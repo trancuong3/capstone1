@@ -9,6 +9,7 @@ Groups (see the three-color acceptance spec):
 from __future__ import annotations
 
 import importlib.util
+import os
 import json
 import sys
 import unicodedata
@@ -677,8 +678,8 @@ class GroundTruthFixtures(unittest.TestCase):
 
 
 @unittest.skipUnless(
-    ocr_engine.PaddleOCR is not None and ocr_engine.Predictor is not None,
-    "PaddleOCR and VietOCR are not installed; the real-OCR gate needs both engines",
+    os.getenv("VIREAD_REAL_OCR_GATE") == "1",
+    "Real OCR evaluation runs in the dedicated VIREAD_REAL_OCR_GATE=1 CI job",
 )
 class RealOcrFixtureGate(unittest.TestCase):
     """Runs the production pipeline on every ground-truth fixture."""
@@ -688,11 +689,11 @@ class RealOcrFixtureGate(unittest.TestCase):
         try:
             _paddle, vietocr = ocr_engine._get_ocr_engines()
         except ocr_engine.OcrEngineUnavailable as exc:
-            raise unittest.SkipTest(f"OCR models are not available: {exc}")
+            raise AssertionError(f"Required real PaddleOCR engine is unavailable: {exc}") from exc
         if vietocr is None:
-            raise unittest.SkipTest("VietOCR weights are not available")
+            raise AssertionError("Required real VietOCR weights failed to initialize")
         if not ocr_engine._configure_tesseract():
-            raise unittest.SkipTest("Tesseract is not installed")
+            raise AssertionError("Required Tesseract Vietnamese OCR runtime is unavailable")
         cls.benchmark = _load_benchmark()
         cls.results = [cls.benchmark.evaluate_fixture(fixture)
                        for fixture in cls.benchmark.load_fixtures()]

@@ -1,257 +1,641 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { KaraokeLyrics } from "@/types/karaoke";
-import { BrowserTranscriptCollector } from "@/lib/reading/browser-transcript-collector";
 import {
-  scoreFromFullTranscript,
-  type SingingScore,
-} from "@/lib/karaoke/singing-score";
+  BrowserTranscriptCollector,
+  type BrowserRecognitionEventLike,
+} from "@/lib/reading/browser-transcript-collector";
+import {
+  LiveSingingAttempt,
+  type LiveSingingScore,
+} from "@/lib/karaoke/live-singing-score";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+type Status =
+  | "idle"
+  | "arming"
+  | "armed"
+  | "listening"
+  | "paused"
+  | "finishing"
+  | "scored"
+  | "insufficient"
+  | "unavailable";
 
-export interface KaraokeScoringState {
-  /** Whether scoring mode is enabled by the user. */
-  enabled: boolean;
-  /** Whether the browser is currently listening. */
-  listening: boolean;
-  /** Whether the browser supports speech recognition. */
-  supported: boolean;
-  /** Partial transcript text accumulated so far. */
-  partialTranscript: string;
-  /** Final score after song ends (null while singing). */
-  score: SingingScore | null;
-  /** Error message if recognition failed. */
+type Snapshot = {
+  status: Status;
+  score: LiveSingingScore | null;
+  liveScore: LiveSingingScore | null;
+  songScore: LiveSingingScore | null;
   error: string | null;
-}
+};
 
-export interface KaraokeScoringController extends KaraokeScoringState {
-  /** Toggle scoring mode on/off. */
-  toggle(): void;
-  /** Start listening (called when playback starts). */
-  startListening(): void;
-  /** Stop listening and compute score (called when playback ends). */
-  stopAndScore(): void;
-  /** Reset to initial state (called when restarting song). */
-  reset(): void;
-}
-
-// ---------------------------------------------------------------------------
-// Browser SpeechRecognition detection
-// ---------------------------------------------------------------------------
-
-type SpeechRecognitionLike = new () => {
+interface Recognition {
   continuous: boolean;
   interimResults: boolean;
   lang: string;
   maxAlternatives: number;
-  onresult: ((event: unknown) => void) | null;
+  onstart: (() => void) | null;
+  onspeechstart: (() => void) | null;
+  onspeechend: (() => void) | null;
+  onresult: ((event: BrowserRecognitionEventLike) => void) | null;
   onerror: ((event: { error?: string }) => void) | null;
   onend: (() => void) | null;
-  start(): void;
+  start(track?: MediaStreamTrack): void;
   stop(): void;
   abort(): void;
-};
-
-function getSpeechRecognition(): SpeechRecognitionLike | null {
-  if (typeof window === "undefined") return null;
-  const w = window as unknown as Record<string, unknown>;
-  return (w.SpeechRecognition ??
-    w.webkitSpeechRecognition ??
-    null) as SpeechRecognitionLike | null;
 }
 
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
+function recognitionConstructor() {
+  if (typeof window === "undefined") return null;
+  const browser = window as Window & {
+    SpeechRecognition?: new () => Recognition;
+    webkitSpeechRecognition?: new () => Recognition;
+  };
+  return browser.SpeechRecognition ?? browser.webkitSpeechRecognition ?? null;
+}
 
-/**
- * Hook for karaoke singing scoring using the Browser Web Speech API.
- *
- * Uses the same `BrowserTranscriptCollector` infrastructure as the reading
- * feature.  Runs entirely in-browser — zero cost, no backend calls.
- *
- * Usage:
- * 1. User toggles scoring on with `toggle()`
- * 2. When playback starts, call `startListening()`
- * 3. When playback ends, call `stopAndScore()` → `score` becomes available
- * 4. On song restart, call `reset()`
- */
-export function useKaraokeScoring(
-  lyrics: KaraokeLyrics | null,
-): KaraokeScoringController {
-  const [enabled, setEnabled] = useState(false);
-  const [listening, setListening] = useState(false);
-  const [partialTranscript, setPartialTranscript] = useState("");
-  const [score, setScore] = useState<SingingScore | null>(null);
-  const [error, setError] = useState<string | null>(null);
+function microphoneError(code?: string) {
+  switch (code) {
+    case "not-allowed":
+    case "NotAllowedError":
+    case "SecurityError":
+    case "service-not-allowed":
+      return "Micro chưa được cấp quyền. Bé có thể hát tự do hoặc nhờ ba mẹ bật micro.";
+    case "audio-capture":
+    case "NotReadableError":
+    case "NotFoundError":
+      return "Chưa tìm thấy micro. Ba mẹ kiểm tra thiết bị giúp bé nhé.";
+    case "network":
+      return "Kết nối nhận dạng bị gián đoạn. Bé vẫn có thể hát tiếp.";
+    case "language-not-supported":
+      return "Trình duyệt này chưa nhận dạng được tiếng Việt. Bé có thể hát tự do.";
+    default:
+      return "Chưa kết nối được micro để chấm điểm. Bé có thể thử lại hoặc hát tự do.";
+  }
+}
 
-  const recognitionRef = useRef<InstanceType<SpeechRecognitionLike> | null>(
-    null,
-  );
-  const collectorRef = useRef(new BrowserTranscriptCollector());
-  const lyricsRef = useRef(lyrics);
-  const enabledRef = useRef(enabled);
-  const listeningRef = useRef(false);
+function errorName(error: unknown) {
+  if (
+    typeof error === "object" &&
+    error &&
+    "name" in error &&
+    typeof error.name === "string"
+  )
+    return error.name;
+}
 
-  useEffect(() => {
-    lyricsRef.current = lyrics;
-  }, [lyrics]);
-  useEffect(() => {
-    enabledRef.current = enabled;
-  }, [enabled]);
+const idle: Snapshot = {
+  status: "idle",
+  score: null,
+  liveScore: null,
+  songScore: null,
+  error: null,
+};
+const supported = () => Boolean(recognitionConstructor());
+const serverSupported = () => false;
+const subscribeSupport = () => () => {};
+const startWaitMs = 15_000;
+const finalWaitMs = 2_000;
+const maxEmptyRestarts = 2;
 
-  const supported = typeof window !== "undefined" && !!getSpeechRecognition();
+type SpeechWindow = { start: number; end: number };
 
-  const stopRecognition = useCallback(() => {
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.abort();
-      } catch {
-        // Ignore errors when aborting.
-      }
-      recognitionRef.current = null;
+// SpeechRecognition provides final text without word timestamps. Prefer speech
+// activity measured on the native music clock; a result-only interval is usable
+// only while short enough to locate its utterance. Never invent earlier times.
+class CaptureWindows {
+  private readonly collector = new BrowserTranscriptCollector();
+  private windows: SpeechWindow[] = [];
+  private speakingFrom: number | null = null;
+  private hasSpeechEvents = false;
+  private startedAt: number;
+  private lastFinalMs: number;
+  private overflow = false;
+  private stoppedAt: number | null = null;
+
+  constructor(
+    private readonly clock: () => number,
+    private readonly sliced: boolean,
+  ) {
+    this.lastFinalMs = clock();
+    this.startedAt = this.lastFinalMs;
+  }
+
+  freeze = () => {
+    this.stoppedAt ??= this.clock();
+  };
+  started = () => {
+    this.startedAt = this.now();
+    this.lastFinalMs = this.startedAt;
+  };
+  private now() {
+    return this.stoppedAt ?? this.clock();
+  }
+
+  speechStart = () => {
+    this.hasSpeechEvents = true;
+    this.speakingFrom = this.now();
+  };
+  speechEnd = () => {
+    if (this.speakingFrom === null) return;
+    const end = this.now();
+    if (end > this.speakingFrom) {
+      if (this.windows.length === 8) this.overflow = true;
+      if (!this.overflow) this.windows.push({ start: this.speakingFrom, end });
     }
-    listeningRef.current = false;
-    setListening(false);
-  }, []);
+    this.speakingFrom = null;
+  };
 
-  const startListening = useCallback(() => {
-    if (!enabledRef.current || !lyricsRef.current) return;
+  consume(event: BrowserRecognitionEventLike, attempt: LiveSingingAttempt) {
+    const finals: { text: string; usable: boolean }[] = [];
+    this.collector.addResults(event, (text, usable) => {
+      finals.push({ text, usable });
+      return usable;
+    });
+    if (!finals.length) return false;
+    const end = this.now();
+    const previous = this.lastFinalMs;
+    this.lastFinalMs = end;
+    if (this.overflow) {
+      this.overflow = false;
+      this.windows = [];
+      this.speakingFrom = null;
+      return false;
+    }
+    const ranges = this.windows;
+    this.windows = [];
+    if (this.speakingFrom !== null && finals.length > ranges.length) {
+      ranges.push({ start: this.speakingFrom, end });
+      this.speakingFrom = end;
+    } else if (
+      !ranges.length &&
+      !this.hasSpeechEvents &&
+      end - previous <= (this.sliced ? 8000 : 4000)
+    )
+      ranges.push({ start: previous, end });
+    const assign = (text: string, range: SpeechWindow) =>
+      range.end > range.start &&
+      range.end - range.start <= 12000 &&
+      attempt.accept(
+        text,
+        Math.max(range.start, this.startedAt),
+        range.end,
+        this.startedAt,
+      );
+    if (ranges.length === 1 && finals.every((slot) => slot.usable))
+      return assign(finals.map((slot) => slot.text).join(" "), ranges[0]);
+    if (ranges.length !== finals.length) return false;
+    let changed = false;
+    finals.forEach((slot, index) => {
+      if (slot.usable && assign(slot.text, ranges[index])) changed = true;
+    });
+    return changed;
+  }
+}
 
-    const SpeechRecognition = getSpeechRecognition();
-    if (!SpeechRecognition) {
-      setError("Trình duyệt không hỗ trợ nhận diện giọng nói.");
+class KaraokeMicSession {
+  private snapshot = idle;
+  private listeners = new Set<() => void>();
+  private recognition: Recognition | null = null;
+  private trackInput = false;
+  private stream: MediaStream | null = null;
+  private sliceClock: ReturnType<typeof setInterval> | undefined;
+  private drainingSlice = false;
+  private windows: CaptureWindows | null = null;
+  private lineEnds: number[] = [];
+  private attempt: LiveSingingAttempt | null = null;
+  private practiceLyrics: KaraokeLyrics | null = null;
+  private getTime: () => number = () => 0;
+  private savedSong: {
+    snapshot: Snapshot;
+    attempt: LiveSingingAttempt | null;
+  } | null = null;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private resolveArm: ((started: boolean) => void) | null = null;
+  private emptyRestarts = 0;
+
+  getSnapshot = () => this.snapshot;
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+
+  private update(
+    status: Status,
+    error: string | null = null,
+    score: LiveSingingScore | null = null,
+  ) {
+    this.snapshot = {
+      status,
+      error,
+      score,
+      liveScore: this.snapshot.liveScore,
+      songScore: this.savedSong ? this.savedSong.snapshot.score : score,
+    };
+    for (const listener of this.listeners) listener();
+  }
+
+  private closeStream() {
+    if (!this.stream) return;
+    for (const track of this.stream.getTracks()) {
+      track.onended = null;
+      track.stop();
+    }
+    this.stream = null;
+  }
+
+  private release(abort: boolean, keepStream = false) {
+    clearTimeout(this.timer);
+    clearInterval(this.sliceClock);
+    this.windows = null;
+    this.drainingSlice = false;
+    const recognition = this.recognition;
+    this.recognition = null;
+    if (!keepStream) this.closeStream();
+    if (!recognition) return;
+    recognition.onresult = null;
+    recognition.onend = null;
+    recognition.onstart = null;
+    recognition.onspeechstart = null;
+    recognition.onspeechend = null;
+    recognition.onerror = null;
+    if (abort) {
+      try {
+        recognition.abort();
+      } catch {
+        /* Already disconnected. */
+      }
+    }
+  }
+
+  private acknowledge(started: boolean) {
+    const resolve = this.resolveArm;
+    this.resolveArm = null;
+    resolve?.(started);
+  }
+
+  reset = () => {
+    this.release(true);
+    this.acknowledge(false);
+    this.attempt = null;
+    this.practiceLyrics = null;
+    this.savedSong = null;
+    this.snapshot = idle;
+    this.emptyRestarts = 0;
+    this.update("idle");
+  };
+
+  arm = (
+    lyrics: KaraokeLyrics,
+    clock: () => number,
+    lineId?: string,
+  ): Promise<boolean> => {
+    const lines = lineId
+      ? lyrics.lines.filter((line) => line.id === lineId)
+      : lyrics.lines;
+    if (!lines.length) return Promise.resolve(false);
+    this.lineEnds = lyrics.lines.flatMap((line) =>
+      line.end_ms === null ? [] : [line.end_ms],
+    );
+    if (lineId) {
+      if (!this.savedSong) {
+        const status = this.snapshot.status;
+        const snapshot =
+          status === "listening" || status === "armed" || status === "paused"
+            ? { ...this.snapshot, status: "paused" as const }
+            : status === "arming"
+              ? idle
+              : this.snapshot;
+        this.savedSong = { snapshot, attempt: this.attempt };
+      }
+      this.release(true);
+      this.acknowledge(false);
+    } else this.reset();
+    this.getTime = clock;
+    this.practiceLyrics = lineId ? { ...lyrics, lines } : null;
+    this.attempt = new LiveSingingAttempt(this.practiceLyrics ?? lyrics);
+    this.snapshot = { ...idle, liveScore: this.attempt.result(!!lineId) };
+    this.emptyRestarts = 0;
+    this.update("arming");
+    return new Promise<boolean>((resolve) => {
+      this.resolveArm = resolve;
+      this.open(true);
+    });
+  };
+
+  endPractice = () => {
+    const saved = this.savedSong;
+    if (!saved) return;
+    this.release(true);
+    this.acknowledge(false);
+    this.savedSong = null;
+    this.practiceLyrics = null;
+    this.emptyRestarts = 0;
+    this.attempt = saved.attempt;
+    this.snapshot = saved.snapshot;
+    this.update(
+      saved.snapshot.status,
+      saved.snapshot.error,
+      saved.snapshot.score,
+    );
+  };
+
+  private fail(message: string) {
+    const finishing = this.snapshot.status === "finishing";
+    this.release(true);
+    this.acknowledge(false);
+    if (finishing) this.complete(message);
+    else this.update("unavailable", message);
+  }
+
+  // Overload arity is zero on browsers that support start(audioTrack).
+  // A stopped track must throw InvalidStateError synchronously. Older engines
+  // ignore the argument; that native recognition becomes the permission probe.
+  // The temporary stream is already closed before either branch runs.
+  private async startInput(recognition: Recognition, probe: boolean) {
+    const devices = navigator.mediaDevices;
+    if (!devices?.getUserMedia || (!probe && !this.trackInput)) {
+      recognition.start();
       return;
     }
-
-    // Clean up any existing recognition.
-    stopRecognition();
-    collectorRef.current.reset();
-    setPartialTranscript("");
-    setScore(null);
-    setError(null);
-
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = false;
-    recognition.lang = "vi-VN";
-    recognition.maxAlternatives = 1;
-
-    recognition.onresult = (event: unknown) => {
-      const e = event as {
-        resultIndex: number;
-        results: ArrayLike<{
-          readonly isFinal: boolean;
-          readonly 0?: { readonly transcript?: string };
-        }>;
-      };
-      collectorRef.current.addResults(e);
-      setPartialTranscript(collectorRef.current.getTranscript());
-    };
-
-    recognition.onerror = (event: { error?: string }) => {
-      // "no-speech" and "aborted" are not real errors — they happen
-      // when the user is quiet or when we stop intentionally.
-      if (event.error === "no-speech" || event.error === "aborted") return;
-      console.warn("[KARAOKE SCORING] Recognition error:", event.error);
-      setError(`Lỗi nhận diện: ${event.error ?? "unknown"}`);
-    };
-
-    recognition.onend = () => {
-      // Restart if we're still supposed to be listening.
-      // Browser Speech API can stop after silence or internal timeouts.
-      if (listeningRef.current && enabledRef.current) {
-        collectorRef.current.completeRecognitionCycle();
-        try {
-          const restartRecognition = new SpeechRecognition();
-          restartRecognition.continuous = true;
-          restartRecognition.interimResults = false;
-          restartRecognition.lang = "vi-VN";
-          restartRecognition.maxAlternatives = 1;
-          restartRecognition.onresult = recognition.onresult;
-          restartRecognition.onerror = recognition.onerror;
-          restartRecognition.onend = recognition.onend;
-          recognitionRef.current = restartRecognition;
-          restartRecognition.start();
-        } catch {
-          // Final end — scoring will use whatever we collected.
-          listeningRef.current = false;
-          setListening(false);
+    const stream =
+      this.stream ??
+      (await devices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      }));
+    if (
+      this.recognition !== recognition ||
+      this.snapshot.status === "finishing"
+    ) {
+      for (const track of stream.getTracks()) track.stop();
+      if (this.recognition === recognition) this.complete();
+      return;
+    }
+    this.stream = stream;
+    const track = stream
+      .getAudioTracks()
+      .find((item) => item.readyState === "live");
+    if (!track)
+      throw new DOMException("Microphone unavailable", "NotFoundError");
+    if (probe) {
+      this.closeStream();
+      this.trackInput = false;
+      try {
+        recognition.start(track);
+      } catch (error) {
+        if (errorName(error) === "TypeError") {
+          recognition.start();
+          return;
         }
+        if (errorName(error) !== "InvalidStateError") throw error;
+        this.trackInput = true;
+        this.release(false);
+        this.update("armed");
+        this.acknowledge(true);
       }
+      return;
+    }
+    track.onended = () => {
+      if (this.stream === stream && this.recognition)
+        this.fail(microphoneError("audio-capture"));
     };
+    recognition.start(track);
+  }
 
-    recognitionRef.current = recognition;
-    listeningRef.current = true;
-    setListening(true);
+  private scheduleSlice(recognition: Recognition, windows: CaptureWindows) {
+    const start = this.getTime();
+    const boundary =
+      this.lineEnds.find((end) => end >= start + 3000 && end <= start + 7000) ??
+      start + 6000;
+    this.sliceClock = setInterval(() => {
+      if (this.recognition !== recognition || this.getTime() < boundary) return;
+      clearInterval(this.sliceClock);
+      windows.freeze();
+      this.drainingSlice = true;
+      this.timer = setTimeout(() => {
+        if (this.recognition !== recognition || !this.drainingSlice) return;
+        this.release(true, true);
+        this.update("armed");
+        this.open(false);
+      }, finalWaitMs);
+      try {
+        recognition.stop();
+      } catch {
+        this.fail(microphoneError());
+      }
+    }, 100);
+  }
 
+  private open(probe: boolean) {
+    const Constructor = recognitionConstructor();
+    if (!Constructor) {
+      this.fail(
+        "Trình duyệt này chưa hỗ trợ nhận dạng để chấm điểm. Bé có thể hát tự do.",
+      );
+      return;
+    }
     try {
-      recognition.start();
-    } catch (err) {
-      console.warn("[KARAOKE SCORING] Failed to start recognition:", err);
-      setError("Không thể bắt đầu nhận diện giọng nói.");
-      listeningRef.current = false;
-      setListening(false);
-    }
-  }, [stopRecognition]);
+      const recognition = new Constructor();
+      const windows = new CaptureWindows(this.getTime, this.trackInput);
+      let capturing = false;
+      this.windows = windows;
+      this.recognition = recognition;
+      recognition.lang = "vi-VN";
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
 
-  const stopAndScore = useCallback(() => {
-    stopRecognition();
-    collectorRef.current.completeRecognitionCycle();
-    const transcript = collectorRef.current.getTranscript();
-    setPartialTranscript(transcript);
-
-    if (lyricsRef.current && transcript) {
-      const result = scoreFromFullTranscript(lyricsRef.current, transcript);
-      setScore(result);
-    } else if (lyricsRef.current) {
-      // No transcript collected — score as 0.
-      setScore(scoreFromFullTranscript(lyricsRef.current, ""));
-    }
-  }, [stopRecognition]);
-
-  const toggle = useCallback(() => {
-    setEnabled((prev) => {
-      if (prev) {
-        // Turning off — stop any active recognition.
-        stopRecognition();
-        collectorRef.current.reset();
-        setPartialTranscript("");
-        setScore(null);
-        setError(null);
+      recognition.onstart = () => {
+        if (this.recognition !== recognition) return;
+        if (this.snapshot.status === "finishing") return;
+        clearTimeout(this.timer);
+        if (probe) {
+          // Discard this entire cycle, including speech delivered after countdown.
+          this.release(true);
+          this.update("armed");
+          this.acknowledge(true);
+        } else {
+          capturing = true;
+          windows.started();
+          this.update("listening");
+          if (this.trackInput) this.scheduleSlice(recognition, windows);
+        }
+      };
+      recognition.onresult = (event) => {
+        if (this.recognition !== recognition || !capturing || !this.attempt)
+          return;
+        if (windows.consume(event, this.attempt)) {
+          this.emptyRestarts = 0;
+          this.snapshot = {
+            ...this.snapshot,
+            liveScore: this.attempt.result(!!this.savedSong),
+          };
+          this.update(this.snapshot.status);
+        }
+      };
+      if (!probe) {
+        recognition.onspeechstart = windows.speechStart;
+        recognition.onspeechend = windows.speechEnd;
       }
-      return !prev;
-    });
-  }, [stopRecognition]);
+      recognition.onerror = ({ error }) => {
+        if (this.recognition !== recognition || error === "no-speech") return;
+        this.fail(microphoneError(error));
+      };
+      recognition.onend = () => {
+        if (this.recognition !== recognition) return;
+        const deliberate = this.drainingSlice;
+        const finishing = this.snapshot.status === "finishing";
+        this.release(false, !probe && !finishing);
+        if (finishing) this.complete();
+        else if (
+          probe ||
+          (!deliberate && ++this.emptyRestarts > maxEmptyRestarts)
+        )
+          this.fail(microphoneError());
+        else {
+          this.update("armed");
+          this.open(false);
+        }
+      };
+      this.timer = setTimeout(() => {
+        if (this.recognition === recognition) this.fail(microphoneError());
+      }, startWaitMs);
+      void this.startInput(recognition, probe).catch((error: unknown) => {
+        if (this.recognition === recognition)
+          this.fail(microphoneError(errorName(error)));
+      });
+    } catch {
+      this.fail(microphoneError());
+    }
+  }
 
-  const reset = useCallback(() => {
-    stopRecognition();
-    collectorRef.current.reset();
-    setPartialTranscript("");
-    setScore(null);
-    setError(null);
-  }, [stopRecognition]);
+  resume = () => {
+    if (this.recognition || !["armed", "paused"].includes(this.snapshot.status))
+      return;
+    this.open(false);
+  };
 
-  // Cleanup on unmount.
-  useEffect(() => {
-    return () => {
-      stopRecognition();
-    };
-  }, [stopRecognition]);
+  pause = () => {
+    const { status } = this.snapshot;
+    if (
+      status !== "listening" &&
+      !(this.recognition && (status === "armed" || status === "paused"))
+    )
+      return;
+    this.release(true);
+    this.update("paused");
+  };
 
-  return {
-    enabled,
-    listening,
+  seekBoundary = (repeatPractice = false) => {
+    if (
+      !this.recognition ||
+      this.snapshot.status === "arming" ||
+      this.snapshot.status === "finishing"
+    )
+      return;
+    this.pause();
+    if (repeatPractice && this.practiceLyrics) {
+      this.attempt = new LiveSingingAttempt(this.practiceLyrics);
+      this.snapshot = {
+        ...this.snapshot,
+        liveScore: this.attempt.result(true),
+      };
+      this.emptyRestarts = 0;
+      this.update("paused");
+    }
+    this.resume();
+  };
+
+  private complete(error = this.snapshot.error) {
+    this.release(true);
+    const result = this.attempt?.result(!!this.savedSong || !!error);
+    this.attempt = null;
+    if (result && result.kind !== "insufficient")
+      this.update("scored", error, result);
+    else this.update("insufficient", error);
+  }
+
+  finish = () => {
+    if (
+      !["listening", "paused", "armed", "unavailable"].includes(
+        this.snapshot.status,
+      )
+    )
+      return;
+    if (!this.recognition) {
+      this.complete();
+      return;
+    }
+    this.update("finishing");
+    this.windows?.freeze();
+    clearInterval(this.sliceClock);
+    clearTimeout(this.timer);
+    const ending = this.recognition;
+    this.timer = setTimeout(() => {
+      if (this.recognition === ending && this.snapshot.status === "finishing")
+        this.complete();
+    }, finalWaitMs);
+    try {
+      if (!this.drainingSlice) this.recognition.stop();
+      this.closeStream();
+    } catch {
+      this.complete();
+    }
+  };
+}
+
+export function useKaraokeScoring(
+  lyrics: KaraokeLyrics,
+  getCurrentMs: () => number,
+) {
+  const [session] = useState(() => new KaraokeMicSession());
+  const state = useSyncExternalStore(
+    session.subscribe,
+    session.getSnapshot,
+    session.getSnapshot,
+  );
+  const available = useSyncExternalStore(
+    subscribeSupport,
     supported,
-    partialTranscript,
-    score,
-    error,
-    toggle,
-    startListening,
-    stopAndScore,
-    reset,
+    serverSupported,
+  );
+  useEffect(() => session.reset, [session, lyrics]);
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") session.reset();
+    };
+    const onAndroidBackground = () => session.reset();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    document.addEventListener("viread:android-background", onAndroidBackground);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      document.removeEventListener(
+        "viread:android-background",
+        onAndroidBackground,
+      );
+    };
+  }, [session]);
+  const arm = useCallback(
+    (lineId?: string) => session.arm(lyrics, getCurrentMs, lineId),
+    [session, lyrics, getCurrentMs],
+  );
+  return {
+    ...state,
+    supported: available,
+    listening: state.status === "listening",
+    arm,
+    endPractice: session.endPractice,
+    seekBoundary: session.seekBoundary,
+    pause: session.pause,
+    resume: session.resume,
+    finish: session.finish,
+    reset: session.reset,
   };
 }

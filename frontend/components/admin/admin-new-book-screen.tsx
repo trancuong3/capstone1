@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, type FormEvent } from "react";
 import { AdminPageHeader } from "@/components/admin/admin-ui";
-import { Button } from "@/components/common/button";
+import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
@@ -83,17 +83,26 @@ export function AdminNewBookScreen() {
   return (
     <section className="figma-form-page mx-auto flex w-full max-w-[960px] flex-col gap-4">
       <AdminPageHeader
-        eyebrow="Kho sách"
         title="Tạo sách mới"
-        description="Tạo bản ghi sách, sau đó tải trang sách và kiểm tra OCR."
+        description="Tạo đầu sách trước khi tải ảnh trang, chạy OCR và hoàn tất Child Safety."
       />
       <Link
-        className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-semibold text-primary focus-visible:outline-3 focus-visible:outline-primary"
+        className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-primary"
         href="/admin/books"
       >
         <ArrowLeft aria-hidden className="size-5" /> Hủy và quay lại
       </Link>
-      <Card className="bg-white sm:px-8 sm:py-6">
+      <Card className="max-w-3xl bg-white sm:px-8 sm:py-8">
+        <StatusMessage
+          className="mb-5"
+          tone="info"
+          title="Sách chưa được đưa vào thư viện trẻ em"
+        >
+          Sau khi tạo, hãy tải các trang và hoàn tất OCR, Proofreading, Child
+          Safety cùng xác nhận của Admin cho từng trang. Backend sẽ chỉ cho trẻ
+          truy cập khi toàn bộ nội dung hiện tại đã được xác minh và không có
+          finding mức HIGH hoặc suitability NOT_RECOMMENDED.
+        </StatusMessage>
         {error ? (
           <StatusMessage className="mb-5" tone="error">
             {error}
@@ -152,8 +161,7 @@ export function AdminNewBookScreen() {
             ) : null}
           </label>
           <label className="grid gap-2 font-semibold" htmlFor="book-author">
-            Tác giả{" "}
-            <span className="font-normal text-muted">(không bắt buộc)</span>
+            Tác giả
             <input
               id="book-author"
               className="min-h-12 rounded-control border border-border px-4 font-normal focus:border-primary focus:outline-3 focus:outline-primary/30"
@@ -202,13 +210,19 @@ export function AdminNewBookScreen() {
               </select>
             </label>
           </div>
-          <Button
-            className="sm:w-auto sm:justify-self-start"
-            isLoading={saving}
-            type="submit"
-          >
-            Tạo sách
-          </Button>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Button
+              className="!max-w-none"
+              isLoading={saving}
+              size="compact"
+              type="submit"
+            >
+              Tạo sách
+            </Button>
+            <ButtonLink href="/admin/books" size="compact" variant="quiet">
+              Hủy
+            </ButtonLink>
+          </div>
         </form>
       </Card>
     </section>

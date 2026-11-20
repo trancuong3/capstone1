@@ -271,6 +271,73 @@ class ServerHealthAndDocsEndpointTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("isolated-test-key", health_text)
 
 
+class LocalTrainingOptInTests(unittest.IsolatedAsyncioTestCase):
+    async def _inspect_lifespan(self, settings: dict[str, str]) -> AsyncMock:
+        """No external workers, SQL, training, subprocess or email in this test."""
+        async def idle(stop: asyncio.Event) -> None:
+            await stop.wait()
+
+        fake_engine = SimpleNamespace(dispose=AsyncMock())
+        subprocess_mock = AsyncMock(
+            return_value=SimpleNamespace(returncode=0)
+        )
+        with (
+            patch.dict(os.environ, settings, clear=True),
+            patch("app.sever.APP_ENVIRONMENT", "development"),
+            patch(
+                "app.sever.probe_database_connection",
+                new=AsyncMock(return_value=_mock_probe_ok()),
+            ),
+            patch(
+                "app.sever.run_active_viread_model_worker",
+                side_effect=lambda stop: stop.wait(0.05),
+            ),
+            patch("app.sever.run_book_quality_worker", side_effect=idle),
+            patch("app.sever.run_admin_ai_workflow_worker", side_effect=idle),
+            patch("app.sever.run_viread_ocr_outbox_worker", side_effect=idle),
+            patch("app.sever.run_viread_ocr_training_auto_worker", side_effect=idle),
+            patch(
+                "app.sever.asyncio.create_subprocess_exec",
+                new=subprocess_mock,
+            ),
+            patch(
+                "app.sever.admin_ocr_correction_jobs.shutdown",
+                new=AsyncMock(),
+            ),
+            patch("app.sever.engine", fake_engine),
+        ):
+            async with lifespan(FastAPI()) as _:
+                pass
+        fake_engine.dispose.assert_awaited_once()
+        return subprocess_mock
+
+    async def test_local_training_never_autostarts_without_both_opt_ins(self):
+        for settings in (
+            {},
+            {"VIREAD_LOCAL_TRAINING_ENABLED": "true"},
+            {"VIREAD_LOCAL_TRAINING_WORKER_AUTOSTART": "true"},
+            {
+                "VIREAD_LOCAL_TRAINING_ENABLED": "false",
+                "VIREAD_LOCAL_TRAINING_WORKER_AUTOSTART": "true",
+            },
+        ):
+            with self.subTest(settings=settings):
+                subprocess_mock = await self._inspect_lifespan(settings)
+                subprocess_mock.assert_not_awaited()
+
+    async def test_explicit_dual_opt_in_preserves_local_trainer_spawn(self):
+        subprocess_mock = await self._inspect_lifespan({
+            "VIREAD_LOCAL_TRAINING_ENABLED": "true",
+            "VIREAD_LOCAL_TRAINING_WORKER_AUTOSTART": "true",
+        })
+        subprocess_mock.assert_awaited_once()
+        args = subprocess_mock.await_args.args
+        self.assertEqual(
+            args[1:],
+            ("-m", "app.jobs.viread_ocr_local_training_worker"),
+        )
+
+
 class RequirementsCompatibilityTests(unittest.TestCase):
     def test_chardet_and_locked_ocr_dependencies_remain_pinned_safely(self):
         requirements_path = Path(__file__).resolve().parent / "requirements.txt"

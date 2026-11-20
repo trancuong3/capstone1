@@ -79,6 +79,7 @@ const comparisonSchema = z.object({
   distance: z.number(),
   alignment: z.array(alignmentSchema),
   summary: summarySchema,
+  self_corrected_word_ids: z.array(z.string()).optional(),
 });
 
 const readingPageWordSchema = z.object({

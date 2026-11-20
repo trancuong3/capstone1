@@ -312,10 +312,9 @@ export function HelpSupportScreen() {
     );
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
+    <section className="support-sheet mx-auto flex w-full max-w-[1120px] flex-col gap-4">
       <PageHeader
-        description="ViRead luôn sẵn sàng đồng hành cùng bạn. Hãy tìm câu trả lời hoặc gửi yêu cầu hỗ trợ cho chúng tôi."
-        eyebrow="Trung tâm hỗ trợ ViRead"
+        description="Tìm câu trả lời về tài khoản, sách và buổi đọc của bé."
         title="Trợ giúp & hỗ trợ"
       />
 

@@ -68,6 +68,7 @@ export function createRevisionService(): RevisionService {
           method: "POST",
           body: {
             page_revision_id: request.page_revision_id,
+            workflow_id: request.workflow_id,
             corrected_text: request.corrected_text,
             words: request.words.map((word) => ({
               word_index: word.word_index,

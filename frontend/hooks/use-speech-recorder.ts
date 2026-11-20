@@ -3,15 +3,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AudioQualityMonitor,
+  type AudioQualityMode,
   type AudioQualitySnapshot,
 } from "@/lib/reading/audio-quality";
+
+export interface SpeechRecorderStartOptions {
+  retainStream?: boolean;
+  mode?: AudioQualityMode;
+}
 
 export interface SpeechRecorder {
   readonly isRecording: boolean;
   readonly isSpeaking: boolean;
   readonly audioLevel: number;
   prepare(): Promise<void>;
-  start(options?: { retainStream?: boolean }): Promise<void>;
+  start(options?: SpeechRecorderStartOptions): Promise<void>;
   stop(): Promise<Blob | null>;
   cancel(options?: { retainStream?: boolean }): void;
   getStream(): MediaStream | null;
@@ -251,7 +257,7 @@ export function useSpeechRecorder(
   }, []);
 
   const begin = useCallback(
-    async (options?: { retainStream?: boolean }) => {
+    async (options?: SpeechRecorderStartOptions) => {
       const retainStream = options?.retainStream === true;
       const requestedGeneration = streamGenerationRef.current;
       // Join a permission preflight instead of opening a second microphone request.
@@ -271,7 +277,7 @@ export function useSpeechRecorder(
       chunksRef.current = [];
       captureErrorRef.current = null;
       noAudioRef.current = false;
-      qualityRef.current = new AudioQualityMonitor();
+      qualityRef.current = new AudioQualityMonitor({ mode: options?.mode });
 
       try {
         await prepare();
@@ -322,7 +328,7 @@ export function useSpeechRecorder(
             "Recording duration limit reached. Please record a shorter passage.",
           );
         }, MAX_RECORDING_MS);
-        recorder.start(250);
+        recorder.start(options?.mode === "short-word" ? 100 : 250);
 
         // Audio analyser chỉ dùng để hiển thị trạng thái giọng nói.
         interface WindowWithAudio {
@@ -392,7 +398,7 @@ export function useSpeechRecorder(
   );
 
   const start = useCallback(
-    (options?: { retainStream?: boolean }): Promise<void> => {
+    (options?: SpeechRecorderStartOptions): Promise<void> => {
       if (startRef.current) return startRef.current;
       if (pendingStopRef.current)
         return Promise.reject(new Error("Microphone is still stopping."));
@@ -468,6 +474,23 @@ export function useSpeechRecorder(
   }, [finish]);
 
   useEffect(() => cancel, [cancel]);
+
+  // Never retain a live mic when the Android activity or browser tab is hidden.
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") cancel();
+    };
+    const onAndroidBackground = () => cancel();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    document.addEventListener("viread:android-background", onAndroidBackground);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      document.removeEventListener(
+        "viread:android-background",
+        onAndroidBackground,
+      );
+    };
+  }, [cancel]);
 
   const getStream = useCallback(() => streamRef.current, []);
   const getIsSpeaking = useCallback(() => isSpeakingRef.current, []);

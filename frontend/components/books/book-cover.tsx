@@ -35,6 +35,7 @@ interface BookCoverProps {
   className?: string;
   hero?: boolean;
   titleAsHeading?: boolean;
+  showTitle?: boolean;
   size?: "default" | "medium" | "small";
 }
 
@@ -43,6 +44,7 @@ export function BookCover({
   className,
   hero = false,
   titleAsHeading = false,
+  showTitle = true,
   size = "default",
 }: BookCoverProps) {
   const artwork = resolveArtwork(book);
@@ -78,8 +80,8 @@ export function BookCover({
   return (
     <div
       className={cn(
-        "flex h-[260px] w-full flex-col items-center justify-center gap-4 rounded-card bg-cream p-6",
-        compact && "shrink-0 gap-1 p-2",
+        "flex w-full flex-col items-center justify-center rounded-card bg-cream",
+        compact ? "shrink-0 gap-1 p-2" : "h-[260px] gap-4 p-6",
         className,
       )}
       style={coverDimensions}
@@ -100,7 +102,7 @@ export function BookCover({
           src={artworkByVariant[artwork]}
         />
       </div>
-      {titleAsHeading ? (
+      {!showTitle ? null : titleAsHeading ? (
         <h2
           className={cn(
             "line-clamp-2 text-center text-2xl font-extrabold leading-snug text-ink",

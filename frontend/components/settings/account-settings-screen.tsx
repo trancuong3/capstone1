@@ -334,7 +334,7 @@ export function AccountSettingsScreen() {
     );
 
   return (
-    <section className="mx-auto flex w-full max-w-[960px] flex-col gap-4">
+    <section className="settings-sheet mx-auto flex w-full max-w-[960px] flex-col gap-4">
       <PageHeader
         description="Quản lý thông tin tài khoản, bảo mật và các tùy chọn sử dụng ViRead."
         eyebrow="Tài khoản ViRead"

@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  Camera,
-  CheckCircle2,
-  RefreshCw,
-  Sparkles,
-  VideoOff,
-} from "lucide-react";
+import { Sparkles, VideoOff } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -53,6 +47,7 @@ export function CameraPreview({
   const cameraRequestRef = useRef<Promise<MediaStream> | null>(null);
   const cameraEffectCountRef = useRef(0);
   const ignoreCameraEndedRef = useRef(false);
+  const cameraSuspendedRef = useRef(false);
 
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraDenied, setCameraDenied] = useState(false);
@@ -88,7 +83,11 @@ export function CameraPreview({
   }, []);
 
   useEffect(() => {
-    if (!enableScanner) return;
+    if (!enableScanner) {
+      cameraSuspendedRef.current = false;
+      return;
+    }
+    if (cameraSuspendedRef.current) return;
     let active = true;
     cameraEffectCountRef.current += 1;
 
@@ -110,7 +109,11 @@ export function CameraPreview({
         if (cameraRequestRef.current === request) {
           cameraRequestRef.current = null;
         }
-        if (!active || !mountedRef.current) {
+        if (!active || !mountedRef.current || cameraSuspendedRef.current) {
+          if (cameraSuspendedRef.current) {
+            acquiredStream.getTracks().forEach((track) => track.stop());
+            return;
+          }
           if (cameraEffectCountRef.current === 0) {
             acquiredStream.getTracks().forEach((track) => track.stop());
           }
@@ -158,6 +161,30 @@ export function CameraPreview({
       scanAbortRef.current?.abort();
       scanAbortRef.current = null;
       if (cameraEffectCountRef.current === 0) stopCamera();
+    };
+  }, [enableScanner, onCameraUnavailable, stopCamera]);
+
+  // Android native background and browser tab suspension must release camera.
+  // The scanner intentionally requires a fresh user action on resume.
+  useEffect(() => {
+    if (!enableScanner) return;
+    const suspend = () => {
+      if (cameraSuspendedRef.current) return;
+      cameraSuspendedRef.current = true;
+      scanAbortRef.current?.abort();
+      setIsScanning(false);
+      setAutoScan(false);
+      stopCamera();
+      onCameraUnavailable?.();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") suspend();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    document.addEventListener("viread:android-background", suspend);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      document.removeEventListener("viread:android-background", suspend);
     };
   }, [enableScanner, onCameraUnavailable, stopCamera]);
 
@@ -311,19 +338,9 @@ export function CameraPreview({
     >
       {/* Thanh trạng thái hướng dẫn bé đặt sách */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-cream px-4 py-3">
-        <p className="inline-flex items-center gap-2 text-body font-semibold text-ink">
-          {isMatched ? (
-            <CheckCircle2
-              aria-hidden="true"
-              className="size-6 text-success-ink"
-            />
-          ) : (
-            <Camera aria-hidden="true" className="size-6 text-primary" />
-          )}
-          <span>
-            {scanResult?.message ??
-              "Đặt trang sách trọn trong khung để bắt đầu."}
-          </span>
+        <p className="text-body font-semibold text-ink">
+          {scanResult?.message ??
+            "Đặt trang sách nằm gọn vào trong khung viền bên dưới để bắt đầu nhé!"}
         </p>
 
         {scanResult && (
@@ -384,7 +401,7 @@ export function CameraPreview({
                 {/* 4 góc định vị khung đặt sách */}
                 <div className="flex items-center justify-between">
                   <span className="rounded-control bg-white/90 px-3 py-1 text-[13px] font-semibold text-ink shadow">
-                    📖 Khung đặt trang sách
+                    Khung đặt trang sách
                   </span>
                   {isScanning ? (
                     <span className="inline-flex items-center gap-1.5 rounded-control bg-primary px-3 py-1 text-[13px] font-semibold text-white shadow">
@@ -412,24 +429,22 @@ export function CameraPreview({
       </div>
 
       {/* Thanh nút điều khiển Camera */}
-      <div className="flex flex-wrap items-center justify-center gap-3">
+      <div className="flex flex-col gap-4">
         <Button
-          className="sm:w-auto sm:px-6"
+          className="min-h-16 w-full"
           disabled={!cameraReady || isScanning}
           isLoading={isScanning}
           onClick={() => void captureAndScan()}
         >
-          <Camera aria-hidden="true" className="size-5" />
           Xác nhận khung & Quét trang
         </Button>
 
         <Button
-          className="sm:w-auto sm:px-6"
+          className="min-h-16 w-full"
           disabled={!cameraReady}
           onClick={() => setAutoScan((prev) => !prev)}
           variant="secondary"
         >
-          <RefreshCw aria-hidden="true" className="size-5" />
           {autoScan ? "Tự động quét: ĐANG BẬT" : "Tự động quét: ĐANG TẮT"}
         </Button>
       </div>

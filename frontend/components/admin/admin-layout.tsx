@@ -70,7 +70,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
   if (pathname === "/admin/login") return <>{children}</>;
   return (
     <ButtonSizeContext.Provider value="compact">
-      <div className="flex min-h-dvh w-full flex-col bg-canvas">
+      <div className="admin-workspace flex min-h-dvh w-full flex-col bg-canvas">
         <a
           className="sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:not-sr-only focus:rounded-control focus:bg-white focus:px-4 focus:py-3 focus:font-semibold focus:text-primary focus:shadow-lg"
           href="#admin-main-content"
@@ -78,15 +78,15 @@ export function AdminLayout({ children }: { children: ReactNode }) {
           Bỏ qua điều hướng, đến nội dung quản trị
         </a>
         <header className="shrink-0 border-b border-border bg-white">
-          <div className="mx-auto flex w-full max-w-[1440px] flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 sm:px-8 xl:grid xl:min-h-24 xl:grid-cols-[auto_minmax(0,1fr)_auto] xl:gap-x-2 xl:px-16">
+          <div className="mx-auto flex w-full max-w-[1440px] flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 sm:px-8 xl:grid xl:min-h-18 xl:grid-cols-[auto_minmax(0,1fr)_auto] xl:gap-x-2 xl:px-16">
             <div className="order-1 flex min-h-12 items-center gap-3 xl:order-none">
               <ViReadLogo
                 ariaLabel="ViRead - khu vực quản trị"
                 href="/admin/parents"
                 size="md"
               />
-              <span className="rounded-control bg-sky px-2.5 py-1 text-xs font-semibold text-primary-hover">
-                ADMIN
+              <span className="border-l border-border pl-3 text-sm font-semibold text-muted">
+                Quản trị
               </span>
             </div>
             <nav
@@ -102,7 +102,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
                     className={cn(
                       "flex min-h-11 shrink-0 items-center gap-1.5 rounded-control px-2 text-xs font-bold focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-12 sm:px-2.5 sm:text-label",
                       isActive
-                        ? "bg-sky text-primary-hover"
+                        ? "bg-ink text-white"
                         : "text-muted hover:bg-canvas",
                     )}
                     href={href}
@@ -137,7 +137,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
           </p>
         ) : null}
         <main
-          className="mx-auto w-full min-w-0 max-w-[1360px] flex-1 px-4 py-8 sm:px-6 sm:py-10 xl:px-10"
+          className="mx-auto w-full min-w-0 max-w-[1360px] flex-1 tabular-nums px-4 py-8 sm:px-6 sm:py-10 xl:px-10"
           id="admin-main-content"
           tabIndex={-1}
         >

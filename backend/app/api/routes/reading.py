@@ -5,6 +5,7 @@ from typing import List
 from uuid import UUID
 from app.api.deps import get_db, get_current_parent_id
 from app.models import (
+    Book,
     ReadingSession,
     ReadingEvent,
     FluencyAssessment,
@@ -23,6 +24,7 @@ from app.schemas.reading import (
 )
 from datetime import datetime, timezone
 from app.repositories.reading_content_repository import ReadingContentRepository
+from app.repositories.book_repository import CatalogRepository
 from app.services.reading_content_service import ReadingContentService
 from app.services.reading_comparison_service import ReadingComparisonService
 from app.schemas.reading import (
@@ -203,7 +205,7 @@ class HistoryRepository:
         return await ReadingComparisonRepository(self.db).list_for_session(session_id)
 
     async def role(self, actor_id: UUID):
-        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id))
+        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id, Profile.Active == 1))
 
     async def owned_child(self, child_id: UUID, actor_id: UUID):
         return await self.db.scalar(select(ChildProfile.Id).where(ChildProfile.Id == child_id, ChildProfile.ParentId == actor_id))
@@ -607,7 +609,12 @@ async def match_book_page_from_camera(
     # Lấy các trang ACTIVE của cuốn sách
     pages_result = await db.execute(
         select(BookPage)
-        .where(BookPage.BookId == book_id, BookPage.LifecycleStatus == "ACTIVE")
+        .join(Book, Book.Id == BookPage.BookId)
+        .where(
+            BookPage.BookId == book_id,
+            BookPage.LifecycleStatus == "ACTIVE",
+            CatalogRepository.eligible_book(),
+        )
         .order_by(BookPage.PageNumber)
     )
     pages = pages_result.scalars().all()
@@ -724,7 +731,9 @@ async def match_page_global_from_camera(
     # Lấy toàn bộ các trang sách ACTIVE của tất cả các đầu sách
     pages_result = await db.execute(
         select(BookPage)
+        .join(Book, Book.Id == BookPage.BookId)
         .where(BookPage.LifecycleStatus == "ACTIVE")
+        .where(CatalogRepository.eligible_book())
         .order_by(BookPage.BookId, BookPage.PageNumber)
     )
     pages = pages_result.scalars().all()

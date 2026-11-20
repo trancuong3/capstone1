@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  fingerprintSchema,
+  processingReviewSchema,
+  processingSummarySchema,
+} from "@/types/karaoke-processing-shared";
 
 export const karaokeMetadataSchema = z.object({
   title: z.string().max(200),
@@ -72,12 +77,17 @@ export const karaokeVersionSchema = karaokeMetadataSchema.extend({
   has_cover: z.boolean(),
   duration_ms: milliseconds.nullable(),
   audio_size_bytes: z.number().int().nonnegative().nullable(),
+  audio_sha256: fingerprintSchema.nullable().optional(),
+  has_reference_audio: z.boolean().optional(),
+  reference_audio_sha256: fingerprintSchema.nullable().optional(),
   lyrics: lyricsSchema,
   created_at: date,
   updated_at: date,
   published_at: date.nullable(),
 });
 export const adminKaraokeDetailSchema = z.object({
+  processing_summary: processingSummarySchema.nullable().optional(),
+  processing_review: processingReviewSchema.optional(),
   song_id: z.guid(),
   status,
   revision: z.number().int().positive(),
@@ -99,6 +109,7 @@ export const adminKaraokeListSchema = z.object({
       duration_ms: milliseconds.nullable(),
       draft_version_id: z.guid().nullable(),
       published_version_id: z.guid().nullable(),
+      processing_summary: processingSummarySchema.nullable().optional(),
       has_audio: z.boolean(),
       has_cover: z.boolean(),
       created_at: date,
@@ -153,6 +164,8 @@ export const karaokeValidationSchema = z.object({
         "CONTENT_INVALID",
         "SYLLABLES_REQUIRED",
         "SYLLABLE_TEXT_MISMATCH",
+        "PROCESSING_IN_PROGRESS",
+        "PROCESSING_REVIEW_REQUIRED",
       ]),
       field: z.string(),
       line_id: z.guid().nullable(),
@@ -161,6 +174,9 @@ export const karaokeValidationSchema = z.object({
   ),
 });
 export type KaraokeMetadata = z.infer<typeof karaokeMetadataSchema>;
+export type KaraokeSongCreate = KaraokeMetadata & {
+  creation_request_id?: string;
+};
 export type KaraokeLyrics = z.infer<typeof lyricsSchema>;
 export type KaraokeLine = KaraokeLyrics["lines"][number];
 export type KaraokeSyllable = z.infer<typeof syllableSchema>;

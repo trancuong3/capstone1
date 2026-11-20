@@ -53,7 +53,7 @@ export function AdminStatusBadge({ status }: { status: Status }) {
   return (
     <span
       className={cn(
-        "inline-flex rounded-full px-3 py-1 text-sm font-semibold",
+        "inline-flex w-fit items-center gap-2 rounded-md px-2.5 py-1 text-sm font-semibold before:size-1.5 before:rounded-full before:bg-current",
         tone,
       )}
     >

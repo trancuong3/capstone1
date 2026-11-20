@@ -46,10 +46,14 @@ async def text_to_speech(
     except VoiceProviderError as error:
         raise provider_http_exception(error) from None
 
+    headers = {"Cache-Control": "no-store"}
+    if audio.resolved_voice_id:
+        headers["X-Resolved-Voice-Id"] = audio.resolved_voice_id
+    headers["X-Voice-Fallback"] = "1" if audio.used_fallback_voice else "0"
     return Response(
         content=audio.content,
         media_type=audio.content_type,
-        headers={"Cache-Control": "no-store"},
+        headers=headers,
     )
 
 

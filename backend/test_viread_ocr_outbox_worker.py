@@ -167,6 +167,159 @@ class VireadOcrOutboxWorkerTests(unittest.IsolatedAsyncioTestCase):
             stop.set()
             await asyncio.wait_for(task, timeout=0.5)
 
+
+    async def test_renewal_is_fenced_by_attempt_generation(self):
+        fake_db = MagicMock()
+        result = MagicMock(rowcount=1)
+        fake_db.execute = AsyncMock(return_value=result)
+        fake_db.commit = AsyncMock()
+
+        class Session:
+            async def __aenter__(self):
+                return fake_db
+
+            async def __aexit__(self, *_args):
+                return False
+
+        event_id = uuid4()
+        with patch.object(outbox_worker, "AsyncSessionLocal", return_value=Session()):
+            renewed = await outbox_worker._renew_claim(
+                event_id, expected_attempts=3
+            )
+            result.rowcount = 0
+            stale = await outbox_worker._renew_claim(
+                event_id, expected_attempts=3
+            )
+
+        self.assertTrue(renewed)
+        self.assertFalse(stale)
+        query, params = fake_db.execute.await_args.args
+        self.assertIn("status = 'PROCESSING'", str(query))
+        self.assertIn("attempts = :expected_attempts", str(query))
+        self.assertIn("locked_at = now()", str(query))
+        self.assertEqual(params, {"event_id": event_id, "expected_attempts": 3})
+        self.assertEqual(fake_db.commit.await_count, 2)
+
+    async def test_slow_materialization_keeps_lease_alive(self):
+        entered = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def slow_process(_event):
+            entered.set()
+            await finish.wait()
+
+        event = {"id": uuid4(), "attempts": 2}
+        with (
+            patch.object(outbox_worker, "LEASE_HEARTBEAT_SECONDS", 0.01),
+            patch.object(outbox_worker, "_process", side_effect=slow_process),
+            patch.object(
+                outbox_worker, "_renew_claim",
+                new=AsyncMock(return_value=True),
+            ) as renew,
+        ):
+            task = asyncio.create_task(outbox_worker._process_with_lease(event))
+            try:
+                await asyncio.wait_for(entered.wait(), timeout=1)
+                for _ in range(60):
+                    if renew.await_count > 0:
+                        break
+                    await asyncio.sleep(0.01)
+                self.assertGreater(renew.await_count, 0)
+                finish.set()
+                await asyncio.wait_for(task, timeout=1)
+            finally:
+                finish.set()
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+        self.assertEqual(renew.await_args.kwargs["expected_attempts"], 2)
+
+    async def test_lost_lease_cancels_long_running_materialization(self):
+        entered = asyncio.Event()
+        was_cancelled = asyncio.Event()
+        event = {"id": uuid4(), "attempts": 2}
+
+        async def slow_process(_event):
+            entered.set()
+            try:
+                await asyncio.Future()
+            finally:
+                was_cancelled.set()
+
+        with (
+            patch.object(outbox_worker, "LEASE_HEARTBEAT_SECONDS", 0.01),
+            patch.object(outbox_worker, "_process", side_effect=slow_process),
+            patch.object(
+                outbox_worker, "_renew_claim",
+                new=AsyncMock(return_value=False),
+            ) as renew,
+        ):
+            with self.assertRaises(outbox_worker.OutboxLeaseLost):
+                await asyncio.wait_for(
+                    outbox_worker._process_with_lease(event), timeout=1
+                )
+
+        self.assertTrue(entered.is_set())
+        self.assertTrue(was_cancelled.is_set())
+        renew.assert_awaited_once_with(event["id"], expected_attempts=2)
+
+    async def test_heartbeat_error_fails_closed_and_does_not_leak_details(self):
+        event = {"id": uuid4(), "attempts": 1}
+        cancelled = asyncio.Event()
+
+        async def slow_process(_event):
+            try:
+                await asyncio.Future()
+            finally:
+                cancelled.set()
+
+        with (
+            patch.object(outbox_worker, "LEASE_HEARTBEAT_SECONDS", 0.01),
+            patch.object(outbox_worker, "_process", side_effect=slow_process),
+            patch.object(
+                outbox_worker, "_renew_claim",
+                new=AsyncMock(side_effect=OSError("private-token")),
+            ),
+            patch.object(outbox_worker, "log_diagnostic") as log,
+        ):
+            with self.assertRaises(outbox_worker.OutboxLeaseLost):
+                await asyncio.wait_for(
+                    outbox_worker._process_with_lease(event), timeout=1
+                )
+        self.assertTrue(cancelled.is_set())
+        self.assertNotIn("private-token", repr(log.call_args))
+
+    async def test_worker_never_marks_reclaimed_event_done_or_dead(self):
+        stop = asyncio.Event()
+        event = {"id": uuid4(), "attempts": 3}
+        called = 0
+
+        async def claim():
+            nonlocal called
+            called += 1
+            if called == 1:
+                return event
+            stop.set()
+            return None
+
+        with (
+            patch.object(outbox_worker, "_claim_one", side_effect=claim),
+            patch.object(
+                outbox_worker, "_process_with_lease",
+                new=AsyncMock(side_effect=outbox_worker.OutboxLeaseLost()),
+            ),
+            patch.object(
+                outbox_worker, "_release_claim_on_cancel", new=AsyncMock()
+            ) as released,
+            patch.object(outbox_worker, "_finish", new=AsyncMock()) as finish,
+            patch.object(outbox_worker, "_wait_for_stop_or_timeout", new=AsyncMock()),
+        ):
+            await asyncio.wait_for(
+                outbox_worker.run_worker(stop, poll_seconds=0), timeout=1
+            )
+        released.assert_awaited_once_with(event["id"], expected_attempts=3)
+        finish.assert_not_awaited()
+
     async def test_finish_fences_update_by_processing_status_and_expected_attempts(self):
         fake_db = MagicMock()
         fake_result = MagicMock()

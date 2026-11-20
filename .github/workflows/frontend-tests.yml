@@ -16,7 +16,7 @@ jobs:
   frontend-checks:
     name: Frontend tests, typecheck, lint and build
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 45
 
     defaults:
       run:
@@ -136,10 +136,11 @@ jobs:
           "app/admin/(protected)/parents/page.tsx"
           "app/admin/(protected)/parents/[parentId]/page.tsx"
 
-      # Informational until pre-existing whole-repository TypeScript debt is resolved.
-      # Parent CRUD files are gated separately by scoped typecheck, lint and tests above.
-      - name: Informational full-app production build
-        continue-on-error: true
+      # Full-repository checks must block the PR, not be informational only.
+      - name: Required full frontend verification (format, lint, typecheck, unit)
+        run: npm run verify
+
+      - name: Required production build
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: test-publishable-key

@@ -28,6 +28,8 @@ export function useKaraokePlayer(
   const [currentMs, setCurrentMs] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [ended, setEnded] = useState(false);
+  const [segmentFinished, setSegmentFinished] = useState(false);
+  const [loopPass, setLoopPass] = useState(0);
   const [waiting, setWaiting] = useState(false);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
@@ -45,11 +47,13 @@ export function useKaraokePlayer(
       if (disposed) return;
       const time = Math.round(audio.currentTime * 1000);
       if (segmentEnd.current !== null && time >= segmentEnd.current) {
-        if (segmentLoop.current !== null)
+        if (segmentLoop.current !== null) {
           audio.currentTime = segmentLoop.current / 1000;
-        else {
-          audio.pause();
+          setLoopPass((previous) => previous + 1);
+        } else {
           segmentEnd.current = null;
+          setSegmentFinished(true);
+          audio.pause();
         }
       }
       setCurrentMs(
@@ -70,6 +74,9 @@ export function useKaraokePlayer(
     }
     function onPause() {
       invalidate();
+      // Browsers may dispatch pause before ended at the natural end of the file.
+      // Publish both together so the microphone can drain the last sung words.
+      if (audio.ended && segmentLoop.current === null) setEnded(true);
       setPlaying(false);
       setWaiting(false);
       cancelAnimationFrame(frame);
@@ -87,6 +94,7 @@ export function useKaraokePlayer(
         return;
       }
       audio.currentTime = start / 1000;
+      setLoopPass((previous) => previous + 1);
       const ticket = operation.current;
       void audio
         .play()
@@ -135,7 +143,6 @@ export function useKaraokePlayer(
       ["pause", onPause],
       ["ended", onEnded],
       ["waiting", onWaiting],
-      ["stalled", onWaiting],
       ["timeupdate", sync],
       ["seeking", sync],
       ["seeked", sync],
@@ -144,10 +151,21 @@ export function useKaraokePlayer(
     listeners.forEach(([event, listener]) =>
       audio.addEventListener(event, listener),
     );
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") audio.pause();
+    };
+    const onAndroidBackground = () => audio.pause();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    document.addEventListener("viread:android-background", onAndroidBackground);
     audio.src = url;
     audio.load();
     return () => {
       disposed = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      document.removeEventListener(
+        "viread:android-background",
+        onAndroidBackground,
+      );
       invalidate();
       cancelAnimationFrame(frame);
       listeners.forEach(([event, listener]) =>
@@ -174,6 +192,7 @@ export function useKaraokePlayer(
       segmentEnd.current = null;
       segmentLoop.current = null;
       setEnded(false);
+      setSegmentFinished(false);
       audioRef.current.currentTime =
         Math.max(0, Math.min(durationMs, ms)) / 1000;
       setCurrentMs(Math.round(audioRef.current.currentTime * 1000));
@@ -206,6 +225,7 @@ export function useKaraokePlayer(
           : null;
       const ticket = ++operation.current;
       setEnded(false);
+      setSegmentFinished(false);
       playPending.current = true;
       setError("");
       try {
@@ -232,6 +252,9 @@ export function useKaraokePlayer(
     if (audioRef.current) audioRef.current.volume = next;
     setVolumeState(next);
   }, []);
+  const setMuted = useCallback((value: boolean) => {
+    if (audioRef.current) audioRef.current.muted = value;
+  }, []);
   const setRate = useCallback((value: number) => {
     if (![0.75, 1].includes(value)) return;
     if (audioRef.current) {
@@ -250,6 +273,8 @@ export function useKaraokePlayer(
     currentMs,
     playing,
     ended,
+    segmentFinished,
+    loopPass,
     waiting,
     ready,
     error,
@@ -259,6 +284,7 @@ export function useKaraokePlayer(
     pause,
     seek,
     setVolume,
+    setMuted,
     setRate,
     getCurrentMs,
   };

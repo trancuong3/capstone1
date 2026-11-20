@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import Link from "next/link";
+import { ArrowLeft, RefreshCw } from "lucide-react";
 import { useParams } from "next/navigation";
 
 import {
@@ -83,10 +84,19 @@ export default function ReadingReportPage() {
     };
   }, [reloadKey, sessionId]);
 
+  const reportHeading = (
+    <header className="border-b border-border pb-5">
+      <Link href="/sessions" className="family-inline-link">
+        <ArrowLeft aria-hidden="true" size={16} /> Lịch sử đọc
+      </Link>
+      <h1 className="book-title text-4xl text-ink">Báo cáo đọc</h1>
+    </header>
+  );
+
   if (loading) {
     return (
       <main className="mx-auto max-w-4xl space-y-4 p-6">
-        <h1 className="text-2xl font-semibold">Báo cáo đọc</h1>
+        {reportHeading}
         <p>Đang tải báo cáo...</p>
       </main>
     );
@@ -95,8 +105,8 @@ export default function ReadingReportPage() {
   if (error) {
     return (
       <main className="mx-auto max-w-4xl space-y-4 p-6">
-        <h1 className="text-2xl font-semibold">Báo cáo đọc</h1>
-        <p className="text-red-600">{error}</p>
+        {reportHeading}
+        <p className="text-danger">{error}</p>
         <Button
           className="sm:w-auto"
           onClick={() => setReloadKey((key) => key + 1)}
@@ -112,11 +122,10 @@ export default function ReadingReportPage() {
   if (reports.length === 0) {
     return (
       <main className="mx-auto max-w-4xl space-y-4 p-6">
-        <h1 className="text-2xl font-semibold">Báo cáo đọc</h1>
+        {reportHeading}
         <p>
-          Buổi đọc đã được lưu nhưng hiện chưa có báo cáo đối chiếu nào được
-          lưu. Báo cáo chỉ được tạo khi hệ thống có transcript giọng nói thực
-          tế.
+          Buổi đọc đã được lưu. Báo cáo đối chiếu sẽ có khi hệ thống ghi nhận
+          được lời đọc của bé.
         </p>
         <Button
           className="sm:w-auto"
@@ -133,8 +142,8 @@ export default function ReadingReportPage() {
   return (
     <main className="mx-auto max-w-4xl space-y-6 p-6">
       <div>
-        <h1 className="text-2xl font-semibold">Báo cáo đọc</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        {reportHeading}
+        <p className="mt-1 text-sm text-muted">
           Có {reports.length} báo cáo trong phiên đọc này.
         </p>
       </div>
@@ -150,7 +159,7 @@ export default function ReadingReportPage() {
             </h2>
 
             <div className="flex items-center gap-3">
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-muted">
                 {new Date(report.created_at).toLocaleString("vi-VN")}
               </p>
 
@@ -158,7 +167,7 @@ export default function ReadingReportPage() {
                 <button
                   type="button"
                   onClick={() => handleDeleteReport(report.report_id)}
-                  className="rounded-lg border border-red-300 px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"
+                  className="rounded-lg border border-red-300 px-3 py-2 text-sm font-medium text-danger transition hover:bg-red-50"
                 >
                   Xóa báo cáo
                 </button>

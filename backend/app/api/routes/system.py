@@ -1,22 +1,33 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from datetime import date, datetime, timedelta, timezone
-from typing import List, Literal
+from typing import Annotated, List, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import literal, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_parent_id, get_db
+from app.api.deps import get_current_parent_id, get_db, require_admin_id, require_parent_id
 from app.api.routes.reading import HistoryRepository, HistoryService
-from app.models import AuditLog, ChildProfile, ConsentRecord, Profile, ProgressReport
+from app.models import AuditLog, ChildProfile, ConsentRecord, Profile, ProgressReport, ReadingSession
 from app.providers.elevenlabs_voice_provider import ElevenLabsVoiceProvider
+from app.repositories.difficult_words_repository import DifficultWordsRepository
 from app.services.admin_ocr_local import LocalCorrectionError, LocalOcrConfig, LocalOcrCorrector
+from app.services.runtime_diagnostics import (
+    collect_ocr_health,
+    collect_worker_health,
+    probe_storage_health,
+)
+from app.services.difficult_words_service import (
+    DifficultWordsService,
+    MAX_PRACTICE_AUDIO_BYTES,
+)
 from app.schemas import (
     AuditLogCreate,
     AuditLogResponse,
@@ -24,6 +35,13 @@ from app.schemas import (
     ConsentRecordResponse,
     ProgressReportCreate,
     ProgressReportResponse,
+)
+from app.schemas.difficult_words import (
+    DifficultWordPracticeAttemptRead,
+    DifficultWordPracticeCompleteRequest,
+    DifficultWordPracticeHistoryRead,
+    DifficultWordPracticeStartRequest,
+    PracticeStatusLiteral,
 )
 from app.schemas.system import (
     AdminAuditLogRead,
@@ -43,33 +61,183 @@ from app.schemas.system import (
 router = APIRouter()
 
 
+async def _require_owned_child(db: AsyncSession, actor_id: UUID, child_id: UUID) -> None:
+    """Use a non-enumerating owner predicate before any child-scoped write."""
+    owned_id = await db.scalar(
+        select(ChildProfile.Id).where(
+            ChildProfile.Id == child_id,
+            ChildProfile.ParentId == actor_id,
+        )
+    )
+    if owned_id is None:
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+
 @router.get("/reports", response_model=List[ProgressReportResponse])
-async def get_reports(db: AsyncSession = Depends(get_db)):
-    """Lấy danh sách báo cáo tiến độ"""
-    result = await db.execute(select(ProgressReport))
+async def get_reports(
+    actor_id: UUID = Depends(require_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Only the signed-in parent's children's reports."""
+    result = await db.execute(
+        select(ProgressReport)
+        .join(ChildProfile, ProgressReport.ChildId == ChildProfile.Id)
+        .where(ChildProfile.ParentId == actor_id)
+    )
     return result.scalars().all()
 
 
+class LegacyReportRepository:
+    """Bounded, owner-scoped evidence for the legacy snapshot writer."""
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def lock_owned_child(self, actor_id: UUID, child_id: UUID) -> bool:
+        # Locking the child serializes concurrent snapshot requests for the same
+        # owner/period, avoiding duplicate writes without touching the schema.
+        child = await self.db.scalar(
+            select(ChildProfile.Id)
+            .where(ChildProfile.Id == child_id, ChildProfile.ParentId == actor_id)
+            .with_for_update()
+        )
+        return child is not None
+
+    async def trusted_snapshot(
+        self, actor_id: UUID, child_id: UUID, start: date, end: date
+    ) -> ProgressReport | None:
+        return await self.db.scalar(
+            select(ProgressReport)
+            .join(ChildProfile, ProgressReport.ChildId == ChildProfile.Id)
+            .where(
+                ChildProfile.ParentId == actor_id,
+                ProgressReport.ChildId == child_id,
+                ProgressReport.PeriodStart == start,
+                ProgressReport.PeriodEnd == end,
+                ProgressReport.Summary["source"].as_string() == "server_completed_sessions_v1",
+            )
+            .order_by(ProgressReport.GeneratedAt.desc(), ProgressReport.Id.desc())
+            .limit(1)
+        )
+
+    async def completed_sessions(
+        self, actor_id: UUID, child_id: UUID, start: datetime, end: datetime, cutoff: datetime
+    ) -> list[tuple[datetime, datetime]]:
+        result = await self.db.execute(
+            select(ReadingSession.StartedAt, ReadingSession.EndedAt)
+            .join(ChildProfile, ReadingSession.ChildId == ChildProfile.Id)
+            .where(
+                ChildProfile.ParentId == actor_id,
+                ReadingSession.ChildId == child_id,
+                ReadingSession.State == "COMPLETED",
+                ReadingSession.StartedAt >= start,
+                ReadingSession.StartedAt < end,
+                ReadingSession.EndedAt.is_not(None),
+                ReadingSession.EndedAt >= ReadingSession.StartedAt,
+                ReadingSession.EndedAt <= cutoff,
+            )
+        )
+        return list(result.all())
+
+    async def save(self, snapshot: ProgressReport) -> ProgressReport:
+        self.db.add(snapshot)
+        try:
+            await self.db.commit()
+            await self.db.refresh(snapshot)
+        except Exception:
+            await self.db.rollback()
+            raise
+        return snapshot
+
+
+class LegacyReportService:
+    """Never trust client-generated progress metrics as persisted evidence."""
+
+    def __init__(self, repository: LegacyReportRepository):
+        self.repository = repository
+
+    async def create(self, report_in: ProgressReportCreate, actor_id: UUID) -> ProgressReport:
+        # Keep the old JSON request shape but reject claimed scores and metrics.
+        if report_in.Summary:
+            raise HTTPException(status_code=422, detail="Client report metrics are not accepted")
+
+        start, end = report_in.PeriodStart, report_in.PeriodEnd
+        today = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=7))).date()
+        if end < start or end > today or (end - start).days > 366:
+            raise HTTPException(status_code=422, detail="Invalid report period")
+
+        if not await self.repository.lock_owned_child(actor_id, report_in.ChildId):
+            raise HTTPException(status_code=404, detail="Resource not found")
+
+        existing = await self.repository.trusted_snapshot(
+            actor_id, report_in.ChildId, start, end
+        )
+        if existing is not None:
+            return existing
+
+        local_tz = timezone(timedelta(hours=7))
+        begin = datetime.combine(start, datetime.min.time(), tzinfo=local_tz)
+        finish = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=local_tz)
+        sessions = await self.repository.completed_sessions(
+            actor_id, report_in.ChildId, begin, finish, datetime.now(timezone.utc)
+        )
+        if not sessions:
+            # An empty snapshot would be indistinguishable from unsupported
+            # evidence in old reports; do not invent a successful period.
+            raise HTTPException(status_code=409, detail="No completed reading sessions in period")
+
+        duration_ms = sum(
+            max(0, int((ended_at - started_at).total_seconds() * 1000))
+            for started_at, ended_at in sessions
+        )
+        snapshot = ProgressReport(
+            ChildId=report_in.ChildId,
+            PeriodStart=start,
+            PeriodEnd=end,
+            Summary={
+                "source": "server_completed_sessions_v1",
+                "completed_sessions": len(sessions),
+                "reading_duration_ms": duration_ms,
+            },
+        )
+        return await self.repository.save(snapshot)
+
+
 @router.post("/reports", response_model=ProgressReportResponse)
-async def create_report(report_in: ProgressReportCreate, db: AsyncSession = Depends(get_db)):
-    """Tạo báo cáo tiến độ học tập mới"""
-    new_report = ProgressReport(**report_in.model_dump())
-    db.add(new_report)
-    await db.commit()
-    await db.refresh(new_report)
-    return new_report
+async def create_report(
+    report_in: ProgressReportCreate,
+    actor_id: UUID = Depends(require_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await LegacyReportService(LegacyReportRepository(db)).create(report_in, actor_id)
 
 
 @router.get("/consents", response_model=List[ConsentRecordResponse])
-async def get_consents(db: AsyncSession = Depends(get_db)):
-    """Lấy danh sách các bản ghi đồng ý (Consent)"""
-    result = await db.execute(select(ConsentRecord))
+async def get_consents(
+    actor_id: UUID = Depends(require_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Consent is visible only when both parent and child belong to the actor."""
+    result = await db.execute(
+        select(ConsentRecord)
+        .join(ChildProfile, ConsentRecord.ChildId == ChildProfile.Id)
+        .where(
+            ConsentRecord.ParentId == actor_id,
+            ChildProfile.ParentId == actor_id,
+        )
+    )
     return result.scalars().all()
 
 
 @router.post("/consents", response_model=ConsentRecordResponse)
-async def create_consent(consent_in: ConsentRecordCreate, db: AsyncSession = Depends(get_db)):
-    """Ghi nhận quyền riêng tư/đồng ý (Consent) mới"""
+async def create_consent(
+    consent_in: ConsentRecordCreate,
+    actor_id: UUID = Depends(require_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    if consent_in.ParentId != actor_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    await _require_owned_child(db, actor_id, consent_in.ChildId)
     new_consent = ConsentRecord(**consent_in.model_dump())
     db.add(new_consent)
     await db.commit()
@@ -78,15 +246,24 @@ async def create_consent(consent_in: ConsentRecordCreate, db: AsyncSession = Dep
 
 
 @router.get("/logs", response_model=List[AuditLogResponse])
-async def get_audit_logs(db: AsyncSession = Depends(get_db)):
-    """Lấy danh sách log kiểm toán hệ thống"""
+async def get_audit_logs(
+    actor_id: UUID = Depends(require_admin_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Raw audit records are restricted to active administrators."""
     result = await db.execute(select(AuditLog))
     return result.scalars().all()
 
 
 @router.post("/logs", response_model=AuditLogResponse)
-async def create_audit_log(log_in: AuditLogCreate, db: AsyncSession = Depends(get_db)):
-    """Ghi log hệ thống"""
+async def create_audit_log(
+    log_in: AuditLogCreate,
+    actor_id: UUID = Depends(require_admin_id),
+    db: AsyncSession = Depends(get_db),
+):
+    # A client must not impersonate another actor in an audit trail.
+    if log_in.ActorId != actor_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     new_log = AuditLog(**log_in.model_dump())
     db.add(new_log)
     await db.commit()
@@ -391,17 +568,189 @@ async def get_owned_progress_periods(
     ).periods(child_id, actor_id, cursor, limit)
 
 
+def _difficult_words_service(db: AsyncSession) -> DifficultWordsService:
+    return DifficultWordsService(
+        DifficultWordsRepository(db),
+        HistoryService(HistoryRepository(db)),
+    )
+
+
 @router.get("/difficult-words/{child_id}", response_model=list[DifficultWordRead])
 async def get_owned_difficult_words(
     child_id: UUID,
     period_start: date | None = None,
     period_end: date | None = None,
+    status_filter: PracticeStatusLiteral | None = None,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    return await ProgressService(
-        ProgressRepository(db), HistoryService(HistoryRepository(db))
-    ).read(child_id, actor_id, period_start, period_end, words_only=True)
+    return await _difficult_words_service(db).list_difficult_words(
+        child_id,
+        actor_id,
+        period_start=period_start,
+        period_end=period_end,
+        status_filter=status_filter,
+    )
+
+
+@router.get(
+    "/difficult-words/{child_id}/practice/history",
+    response_model=DifficultWordPracticeHistoryRead,
+)
+async def get_difficult_word_practice_history(
+    child_id: UUID,
+    normalized_word: Annotated[str | None, Query(max_length=120)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _difficult_words_service(db).practice_history(
+        child_id,
+        actor_id,
+        normalized_word=normalized_word,
+        limit=limit,
+    )
+
+
+@router.post(
+    "/difficult-words/{child_id}/practice/evaluate",
+    response_model=DifficultWordPracticeAttemptRead,
+)
+async def evaluate_difficult_word_direct(
+    child_id: UUID,
+    request_id: Annotated[UUID, Form()],
+    normalized_word: Annotated[str, Form(min_length=1, max_length=120)],
+    display_text: Annotated[str | None, Form(max_length=120)] = None,
+    file: Annotated[UploadFile | None, File(description="Child reading recording for this word")] = None,
+    audio_duration_ms: Annotated[int | None, Form(ge=0, le=60_000)] = None,
+    audio_quality_status: Annotated[str | None, Form(max_length=32)] = None,
+    browser_transcript: Annotated[str | None, Form(max_length=160)] = None,
+    browser_confidence: Annotated[float | None, Form(ge=0.0, le=1.0)] = None,
+    book_id: Annotated[UUID | None, Form()] = None,
+    session_id: Annotated[UUID | None, Form()] = None,
+    page_id: Annotated[UUID | None, Form()] = None,
+    page_revision_id: Annotated[UUID | None, Form()] = None,
+    word_id: Annotated[UUID | None, Form()] = None,
+    context_phrase: Annotated[str | None, Form(max_length=240)] = None,
+    evidence_word_ids: Annotated[str | None, Form(max_length=4096)] = None,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    audio_bytes: bytes | None = None
+    filename = "practice.webm"
+    content_type: str | None = None
+    if file is not None:
+        filename = file.filename or "practice.webm"
+        content_type = file.content_type
+        try:
+            audio_bytes = await file.read(MAX_PRACTICE_AUDIO_BYTES + 1)
+        finally:
+            await file.close()
+
+    parsed_evidence_ids: list[UUID] = []
+    if evidence_word_ids:
+        try:
+            raw_list = json.loads(evidence_word_ids)
+            if isinstance(raw_list, list):
+                for item in raw_list[:50]:
+                    if isinstance(item, str):
+                        parsed_evidence_ids.append(UUID(item))
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=422, detail="INVALID_EVIDENCE_WORD_IDS") from None
+
+    return await _difficult_words_service(db).evaluate_word_direct(
+        child_id,
+        actor_id,
+        request_id=request_id,
+        normalized_word=normalized_word,
+        display_text=display_text,
+        audio_bytes=audio_bytes,
+        filename=filename,
+        content_type=content_type,
+        audio_duration_ms=audio_duration_ms,
+        audio_quality_status=audio_quality_status,
+        browser_transcript=browser_transcript,
+        browser_confidence=browser_confidence,
+        evidence_word_ids=parsed_evidence_ids,
+        book_id=book_id,
+        session_id=session_id,
+        page_id=page_id,
+        page_revision_id=page_revision_id,
+        word_id=word_id,
+        context_phrase=context_phrase,
+    )
+
+
+@router.post(
+    "/difficult-words/{child_id}/practice/start",
+    response_model=DifficultWordPracticeAttemptRead,
+)
+async def start_difficult_word_practice(
+    child_id: UUID,
+    payload: DifficultWordPracticeStartRequest,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _difficult_words_service(db).start_attempt(
+        child_id,
+        actor_id,
+        payload,
+    )
+
+
+@router.post(
+    "/difficult-words/{child_id}/practice/{attempt_id}/evaluate-audio",
+    response_model=DifficultWordPracticeAttemptRead,
+)
+async def evaluate_difficult_word_practice_audio(
+    child_id: UUID,
+    attempt_id: UUID,
+    completion_request_id: Annotated[UUID, Form()],
+    file: Annotated[UploadFile, File(description="Child reading recording for this word")],
+    audio_duration_ms: Annotated[int | None, Form(ge=0, le=60_000)] = None,
+    audio_quality_status: Annotated[str | None, Form(max_length=32)] = None,
+    browser_transcript: Annotated[str | None, Form(max_length=160)] = None,
+    browser_confidence: Annotated[float | None, Form(ge=0.0, le=1.0)] = None,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        audio_bytes = await file.read(MAX_PRACTICE_AUDIO_BYTES + 1)
+    finally:
+        await file.close()
+
+    return await _difficult_words_service(db).evaluate_audio_attempt(
+        child_id,
+        attempt_id,
+        actor_id,
+        completion_request_id=completion_request_id,
+        audio_bytes=audio_bytes,
+        filename=file.filename or "practice.webm",
+        content_type=file.content_type,
+        audio_duration_ms=audio_duration_ms,
+        audio_quality_status=audio_quality_status,
+        browser_transcript=browser_transcript,
+        browser_confidence=browser_confidence,
+    )
+
+
+@router.post(
+    "/difficult-words/{child_id}/practice/{attempt_id}/complete",
+    response_model=DifficultWordPracticeAttemptRead,
+)
+async def complete_difficult_word_practice(
+    child_id: UUID,
+    attempt_id: UUID,
+    payload: DifficultWordPracticeCompleteRequest,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _difficult_words_service(db).complete_attempt(
+        child_id,
+        attempt_id,
+        actor_id,
+        payload,
+    )
 
 
 class AdminSystemRepository:
@@ -409,7 +758,7 @@ class AdminSystemRepository:
         self.db = db
 
     async def role(self, actor_id: UUID):
-        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id))
+        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id, Profile.Active == 1))
 
     async def logs(self, action: str | None, resource_type: str | None, offset: int, limit: int):
         query = select(AuditLog)
@@ -477,16 +826,16 @@ class AdminSystemService:
         except ValidationError:
             raise HTTPException(status_code=501, detail="Audit contract is not available yet") from None
 
-    async def health(self):
-        # Probes the API, database, local OCR model, and voice providers.
+    async def health(self, workers: dict[str, object] | None = None):
+        # Lightweight, bounded probes. Never initialize OCR weights from Health.
         try:
             database_ready = await asyncio.wait_for(self.repository.probe_database(), timeout=4)
         except (TimeoutError, asyncio.TimeoutError, SQLAlchemyError, OSError):
             database_ready = False
 
         try:
-            local_ocr_status, local_ocr_message = await LocalOcrCorrector.probe(
-                LocalOcrConfig.from_environment()
+            local_ocr_status, local_ocr_message = await asyncio.wait_for(
+                LocalOcrCorrector.probe(LocalOcrConfig.from_environment()), timeout=4
             )
         except LocalCorrectionError:
             local_ocr_status, local_ocr_message = (
@@ -500,14 +849,45 @@ class AdminSystemService:
             )
 
         try:
-            tts_status, tts_message = await self.voice_provider.probe_tts()
+            tts_status, tts_message = await asyncio.wait_for(
+                self.voice_provider.probe_tts(), timeout=5
+            )
         except Exception:
             tts_status, tts_message = "UNAVAILABLE", "Không thể kiểm tra dịch vụ TTS."
 
         try:
-            stt_status, stt_message = await self.voice_provider.probe_stt()
+            stt_status, stt_message = await asyncio.wait_for(
+                self.voice_provider.probe_stt(), timeout=5
+            )
         except Exception:
             stt_status, stt_message = "UNAVAILABLE", "Không thể kiểm tra dịch vụ STT."
+
+        try:
+            ocr_details = await asyncio.wait_for(
+                asyncio.to_thread(collect_ocr_health), timeout=3
+            )
+        except Exception:
+            # Never imply engine readiness after an inconclusive probe.
+            ocr_details = [
+                dict(id=key, label=label, status="DEGRADED", detail_status="unknown",
+                     safe_message="Chưa xác minh được trạng thái runtime OCR.")
+                for key, label in (
+                    ("paddleocr", "PaddleOCR"), ("vietocr", "VietOCR"),
+                    ("tesseract", "Tesseract"),
+                    ("tesseract_vie", "Tesseract tiếng Việt"),
+                )
+            ]
+
+        try:
+            storage_details = await asyncio.wait_for(
+                probe_storage_health(), timeout=3
+            )
+        except Exception:
+            storage_details = dict(
+                id="storage", label="Supabase Storage", status="DEGRADED",
+                detail_status="unknown",
+                safe_message="Chưa thể xác minh trạng thái Storage.",
+            )
 
         checked_at = datetime.now(timezone.utc)
         items = [
@@ -552,6 +932,14 @@ class AdminSystemService:
             ),
         ]
 
+        items.append(AdminHealthItemRead(**storage_details, checked_at=checked_at))
+        items.extend(AdminHealthItemRead(**entry, checked_at=checked_at) for entry in ocr_details)
+        if workers is not None:
+            items.extend(
+                AdminHealthItemRead(**entry, checked_at=checked_at)
+                for entry in collect_worker_health(workers)
+            )
+
         statuses = [item.status for item in items]
         overall = "HEALTHY" if all(s == "HEALTHY" for s in statuses) else "DEGRADED"
 
@@ -578,8 +966,12 @@ async def get_admin_audit_logs(
 
 @router.get("/admin/health", response_model=AdminHealthRead)
 async def get_admin_health(
-    actor_id: UUID = Depends(get_current_parent_id), db: AsyncSession = Depends(get_db)
+    request: Request,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
 ):
     service = AdminSystemService(AdminSystemRepository(db))
     await service.require_admin(actor_id)
-    return await service.health()
+    return await service.health(
+        workers=getattr(request.app.state, "background_workers", None) or {}
+    )

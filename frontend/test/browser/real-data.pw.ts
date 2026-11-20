@@ -164,10 +164,26 @@ test("Parent stored history → detail, report counts and words", async ({
   await page.goto(`/reports?childId=${ids.child}`);
   await expect(page.getByText("2 buổi", { exact: true })).toBeVisible();
   await page.goto(`/reports/difficult-words?childId=${ids.child}`);
-  await expect(page.getByRole("heading", { name: "Mèo API" })).toBeVisible();
-  await page.getByRole("button", { name: "Luyện từ" }).click();
+  const wordPracticeButton = page.getByRole("button", {
+    name: /Luyện từ Mèo API/,
+  });
+  await expect(wordPracticeButton).toBeVisible();
+  await wordPracticeButton.click();
   await expect(
-    page.getByText(/Chức năng luyện từ chưa sẵn sàng/),
+    page.getByRole("heading", { name: "Mèo API", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Nghe phát âm mẫu" }),
+  ).toBeVisible();
+  // Choosing a word now starts the hands-free practice automatically.
+  // The microphone may be unavailable in isolated CI, in which case the
+  // practice offers a safe resume action instead of its initial start button.
+  await expect(
+    page
+      .getByRole("button", {
+        name: /^(Tiếp tục luyện|Tạm dừng|Dừng ghi âm)$/,
+      })
+      .first(),
   ).toBeVisible();
   expect(api.unexpected).toEqual([]);
 });
@@ -237,8 +253,13 @@ test("Admin OCR is read-only and can switch to a stored revision", async ({
     page.getByRole("heading", { name: "Kiểm tra OCR · R2" }),
   ).toBeVisible();
   await expect(page.getByLabel("Nội dung trang")).toBeDisabled();
+  await page
+    .getByText("Thông tin chi tiết từ OCR và lịch sử revision", {
+      exact: true,
+    })
+    .click();
   await expect(
-    page.getByRole("button", { name: "Chạy lại OCR" }),
+    page.getByRole("button", { name: /Chạy lại OCR từ ảnh đã lưu/ }),
   ).toBeEnabled();
   await page.getByRole("button", { name: /Revision R1/ }).click();
   await expect(page.getByLabel("Nội dung trang")).toHaveValue(
@@ -247,7 +268,7 @@ test("Admin OCR is read-only and can switch to a stored revision", async ({
   expect(api.unexpected).toEqual([]);
 });
 
-test("Admin OCR draft → integrated AI proofread → save → verify preserves bounding boxes", async ({
+test("Admin OCR draft → combined AI review → save → verify preserves bounding boxes", async ({
   page,
 }) => {
   const api = await installApiFixture(page);
@@ -266,9 +287,7 @@ test("Admin OCR draft → integrated AI proofread → save → verify preserves 
   await expect(page.getByLabel("Nội dung trang")).toHaveValue("Văn bản đã lưu");
   expect(api.draftCreateSourceRevisionId).toBe(ids.revision);
 
-  await page
-    .getByRole("button", { name: /AI kiểm tra trước khi xác minh/ })
-    .click();
+  await page.getByRole("button", { name: /XÁC NHẬN & CHẠY AI/ }).click();
   await expect(
     page.getByRole("heading", { name: "Rà soát đề xuất AI" }),
   ).toBeVisible();
@@ -289,7 +308,10 @@ test("Admin OCR draft → integrated AI proofread → save → verify preserves 
   await applySelected.click();
 
   await expect(page.getByLabel("Nội dung trang")).toHaveValue("Văn bản đã sửa");
-  expect(api.aiCorrectionText).toBe("Văn bản đã lưu");
+  expect(api.workflowRequest).toMatchObject({
+    page_revision_id: ids.draftRevision,
+    draft_text: "Văn bản đã lưu",
+  });
   const firstBox = page.getByRole("button", { name: /Từ 1: Văn\./ });
   await expect(firstBox).toBeVisible();
   const bboxStyle = await firstBox.getAttribute("style");
@@ -298,6 +320,14 @@ test("Admin OCR draft → integrated AI proofread → save → verify preserves 
   expect(bboxStyle).toContain("width: 14%");
   expect(bboxStyle).toContain("height: 5%");
 
+  const workflowCard = page.getByTestId("admin-ai-workflow");
+  await expect(
+    workflowCard
+      .getByText("Candidate version")
+      .locator("..")
+      .getByText("1", { exact: true }),
+  ).toBeVisible();
+  await expect(workflowCard.getByText("Khớp Candidate hiện tại")).toBeVisible();
   await page.getByRole("button", { name: /Lưu bản nháp/ }).click();
   await expect(page.getByText("Đã lưu bản nháp vào database.")).toBeVisible();
   expect(api.draftSaveRequest?.draft_text).toBe("Văn bản đã sửa");
@@ -305,16 +335,23 @@ test("Admin OCR draft → integrated AI proofread → save → verify preserves 
     Array<Record<string, unknown>> | undefined;
   expect(savedWords?.[0]?.bbox).toEqual([0.1, 0.2, 0.14, 0.05]);
 
+  expect(api.candidateRequest).toMatchObject({
+    expected_candidate_version: 0,
+    candidate_text: "Văn bản đã sửa",
+  });
+  await page.getByRole("button", { name: "Xác nhận kết quả Safety" }).click();
+  expect(api.safetyDecisionRequest).toMatchObject({
+    expected_candidate_hash: "c".repeat(64),
+    confirmed: true,
+  });
   await page
-    .getByRole("button", { name: /AI kiểm tra trước khi xác minh/ })
+    .getByRole("button", {
+      name: /XÁC NHẬN VÀ LƯU NỘI DUNG CUỐI CÙNG/,
+    })
     .click();
   await expect(
-    page.getByText(/AI không phát hiện lỗi chính tả trong văn bản/),
+    page.getByText("Đã xác minh revision", { exact: true }),
   ).toBeVisible();
-  await page
-    .getByRole("button", { name: /Xác nhận nội dung và hoàn tất VERIFIED/ })
-    .click();
-  await expect(page.getByText(/Đã xác minh revision/)).toBeVisible();
   expect(api.verifyRequest?.corrected_text).toBe("Văn bản đã sửa");
   expect(api.verifyRequest?.proofread_audit).toMatchObject({
     mode: "AI_CHECKED",
@@ -437,10 +474,13 @@ test("Visual QA: book, scanner and reading preparation at requested widths", asy
             .__deviceProbe.cameraRequests,
       ),
     ).toBe(1);
-    await page.getByRole("link", { name: "Về tổng quan", exact: true }).click();
+    await page
+      .getByRole("navigation", { name: "Điều hướng dành cho ba mẹ" })
+      .getByRole("link", { name: "Tổng quan", exact: true })
+      .click();
     await expect(
       page.getByRole("heading", {
-        name: "Chào Ba mẹ API, hôm nay mình đọc gì cùng bé?",
+        name: "Góc đọc gia đình",
       }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Chọn sách" }).click();

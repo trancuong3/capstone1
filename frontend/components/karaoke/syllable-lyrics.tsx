@@ -1,15 +1,44 @@
 import { Fragment, type CSSProperties } from "react";
 import type { KaraokeLine } from "@/types/karaoke";
+import type { LiveLineScore } from "@/lib/karaoke/live-singing-score";
 import { syllableProgress } from "@/lib/karaoke/syllable-timing";
 import styles from "./syllable-lyrics.module.css";
 
 export function SyllableLyrics({
   line,
   currentMs,
+  evidence,
 }: {
   line: KaraokeLine;
   currentMs: number;
+  evidence?: LiveLineScore;
 }) {
+  // Keep original punctuation and capitalization while marking each occurrence.
+  const matched = new Set(
+    evidence?.words
+      .filter((word) => word.state === "matched")
+      .map((word) => word.id),
+  );
+  function mark(text: string, unitId: string) {
+    if (!matched.size) return text;
+    let token = 0;
+    return text
+      .normalize("NFC")
+      .split(/([\p{L}\p{M}\p{N}]+)/gu)
+      .map((part, index) => {
+        if (!/[\p{L}\p{N}]/u.test(part)) return part;
+        const id = unitId + "/" + token++;
+        return matched.has(id) ? (
+          <span key={index} className={styles.heard} data-heard={id}>
+            {part}
+            <span className="sr-only"> (đã nghe khớp)</span>
+          </span>
+        ) : (
+          part
+        );
+      });
+  }
+  if (!line.syllables?.length) return <>{mark(line.text, line.id)}</>;
   return (
     <>
       {line.syllables?.map((unit, i) => {
@@ -32,7 +61,7 @@ export function SyllableLyrics({
                 { "--karaoke-fill": `${progress * 100}%` } as CSSProperties
               }
             >
-              <span>{unit.text}</span>
+              <span>{mark(unit.text, unit.id)}</span>
               <span aria-hidden="true" className={styles.fill}>
                 {unit.text}
               </span>

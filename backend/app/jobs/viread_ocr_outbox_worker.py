@@ -20,6 +20,14 @@ from app.services.viread_training_storage_quota import ensure_database_capacity,
 logger = logging.getLogger(__name__)
 MAX_ATTEMPTS = 8
 POLL_SECONDS = 5
+# Claims expire after ten minutes in _claim_one. Refresh well before that,
+# including when Storage downloads/uploads are taking a long time.
+LEASE_HEARTBEAT_SECONDS = 60
+LEASE_HEARTBEAT_TIMEOUT_SECONDS = 5
+
+
+class OutboxLeaseLost(RuntimeError):
+    """Stop side effects when another worker has reclaimed this event."""
 
 
 async def _claim_one() -> dict[str, Any] | None:
@@ -89,67 +97,77 @@ def _line_crops(image_bytes: bytes, words: list[dict[str, Any]]) -> list[tuple[i
 
 async def _process(event: dict[str, Any]) -> None:
     async with AsyncSessionLocal() as db:
-        result = await db.execute(text("""
-            SELECT p.imagepath, p.bookid, p.width, p.height, r.verificationstatus, r.verifiedtext,
-                   r.contenthash, r.processingmeta, w.wordindex, w.lineindex, w.text, w.boundingbox
+        header_result = await db.execute(text("""
+            SELECT p.imagepath, p.bookid, r.verificationstatus, r.contenthash,
+                   r.processingmeta -> 'ai_proofread_audit' ->> 'mode' AS ai_proofread_mode
             FROM public.bookpages AS p
             JOIN public.pagerevisions AS r ON r.pageid = p.id
-            JOIN public.pagerevisionwords AS w ON w.pagerevisionid = r.id
             WHERE p.id = :page_id AND r.id = :revision_id
-            ORDER BY w.lineindex, w.wordindex
         """), {"page_id": event["page_id"], "revision_id": event["revision_id"]})
-        rows = [dict(row) for row in result.mappings().all()]
-    if not rows or rows[0]["verificationstatus"] != "VERIFIED":
-        raise ValueError("outbox source revision is missing or not VERIFIED")
-    processing_meta = rows[0].get("processingmeta")
-    ai_audit = (
-        processing_meta.get("ai_proofread_audit")
-        if isinstance(processing_meta, dict)
-        else None
-    )
-    ai_review_required = (
-        isinstance(ai_audit, dict)
-        and ai_audit.get("mode") == "AI_AUTO_VERIFIED"
-    )
-    image_path = rows[0]["imagepath"]
+        header = header_result.mappings().first()
+        if not header or header["verificationstatus"] != "VERIFIED":
+            raise ValueError("outbox source revision is missing or not VERIFIED")
+
+        words_result = await db.execute(text("""
+            SELECT w.wordindex, w.lineindex, w.text, w.boundingbox
+            FROM public.pagerevisionwords AS w
+            WHERE w.pagerevisionid = :revision_id
+            ORDER BY w.lineindex, w.wordindex, w.id
+        """), {"revision_id": event["revision_id"]})
+        words = [dict(row) for row in words_result.mappings().all()]
+
+    if not words:
+        raise ValueError("outbox source revision has no words")
+
+    ai_review_required = header["ai_proofread_mode"] == "AI_AUTO_VERIFIED"
+    image_path = header["imagepath"]
     image_bytes = await asyncio.to_thread(download_object, image_path)
-    words = [{key: row[key] for key in ("wordindex", "lineindex", "text", "boundingbox")} for row in rows]
     crops = _line_crops(image_bytes, words)
     if not crops:
         raise ValueError("verified revision contains no usable line crops")
 
+    total_crop_bytes = sum(len(crop) for _, crop, _, _ in crops)
+    total_db_bytes = sum(len(label.encode("utf-8")) + 2048 for _, _, label, _ in crops)
+    async with AsyncSessionLocal() as db:
+        await ensure_storage_capacity(db, total_crop_bytes)
+        await ensure_database_capacity(db, total_db_bytes)
+
+    group_id = str(header["bookid"] or event["page_id"])
+    split_value = "train" if ai_review_required else _stable_split(group_id)
+    sample_rows: list[dict[str, Any]] = []
+
     for line_index, crop, label, fingerprint in crops:
         object_path = f"ocr-training/flow2/admin-verified/{event['revision_id']}/{line_index:04d}-{fingerprint}.png"
-        async with AsyncSessionLocal() as db:
-            await ensure_storage_capacity(db, len(crop), existing_object_path=object_path)
-            await db.commit()
         await asyncio.to_thread(upload_object, object_path, crop, "image/png", upsert=True)
         image_hash = hashlib.sha256(crop).hexdigest()
-        async with AsyncSessionLocal() as db:
-            await ensure_database_capacity(db, len(label.encode("utf-8")) + 2048)
-            await db.execute(text("""
-                INSERT INTO public.viread_ocr_samples
-                    (source_flow, source_group_id, split, image_storage_path, image_sha256,
-                     label, source_page_id, source_revision_id, provenance)
-                VALUES ('FLOW1_VERIFIED', :group_id, :split, :path, :image_sha, :label,
-                        :page_id, :revision_id, CAST(:provenance AS jsonb))
-                ON CONFLICT DO NOTHING
-            """), {
-                # Group and split at book/document level, never at an individual page.
-                "group_id": str(rows[0]["bookid"] or event["page_id"]),
-                "split": "train" if ai_review_required else _stable_split(str(rows[0]["bookid"] or event["page_id"])),
-                "path": object_path,
-                "image_sha": image_hash,
-                "label": label,
-                "page_id": event["page_id"],
-                "revision_id": event["revision_id"],
-                "provenance": json.dumps({"outbox_event_id": str(event["id"]), "line_index": line_index,
-                                           "source_content_hash": rows[0]["contenthash"],
-                                           "verified_by_admin": not ai_review_required,
-                                           "ai_review_required": ai_review_required,
-                                           "verification_source": "ai_auto" if ai_review_required else "admin"}),
-            })
-            await db.commit()
+        sample_rows.append({
+            "group_id": group_id,
+            "split": split_value,
+            "path": object_path,
+            "image_sha": image_hash,
+            "label": label,
+            "page_id": event["page_id"],
+            "revision_id": event["revision_id"],
+            "provenance": json.dumps({
+                "outbox_event_id": str(event["id"]),
+                "line_index": line_index,
+                "source_content_hash": header["contenthash"],
+                "verified_by_admin": not ai_review_required,
+                "ai_review_required": ai_review_required,
+                "verification_source": "ai_auto" if ai_review_required else "admin",
+            }),
+        })
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(text("""
+            INSERT INTO public.viread_ocr_samples
+                (source_flow, source_group_id, split, image_storage_path, image_sha256,
+                 label, source_page_id, source_revision_id, provenance)
+            VALUES ('FLOW1_VERIFIED', :group_id, :split, :path, :image_sha, :label,
+                    :page_id, :revision_id, CAST(:provenance AS jsonb))
+            ON CONFLICT DO NOTHING
+        """), sample_rows)
+        await db.commit()
 
 
 def _stable_split(group_id: str) -> str:
@@ -186,6 +204,91 @@ async def _finish(
         return bool(result.rowcount)
 
 
+
+async def _renew_claim(event_id, *, expected_attempts: int) -> bool:
+    """Fence heartbeat by status and attempt generation, not merely the event UUID."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(text("""
+            UPDATE public.viread_ocr_outbox
+            SET locked_at = now(), updated_at = now()
+            WHERE id = :event_id AND status = 'PROCESSING'
+              AND attempts = :expected_attempts
+        """), {"event_id": event_id, "expected_attempts": expected_attempts})
+        await db.commit()
+        return result.rowcount == 1
+
+
+async def _maintain_claim(
+    event_id,
+    *,
+    expected_attempts: int,
+    stop: asyncio.Event,
+    lease_lost: asyncio.Event,
+) -> None:
+    """Renew an in-flight claim. Fail closed if renewal cannot be verified."""
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=LEASE_HEARTBEAT_SECONDS)
+        except TimeoutError:
+            pass
+        if stop.is_set():
+            return
+        try:
+            owned = await asyncio.wait_for(
+                _renew_claim(event_id, expected_attempts=expected_attempts),
+                timeout=LEASE_HEARTBEAT_TIMEOUT_SECONDS,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # Log only the exception type, never credentials or Storage paths.
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="viread_ocr_outbox_lease_renewal_failed",
+                stage="lease_heartbeat",
+                error_code=type(exc).__name__.upper(),
+            )
+            lease_lost.set()
+            return
+        if not owned:
+            lease_lost.set()
+            return
+
+
+async def _process_with_lease(event: dict[str, Any]) -> None:
+    """Race work against lease loss; stop additional work after fencing fails."""
+    stop_heartbeat = asyncio.Event()
+    lease_lost = asyncio.Event()
+    processing = asyncio.create_task(_process(event), name="ocr_outbox_materialize")
+    heartbeat = asyncio.create_task(
+        _maintain_claim(
+            event["id"], expected_attempts=int(event["attempts"]),
+            stop=stop_heartbeat, lease_lost=lease_lost,
+        ),
+        name="ocr_outbox_lease_heartbeat",
+    )
+    lost_watcher = asyncio.create_task(lease_lost.wait())
+    try:
+        completed, _ = await asyncio.wait(
+            {processing, lost_watcher}, return_when=asyncio.FIRST_COMPLETED
+        )
+        if lost_watcher in completed and lease_lost.is_set():
+            raise OutboxLeaseLost("Outbox event lease was lost")
+        await processing
+        if lease_lost.is_set():
+            raise OutboxLeaseLost("Outbox event lease was lost")
+    finally:
+        stop_heartbeat.set()
+        if not processing.done():
+            processing.cancel()
+        heartbeat.cancel()
+        lost_watcher.cancel()
+        await asyncio.gather(
+            processing, heartbeat, lost_watcher, return_exceptions=True
+        )
+
+
 async def _release_claim_on_cancel(event_id, *, expected_attempts: int) -> None:
     """Return an interrupted PROCESSING claim to the queue without burning an attempt."""
     async with AsyncSessionLocal() as db:
@@ -213,6 +316,7 @@ async def _wait_for_stop_or_timeout(stop: asyncio.Event, timeout_seconds: float)
 
 async def run_worker(stop: asyncio.Event, *, poll_seconds: int = POLL_SECONDS) -> None:
     """Durable multi-process-safe outbox worker. Failed events retry and eventually dead-letter."""
+    idle_streak = 0
     while not stop.is_set():
         try:
             event = await _claim_one()
@@ -224,19 +328,51 @@ async def run_worker(stop: asyncio.Event, *, poll_seconds: int = POLL_SECONDS) -
             await _wait_for_stop_or_timeout(stop, poll_seconds)
             continue
         if event is None:
-            await _wait_for_stop_or_timeout(stop, poll_seconds)
+            idle_streak = min(idle_streak + 1, 4)
+            sleep_for = (
+                min(30, poll_seconds * (2 ** (idle_streak - 1)))
+                if poll_seconds >= 1
+                else poll_seconds
+            )
+            await _wait_for_stop_or_timeout(stop, sleep_for)
             continue
 
+        idle_streak = 0
         attempts = int(event["attempts"])
         process_completed = False
         try:
-            await _process(event)
+            await _process_with_lease(event)
             process_completed = True
             # Shield DONE finalization so cancellation arriving after all crops/samples
             # were persisted does not leave a completed event in PROCESSING.
             await asyncio.shield(
                 _finish(event["id"], status="DONE", expected_attempts=attempts)
             )
+        except OutboxLeaseLost:
+            # A stale worker must never finalize a newer claim. A release is
+            # fenced by attempt generation, so it is a no-op after takeover.
+            try:
+                await asyncio.wait_for(
+                    _release_claim_on_cancel(
+                        event["id"], expected_attempts=attempts
+                    ),
+                    timeout=LEASE_HEARTBEAT_TIMEOUT_SECONDS,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log_diagnostic(
+                    logger, logging.WARNING,
+                    event="viread_ocr_outbox_lease_release_failed",
+                    stage="lease_loss", error_code=type(exc).__name__.upper(),
+                )
+            log_diagnostic(
+                logger, logging.WARNING,
+                event="viread_ocr_outbox_lease_lost",
+                stage="materialization", outbox_id=str(event["id"]),
+                attempt=attempts,
+            )
+            await _wait_for_stop_or_timeout(stop, poll_seconds)
         except asyncio.CancelledError:
             if not process_completed:
                 try:

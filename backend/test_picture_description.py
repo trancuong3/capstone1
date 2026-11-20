@@ -30,11 +30,17 @@ from app.schemas.picture_description import (
     PictureVocabItem,
 )
 from app.services.picture_description_ai import (
+    DEFAULT_FALLBACK_MODEL,
+    DEFAULT_PRIMARY_MODEL,
+    DEFAULT_TIMEOUT_SECONDS,
     GeminiPictureDescriptionAI,
     PictureAiError,
     PictureDescriptionAiConfig,
     _compute_stars,
+    _evaluation_schema,
+    _guide_schema,
     evaluate_description_with_guide_fallback,
+    get_picture_ai_config,
 )
 from app.services.picture_description_service import (
     PictureDescriptionService,
@@ -771,6 +777,82 @@ class TestGeminiPictureDescriptionAI(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(model_used, "gemini-3.5-flash-lite")
         self.assertEqual(feedback.score_out_of_10, 9)
+
+    def test_defaults_and_lowercase_json_schema(self):
+        import os
+        from unittest.mock import patch
+
+        self.assertEqual(DEFAULT_PRIMARY_MODEL, "gemini-3.1-flash-lite")
+        self.assertEqual(DEFAULT_FALLBACK_MODEL, "gemini-3.5-flash-lite")
+        self.assertEqual(DEFAULT_TIMEOUT_SECONDS, 15)
+        self.assertEqual(_guide_schema()["type"], "object")
+        self.assertEqual(_evaluation_schema()["type"], "object")
+
+        with patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": "g-key-1",
+                "GROQ_API_KEY": "groq-key-1",
+                "PICTURE_DESC_GEMINI_MODEL": "",
+                "PICTURE_DESC_GEMINI_FALLBACK_MODEL": "",
+                "GEMINI_OCR_PRIMARY_MODEL": "",
+                "GEMINI_OCR_FALLBACK_MODEL": "",
+            },
+            clear=False,
+        ):
+            get_picture_ai_config.cache_clear()
+            cfg = get_picture_ai_config()
+            self.assertEqual(cfg.primary_model, "gemini-3.1-flash-lite")
+            self.assertEqual(cfg.fallback_model, "gemini-3.5-flash-lite")
+            self.assertEqual(cfg.groq_api_key, "groq-key-1")
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "g-key-2"}, clear=False):
+            cfg2 = get_picture_ai_config()
+            self.assertEqual(cfg2.api_key, "g-key-2")
+
+    async def test_analyze_picture_falls_back_to_groq_when_gemini_times_out(self):
+        endpoints_hit: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            endpoints_hit.append(str(request.url))
+            if "generativelanguage.googleapis.com" in str(request.url):
+                raise httpx.ReadTimeout("simulated gemini timeout")
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": f"<think>reasoning</think>\n```json\n{json.dumps(_guide_json_payload(), ensure_ascii=False)}\n```"
+                            }
+                        }
+                    ]
+                },
+            )
+
+        ai = GeminiPictureDescriptionAI(
+            config=PictureDescriptionAiConfig(
+                api_key="gemini-key",
+                primary_model="gemini-3.1-flash-lite",
+                fallback_model="gemini-3.5-flash-lite",
+                timeout_seconds=10,
+                groq_api_key="groq-secret-xyz",
+                groq_model="qwen/qwen3.8-27b",
+                ollama_enabled=False,
+            ),
+            transport=httpx.MockTransport(handler),
+        )
+
+        guide, model = await ai.analyze_picture(
+            image_bytes=_sample_png_bytes(),
+            mime_type="image/png",
+            child_grade=2,
+        )
+
+        self.assertEqual(model, "groq:qwen/qwen3.8-27b")
+        self.assertEqual(guide.scene_title, "Chú mèo ngủ trưa trong vườn nắng")
+        self.assertEqual(len(endpoints_hit), 3)
+        self.assertIn("groq.com", endpoints_hit[-1])
 
 
 class TestPictureDescriptionService(unittest.IsolatedAsyncioTestCase):

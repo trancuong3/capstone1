@@ -50,6 +50,7 @@ const shotSchema = z.object({
   next_expected_position: z.number().int().min(0),
   stars_awarded: z.number().int().min(0).max(3),
   completed_sentence: z.string().nullable(),
+  next_round: roundSchema.nullable().optional(),
   message: z.string(),
 });
 const hintSchema = z.object({

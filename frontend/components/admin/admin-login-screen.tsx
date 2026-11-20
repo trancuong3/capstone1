@@ -64,7 +64,7 @@ export function AdminLoginScreen({
     }
   });
   return (
-    <div className="flex min-h-dvh w-full flex-col bg-canvas">
+    <div className="staff-login flex min-h-dvh w-full flex-col bg-canvas">
       <SiteHeader variant="admin-login" />
       <main className="grid w-full min-w-0 flex-1 place-items-center px-4 py-10">
         <Card className="max-w-[560px] gap-4 border border-border bg-white sm:px-8">

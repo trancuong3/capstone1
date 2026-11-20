@@ -9,7 +9,6 @@ import re
 import time
 import unicodedata
 from dataclasses import dataclass, field
-from functools import lru_cache
 from io import BytesIO
 from typing import Any
 
@@ -186,7 +185,6 @@ def _extra_models_env(primary: str, fallback: str | None) -> tuple[str, ...]:
     return tuple(extras)
 
 
-@lru_cache(maxsize=1)
 def get_picture_ai_config() -> PictureDescriptionAiConfig:
     primary = _model_env(
         ("PICTURE_DESC_GEMINI_MODEL", "GEMINI_OCR_PRIMARY_MODEL"),
@@ -262,6 +260,9 @@ def get_picture_ai_config() -> PictureDescriptionAiConfig:
         ),
         ollama_num_predict=max(DEFAULT_OLLAMA_NUM_PREDICT, base_num_predict),
     )
+
+
+get_picture_ai_config.cache_clear = lambda: None  # type: ignore[attr-defined]
 
 
 def _strip_json_fences(raw_text: str) -> str:

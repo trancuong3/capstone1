@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import (
-    CheckConstraint, Column, DateTime, ForeignKey, ForeignKeyConstraint,
+    Boolean, CheckConstraint, Column, DateTime, ForeignKey, ForeignKeyConstraint,
     Index, Integer, SmallInteger, String, Text, UniqueConstraint, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -32,11 +32,17 @@ class KaraokeSong(Base):
             deferrable=True, initially="DEFERRED",
         ),
         Index("karaoke_song_catalog_idx", "status", "created_at", "id"),
+        Index("karaoke_creation_request_idx", "created_by", "creation_request_id", unique=True,
+              postgresql_where=text("creation_request_id IS NOT NULL")),
+        CheckConstraint("(creation_request_id IS NULL) = (creation_request_fingerprint IS NULL)",
+                        name="karaoke_creation_request_pair"),
     )
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     status = Column(String(16), nullable=False, default="DRAFT", server_default="DRAFT")
     published_version_id = Column(UUID(as_uuid=True), nullable=True)
     revision = Column(Integer, nullable=False, default=1, server_default="1")
+    creation_request_id = Column(UUID(as_uuid=True))
+    creation_request_fingerprint = Column(String(64))
     created_by = Column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"))
     created_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), nullable=False, default=utcnow, server_default=text("now()"))
@@ -55,6 +61,21 @@ class KaraokeSongVersion(Base):
         CheckConstraint("duration_ms IS NULL OR duration_ms BETWEEN 1 AND 300000", name="karaoke_version_duration"),
         CheckConstraint("audio_size_bytes IS NULL OR audio_size_bytes BETWEEN 1 AND 20971520", name="karaoke_version_audio_size"),
         Index("karaoke_one_draft_idx", "song_id", unique=True, postgresql_where=text("state = 'DRAFT'")),
+        ForeignKeyConstraint(
+            ["song_id", "origin_job_id"], ["karaoke_processing_jobs.song_id", "karaoke_processing_jobs.id"],
+            name="karaoke_version_origin_job_fk", use_alter=True, ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "(reviewed_content_sha256 IS NULL) = (reviewed_at IS NULL)",
+            name="karaoke_review_pair",
+        ),
+        CheckConstraint(
+            "(reference_audio_path IS NULL AND reference_audio_sha256 IS NULL AND "
+            "reference_audio_size_bytes IS NULL AND reference_duration_ms IS NULL) OR "
+            "(num_nonnulls(reference_audio_path, reference_audio_sha256, reference_audio_size_bytes, reference_duration_ms) = 4 AND reference_audio_sha256 ~ '^[0-9a-f]{64}$' AND "
+            "reference_audio_size_bytes BETWEEN 1 AND 20971520 AND reference_duration_ms BETWEEN 1 AND 300000)",
+            name="karaoke_reference_complete",
+        ),
     )
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     song_id = Column(UUID(as_uuid=True), ForeignKey("karaoke_songs.id", ondelete="RESTRICT"), nullable=False)
@@ -70,6 +91,16 @@ class KaraokeSongVersion(Base):
     cover_path = Column(Text)
     audio_sha256 = Column(String(64))
     timed_audio_sha256 = Column(String(64))
+    requires_processing_review = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    origin_job_id = Column(UUID(as_uuid=True))
+    reviewed_content_sha256 = Column(String(64))
+    reviewed_by = Column(UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"))
+    reviewed_at = Column(DateTime(timezone=True))
+    review_acknowledged_flag_ids = Column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
+    reference_audio_path = Column(Text)
+    reference_audio_sha256 = Column(String(64))
+    reference_audio_size_bytes = Column(Integer)
+    reference_duration_ms = Column(Integer)
     audio_size_bytes = Column(Integer)
     duration_ms = Column(Integer)
     lyrics = Column(JSONB, nullable=False, default=lambda: {"format_version": 1, "lines": []},

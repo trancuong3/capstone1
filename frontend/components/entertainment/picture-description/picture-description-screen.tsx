@@ -17,6 +17,8 @@ import {
   Plus,
   RefreshCw,
   Send,
+  Images,
+  LoaderCircle,
   Sparkles,
   Square,
   Star,
@@ -887,7 +889,11 @@ export function PictureDescriptionScreen() {
 
   return (
     <section className="mx-auto flex w-full max-w-[1130px] flex-col gap-6 pb-8">
-      <BookChildHeader child={selectedChild} />
+      <BookChildHeader
+        child={selectedChild}
+        mobileLabel="Góc kể chuyện"
+        backHref="/entertainment"
+      />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -899,12 +905,11 @@ export function PictureDescriptionScreen() {
             Quay lại góc Giải trí
           </Link>
           <h1 className="mt-1 flex items-center gap-2 text-heading font-extrabold text-ink">
-            <Sparkles aria-hidden="true" className="size-7 text-[#E5A913]" />
             Kể chuyện qua tranh
           </h1>
           <p className="text-body text-muted">
-            Quan sát bức tranh thật kỹ, kể lại bằng lời của bé để nhận sao từ cô
-            giáo AI nhé!
+            Chọn một bức tranh. Bé có thể kể bằng giọng nói hoặc viết một câu về
+            điều mình nhìn thấy.
           </p>
         </div>
 
@@ -945,12 +950,12 @@ export function PictureDescriptionScreen() {
           aria-live="polite"
           className="flex flex-col items-center justify-center gap-4 rounded-card border border-border bg-white p-10 text-center shadow-sm"
         >
-          <Sparkles
+          <LoaderCircle
             aria-hidden="true"
-            className="size-10 animate-pulse text-primary"
+            className="size-8 animate-spin text-primary"
           />
           <h2 className="text-xl font-extrabold text-ink">
-            Cô giáo AI đang ngắm tranh cùng bé...
+            Đang chuẩn bị câu hỏi cho bức tranh…
           </h2>
           <p className="max-w-md text-body text-muted">
             Hệ thống đang chuẩn bị câu hỏi gợi ý và bộ từ vựng phù hợp cho Lớp{" "}
@@ -972,7 +977,7 @@ export function PictureDescriptionScreen() {
                   {
                     id: "SAMPLE",
                     label: "Tranh chủ đề ViRead",
-                    icon: Sparkles,
+                    icon: Images,
                   },
                   {
                     id: "CUSTOM_UPLOAD",

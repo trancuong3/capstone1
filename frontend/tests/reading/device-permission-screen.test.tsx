@@ -103,8 +103,12 @@ describe("Book scanner entry", () => {
         name: "Đưa trang sách vào khung camera",
       }),
     ).toBeInTheDocument();
-    expect(screen.getByText(`${childFixture.alias}`)).toBeInTheDocument();
-    expect(screen.getByText(`Lớp ${childFixture.grade}`)).toBeInTheDocument();
+    expect(
+      screen.getByText(new RegExp(childFixture.alias)),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(new RegExp(`Lớp ${childFixture.grade}`)),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
     expect(getUserMedia).not.toHaveBeenCalled();
 

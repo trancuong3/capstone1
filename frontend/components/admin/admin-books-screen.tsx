@@ -119,8 +119,8 @@ export function AdminBooksScreen() {
                   : "Đã kích hoạt lại sách",
               message:
                 nextStatus === "RETIRED"
-                  ? "Trạng thái mới đã được tải lại từ API. Dữ liệu sách và lịch sử đọc vẫn được giữ nguyên."
-                  : "Trạng thái mới đã được tải lại từ API và sách có thể xuất hiện lại trong catalog nếu đáp ứng quy tắc hiện hành.",
+                  ? "Các trang sách và lịch sử đọc đã được giữ lại."
+                  : "Sách có thể xuất hiện lại trong thư viện khi có trang đã duyệt.",
             }
           : {
               tone: "error",
@@ -139,9 +139,13 @@ export function AdminBooksScreen() {
         message:
           nextStatus === "ACTIVE" &&
           isServiceError(cause) &&
-          cause.status === 422
-            ? "Metadata chưa hợp lệ. Hãy chỉnh sửa tiêu đề và khoảng lớp rồi thử kích hoạt lại."
-            : "Backend chưa xác nhận thay đổi. Hãy kiểm tra quyền Admin hoặc kết nối rồi thử lại.",
+          cause.status === 409
+            ? "Child Safety chưa cho phép đưa sách vào thư viện. Hoàn tất OCR VERIFIED và xác nhận Safety khớp Candidate cho tất cả trang; finding HIGH hoặc NOT_RECOMMENDED tiếp tục bị chặn."
+            : nextStatus === "ACTIVE" &&
+                isServiceError(cause) &&
+                cause.status === 422
+              ? "Metadata chưa hợp lệ. Hãy chỉnh sửa tiêu đề và khoảng lớp rồi thử kích hoạt lại."
+              : "Backend chưa xác nhận thay đổi. Hãy kiểm tra quyền Admin hoặc kết nối rồi thử lại.",
       });
     } finally {
       setLifecycleBusyBookId(null);
@@ -158,18 +162,13 @@ export function AdminBooksScreen() {
       <AdminPageHeader
         eyebrow="Quản trị nội dung"
         title="Kho sách"
-        description="Quản lý tên sách, tiêu đề riêng biệt, metadata và trạng thái hoạt động của từng sách."
+        description="Chỉnh sửa thông tin sách và kiểm tra những trang đang chờ duyệt."
         actions={
-          <ButtonLink className="sm:w-80" href="/admin/books/new">
+          <ButtonLink className="sm:w-auto sm:px-6" href="/admin/books/new">
             Tạo sách mới
           </ButtonLink>
         }
       />
-      <StatusMessage className="mb-6" tone="info">
-        Danh mục được tải từ API thật. Các thao tác cập nhật chỉ thay đổi
-        metadata hoặc vòng đời sách; trang sách, revision và lịch sử đọc được
-        giữ nguyên.
-      </StatusMessage>
       <p aria-label="Tổng quan kho sách" className="mb-4 text-sm text-muted">
         {items
           ? `${items.length} sách · ${items.filter((i) => i.book.lifecycle_status === "ACTIVE").length} đang hoạt động · ${items.reduce((t, i) => t + i.needs_review_count, 0)} trang cần duyệt OCR`
@@ -255,7 +254,7 @@ export function AdminBooksScreen() {
         </StatusMessage>
       ) : items.length === 0 ? (
         <EmptyState
-          description="Điều chỉnh bộ lọc hoặc kiểm tra dữ liệu sách trong database."
+          description="Thử tên sách khác hoặc thay đổi bộ lọc."
           title="Không tìm thấy sách"
         />
       ) : (
@@ -276,7 +275,7 @@ export function AdminBooksScreen() {
               : `/admin/books/${encodeURIComponent(book.id)}/edit`;
 
             return (
-              <Card className="gap-3 bg-white sm:px-8 sm:py-6" key={book.id}>
+              <Card className="catalog-admin-row" key={book.id}>
                 <Link
                   className="w-fit rounded-sm focus-visible:outline-3 focus-visible:outline-primary"
                   href={`/admin/books/${encodeURIComponent(book.id)}`}
@@ -296,6 +295,10 @@ export function AdminBooksScreen() {
                     <span className="rounded-control bg-sky px-3 py-1 text-sm font-bold text-primary">
                       Có trong thư viện ba mẹ
                     </span>
+                  ) : book.lifecycle_status === "ACTIVE" ? (
+                    <span className="rounded-control bg-amber-100 px-3 py-1 text-sm font-bold text-amber-950">
+                      Chưa đủ điều kiện thư viện trẻ em · OCR / Safety
+                    </span>
                   ) : null}
                 </div>
                 <p
@@ -311,7 +314,7 @@ export function AdminBooksScreen() {
                     variant="secondary"
                     href={`/admin/books/${encodeURIComponent(book.id)}`}
                   >
-                    Xem chi tiết / trang sách
+                    Xem các trang
                   </ButtonLink>
                   <ButtonLink variant="quiet" href={editHref}>
                     {missingTitle ? "Bổ sung tiêu đề" : "Chỉnh sửa thông tin"}

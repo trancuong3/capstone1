@@ -4,6 +4,7 @@ import asyncio
 import logging
 import socket
 import ssl
+import sys
 import time
 from typing import Any
 
@@ -16,6 +17,7 @@ from sqlalchemy.pool import NullPool
 from app.diagnostic_logging import log_diagnostic
 
 from .config import (
+    APP_ENVIRONMENT,
     DATABASE_COMMAND_TIMEOUT,
     DATABASE_CONCURRENCY_LIMIT,
     DATABASE_CONCURRENCY_WAIT_TIMEOUT,
@@ -206,12 +208,40 @@ if DATABASE_SSL_REQUIRED:
         raise RuntimeError("Database SSL context must verify CA and hostname")
     asyncpg_connect_args["ssl"] = ssl_context
 
-engine = create_async_engine(
-    sqlalchemy_database_url,
-    echo=False,
-    poolclass=NullPool,
-    connect_args=asyncpg_connect_args,
+_running_test_cli = any(
+    runner in (sys.argv[0] if sys.argv else "")
+    for runner in ("unittest", "pytest")
 )
+_use_null_pool = (
+    APP_ENVIRONMENT == "test"
+    or _running_test_cli
+    or (
+        DATABASE_POOLER_MODE == "local"
+        and (sqlalchemy_database_url.host or "") in {"127.0.0.1", "localhost", "::1"}
+    )
+)
+
+if _use_null_pool:
+    engine = create_async_engine(
+        sqlalchemy_database_url,
+        echo=False,
+        poolclass=NullPool,
+        connect_args=asyncpg_connect_args,
+    )
+else:
+    _base_pool_size = max(2, min(DATABASE_CONCURRENCY_LIMIT, 4))
+    _max_overflow = max(2, DATABASE_CONCURRENCY_LIMIT - _base_pool_size)
+    engine = create_async_engine(
+        sqlalchemy_database_url,
+        echo=False,
+        pool_size=_base_pool_size,
+        max_overflow=_max_overflow,
+        pool_timeout=DATABASE_CONCURRENCY_WAIT_TIMEOUT,
+        pool_recycle=300,
+        pool_pre_ping=True,
+        pool_use_lifo=True,
+        connect_args=asyncpg_connect_args,
+    )
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,

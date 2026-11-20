@@ -112,6 +112,23 @@ describe("scoreSong", () => {
 });
 
 describe("scoreFromFullTranscript", () => {
+  it("preserves tones while matching decomposed Vietnamese text", () => {
+    const ly = lyrics(["Bé lá"]);
+    const result = scoreFromFullTranscript(ly, "BÉ LÀ".normalize("NFD"));
+
+    expect(result.matchedWords).toBe(1);
+    expect(
+      result.lineScores[0].wordMatches.map((word) => word.matched),
+    ).toEqual([true, false]);
+  });
+
+  it("identifies the actual matching positions around a skipped syllable", () => {
+    const result = scoreFromFullTranscript(lyrics(["Bé đi học"]), "bé học");
+    const matches = result.lineScores[0].wordMatches;
+
+    expect(matches.map((word) => word.matched)).toEqual([true, false, true]);
+  });
+
   it("matches words sequentially across lines", () => {
     const ly = lyrics(["Bé đi học", "Mèo con chơi"]);
     const result = scoreFromFullTranscript(ly, "Bé đi học Mèo con chơi");

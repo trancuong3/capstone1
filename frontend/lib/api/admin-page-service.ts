@@ -1,4 +1,5 @@
 import type {
+  AdminDocumentUploadResponseDTO,
   AdminPageImageUI,
   AdminPageListItemUI,
   AdminPageLifecycleDTO,
@@ -43,6 +44,73 @@ export const adminProcessingSchema = z.object({
   verified_at: z.iso.datetime({ offset: true }).nullable(),
   current_verified_revision_id: z.uuid().nullable(),
 });
+
+export const adminDocumentPageResultSchema = z.object({
+  source_page: z.number().int().min(1).max(30),
+  status: z.enum(["SUCCEEDED", "SKIPPED_EMPTY", "FAILED"]),
+  page_id: z.uuid().nullable(),
+  page_number: z.number().int().positive().nullable(),
+  revision: adminRevisionDetailSchema.nullable(),
+  error_code: z.string().nullable(),
+  error_message: z.string().nullable(),
+});
+
+export function createAdminDocumentUploadResponseSchema(bookId: string) {
+  return z
+    .object({
+      book_id: z.uuid(),
+      file_name: z.string(),
+      source_format: z.enum([
+        "JPEG",
+        "PNG",
+        "WEBP",
+        "BMP",
+        "TIFF",
+        "PDF",
+        "DOCX",
+      ]),
+      total_source_pages: z.number().int().min(1).max(30),
+      created_pages_count: z.number().int().nonnegative(),
+      skipped_empty_count: z.number().int().nonnegative(),
+      failed_pages_count: z.number().int().nonnegative(),
+      pages: z.array(adminDocumentPageResultSchema),
+    })
+    .refine(
+      (res) =>
+        res.book_id === bookId &&
+        res.pages.length === res.total_source_pages &&
+        res.created_pages_count +
+          res.skipped_empty_count +
+          res.failed_pages_count ===
+          res.total_source_pages,
+    );
+}
+
+const standardImageTypes = new Set<string>([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+
+function isDocumentUpload(page: AdminPageUploadInputUI): boolean {
+  return (
+    page.upload_kind === "document" || !standardImageTypes.has(page.mime_type)
+  );
+}
+
+function formatDocumentSummary(
+  response: AdminDocumentUploadResponseDTO,
+): string {
+  const notes: string[] = [];
+  if (response.skipped_empty_count > 0) {
+    notes.push(`bỏ qua ${response.skipped_empty_count} trang trắng`);
+  }
+  if (response.failed_pages_count > 0) {
+    notes.push(`lỗi ${response.failed_pages_count} trang`);
+  }
+  const suffix = notes.length > 0 ? ` (${notes.join(", ")})` : "";
+  return `Đã tạo ${response.created_pages_count} trang · Cần duyệt${suffix}`;
+}
 
 export function createAdminPageService(): AdminPageService {
   const uploadIds = new WeakMap<File, string>();
@@ -118,28 +186,55 @@ export function createAdminPageService(): AdminPageService {
       for (const page of pages) {
         onProgress?.({
           client_id: page.client_id,
+          file_name: page.file_name,
           progress_percent: 0,
           status: "UPLOADING",
         });
         const form = new FormData();
-        form.append("image", page.file, page.file_name);
+        const documentMode = isDocumentUpload(page);
+        form.append(
+          documentMode ? "document" : "image",
+          page.file,
+          page.file_name,
+        );
         form.append("upload_id", uploadIdFor(page.file));
         try {
-          await requestApi(
-            `/books/admin/catalog/${encodeURIComponent(bookId)}/pages`,
-            adminRevisionDetailSchema,
-            undefined,
-            { method: "POST", body: form },
-          );
-          // The endpoint returns only after OCR and database persistence complete.
-          onProgress?.({
-            client_id: page.client_id,
-            progress_percent: 100,
-            status: "PROCESSING",
-          });
+          if (documentMode) {
+            const summary = await requestApi(
+              `/books/admin/catalog/${encodeURIComponent(bookId)}/documents`,
+              createAdminDocumentUploadResponseSchema(bookId),
+              undefined,
+              { method: "POST", body: form },
+            );
+            onProgress?.({
+              client_id: page.client_id,
+              file_name: page.file_name,
+              progress_percent: 100,
+              status: "PROCESSING",
+              created_pages_count: summary.created_pages_count,
+              skipped_empty_count: summary.skipped_empty_count,
+              failed_pages_count: summary.failed_pages_count,
+              summary_message: formatDocumentSummary(summary),
+            });
+          } else {
+            await requestApi(
+              `/books/admin/catalog/${encodeURIComponent(bookId)}/pages`,
+              adminRevisionDetailSchema,
+              undefined,
+              { method: "POST", body: form },
+            );
+            // The endpoint returns only after OCR and database persistence complete.
+            onProgress?.({
+              client_id: page.client_id,
+              file_name: page.file_name,
+              progress_percent: 100,
+              status: "PROCESSING",
+            });
+          }
         } catch (cause) {
           onProgress?.({
             client_id: page.client_id,
+            file_name: page.file_name,
             progress_percent: 0,
             status: "FAILED",
             error_message: isServiceError(cause)

@@ -1,3 +1,4 @@
+import Image from "next/image";
 import type { ReactNode } from "react";
 
 import { Card } from "@/components/common/card";
@@ -12,12 +13,28 @@ interface AuthShellProps {
 
 export function AuthShell({ children }: AuthShellProps) {
   return (
-    <div className="flex min-h-dvh w-full flex-col overflow-x-hidden bg-canvas">
+    <div className="account-spread flex min-h-dvh w-full flex-col overflow-x-hidden bg-canvas">
       <SiteHeader />
-      <main className="flex w-full min-w-0 flex-1 items-center justify-center px-4 py-8 sm:min-h-[774px] sm:px-12 sm:py-12">
+      <main className="flex w-full min-w-0 flex-1 items-center justify-center px-4 py-8 sm:min-h-[640px] sm:px-12 sm:py-12">
         <ButtonSizeProvider size="compact">
-          <div className="w-full max-w-[560px] [&>div]:gap-4 [&>div]:max-w-none [&>div]:shadow-none [&>div]:sm:px-8">
-            {children}
+          <div className="account-spread-inner grid w-full max-w-[560px] lg:max-w-[1088px] items-stretch overflow-hidden rounded-card border border-border bg-white lg:grid-cols-[1.1fr_1fr]">
+            <div
+              aria-hidden="true"
+              className="relative hidden overflow-hidden bg-cream lg:block"
+            >
+              <Image
+                alt=""
+                src="/images/reading-studio.webp"
+                fill
+                unoptimized
+                sizes="560px"
+                loading="eager"
+                className="object-cover object-[41%_center]"
+              />
+            </div>
+            <div className="mx-auto flex w-full max-w-[560px] flex-col justify-center [&>div]:rounded-none [&>div]:border-0 [&>div]:gap-4 [&>div]:max-w-none [&>div]:shadow-none [&>div]:sm:px-8">
+              {children}
+            </div>
           </div>
         </ButtonSizeProvider>
       </main>

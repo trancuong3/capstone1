@@ -4,6 +4,8 @@ from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.session import get_db
 from app.database.supabase_client import get_supabase_client, reset_supabase_client
@@ -124,3 +126,33 @@ def get_current_parent_id(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authenticated user ID",
         )
+
+async def _require_database_role(actor_id: UUID, db: AsyncSession, expected_role: str) -> UUID:
+    """Authorize against the active database profile, never untrusted JWT role claims."""
+    from app.models import Profile
+
+    role = await db.scalar(
+        select(Profile.Role).where(Profile.Id == actor_id, Profile.Active == 1)
+    )
+    if role != expected_role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+    return actor_id
+
+
+async def require_parent_id(
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+) -> UUID:
+    """Require a verified Supabase user with an active parent profile."""
+    return await _require_database_role(actor_id, db, "parent")
+
+
+async def require_admin_id(
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+) -> UUID:
+    """Require a verified Supabase user with an active admin profile."""
+    return await _require_database_role(actor_id, db, "admin")

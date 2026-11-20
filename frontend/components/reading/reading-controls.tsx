@@ -1,9 +1,8 @@
-import { Check, CircleHelp, Mic, Pause, Volume2, VolumeX } from "lucide-react";
+import { Check, BookOpen, Mic, Pause, Volume2, VolumeX } from "lucide-react";
 
 import type { ReactNode } from "react";
-
-import { Button } from "@/components/common/button";
 import { cn } from "@/lib/utils/cn";
+import { Button } from "@/components/common/button";
 
 interface ReadingControlsProps {
   pauseDisabled?: boolean;
@@ -16,7 +15,7 @@ interface ReadingControlsProps {
   onReadSample?: () => void;
   onToggleListening?: () => void;
   retryMode?: boolean;
-  /** Extra control (voice settings) placed right after the sample button. */
+  onChoosePage?: () => void;
   voiceSettings?: ReactNode;
 }
 
@@ -31,25 +30,30 @@ export function ReadingControls({
   onReadSample,
   onToggleListening,
   retryMode = false,
+  onChoosePage,
   voiceSettings,
 }: ReadingControlsProps) {
   const finishDisabled = disabled;
 
   return (
-    <div className="@container sticky top-0 z-20 mx-auto w-full max-w-[1008px]">
+    <div className="mx-auto w-full max-w-[1104px]">
       <nav
         aria-label="Điều khiển buổi đọc"
         data-reading-controls
         className={cn(
-          "grid w-full grid-cols-2 gap-2 rounded-card border border-border bg-white p-2 shadow-sm @min-[320px]:grid-cols-3 @min-[900px]:gap-3",
-          voiceSettings
-            ? "@min-[900px]:grid-cols-6"
-            : "@min-[900px]:grid-cols-5",
+          "grid grid-cols-2 gap-2 sm:gap-3",
+          retryMode
+            ? voiceSettings
+              ? "sm:grid-cols-5"
+              : "sm:grid-cols-4"
+            : voiceSettings
+              ? "sm:grid-cols-6"
+              : "sm:grid-cols-5",
         )}
       >
         <Button
           aria-label="Tạm dừng buổi đọc"
-          className="h-auto! min-h-[68px]! min-w-0 flex-col gap-0! px-1! py-1! text-label! font-semibold! @min-[900px]:h-16! @min-[900px]:min-h-16! @min-[900px]:flex-row @min-[900px]:gap-2! @min-[900px]:px-3! @min-[900px]:py-2! @min-[900px]:text-button!"
+          className="min-h-14 min-w-0"
           disabled={pauseDisabled ?? disabled}
           onClick={onPause}
           variant="quiet"
@@ -68,7 +72,7 @@ export function ReadingControls({
                 ? "Nghe mẫu từ cần đọc lại"
                 : "Nghe đọc mẫu cả trang"
           }
-          className="h-auto! min-h-[68px]! min-w-0 flex-col gap-0! px-1! py-1! text-label! font-semibold! @min-[900px]:h-16! @min-[900px]:min-h-16! @min-[900px]:flex-row @min-[900px]:gap-2! @min-[900px]:px-3! @min-[900px]:py-2! @min-[900px]:text-button!"
+          className="min-h-14 min-w-0"
           disabled={disabled}
           onClick={onReadSample ?? onHelp}
           variant="secondary"
@@ -99,7 +103,7 @@ export function ReadingControls({
                 ? "Bật mic"
                 : "Bé đọc với nhận diện giọng nói"
           }
-          className="order-first h-auto! min-h-[68px]! min-w-0 flex-col gap-0! px-1! py-1! text-label! font-semibold! @min-[900px]:h-16! @min-[900px]:min-h-16! @min-[900px]:flex-row @min-[900px]:gap-2! @min-[900px]:px-3! @min-[900px]:py-2! @min-[900px]:text-button!"
+          className="min-h-14 min-w-0"
           disabled={disabled}
           onClick={onToggleListening ?? onPause}
           variant="primary"
@@ -118,25 +122,27 @@ export function ReadingControls({
           </span>
         </Button>
 
-        <Button
-          aria-label="Nhờ gia sư giúp đọc"
-          className="h-auto! min-h-[68px]! min-w-0 flex-col gap-0! px-1! py-1! text-label! font-semibold! @min-[900px]:h-16! @min-[900px]:min-h-16! @min-[900px]:flex-row @min-[900px]:gap-2! @min-[900px]:px-3! @min-[900px]:py-2! @min-[900px]:text-button!"
-          disabled={disabled || retryMode}
-          onClick={onHelp}
-          variant="quiet"
-        >
-          <CircleHelp aria-hidden="true" className="size-6 shrink-0" />
-          <span className="max-w-full text-center whitespace-normal break-words">
-            Gia sư
-          </span>
-        </Button>
+        {!retryMode && (
+          <Button
+            aria-label="Chọn trang"
+            className="min-h-14 min-w-0"
+            disabled={disabled || !onChoosePage}
+            onClick={onChoosePage}
+            variant="quiet"
+          >
+            <BookOpen aria-hidden="true" className="size-6 shrink-0" />
+            <span className="max-w-full text-center whitespace-normal break-words">
+              Chọn trang
+            </span>
+          </Button>
+        )}
 
         <Button
           aria-label={retryMode ? "Hoàn thành đọc lại" : "Kết thúc buổi đọc"}
-          className="h-auto! min-h-[68px]! min-w-0 flex-col gap-0! px-1! py-1! text-label! font-semibold! @min-[900px]:h-16! @min-[900px]:min-h-16! @min-[900px]:flex-row @min-[900px]:gap-2! @min-[900px]:px-3! @min-[900px]:py-2! @min-[900px]:text-button!"
+          className="min-h-14 min-w-0"
           disabled={finishDisabled}
           onClick={onFinish}
-          variant="quiet"
+          variant="secondary"
         >
           <Check aria-hidden="true" className="size-6 shrink-0" />
           <span className="max-w-full text-center whitespace-normal break-words">

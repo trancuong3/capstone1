@@ -65,11 +65,20 @@ async def prepare_database():
             if occupied:
                 raise RuntimeError("Refusing a non-empty database without our disposable-test marker")
             await connection.execute("""
-                DO $$ BEGIN
-                    CREATE ROLE anon NOLOGIN;
-                    CREATE ROLE authenticated NOLOGIN;
-                    CREATE ROLE service_role NOLOGIN;
-                END $$;
+                -- Database roles are cluster-wide: the separate OCR migration
+                -- fixture may already have created them on this same disposable
+                -- PostgreSQL service. Never drop or replace existing roles.
+                DO $role_setup$ BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+                        CREATE ROLE anon NOLOGIN;
+                    END IF;
+                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+                        CREATE ROLE authenticated NOLOGIN;
+                    END IF;
+                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+                        CREATE ROLE service_role NOLOGIN;
+                    END IF;
+                END $role_setup$;
                 CREATE TABLE public.profiles (
                     id uuid PRIMARY KEY, role text NOT NULL, displayname text,
                     contact_phone text, avatar_path text, active smallint NOT NULL DEFAULT 1,
@@ -95,6 +104,20 @@ async def prepare_database():
             await connection.execute(sql)
             await connection.execute("CREATE TABLE public.karaoke_phase2_test_marker (fingerprint text NOT NULL)")
             await connection.execute("INSERT INTO public.karaoke_phase2_test_marker VALUES ($1)", fingerprint)
+        # The same disposable harness now upgrades the additive processing schema.
+        # It still refuses every database without the baseline test marker above.
+        processing = MIGRATION.parent / "20261117060000_add_karaoke_processing.sql"
+        if processing.exists():
+            processing_sql = processing.read_text(encoding="utf-8")
+            processing_hash = hashlib.sha256(processing_sql.encode()).hexdigest()
+            if await connection.fetchval("SELECT to_regclass('public.karaoke_processing_test_marker')"):
+                stored = await connection.fetchval("SELECT fingerprint FROM public.karaoke_processing_test_marker")
+                if stored != processing_hash:
+                    raise RuntimeError("Processing migration changed; use a fresh disposable database")
+            else:
+                await connection.execute(processing_sql)
+                await connection.execute("CREATE TABLE public.karaoke_processing_test_marker (fingerprint text NOT NULL)")
+                await connection.execute("INSERT INTO public.karaoke_processing_test_marker VALUES ($1)", processing_hash)
         _prepared = True
     finally:
         await connection.close()

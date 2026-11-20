@@ -1162,22 +1162,60 @@ async def _dispatch_or_poll_colab_once() -> bool:
         return True
 
 
-async def run_worker(stop: asyncio.Event, *, poll_seconds: int = POLL_SECONDS) -> None:
+async def _pipeline_change_token() -> tuple[Any, ...]:
+    """Lightweight 1-row watermark so idle ticks skip full manifest & holdout scans."""
+    async with AsyncSessionLocal() as db:
+        res = await db.execute(text("""
+            SELECT
+                (SELECT max(updated_at) FROM public.viread_ocr_outbox WHERE status = 'DONE') AS last_outbox_done,
+                (SELECT max(created_at) FROM public.viread_ocr_dataset_versions) AS last_dataset_at,
+                (SELECT max(updated_at) FROM public.viread_ocr_training_jobs) AS last_job_at,
+                (SELECT updated_at FROM public.viread_ocr_active_model WHERE singleton = TRUE) AS active_model_at,
+                EXISTS (
+                    SELECT 1 FROM public.viread_ocr_training_jobs
+                    WHERE status IN (
+                        'LOCAL_RUNNING', 'COLAB_RUNNING', 'COLAB_SUBMITTING',
+                        'COLAB_SUBMITTED', 'COLAB_EXECUTING', 'WAITING_FOR_COLAB_WORKER',
+                        'FALLBACK_QUEUED_COLAB', 'BLOCKED_CONFIGURATION'
+                    )
+                ) AS has_active_jobs
+        """))
+        row = res.mappings().one()
+        return (
+            row["last_outbox_done"],
+            row["last_dataset_at"],
+            row["last_job_at"],
+            row["active_model_at"],
+            bool(row["has_active_jobs"]),
+        )
+
+
+async def run_worker(stop: asyncio.Event, *, poll_seconds: int = 60) -> None:
+    last_schedule_token: tuple[Any, ...] | None = None
     while not stop.is_set():
+        did_work = False
         try:
-            await _expire_exhausted_jobs()
-            # Schedule training from verified Train/Validation before doing any evaluation work.
-            await _schedule_ready_flow1()
-            await _schedule_ready_flow2()
-            # A slow or unavailable evaluation snapshot must never stop training dispatch.
-            try:
-                await _ensure_automatic_locked_test()
-            except asyncio.CancelledError:
-                raise
-            except Exception as evaluation_error:
-                log_diagnostic(logger, logging.WARNING, event="viread_training_evaluation_snapshot_deferred",
-                               stage="automatic_locked_test_snapshot", exception=evaluation_error)
-            did_work = await _dispatch_or_poll_colab_once()
+            current_token = await _pipeline_change_token()
+            has_active_jobs = current_token[4]
+            data_changed = (last_schedule_token is None) or (current_token[:4] != last_schedule_token[:4])
+
+            if has_active_jobs or data_changed:
+                await _expire_exhausted_jobs()
+
+            if data_changed:
+                await _schedule_ready_flow1()
+                await _schedule_ready_flow2()
+                try:
+                    await _ensure_automatic_locked_test()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as evaluation_error:
+                    log_diagnostic(logger, logging.WARNING, event="viread_training_evaluation_snapshot_deferred",
+                                   stage="automatic_locked_test_snapshot", exception=evaluation_error)
+                last_schedule_token = await _pipeline_change_token()
+
+            if has_active_jobs or data_changed:
+                did_work = await _dispatch_or_poll_colab_once()
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -1185,6 +1223,7 @@ async def run_worker(stop: asyncio.Event, *, poll_seconds: int = POLL_SECONDS) -
                            stage="automatic_dataset_schedule_or_colab_dispatch", exception=exc)
             did_work = False
         if did_work:
+            last_schedule_token = None
             continue
         try:
             await asyncio.wait_for(stop.wait(), timeout=poll_seconds)

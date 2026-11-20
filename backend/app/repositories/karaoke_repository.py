@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.orm import aliased
 
 from app.models.karaoke import KaraokeSong, KaraokeSongVersion, utcnow
@@ -92,6 +92,16 @@ class KaraokeRepository:
         draft = await self.add_draft(song.id, actor_id, 1, values)
         return SongState(song, draft, None)
 
+    async def creation_lock(self):
+        # A short, independent lock serializes optional create intent keys.
+        await self.db.execute(text("SELECT pg_advisory_xact_lock(144764,110018)"))
+
+    async def creation_state(self, actor_id, key):
+        song = await self.db.scalar(select(KaraokeSong).where(
+            KaraokeSong.created_by == actor_id, KaraokeSong.creation_request_id == key,
+        ))
+        return await self.state(song.id) if song else None
+
     async def add_draft(self, song_id, actor_id, version_no, values):
         now = utcnow()
         version = KaraokeSongVersion(
@@ -120,9 +130,14 @@ class KaraokeRepository:
         song.updated_at = now
 
     async def referenced(self, path):
-        return bool(await self.db.scalar(select(KaraokeSongVersion.id).where(or_(
+        version = await self.db.scalar(select(KaraokeSongVersion.id).where(or_(
             KaraokeSongVersion.audio_path == path, KaraokeSongVersion.cover_path == path,
-        )).limit(1)))
+            KaraokeSongVersion.reference_audio_path == path,
+        )).limit(1))
+        if version:
+            return True
+        from app.repositories.karaoke_processing_repository import KaraokeProcessingRepository
+        return await KaraokeProcessingRepository(self.db).references(path)
 
     async def list_states(self, *, search, status, grade, limit, offset):
         draft, published = aliased(KaraokeSongVersion), aliased(KaraokeSongVersion)

@@ -203,4 +203,90 @@ describe("SessionReadingReports", () => {
       await screen.findByRole("heading", { name: "Trang 7" }),
     ).toBeInTheDocument();
   });
+
+  it("renders 'có' in 'Bé có một bông hoa.' red before practice and green once self_corrected_word_ids includes it", async () => {
+    const words = ["Bé", "có", "một", "bông", "hoa."].map((text, index) => ({
+      word_id: `60000000-0000-4000-8000-00000000000${index + 1}`,
+      word_index: index,
+      text,
+      bbox: [0.05 + index * 0.16, 0.2, 0.12, 0.05] as [
+        number,
+        number,
+        number,
+        number,
+      ],
+    }));
+    const coId = words[1].word_id;
+    const baseReport: SavedReadingReport = {
+      ...report,
+      transcript: "Bé một bông hoa",
+      alignment: [],
+      summary: {
+        ...report.summary,
+        assessment_version: 1,
+        initial_assessment: [
+          {
+            word_id: words[0].word_id,
+            word_index: 0,
+            text: "Bé",
+            status: "CORRECT",
+          },
+          { word_id: coId, word_index: 1, text: "có", status: "OMISSION" },
+          {
+            word_id: words[2].word_id,
+            word_index: 2,
+            text: "một",
+            status: "CORRECT",
+          },
+          {
+            word_id: words[3].word_id,
+            word_index: 3,
+            text: "bông",
+            status: "CORRECT",
+          },
+          {
+            word_id: words[4].word_id,
+            word_index: 4,
+            text: "hoa.",
+            status: "CORRECT",
+          },
+        ],
+      },
+    };
+    const sentencePage: ReadingPage = {
+      ...historicalPage,
+      text: "Bé có một bông hoa.",
+      words,
+    };
+    comparisonApi.getReadingPage.mockResolvedValue(sentencePage);
+
+    // 1) Before practice -> 'có' is red
+    comparisonApi.getSessionReports.mockResolvedValueOnce({
+      session_id: SESSION_ID,
+      total: 1,
+      reports: [{ ...baseReport, self_corrected_word_ids: [] }],
+    });
+    const { rerender } = render(
+      <SessionReadingReports sessionId={SESSION_ID} />,
+    );
+    const coBefore = await screen.findByText("có");
+    expect(coBefore.className).toContain("bg-red-200");
+
+    // 2) After self-correction / difficult-word practice saved -> 'có' turns green
+    comparisonApi.getSessionReports.mockResolvedValueOnce({
+      session_id: SESSION_ID,
+      total: 1,
+      reports: [{ ...baseReport, self_corrected_word_ids: [coId] }],
+    });
+    rerender(<SessionReadingReports sessionId={SESSION_ID} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Thử tải lại báo cáo" }),
+    );
+    const coAfter = await screen.findByText("có");
+    await waitFor(() => {
+      expect(coAfter.className).toContain("bg-green-200");
+    });
+    expect(coAfter.className).not.toContain("bg-red-200");
+    expect(screen.getByText(/Đã đọc lại đúng: 1 từ/)).toBeInTheDocument();
+  });
 });

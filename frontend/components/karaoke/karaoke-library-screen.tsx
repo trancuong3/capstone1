@@ -29,9 +29,6 @@ function Library({ child }: { child: ChildProfileDTO }) {
     <section className="mx-auto grid w-full max-w-[1280px] gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-label font-bold text-primary">
-            CÙNG BÉ HÁT MỖI NGÀY
-          </p>
           <h1 className="mt-2 text-heading font-extrabold">
             Hát vui cùng {child.alias}
           </h1>

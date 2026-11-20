@@ -1,0 +1,72 @@
+name: Supabase Reading Indexes (Disposable PostgreSQL)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "supabase/migrations/20261120140000_reading_query_indexes_cleanup.sql"
+      - "supabase/rollbacks/20261120140000_reading_query_indexes_cleanup_rollback.sql"
+      - "supabase/tests/reading_query_indexes_disposable.sql"
+      - ".github/workflows/supabase-query-index-performance.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "supabase/migrations/20261120140000_reading_query_indexes_cleanup.sql"
+      - "supabase/rollbacks/20261120140000_reading_query_indexes_cleanup_rollback.sql"
+      - "supabase/tests/reading_query_indexes_disposable.sql"
+      - ".github/workflows/supabase-query-index-performance.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  reading-indexes:
+    name: Reading index plans, migration and rollback
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: viread_perf_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test -d viread_perf_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: test
+      PGPASSWORD: test
+      PGDATABASE: viread_perf_ci
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Ensure local PostgreSQL CLI
+        run: |
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update -o Acquire::Retries=2
+            sudo apt-get install -y --no-install-recommends postgresql-client
+          fi
+          psql --version
+          psql -X -v ON_ERROR_STOP=1 -c "select current_database(), current_setting('server_version')"
+
+      - name: Verify exact proposed migration and rollback in disposable PostgreSQL
+        run: |
+          psql -X -v ON_ERROR_STOP=1 -f supabase/tests/reading_query_indexes_disposable.sql
+
+      - name: Dispose of synthetic performance database
+        if: always()
+        run: |
+          PGDATABASE=postgres psql -X -v ON_ERROR_STOP=1 \
+            -c "DROP DATABASE IF EXISTS viread_perf_ci WITH (FORCE)"

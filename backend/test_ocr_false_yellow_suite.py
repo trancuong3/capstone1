@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
 import random
 import sys
 import unicodedata
@@ -581,8 +582,8 @@ CONDITION_FLOORS = {
 
 
 @unittest.skipUnless(
-    ocr_engine.PaddleOCR is not None and ocr_engine.Predictor is not None,
-    "PaddleOCR and VietOCR are not installed; real-OCR tests need both engines",
+    os.getenv("VIREAD_REAL_OCR_GATE") == "1",
+    "Real OCR evaluation runs in the dedicated VIREAD_REAL_OCR_GATE=1 CI job",
 )
 class RealOcrIntegration(unittest.TestCase):
     @classmethod
@@ -590,9 +591,11 @@ class RealOcrIntegration(unittest.TestCase):
         try:
             _paddle, vietocr = ocr_engine._get_ocr_engines()
         except ocr_engine.OcrEngineUnavailable as exc:
-            raise unittest.SkipTest(f"OCR models are not available: {exc}")
-        if vietocr is None or not ocr_engine._configure_tesseract():
-            raise unittest.SkipTest("VietOCR weights or Tesseract are not available")
+            raise AssertionError(f"Required real PaddleOCR engine is unavailable: {exc}") from exc
+        if vietocr is None:
+            raise AssertionError("Required real VietOCR weights failed to initialize")
+        if not ocr_engine._configure_tesseract():
+            raise AssertionError("Required Tesseract Vietnamese OCR runtime is unavailable")
         cls.benchmark = _benchmark()
         cls.results = {}
         for fixture in cls.benchmark.load_fixtures():

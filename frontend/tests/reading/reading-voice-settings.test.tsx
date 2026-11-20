@@ -67,7 +67,7 @@ describe("reading voice settings", () => {
       screen.queryByRole("option", { name: "Giọng trẻ trung" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByText(/Chưa có giọng được xác nhận là trẻ trung/),
+      screen.getByRole("option", { name: "Tất cả giọng đọc" }),
     ).toBeInTheDocument();
   });
 
@@ -173,7 +173,7 @@ describe("reading voice settings", () => {
 
     expect(await screen.findByRole("radio", { name: /Jessica/ })).toBeChecked();
     expect(screen.getByRole("radio", { name: /Roger/ })).not.toBeChecked();
-    expect(screen.getByText("Nữ · american")).toBeInTheDocument();
+    expect(screen.getByText("Nữ · Giọng Mỹ")).toBeInTheDocument();
     expect(voiceStudioMock.listVoices).toHaveBeenCalledOnce();
   });
 

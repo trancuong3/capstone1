@@ -246,14 +246,14 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col bg-canvas">
+    <div className="parent-shell flex min-h-dvh flex-col bg-canvas">
       <a
         className="sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:not-sr-only focus:rounded-control focus:bg-white focus:px-4 focus:py-3 focus:font-semibold focus:text-primary focus:shadow-lg"
         href="#main-content"
       >
         Bỏ qua điều hướng, đến nội dung
       </a>
-      <header className="shrink-0 border-b border-border bg-white px-4 py-4 sm:px-8">
+      <header className="parent-topbar shrink-0 border-b border-border bg-white px-4 py-4 sm:px-8">
         <nav
           aria-label="Điều hướng dành cho ba mẹ"
           className={cn(
@@ -272,10 +272,15 @@ export function AppShell({ children }: AppShellProps) {
 
           <div className="flex w-full min-w-0 items-center gap-2 xl:w-auto xl:gap-3">
             {!isChildOnboarding ? (
-              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 py-1 xl:flex-none xl:flex-nowrap xl:justify-end xl:gap-2">
+              <div className="parent-nav-links flex min-w-0 flex-1 flex-wrap items-center gap-1 py-1 xl:flex-none xl:flex-nowrap xl:justify-end xl:gap-2">
                 {navigationItems.map(({ href, icon: Icon, label }) => {
                   const isActive =
-                    routeIsActive(pathname, href) ||
+                    (routeIsActive(pathname, href) &&
+                      !navigationItems.some(
+                        (other) =>
+                          other.href.length > href.length &&
+                          routeIsActive(pathname, other.href),
+                      )) ||
                     (href === "/entertainment" &&
                       (pathname === "/karaoke" ||
                         pathname.startsWith("/karaoke/")));
@@ -286,7 +291,7 @@ export function AppShell({ children }: AppShellProps) {
                       className={cn(
                         "flex min-h-10 shrink-0 items-center justify-center gap-1 rounded-control px-1.5 text-center text-xs font-semibold text-ink transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-11 sm:px-2.5 sm:text-sm xl:h-12 xl:gap-2 xl:px-3 xl:text-label",
                         isActive
-                          ? "bg-sky text-primary-hover"
+                          ? "bg-sky text-primary-hover xl:underline xl:decoration-2 xl:underline-offset-8"
                           : "bg-white hover:bg-canvas",
                       )}
                       href={href}
@@ -301,7 +306,8 @@ export function AppShell({ children }: AppShellProps) {
                     >
                       <Icon
                         aria-hidden="true"
-                        className="size-4 shrink-0 sm:size-5 xl:hidden"
+                        className="size-4 shrink-0 sm:size-[18px]"
+                        strokeWidth={1.8}
                       />
                       <span className="whitespace-nowrap">{label}</span>
                     </Link>

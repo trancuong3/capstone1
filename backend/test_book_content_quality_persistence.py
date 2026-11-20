@@ -134,6 +134,7 @@ class ParentBookContentQualityPostgresTests(unittest.IsolatedAsyncioTestCase):
                     pageid uuid NOT NULL REFERENCES bookpages(id) ON DELETE CASCADE,
                     revisionno varchar NOT NULL,
                     verificationstatus varchar NOT NULL,
+                    originalocrtext text,
                     verifiedtext varchar,
                     drafttext varchar,
                     contenthash varchar NOT NULL,

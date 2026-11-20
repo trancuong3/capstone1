@@ -1,5 +1,6 @@
 import { expect, type Page, type Route } from "@playwright/test";
 import { createPlaywrightAuthFixtureHeaders } from "../../lib/auth/playwright-auth-fixture";
+import type { ProcessingCapabilities } from "../../types/karaoke-processing";
 
 export const ids = {
   parent: "11111111-1111-4111-8111-111111111111",
@@ -89,6 +90,9 @@ export interface BrowserApiState {
   } | null;
   draftCreateSourceRevisionId: string | null;
   aiCorrectionText: string | null;
+  workflowRequest: Record<string, unknown> | null;
+  candidateRequest: Record<string, unknown> | null;
+  safetyDecisionRequest: Record<string, unknown> | null;
   draftSaveRequest: Record<string, unknown> | null;
   verifyRequest: Record<string, unknown> | null;
 }
@@ -157,6 +161,9 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
     createdBook: null,
     draftCreateSourceRevisionId: null,
     aiCorrectionText: null,
+    workflowRequest: null,
+    candidateRequest: null,
+    safetyDecisionRequest: null,
     draftSaveRequest: null,
     verifyRequest: null,
   };
@@ -204,6 +211,57 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       verified_by: verified ? ids.parent : null,
     };
   }
+  let latestWorkflow: Record<string, unknown> | null = null;
+  function makeReadyWorkflow() {
+    const proofreadHash = "b".repeat(64);
+    return {
+      workflow_id: "99999999-9999-4999-8999-999999999999",
+      page_id: ids.page,
+      book_id: ids.book,
+      page_revision_id: ids.draftRevision,
+      status: "READY_FOR_ADMIN_REVIEW",
+      stage: "READY_FOR_ADMIN_REVIEW",
+      progress: { completed_chunks: 1, total_chunks: 1 },
+      attempts: 1,
+      error_code: null,
+      original_ocr_hash: "a".repeat(64),
+      admin_input_hash: "a".repeat(64),
+      proofread_text: "Văn bản đã sửa",
+      proofread_output_hash: proofreadHash,
+      corrections: [],
+      uncertain_word_indices: [],
+      proofread_metadata: {},
+      safety_metadata: {},
+      candidate_history: [],
+      safety_history: [],
+      review_history: [],
+      candidate_text: "Văn bản đã sửa",
+      candidate_hash: proofreadHash,
+      candidate_version: 0,
+      safety_input_hash: proofreadHash,
+      hash_match: true,
+      suitability: "SUITABLE",
+      safety_status: "PROVISIONAL",
+      findings: [],
+      provider_events: [],
+      ocr_approved_at: null,
+      final_approved_text_hash: null,
+      created_at: timestamp,
+      updated_at: timestamp,
+    };
+  }
+  const difficultPracticeAttempts: Record<string, unknown>[] = [];
+  const difficultWordState: {
+    normalized_word: string;
+    display_text: string;
+    practice_status?: string;
+    practice_attempts_count?: number;
+    practice_correct_count?: number;
+    consecutive_correct_count?: number;
+    last_practiced_at?: string | null;
+    last_practice_status?: string | null;
+    [key: string]: unknown;
+  } = { ...word };
   await page.context().route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -316,6 +374,64 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       );
     }
     if (
+      request.method() === "POST" &&
+      path === `/books/admin/pages/${ids.page}/ai-workflows`
+    ) {
+      state.workflowRequest = request.postDataJSON() as Record<string, unknown>;
+      if (
+        state.workflowRequest.page_revision_id !== ids.draftRevision ||
+        state.workflowRequest.draft_text !== "Văn bản đã lưu"
+      )
+        return respond(route, { detail: "Invalid workflow snapshot" }, 409);
+      latestWorkflow = makeReadyWorkflow();
+      return respond(route, latestWorkflow, 202);
+    }
+    if (
+      request.method() === "PATCH" &&
+      path ===
+        `/books/admin/pages/${ids.page}/ai-workflows/99999999-9999-4999-8999-999999999999/candidate`
+    ) {
+      state.candidateRequest = request.postDataJSON() as Record<
+        string,
+        unknown
+      >;
+      const candidateText = state.candidateRequest.candidate_text;
+      if (!latestWorkflow || candidateText !== "Văn bản đã sửa")
+        return respond(route, { detail: "Invalid candidate" }, 409);
+      latestWorkflow = {
+        ...latestWorkflow,
+        candidate_text: candidateText,
+        candidate_hash: "c".repeat(64),
+        candidate_version: 1,
+        safety_input_hash: "c".repeat(64),
+        hash_match: true,
+      };
+      return respond(route, latestWorkflow);
+    }
+    if (
+      request.method() === "POST" &&
+      path ===
+        `/books/admin/pages/${ids.page}/ai-workflows/99999999-9999-4999-8999-999999999999/safety-decision`
+    ) {
+      state.safetyDecisionRequest = request.postDataJSON() as Record<
+        string,
+        unknown
+      >;
+      if (
+        !latestWorkflow ||
+        state.safetyDecisionRequest.expected_candidate_hash !==
+          latestWorkflow.candidate_hash
+      )
+        return respond(route, { detail: "Stale candidate hash" }, 409);
+      latestWorkflow = {
+        ...latestWorkflow,
+        safety_status: state.safetyDecisionRequest.confirmed
+          ? "CONFIRMED"
+          : "PROVISIONAL",
+      };
+      return respond(route, latestWorkflow);
+    }
+    if (
       request.method() === "PUT" &&
       path ===
         `/books/admin/pages/${ids.page}/revisions/${ids.draftRevision}/draft`
@@ -337,6 +453,15 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         return respond(route, { detail: "Invalid draft revision" }, 409);
       return respond(route, draftDetail());
     }
+    const latestWorkflowPath = `/books/admin/pages/${ids.page}/revisions/${ids.draftRevision}/ai-workflows/latest`;
+    if (request.method() === "GET" && path === latestWorkflowPath)
+      return respond(route, latestWorkflow);
+    if (
+      request.method() === "GET" &&
+      path ===
+        `/books/admin/pages/${ids.page}/revisions/${ids.revision}/ai-workflows/latest`
+    )
+      return respond(route, null);
     // The AI progress card is a separate feature with its own tests; here it
     // only needs to settle quietly ("not enough data" -> no AI call is made).
     const assessmentChild =
@@ -593,8 +718,115 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         },
         state.reportStatus,
       );
+    if (
+      path.startsWith(`/system/difficult-words/${ids.child}/practice/history`)
+    ) {
+      if (state.reportStatus !== 200)
+        return respond(route, {}, state.reportStatus);
+      return respond(route, {
+        storage_ready: true,
+        items: difficultPracticeAttempts,
+      });
+    }
+    if (
+      path === `/system/difficult-words/${ids.child}/practice/evaluate` &&
+      request.method() === "POST"
+    ) {
+      if (state.reportStatus !== 200)
+        return respond(route, {}, state.reportStatus);
+      const attemptId = `99999999-9999-4999-8999-${String(difficultPracticeAttempts.length + 1).padStart(12, "0")}`;
+      const attempt = {
+        attempt_id: attemptId,
+        child_id: ids.child,
+        normalized_word: difficultWordState.normalized_word,
+        display_text: difficultWordState.display_text,
+        attempt_number: difficultPracticeAttempts.length + 1,
+        state: "COMPLETED",
+        assessment_status: "CORRECT",
+        recognition_source: "SERVER_STT",
+        spoken_transcript: difficultWordState.display_text,
+        confidence: null,
+        audio_duration_ms: 820,
+        assessment_version: 1,
+        evidence_word_ids: [ids.revision],
+        persistence_backend: "READING_EVENT",
+        resolved_in_session: true,
+        started_at: timestamp,
+        completed_at: timestamp,
+        feedback_message: "Chính xác rồi! Con giỏi lắm!",
+        word_progress: {
+          normalized_word: difficultWordState.normalized_word,
+          practice_status: "COMPLETED",
+          practice_attempts_count: 1,
+          practice_correct_count: 1,
+          practice_incorrect_count: 0,
+          practice_uncertain_count: 0,
+          consecutive_correct_count: 1,
+          required_consecutive_correct: 1,
+          last_practiced_at: timestamp,
+          last_practice_status: "CORRECT",
+        },
+        next_recommended_word: null,
+        evidence_count_unchanged: true,
+      };
+      difficultWordState.practice_status = "COMPLETED";
+      difficultWordState.practice_attempts_count = 1;
+      difficultWordState.practice_correct_count = 1;
+      difficultWordState.consecutive_correct_count = 1;
+      difficultWordState.last_practiced_at = timestamp;
+      difficultWordState.last_practice_status = "CORRECT";
+      difficultPracticeAttempts.unshift(attempt);
+      return respond(route, attempt);
+    }
+    if (
+      path === `/system/difficult-words/${ids.child}/practice/start` &&
+      request.method() === "POST"
+    ) {
+      if (state.reportStatus !== 200)
+        return respond(route, {}, state.reportStatus);
+      const body = route.request().postDataJSON() as {
+        normalized_word: string;
+        display_text?: string;
+        evidence_word_ids?: string[];
+      };
+      const attemptId = `99999999-9999-4999-8999-${String(difficultPracticeAttempts.length + 1).padStart(12, "0")}`;
+      const attempt = {
+        attempt_id: attemptId,
+        child_id: ids.child,
+        normalized_word: body.normalized_word,
+        display_text: body.display_text ?? body.normalized_word,
+        attempt_number: difficultPracticeAttempts.length + 1,
+        state: "STARTED",
+        assessment_status: null,
+        recognition_source: null,
+        spoken_transcript: null,
+        confidence: null,
+        audio_duration_ms: null,
+        assessment_version: 1,
+        evidence_word_ids: body.evidence_word_ids ?? [ids.revision],
+        started_at: timestamp,
+        completed_at: null,
+        feedback_message: null,
+        word_progress: {
+          normalized_word: body.normalized_word,
+          practice_status: "IN_PROGRESS",
+          practice_attempts_count: difficultPracticeAttempts.length,
+          practice_correct_count: difficultPracticeAttempts.length,
+          practice_incorrect_count: 0,
+          practice_uncertain_count: 0,
+          consecutive_correct_count: difficultPracticeAttempts.length,
+          required_consecutive_correct: 2,
+          last_practiced_at: null,
+          last_practice_status: null,
+        },
+        next_recommended_word: null,
+        evidence_count_unchanged: true,
+      };
+      difficultPracticeAttempts.unshift(attempt);
+      return respond(route, attempt);
+    }
     if (path.startsWith("/system/difficult-words/"))
-      return respond(route, [word], state.reportStatus);
+      return respond(route, [difficultWordState], state.reportStatus);
     if (path === "/books/admin/catalog")
       return respond(
         route,
@@ -733,6 +965,23 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         verified_by: null,
       });
     }
+    if (
+      request.method() === "GET" &&
+      path === "/karaoke/admin/processing-capabilities"
+    )
+      return respond(route, {
+        enabled: false,
+        configured: false,
+        supported_modes: [],
+        unavailable_reason: "DISABLED",
+        limits: {
+          max_audio_bytes: 20971520,
+          max_duration_ms: 300000,
+          max_lyric_lines: 300,
+          max_lyric_characters: 50000,
+        },
+        queue_warning_after_seconds: 150,
+      } satisfies ProcessingCapabilities);
     if (path === "/system/admin/audit-logs")
       return respond(route, {
         items: [

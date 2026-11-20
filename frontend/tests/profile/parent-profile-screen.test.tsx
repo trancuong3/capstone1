@@ -164,7 +164,7 @@ describe("ParentProfileScreen", () => {
       profile.display_name,
     );
     expect(screen.getByLabelText("Email")).toHaveValue(profile.email);
-    expect(screen.getByLabelText("Số điện thoại liên hệ")).toHaveValue(
+    expect(screen.getByLabelText("Số điện thoại")).toHaveValue(
       profile.contact_phone,
     );
     expect(
@@ -212,7 +212,7 @@ describe("ParentProfileScreen", () => {
     );
 
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
-    expect(screen.getByLabelText("Số điện thoại liên hệ")).toBeInTheDocument();
+    expect(screen.getByLabelText("Số điện thoại")).toBeInTheDocument();
 
     await user.clear(screen.getByLabelText("Email"));
     await user.type(screen.getByLabelText("Email"), "new-parent@example.com");
@@ -253,16 +253,13 @@ describe("ParentProfileScreen", () => {
       await screen.findByRole("button", { name: "Chỉnh sửa hồ sơ" }),
     );
 
-    expect(screen.getByLabelText("Số điện thoại liên hệ")).toBeInTheDocument();
+    expect(screen.getByLabelText("Số điện thoại")).toBeInTheDocument();
     expect(
       screen.queryByLabelText("Mã OTP gồm 6 chữ số"),
     ).not.toBeInTheDocument();
 
-    await user.clear(screen.getByLabelText("Số điện thoại liên hệ"));
-    await user.type(
-      screen.getByLabelText("Số điện thoại liên hệ"),
-      "0912345678",
-    );
+    await user.clear(screen.getByLabelText("Số điện thoại"));
+    await user.type(screen.getByLabelText("Số điện thoại"), "0912345678");
     await user.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(

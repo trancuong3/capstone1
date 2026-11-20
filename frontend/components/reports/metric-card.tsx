@@ -6,7 +6,7 @@ interface MetricCardProps {
 
 export function MetricCard({ metric }: MetricCardProps) {
   return (
-    <article className="flex min-w-0 flex-col gap-2 rounded-card border border-border bg-white p-4">
+    <article className="report-metric flex min-w-0 flex-col gap-2">
       <h2 className="text-label font-bold text-muted">{metric.label}</h2>
       <p
         className="break-words text-3xl font-extrabold leading-[1.4] text-primary"

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -253,6 +254,9 @@ export function LoginForm({
         type="password"
         {...register("password")}
       />
+      <Link href="/forgot-password" className="account-forgot">
+        Quên mật khẩu?
+      </Link>
       <Button
         disabled={
           !isHydrated ||
@@ -268,7 +272,7 @@ export function LoginForm({
           <ArrowRight aria-hidden="true" className="size-5" />
         ) : null}
       </Button>
-      <div className="flex flex-col gap-3">
+      <div className="account-providers grid gap-3">
         <div className="relative py-2">
           <div
             className="absolute inset-0 flex items-center"
@@ -317,10 +321,7 @@ export function LoginForm({
           Tiếp tục với Facebook
         </Button>
       </div>
-      <ButtonLink href="/forgot-password" variant="quiet">
-        Quên mật khẩu?
-      </ButtonLink>
-      <ButtonLink href="/register" variant="secondary">
+      <ButtonLink href="/register" variant="quiet" className="account-signup">
         <span className="sm:hidden">Đăng ký tài khoản</span>
         <span className="hidden sm:inline">Chưa có tài khoản? Đăng ký</span>
       </ButtonLink>

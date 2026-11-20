@@ -25,7 +25,7 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
     <footer
       aria-label="Thông tin ViRead"
       className={cn(
-        "mt-auto w-full shrink-0 border-t border-border bg-white",
+        "site-colophon mt-auto w-full shrink-0 border-t border-border bg-white",
         className,
       )}
     >

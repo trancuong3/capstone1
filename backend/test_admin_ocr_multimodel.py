@@ -280,6 +280,28 @@ class OcrCorrectionConfigTests(unittest.TestCase):
         )
         with patch.dict(
             os.environ,
+            {
+                "GEMINI_OCR_PRIMARY_MODEL": "gemini-custom-preview-2",
+                "GEMINI_OCR_FALLBACK_MODEL": "gemini-2.5-flash-lite",
+                "GROQ_OCR_MODEL": "qwen/qwen-2.5-vl-72b-instruct",
+            },
+            clear=False,
+        ):
+            configured_models = OcrCorrectionConfig.from_environment()
+        self.assertEqual(
+            (
+                configured_models.gemini_primary_model,
+                configured_models.gemini_fallback_model,
+                configured_models.groq_model,
+            ),
+            (
+                "gemini-custom-preview-2",
+                "gemini-2.5-flash-lite",
+                "qwen/qwen-2.5-vl-72b-instruct",
+            ),
+        )
+        with patch.dict(
+            os.environ,
             {"GEMINI_OCR_PRIMARY_MODEL": "not a valid model id"},
             clear=False,
         ):
@@ -625,7 +647,7 @@ class OcrFallbackOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "ngay xua.")
         self.assertEqual([entry[0] for entry in calls], ["gemini_3_5", "groq_qwen"])
 
-    async def test_gemini_and_groq_failures_advance_to_gemini_fallback(self):
+    async def test_gemini_models_fail_in_order_before_groq(self):
         calls = []
         providers = [
             _Provider(
@@ -634,11 +656,11 @@ class OcrFallbackOrchestratorTests(unittest.IsolatedAsyncioTestCase):
                 error=OcrProviderError(provider="gemini_3_5", code="PROVIDER_TIMEOUT"),
             ),
             _Provider(
-                "groq_qwen",
+                "gemini_3_1",
                 calls,
-                error=OcrProviderError(provider="groq_qwen", code="PROVIDER_QUOTA"),
+                error=OcrProviderError(provider="gemini_3_1", code="PROVIDER_QUOTA"),
             ),
-            _Provider("gemini_3_1", calls),
+            _Provider("groq_qwen", calls),
             _Provider("ollama_qwen3_vl", calls),
         ]
         result = await OcrCorrectionOrchestrator(
@@ -646,7 +668,7 @@ class OcrFallbackOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         ).correct("ngay xua.", _image(), _boxes(2))
         self.assertEqual(result, "ngay xua.")
         self.assertEqual(
-            [entry[0] for entry in calls], ["gemini_3_5", "groq_qwen", "gemini_3_1"]
+            [entry[0] for entry in calls], ["gemini_3_5", "gemini_3_1", "groq_qwen"]
         )
 
     async def test_all_cloud_failures_advance_to_ollama_last(self):
@@ -738,7 +760,7 @@ class OcrFallbackOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("UNCERTAIN_TOKENS", "\n".join(logs.output))
         self.assertNotIn("ngay xua", "\n".join(logs.output))
 
-    async def test_all_providers_uncertain_preserves_original_and_logs_count(self):
+    async def test_all_cloud_providers_uncertain_preserves_original_without_ollama(self):
         calls = []
         partial = ChunkCorrectionResult(0, ("ngay",), (0,))
         providers = [
@@ -752,7 +774,7 @@ class OcrFallbackOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "ngay")
         self.assertEqual(
             [entry[0] for entry in calls],
-            ["gemini_3_5", "groq_qwen", "gemini_3_1", "ollama_qwen3_vl"],
+            ["gemini_3_5", "groq_qwen", "gemini_3_1"],
         )
         output = "\n".join(logs.output)
         self.assertIn("ocr_uncertain_tokens_preserved", output)

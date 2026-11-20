@@ -398,6 +398,31 @@ describe("real Admin adapters", () => {
     expect(await createHealthService().get()).toEqual(result);
     expect(fetchMock.mock.calls[0][0]).toContain("/system/admin/health");
   });
+  it("validates explicit low-cost OCR diagnostic states", async () => {
+    const result = {
+      overall_status: "DEGRADED",
+      checked_at: timestamp,
+      services: [
+        {
+          id: "vietocr",
+          label: "VietOCR",
+          status: "DEGRADED",
+          checked_at: timestamp,
+          safe_message: "Đã cài, chưa nạp.",
+          detail_status: "installed",
+        },
+      ],
+    };
+    fetchMock.mockResolvedValue(Response.json(result));
+    expect(await createHealthService().get()).toEqual(result);
+    fetchMock.mockResolvedValue(
+      Response.json({
+        ...result,
+        services: [{ ...result.services[0], detail_status: "not_real" }],
+      }),
+    );
+    await expect(createHealthService().get()).rejects.toThrow();
+  });
   it.each([401, 403, 404, 501, 503])(
     "preserves HTTP %s with a safe generic message",
     async (status) => {

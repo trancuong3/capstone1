@@ -157,12 +157,14 @@ describe("Shared reading preparation", () => {
     expect(
       await screen.findByRole("heading", { name: "Chuẩn bị đọc sách" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(`${childFixture.alias}`)).toBeInTheDocument();
+    expect(
+      screen.getByText(new RegExp(childFixture.alias)),
+    ).toBeInTheDocument();
     expect(
       screen.getByText(/Trang OCR xác nhận: Trang 1 · Độ tin cậy 91%/),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Microphone" }),
+      screen.getByRole("heading", { name: "Kiểm tra microphone" }),
     ).toBeInTheDocument();
     expect(screen.queryByText("Camera")).not.toBeInTheDocument();
     expect(getSnapshotMock).not.toHaveBeenCalled();

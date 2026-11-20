@@ -62,13 +62,22 @@ export default async function warmRoutes(): Promise<void> {
       "/admin/karaoke/11111111-1111-4111-8111-111111111111/edit",
     ],
   } as const;
+  const routeFilter = process.env.PLAYWRIGHT_ROUTE_FILTER?.split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
   for (const role of ["parent", "admin"] as const) {
+    const targetPaths = routeFilter?.length
+      ? paths[role].filter((path) =>
+          routeFilter.some((prefix) => path.startsWith(prefix)),
+        )
+      : paths[role];
+    if (targetPaths.length === 0) continue;
     const context = await request.newContext({
       baseURL: "http://127.0.0.1:3106",
       extraHTTPHeaders: createPlaywrightAuthFixtureHeaders(role, token),
     });
     try {
-      for (const path of paths[role]) {
+      for (const path of targetPaths) {
         const response = await context.get(path, {
           timeout: 120000,
           maxRedirects: 0,

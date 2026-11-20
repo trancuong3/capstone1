@@ -3,6 +3,7 @@ name: Admin Book CRUD Verification
 on:
   push:
     branches:
+      - main
       - feature/admin-book-crud-metadata-quality-20261020
       - fix/admin-book-crud-title-and-ci-20261020
       - feature/admin-book-title-quality-check-20261021
@@ -71,8 +72,8 @@ jobs:
             test/browser/real-data-fixture.ts \
             test/browser/real-data.pw.ts
 
+      # Full formatting is a required PR gate, not an informational step.
       - name: Check whole-repository formatting
-        continue-on-error: true
         run: npm run format:check
 
       - name: Run ESLint
