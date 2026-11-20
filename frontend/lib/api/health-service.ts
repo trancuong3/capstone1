@@ -24,8 +24,13 @@ export function createHealthService(): HealthService {
               safe_message: z.string(),
               detail_status: z
                 .enum([
-                  "installed", "initialized", "loaded", "healthy",
-                  "failed", "unknown", "disabled",
+                  "installed",
+                  "initialized",
+                  "loaded",
+                  "healthy",
+                  "failed",
+                  "unknown",
+                  "disabled",
                 ])
                 .nullable()
                 .optional(),

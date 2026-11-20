@@ -1077,24 +1077,53 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     fetchMock.mockImplementation(async (url: string) =>
       url.endsWith("/system/admin/health")
         ? Response.json({
-            overall_status: "DEGRADED", checked_at: timestamp,
+            overall_status: "DEGRADED",
+            checked_at: timestamp,
             services: [
-              { id: "vietocr", label: "VietOCR", status: "DEGRADED",
-                checked_at: timestamp, safe_message: "Đã cài, chưa nạp.", detail_status: "installed" },
-              { id: "tesseract_vie", label: "Tesseract tiếng Việt", status: "UNAVAILABLE",
-                checked_at: timestamp, safe_message: "Thiếu dữ liệu nhận diện tiếng Việt (vie).", detail_status: "failed" },
-              { id: "book_quality", label: "Book quality worker", status: "DEGRADED",
-                checked_at: timestamp, safe_message: "Worker không được khởi chạy.", detail_status: "disabled" },
+              {
+                id: "vietocr",
+                label: "VietOCR",
+                status: "DEGRADED",
+                checked_at: timestamp,
+                safe_message: "Đã cài, chưa nạp.",
+                detail_status: "installed",
+              },
+              {
+                id: "tesseract_vie",
+                label: "Tesseract tiếng Việt",
+                status: "UNAVAILABLE",
+                checked_at: timestamp,
+                safe_message: "Thiếu dữ liệu nhận diện tiếng Việt (vie).",
+                detail_status: "failed",
+              },
+              {
+                id: "book_quality",
+                label: "Book quality worker",
+                status: "DEGRADED",
+                checked_at: timestamp,
+                safe_message: "Worker không được khởi chạy.",
+                detail_status: "disabled",
+              },
             ],
           })
         : readyResponse(url),
     );
-    render(<AdminServicesProvider><AdminHealthScreen /></AdminServicesProvider>);
-    expect(await screen.findByRole("heading", { name: "VietOCR" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Tesseract tiếng Việt" })).toBeInTheDocument();
+    render(
+      <AdminServicesProvider>
+        <AdminHealthScreen />
+      </AdminServicesProvider>,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "VietOCR" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Tesseract tiếng Việt" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Trạng thái kỹ thuật: Đã cài")).toBeInTheDocument();
     expect(screen.getByText("Trạng thái kỹ thuật: Chưa chạy")).toBeInTheDocument();
-    expect(screen.getByText("Thiếu dữ liệu nhận diện tiếng Việt (vie).")).toBeInTheDocument();
+    expect(
+      screen.getByText("Thiếu dữ liệu nhận diện tiếng Việt (vie)."),
+    ).toBeInTheDocument();
   });
   it("health error is safe and recheck recovers", async () => {
     const user = userEvent.setup();
