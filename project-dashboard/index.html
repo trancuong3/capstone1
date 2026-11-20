@@ -259,12 +259,12 @@
       const sha=(c.sha||"").slice(0,7),msg=((c.commit&&c.commit.message)||"").split("\n")[0],date=c.commit&&c.commit.author&&c.commit.author.date;
       return activityRow("⌘",sha+" · "+msg,timeAgo(date),c.html_url);
     }).join("")||(github.commits===null?'<div class="empty">Không thể tải commits từ GitHub API.</div>':'<div class="empty">Repository chưa có commit để hiển thị.</div>');
-    const prRows=(Array.isArray(github.prs)?github.prs:[]).map(p=>activityRow("⑂","#"+p.number+" · "+p.title,(p.draft?"Draft · ":"")+ "Cập nhật "+timeAgo(p.updated_at),p.html_url)).join("")||'<div class="empty">Không có pull request đang mở.</div>';
+    const prRows=(Array.isArray(github.prs)?github.prs:[]).map(p=>activityRow("⑂","#"+p.number+" · "+p.title,(p.draft?"Draft · ":"")+ "Cập nhật "+timeAgo(p.updated_at),p.html_url)).join("")||(github.prs===null?'<div class="empty">Không thể tải pull requests từ GitHub API.</div>':'<div class="empty">Không có pull request đang mở.</div>');
     const runRows=(Array.isArray(github.runs)?github.runs:[]).map(r=>{
       const result=r.status==="completed"?(r.conclusion||"completed"):r.status;
       return activityRow("◉",r.name||r.display_title||"Workflow",result+" · "+timeAgo(r.updated_at),r.html_url);
     }).join("")||(github.runs===null?'<div class="empty">Không thể đọc GitHub Actions API.</div>':'<div class="empty">Chưa có workflow run.</div>');
-    const releaseRows=(Array.isArray(github.releases)?github.releases:[]).map(r=>activityRow("⬇",r.name||r.tag_name,(r.prerelease?"Pre-release · ":"")+fmtDate(r.published_at),r.html_url)).join("")||'<div class="empty">Chưa có release công khai hoặc API không khả dụng.</div>';
+    const releaseRows=(Array.isArray(github.releases)?github.releases:[]).map(r=>activityRow("⬇",r.name||r.tag_name,(r.prerelease?"Pre-release · ":"")+fmtDate(r.published_at),r.html_url)).join("")||(github.releases===null?'<div class="empty">Không thể tải releases từ GitHub API.</div>':'<div class="empty">Chưa có release công khai.</div>');
     ["overviewCommits","allCommits"].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=commitRows;});
     ["overviewPrs","allPrs"].forEach(id=>{const el=document.getElementById(id);if(el)el.innerHTML=prRows;});
     document.getElementById("allRuns").innerHTML=runRows;
