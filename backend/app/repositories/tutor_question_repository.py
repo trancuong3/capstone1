@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import (
     Book,
     ChildProfile,
+    Profile,
     ComprehensionAnswer,
     ComprehensionQuestion,
     PageRevision,
@@ -30,9 +31,12 @@ class TutorQuestionRepository:
             select(ReadingSession)
             .join(Book, Book.Id == ReadingSession.BookId)
             .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
+            .join(Profile, Profile.Id == ChildProfile.ParentId)
             .where(
                 ReadingSession.Id == session_id,
                 ChildProfile.ParentId == parent_id,
+                Profile.Role == "parent",
+                Profile.Active == 1,
                 CatalogRepository.eligible_book(),
             )
         )
@@ -44,9 +48,12 @@ class TutorQuestionRepository:
             select(ReadingSession)
             .join(Book, Book.Id == ReadingSession.BookId)
             .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
+            .join(Profile, Profile.Id == ChildProfile.ParentId)
             .where(
                 ReadingSession.Id == session_id,
                 ChildProfile.ParentId == parent_id,
+                Profile.Role == "parent",
+                Profile.Active == 1,
                 CatalogRepository.eligible_book(),
             )
             .with_for_update(of=ReadingSession)
