@@ -258,6 +258,26 @@ class RuntimeProvenanceTests(unittest.TestCase):
         self.assertEqual(meta["model_load_status"], "not_run")
         self.assertEqual(meta["fallback_reason"], "paddle_unavailable")
 
+    def test_paddle_only_scan_records_vietocr_unavailable_fallback(self):
+        with (
+            patch.object(ocr_engine, "_get_ocr_engines", return_value=(object(), None)),
+            patch.object(ocr_engine, "_extract_text_and_boxes_dual_engine", return_value={
+                "text": "mèo", "words": [],
+                "metadata": {
+                    "engine": "paddleocr_vietocr_dual",
+                    "engine_statuses": {
+                        "paddleocr": "success",
+                        "vietocr": "not_initialized",
+                        "tesseract": "not_run",
+                    },
+                },
+            }),
+        ):
+            result = ocr_engine.extract_text_and_boxes(b"synthetic")
+        self.assertEqual(result["metadata"]["model_load_status"], "unavailable")
+        self.assertEqual(result["metadata"]["fallback_reason"], "vietocr_unavailable")
+        self.assertIsNone(result["metadata"]["checkpoint_sha256"])
+
     def test_scan_metadata_flags_inference_failure_without_exposing_exception(self):
         with self.runtime(self.active("ORIGINAL")):
             _, engine = ocr_engine._get_ocr_engines()
