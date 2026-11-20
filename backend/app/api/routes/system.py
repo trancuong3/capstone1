@@ -13,9 +13,9 @@ from sqlalchemy import literal, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_parent_id, get_db
+from app.api.deps import get_current_parent_id, get_db, require_admin_id, require_parent_id
 from app.api.routes.reading import HistoryRepository, HistoryService
-from app.models import AuditLog, ChildProfile, ConsentRecord, Profile, ProgressReport
+from app.models import AuditLog, ChildProfile, ConsentRecord, Profile, ProgressReport, ReadingSession
 from app.providers.elevenlabs_voice_provider import ElevenLabsVoiceProvider
 from app.repositories.difficult_words_repository import DifficultWordsRepository
 from app.services.admin_ocr_local import LocalCorrectionError, LocalOcrConfig, LocalOcrCorrector
@@ -56,33 +56,183 @@ from app.schemas.system import (
 router = APIRouter()
 
 
+async def _require_owned_child(db: AsyncSession, actor_id: UUID, child_id: UUID) -> None:
+    """Use a non-enumerating owner predicate before any child-scoped write."""
+    owned_id = await db.scalar(
+        select(ChildProfile.Id).where(
+            ChildProfile.Id == child_id,
+            ChildProfile.ParentId == actor_id,
+        )
+    )
+    if owned_id is None:
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+
 @router.get("/reports", response_model=List[ProgressReportResponse])
-async def get_reports(db: AsyncSession = Depends(get_db)):
-    """Lấy danh sách báo cáo tiến độ"""
-    result = await db.execute(select(ProgressReport))
+async def get_reports(
+    actor_id: UUID = Depends(require_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Only the signed-in parent's children's reports."""
+    result = await db.execute(
+        select(ProgressReport)
+        .join(ChildProfile, ProgressReport.ChildId == ChildProfile.Id)
+        .where(ChildProfile.ParentId == actor_id)
+    )
     return result.scalars().all()
 
 
+class LegacyReportRepository:
+    """Bounded, owner-scoped evidence for the legacy snapshot writer."""
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def lock_owned_child(self, actor_id: UUID, child_id: UUID) -> bool:
+        # Locking the child serializes concurrent snapshot requests for the same
+        # owner/period, avoiding duplicate writes without touching the schema.
+        child = await self.db.scalar(
+            select(ChildProfile.Id)
+            .where(ChildProfile.Id == child_id, ChildProfile.ParentId == actor_id)
+            .with_for_update()
+        )
+        return child is not None
+
+    async def trusted_snapshot(
+        self, actor_id: UUID, child_id: UUID, start: date, end: date
+    ) -> ProgressReport | None:
+        return await self.db.scalar(
+            select(ProgressReport)
+            .join(ChildProfile, ProgressReport.ChildId == ChildProfile.Id)
+            .where(
+                ChildProfile.ParentId == actor_id,
+                ProgressReport.ChildId == child_id,
+                ProgressReport.PeriodStart == start,
+                ProgressReport.PeriodEnd == end,
+                ProgressReport.Summary["source"].as_string() == "server_completed_sessions_v1",
+            )
+            .order_by(ProgressReport.GeneratedAt.desc(), ProgressReport.Id.desc())
+            .limit(1)
+        )
+
+    async def completed_sessions(
+        self, actor_id: UUID, child_id: UUID, start: datetime, end: datetime, cutoff: datetime
+    ) -> list[tuple[datetime, datetime]]:
+        result = await self.db.execute(
+            select(ReadingSession.StartedAt, ReadingSession.EndedAt)
+            .join(ChildProfile, ReadingSession.ChildId == ChildProfile.Id)
+            .where(
+                ChildProfile.ParentId == actor_id,
+                ReadingSession.ChildId == child_id,
+                ReadingSession.State == "COMPLETED",
+                ReadingSession.StartedAt >= start,
+                ReadingSession.StartedAt < end,
+                ReadingSession.EndedAt.is_not(None),
+                ReadingSession.EndedAt >= ReadingSession.StartedAt,
+                ReadingSession.EndedAt <= cutoff,
+            )
+        )
+        return list(result.all())
+
+    async def save(self, snapshot: ProgressReport) -> ProgressReport:
+        self.db.add(snapshot)
+        try:
+            await self.db.commit()
+            await self.db.refresh(snapshot)
+        except Exception:
+            await self.db.rollback()
+            raise
+        return snapshot
+
+
+class LegacyReportService:
+    """Never trust client-generated progress metrics as persisted evidence."""
+
+    def __init__(self, repository: LegacyReportRepository):
+        self.repository = repository
+
+    async def create(self, report_in: ProgressReportCreate, actor_id: UUID) -> ProgressReport:
+        # Keep the old JSON request shape but reject claimed scores and metrics.
+        if report_in.Summary:
+            raise HTTPException(status_code=422, detail="Client report metrics are not accepted")
+
+        start, end = report_in.PeriodStart, report_in.PeriodEnd
+        today = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=7))).date()
+        if end < start or end > today or (end - start).days > 366:
+            raise HTTPException(status_code=422, detail="Invalid report period")
+
+        if not await self.repository.lock_owned_child(actor_id, report_in.ChildId):
+            raise HTTPException(status_code=404, detail="Resource not found")
+
+        existing = await self.repository.trusted_snapshot(
+            actor_id, report_in.ChildId, start, end
+        )
+        if existing is not None:
+            return existing
+
+        local_tz = timezone(timedelta(hours=7))
+        begin = datetime.combine(start, datetime.min.time(), tzinfo=local_tz)
+        finish = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=local_tz)
+        sessions = await self.repository.completed_sessions(
+            actor_id, report_in.ChildId, begin, finish, datetime.now(timezone.utc)
+        )
+        if not sessions:
+            # An empty snapshot would be indistinguishable from unsupported
+            # evidence in old reports; do not invent a successful period.
+            raise HTTPException(status_code=409, detail="No completed reading sessions in period")
+
+        duration_ms = sum(
+            max(0, int((ended_at - started_at).total_seconds() * 1000))
+            for started_at, ended_at in sessions
+        )
+        snapshot = ProgressReport(
+            ChildId=report_in.ChildId,
+            PeriodStart=start,
+            PeriodEnd=end,
+            Summary={
+                "source": "server_completed_sessions_v1",
+                "completed_sessions": len(sessions),
+                "reading_duration_ms": duration_ms,
+            },
+        )
+        return await self.repository.save(snapshot)
+
+
 @router.post("/reports", response_model=ProgressReportResponse)
-async def create_report(report_in: ProgressReportCreate, db: AsyncSession = Depends(get_db)):
-    """Tạo báo cáo tiến độ học tập mới"""
-    new_report = ProgressReport(**report_in.model_dump())
-    db.add(new_report)
-    await db.commit()
-    await db.refresh(new_report)
-    return new_report
+async def create_report(
+    report_in: ProgressReportCreate,
+    actor_id: UUID = Depends(require_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await LegacyReportService(LegacyReportRepository(db)).create(report_in, actor_id)
 
 
 @router.get("/consents", response_model=List[ConsentRecordResponse])
-async def get_consents(db: AsyncSession = Depends(get_db)):
-    """Lấy danh sách các bản ghi đồng ý (Consent)"""
-    result = await db.execute(select(ConsentRecord))
+async def get_consents(
+    actor_id: UUID = Depends(require_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Consent is visible only when both parent and child belong to the actor."""
+    result = await db.execute(
+        select(ConsentRecord)
+        .join(ChildProfile, ConsentRecord.ChildId == ChildProfile.Id)
+        .where(
+            ConsentRecord.ParentId == actor_id,
+            ChildProfile.ParentId == actor_id,
+        )
+    )
     return result.scalars().all()
 
 
 @router.post("/consents", response_model=ConsentRecordResponse)
-async def create_consent(consent_in: ConsentRecordCreate, db: AsyncSession = Depends(get_db)):
-    """Ghi nhận quyền riêng tư/đồng ý (Consent) mới"""
+async def create_consent(
+    consent_in: ConsentRecordCreate,
+    actor_id: UUID = Depends(require_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    if consent_in.ParentId != actor_id:
+        raise HTTPException(status_code=403, detail="Access denied")
+    await _require_owned_child(db, actor_id, consent_in.ChildId)
     new_consent = ConsentRecord(**consent_in.model_dump())
     db.add(new_consent)
     await db.commit()
@@ -91,15 +241,24 @@ async def create_consent(consent_in: ConsentRecordCreate, db: AsyncSession = Dep
 
 
 @router.get("/logs", response_model=List[AuditLogResponse])
-async def get_audit_logs(db: AsyncSession = Depends(get_db)):
-    """Lấy danh sách log kiểm toán hệ thống"""
+async def get_audit_logs(
+    actor_id: UUID = Depends(require_admin_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Raw audit records are restricted to active administrators."""
     result = await db.execute(select(AuditLog))
     return result.scalars().all()
 
 
 @router.post("/logs", response_model=AuditLogResponse)
-async def create_audit_log(log_in: AuditLogCreate, db: AsyncSession = Depends(get_db)):
-    """Ghi log hệ thống"""
+async def create_audit_log(
+    log_in: AuditLogCreate,
+    actor_id: UUID = Depends(require_admin_id),
+    db: AsyncSession = Depends(get_db),
+):
+    # A client must not impersonate another actor in an audit trail.
+    if log_in.ActorId != actor_id:
+        raise HTTPException(status_code=403, detail="Access denied")
     new_log = AuditLog(**log_in.model_dump())
     db.add(new_log)
     await db.commit()
@@ -594,7 +753,7 @@ class AdminSystemRepository:
         self.db = db
 
     async def role(self, actor_id: UUID):
-        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id))
+        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id, Profile.Active == 1))
 
     async def logs(self, action: str | None, resource_type: str | None, offset: int, limit: int):
         query = select(AuditLog)

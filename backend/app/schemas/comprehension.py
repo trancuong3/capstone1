@@ -39,3 +39,21 @@ class ComprehensionAnswerResponse(ComprehensionAnswerBase):
     QuestionId: UUID
     CreatedAt: datetime
     model_config = ConfigDict(from_attributes=True)
+
+class ComprehensionQuestionPublic(BaseModel):
+    """Safe legacy read response: never expose stored grading answers.
+
+    Tutor-created rows store SourceSpan as JSON object; historical legacy rows
+    may store it as a list. Neither shape needs to be exposed to clients.
+    """
+
+    Id: UUID
+    SessionId: UUID
+    PageId: UUID
+    PageRevisionId: UUID
+    Type: str
+    Prompt: str
+    Difficulty: str
+    CreatedAt: datetime
+
+    model_config = ConfigDict(from_attributes=True)

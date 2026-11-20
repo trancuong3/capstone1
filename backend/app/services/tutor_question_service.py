@@ -165,6 +165,11 @@ class TutorQuestionService:
         locked = await self.repository.owned_session_for_update(session_id, actor_id)
         if locked is None:
             raise self._not_found()
+        if locked.State not in FINISHED_STATES:
+            await self.repository.release()
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "Reading session must be finished first"
+            )
         existing = await self._tutor_questions(session_id)
         if existing:
             await self.repository.release()

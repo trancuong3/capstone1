@@ -9,6 +9,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ChildProfile, Profile
+from app.database.role_cache import invalidate_cached_role
 
 
 class AdminParentRepository:
@@ -190,4 +191,5 @@ class AdminParentRepository:
             await self.db.rollback()
             return False
         await self.db.commit()
+        invalidate_cached_role(parent_id)
         return True
