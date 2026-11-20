@@ -1,10 +1,9 @@
 -- Disposable PostgreSQL integration test for TASK 02.
 -- DO NOT run against Supabase production. It requires the dedicated CI
--- database name and rolls the entire fixture + migration back at the end.
+-- database name; GitHub Actions discards the entire disposable DB after the job.
 -- psql -X -v ON_ERROR_STOP=1 -f supabase/tests/security_hardening_disposable.sql
 
 \set ON_ERROR_STOP on
-begin;
 
 do $guard$
 begin
@@ -170,7 +169,7 @@ $rights$;
 
 -- Simulate Auth's real database insert role: the trigger must still execute
 -- even though no client has EXECUTE on its SECURITY DEFINER function.
-set local role supabase_auth_admin;
+set role supabase_auth_admin;
 insert into auth.users(id,email,raw_user_meta_data)
 values('11111111-1111-4111-8111-111111111111',
        'signup@example.invalid',
@@ -208,8 +207,8 @@ $rls_check$;
 insert into public.profiles(id,role,displayname)
 values('22222222-2222-4222-8222-222222222222','parent','Parent B');
 
-set local request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
-set local role authenticated;
+set request.jwt.claim.sub = '11111111-1111-4111-8111-111111111111';
+set role authenticated;
 
 do $parent_checks$
 declare
@@ -268,7 +267,6 @@ begin
 end;
 $final$;
 
--- Everything, including the two copies of the proposed migration and all
--- synthetic data, is rolled back. CI does not retain user records or grants.
-rollback;
+-- The dedicated CI database is destroyed by the workflow. Never use real users.
+reset request.jwt.claim.sub;
 \echo 'PASS: Supabase SECURITY DEFINER, Auth signup, RLS, IDOR and profile grants'
