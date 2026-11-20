@@ -26,9 +26,9 @@ def invalidate_cached_role(profile_id: UUID | None = None) -> None:
 
 
 async def get_cached_profile_role(db: AsyncSession, profile_id: UUID) -> str | None:
-    """Return cached Profile.Role for live sessions; pass through in tests/mocks."""
+    """Cache only active profile roles; inactive parents and admins have no access."""
     if APP_ENVIRONMENT == "test" or not isinstance(db, AsyncSession):
-        return await db.scalar(select(Profile.Role).where(Profile.Id == profile_id))
+        return await db.scalar(select(Profile.Role).where(Profile.Id == profile_id, Profile.Active == 1))
 
     now = time.monotonic()
     with _lock:
@@ -36,7 +36,7 @@ async def get_cached_profile_role(db: AsyncSession, profile_id: UUID) -> str | N
         if entry is not None and entry[0] > now:
             return entry[1]
 
-    role = await db.scalar(select(Profile.Role).where(Profile.Id == profile_id))
+    role = await db.scalar(select(Profile.Role).where(Profile.Id == profile_id, Profile.Active == 1))
     with _lock:
         if len(_role_cache) >= _MAX_CACHE_ENTRIES:
             _role_cache.clear()
