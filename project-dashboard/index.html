@@ -161,7 +161,10 @@
     try{local=JSON.parse(localStorage.getItem(STORAGE_KEY)||"null");}catch(e){}
     try{cache=JSON.parse(localStorage.getItem(CACHE_KEY)||"null");}catch(e){}
     try{imports=JSON.parse(localStorage.getItem(IMPORTS_KEY)||"[]");}catch(e){}
-    const cached=cache&&Array.isArray(cache.tasks)&&cache.tasks.length===seedTasks.length?cache.tasks:null;
+    const cached=cache&&Array.isArray(cache.tasks)&&cache.tasks.length===seedTasks.length&&
+      seedTasks.every((t,i)=>cache.tasks[i]&&cache.tasks[i].id===t.id&&
+        Object.prototype.hasOwnProperty.call(STATUS,cache.tasks[i].status)&&
+        /^https:\/\/github\.com\/trancuong3\/capstone1\/issues\/\d+$/.test(cache.tasks[i].url||""))?cache.tasks:null;
     return {
       tasks:(cached||seedTasks).map(t=>({...t})),
       sharedAt:cached?cache.syncedAt:null,
@@ -436,7 +439,7 @@
   });
   if(state.note){document.getElementById("noteStatus").textContent="Đã có ghi chú";document.getElementById("noteStatus").className="status done";}
   renderTasks();
-  setRoadmapMessage(state.sharedAt?new Error("Đang tải trạng thái mới"):new Error("Chưa đồng bộ"));
+  document.getElementById("roadmapSyncNotice").textContent="Đang kiểm tra GitHub Issues…"+(state.sharedAt?" Bản lưu gần nhất: "+fmtDate(state.sharedAt):" Chưa có dữ liệu đã đồng bộ.");
   syncGithub();
   const REFRESH_INTERVAL=15*60*1000;
   setInterval(()=>{if(!document.hidden&&Date.now()-lastAttempt>=REFRESH_INTERVAL)syncGithub();},60*1000);
