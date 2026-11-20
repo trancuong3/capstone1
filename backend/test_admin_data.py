@@ -241,6 +241,18 @@ class AdminSystemTests(unittest.IsolatedAsyncioTestCase):
             probe_tts=AsyncMock(return_value=("HEALTHY", "ElevenLabs TTS kết nối bình thường")),
             probe_stt=AsyncMock(return_value=("HEALTHY", "ElevenLabs STT kết nối bình thường")),
         )
+        healthy_ocr = [
+            {
+                "id": name, "label": label, "status": "HEALTHY",
+                "detail_status": "healthy", "safe_message": "Đã xác minh.",
+            }
+            for name, label in (
+                ("paddleocr", "PaddleOCR"),
+                ("vietocr", "VietOCR"),
+                ("tesseract", "Tesseract"),
+                ("tesseract_vie", "Tesseract tiếng Việt"),
+            )
+        ]
         with (
             patch(
                 "app.api.routes.system.LocalOcrConfig.from_environment",
@@ -250,14 +262,22 @@ class AdminSystemTests(unittest.IsolatedAsyncioTestCase):
                 "app.api.routes.system.LocalOcrCorrector.probe",
                 new=AsyncMock(return_value=("HEALTHY", "Ollama cục bộ sẵn sàng")),
             ) as local_probe,
+            patch(
+                "app.api.routes.system.collect_ocr_health",
+                return_value=healthy_ocr,
+            ) as ocr_probe,
         ):
             result = await AdminSystemService(repo, voice).health()
         self.assertEqual(result.overall_status, "HEALTHY")
         self.assertEqual(
             [item.id for item in result.services],
-            ["api", "database", "local_ocr", "tts", "stt"],
+            [
+                "api", "database", "local_ocr", "tts", "stt",
+                "paddleocr", "vietocr", "tesseract", "tesseract_vie",
+            ],
         )
         local_probe.assert_awaited_once()
+        ocr_probe.assert_called_once()
         repo.probe_database.assert_awaited_once()
         voice.probe_tts.assert_awaited_once()
         voice.probe_stt.assert_awaited_once()
