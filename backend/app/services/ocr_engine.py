@@ -367,9 +367,19 @@ def _v2_artifact_from_storage(active: dict[str, Any]) -> tuple[str, dict[str, An
     local_path = os.path.join(tempfile.gettempdir(), f"viread-vietocr-v2-{expected_sha}.pth")
     if not (os.path.isfile(local_path) and _sha256_path(local_path) == expected_sha):
         digest = hashlib.sha256()
-        temporary = local_path + ".assembling"
+        # Unique per-attempt scratch file: multiple Render workers may attempt
+        # to download the same SHA concurrently. Atomic replace publishes only
+        # a fully hash-verified checkpoint; no worker deletes another's temp.
+        temporary: str | None = None
         try:
-            with open(temporary, "xb") as output:
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                prefix=f"viread-vietocr-v2-{expected_sha}-",
+                suffix=".assembling",
+                dir=tempfile.gettempdir(),
+                delete=False,
+            ) as output:
+                temporary = output.name
                 chunks = sorted(manifest["chunks"], key=lambda item: int(item["index"]))
                 if [int(item["index"]) for item in chunks] != list(range(len(chunks))):
                     raise ValueError("VietOCR V2 checkpoint shards are incomplete")
@@ -383,9 +393,7 @@ def _v2_artifact_from_storage(active: dict[str, Any]) -> tuple[str, dict[str, An
                 raise ValueError("assembled VietOCR V2 checkpoint hash mismatch")
             os.replace(temporary, local_path)
         finally:
-            # A failed shard/hash validation must not leave an exclusive .assembling
-            # file behind, permanently breaking retries for this checkpoint.
-            if os.path.exists(temporary):
+            if temporary is not None and os.path.exists(temporary):
                 os.unlink(temporary)
 
     custom_config: dict[str, Any] | None = None
