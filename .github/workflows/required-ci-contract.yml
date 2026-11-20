@@ -1,0 +1,25 @@
+name: CI Policy Contract
+
+# Always produce a stable status check for every PR into main. This is a
+# companion to (not a replacement for) GitHub repository Ruleset enforcement.
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  required-ci-contract:
+    name: Required CI policy contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Verify required checks cannot silently become optional
+        run: python3 -B -m unittest discover -s .github/scripts -p 'test_required_ci_contract.py' -v
