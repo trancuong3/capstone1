@@ -207,6 +207,8 @@ def _scan_vietocr_snapshot(
         status = "fallback_loaded"
     else:
         status = "loaded"
+    if status in {"fallback_loaded", "stale_loaded"} and not fallback_reason:
+        fallback_reason = "requested_checkpoint_not_loaded"
     return {
         "provenance_version": _OCR_RUNTIME_PROVENANCE_VERSION,
         "model_profile": proof["model_profile"] if proof else None,
@@ -350,21 +352,25 @@ def _v2_artifact_from_storage(active: dict[str, Any]) -> tuple[str, dict[str, An
     if not (os.path.isfile(local_path) and _sha256_path(local_path) == expected_sha):
         digest = hashlib.sha256()
         temporary = local_path + ".assembling"
-        with open(temporary, "xb") as output:
-            chunks = sorted(manifest["chunks"], key=lambda item: int(item["index"]))
-            if [int(item["index"]) for item in chunks] != list(range(len(chunks))):
-                raise ValueError("VietOCR V2 checkpoint shards are incomplete")
-            for item in chunks:
-                data = download_object(str(item["path"]))
-                if len(data) != int(item["bytes"]) or hashlib.sha256(data).hexdigest() != item["sha256"]:
-                    raise ValueError("VietOCR V2 checkpoint shard failed integrity verification")
-                output.write(data)
-                digest.update(data)
-        if digest.hexdigest() != expected_sha:
-            if os.path.isfile(temporary):
+        try:
+            with open(temporary, "xb") as output:
+                chunks = sorted(manifest["chunks"], key=lambda item: int(item["index"]))
+                if [int(item["index"]) for item in chunks] != list(range(len(chunks))):
+                    raise ValueError("VietOCR V2 checkpoint shards are incomplete")
+                for item in chunks:
+                    data = download_object(str(item["path"]))
+                    if len(data) != int(item["bytes"]) or hashlib.sha256(data).hexdigest() != item["sha256"]:
+                        raise ValueError("VietOCR V2 checkpoint shard failed integrity verification")
+                    output.write(data)
+                    digest.update(data)
+            if digest.hexdigest() != expected_sha:
+                raise ValueError("assembled VietOCR V2 checkpoint hash mismatch")
+            os.replace(temporary, local_path)
+        finally:
+            # A failed shard/hash validation must not leave an exclusive .assembling
+            # file behind, permanently breaking retries for this checkpoint.
+            if os.path.exists(temporary):
                 os.unlink(temporary)
-            raise ValueError("assembled VietOCR V2 checkpoint hash mismatch")
-        os.replace(temporary, local_path)
 
     custom_config: dict[str, Any] | None = None
     config_sha: str | None = None
