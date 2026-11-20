@@ -151,10 +151,21 @@ export function useKaraokePlayer(
     listeners.forEach(([event, listener]) =>
       audio.addEventListener(event, listener),
     );
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") audio.pause();
+    };
+    const onAndroidBackground = () => audio.pause();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    document.addEventListener("viread:android-background", onAndroidBackground);
     audio.src = url;
     audio.load();
     return () => {
       disposed = true;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      document.removeEventListener(
+        "viread:android-background",
+        onAndroidBackground,
+      );
       invalidate();
       cancelAnimationFrame(frame);
       listeners.forEach(([event, listener]) =>
