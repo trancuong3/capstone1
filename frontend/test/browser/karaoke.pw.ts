@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import { expect, test, type Page, type Route } from "@playwright/test";
 import { installApiFixture, setRole, child, ids } from "./real-data-fixture";
+import { lyricsSchema } from "../../types/karaoke";
 import {
   previewDetail,
   songId,
@@ -34,7 +36,10 @@ test.beforeAll(async ({ request }) => {
     expect(response.status()).toBe(200);
   }
 });
-async function fixture(page: Page) {
+async function fixture(
+  page: Page,
+  media = { bytes: wav(), contentType: "audio/wav", durationMs: 20000 },
+) {
   const base = await installApiFixture(page);
   const state = {
     fail: false,
@@ -47,7 +52,7 @@ async function fixture(page: Page) {
     author: "Tác giả",
   };
   await page.context().route("https://media.example.test/**", (route) => {
-    const bytes = wav();
+    const { bytes, contentType } = media;
     const range = /^bytes=(\d+)-(\d*)$/.exec(
       route.request().headers().range ?? "",
     );
@@ -57,7 +62,7 @@ async function fixture(page: Page) {
       : bytes.length - 1;
     return route.fulfill({
       status: range ? 206 : 200,
-      contentType: "audio/wav",
+      contentType,
       body: bytes.subarray(start, end + 1),
       headers: {
         "access-control-allow-origin": "*",
@@ -98,7 +103,7 @@ async function fixture(page: Page) {
           version_id: versionId,
           title: state.title,
           author: state.author,
-          duration_ms: 20000,
+          duration_ms: media.durationMs,
           min_grade: 1,
           max_grade: 3,
           cover_url: null,
@@ -122,6 +127,7 @@ async function fixture(page: Page) {
           ...source,
           title: state.title,
           author: state.author,
+          duration_ms: media.durationMs,
           version_id: state.conflict ? lineId : versionId,
           lyrics: state.lyrics,
         });
@@ -154,9 +160,10 @@ async function noOverflow(page: Page) {
   ).toBe(true);
 }
 
-test("v2 lyrics follow seeks, gaps and reduced motion using the existing child player", async ({
+test("Ngôi sao nhỏ highlights the current v2 syllable while seeking and with reduced motion", async ({
   page,
 }) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   await page.addInitScript(() => {
     const NativeAudio = window.Audio;
     const audios: HTMLAudioElement[] = [];
@@ -169,14 +176,23 @@ test("v2 lyrics follow seeks, gaps and reduced motion using the existing child p
       },
     });
   });
-  const { state } = await fixture(page);
-  state.lyrics = syllableLyrics();
+  const demo = new URL("../../../docs/karaoke-demo/", import.meta.url);
+  const { state } = await fixture(page, {
+    bytes: readFileSync(new URL("ngoi-sao-nho.mp3", demo)),
+    contentType: "audio/mpeg",
+    durationMs: 103366,
+  });
+  state.title = "Ngôi sao nhỏ";
+  state.lyrics = lyricsSchema.parse(
+    JSON.parse(readFileSync(new URL("ngoi-sao-nho-v2.json", demo), "utf8")),
+  );
   await enter(page);
   await page
     .getByRole("link", { name: `Hát bài ${state.title}`, exact: true })
     .click();
   const seek = page.getByRole("slider", { name: "Vị trí phát" });
   await expect(seek).toBeEnabled();
+  await page.getByRole("combobox", { name: "Tốc độ hát" }).selectOption("0.75");
   await page.getByRole("button", { name: "Bắt đầu hát", exact: true }).click();
   await page.getByRole("button", { name: "Tạm dừng", exact: true }).click();
   await expect
@@ -196,17 +212,35 @@ test("v2 lyrics follow seeks, gaps and reduced motion using the existing child p
     await seek.press("ArrowRight");
     await expect(seek).toHaveValue(String(value));
   };
-  await seekTo(1250);
+  await seekTo(1417);
   const active = page.locator(
     '[data-testid="karaoke-active-line"] [data-state="active"]',
   );
   await expect(active).toHaveCount(1);
+  await expect(active).toHaveAttribute(
+    "data-syllable-id",
+    state.lyrics.lines[0].syllables![1].id,
+  );
   await expect(active).toHaveCSS("--karaoke-fill", "50%");
-  await seekTo(1600);
+  await expect(active).toHaveCSS("background-color", "rgb(255, 230, 109)");
+  await expect(active).toHaveCSS("transform", "matrix(1.08, 0, 0, 1.08, 0, 0)");
+  await seekTo(150);
   await expect(active).toHaveCount(0);
-  await seekTo(3300);
+  await seekTo(6937);
+  await expect(active).toHaveAttribute(
+    "data-syllable-id",
+    state.lyrics.lines[1].syllables![1].id,
+  );
   await expect(active).toHaveCSS("--karaoke-fill", "50%");
+  await page.getByRole("button", { name: "Mở rộng màn hát" }).click();
+  await expect(
+    page.getByRole("button", { name: "Thu gọn màn hát" }),
+  ).toBeVisible();
+  await expect(active).toHaveCSS("transform", "matrix(1.08, 0, 0, 1.08, 0, 0)");
+  await noOverflow(page);
   await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(active).toHaveCSS("background-color", "rgb(255, 230, 109)");
+  await expect(active).toHaveCSS("transform", "none");
   await expect(active.locator('[aria-hidden="true"]')).toHaveCSS(
     "clip-path",
     "none",
@@ -301,6 +335,9 @@ test("dashboard → selected child → library → native player → leave stops
     "Em vui đến trường",
   );
   await expect(page.getByText("Câu đang hát", { exact: true })).toBeVisible();
+  await expect(
+    page.getByTestId("karaoke-active-line").locator('[data-state="active"]'),
+  ).toHaveCSS("background-color", "rgb(255, 230, 109)");
   await page.getByRole("button", { name: "Tạm dừng", exact: true }).click();
   await noOverflow(page);
   await page.screenshot({
@@ -551,7 +588,10 @@ test("child live scoring confirms actual syllables and preserves song results af
     audio.currentTime = audio.duration - 0.1;
   });
   const result = stage.getByRole("region", { name: "Kết quả đúng lời" });
-  await expect(result).toContainText("67 điểm đúng lời");
+  await expect(
+    result.getByText("Điểm đúng lời", { exact: true }),
+  ).toBeVisible();
+  await expect(result.getByText("67/100", { exact: true })).toBeVisible();
   await expect(result).toContainText("Đã đánh giá 3/3 tiếng");
   await action("Luyện lại câu 1").click();
   await listening();
@@ -568,9 +608,9 @@ test("child live scoring confirms actual syllables and preserves song results af
     audio.dispatchEvent(new Event("timeupdate"));
   });
   await expect(result).toContainText("Bé hát khớp 3/3 tiếng");
-  await expect(result).not.toContainText("điểm đúng lời");
+  await expect(result.getByText(/^\d+\/100$/)).toHaveCount(0);
   await action("Về kết quả bài hát").click();
-  await expect(result).toContainText("67 điểm đúng lời");
+  await expect(result.getByText("67/100", { exact: true })).toBeVisible();
   expect(
     await page.evaluate(
       () => (window as unknown as ScoringPage).__singingFixture.liveTracks,
@@ -581,6 +621,25 @@ test("child live scoring confirms actual syllables and preserves song results af
       () => (window as unknown as ScoringPage).__singingFixture.tracksStarted,
     ),
   ).toBeGreaterThanOrEqual(3);
+  await action("Hát lại bài này").click();
+  await listening();
+  await page.evaluate(() => {
+    const fixture = (window as unknown as ScoringPage).__singingFixture;
+    fixture.sing(1, 1.5, "bé");
+    fixture.audio.currentTime = fixture.audio.duration - 0.1;
+  });
+  await expect(result.getByText("Điểm phần đã nghe")).toBeVisible();
+  await expect(result.getByText("100/100", { exact: true })).toBeVisible();
+  await expect(result).toContainText("Đã đánh giá 1/3 tiếng");
+
+  await action("Hát lại bài này").click();
+  await listening();
+  await page.evaluate(() => {
+    const audio = (window as unknown as ScoringPage).__singingFixture.audio;
+    audio.currentTime = audio.duration - 0.1;
+  });
+  await expect(result).toContainText("Mình chưa nghe rõ");
+  await expect(result.getByText(/^\d+\/100$/)).toHaveCount(0);
   await noOverflow(page);
   expect(state.unexpected).toEqual([]);
   expect(base.unexpected).toEqual([]);
@@ -639,10 +698,18 @@ test("child stage supports preparation, practice, slow loops, enlarged view and 
   ).toBe(true);
   await start.click();
   await expect(stage.getByTestId("karaoke-cue")).toContainText("Chuẩn bị");
+  const countdown = stage.getByTestId("karaoke-countdown");
+  await expect(countdown).toBeVisible();
+  expect(
+    await countdown.evaluate((digit) =>
+      parseFloat(getComputedStyle(digit).fontSize),
+    ),
+  ).toBeGreaterThanOrEqual(64);
   await stage
     .getByRole("button", { name: "Hủy chuẩn bị", exact: true })
     .click();
   await expect(start).toBeVisible();
+  await expect(countdown).toHaveCount(0);
   await start.click();
   await stage.getByRole("button", { name: "Tạm dừng", exact: true }).click();
   await stage.getByText("Chọn câu để luyện", { exact: true }).click();

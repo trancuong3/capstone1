@@ -7,10 +7,12 @@ import styles from "./syllable-lyrics.module.css";
 export function SyllableLyrics({
   line,
   currentMs,
+  highlightActive = false,
   evidence,
 }: {
   line: KaraokeLine;
   currentMs: number;
+  highlightActive?: boolean;
   evidence?: LiveLineScore;
 }) {
   // Keep original punctuation and capitalization while marking each occurrence.
@@ -38,7 +40,16 @@ export function SyllableLyrics({
         );
       });
   }
-  if (!line.syllables?.length) return <>{mark(line.text, line.id)}</>;
+  if (!line.syllables?.length) {
+    const text = mark(line.text, line.id);
+    return highlightActive ? (
+      <span className={styles.activeLine} data-state="active">
+        {text}
+      </span>
+    ) : (
+      <>{text}</>
+    );
+  }
   return (
     <>
       {line.syllables?.map((unit, i) => {
@@ -52,7 +63,7 @@ export function SyllableLyrics({
           <Fragment key={unit.id}>
             {i > 0 ? " " : null}
             <span
-              className={`${styles.unit} ${active ? styles.active : ""}`}
+              className={`${styles.unit} ${active ? styles.active : ""} ${highlightActive ? styles.highlight : ""}`}
               data-syllable-id={unit.id}
               data-state={
                 active ? "active" : progress >= 1 ? "past" : "upcoming"

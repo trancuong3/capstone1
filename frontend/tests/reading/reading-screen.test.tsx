@@ -543,7 +543,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     });
 
     it("offers one model after two quiet windows, then leaves the mic off after another quiet turn", async () => {
-      renderReading("reading");
+      await act(async () => {
+        renderReading("reading");
+      });
       const start = await screen.findByRole("button", {
         name: "Bé đọc với nhận diện giọng nói",
       });
@@ -585,7 +587,11 @@ describe("ReadingScreen presentation with typed test-local service responses", (
           language_code: "vie",
           words: null,
         });
-      renderReading("reading");
+      // Flush the page effect that initializes alignment before starting the
+      // recorder or arming the silence timer against that engine.
+      await act(async () => {
+        renderReading("reading");
+      });
       const start = await screen.findByRole("button", {
         name: "Bé đọc với nhận diện giọng nói",
       });
@@ -596,6 +602,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       } finally {
         vi.useRealTimers();
       }
+      expect(speechServiceMock.transcribe).toHaveBeenCalledOnce();
       expect(speechPlayerMock.play).toHaveBeenCalledWith("Bé", {
         wordSample: true,
       });

@@ -77,18 +77,26 @@ describe("child karaoke stage", () => {
     stage();
     const audio = audios[0];
     expect(audio.play).not.toHaveBeenCalled();
+    expect(screen.getByTestId("karaoke-cue")).toHaveTextContent(
+      "Bấm Bắt đầu hát",
+    );
+    expect(screen.queryByTestId("karaoke-countdown")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Bắt đầu hát" }));
-    expect(screen.getByTestId("karaoke-cue")).toHaveTextContent("Chuẩn bị · 3");
-    act(() => vi.advanceTimersByTime(2000));
+    expect(screen.getByTestId("karaoke-countdown")).toHaveTextContent("3");
+    act(() => vi.advanceTimersByTime(1000));
+    expect(screen.getByTestId("karaoke-countdown")).toHaveTextContent("2");
+    act(() => vi.advanceTimersByTime(1000));
     expect(audio.play).not.toHaveBeenCalled();
     expect(audio.currentTime).toBe(0);
-    expect(screen.getByTestId("karaoke-cue")).toHaveTextContent("Chuẩn bị · 1");
+    expect(screen.getByTestId("karaoke-countdown")).toHaveTextContent("1");
     fireEvent.click(screen.getByRole("button", { name: "Hủy chuẩn bị" }));
+    expect(screen.queryByTestId("karaoke-countdown")).toBeNull();
     await finishPreparation();
     expect(audio.play).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Bắt đầu hát" }));
     await finishPreparation();
     expect(audio.play).toHaveBeenCalledOnce();
+    expect(screen.queryByTestId("karaoke-countdown")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Tạm dừng" }));
     fireEvent.click(screen.getByRole("button", { name: "Hát tiếp" }));
     await act(async () => {});
@@ -289,7 +297,9 @@ async function scoredStage() {
   const probe = recognizers[0];
   expect(probe.start).toHaveBeenCalledOnce();
   expect(audios[0].play).not.toHaveBeenCalled();
+  expect(screen.queryByTestId("karaoke-countdown")).toBeNull();
   await act(async () => probe.onstart?.());
+  expect(screen.getByTestId("karaoke-countdown")).toHaveTextContent("3");
   await finishPreparation();
   expect(audios[0].play).toHaveBeenCalledOnce();
   const capture = recognizers[1];
@@ -315,7 +325,7 @@ describe("child karaoke microphone lifecycle", () => {
     expect(audios[0].play).toHaveBeenCalledOnce();
     expect(recognizers).toHaveLength(1);
     finishSong();
-    expect(screen.queryByText(/^\d+%$/)).toBeNull();
+    expect(screen.queryByText(/^\d+\/100$/)).toBeNull();
   });
 
   it("keeps earlier finals on resume and ignores queued callbacks from before the pause", async () => {
@@ -340,7 +350,9 @@ describe("child karaoke microphone lifecycle", () => {
     finishSong();
     act(() => resumed.onend?.());
     expect(screen.getByText("Đã đánh giá 2/3 tiếng.")).toBeVisible();
-    expect(screen.queryByText(/\d+ điểm đúng lời/)).toBeNull();
+    expect(screen.getByText("Điểm phần đã nghe")).toBeVisible();
+    expect(screen.getByText("100/100", { exact: true })).toBeVisible();
+    expect(screen.queryByText("Điểm đúng lời", { exact: true })).toBeNull();
   });
 
   it("flushes the last final after native end and closes the score exactly once", async () => {
@@ -362,7 +374,7 @@ describe("child karaoke microphone lifecycle", () => {
     });
     finishSong();
     expect(capture.stop).toHaveBeenCalledOnce();
-    expect(screen.queryByText(/^\d+%$/)).toBeNull();
+    expect(screen.queryByText(/^\d+\/100$/)).toBeNull();
     act(() => {
       finishResult(finalResults("bé", "hát"));
       finishCycle();
@@ -385,7 +397,7 @@ describe("child karaoke microphone lifecycle", () => {
       lastResult(finalResults("bé"));
     });
     finishSong();
-    expect(screen.queryByText(/^\d+%$/)).toBeNull();
+    expect(screen.queryByText(/^\d+\/100$/)).toBeNull();
     act(() => vi.advanceTimersByTime(3000));
     expect(screen.getByText("Đã đánh giá 1/3 tiếng.")).toBeVisible();
     act(() => lastResult(finalResults("bé", "hát vui")));
@@ -415,7 +427,8 @@ describe("child karaoke microphone lifecycle", () => {
     });
     finishSong();
     act(() => capture.onend?.());
-    expect(screen.getByText("100 điểm đúng lời")).toBeVisible();
+    expect(screen.getByText("Điểm đúng lời", { exact: true })).toBeVisible();
+    expect(screen.getByText("100/100", { exact: true })).toBeVisible();
     clickButton("Hát lại bài này");
     await act(async () => recognizers.at(-1)!.onstart?.());
     await finishPreparation();
@@ -428,7 +441,7 @@ describe("child karaoke microphone lifecycle", () => {
     finishSong();
     act(() => replay.onend?.());
     expect(screen.getByText(/Mình chưa nghe rõ/)).toBeVisible();
-    expect(screen.queryByText(/^\d+%$/)).toBeNull();
+    expect(screen.queryByText(/^\d+\/100$/)).toBeNull();
   });
 
   it("retains the words heard before a network error without grading the silent remainder", async () => {
@@ -440,7 +453,8 @@ describe("child karaoke microphone lifecycle", () => {
     });
     finishSong();
     expect(screen.getByText("Đã đánh giá 1/3 tiếng.")).toBeVisible();
-    expect(screen.queryByText(/^\d+%$/)).toBeNull();
+    expect(screen.getByText("Điểm phần đã nghe")).toBeVisible();
+    expect(screen.getByText("100/100", { exact: true })).toBeVisible();
   });
 
   it("marks the exact live words, isolates speaker backing and preserves the song score after practice", async () => {
@@ -464,7 +478,8 @@ describe("child karaoke microphone lifecycle", () => {
     ]);
     finishSong();
     act(() => capture.onend?.());
-    expect(screen.getByText("67 điểm đúng lời")).toBeVisible();
+    expect(screen.getByText("Điểm đúng lời", { exact: true })).toBeVisible();
+    expect(screen.getByText("67/100", { exact: true })).toBeVisible();
     clickButton("Luyện lại câu 1");
     await act(async () => recognizers.at(-1)!.onstart?.());
     await finishPreparation();
@@ -480,8 +495,9 @@ describe("child karaoke microphone lifecycle", () => {
     expect(
       screen.getByText("Bé hát khớp 3/3 tiếng trong phần đã nghe."),
     ).toBeVisible();
+    expect(screen.queryByText(/^\d+\/100$/)).toBeNull();
     clickButton("Về kết quả bài hát");
-    expect(screen.getByText("67 điểm đúng lời")).toBeVisible();
+    expect(screen.getByText("67/100", { exact: true })).toBeVisible();
   });
 
   it("releases the listening microphone when the child leaves the song", async () => {

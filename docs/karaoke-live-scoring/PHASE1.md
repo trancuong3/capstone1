@@ -36,10 +36,10 @@ Với bản chấm cả bài, đặt **N** là tổng số tiếng trong lời, 
 Quy ước nghiệm thu ban đầu cho bản thử:
 
 - **Cả bài** khi nhạc kết thúc, E > 0 và độ bao phủ từ **80%** trở lên. Kiểm trên tỷ lệ gốc, trước khi làm tròn. Hiện thêm số tiếng đã đánh giá trên tổng số tiếng.
-- **Một phần** khi E > 0 nhưng chưa đạt ngưỡng toàn bài, hoặc người dùng đang luyện riêng một câu. Hiện số tiếng khớp trong phần nghe được, phạm vi câu và gợi ý luyện lại.
+- **Một phần** khi E > 0 nhưng chưa đạt ngưỡng toàn bài, hoặc người dùng đang luyện riêng một câu. Với lượt hát cả bài, thẻ hiện **Điểm phần đã nghe** bằng `round(100 × M/E)` trên thang 100, kèm độ bao phủ E/N. Lượt luyện riêng vẫn hiện số tiếng khớp của câu.
 - **Chưa nghe rõ** khi E = 0 hoặc bài không có tiếng hợp lệ. Có thể có điểm 0 khi nghe rõ mà hát khác toàn bộ lời trong một lượt đủ bao phủ. Transcript rỗng tự nó chỉ cho biết chưa đủ dữ liệu.
 
-Ví dụ với bài 20 tiếng: M=12, E=16 cho **75 điểm**, bao phủ **16/20**. M=15, E=15 chỉ báo **15/15 tiếng khớp trong phần đã nghe**, bao phủ **15/20**. Khi E=0, hiển thị lời nhắc kiểm tra mic. Thao tác luyện lặp một câu giữ kết quả riêng. Tua qua một câu để nguyên trạng thái chưa đủ dữ liệu. Hát lại cả bài mở một lượt mới.
+Ví dụ, trong bài 20 tiếng, M=12 và E=16 cho **75/100 điểm đúng lời**, bao phủ **16/20**. M=15 và E=15 cho **100/100 điểm phần đã nghe**, bao phủ **15/20**. Khi E=0, hiển thị lời nhắc kiểm tra mic. Thao tác luyện lặp một câu giữ kết quả riêng. Tua qua một câu để nguyên trạng thái chưa đủ dữ liệu. Hát lại cả bài mở một lượt mới.
 
 ## Ca nghiệm thu
 
