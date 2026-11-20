@@ -100,7 +100,7 @@ Safe fallback codes: `checkpoint_unavailable_or_invalid`,
 `model_initialization_failed`, `requested_checkpoint_not_loaded`,
 `invalid_original_registry_pointer`, `unsupported_model_profile`,
 `vietocr_inference_error`, `vietocr_no_result`,
-`paddle_unavailable`, `paddle_no_text`, `paddle_inference_error`,
+`vietocr_unavailable`, `paddle_unavailable`, `paddle_no_text`, `paddle_inference_error`,
 `tesseract_fallback`.
 
 ## Security / backwards compatibility
