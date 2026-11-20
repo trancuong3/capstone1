@@ -28,8 +28,8 @@ from app.api.deps import get_current_parent_id, get_db
 from app.api.router import api_router
 from app.database.session import Base
 from app.models import (
-    Book, BookPage, ChildProfile, PageRevision, PageRevisionWord, Profile,
-    ReadingEvent, ReadingSession, ReadingSessionPage,
+    AdminAiWorkflow, AuditLog, Book, BookPage, ChildProfile, PageRevision,
+    PageRevisionWord, Profile, ReadingEvent, ReadingSession, ReadingSessionPage,
 )
 from app.models.reading_comparison_report import ReadingComparisonReport
 from app.repositories.reading_content_repository import ReadingContentRepository
@@ -61,6 +61,7 @@ class Phase7PostgresTests(unittest.IsolatedAsyncioTestCase):
         tables = [model.__table__ for model in (
             Profile, ChildProfile, Book, BookPage, PageRevision, PageRevisionWord,
             ReadingSession, ReadingSessionPage, ReadingEvent, ReadingComparisonReport,
+            AdminAiWorkflow, AuditLog,
         )]
         async with self.engine.begin() as connection:
             await connection.run_sync(lambda sync: Base.metadata.create_all(sync, tables=tables))
