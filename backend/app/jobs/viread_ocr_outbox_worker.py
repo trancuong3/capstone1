@@ -20,6 +20,14 @@ from app.services.viread_training_storage_quota import ensure_database_capacity,
 logger = logging.getLogger(__name__)
 MAX_ATTEMPTS = 8
 POLL_SECONDS = 5
+# Claims expire after ten minutes in _claim_one. Refresh well before that,
+# including when Storage downloads/uploads are taking a long time.
+LEASE_HEARTBEAT_SECONDS = 60
+LEASE_HEARTBEAT_TIMEOUT_SECONDS = 5
+
+
+class OutboxLeaseLost(RuntimeError):
+    """Stop side effects when another worker has reclaimed this event."""
 
 
 async def _claim_one() -> dict[str, Any] | None:
@@ -196,6 +204,91 @@ async def _finish(
         return bool(result.rowcount)
 
 
+
+async def _renew_claim(event_id, *, expected_attempts: int) -> bool:
+    """Fence heartbeat by status and attempt generation, not merely the event UUID."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(text("""
+            UPDATE public.viread_ocr_outbox
+            SET locked_at = now(), updated_at = now()
+            WHERE id = :event_id AND status = 'PROCESSING'
+              AND attempts = :expected_attempts
+        """), {"event_id": event_id, "expected_attempts": expected_attempts})
+        await db.commit()
+        return result.rowcount == 1
+
+
+async def _maintain_claim(
+    event_id,
+    *,
+    expected_attempts: int,
+    stop: asyncio.Event,
+    lease_lost: asyncio.Event,
+) -> None:
+    """Renew an in-flight claim. Fail closed if renewal cannot be verified."""
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=LEASE_HEARTBEAT_SECONDS)
+        except TimeoutError:
+            pass
+        if stop.is_set():
+            return
+        try:
+            owned = await asyncio.wait_for(
+                _renew_claim(event_id, expected_attempts=expected_attempts),
+                timeout=LEASE_HEARTBEAT_TIMEOUT_SECONDS,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # Log only the exception type, never credentials or Storage paths.
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="viread_ocr_outbox_lease_renewal_failed",
+                stage="lease_heartbeat",
+                error_code=type(exc).__name__.upper(),
+            )
+            lease_lost.set()
+            return
+        if not owned:
+            lease_lost.set()
+            return
+
+
+async def _process_with_lease(event: dict[str, Any]) -> None:
+    """Race work against lease loss; stop additional work after fencing fails."""
+    stop_heartbeat = asyncio.Event()
+    lease_lost = asyncio.Event()
+    processing = asyncio.create_task(_process(event), name="ocr_outbox_materialize")
+    heartbeat = asyncio.create_task(
+        _maintain_claim(
+            event["id"], expected_attempts=int(event["attempts"]),
+            stop=stop_heartbeat, lease_lost=lease_lost,
+        ),
+        name="ocr_outbox_lease_heartbeat",
+    )
+    lost_watcher = asyncio.create_task(lease_lost.wait())
+    try:
+        completed, _ = await asyncio.wait(
+            {processing, lost_watcher}, return_when=asyncio.FIRST_COMPLETED
+        )
+        if lost_watcher in completed and lease_lost.is_set():
+            raise OutboxLeaseLost("Outbox event lease was lost")
+        await processing
+        if lease_lost.is_set():
+            raise OutboxLeaseLost("Outbox event lease was lost")
+    finally:
+        stop_heartbeat.set()
+        if not processing.done():
+            processing.cancel()
+        heartbeat.cancel()
+        lost_watcher.cancel()
+        await asyncio.gather(
+            processing, heartbeat, lost_watcher, return_exceptions=True
+        )
+
+
 async def _release_claim_on_cancel(event_id, *, expected_attempts: int) -> None:
     """Return an interrupted PROCESSING claim to the queue without burning an attempt."""
     async with AsyncSessionLocal() as db:
@@ -248,13 +341,38 @@ async def run_worker(stop: asyncio.Event, *, poll_seconds: int = POLL_SECONDS) -
         attempts = int(event["attempts"])
         process_completed = False
         try:
-            await _process(event)
+            await _process_with_lease(event)
             process_completed = True
             # Shield DONE finalization so cancellation arriving after all crops/samples
             # were persisted does not leave a completed event in PROCESSING.
             await asyncio.shield(
                 _finish(event["id"], status="DONE", expected_attempts=attempts)
             )
+        except OutboxLeaseLost:
+            # A stale worker must never finalize a newer claim. A release is
+            # fenced by attempt generation, so it is a no-op after takeover.
+            try:
+                await asyncio.wait_for(
+                    _release_claim_on_cancel(
+                        event["id"], expected_attempts=attempts
+                    ),
+                    timeout=LEASE_HEARTBEAT_TIMEOUT_SECONDS,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log_diagnostic(
+                    logger, logging.WARNING,
+                    event="viread_ocr_outbox_lease_release_failed",
+                    stage="lease_loss", error_code=type(exc).__name__.upper(),
+                )
+            log_diagnostic(
+                logger, logging.WARNING,
+                event="viread_ocr_outbox_lease_lost",
+                stage="materialization", outbox_id=str(event["id"]),
+                attempt=attempts,
+            )
+            await _wait_for_stop_or_timeout(stop, poll_seconds)
         except asyncio.CancelledError:
             if not process_completed:
                 try:
