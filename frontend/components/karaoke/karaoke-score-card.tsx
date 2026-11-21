@@ -40,9 +40,16 @@ export function KaraokeScoreCard({
   const allWords = score.lineScores.flatMap((line) => line.words);
   const differentWords = allWords.filter((w) => w.state === "different").length;
   const omittedWords = allWords.filter((w) => w.state === "omitted").length;
-  const suggested =
-    score.lineScores.find((line) => line.matchedWords < line.words.length) ??
-    score.lineScores[0];
+  const errorLine = score.lineScores.find((line) =>
+    line.words.some(
+      (word) => word.state === "different" || word.state === "omitted",
+    ),
+  );
+  const unheardLine = score.lineScores.find((line) =>
+    line.words.some((word) => word.state === "unknown"),
+  );
+  const suggested = errorLine ?? unheardLine;
+  const unassessedWords = totalWords - evaluatedWords;
 
   return (
     <section
@@ -79,6 +86,11 @@ export function KaraokeScoreCard({
           ? "Mình chưa nghe rõ. Bé thử lại nhé!"
           : `Bé hát khớp ${matchedWords}/${evaluatedWords} tiếng trong phần đã nghe.`}
       </p>
+      {unassessedWords > 0 && (
+        <p className="text-sm text-muted">
+          Chưa đánh giá: {unassessedWords} tiếng. Phần này không tính là sai.
+        </p>
+      )}
       {evaluatedWords > 0 && (
         <>
           <p className="text-sm text-muted">
@@ -124,7 +136,8 @@ export function KaraokeScoreCard({
           variant="secondary"
           onClick={() => onPractice(suggested.lineId)}
         >
-          Luyện lại câu {suggested.lineIndex + 1}
+          {errorLine ? "Luyện lại câu" : "Hát lại để nghe rõ câu"}{" "}
+          {suggested.lineIndex + 1}
         </Button>
       )}
       {onPractice && score.lineScores.length > 1 && (

@@ -7,6 +7,7 @@ import {
   type TimingControls,
 } from "@/components/admin/karaoke/syllable-timing-editor";
 import { SyllableLyrics } from "@/components/karaoke/syllable-lyrics";
+import { LiveSingingAttempt } from "@/lib/karaoke/live-singing-score";
 import {
   canonicalLyricText,
   copySyllableTiming,
@@ -172,6 +173,26 @@ describe("syllable data and timeline", () => {
       />,
     );
     expect(container.querySelector("b")).toBeNull();
+  });
+});
+
+describe("scored lyric occurrence rendering", () => {
+  it("keeps compound number occurrence IDs identical to scoring", () => {
+    const song = syllableLyrics();
+    song.lines[0].text = "1.2 hát vui";
+    song.lines[0].syllables![0].text = "1.2";
+    const attempt = new LiveSingingAttempt(song);
+    attempt.accept("1.2 hát vui", 1000, 4000);
+    const { container } = render(
+      <SyllableLyrics
+        line={song.lines[0]}
+        currentMs={4000}
+        evidence={attempt.result().lineScores[0]}
+      />,
+    );
+    const marked = container.querySelectorAll("[data-heard]");
+    expect(marked).toHaveLength(3);
+    expect(marked[0]).toHaveTextContent("1.2 (đã nghe khớp)");
   });
 });
 

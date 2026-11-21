@@ -512,7 +512,7 @@ describe("child karaoke microphone lifecycle", () => {
     expect(recognizers).toHaveLength(2);
   });
 
-  it("highlights live right/wrong words while singing and allows finishing early to score the song", async () => {
+  it("keeps interim feedback neutral, then shows confirmed right/wrong and the final score", async () => {
     const recognizers = installRecognition();
     stage();
     // Start in free mode first, then switch to scored mode while playing
@@ -543,16 +543,17 @@ describe("child karaoke microphone lifecycle", () => {
     });
     const activeLine = screen.getByTestId("karaoke-active-line");
     expect(
-      activeLine.querySelector('[data-word-state="preview-matched"]'),
+      activeLine.querySelector('[data-word-state="processing"]'),
     ).toHaveTextContent("Bé");
     expect(
-      activeLine.querySelector('[data-word-state="preview-different"]'),
-    ).toHaveTextContent("hát");
+      activeLine.querySelector('[data-word-state="different"]'),
+    ).toBeNull();
+    expect(activeLine.querySelector('[data-word-state="omitted"]')).toBeNull();
     expect(screen.getByTestId("karaoke-live-feedback")).toHaveTextContent(
-      "Đúng: 1",
+      "Đúng: 0",
     );
     expect(screen.getByTestId("karaoke-live-feedback")).toHaveTextContent(
-      "Chưa đúng: 1",
+      "Chưa đúng: 0",
     );
 
     // Final result: "bé nói vui" ("bé" matched, "hát" different, "vui" matched)
@@ -584,10 +585,11 @@ describe("child karaoke microphone lifecycle", () => {
     expect(breakdown).toHaveTextContent("Bỏ qua0");
   });
 
-  it("marks unsung words as Bỏ qua in real time as the audio plays past them", async () => {
+  it("keeps missing recognition pending and finishes unassessed instead of assigning zero", async () => {
     const { capture } = await scoredStage();
-    // Advance playback continuously through syllable 1 (1000..1500) and syllable 2 (1800..2500) without singing
-    for (const ms of [500, 1000, 1300, 1660]) {
+    for (const ms of [
+      500, 1000, 1300, 1660, 2000, 2400, 2660, 3100, 3600, 3950,
+    ]) {
       act(() => {
         audios[0].currentTime = ms / 1000;
         audios[0].dispatchEvent(new Event("timeupdate"));
@@ -596,36 +598,24 @@ describe("child karaoke microphone lifecycle", () => {
     const activeLine = screen.getByTestId("karaoke-active-line");
     expect(
       activeLine.querySelectorAll('[data-word-state="omitted"]'),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
     expect(screen.getByTestId("karaoke-live-feedback")).toHaveTextContent(
-      "Bỏ qua: 1",
+      "Bỏ qua: 0",
     );
     expect(screen.getByTestId("karaoke-live-feedback")).toHaveTextContent(
-      "Tỉ lệ đúng: 0%",
+      "Đang xử lý:",
     );
-
-    // Continue silent playback past syllable 2 (1800..2500) and syllable 3 (2600..4000)
-    for (const ms of [2000, 2400, 2660, 3100, 3600, 3950]) {
-      act(() => {
-        audios[0].currentTime = ms / 1000;
-        audios[0].dispatchEvent(new Event("timeupdate"));
-      });
-    }
-    expect(
-      activeLine.querySelectorAll('[data-word-state="omitted"]'),
-    ).toHaveLength(2);
-    expect(screen.getByTestId("karaoke-live-feedback")).toHaveTextContent(
-      "Bỏ qua: 2",
+    expect(screen.getByTestId("karaoke-live-feedback")).not.toHaveTextContent(
+      "Tỉ lệ đúng:",
     );
-
-    // Finish song without singing any words -> all 3 played words are Bỏ qua (0/100)
     clickButton("Kết thúc & chấm điểm");
     act(() => capture.onend?.());
-    expect(screen.getByText("Điểm đúng lời", { exact: true })).toBeVisible();
-    expect(screen.getByText("0/100", { exact: true })).toBeVisible();
-    const breakdown = screen.getByTestId("karaoke-score-breakdown");
-    expect(breakdown).toHaveTextContent("Hát đúng0");
-    expect(breakdown).toHaveTextContent("Chưa đúng0");
-    expect(breakdown).toHaveTextContent("Bỏ qua3");
+    expect(screen.queryByText("0/100", { exact: true })).toBeNull();
+    expect(
+      screen.getByText("Mình chưa nghe rõ. Bé thử lại nhé!"),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Chưa đánh giá: 3 tiếng. Phần này không tính là sai."),
+    ).toBeVisible();
   });
 });

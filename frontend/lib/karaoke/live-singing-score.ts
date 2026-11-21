@@ -1,13 +1,17 @@
-import { tokenizeVietnameseText } from "@/lib/reading/vietnamese-text";
+import { tokenizeSingingText } from "./singing-text";
 import type { KaraokeLine, KaraokeLyrics } from "@/types/karaoke";
 
 export type LiveWordState = "matched" | "different" | "omitted" | "unknown";
+
+export type WordPhase = "upcoming" | "listening" | "processing" | "settled";
+export type SingingActivity = "voice" | "quiet" | "uncertain";
 
 export interface LiveWord {
   id: string;
   syllableId: string | null;
   text: string;
   state: LiveWordState;
+  phase?: WordPhase;
 }
 export interface LiveLineScore {
   lineIndex: number;
@@ -33,7 +37,8 @@ interface TimedWord extends LiveWord {
   clockStart: number | null;
   clockEnd: number | null;
   playedMs: number;
-  clockOmitted: boolean;
+  quietMs: number;
+  uncertainAudio: boolean;
   position: number;
 }
 interface Anchor {
@@ -53,7 +58,7 @@ function wordsInLine(
   const segments = line.syllables?.length ? line.syllables : [line];
   const words: TimedWord[] = [];
   for (const segment of segments) {
-    const tokens = tokenizeVietnameseText(segment.text);
+    const tokens = tokenizeSingingText(segment.text);
     const count = Math.max(1, tokens.length);
     const hasTiming =
       segment.start_ms !== null &&
@@ -77,7 +82,9 @@ function wordsInLine(
         clockStart,
         clockEnd,
         playedMs: 0,
-        clockOmitted: false,
+        quietMs: 0,
+        uncertainAudio: false,
+        phase: "upcoming",
         lineIndex,
         position: offset + words.length,
       });
@@ -149,6 +156,81 @@ export class LiveSingingAttempt {
   private readonly byLine: TimedWord[][];
   private lastEnd = -1;
   private cursor = -1;
+  private lastAudioEnd = -1;
+  private capture: {
+    id: string;
+    revision: number;
+    cursor: number;
+    lastEnd: number;
+    words: { state: LiveWordState; phase: WordPhase | undefined }[];
+  } | null = null;
+
+  beginCapture(id = "capture"): void {
+    this.capture = {
+      id,
+      revision: 0,
+      cursor: this.cursor,
+      lastEnd: this.lastEnd,
+      words: this.words.map(({ state, phase }) => ({ state, phase })),
+    };
+    this.lastAudioEnd = -1;
+    for (const word of this.words) {
+      word.quietMs = 0;
+      word.uncertainAudio = false;
+    }
+  }
+
+  closeCapture(): void {
+    this.capture = null;
+  }
+
+  /** Re-evaluate only the current capture as its final fragments accumulate.
+   * Earlier captures are the immutable baseline. Revisions are ordered and
+   * scoped to an identity so a seek/retry cannot rewrite a different attempt. */
+  acceptCapture(
+    id: string,
+    revision: number,
+    text: string,
+    fromMs: number,
+    toMs: number,
+    earliestCapturedMs: number,
+  ): boolean {
+    const capture = this.capture;
+    if (
+      !capture ||
+      id !== capture.id ||
+      !Number.isSafeInteger(revision) ||
+      revision <= capture.revision ||
+      !Number.isFinite(fromMs) ||
+      !Number.isFinite(toMs) ||
+      !Number.isFinite(earliestCapturedMs) ||
+      earliestCapturedMs < 0 ||
+      fromMs < earliestCapturedMs ||
+      toMs <= fromMs ||
+      toMs - fromMs > 12000 ||
+      !tokenizeSingingText(text).length
+    )
+      return false;
+    const before = this.words.map((word) => word.state);
+    capture.revision = revision;
+    this.cursor = capture.cursor;
+    this.lastEnd = capture.lastEnd;
+    this.words.forEach((word, i) => {
+      word.state = capture.words[i].state;
+      // Preserve playback phase for words left unassessed by this revision.
+      if (word.state !== "unknown") word.phase = capture.words[i].phase;
+      else if (word.phase === "settled")
+        word.phase = word.playedMs > 0 ? "processing" : "upcoming";
+    });
+    this.accept(text, fromMs, toMs, earliestCapturedMs);
+    return this.words.some((word, i) => word.state !== before[i]);
+  }
+
+  noteSpeech(fromMs: number, toMs: number): void {
+    for (const word of this.words) {
+      if (overlaps(word, fromMs, toMs)) word.uncertainAudio = true;
+    }
+  }
 
   constructor(private readonly lyrics: KaraokeLyrics) {
     this.byLine = lyrics.lines.map((line, i) => {
@@ -158,12 +240,13 @@ export class LiveSingingAttempt {
     });
   }
 
-  accept(
+  private align(
     text: string,
     fromMs: number,
     toMs: number,
     earliestCapturedMs = 0,
-  ): boolean {
+  ): Map<string, LiveWordState> {
+    const decisions = new Map<string, LiveWordState>();
     if (
       !Number.isFinite(fromMs) ||
       !Number.isFinite(toMs) ||
@@ -172,9 +255,9 @@ export class LiveSingingAttempt {
       fromMs < earliestCapturedMs ||
       toMs <= fromMs
     )
-      return false;
-    const heard = tokenizeVietnameseText(text);
-    if (!heard.length) return false;
+      return decisions;
+    const heard = tokenizeSingingText(text);
+    if (!heard.length) return decisions;
     const forward = fromMs >= this.lastEnd;
     // A delayed final may reach back within its capture, never across a seek,
     // pause, or time spent waiting for microphone access.
@@ -185,7 +268,7 @@ export class LiveSingingAttempt {
         overlaps(word, searchFrom, toMs),
     );
     const core = eligible.filter((word) => overlaps(word, fromMs, toMs));
-    if (!eligible.length) return false;
+    if (!eligible.length) return decisions;
     // Prefer the actual sung interval for identical words in adjacent lines
     // when the recording spans that full phrase. A short boundary fragment
     // can also belong to the previous line; require unambiguous anchors.
@@ -199,15 +282,8 @@ export class LiveSingingAttempt {
       core.every((word, i) => covers(word) && word.text === heard[i]);
     const words = exactCore ? core : eligible;
     const anchors = uniqueAnchors(words, heard);
-    let changed = false;
-    let lastPosition = -1;
     const mark = (word: TimedWord, state: LiveWordState) => {
-      lastPosition = Math.max(lastPosition, word.position);
-      if (word.state !== "unknown" && !word.clockOmitted) return;
-      const stateChanged = word.state !== state;
-      word.state = state;
-      word.clockOmitted = false;
-      if (stateChanged) changed = true;
+      if (word.state === "unknown") decisions.set(word.id, state);
     };
     for (const anchor of anchors) {
       if (anchor) mark(words[anchor.expected], "matched");
@@ -260,103 +336,39 @@ export class LiveSingingAttempt {
       )
         gap.forEach((word) => mark(word, "different"));
     }
-    if (lastPosition >= 0) {
-      this.cursor = lastPosition;
-      this.lastEnd = toMs;
-    }
-    return changed;
+    return decisions;
   }
 
-  /**
-   * Computes non-destructive real-time word states from interim speech
-   * recognition (like RealtimeAlignmentEngine.previewAlignment in Reading).
-   */
+  accept(
+    text: string,
+    fromMs: number,
+    toMs: number,
+    earliestCapturedMs = 0,
+  ): boolean {
+    const decisions = this.align(text, fromMs, toMs, earliestCapturedMs);
+    for (const word of this.words) {
+      const state = decisions.get(word.id);
+      if (!state) continue;
+      word.state = state;
+      word.phase = "settled";
+      this.cursor = Math.max(this.cursor, word.position);
+    }
+    if (decisions.size) this.lastEnd = Math.max(this.lastEnd, toMs);
+    return decisions.size > 0;
+  }
+
+  /** Interim and final use identical positional evidence; preview never commits. */
   preview(
     text: string,
     fromMs: number,
     toMs: number,
     earliestCapturedMs = 0,
   ): Map<string, LiveWordState> {
-    const map = new Map<string, LiveWordState>();
-    const heard = tokenizeVietnameseText(text);
-    if (!heard.length || !Number.isFinite(fromMs) || !Number.isFinite(toMs))
-      return map;
-    const searchFrom = Math.max(earliestCapturedMs, fromMs - finalLagMs);
-    const windowEnd = Math.max(toMs, fromMs + 400);
-    const activeLineIndex = this.lyrics.lines.findIndex(
-      (line) =>
-        line.start_ms !== null &&
-        line.end_ms !== null &&
-        line.start_ms <= windowEnd &&
-        windowEnd <= line.end_ms + finalLagMs,
-    );
-    const eligible =
-      activeLineIndex >= 0
-        ? this.byLine[activeLineIndex]
-        : this.words.filter(
-            (word) =>
-              word.position > this.cursor &&
-              overlaps(word, searchFrom, windowEnd),
-          );
-    if (!eligible.length) return map;
-
-    const isOpen = (w: TimedWord) => w.state === "unknown" || w.clockOmitted;
-    let idx = 0;
-    while (idx < eligible.length && !isOpen(eligible[idx])) idx++;
-    for (const token of heard) {
-      if (idx >= eligible.length) break;
-      const current = eligible[idx];
-      if (current.text === token) {
-        map.set(current.id, "matched");
-        idx++;
-        while (idx < eligible.length && !isOpen(eligible[idx])) idx++;
-        continue;
-      }
-      // Ignore immediate stutter of previous word
-      if (idx > 0 && eligible[idx - 1].text === token) {
-        continue;
-      }
-      // Lookahead up to 3 words in the same line (like Reading previewAlignment)
-      let ahead = -1;
-      const maxLook = Math.min(eligible.length - 1, idx + 3);
-      for (let look = idx + 1; look <= maxLook; look++) {
-        if (
-          eligible[look].lineIndex === current.lineIndex &&
-          isOpen(eligible[look]) &&
-          eligible[look].text === token
-        ) {
-          ahead = look;
-          break;
-        }
-      }
-      if (ahead !== -1) {
-        for (let skip = idx; skip < ahead; skip++) {
-          if (
-            isOpen(eligible[skip]) &&
-            map.get(eligible[skip].id) !== "different"
-          ) {
-            map.set(eligible[skip].id, "omitted");
-          }
-        }
-        map.set(eligible[ahead].id, "matched");
-        idx = ahead + 1;
-        while (idx < eligible.length && !isOpen(eligible[idx])) idx++;
-        continue;
-      }
-      // Unmatched token at current cursor: mark as temporary substitution
-      map.set(current.id, "different");
-      idx++;
-      while (idx < eligible.length && !isOpen(eligible[idx])) idx++;
-    }
-    return map;
+    return this.align(text, fromMs, toMs, earliestCapturedMs);
   }
 
-  /**
-   * Tracks continuous playback across timed words while the microphone is
-   * active. Any word whose time window was played through without being sung
-   * is marked as "omitted" ("Bỏ qua") once its window ends.
-   */
-  observePlayback(fromMs: number, toMs: number, graceMs = 150): boolean {
+  /** Playback measures exposure, not whether a child sang a word. */
+  observePlayback(fromMs: number, toMs: number): boolean {
     if (
       !Number.isFinite(fromMs) ||
       !Number.isFinite(toMs) ||
@@ -366,40 +378,85 @@ export class LiveSingingAttempt {
       return false;
     let changed = false;
     for (const word of this.words) {
-      if (word.clockStart === null || word.clockEnd === null) continue;
+      if (
+        word.clockStart === null ||
+        word.clockEnd === null ||
+        word.state !== "unknown"
+      )
+        continue;
       const overlap =
         Math.min(toMs, word.clockEnd) - Math.max(fromMs, word.clockStart);
-      if (overlap > 0) {
-        word.playedMs += overlap;
-      }
-      const duration = Math.max(1, word.clockEnd - word.clockStart);
-      const required = Math.min(180, Math.max(40, duration * 0.35));
-      if (
-        word.state === "unknown" &&
-        word.playedMs >= required &&
-        toMs >= word.clockEnd + graceMs
-      ) {
-        word.state = "omitted";
-        word.clockOmitted = true;
+      if (word.phase === "settled" && overlap <= 0) continue;
+      if (overlap > 0) word.playedMs += overlap;
+      const phase: WordPhase =
+        word.playedMs === 0
+          ? "upcoming"
+          : toMs < word.clockEnd
+            ? "listening"
+            : "processing";
+      if (phase !== word.phase) {
+        word.phase = phase;
         changed = true;
       }
     }
     return changed;
   }
 
-  flushPlayedOmissions(currentMs: number): boolean {
+  /** Quiet is useful only on a live, unmuted, calibrated input. A small
+   * ambiguous/voiced interval prevents a silence verdict for the entire unit.
+   * v1 uses the whole line, never the invented evenly spaced word clock. */
+  observeAudio(fromMs: number, toMs: number, activity: SingingActivity): void {
+    if (
+      !Number.isFinite(fromMs) ||
+      !Number.isFinite(toMs) ||
+      toMs <= fromMs ||
+      toMs - fromMs > 250 ||
+      fromMs < this.lastAudioEnd
+    )
+      return;
+    this.lastAudioEnd = toMs;
+    for (const word of this.words) {
+      if (word.start === null || word.end === null) continue;
+      const overlap =
+        Math.min(toMs, word.end + 300) -
+        Math.max(fromMs, Math.max(0, word.start - 150));
+      if (overlap <= 0) continue;
+      if (activity === "quiet") word.quietMs += overlap;
+      else word.uncertainAudio = true;
+    }
+  }
+
+  /** Called only after a capture has drained successfully. A timeout, pause,
+   * network failure or mere playback tick is not a silence confirmation. */
+  settleThrough(capturedEndMs: number): boolean {
+    if (!Number.isFinite(capturedEndMs)) return false;
     let changed = false;
     for (const word of this.words) {
-      if (word.clockStart === null || word.clockEnd === null) continue;
-      const duration = Math.max(1, word.clockEnd - word.clockStart);
-      const required = Math.min(180, Math.max(40, duration * 0.35));
       if (
-        word.state === "unknown" &&
-        word.playedMs >= required &&
-        currentMs >= word.clockStart + required
-      ) {
+        word.state !== "unknown" ||
+        word.start === null ||
+        word.end === null ||
+        word.uncertainAudio
+      )
+        continue;
+      const end = word.end + 300;
+      const duration = end - Math.max(0, word.start - 150);
+      if (capturedEndMs >= end && word.quietMs >= duration * 0.98) {
         word.state = "omitted";
-        word.clockOmitted = true;
+        word.phase = "settled";
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  /** Close unresolved exposure without inventing omissions when ASR is absent. */
+  flushPlayedOmissions(currentMs: number): boolean {
+    if (!Number.isFinite(currentMs)) return false;
+    let changed = false;
+    for (const word of this.words) {
+      if (word.playedMs > 0 && word.phase !== "settled") {
+        word.phase = "settled";
         changed = true;
       }
     }
@@ -410,11 +467,12 @@ export class LiveSingingAttempt {
     let matchedWords = 0;
     let evaluatedWords = 0;
     const lineScores = this.byLine.map((lineWords, lineIndex) => {
-      const words = lineWords.map(({ id, syllableId, text, state }) => ({
+      const words = lineWords.map(({ id, syllableId, text, state, phase }) => ({
         id,
         syllableId,
         text,
         state,
+        phase,
       }));
       const matched = words.filter((word) => word.state === "matched").length;
       const evaluated = words.filter((word) => word.state !== "unknown").length;
