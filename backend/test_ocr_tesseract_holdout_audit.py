@@ -155,7 +155,9 @@ class HeldoutAggregateTests(unittest.TestCase):
             "tesseract_line_priority",
             "tesseract_line_vietocr_crop_agreement",
         ):
-            report["quality"]["ground_truth_blind_rules"][policy]["regressed_words"] = 0
+            row = report["quality"]["ground_truth_blind_rules"][policy]
+            row["corrected_words"] += row["regressed_words"]
+            row["regressed_words"] = 0
         result = summarize_holdout_report(report, _audit(), 20)
         self.assertFalse(result["production_deployment_allowed"])
         self.assertNotIn("observed_correct_to_wrong_regressions", result["reason_codes"])
@@ -189,6 +191,9 @@ class HeldoutAggregateTests(unittest.TestCase):
         report["quality"]["ground_truth_blind_rules"][
             "tesseract_line_priority"
         ]["flips_without_positional_truth"] = 1
+        report["quality"]["ground_truth_blind_rules"][
+            "tesseract_line_priority"
+        ]["corrected_words"] -= 1
         result = summarize_holdout_report(report, _audit(), 20)
         self.assertIn("unresolved_positional_scoring", result["reason_codes"])
 
