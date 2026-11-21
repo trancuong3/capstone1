@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "node scripts/dev-fixed-port.mjs",
     "build": "next build",
+    "build:hosting": "node scripts/verify-hosting-env.mjs && next build",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
