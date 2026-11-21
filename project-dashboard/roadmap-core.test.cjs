@@ -39,3 +39,45 @@ test("detect old local-only differences without mutating shared status", () => {
   assert.deepEqual(result,{changed:1,personal:1});
   assert.equal(shared[0].status,"done");
 });
+
+test("exports a note-only localStorage record with empty tasks, and accepts round trip", () => {
+  const {makeLocalExport,parseLocalImport}=require("./roadmap-core.js");
+  const original={note:"Ghi chú tiếng Việt — thử nghiệm"};
+  const exported=makeLocalExport(original,original.note,[],{syncedAt:null,tasks:[]},"2026-11-21T00:00:00.000Z");
+  assert.equal(exported.format,"viread-local-export-v1");
+  assert.deepEqual(exported.legacy,{note:original.note,tasks:[]});
+  assert.deepEqual(original,{note:"Ghi chú tiếng Việt — thử nghiệm"}); // don't mutate localStorage data
+  assert.deepEqual(parseLocalImport(JSON.parse(JSON.stringify(exported))),{
+    tasks:[],note:"Ghi chú tiếng Việt — thử nghiệm"
+  });
+});
+test("accepts exact legacy shape of old exported files without legacy.tasks", () => {
+  const {parseLocalImport}=require("./roadmap-core.js");
+  const old={
+    format:"viread-local-export-v1",
+    exportedAt:"2026-11-21T01:30:31.954Z",
+    legacy:{note:"Ví dụ ghi chú"},
+    imports:[{importedAt:"2026-11-20T15:08:38.711Z",tasks:[],note:""}],
+    sharedSnapshot:{syncedAt:"2026-11-20T22:41:27.420Z",tasks:[{id:"p1",status:"done"}]}
+  };
+  assert.deepEqual(parseLocalImport(old),{tasks:[],note:"Ví dụ ghi chú"});
+  assert.deepEqual(parseLocalImport({note:"Chỉ có ghi chú"}),{tasks:[],note:"Chỉ có ghi chú"});
+});
+test("retains custom legacy task entries and doesn't alter shared snapshot", () => {
+  const {makeLocalExport,parseLocalImport}=require("./roadmap-core.js");
+  const existing={tasks:[{id:"custom",status:"blocked"}],note:"Private",customSetting:"preserved"};
+  const shared={syncedAt:"2026-11-20T16:00:00.000Z",tasks:[{id:"p1",status:"done"}]};
+  const exported=makeLocalExport(existing,"ignored",[],shared,"2026-11-21T00:00:00.000Z");
+  assert.equal(exported.legacy.customSetting,"preserved");
+  assert.equal(exported.legacy.note,"Private");
+  assert.deepEqual(parseLocalImport(exported).tasks,[{id:"custom",status:"blocked"}]);
+  assert.equal(shared.tasks[0].status,"done");
+});
+test("rejects corrupted or unknown local backup formats and task types", () => {
+  const {parseLocalImport}=require("./roadmap-core.js");
+  assert.throws(()=>parseLocalImport({format:"unknown",legacy:{note:"text"}}),/Unknown local backup format/);
+  assert.throws(()=>parseLocalImport({format:"viread-local-export-v1",legacy:{}}),/Missing local tasks or note/);
+  assert.throws(()=>parseLocalImport({format:"viread-local-export-v1",legacy:{tasks:"not-array"}}),/Invalid local task list/);
+  assert.throws(()=>parseLocalImport({tasks:[null]}),/Invalid local task entry/);
+  assert.throws(()=>parseLocalImport({note:4}),/Invalid local note/);
+});
