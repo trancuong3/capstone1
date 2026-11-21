@@ -187,7 +187,10 @@ describe("Mobile My Books Multi-Format Upload (Image/PDF/DOCX) & Responsive Cont
 
     apiFetchFixture.mockImplementation(async (input, init) => {
       const path = new URL(String(input)).pathname;
-      if (path === "/books/my-books" && (!init?.method || init.method === "GET")) {
+      if (
+        path === "/books/my-books" &&
+        (!init?.method || init.method === "GET")
+      ) {
         return Response.json([summary]);
       }
       if (path === "/books/my-books" && init?.method === "POST") {
@@ -209,9 +212,7 @@ describe("Mobile My Books Multi-Format Upload (Image/PDF/DOCX) & Responsive Cont
       </AuthRuntimeContext.Provider>,
     );
 
-    expect(
-      await screen.findByText("Sách Đồng Dao Cho Bé"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Sách Đồng Dao Cho Bé")).toBeInTheDocument();
     expect(screen.getByText(/tối đa 30 trang\/tệp/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Tạo sách riêng/i }));
@@ -299,9 +300,7 @@ describe("Mobile My Books Multi-Format Upload (Image/PDF/DOCX) & Responsive Cont
       </AuthRuntimeContext.Provider>,
     );
 
-    expect(
-      await screen.findByText("Sách Đồng Dao Cho Bé"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Sách Đồng Dao Cho Bé")).toBeInTheDocument();
 
     const fileInput = screen.getByLabelText(
       /Chọn tệp trang sách hoặc tài liệu/i,

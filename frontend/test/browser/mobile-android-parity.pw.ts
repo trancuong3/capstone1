@@ -60,7 +60,9 @@ async function assertMobileScreenHealth(
         const src = img.getAttribute("src") || "";
         return src.length > 0 && img.complete && img.naturalWidth === 0;
       })
-      .map((img) => img.getAttribute("alt") || img.getAttribute("src") || "img");
+      .map(
+        (img) => img.getAttribute("alt") || img.getAttribute("src") || "img",
+      );
 
     return {
       scrollWidth: doc.scrollWidth,
@@ -83,7 +85,10 @@ async function assertMobileScreenHealth(
   for (const locator of interactiveLocators) {
     await expect(locator).toBeVisible();
     const box = await locator.boundingBox();
-    expect(box, `[${projectName}:${screenSlug}] Missing bounding box`).not.toBeNull();
+    expect(
+      box,
+      `[${projectName}:${screenSlug}] Missing bounding box`,
+    ).not.toBeNull();
     expect(
       Math.round(box!.height),
       `[${projectName}:${screenSlug}] Touch target height < 44px (${box?.height}px)`,
@@ -92,7 +97,10 @@ async function assertMobileScreenHealth(
 
   // 3. Persist acceptance screenshot
   fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
-  const shotPath = path.join(SCREENSHOT_DIR, `${projectName}_${screenSlug}.png`);
+  const shotPath = path.join(
+    SCREENSHOT_DIR,
+    `${projectName}_${screenSlug}.png`,
+  );
   await page.screenshot({ path: shotPath, fullPage: false });
 }
 
@@ -131,7 +139,9 @@ test.describe("Mobile & Android WebView Full UI + OCR Parity E2E", () => {
     await page.goto("/login");
     const loginSubmit = page.getByRole("button", { name: /^Đăng nhập$/ });
     await expect(loginSubmit).toBeVisible();
-    await assertMobileScreenHealth(page, projectName, "01_login", [loginSubmit]);
+    await assertMobileScreenHealth(page, projectName, "01_login", [
+      loginSubmit,
+    ]);
 
     await page.getByLabel("Email của ba mẹ").fill(stack.users.parent_a.email);
     await page.getByLabel("Mật khẩu").fill(stack.users.parent_a.password);
@@ -201,9 +211,12 @@ test.describe("Mobile & Android WebView Full UI + OCR Parity E2E", () => {
       name: /^Bắt đầu đọc$/i,
     });
     await expect(startSessionBtn).toBeEnabled({ timeout: 20_000 });
-    await assertMobileScreenHealth(page, projectName, "05_reading_preparation", [
-      startSessionBtn,
-    ]);
+    await assertMobileScreenHealth(
+      page,
+      projectName,
+      "05_reading_preparation",
+      [startSessionBtn],
+    );
 
     await startSessionBtn.click();
     await page.waitForURL(/\/reading\/[0-9a-f-]+/i, { timeout: 25_000 });
@@ -360,6 +373,9 @@ test.describe("Mobile & Android WebView Full UI + OCR Parity E2E", () => {
     });
 
     expect(pageErrors, `[${projectName}] Uncaught pageerror(s)`).toEqual([]);
-    expect(consoleErrors, `[${projectName}] Unexpected console.error(s)`).toEqual([]);
+    expect(
+      consoleErrors,
+      `[${projectName}] Unexpected console.error(s)`,
+    ).toEqual([]);
   });
 });

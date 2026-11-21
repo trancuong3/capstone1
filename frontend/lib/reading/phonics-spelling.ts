@@ -526,7 +526,9 @@ export function matchPhonicsSpelling(
         // Never start a phonics sequence with a bare filler like "dấu" or "à"
         // unless that vowel itself belongs to the target's nucleus.
         const parts = decomposeVietnameseSyllable(target);
-        const targetNucleus = parts ? splitVietnameseRhyme(parts.rhyme).nucleus : "";
+        const targetNucleus = parts
+          ? splitVietnameseRhyme(parts.rhyme).nucleus
+          : "";
         const isOwnVowel =
           (token === "à" &&
             (targetNucleus.includes("a") || targetNucleus.includes("ă"))) ||

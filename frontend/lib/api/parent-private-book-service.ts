@@ -195,7 +195,8 @@ export function createParentPrivateBookService(): ParentPrivateBookService {
     update: (bookId, input) => {
       const body: Record<string, unknown> = {};
       if (input.title !== undefined) body.title = input.title.trim();
-      if (input.author !== undefined) body.author = input.author?.trim() || null;
+      if (input.author !== undefined)
+        body.author = input.author?.trim() || null;
       if (input.min_grade !== undefined) body.min_grade = input.min_grade;
       if (input.max_grade !== undefined) body.max_grade = input.max_grade;
       if (input.source_type !== undefined) body.source_type = input.source_type;
@@ -222,7 +223,13 @@ export function createParentPrivateBookService(): ParentPrivateBookService {
         undefined,
         { method: "PATCH", body: input },
       ),
-    replaceCommittedPageFile: (bookId, pageId, file, sourceType, sourceNote) => {
+    replaceCommittedPageFile: (
+      bookId,
+      pageId,
+      file,
+      sourceType,
+      sourceNote,
+    ) => {
       const form = new FormData();
       form.append("file", file);
       if (sourceType) form.append("source_type", sourceType);

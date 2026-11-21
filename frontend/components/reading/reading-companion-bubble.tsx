@@ -3,10 +3,7 @@ import { BookOpenCheck, Heart, Sparkles, Volume2 } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
 export type CompanionMood =
-  | "listening"
-  | "comforting"
-  | "teaching"
-  | "celebrating";
+  "listening" | "comforting" | "teaching" | "celebrating";
 
 export interface CompanionBubbleState {
   readonly mood: CompanionMood;

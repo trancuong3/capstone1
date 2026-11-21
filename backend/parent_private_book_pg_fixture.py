@@ -32,13 +32,13 @@ def _resolve_local_pg_admin_url() -> str:
         return explicit
     for env_name in ("ADMIN_OCR_TEST_DATABASE_URL", "READING_REPORT_TEST_DATABASE_URL", "DATABASE_URL"):
         candidate = (os.getenv(env_name) or "").strip()
-        if not candidate:
+        if not candidate or ":1/" in candidate:
             continue
         if "127.0.0.1" not in candidate and "localhost" not in candidate:
             continue
         sync_candidate = candidate.replace("postgresql+asyncpg://", "postgresql://", 1)
         if "/" in sync_candidate.rsplit("@", 1)[-1]:
-            return sync_candidate.rsplit("/", 1)[0] + "/postgres"
+            return sync_candidate
     return DEFAULT_LOCAL_ADMIN_PG_URL
 
 
@@ -623,8 +623,9 @@ class DisposablePrivateBookDatabase:
     """Manages one disposable PostgreSQL database + isolated local Storage dir + FastAPI test app."""
 
     def __init__(self) -> None:
+        self.admin_url = _resolve_local_pg_admin_url()
         self.db_name = f"viread_ppb_test_{uuid4().hex[:12]}"
-        self.sync_url = LOCAL_PG_ADMIN_URL.rsplit("/", 1)[0] + f"/{self.db_name}"
+        self.sync_url = self.admin_url.rsplit("/", 1)[0] + f"/{self.db_name}"
         self.async_url = self.sync_url.replace("postgresql://", "postgresql+asyncpg://", 1)
         self.storage_dir = Path(tempfile.mkdtemp(prefix="viread_ppb_storage_"))
         self.engine = None
@@ -633,7 +634,7 @@ class DisposablePrivateBookDatabase:
 
     def setup(self) -> None:
         # 1. Create fresh disposable database
-        admin_conn = psycopg2.connect(LOCAL_PG_ADMIN_URL)
+        admin_conn = psycopg2.connect(self.admin_url)
         admin_conn.autocommit = True
         try:
             with admin_conn.cursor() as cur:
@@ -830,7 +831,7 @@ class DisposablePrivateBookDatabase:
             os.environ["VIREAD_LOCAL_STORAGE_DIR"] = self.previous_storage_env
         shutil.rmtree(self.storage_dir, ignore_errors=True)
 
-        admin_conn = psycopg2.connect(LOCAL_PG_ADMIN_URL)
+        admin_conn = psycopg2.connect(self.admin_url)
         admin_conn.autocommit = True
         try:
             with admin_conn.cursor() as cur:

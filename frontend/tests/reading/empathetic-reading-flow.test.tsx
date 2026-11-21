@@ -100,7 +100,10 @@ function makePage(words: readonly string[], pageNum = 4): ReadingPageDTO {
 const defaultPage = makePage(["Bé", "mèo", "nhỏ", "đang"], 14);
 const nextPage = makePage(["Con", "cá", "vàng", "bơi"], 15);
 
-function makeProgress(first: ReadingPageDTO, second: ReadingPageDTO): ReadingSessionPageProgressDTO {
+function makeProgress(
+  first: ReadingPageDTO,
+  second: ReadingPageDTO,
+): ReadingSessionPageProgressDTO {
   return {
     session_id: TEST_SESSION_ID,
     persisted: true,
@@ -348,10 +351,18 @@ describe("Empathetic Grade-1 teacher comfort, mistake classification & phonics m
   });
 
   it("provides rich multi-sentence comfort banks (>=8 TONE, >=8 NEAR_SOUND, >=10 GENERAL) with zero consecutive repeats", () => {
-    expect(INTERACTIVE_PROMPT_BANKS.comfortToneMistake.length).toBeGreaterThanOrEqual(8);
-    expect(INTERACTIVE_PROMPT_BANKS.comfortNearSoundMistake.length).toBeGreaterThanOrEqual(8);
-    expect(INTERACTIVE_PROMPT_BANKS.comfortGeneralMistake.length).toBeGreaterThanOrEqual(10);
-    expect(INTERACTIVE_PROMPT_BANKS.comfortGiveUpEffort.length).toBeGreaterThanOrEqual(6);
+    expect(
+      INTERACTIVE_PROMPT_BANKS.comfortToneMistake.length,
+    ).toBeGreaterThanOrEqual(8);
+    expect(
+      INTERACTIVE_PROMPT_BANKS.comfortNearSoundMistake.length,
+    ).toBeGreaterThanOrEqual(8);
+    expect(
+      INTERACTIVE_PROMPT_BANKS.comfortGeneralMistake.length,
+    ).toBeGreaterThanOrEqual(10);
+    expect(
+      INTERACTIVE_PROMPT_BANKS.comfortGiveUpEffort.length,
+    ).toBeGreaterThanOrEqual(6);
 
     const selector = new InteractivePromptSelector();
     let prev = "";
@@ -376,7 +387,9 @@ describe("Empathetic Grade-1 teacher comfort, mistake classification & phonics m
     expect(speechPlayerMock.play).toHaveBeenCalledTimes(1);
     const firstComfort = speechPlayerMock.play.mock.calls[0]?.[0] as string;
     expect(firstComfort).toContain("mèo");
-    expect(firstComfort.split(/[.!?]+/u).filter((s) => s.trim()).length).toBeGreaterThanOrEqual(2);
+    expect(
+      firstComfort.split(/[.!?]+/u).filter((s) => s.trim()).length,
+    ).toBeGreaterThanOrEqual(2);
 
     const bubble = screen.getByTestId("reading-companion-bubble");
     expect(bubble).toHaveAttribute("data-companion-mood", "comforting");
@@ -426,7 +439,9 @@ describe("Empathetic Grade-1 teacher comfort, mistake classification & phonics m
     act(() => lastRecognition().say("di"));
     await act(async () => vi.advanceTimersByTimeAsync(1_600));
 
-    const nearSoundComfort = speechPlayerMock.play.mock.calls.at(-1)?.[0] as string;
+    const nearSoundComfort = speechPlayerMock.play.mock.calls.at(
+      -1,
+    )?.[0] as string;
     expect(nearSoundComfort).toMatch(/âm|vần|nét|chữ/iu);
     expect(screen.getByTestId("reading-companion-bubble")).toHaveTextContent(
       /hai âm gần giống/iu,
@@ -482,9 +497,9 @@ describe("Empathetic Grade-1 teacher comfort, mistake classification & phonics m
     act(() => lastRecognition().say("bàn"));
     await act(async () => vi.advanceTimersByTimeAsync(1_600));
     const step3Calls = speechPlayerMock.play.mock.calls.map(([t]) => String(t));
-    expect(step3Calls.some((t) => /kiên trì|tự hào|cố gắng|cụm/iu.test(t))).toBe(
-      true,
-    );
+    expect(
+      step3Calls.some((t) => /kiên trì|tự hào|cố gắng|cụm/iu.test(t)),
+    ).toBe(true);
     expect(step3Calls).toContain("Tê ăn cỏ.");
 
     // Attempt 4 wrong -> Step 4 celebrates effort warmly, marks "Tê" assisted (never green!), and invites sentence reinforcement!
@@ -495,11 +510,15 @@ describe("Empathetic Grade-1 teacher comfort, mistake classification & phonics m
 
     const step4Calls = speechPlayerMock.play.mock.calls.map(([t]) => String(t));
     expect(
-      step4Calls.some((t) => /dũng cảm|tự hào|chăm chỉ|ngôi sao|nỗ lực|giỏi lắm/iu.test(t)),
+      step4Calls.some((t) =>
+        /dũng cảm|tự hào|chăm chỉ|ngôi sao|nỗ lực|giỏi lắm/iu.test(t),
+      ),
     ).toBe(true);
     expect(wordEl("Tê")).not.toHaveClass(SUCCESS);
     expect(wordEl("Tê")).toHaveClass("underline"); // assisted, never plain green
-    expect(screen.getByText(/Đọc lại cả câu: “Tê ăn cỏ\.”/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Đọc lại cả câu: “Tê ăn cỏ\.”/),
+    ).toBeInTheDocument();
   });
 
   it("accepts 4 low-confidence (0.34) split phonics events 'ê' -> 'tờ' -> 'ê' -> 'tê' on live ReadingScreen without false uncertainty or interruption (G25, G26)", async () => {
@@ -537,8 +556,10 @@ describe("Empathetic Grade-1 teacher comfort, mistake classification & phonics m
 
     expect(speechPlayerMock.play).toHaveBeenCalledTimes(1);
     const concisePrompt = speechPlayerMock.play.mock.calls[0]?.[0] as string;
-    expect(INTERACTIVE_PROMPT_BANKS.comfortConciseMistake.some((tpl) =>
-      concisePrompt === tpl.replaceAll("{word}", "mèo"),
-    )).toBe(true);
+    expect(
+      INTERACTIVE_PROMPT_BANKS.comfortConciseMistake.some(
+        (tpl) => concisePrompt === tpl.replaceAll("{word}", "mèo"),
+      ),
+    ).toBe(true);
   });
 });

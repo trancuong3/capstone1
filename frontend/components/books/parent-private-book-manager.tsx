@@ -237,8 +237,9 @@ function ParentPrivateBookManagerContent({
   const [editBookAuthor, setEditBookAuthor] = useState("");
   const [editBookMinGrade, setEditBookMinGrade] = useState<number>(1);
   const [editBookMaxGrade, setEditBookMaxGrade] = useState<number>(3);
-  const [editBookSourceType, setEditBookSourceType] =
-    useState<SourceUsageType>("OWNED_PHYSICAL_BOOK");
+  const [editBookSourceType, setEditBookSourceType] = useState<SourceUsageType>(
+    "OWNED_PHYSICAL_BOOK",
+  );
   const [editBookSourceNote, setEditBookSourceNote] = useState("");
   const [confirmDeleteBook, setConfirmDeleteBook] = useState(false);
 
@@ -246,8 +247,9 @@ function ParentPrivateBookManagerContent({
   const [editingPageId, setEditingPageId] = useState<string | null>(null);
   const [editPageText, setEditPageText] = useState("");
   const [editPageNumber, setEditPageNumber] = useState<number>(1);
-  const [editPageSourceType, setEditPageSourceType] =
-    useState<SourceUsageType>("OWNED_PHYSICAL_BOOK");
+  const [editPageSourceType, setEditPageSourceType] = useState<SourceUsageType>(
+    "OWNED_PHYSICAL_BOOK",
+  );
   const [editPageSourceNote, setEditPageSourceNote] = useState("");
   const [confirmDeletePageId, setConfirmDeletePageId] = useState<string | null>(
     null,

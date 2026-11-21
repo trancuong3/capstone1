@@ -1,4 +1,10 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -183,12 +189,11 @@ describe("Mobile Book Scanner & EXIF/Resolution OCR Pre-processing", () => {
           drawImage: drawImageSpy,
         }) as unknown as CanvasRenderingContext2D,
     );
-    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(function (
-      this: HTMLCanvasElement,
-      cb: BlobCallback,
-    ) {
-      cb(new Blob(["optimized-upright-jpeg"], { type: "image/jpeg" }));
-    });
+    vi.spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(
+      function (this: HTMLCanvasElement, cb: BlobCallback) {
+        cb(new Blob(["optimized-upright-jpeg"], { type: "image/jpeg" }));
+      },
+    );
 
     const exifBytes = buildJpegWithExifOrientation(6);
     const rawCameraPhoto = new File([exifBytes], "IMG_20261122.JPG", {

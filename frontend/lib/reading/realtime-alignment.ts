@@ -395,7 +395,10 @@ export class RealtimeAlignmentEngine {
             combined,
             this.bookWords[cursor].normalizedText,
           );
-          if (bufferedPhonics && bufferedPhonics.consumedCount > buffered.length) {
+          if (
+            bufferedPhonics &&
+            bufferedPhonics.consumedCount > buffered.length
+          ) {
             const consumedFromNew =
               bufferedPhonics.consumedCount - buffered.length;
             matched += consumedFromNew;

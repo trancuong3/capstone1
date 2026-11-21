@@ -555,7 +555,9 @@ describe("Parent Private Books UI (Sách của tôi)", () => {
     // 1. Edit book -> shows full re-check warning -> saves -> resets readable status
     await user.click(screen.getByRole("button", { name: "Sửa sách test tạo" }));
     expect(
-      screen.getByText(/toàn bộ các trang của sách sẽ phải kiểm tra lại từ đầu/),
+      screen.getByText(
+        /toàn bộ các trang của sách sẽ phải kiểm tra lại từ đầu/,
+      ),
     ).toBeInTheDocument();
     const titleInput = screen.getByLabelText("Tên sách chỉnh sửa");
     await user.clear(titleInput);

@@ -136,9 +136,12 @@ describe("Android WebView Audio, MediaRecorder & Speech Fallback Compatibility",
     }
     vi.stubGlobal("Audio", FakeAudioElement);
 
-    const player = new TtsPlayback({ synthesize } as never, {
-      synthesizeTimed,
-    } as never);
+    const player = new TtsPlayback(
+      { synthesize } as never,
+      {
+        synthesizeTimed,
+      } as never,
+    );
     await player.play("Xin chào bé yêu");
     expect(synthesize).toHaveBeenCalledTimes(1);
     expect(player.getState()).toBe("completed");
@@ -152,7 +155,9 @@ describe("Android WebView Audio, MediaRecorder & Speech Fallback Compatibility",
     expect(
       (window as unknown as Record<string, unknown>).webkitSpeechRecognition,
     ).toBeUndefined();
-    expect(PREFERRED_RECORDER_MIME_TYPES).toContain("audio/mp4;codecs=mp4a.40.2");
+    expect(PREFERRED_RECORDER_MIME_TYPES).toContain(
+      "audio/mp4;codecs=mp4a.40.2",
+    );
 
     const stopTrack = vi.fn();
     const track = {

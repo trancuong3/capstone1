@@ -144,7 +144,10 @@ export function CameraPreview({
           cameraRequestRef.current = null;
         }
         if (!active || !mountedRef.current || cameraSuspendedRef.current) {
-          if (cameraSuspendedRef.current || cameraEffectCountRef.current === 0) {
+          if (
+            cameraSuspendedRef.current ||
+            cameraEffectCountRef.current === 0
+          ) {
             acquiredStream.getTracks().forEach((track) => track.stop());
           }
           return;
@@ -198,12 +201,7 @@ export function CameraPreview({
       scanInFlightRef.current = false;
       if (cameraEffectCountRef.current === 0) stopCamera();
     };
-  }, [
-    cameraSessionNonce,
-    enableScanner,
-    onCameraUnavailable,
-    stopCamera,
-  ]);
+  }, [cameraSessionNonce, enableScanner, onCameraUnavailable, stopCamera]);
 
   // Release camera tracks immediately when Android Activity enters background or tab hides,
   // while allowing an instant single-tap "Bật lại camera" recovery on return.

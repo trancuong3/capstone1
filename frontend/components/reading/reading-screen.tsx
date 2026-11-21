@@ -1818,11 +1818,11 @@ function ReadingSessionScreen({
                   activeReinforce.span.words[nextIdx]?.text;
                 return Boolean(
                   reinforceTarget &&
-                    isLikelyPhonicsCueForWord(
-                      rawText,
-                      reinforceTarget,
-                      sentenceReinforcementRef.current.getBufferedSpellingTokens(),
-                    ),
+                  isLikelyPhonicsCueForWord(
+                    rawText,
+                    reinforceTarget,
+                    sentenceReinforcementRef.current.getBufferedSpellingTokens(),
+                  ),
                 );
               }
               const targetId = engine.getSnapshot().currentWordId;
@@ -1831,11 +1831,11 @@ function ReadingSessionScreen({
               )?.text;
               return Boolean(
                 targetWord &&
-                  isLikelyPhonicsCueForWord(
-                    rawText,
-                    targetWord,
-                    engine.getBufferedSpellingTokens(),
-                  ),
+                isLikelyPhonicsCueForWord(
+                  rawText,
+                  targetWord,
+                  engine.getBufferedSpellingTokens(),
+                ),
               );
             };
             const newFinals = browserTranscriptCollectorRef.current.addResults(
@@ -1916,7 +1916,7 @@ function ReadingSessionScreen({
                   pageHelpWordRef.current?.wordId ?? null;
                 const wasMispronouncedBefore = Boolean(
                   helpedWordBefore &&
-                    mispronouncedWordIdsRef.current.has(helpedWordBefore),
+                  mispronouncedWordIdsRef.current.has(helpedWordBefore),
                 );
                 if (pageHelpWordRef.current)
                   pageHelpWordRef.current.awaitingAttempt = false;
@@ -1930,15 +1930,20 @@ function ReadingSessionScreen({
                   prevSnapshot.spelledOutWordIds?.size ?? 0;
                 const scored = engine.addFinalTranscript(part);
                 applyRealtimeSnapshot(scored);
-                if (scored.statusByWordId.get(helpedWordBefore ?? "")?.status === "MATCH") {
+                if (
+                  scored.statusByWordId.get(helpedWordBefore ?? "")?.status ===
+                  "MATCH"
+                ) {
                   pageHelpWordRef.current = null;
                 }
 
                 // Visual companion celebration for quick self-correction or phonics spelling
-                if ((scored.selfCorrectedSlipWordIds?.size ?? 0) > slipBeforeSize) {
-                  const slipId = [...(scored.selfCorrectedSlipWordIds ?? [])].at(
-                    -1,
-                  );
+                if (
+                  (scored.selfCorrectedSlipWordIds?.size ?? 0) > slipBeforeSize
+                ) {
+                  const slipId = [
+                    ...(scored.selfCorrectedSlipWordIds ?? []),
+                  ].at(-1);
                   const slipWord =
                     page?.words.find((w) => w.word_id === slipId)?.text ?? "";
                   if (slipWord) {
@@ -1954,9 +1959,12 @@ function ReadingSessionScreen({
                 } else if (
                   (scored.spelledOutWordIds?.size ?? 0) > spelledBeforeSize
                 ) {
-                  const spelledId = [...(scored.spelledOutWordIds ?? [])].at(-1);
+                  const spelledId = [...(scored.spelledOutWordIds ?? [])].at(
+                    -1,
+                  );
                   const spelledWord =
-                    page?.words.find((w) => w.word_id === spelledId)?.text ?? "";
+                    page?.words.find((w) => w.word_id === spelledId)?.text ??
+                    "";
                   if (spelledWord) {
                     setCompanionBubble({
                       mood: "celebrating",

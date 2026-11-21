@@ -10,6 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from .colab_state_store import LocalDriveJobStateStore, MANIFEST_NAME
+from . import colab_worker as colab_worker_mod
 from .colab_worker import ColabWorker
 
 
@@ -274,7 +275,11 @@ class ColabWorkerDriveProxyAndGateFixTests(unittest.TestCase):
                         return_value=(run_dir / "r.json", run_dir / "r.json", run_dir),
                     ),
                     patch.object(worker, "materialize_parent", return_value=orig_file),
-                    patch("ai.vietocr_v2.colab_worker.sha256_file", return_value="380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59"),
+                    patch.object(
+                        colab_worker_mod,
+                        "sha256_file",
+                        return_value="380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59",
+                    ),
                     patch.object(worker, "call", side_effect=fake_call),
                 ):
                     worker.process_benchmark_only_job(job, run_dir, {})

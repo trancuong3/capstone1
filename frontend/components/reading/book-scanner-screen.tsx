@@ -544,7 +544,8 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
       {cameraUnavailable ? (
         <StatusMessage title="Camera chưa sẵn sàng" tone="error">
           Không thể mở camera trực tiếp hoặc quyền camera đang bị tắt. Ba mẹ có
-          thể bấm Chụp bằng Camera máy hoặc Chọn ảnh trang sách để quét OCR ngay.
+          thể bấm Chụp bằng Camera máy hoặc Chọn ảnh trang sách để quét OCR
+          ngay.
         </StatusMessage>
       ) : null}
 
@@ -558,7 +559,10 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
         />
       ) : (
         <div className="flex min-h-[340px] flex-col items-center justify-center gap-4 rounded-card bg-desk p-5 text-center sm:min-h-[380px] sm:p-6">
-          <Camera aria-hidden="true" className="size-12 text-primary sm:size-14" />
+          <Camera
+            aria-hidden="true"
+            className="size-12 text-primary sm:size-14"
+          />
           <div>
             <h2 className="text-xl font-extrabold text-ink sm:text-2xl">
               Camera đang tắt

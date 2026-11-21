@@ -297,7 +297,12 @@ export async function preprocessScanImage(
     ctx.save();
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
-    applyExifCanvasTransform(ctx, manualOrientation, target.width, target.height);
+    applyExifCanvasTransform(
+      ctx,
+      manualOrientation,
+      target.width,
+      target.height,
+    );
 
     const drawWidth = target.swappedAxes ? target.height : target.width;
     const drawHeight = target.swappedAxes ? target.width : target.height;
@@ -319,14 +324,10 @@ export async function preprocessScanImage(
       };
     }
 
-    const optimizedFile = new File(
-      [blob],
-      normalizeOutputJpegName(file.name),
-      {
-        type: "image/jpeg",
-        lastModified: file.lastModified || Date.now(),
-      },
-    );
+    const optimizedFile = new File([blob], normalizeOutputJpegName(file.name), {
+      type: "image/jpeg",
+      lastModified: file.lastModified || Date.now(),
+    });
     return {
       file: optimizedFile,
       wasTransformed: true,
