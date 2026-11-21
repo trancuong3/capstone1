@@ -104,6 +104,7 @@ def percentile(data: list[float], quantile: float) -> float | None:
 
 def evaluate(
     cases: list[Case], *, expected_profile: str | None, expected_sha: str | None,
+    private_error_records: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     # Torch FIRST: avoids Windows shm.dll dependency-loading conflicts observed
     # with Paddle 2.6.2 imported first in the ViRead CUDA 12.6 environment.
@@ -120,7 +121,7 @@ def evaluate(
     conditions: Counter[str] = Counter()
     condition_quality: dict[str, dict[str, int]] = {}
 
-    for case in cases:
+    for case_index, case in enumerate(cases, 1):
         try:
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
@@ -151,6 +152,14 @@ def evaluate(
                 raise ValueError("unexpected_checkpoint")
             predicted = normalize(output["text"])
             gt = case.truth
+            private_record = None
+            if private_error_records is not None:
+                from scripts.ocr_word_error_diagnostics import analyze_word_errors
+                private_record = {
+                    "case_number": case_index,
+                    "condition": case.condition,
+                    **analyze_word_errors(gt, predicted),
+                }
             chars_wrong += edit_distance(list(predicted), list(gt))
             chars_total += len(gt)
             words_wrong += edit_distance(predicted.split(), gt.split())
@@ -175,6 +184,8 @@ def evaluate(
             if torch.cuda.is_available():
                 gpu_allocated.append(torch.cuda.max_memory_allocated() / 1024**2)
                 gpu_reserved.append(torch.cuda.max_memory_reserved() / 1024**2)
+            if private_record is not None and private_error_records is not None:
+                private_error_records.append(private_record)
         except Exception as exc:
             # Do not print exception messages: some include source paths or OCR text.
             failures[type(exc).__name__] += 1
@@ -246,6 +257,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-sha", type=str, help="Fail if loaded checkpoint SHA256 differs")
     parser.add_argument("--max-cer", type=float, help="Optional prespecified micro CER threshold")
     parser.add_argument("--max-wer", type=float, help="Optional prespecified micro WER threshold")
+    parser.add_argument(
+        "--private-error-output", type=Path,
+        help="OPT-IN sensitive JSONL with mismatched words; store only beside private dataset, never commit/share",
+    )
     args = parser.parse_args(argv)
     # Worktrees do not inherit the developer's original checkout .env.  Load
     # an explicitly selected local environment file before the OCR engine
@@ -281,7 +296,30 @@ def main(argv: list[str] | None = None) -> int:
     if len(cases) < args.min_pages:
         print(f"FAIL: {len(cases)} distinct cases, requires {args.min_pages}", file=sys.stderr)
         return 2
-    report = evaluate(cases, expected_profile=args.expected_profile, expected_sha=args.expected_sha)
+    private_path = args.private_error_output.expanduser().resolve() if args.private_error_output else None
+    if private_path is not None:
+        # Diagnostics contain OCR and ground-truth words, unlike the aggregate.
+        # Explicitly restrict storage to the private dataset's own directory tree.
+        if private_path.suffix.lower() != ".jsonl":
+            parser.error("--private-error-output must end with .jsonl")
+        if not private_path.is_relative_to(args.dataset.resolve().parent):
+            parser.error("--private-error-output must be within the private dataset directory")
+        if private_path == args.dataset.resolve():
+            parser.error("--private-error-output cannot replace the dataset manifest")
+        if args.output and private_path == args.output.resolve():
+            parser.error("--private-error-output cannot replace the aggregate report")
+        if args.env_file and private_path == args.env_file.resolve():
+            parser.error("--private-error-output cannot replace the environment file")
+        if private_path.exists():
+            parser.error("--private-error-output already exists; choose a new filename")
+    private_errors: list[dict[str, object]] | None = [] if private_path else None
+    if private_errors is None:
+        report = evaluate(cases, expected_profile=args.expected_profile, expected_sha=args.expected_sha)
+    else:
+        report = evaluate(
+            cases, expected_profile=args.expected_profile, expected_sha=args.expected_sha,
+            private_error_records=private_errors,
+        )
     metrics = report["recognition"]
     thresholds = {}
     if args.max_cer is not None:
@@ -292,6 +330,18 @@ def main(argv: list[str] | None = None) -> int:
     report["all_runtime_checks_passed"] = report["failed_cases"] == 0
     report["quality_thresholds_predeclared"] = bool(thresholds)
     encoded = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
+    if private_path is not None and private_errors is not None:
+        import os
+        try:
+            private_path.parent.mkdir(parents=True, exist_ok=True)
+            # Exclusive create avoids overwriting any existing user file.
+            fd = os.open(private_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as diagnostics_file:
+                for row in private_errors:
+                    diagnostics_file.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except OSError as exc:
+            print(f"Could not write private diagnostics: {type(exc).__name__}", file=sys.stderr)
+            return 2
     print(encoded)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
