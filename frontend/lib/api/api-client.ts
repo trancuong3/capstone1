@@ -257,6 +257,52 @@ const safeBackendMessages: Record<string, string> = {
   EMPTY_AUDIO: "Chưa nhận được âm thanh ghi âm. Con hãy thử nói lại nhé.",
   AUDIO_TOO_LARGE: "Đoạn ghi âm quá dài. Con hãy ghi âm ngắn gọn một từ nhé.",
   UNSUPPORTED_AUDIO: "Định dạng âm thanh chưa được hỗ trợ trên thiết bị này.",
+  "Khóa idempotency không hợp lệ.": "Khóa yêu cầu tải lên không hợp lệ. Vui lòng thử lại.",
+  "Loại nguồn sử dụng không hợp lệ.": "Loại nguồn sử dụng không hợp lệ.",
+  "Sách riêng đang bị đình chỉ hoặc ngừng hoạt động nên không thể tải thêm trang.":
+    "Sách riêng đang bị đình chỉ hoặc ngừng hoạt động nên không thể tải thêm trang.",
+  "Sách riêng đang bị đình chỉ hoặc ngừng hoạt động.":
+    "Sách riêng đang bị đình chỉ hoặc ngừng hoạt động.",
+  "Phiên bản trang đã thay đổi. Hãy tải lại trước khi chấp nhận chính tả.":
+    "Phiên bản trang đã thay đổi. Hãy tải lại trước khi chấp nhận chính tả.",
+  "Bước rà chính tả chưa hoàn tất.": "Bước rà chính tả chưa hoàn tất.",
+  "Không thể chỉnh sửa bản nộp đã hoàn tất hoặc đã hủy.":
+    "Không thể chỉnh sửa bản nộp đã hoàn tất hoặc đã hủy.",
+  "Phiên bản trang vừa thay đổi. Hãy tải lại.":
+    "Phiên bản trang vừa thay đổi. Hãy tải lại dữ liệu.",
+  "Khi thay ảnh cho một trang cụ thể, hãy chọn đúng 1 ảnh hoặc tài liệu 1 trang.":
+    "Khi thay ảnh cho một trang cụ thể, hãy chọn đúng 1 ảnh hoặc tài liệu 1 trang.",
+  "Chỉ có thể thử lại các trang đang ở trạng thái kiểm tra lỗi hoặc cần kiểm tra lại.":
+    "Chỉ có thể thử lại các trang đang ở trạng thái kiểm tra lỗi hoặc cần kiểm tra lại.",
+  "Không thể hủy trang đã thêm vào sách.": "Không thể hủy trang đã thêm vào sách.",
+  "Phiên bản trang không khớp snapshot hiện tại. Hãy tải lại trước khi gửi Admin.":
+    "Phiên bản trang đã thay đổi. Hãy tải lại trước khi gửi Admin.",
+  "Chỉ trang đang ở trạng thái Cần Admin duyệt mới có thể gửi yêu cầu xem xét.":
+    "Chỉ trang đang ở trạng thái Cần Admin duyệt mới có thể gửi yêu cầu xem xét.",
+  "Phiên bản hoặc hash của trang không khớp kết quả kiểm tra hiện hành.":
+    "Phiên bản trang đã thay đổi so với kết quả kiểm tra hiện hành. Hãy tải lại.",
+  "Trang có nội dung vi phạm mức chặn theo chính sách an toàn trẻ em nên không thể thêm vào sách.":
+    "Trang có nội dung vi phạm mức chặn theo chính sách an toàn trẻ em nên không thể thêm vào sách.",
+  "Trang chưa hoàn tất sạch OCR, rà chính tả và Tool Check cho đúng phiên bản hiện tại.":
+    "Trang chưa hoàn tất sạch OCR, rà chính tả và Tool Check cho đúng phiên bản hiện tại.",
+  "Vui lòng xem và chấp nhận đề xuất chính tả trước khi thêm trang vào sách.":
+    "Vui lòng xem và chấp nhận đề xuất chính tả trước khi thêm trang vào sách.",
+  "Phê duyệt của Admin không khớp đúng phiên bản/hash hiện tại của trang.":
+    "Phê duyệt của Admin không còn khớp với phiên bản hiện tại của trang.",
+  "Không tìm thấy quyết định phê duyệt hợp lệ của Admin cho đúng phiên bản này.":
+    "Chưa có quyết định phê duyệt hợp lệ của Admin cho phiên bản này.",
+  "Trang đang chờ kiểm tra, bị gắn cờ hoặc chưa được Admin phê duyệt nên không thể thêm vào sách.":
+    "Trang đang chờ kiểm tra, bị gắn cờ hoặc chưa được Admin phê duyệt nên không thể thêm vào sách.",
+  "Phiên bản trang đã thay đổi hoặc vừa được Admin khác xử lý. Hãy tải lại dữ liệu trước khi quyết định.":
+    "Phiên bản trang đã thay đổi hoặc vừa được Admin khác xử lý. Hãy tải lại trước khi quyết định.",
+  "Không thể phê duyệt trang của sách đang bị đình chỉ.":
+    "Không thể phê duyệt trang của sách đang bị đình chỉ.",
+  "Nội dung vi phạm mức chặn theo chính sách an toàn trẻ em không thể duyệt trực tiếp; phải yêu cầu chỉnh sửa hoặc từ chối.":
+    "Nội dung vi phạm mức chặn không thể duyệt bỏ qua; phải yêu cầu chỉnh sửa hoặc từ chối.",
+  "Trang hiện không ở trạng thái chờ Admin phê duyệt.":
+    "Trang hiện không ở trạng thái chờ Admin phê duyệt.",
+  "Sách riêng đang bị đình chỉ hoặc không còn khả dụng.":
+    "Sách riêng đang bị đình chỉ hoặc không còn khả dụng.",
 };
 
 function errorCode(status: number): ServiceErrorCode {
@@ -430,4 +476,85 @@ export function unavailableOperation(): Promise<never> {
       retryable: false,
     }),
   );
+}
+
+const activePrivateBlobUrls = new Set<string>();
+
+export function isPrivateApiMediaUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  return (
+    url.includes("/books/my-books/") ||
+    url.includes("/books/admin/quality/user-books/")
+  );
+}
+
+export function clearPrivateMediaMemoryCache(): void {
+  if (typeof URL === "undefined" || typeof URL.revokeObjectURL !== "function") {
+    activePrivateBlobUrls.clear();
+    return;
+  }
+  for (const blobUrl of activePrivateBlobUrls) {
+    try {
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      // Ignore already-revoked object URLs.
+    }
+  }
+  activePrivateBlobUrls.clear();
+}
+
+export function revokePrivateBlobUrl(blobUrl: string | null | undefined): void {
+  if (!blobUrl) return;
+  activePrivateBlobUrls.delete(blobUrl);
+  if (typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
+    try {
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      // Ignore already-revoked URLs.
+    }
+  }
+}
+
+/**
+ * Fetch an authenticated private image through the FastAPI media proxy using
+ * the active Bearer session token and `cache: "no-store"`. Never persists to
+ * browser storage or shared caches.
+ */
+export async function fetchAuthenticatedBlobUrl(
+  url: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  let token: string;
+  try {
+    const supabase = createBrowserSupabaseClient();
+    const { error: initError } = await supabase.auth.initialize();
+    if (initError) throw failure(401);
+    const { data, error } = await supabase.auth.getSession();
+    if (error || !data.session?.access_token) throw failure(401);
+    token = data.session.access_token;
+  } catch (error) {
+    if (error instanceof ServiceError) throw error;
+    throw failure(401);
+  }
+
+  const resolvedUrl = url.startsWith("/") ? `${getApiBaseUrl()}${url}` : url;
+  const response = await fetch(resolvedUrl, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    cache: "no-store",
+    credentials: "omit",
+    redirect: "error",
+    signal,
+  });
+
+  if (!response.ok) {
+    throw failure(response.status);
+  }
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  activePrivateBlobUrls.add(objectUrl);
+  return objectUrl;
 }

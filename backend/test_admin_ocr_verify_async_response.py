@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import os
 import unittest
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import UUID
+from uuid import UUID, uuid4
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:1/test")
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
@@ -13,7 +14,7 @@ os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 
 from sqlalchemy.exc import MissingGreenlet
 
-from app.schemas.admin_ocr import AdminOcrVerifyRequest
+from app.schemas.admin_ocr import AdminOcrProofreadAuditInput, AdminOcrVerifyRequest
 from app.services.admin_ocr_service import AdminOcrService, safety_content_hash
 from fastapi import HTTPException
 
@@ -121,14 +122,47 @@ class AdminOcrVerifyAsyncResponseTests(unittest.IsolatedAsyncioTestCase):
 
         workflow = SimpleNamespace(
             Id=WORKFLOW_ID,
+            PageId=PAGE_ID,
             PageRevisionId=REVISION_ID,
+            ImagePath="books/test/page.png",
+            ImageHash="a" * 64,
+            ProofreadText="Bé",
+            CandidateText="Bé",
+            CandidateHash=safety_content_hash("Bé"),
+            UncertainWordIndices=[],
+            ProofreadMetadata={"status": "SUCCEEDED"},
+            Status="READY_FOR_ADMIN_REVIEW",
+            Suitability="SUITABLE",
+            Findings=[],
             SafetyStatus="CONFIRMED",
+            SafetyConfirmedBy=ACTOR_ID,
             SafetyInputHash=safety_content_hash("Bé"),
+            SafetyMetadata={"scope": "TEXT", "total_chunks": 1, "scanned_chunks": 1, "coverage_complete": True},
+            ImageSafetyStatus="NOT_REVIEWED",
+            RightsProfileId=None,
+            RightsProfileVersion=None,
+            RightsProfileHash=None,
             OcrApprovedAt=None,
             OcrApprovedBy=None,
             FinalApprovedTextHash=None,
             ReviewEvents=[],
             UpdatedAt=None,
+        )
+        rights_profile = SimpleNamespace(
+            Id=uuid4(),
+            Scope="BOOK",
+            Status="REVIEWED",
+            SourceName="Tự biên soạn ViRead",
+            RightsHolder="ViRead",
+            UsageBasis="OWN_ORIGINAL",
+            EvidenceUrl="https://example.org/rights/1",
+            EvidenceReference="HD-1",
+            Notes="Bản quyền nội bộ.",
+            SourceFingerprint="f" * 64,
+            ProfileVersion=1,
+            ReferenceCheckStatus="NO_MATCH_IN_ALLOWED_CORPUS",
+            ReviewedBy=ACTOR_ID,
+            ReviewedAt=datetime.now(timezone.utc),
         )
         db.scalar.return_value = workflow
 
@@ -157,32 +191,82 @@ class AdminOcrVerifyAsyncResponseTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-        async def rollback_after_commit(_service, _book_id):
-            await db.rollback()
-            return False
-
-        with patch(
-            "app.services.book_content_quality_service.BookContentQualityService.auto_publish_if_eligible",
-            new=rollback_after_commit,
+        auto_publish_spy = AsyncMock(return_value=False)
+        with (
+            patch(
+                "app.services.admin_ocr_service.BookContentQualityRepository.effective_rights_profile",
+                new=AsyncMock(return_value=rights_profile),
+            ),
+            patch(
+                "app.services.admin_ocr_service.BookContentQualityRepository.open_image_or_safety_reports_for_page",
+                new=AsyncMock(return_value=0),
+            ),
+            patch(
+                "app.services.book_content_quality_service.BookContentQualityService.auto_publish_if_eligible",
+                new=auto_publish_spy,
+            ),
         ):
             result = await service.verify(ACTOR_ID, PAGE_ID, payload)
+            retry_result = await service.verify(ACTOR_ID, PAGE_ID, payload)
+            changed_payload = payload.model_copy(update={"corrected_text": "Khác"})
+            with self.assertRaises(HTTPException) as conflict:
+                await service.verify(ACTOR_ID, PAGE_ID, changed_payload)
+
+            # Direct verify without workflow_id or with MANUAL_FALLBACK / AI_AUTO_VERIFIED must be blocked.
+            persisted_revision["VerificationStatus"] = "NEEDS_REVIEW"
+            with self.assertRaises(HTTPException) as missing_wf:
+                await service.verify(
+                    ACTOR_ID, PAGE_ID, payload.model_copy(update={"workflow_id": None})
+                )
+            self.assertEqual(missing_wf.exception.status_code, 409)
+            self.assertEqual(missing_wf.exception.detail["code"], "AI_WORKFLOW_REQUIRED")
+
+            with self.assertRaises(HTTPException) as manual_bypass:
+                await service.verify(
+                    ACTOR_ID,
+                    PAGE_ID,
+                    payload.model_copy(
+                        update={
+                            "proofread_audit": AdminOcrProofreadAuditInput(
+                                mode="MANUAL_FALLBACK",
+                                checked_text="Bé",
+                                suggestions=[],
+                                reason_code="AI_CHECK_UNAVAILABLE",
+                            )
+                        }
+                    ),
+                )
+            self.assertEqual(manual_bypass.exception.status_code, 422)
+            self.assertEqual(manual_bypass.exception.detail["code"], "MANUAL_BYPASS_DISABLED")
+
+            with self.assertRaises(HTTPException) as auto_verify:
+                await service.verify(
+                    ACTOR_ID,
+                    PAGE_ID,
+                    payload.model_copy(
+                        update={
+                            "proofread_audit": AdminOcrProofreadAuditInput(
+                                mode="AI_AUTO_VERIFIED",
+                                checked_text="Bé",
+                                suggestions=[],
+                            )
+                        }
+                    ),
+                )
+            self.assertEqual(auto_verify.exception.status_code, 422)
+            self.assertEqual(auto_verify.exception.detail["code"], "AUTO_VERIFICATION_DISABLED")
 
         self.assertEqual(result, (PAGE_ID, REVISION_ID, "VERIFIED", []))
-        retry_result = await service.verify(ACTOR_ID, PAGE_ID, payload)
         self.assertEqual(retry_result, result)
-        changed_payload = payload.model_copy(update={"corrected_text": "Khác"})
-        with self.assertRaises(HTTPException) as conflict:
-            await service.verify(ACTOR_ID, PAGE_ID, changed_payload)
         self.assertEqual(conflict.exception.status_code, 409)
         self.assertEqual(
             conflict.exception.detail,
             "Only a revision awaiting review can be verified",
         )
-        self.assertEqual(service.repo.page.await_count, 4)
-        self.assertEqual(service.repo.revision.await_count, 4)
+        auto_publish_spy.assert_not_awaited()
         service.repo.sync_words.assert_awaited_once()
         service.repo.update_revision_verification.assert_called_once()
+        db.add.assert_called_once()
         db.execute.assert_awaited_once()
         db.commit.assert_awaited_once()
-        db.rollback.assert_awaited_once()
 

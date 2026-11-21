@@ -49,6 +49,7 @@ class MetadataQualityRepository:
             .select_from(other)
             .where(
                 other.Id != Book.Id,
+                other.VisibilityScope == "CATALOG",
                 func.length(current_title) > 0,
                 func.length(other_title) > 0,
                 func.length(current_author) > 0,
@@ -94,7 +95,7 @@ class MetadataQualityRepository:
             func.count(case((issues["INVALID_GRADE_RANGE"], Book.Id))).label("invalid_grade_range"),
             func.count(case((issues["POSSIBLE_DUPLICATE"], Book.Id))).label("books_in_duplicate_groups"),
             func.count(case((any_issue, Book.Id))).label("books_with_issues"),
-        ).select_from(Book)
+        ).select_from(Book).where(Book.VisibilityScope == "CATALOG")
         row = (await self.db.execute(statement)).one()
 
         normalized_title = self._normalized_title(Book)
@@ -105,6 +106,7 @@ class MetadataQualityRepository:
                 normalized_author.label("normalized_author"),
             )
             .where(
+                Book.VisibilityScope == "CATALOG",
                 func.length(normalized_title) > 0,
                 func.length(normalized_author) > 0,
             )
@@ -134,6 +136,7 @@ class MetadataQualityRepository:
     ):
         conditions = self._issue_conditions()
         filters = [
+            Book.VisibilityScope == "CATALOG",
             conditions[issue_type] if issue_type else or_(*conditions.values())
         ]
         if search and search.strip():

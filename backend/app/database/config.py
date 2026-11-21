@@ -38,6 +38,10 @@ SUPABASE_AVATAR_BUCKET = (
     (os.getenv("SUPABASE_AVATAR_BUCKET") or "viread-avatars").strip()
     or "viread-avatars"
 )
+SUPABASE_PRIVATE_BOOKS_BUCKET = (
+    (os.getenv("SUPABASE_PRIVATE_BOOKS_BUCKET") or "viread-private-books").strip()
+    or "viread-private-books"
+)
 
 # Server-only credentials for Supabase Storage/Auth Admin. Prefer the current
 # secret API key and retain the legacy service-role key for existing deployments.

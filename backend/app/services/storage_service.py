@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
+from pathlib import Path
 from urllib.parse import quote, urlsplit
 
 import requests
 from fastapi import HTTPException, status
 
 from app.database.config import (
+    APP_ENVIRONMENT,
     SUPABASE_ADMIN_KEY,
     SUPABASE_STORAGE_BUCKET,
     SUPABASE_URL,
@@ -119,6 +122,34 @@ def _upload_failure_detail(http_status: int | None, error_code: str | None) -> s
     return "Could not save the image to Supabase Storage"
 
 
+def _local_storage_path(object_path: str, bucket_name: str | None = None) -> Path | None:
+    """Isolated local filesystem storage for test/local runs only (never production)."""
+    if APP_ENVIRONMENT == "production":
+        return None
+    raw_root = (os.getenv("VIREAD_LOCAL_STORAGE_DIR") or "").strip()
+    if not raw_root:
+        return None
+    normalized_bucket = (bucket_name or SUPABASE_STORAGE_BUCKET or "default").strip()
+    if not normalized_bucket or "/" in normalized_bucket or "\\" in normalized_bucket or ".." in normalized_bucket:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Supabase Storage is not configured",
+        )
+    if not object_path or object_path.startswith(("/", "\\", "http://", "https://")) or ".." in object_path.split("/"):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The stored image is not a Storage object path",
+        )
+    base = (Path(raw_root).resolve() / normalized_bucket).resolve()
+    target = (base / object_path).resolve()
+    if not target.is_relative_to(base):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="The stored image is not a Storage object path",
+        )
+    return target
+
+
 def upload_object(
     object_path: str,
     data: bytes,
@@ -127,6 +158,16 @@ def upload_object(
     bucket_name: str | None = None,
     upsert: bool = False,
 ) -> None:
+    local_target = _local_storage_path(object_path, bucket_name)
+    if local_target is not None:
+        local_target.parent.mkdir(parents=True, exist_ok=True)
+        if not upsert and local_target.exists():
+            raise StorageUploadFailure(
+                "Could not save the image to Supabase Storage",
+                cleanup_may_be_needed=False,
+            )
+        local_target.write_bytes(data)
+        return
     # Separate config/client initialization from the actual remote write. If this
     # fails, Storage was never asked to create an object and cleanup is pointless.
     bucket = _storage_bucket() if bucket_name is None else _storage_bucket(bucket_name)
@@ -164,6 +205,11 @@ def upload_object(
 
 def delete_object(object_path: str, *, bucket_name: str | None = None) -> None:
     try:
+        local_target = _local_storage_path(object_path, bucket_name)
+        if local_target is not None:
+            if local_target.is_file():
+                local_target.unlink()
+            return
         bucket = _storage_bucket() if bucket_name is None else _storage_bucket(bucket_name)
         bucket.remove([object_path])
         log_diagnostic(
@@ -184,14 +230,29 @@ def delete_object(object_path: str, *, bucket_name: str | None = None) -> None:
         return
 
 
-def download_object(object_path: str) -> bytes:
+def download_object(object_path: str, *, bucket_name: str | None = None) -> bytes:
     if not object_path or object_path.startswith(("http://", "https://")):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="The stored image is not a Storage object path",
         )
+    local_target = _local_storage_path(object_path, bucket_name)
+    if local_target is not None:
+        if not local_target.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Could not read the image from Supabase Storage",
+            )
+        data = local_target.read_bytes()
+        if not data:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Could not read the image from Supabase Storage",
+            )
+        return data
     try:
-        result = _storage_bucket().download(object_path)
+        bucket = _storage_bucket() if bucket_name is None else _storage_bucket(bucket_name)
+        result = bucket.download(object_path)
         if not isinstance(result, (bytes, bytearray)) or not result:
             raise ValueError("empty Storage object")
         return bytes(result)

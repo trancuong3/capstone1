@@ -2,6 +2,7 @@
 
 import {
   BarChart3,
+  BookMarked,
   CalendarClock,
   CircleHelp,
   Gamepad2,
@@ -33,6 +34,7 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useProfileService } from "@/hooks/use-profile-service";
+import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
 import { cn } from "@/lib/utils/cn";
 import type { ParentProfileDTO } from "@/types/profile";
 
@@ -45,6 +47,11 @@ const navigationItems = [
     href: "/dashboard",
     icon: LayoutDashboard,
     label: "Tổng quan",
+  },
+  {
+    href: "/my-books",
+    icon: BookMarked,
+    label: "Sách của tôi",
   },
   {
     href: "/reports",
@@ -189,6 +196,10 @@ export function AppShell({ children }: AppShellProps) {
     };
   }, [isAccountMenuVisible]);
 
+  useEffect(() => {
+    clearPrivateMediaMemoryCache();
+  }, [user?.id]);
+
   async function handleSignOut() {
     if (isSigningOut) return;
 
@@ -196,6 +207,7 @@ export function AppShell({ children }: AppShellProps) {
     setIsSigningOut(true);
 
     try {
+      clearPrivateMediaMemoryCache();
       await authService.signOut();
       setAccountMenu((current) => ({ ...current, isOpen: false }));
       router.replace("/login");

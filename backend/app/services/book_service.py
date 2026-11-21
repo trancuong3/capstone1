@@ -8,6 +8,11 @@ from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Book
+from app.policies.book_access import (
+    MODERATION_SUSPENDED,
+    is_book_private,
+    private_page_image_url,
+)
 from app.repositories.book_repository import (
     AdminCatalogRepository,
     BookRepository,
@@ -47,9 +52,11 @@ class BookService:
         return await self.repository.create(Book(**values))
 
     async def list_pages(self, book_id: UUID):
-        if await CatalogRepository(self.repository.db).get(book_id) is None:
+        catalog_repo = CatalogRepository(self.repository.db)
+        book = await catalog_repo.get(book_id)
+        if book is None or is_book_private(book):
             raise HTTPException(status_code=404, detail="Resource not found")
-        if not await CatalogRepository(self.repository.db).is_eligible(book_id):
+        if not await catalog_repo.is_eligible(book_id):
             raise HTTPException(
                 status_code=409,
                 detail={
@@ -73,13 +80,55 @@ class CatalogService:
         if await self.repository.role(actor_id) != "parent":
             raise HTTPException(status_code=403, detail="Access denied")
 
-    async def list(self, search: str | None, author: str | None, grade: int | None):
-        return [CatalogBookResponse.model_validate(book) for book in await self.repository.list(search, author, grade)]
+    async def list(
+        self,
+        search: str | None,
+        author: str | None,
+        grade: int | None,
+        *,
+        actor_id: UUID | None = None,
+        include_private: bool = False,
+    ):
+        if include_private and actor_id is not None:
+            books = await self.repository.list(
+                search,
+                author,
+                grade,
+                actor_id=actor_id,
+                include_private=True,
+            )
+        else:
+            books = await self.repository.list(search, author, grade)
+        return [CatalogBookResponse.model_validate(book) for book in books]
 
-    async def get(self, book_id: UUID):
+    async def _require_readable_book(
+        self, book_id: UUID, *, actor_id: UUID | None = None
+    ) -> Book:
         book = await self.repository.get(book_id)
         if book is None:
             raise HTTPException(status_code=404, detail="Resource not found")
+        if is_book_private(book):
+            if actor_id is None or getattr(book, "OwnerParentId", None) != actor_id:
+                raise HTTPException(status_code=404, detail="Resource not found")
+            if getattr(book, "ModerationStatus", "ACTIVE") == MODERATION_SUSPENDED:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "CONTENT_INACTIVE",
+                        "message": "Sách riêng này đang bị Admin đình chỉ và tạm ngừng đọc.",
+                    },
+                )
+            if book.LifecycleStatus != "ACTIVE":
+                raise HTTPException(status_code=409, detail={"code": "CONTENT_INACTIVE"})
+            if not await self.repository.is_readable(book_id, actor_id):
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "CONTENT_INACTIVE",
+                        "message": "Sách riêng chưa có đủ trang đã kiểm tra để bé đọc.",
+                    },
+                )
+            return book
         if book.LifecycleStatus != "ACTIVE":
             raise HTTPException(status_code=409, detail={"code": "CONTENT_INACTIVE"})
         if not await self.repository.is_eligible(book_id):
@@ -90,11 +139,26 @@ class CatalogService:
                     "message": "Sách chưa hoàn tất OCR và Child Safety cho toàn bộ trang hiện tại.",
                 },
             )
+        return book
+
+    async def get(self, book_id: UUID, *, actor_id: UUID | None = None):
+        book = await self._require_readable_book(book_id, actor_id=actor_id)
         return CatalogBookResponse.model_validate(book)
 
-    async def previews(self, book_id: UUID):
-        await self.get(book_id)
-        pages = await self.repository.previews(book_id)
+    async def previews(
+        self,
+        book_id: UUID,
+        *,
+        actor_id: UUID | None = None,
+        base_url: str | None = None,
+    ):
+        book = await self._require_readable_book(book_id, actor_id=actor_id)
+        private = is_book_private(book)
+        pages = (
+            await self.repository.previews(book_id, private=True)
+            if private
+            else await self.repository.previews(book_id)
+        )
         snapshots = [
             {
                 "page_id": page.Id,
@@ -109,8 +173,16 @@ class CatalogService:
         await self.repository.db.rollback()
         previews = []
         for page in snapshots:
-            # Preserve the existing Storage error contract after releasing the DB transaction.
-            preview_url = create_signed_image_url(page["image_path"])
+            if private:
+                preview_url = private_page_image_url(
+                    book_id,
+                    page["page_id"],
+                    revision_id=page["current_verified_revision_id"],
+                    base_url=base_url,
+                )
+            else:
+                # Preserve the existing Storage error contract after releasing the DB transaction.
+                preview_url = create_signed_image_url(page["image_path"])
             previews.append(CatalogPagePreviewResponse(
                 page_id=page["page_id"],
                 page_number=page["page_number"],
@@ -147,7 +219,7 @@ class AdminCatalogService:
 
     async def book(self, book_id: UUID):
         row = await self.repository.get(book_id)
-        if row is None:
+        if row is None or is_book_private(row):
             raise HTTPException(status_code=404, detail="Resource not found")
         try:
             return AdminBookMetadataResponse.model_validate(row)

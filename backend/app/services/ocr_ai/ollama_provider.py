@@ -68,6 +68,11 @@ class OllamaOcrProvider:
                 transport=self._transport,
             ) as client:
                 response = await client.post("api/chat", json=payload)
+                # Older or stricter Ollama builds may reject JSON Schema in `format`.
+                # Retry once in plain JSON mode; decode_and_validate_content remains authoritative.
+                if response.status_code in {400, 422} and isinstance(payload.get("format"), dict):
+                    fallback_payload = {**payload, "format": "json"}
+                    response = await client.post("api/chat", json=fallback_payload)
         except httpx.TimeoutException as exc:
             raise OcrProviderError(
                 provider=self.name, code="PROVIDER_TIMEOUT", status_code=504
@@ -77,12 +82,18 @@ class OllamaOcrProvider:
                 provider=self.name, code="PROVIDER_NETWORK", status_code=503
             ) from exc
         if response.status_code != 200:
+            upstream_status = response.status_code
+            if upstream_status == 404:
+                code = "MODEL_UNAVAILABLE"
+            elif upstream_status in {400, 422}:
+                code = "PROVIDER_REJECTED"
+            else:
+                code = "PROVIDER_UNAVAILABLE"
             raise OcrProviderError(
                 provider=self.name,
-                code="MODEL_UNAVAILABLE"
-                if response.status_code in (400, 404)
-                else "PROVIDER_UNAVAILABLE",
+                code=code,
                 status_code=503,
+                upstream_status_code=upstream_status,
             )
         try:
             data = response.json()

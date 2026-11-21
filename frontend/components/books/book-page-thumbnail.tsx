@@ -1,5 +1,7 @@
 import Image from "next/image";
 
+import { AuthenticatedImage } from "@/components/common/authenticated-image";
+import { isPrivateApiMediaUrl } from "@/lib/api/api-client";
 import { cn } from "@/lib/utils/cn";
 import type { BookPagePreviewDTO } from "@/types/book";
 
@@ -14,6 +16,7 @@ export function BookPageThumbnail({
   onSelect,
   page,
 }: BookPageThumbnailProps) {
+  const isPrivateMedia = isPrivateApiMediaUrl(page.preview_url);
   return (
     <button
       aria-label={`Chọn trang ${page.page_number}`}
@@ -28,14 +31,22 @@ export function BookPageThumbnail({
       type="button"
     >
       <span className="relative h-[107px] w-40 overflow-hidden rounded-lg bg-cream shadow-sm">
-        <Image
-          alt={`Ảnh xem trước trang ${page.page_number}`}
-          className="object-contain px-6 py-4"
-          fill
-          sizes="160px"
-          src={page.preview_url}
-          unoptimized
-        />
+        {isPrivateMedia ? (
+          <AuthenticatedImage
+            alt={`Ảnh xem trước trang ${page.page_number}`}
+            className="h-full w-full object-contain px-4 py-2"
+            src={page.preview_url}
+          />
+        ) : (
+          <Image
+            alt={`Ảnh xem trước trang ${page.page_number}`}
+            className="object-contain px-6 py-4"
+            fill
+            sizes="160px"
+            src={page.preview_url}
+            unoptimized
+          />
+        )}
         <span className="absolute bottom-2 left-2 right-2 z-10 text-[5px] font-semibold text-ink">
           Trang sách đã được xác minh
         </span>

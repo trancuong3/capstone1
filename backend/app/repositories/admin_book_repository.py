@@ -19,7 +19,9 @@ class AdminBookRepository:
         return await get_cached_profile_role(self.db, actor_id)
 
     async def get(self, book_id: UUID) -> Book | None:
-        return await self.db.scalar(select(Book).where(Book.Id == book_id))
+        return await self.db.scalar(
+            select(Book).where(Book.Id == book_id, Book.VisibilityScope == "CATALOG")
+        )
 
     async def is_ready_for_children(self, book_id: UUID) -> bool:
         return await CatalogRepository(self.db).is_ready_for_children(book_id)

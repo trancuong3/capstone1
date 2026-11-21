@@ -7,6 +7,7 @@ const parentRoutePrefixes = [
   "/profile",
   "/children",
   "/books",
+  "/my-books",
   "/reading",
   "/sessions",
   "/reports",

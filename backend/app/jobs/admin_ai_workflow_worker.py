@@ -111,22 +111,21 @@ async def _load(workflow_id: UUID) -> dict[str, object] | None:
         }
 
 
+def _extract_error_code(exc: Exception) -> str:
+    explicit = getattr(exc, "ocr_error_code", None) or getattr(exc, "code", None)
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()[:80]
+    if isinstance(exc, HTTPException):
+        if isinstance(exc.detail, dict) and isinstance(exc.detail.get("code"), str):
+            return str(exc.detail["code"]).strip()[:80]
+        return f"HTTP_{exc.status_code}"
+    return type(exc).__name__.upper()[:80]
+
+
 async def _try_auto_publish(book_id: UUID) -> None:
-    if not isinstance(book_id, UUID):
-        return
-    try:
-        async with AsyncSessionLocal() as session:
-            await BookContentQualityService(
-                BookContentQualityRepository(session)
-            ).auto_publish_if_eligible(book_id)
-    except Exception as exc:
-        log_diagnostic(
-            logger,
-            logging.ERROR,
-            event="book_auto_publish_attempt_failed",
-            book_id=str(book_id),
-            error_code=type(exc).__name__.upper(),
-        )
+    """Automatic publication is disabled; new content requires explicit Admin approval."""
+    del book_id
+    return None
 
 
 async def _progress_loop(
@@ -217,15 +216,18 @@ async def _run_proofreading(snapshot: dict[str, object], worker_id: str) -> None
             return None, exc
 
     # Safety starts from the immutable OCR snapshot in parallel with
-    # proofreading. If proofreading changes the text, a hash-bound follow-up
-    # safety scan is queued on the existing worker after both results persist.
+    # proofreading only when cloud providers are active. When running
+    # Ollama-only on local CPU/GPU, run Child Safety sequentially after
+    # proofreading on the post-proofread candidate to avoid contention and
+    # wasted pre-proofread inference.
+    cloud_parallel_allowed = bool(getattr(config, "cloud_enabled", True))
     cached_safety = (
         snapshot.get("safety_input_hash") == input_hash
         and snapshot.get("safety_status") in {"PROVISIONAL", "CONFIRMED"}
     )
     safety_task = (
         None
-        if cached_safety or proofread_retry_only
+        if cached_safety or proofread_retry_only or not cloud_parallel_allowed
         else asyncio.create_task(scan_original_text())
     )
     corrected: str | None = None
@@ -267,12 +269,24 @@ async def _run_proofreading(snapshot: dict[str, object], worker_id: str) -> None
             "prompt_version": PROOFREAD_PROMPT_VERSION,
             "processing_time_ms": proofread_duration_ms,
             "status": "SUCCEEDED",
+            "uncertain_count": len(uncertain_indices),
         }
+    needs_followup_safety_error = False
     async with AsyncSessionLocal() as session:
         row = await AdminAiWorkflowRepository(session).get(workflow_id, lock=True)
         now = datetime.now(timezone.utc)
         if row is None or not _owns_active_claim(row, worker_id, now):
             await session.rollback()
+            return
+        if getattr(row, "OcrApprovedAt", None) is not None or (
+            getattr(row, "AdminInputHash", None)
+            and row.AdminInputHash != input_hash
+        ):
+            # Late completion for a workflow whose revision/input changed or was finalized.
+            row.WorkerId = None
+            row.LeaseExpiresAt = None
+            row.UpdatedAt = now
+            await session.commit()
             return
         if corrected is not None and corrected_hash is not None and run_metadata is not None:
             row.ProofreadText = corrected
@@ -291,6 +305,8 @@ async def _run_proofreading(snapshot: dict[str, object], worker_id: str) -> None
                 "changed_by": "AI_PROOFREADING",
             }]
         if safety_result is not None:
+            total_safety_chunks = int(safety_result.get("total_chunks") or 1)
+            scanned_safety_chunks = int(safety_result.get("scanned_chunks") or total_safety_chunks)
             row.SafetyInputHash = input_hash
             row.Suitability = str(safety_result["suitability"])
             row.Findings = list(safety_result["findings"])
@@ -299,14 +315,31 @@ async def _run_proofreading(snapshot: dict[str, object], worker_id: str) -> None
                 "scan_id": str(uuid4()),
                 "content_hash": input_hash,
                 "target": "GRADE_1_TO_5",
+                "scope": str(safety_result.get("scope") or "TEXT"),
+                "image_scope": str(safety_result.get("image_scope") or "MANUAL_REVIEW_REQUIRED"),
                 "prompt_version": CHILD_SAFETY_PROMPT_VERSION,
                 "processing_time_ms": safety_result.get("_processing_time_ms"),
+                "total_chunks": total_safety_chunks,
+                "scanned_chunks": scanned_safety_chunks,
+                "coverage_complete": bool(
+                    safety_result.get("coverage_complete", scanned_safety_chunks == total_safety_chunks)
+                ),
+                "chunks_summary": list(safety_result.get("chunks_summary") or []),
                 "status": "PROVISIONAL",
                 "input_version": "ORIGINAL_OCR",
             }
             row.ProviderEvents = list(row.ProviderEvents or []) + list(safety_result["provider_events"])
         elif safety_error is not None:
             row.SafetyStatus = "FAILED"
+            row.SafetyMetadata = {
+                **dict(row.SafetyMetadata or {}),
+                "scope": "TEXT",
+                "image_scope": "MANUAL_REVIEW_REQUIRED",
+                "coverage_complete": False,
+                "status": "FAILED",
+                "error_code": _extract_error_code(safety_error),
+                "failed_chunk_id": getattr(safety_error, "chunk_id", None),
+            }
         row.ProviderEvents = list(row.ProviderEvents or []) + events
         row.UpdatedAt = now
         if proofread_error is not None:
@@ -314,14 +347,12 @@ async def _run_proofreading(snapshot: dict[str, object], worker_id: str) -> None
                 **dict(row.ProofreadMetadata or {}),
                 "input_text_hash": input_hash,
                 "status": "FAILED",
-                "error_code": getattr(proofread_error, "code", None) or type(proofread_error).__name__.upper(),
+                "error_code": _extract_error_code(proofread_error),
+                "provider": getattr(proofread_error, "ocr_provider", None),
+                "chunk_id": getattr(proofread_error, "ocr_chunk_id", None),
             }
             row.Stage = "PROOFREADING"
             row.Status = "PROOFREADING"
-            await session.commit()
-        elif safety_error is not None:
-            row.Stage = "CHILD_SAFETY_SCANNING"
-            row.Status = "CHILD_SAFETY_SCANNING"
             await session.commit()
         elif corrected_hash != input_hash:
             if row.SafetyInputHash or row.Findings:
@@ -366,6 +397,26 @@ async def _run_proofreading(snapshot: dict[str, object], worker_id: str) -> None
             row.ErrorCode = None
             await session.commit()
             return
+        elif safety_error is not None:
+            needs_followup_safety_error = True
+            row.Stage = "CHILD_SAFETY_SCANNING"
+            row.Status = "CHILD_SAFETY_SCANNING"
+            await session.commit()
+        elif not cached_safety and not proofread_retry_only and safety_result is None:
+            # Sequential local-only mode: proofreading succeeded with unchanged text,
+            # now queue Child Safety on the post-proofread candidate.
+            row.Stage = "CHILD_SAFETY_SCANNING"
+            row.Status = "QUEUED"
+            row.SafetyStatus = "PENDING"
+            row.WorkerId = None
+            row.LeaseExpiresAt = None
+            row.RetryAfter = None
+            row.CompletedChunks = 0
+            row.TotalChunks = 1
+            row.Attempts = 0
+            row.ErrorCode = None
+            await session.commit()
+            return
         else:
             row.Stage = "READY_FOR_ADMIN_REVIEW"
             row.Status = "READY_FOR_ADMIN_REVIEW"
@@ -379,25 +430,23 @@ async def _run_proofreading(snapshot: dict[str, object], worker_id: str) -> None
         await session.commit()
 
     if proofread_error is not None:
-        error_code = getattr(proofread_error, "code", None) or type(proofread_error).__name__.upper()
+        error_code = _extract_error_code(proofread_error)
         await _fail(
             workflow_id,
             worker_id,
             "PROOFREADING",
-            str(error_code),
+            error_code,
             list(getattr(proofread_error, "provider_events", []) or []),
         )
-    elif safety_error is not None:
-        error_code = getattr(safety_error, "code", None) or type(safety_error).__name__.upper()
+    elif needs_followup_safety_error and safety_error is not None:
+        error_code = _extract_error_code(safety_error)
         await _fail(
             workflow_id,
             worker_id,
             "CHILD_SAFETY_SCANNING",
-            str(error_code),
+            error_code,
             list(getattr(safety_error, "provider_events", []) or []),
         )
-    elif corrected_hash == input_hash:
-        await _try_auto_publish(snapshot["book_id"])
 
 
 async def _run_safety(snapshot: dict[str, object], worker_id: str) -> None:
@@ -435,6 +484,8 @@ async def _run_safety(snapshot: dict[str, object], worker_id: str) -> None:
             await session.commit()
             return
         now = datetime.now(timezone.utc)
+        total_safety_chunks = int(result.get("total_chunks") or 1)
+        scanned_safety_chunks = int(result.get("scanned_chunks") or total_safety_chunks)
         row.SafetyInputHash = expected_hash
         row.Suitability = result["suitability"]
         row.Findings = result["findings"]
@@ -443,8 +494,16 @@ async def _run_safety(snapshot: dict[str, object], worker_id: str) -> None:
             "scan_id": str(uuid4()),
             "content_hash": expected_hash,
             "target": "GRADE_1_TO_5",
+            "scope": str(result.get("scope") or "TEXT"),
+            "image_scope": str(result.get("image_scope") or "MANUAL_REVIEW_REQUIRED"),
             "prompt_version": CHILD_SAFETY_PROMPT_VERSION,
             "processing_time_ms": max(0, int((now - started).total_seconds() * 1000)),
+            "total_chunks": total_safety_chunks,
+            "scanned_chunks": scanned_safety_chunks,
+            "coverage_complete": bool(
+                result.get("coverage_complete", scanned_safety_chunks == total_safety_chunks)
+            ),
+            "chunks_summary": list(result.get("chunks_summary") or []),
             "status": "PROVISIONAL",
             "input_version": "PROOFREAD_CANDIDATE",
         }
@@ -460,7 +519,6 @@ async def _run_safety(snapshot: dict[str, object], worker_id: str) -> None:
         row.RetryAfter = None
         row.UpdatedAt = now
         await session.commit()
-    await _try_auto_publish(snapshot["book_id"])
 
 
 async def _fail(
@@ -537,13 +595,13 @@ async def _process(workflow_id: UUID, worker_id: str) -> None:
             )
         raise
     except OcrOrchestrationError as exc:
-        await _fail(workflow_id, worker_id, stage, exc.code)
+        await _fail(workflow_id, worker_id, stage, exc.last_error_code or exc.code)
     except ChildSafetyError as exc:
         await _fail(workflow_id, worker_id, stage, exc.code, exc.provider_events)
     except HTTPException as exc:
         await _fail(
             workflow_id, worker_id, stage,
-            f"HTTP_{exc.status_code}",
+            _extract_error_code(exc),
         )
     except Exception as exc:
         await _fail(workflow_id, worker_id, stage, type(exc).__name__.upper())

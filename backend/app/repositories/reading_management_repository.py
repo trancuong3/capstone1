@@ -36,16 +36,29 @@ class ReadingManagementRepository:
         result = await self.db.execute(select(ChildProfile).where(ChildProfile.ParentId == actor_id))
         return list(result.scalars().all())
 
-    async def eligible_book(self, book_id: UUID) -> Book | None:
+    async def eligible_book(
+        self, book_id: UUID, *, actor_id: UUID | None = None
+    ) -> Book | None:
         return await self.db.scalar(
             select(Book).where(
                 Book.Id == book_id,
-                CatalogRepository.eligible_book(),
+                CatalogRepository.readable_book(actor_id),
             )
         )
 
-    async def book(self, book_id: UUID) -> Book | None:
-        return await self.db.scalar(select(Book).where(Book.Id == book_id))
+    async def book(
+        self, book_id: UUID, *, actor_id: UUID | None = None
+    ) -> Book | None:
+        from app.policies.book_access import is_catalog_book, is_private_book_owned_by
+
+        visibility = (
+            or_(is_catalog_book(), is_private_book_owned_by(actor_id))
+            if actor_id is not None
+            else is_catalog_book()
+        )
+        return await self.db.scalar(
+            select(Book).where(Book.Id == book_id, visibility)
+        )
 
     async def goals(self, child_id: UUID) -> list[ReadingGoal]:
         result = await self.db.execute(select(ReadingGoal).where(ReadingGoal.ChildId == child_id).order_by(ReadingGoal.CreatedAt.desc(), ReadingGoal.Id))

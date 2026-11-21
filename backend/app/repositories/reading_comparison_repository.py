@@ -16,13 +16,15 @@ class ReadingComparisonRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def lock_session(self, session_id: UUID) -> ReadingSession | None:
+    async def lock_session(
+        self, session_id: UUID, *, actor_id: UUID | None = None
+    ) -> ReadingSession | None:
         return await self.db.scalar(
             select(ReadingSession)
             .join(Book, Book.Id == ReadingSession.BookId)
             .where(
                 ReadingSession.Id == session_id,
-                CatalogRepository.eligible_book(),
+                CatalogRepository.readable_book(actor_id),
             )
             .with_for_update().execution_options(populate_existing=True)
         )

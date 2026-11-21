@@ -20,7 +20,15 @@ from app.models import (
     PageRevisionWord,
     Profile,
 )
-from app.policies.book_approval import BOOK_APPROVAL_POLICY_VERSION
+from app.policies.book_approval import (
+    BOOK_APPROVAL_POLICY_VERSION,
+    SUPPORTED_BOOK_APPROVAL_POLICY_VERSIONS,
+)
+from app.policies.book_access import (
+    is_catalog_book,
+    is_private_book_readable_by,
+    is_private_page_readable,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from app.database.role_cache import get_cached_profile_role
 
@@ -298,22 +306,48 @@ class CatalogRepository:
             select(AuditLog.Id).where(
                 AuditLog.Id == latest_book_decision_id,
                 AuditLog.Action == "book.children.approved",
-                AuditLog.Metadata["policy"].as_string() == BOOK_APPROVAL_POLICY_VERSION,
+                AuditLog.Metadata["policy"].as_string().in_(
+                    tuple(sorted(SUPPORTED_BOOK_APPROVAL_POLICY_VERSIONS))
+                ),
                 AuditLog.Metadata["page_snapshot"] == current_snapshot,
             )
         ).correlate(Book)
-        criteria = [child_content_page, not_(unready_page), current_book_approval]
+        criteria = [is_catalog_book(), child_content_page, not_(unready_page), current_book_approval]
         if require_active:
             criteria.append(Book.LifecycleStatus == "ACTIVE")
         return and_(*criteria)
+
+    @classmethod
+    def readable_book(cls, actor_id: UUID | None = None, *, require_active: bool = True):
+        """Eligible shared catalog book OR ready private book owned by `actor_id`."""
+        catalog_cond = cls.eligible_book(require_active=require_active)
+        if actor_id is None:
+            return catalog_cond
+        return or_(
+            catalog_cond,
+            is_private_book_readable_by(actor_id, require_active=require_active),
+        )
 
     @staticmethod
     def search_pattern(value: str) -> str:
         escaped = value.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         return f"%{escaped}%"
 
-    async def list(self, search: str | None, author: str | None, grade: int | None):
-        query = select(Book).where(self.eligible_book())
+    async def list(
+        self,
+        search: str | None,
+        author: str | None,
+        grade: int | None,
+        *,
+        actor_id: UUID | None = None,
+        include_private: bool = False,
+    ):
+        condition = (
+            self.readable_book(actor_id)
+            if include_private and actor_id is not None
+            else self.eligible_book()
+        )
+        query = select(Book).where(condition)
         if search and search.strip():
             pattern = self.search_pattern(search)
             query = query.where(or_(Book.Name.ilike(pattern, escape="\\"), Book.Title.ilike(pattern, escape="\\"), Book.Author.ilike(pattern, escape="\\")))
@@ -330,6 +364,16 @@ class CatalogRepository:
     async def is_eligible(self, book_id: UUID) -> bool:
         return (await self.db.scalar(select(Book.Id).where(Book.Id == book_id, self.eligible_book()))) is not None
 
+    async def is_readable(self, book_id: UUID, actor_id: UUID | None = None) -> bool:
+        return (
+            await self.db.scalar(
+                select(Book.Id).where(
+                    Book.Id == book_id,
+                    self.readable_book(actor_id),
+                )
+            )
+        ) is not None
+
     async def is_ready_for_children(self, book_id: UUID) -> bool:
         return (
             await self.db.scalar(
@@ -340,11 +384,12 @@ class CatalogRepository:
             )
         ) is not None
 
-    async def previews(self, book_id: UUID):
+    async def previews(self, book_id: UUID, *, private: bool = False):
+        page_filter = is_private_page_readable() if private else self.eligible_page()
         result = await self.db.execute(
             select(BookPage)
             .join(PageRevision, PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
-            .where(BookPage.BookId == book_id, self.eligible_page())
+            .where(BookPage.BookId == book_id, page_filter)
             .order_by(BookPage.PageNumber, BookPage.Id)
         )
         return result.scalars().all()
@@ -402,7 +447,7 @@ class AdminCatalogRepository(CatalogRepository):
         return int(value) if value is not None else None
 
     async def books(self, search: str | None, lifecycle_status: str | None):
-        query = select(Book)
+        query = select(Book).where(is_catalog_book())
         if search and search.strip():
             pattern = self.search_pattern(search)
             query = query.where(or_(Book.Name.ilike(pattern, escape="\\"), Book.Title.ilike(pattern, escape="\\"), Book.Author.ilike(pattern, escape="\\")))
@@ -470,6 +515,7 @@ class AdminCatalogRepository(CatalogRepository):
                 ),
             )
             .outerjoin(stats, stats.c.book_id == Book.Id)
+            .where(is_catalog_book())
         )
         if search and search.strip():
             pattern = self.search_pattern(search)

@@ -3,6 +3,11 @@
 import Image from "next/image";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BookPageContent } from "@/components/reading/book-page-content";
+import {
+  fetchAuthenticatedBlobUrl,
+  isPrivateApiMediaUrl,
+  revokePrivateBlobUrl,
+} from "@/lib/api/api-client";
 import { canOverlayPage, containImage } from "@/lib/reading/page-presentation";
 import {
   wordPresentationLabels,
@@ -44,8 +49,44 @@ function PageSurface(props: BookPageViewerProps) {
     { width: number; height: number } | "failed" | null
   >(null);
   const [referenceOpen, setReferenceOpen] = useState(false);
+  const [privateBlobUrl, setPrivateBlobUrl] = useState<string | null>(null);
+  const isPrivateSource = isPrivateApiMediaUrl(page.image_url);
+
+  useEffect(() => {
+    if (!isPrivateSource || !page.image_url) {
+      return;
+    }
+    const controller = new AbortController();
+    let createdUrl: string | null = null;
+    let cancelled = false;
+    void fetchAuthenticatedBlobUrl(page.image_url, controller.signal)
+      .then((blobUrl) => {
+        if (cancelled) {
+          revokePrivateBlobUrl(blobUrl);
+          return;
+        }
+        createdUrl = blobUrl;
+        setPrivateBlobUrl(blobUrl);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setImage("failed");
+        }
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (createdUrl) {
+        revokePrivateBlobUrl(createdUrl);
+      }
+      setPrivateBlobUrl(null);
+    };
+  }, [isPrivateSource, page.image_url]);
+
   let source: string | null = null;
-  if (page.image_url) {
+  if (isPrivateSource) {
+    source = privateBlobUrl;
+  } else if (page.image_url) {
     try {
       const url = new URL(page.image_url);
       if (

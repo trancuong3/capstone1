@@ -25,6 +25,11 @@ export function BookCard({
   return (
     <article className="catalog-volume group flex h-full min-w-0 flex-col items-start gap-3">
       <BookCover book={book} hero className="catalog-jacket" />
+      {book.visibility_scope === "PARENT_PRIVATE" ? (
+        <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
+          Sách riêng của gia đình
+        </span>
+      ) : null}
       <h2 className="book-title text-2xl text-ink">{book.title}</h2>
       <p className="w-full text-sm text-muted">
         {book.author ?? "Tác giả đang cập nhật"} · {formatGradeRange(book)}

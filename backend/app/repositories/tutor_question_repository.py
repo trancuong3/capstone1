@@ -37,7 +37,7 @@ class TutorQuestionRepository:
                 ChildProfile.ParentId == parent_id,
                 Profile.Role == "parent",
                 Profile.Active == 1,
-                CatalogRepository.eligible_book(),
+                CatalogRepository.readable_book(parent_id),
             )
         )
 
@@ -54,7 +54,7 @@ class TutorQuestionRepository:
                 ChildProfile.ParentId == parent_id,
                 Profile.Role == "parent",
                 Profile.Active == 1,
-                CatalogRepository.eligible_book(),
+                CatalogRepository.readable_book(parent_id),
             )
             .with_for_update(of=ReadingSession)
         )

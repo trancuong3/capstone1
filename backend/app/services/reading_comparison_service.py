@@ -74,7 +74,7 @@ class ReadingComparisonService:
         if not reference_text.strip():
             raise HTTPException(status_code=422, detail="Book text is empty.")
 
-        session = await self.repository.lock_session(session_id)
+        session = await self.repository.lock_session(session_id, actor_id=actor_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Reading session not found")
         initial_assessment = None

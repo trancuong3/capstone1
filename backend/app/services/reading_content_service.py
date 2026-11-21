@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 
 from app.models import BookPage, FluencyAssessment, ReadingEvent, ReadingSession, ReadingSessionPage
+from app.policies.book_access import is_book_private, private_page_image_url
 from app.repositories.reading_content_repository import ReadingContentRepository
 from app.schemas.reading import (
     FluencyAssessmentCreate,
@@ -29,6 +30,45 @@ class ReadingContentService:
 
     def __init__(self, repository: ReadingContentRepository):
         self.repository = repository
+
+    async def _repo_session(self, session_id: UUID, actor_id: UUID) -> ReadingSession | None:
+        if isinstance(self.repository, ReadingContentRepository):
+            return await self.repository.session(session_id, actor_id=actor_id)
+        return await self.repository.session(session_id)
+
+    async def _repo_session_for_update(self, session_id: UUID, actor_id: UUID) -> ReadingSession | None:
+        if isinstance(self.repository, ReadingContentRepository):
+            return await self.repository.session_for_update(session_id, actor_id=actor_id)
+        return await self.repository.session_for_update(session_id)
+
+    async def _repo_book_is_eligible(self, book_id: UUID, actor_id: UUID) -> bool:
+        if isinstance(self.repository, ReadingContentRepository):
+            book = await self.repository.book_by_id(book_id)
+            if book is not None and is_book_private(book) and getattr(book, "OwnerParentId", None) != actor_id:
+                raise HTTPException(status_code=404, detail="Resource not found")
+            return await self.repository.book_is_eligible(book_id, actor_id=actor_id)
+        return await self.repository.book_is_eligible(book_id)
+
+    async def _repo_verified_page(self, page_id: UUID, book_id: UUID | None, actor_id: UUID) -> BookPage | None:
+        if isinstance(self.repository, ReadingContentRepository):
+            return await self.repository.verified_page(page_id, book_id, actor_id=actor_id)
+        return await self.repository.verified_page(page_id, book_id)
+
+    async def _repo_first_verified_page(self, book_id: UUID, actor_id: UUID) -> BookPage | None:
+        if isinstance(self.repository, ReadingContentRepository):
+            return await self.repository.first_verified_page(book_id, actor_id=actor_id)
+        return await self.repository.first_verified_page(book_id)
+
+    async def _repo_verified_pages_between(
+        self, book_id: UUID, start_page_number: int, end_page_number: int, actor_id: UUID
+    ) -> list[BookPage]:
+        if isinstance(self.repository, ReadingContentRepository):
+            return await self.repository.verified_pages_between_numbers(
+                book_id, start_page_number, end_page_number, actor_id=actor_id
+            )
+        return await self.repository.verified_pages_between_numbers(
+            book_id, start_page_number, end_page_number
+        )
 
     async def require_parent(self, actor_id: UUID) -> None:
         if await self.repository.profile_role(actor_id) != "parent":
@@ -75,7 +115,7 @@ class ReadingContentService:
         actor_id: UUID,
     ) -> ReadingCompletionSummaryDTO:
         await self.require_parent(actor_id)
-        session = await self.repository.session(session_id)
+        session = await self._repo_session(session_id, actor_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
@@ -112,7 +152,7 @@ class ReadingContentService:
         from pydantic import ValidationError
         from app.schemas.reading import PracticePageRead, PracticeWordRead, ReadingPracticeStateRead, StoredInitialWordAssessment
         await self.require_parent(actor_id)
-        session = await self.repository.session(session_id)
+        session = await self._repo_session(session_id, actor_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
@@ -190,7 +230,7 @@ class ReadingContentService:
     ) -> ReadingEvent:
         await self.require_parent(actor_id)
         # Serialize event writes with session completion and other attempts.
-        session = await self.repository.session_for_update(payload.SessionId)
+        session = await self._repo_session_for_update(payload.SessionId, actor_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
@@ -234,7 +274,7 @@ class ReadingContentService:
             if page is None or page.BookId != session.BookId or revision is None:
                 raise HTTPException(status_code=409, detail="Saved page revision is unavailable")
         else:
-            page = await self.repository.verified_page(payload.PageId, session.BookId)
+            page = await self._repo_verified_page(payload.PageId, session.BookId, actor_id)
             if page is None:
                 raise HTTPException(
                     status_code=409,
@@ -343,7 +383,7 @@ class ReadingContentService:
         payload: FluencyAssessmentCreate,
     ) -> FluencyAssessment:
         await self.require_parent(actor_id)
-        session = await self.repository.session(payload.SessionId)
+        session = await self._repo_session(payload.SessionId, actor_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
@@ -365,7 +405,7 @@ class ReadingContentService:
                 detail="ChildId and BookId are required",
             )
         await self.require_owned_child(child_id, actor_id)
-        if not await self.repository.book_is_eligible(book_id):
+        if not await self._repo_book_is_eligible(book_id, actor_id):
             raise HTTPException(
                 status_code=409,
                 detail={
@@ -379,7 +419,7 @@ class ReadingContentService:
             payload.SelectedPageRevisionId or payload.selected_page_revision_id
         )
         if page_id is not None:
-            page = await self.repository.verified_page(page_id, book_id)
+            page = await self._repo_verified_page(page_id, book_id, actor_id)
             if page is None:
                 raise HTTPException(
                     status_code=409,
@@ -389,7 +429,7 @@ class ReadingContentService:
                     },
                 )
         else:
-            page = await self.repository.first_verified_page(book_id)
+            page = await self._repo_first_verified_page(book_id, actor_id)
             if page is None:
                 raise HTTPException(
                     status_code=409,
@@ -401,7 +441,7 @@ class ReadingContentService:
 
         end_page_id = payload.EndPageId or payload.end_page_id
         end_page = (
-            await self.repository.verified_page(end_page_id, book_id)
+            await self._repo_verified_page(end_page_id, book_id, actor_id)
             if end_page_id is not None
             else page
         )
@@ -421,8 +461,8 @@ class ReadingContentService:
         raw_pages = await self.repository.all_pages_between_numbers(
             book_id, page.PageNumber, end_page.PageNumber
         )
-        eligible_pages = await self.repository.verified_pages_between_numbers(
-            book_id, page.PageNumber, end_page.PageNumber
+        eligible_pages = await self._repo_verified_pages_between(
+            book_id, page.PageNumber, end_page.PageNumber, actor_id
         )
         expected_numbers = list(range(page.PageNumber, end_page.PageNumber + 1))
         raw_numbers = [row.PageNumber for row in raw_pages]
@@ -554,7 +594,7 @@ class ReadingContentService:
         actor_id: UUID,
     ) -> SessionSummaryRead:
         await self.require_parent(actor_id)
-        session = await self.repository.session_for_update(session_id)
+        session = await self._repo_session_for_update(session_id, actor_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
@@ -583,15 +623,17 @@ class ReadingContentService:
         actor_id: UUID,
     ) -> SessionSummaryRead:
         await self.require_parent(actor_id)
-        session = await self.repository.session(session_id)
+        session = await self._repo_session(session_id, actor_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
         return self._summary(session)
 
-    async def get_session_page(self, session_id: UUID, actor_id: UUID) -> ReadingPageDTO:
+    async def get_session_page(
+        self, session_id: UUID, actor_id: UUID, *, base_url: str | None = None
+    ) -> ReadingPageDTO:
         await self.require_parent(actor_id)
-        session = await self.repository.session(session_id)
+        session = await self._repo_session(session_id, actor_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
@@ -611,13 +653,13 @@ class ReadingContentService:
             )
             if page is None or revision is None or page.BookId != session.BookId:
                 raise HTTPException(status_code=409, detail="Saved page snapshot is unavailable")
-            return await self._build_page_dto(page, revision)
+            return await self._build_page_dto(page, revision, base_url=base_url)
 
         # Legacy sessions created before range persistence continue to use the
         # original one-page selection and current verified-revision contract.
         page = None
         if session.SelectedPageId is not None:
-            page = await self.repository.verified_page(session.SelectedPageId, session.BookId)
+            page = await self._repo_verified_page(session.SelectedPageId, session.BookId, actor_id)
             if page is None:
                 raise HTTPException(
                     status_code=409,
@@ -627,7 +669,7 @@ class ReadingContentService:
                     },
                 )
         else:
-            page = await self.repository.first_verified_page(session.BookId)
+            page = await self._repo_first_verified_page(session.BookId, actor_id)
         if page is None:
             raise HTTPException(
                 status_code=409,
@@ -650,7 +692,7 @@ class ReadingContentService:
                     "message": "The reading session does not reference a verified page revision.",
                 },
             )
-        return await self._build_page_dto(page, revision)
+        return await self._build_page_dto(page, revision, base_url=base_url)
 
     async def get_page(
         self,
@@ -658,10 +700,12 @@ class ReadingContentService:
         session_id: UUID,
         actor_id: UUID,
         revision_id: UUID | None = None,
+        *,
+        base_url: str | None = None,
     ) -> ReadingPageDTO:
         await self.require_parent(actor_id)
 
-        session = await self.repository.session(session_id)
+        session = await self._repo_session(session_id, actor_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Reading session not found")
 
@@ -693,10 +737,10 @@ class ReadingContentService:
             if page is None or revision is None or page.BookId != session.BookId:
                 raise HTTPException(status_code=409, detail="Saved page snapshot is unavailable")
 
-            return await self._build_page_dto(page, revision)
+            return await self._build_page_dto(page, revision, base_url=base_url)
 
         # Legacy session
-        page = await self.repository.verified_page(page_id, session.BookId)
+        page = await self._repo_verified_page(page_id, session.BookId, actor_id)
 
         if page is None:
             raise HTTPException(
@@ -715,13 +759,13 @@ class ReadingContentService:
         if revision is None:
             raise HTTPException(status_code=409, detail="Page revision is unavailable")
 
-        return await self._build_page_dto(page, revision)
+        return await self._build_page_dto(page, revision, base_url=base_url)
 
     async def get_session_progress(
         self, session_id: UUID, actor_id: UUID
     ) -> ReadingSessionPageProgressDTO:
         await self.require_parent(actor_id)
-        session = await self.repository.session(session_id)
+        session = await self._repo_session(session_id, actor_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
@@ -795,7 +839,7 @@ class ReadingContentService:
         actor_id: UUID,
     ) -> ReadingSessionPageProgressDTO:
         await self.require_parent(actor_id)
-        session = await self.repository.session_for_update(session_id)
+        session = await self._repo_session_for_update(session_id, actor_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
@@ -834,7 +878,7 @@ class ReadingContentService:
         payload: ReadingPageNavigationCreate,
     ) -> ReadingSessionPageProgressDTO:
         await self.require_parent(actor_id)
-        session = await self.repository.session_for_update(session_id)
+        session = await self._repo_session_for_update(session_id, actor_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Reading session not found")
         await self.require_owned_child(session.ChildId, actor_id)
@@ -877,7 +921,9 @@ class ReadingContentService:
         await self.repository.save_session_progress(session, rows)
         return await self.get_session_progress(session_id, actor_id)
 
-    async def _build_page_dto(self, page: BookPage, revision) -> ReadingPageDTO:
+    async def _build_page_dto(
+        self, page: BookPage, revision, *, base_url: str | None = None
+    ) -> ReadingPageDTO:
         text_content = (revision.VerifiedText or "").strip()
         if not text_content:
             raise HTTPException(
@@ -953,10 +999,23 @@ class ReadingContentService:
             # revisions without provenance must not borrow a replacement image.
             image_path = page.ImagePath
 
+        book_id_value = getattr(page, "BookId", None)
+        book_is_private = False
+        if book_id_value is not None and isinstance(self.repository, ReadingContentRepository):
+            book_row = await self.repository.book_by_id(book_id_value)
+            book_is_private = book_row is not None and is_book_private(book_row)
+
         await self.repository.db.rollback()
 
         image_url = None
-        if image_path:
+        if book_is_private and book_id_value is not None:
+            image_url = private_page_image_url(
+                book_id_value,
+                page_id,
+                revision_id=page_revision_id,
+                base_url=base_url,
+            )
+        elif image_path:
             try:
                 image_url = create_signed_image_url(image_path)
             except Exception:

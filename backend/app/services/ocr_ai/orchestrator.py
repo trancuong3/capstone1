@@ -115,10 +115,13 @@ class OcrCorrectionOrchestrator:
         except LocalCorrectionError as exc:
             raise OcrOrchestrationError("SOURCE_IMAGE_UNAVAILABLE") from exc
 
+        deadline = time.monotonic() + float(self.config.total_timeout_seconds)
+
         async def run() -> str:
             corrected_by_chunk: dict[int, tuple[str, ...]] = {}
             disabled_families: set[str] = set()
-            for chunk in plan.chunks:
+            total_chunks = len(plan.chunks)
+            for chunk_position, chunk in enumerate(plan.chunks):
                 try:
                     crop = await asyncio.to_thread(
                         _crop_chunk_image,
@@ -126,53 +129,140 @@ class OcrCorrectionOrchestrator:
                         word_boxes[chunk.start_token_index : chunk.end_token_index],
                     )
                 except LocalCorrectionError as exc:
-                    raise OcrOrchestrationError("CHUNK_IMAGE_UNAVAILABLE") from exc
+                    raise OcrOrchestrationError(
+                        "CHUNK_IMAGE_UNAVAILABLE",
+                        stage="chunk_image_crop",
+                        chunk_id=chunk.chunk_id,
+                    ) from exc
                 result = await self._correct_chunk(
                     chunk_id=chunk.chunk_id,
                     chunk=chunk,
                     crop=crop,
                     disabled_families=disabled_families,
+                    deadline=deadline,
+                    remaining_chunks=max(1, total_chunks - chunk_position),
                     on_provider_event=on_provider_event,
                     on_uncertain_tokens=on_uncertain_tokens,
                 )
                 corrected_by_chunk[chunk.chunk_id] = result.corrected_words
                 if on_progress is not None:
-                    on_progress(len(corrected_by_chunk), len(plan.chunks))
+                    on_progress(len(corrected_by_chunk), total_chunks)
             try:
                 return reconstruct_ocr_text(plan, corrected_by_chunk)
             except ChunkingError as exc:
-                raise OcrOrchestrationError("RECONSTRUCTION_REJECTED") from exc
+                raise OcrOrchestrationError(
+                    "RECONSTRUCTION_REJECTED", stage="text_reconstruction"
+                ) from exc
 
         try:
             return await asyncio.wait_for(run(), timeout=self.config.total_timeout_seconds)
         except asyncio.TimeoutError as exc:
-            raise OcrOrchestrationError("DOCUMENT_TIMEOUT") from exc
+            raise OcrOrchestrationError(
+                "DOCUMENT_TIMEOUT", stage="document_timeout", last_error_code="DOCUMENT_TIMEOUT"
+            ) from exc
+
+    @staticmethod
+    def _is_local_provider(provider: OcrCorrectionProvider) -> bool:
+        return provider.family == "ollama" or provider.name.lower().startswith("ollama")
 
     async def _correct_chunk(
-        self, *, chunk_id, chunk, crop, disabled_families, on_provider_event=None,
+        self,
+        *,
+        chunk_id,
+        chunk,
+        crop,
+        disabled_families,
+        deadline: float | None = None,
+        remaining_chunks: int = 1,
+        on_provider_event=None,
         on_uncertain_tokens=None,
     ):
         attempted = False
         has_valid_response = False
-        has_valid_cloud_response = False
+        last_valid_result = None
+        last_error_code: str | None = None
+        last_provider_name: str | None = None
+        last_http_status: int | None = None
         working_words = [token.text for token in chunk.tokens]
         unresolved_indices = set(range(chunk.expected_word_count))
         request_chunk = chunk
-        for provider in self.providers:
+        for provider_index, provider in enumerate(self.providers):
             if provider.family in disabled_families:
                 continue
-            is_local = provider.family == "ollama" or provider.name.lower().startswith("ollama")
-            # Uncertainty is not provider unavailability. Once a cloud model
-            # has returned a schema-valid answer, unresolved words stay for
-            # Admin review after the remaining cloud providers are tried.
-            if is_local and has_valid_cloud_response:
-                continue
-            attempted = True
-            started = time.perf_counter()
+            is_local = self._is_local_provider(provider)
             attempt_number = sum(
-                1 for prior in self.providers[: self.providers.index(provider)]
+                1
+                for prior in self.providers[:provider_index]
                 if prior.family not in disabled_families
             )
+            call_timeout: float | None = None
+            if deadline is not None:
+                remaining_total = max(0.0, deadline - time.monotonic())
+                has_later_local = (not is_local) and any(
+                    self._is_local_provider(candidate)
+                    and candidate.family not in disabled_families
+                    for candidate in self.providers[provider_index + 1 :]
+                )
+                if has_later_local:
+                    chunk_share = remaining_total / max(1, remaining_chunks)
+                    local_reserve_per_chunk = min(
+                        float(self.config.local.timeout_seconds),
+                        max(0.05, chunk_share * 0.5),
+                    )
+                    total_local_reserve = local_reserve_per_chunk * max(1, remaining_chunks)
+                    cloud_available = max(0.0, remaining_total - total_local_reserve)
+                    remaining_cloud_count = max(
+                        1,
+                        sum(
+                            1
+                            for candidate in self.providers[provider_index:]
+                            if candidate.family not in disabled_families
+                            and not self._is_local_provider(candidate)
+                        ),
+                    )
+                    if cloud_available <= 0.02:
+                        self._emit_provider_event(
+                            on_provider_event,
+                            provider=provider,
+                            chunk_id=chunk_id,
+                            status="failed",
+                            availability=False,
+                            error_code="CLOUD_BUDGET_EXHAUSTED",
+                            http_status=None,
+                            duration_ms=0,
+                            retry_count=max(0, attempt_number),
+                        )
+                        next_provider = self._next_provider_name(
+                            provider, disabled_families
+                        )
+                        log_diagnostic(
+                            logger,
+                            logging.WARNING,
+                            event="ocr_provider_fallback",
+                            stage="chunk_correction",
+                            provider=provider.name,
+                            model=getattr(provider, "model", None),
+                            next_provider=next_provider,
+                            reason_code="CLOUD_BUDGET_EXHAUSTED",
+                            chunk_id=chunk_id,
+                            elapsed_ms=0,
+                        )
+                        last_error_code = "CLOUD_BUDGET_EXHAUSTED"
+                        last_provider_name = provider.name
+                        continue
+                    call_timeout = min(
+                        float(self.config.cloud_timeout_seconds),
+                        max(0.05, cloud_available / remaining_cloud_count),
+                    )
+                else:
+                    provider_cap = (
+                        float(self.config.local.timeout_seconds)
+                        if is_local
+                        else float(self.config.cloud_timeout_seconds)
+                    )
+                    call_timeout = min(provider_cap, max(0.05, remaining_total))
+            attempted = True
+            started = time.perf_counter()
             log_diagnostic(
                 logger,
                 logging.INFO,
@@ -194,15 +284,59 @@ class OcrCorrectionOrchestrator:
                 retry_count=max(0, attempt_number),
             )
             try:
-                result = await provider.correct_chunk(
+                coro = provider.correct_chunk(
                     chunk=request_chunk,
                     image_bytes=crop,
                     image_mime_type="image/jpeg",
                 )
+                result = (
+                    await asyncio.wait_for(coro, timeout=call_timeout)
+                    if call_timeout is not None
+                    else await coro
+                )
+            except asyncio.TimeoutError as exc:
+                timeout_err = OcrProviderError(
+                    provider=provider.name,
+                    code="PROVIDER_TIMEOUT",
+                    status_code=504,
+                )
+                elapsed_ms = int((time.perf_counter() - started) * 1000)
+                last_error_code = timeout_err.code
+                last_provider_name = provider.name
+                last_http_status = None
+                self._emit_provider_event(
+                    on_provider_event,
+                    provider=provider,
+                    chunk_id=chunk_id,
+                    status="failed",
+                    availability=False,
+                    error_code=timeout_err.code,
+                    http_status=None,
+                    duration_ms=elapsed_ms,
+                    retry_count=max(0, attempt_number),
+                )
+                next_provider = self._next_provider_name(provider, disabled_families)
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="ocr_provider_fallback",
+                    stage="chunk_correction",
+                    exception=timeout_err,
+                    provider=provider.name,
+                    model=getattr(provider, "model", None),
+                    next_provider=next_provider,
+                    reason_code=timeout_err.code,
+                    chunk_id=chunk_id,
+                    elapsed_ms=elapsed_ms,
+                )
+                continue
             except OcrProviderError as exc:
                 if exc.disables_family:
                     disabled_families.add(provider.family)
                 elapsed_ms = int((time.perf_counter() - started) * 1000)
+                last_error_code = exc.code
+                last_provider_name = provider.name
+                last_http_status = exc.upstream_status_code
                 self._emit_provider_event(
                     on_provider_event,
                     provider=provider,
@@ -215,8 +349,7 @@ class OcrCorrectionOrchestrator:
                     retry_count=max(0, attempt_number),
                 )
                 next_provider = self._next_provider_name(
-                    provider, disabled_families,
-                    skip_local=has_valid_cloud_response,
+                    provider, disabled_families
                 )
                 log_diagnostic(
                     logger,
@@ -233,11 +366,14 @@ class OcrCorrectionOrchestrator:
                     provider_error_code=exc.upstream_error_code,
                     provider_request_id=exc.upstream_request_id,
                     chunk_id=chunk_id,
-                    elapsed_ms=int((time.perf_counter() - started) * 1000),
+                    elapsed_ms=elapsed_ms,
                 )
                 continue
             except Exception as exc:
                 elapsed_ms = int((time.perf_counter() - started) * 1000)
+                last_error_code = "PROVIDER_INTERNAL_ERROR"
+                last_provider_name = provider.name
+                last_http_status = None
                 self._emit_provider_event(
                     on_provider_event,
                     provider=provider,
@@ -250,8 +386,7 @@ class OcrCorrectionOrchestrator:
                     retry_count=max(0, attempt_number),
                 )
                 next_provider = self._next_provider_name(
-                    provider, disabled_families,
-                    skip_local=has_valid_cloud_response,
+                    provider, disabled_families
                 )
                 log_diagnostic(
                     logger,
@@ -264,13 +399,14 @@ class OcrCorrectionOrchestrator:
                     next_provider=next_provider,
                     reason_code="PROVIDER_INTERNAL_ERROR",
                     chunk_id=chunk_id,
-                    elapsed_ms=int((time.perf_counter() - started) * 1000),
+                    elapsed_ms=elapsed_ms,
                 )
                 continue
             has_valid_response = True
-            if not is_local:
-                has_valid_cloud_response = True
+            last_valid_result = result
             uncertain = set(result.uncertain_word_indices)
+            # Only update tokens that are still unresolved; tokens accepted by an
+            # earlier provider remain fixed so fallback never overwrites confirmed fixes.
             for index in unresolved_indices - uncertain:
                 working_words[index] = result.corrected_words[index]
             unresolved_indices.intersection_update(uncertain)
@@ -288,8 +424,7 @@ class OcrCorrectionOrchestrator:
                 )
                 request_chunk = self._chunk_with_words(chunk, working_words)
                 next_provider = self._next_provider_name(
-                    provider, disabled_families,
-                    skip_local=has_valid_cloud_response,
+                    provider, disabled_families
                 )
                 log_diagnostic(
                     logger,
@@ -331,7 +466,7 @@ class OcrCorrectionOrchestrator:
                 corrected_words=tuple(working_words),
                 uncertain_word_indices=(),
             )
-        if has_valid_response:
+        if has_valid_response and last_valid_result is not None:
             if on_uncertain_tokens is not None and unresolved_indices:
                 uncertain_global_indices = tuple(
                     chunk.tokens[index].index for index in sorted(unresolved_indices)
@@ -349,12 +484,19 @@ class OcrCorrectionOrchestrator:
                 uncertain_count=len(unresolved_indices),
             )
             return replace(
-                result,
+                last_valid_result,
                 corrected_words=tuple(working_words),
                 uncertain_word_indices=tuple(sorted(unresolved_indices)),
             )
         code = "ALL_PROVIDERS_SKIPPED" if not attempted else "ALL_PROVIDERS_FAILED"
-        raise OcrOrchestrationError(code)
+        raise OcrOrchestrationError(
+            code,
+            stage="chunk_correction",
+            provider=last_provider_name,
+            chunk_id=chunk_id,
+            last_error_code=last_error_code or code,
+            upstream_status_code=last_http_status,
+        )
 
     @staticmethod
     def _emit_provider_event(

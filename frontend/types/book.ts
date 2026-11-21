@@ -2,6 +2,8 @@ import type { UUID } from "@/types/profile";
 
 export type BookLifecycleStatus = "ACTIVE" | "RETIRED";
 
+export type BookVisibilityScope = "CATALOG" | "PARENT_PRIVATE";
+
 export interface BookListItemDTO {
   readonly id: UUID;
   readonly name?: string | null;
@@ -10,6 +12,7 @@ export interface BookListItemDTO {
   readonly min_grade: number;
   readonly max_grade: number;
   readonly lifecycle_status: BookLifecycleStatus;
+  readonly visibility_scope?: BookVisibilityScope;
 }
 
 // Parent-facing preview metadata is delivered through BookPagePreviewDTO.
@@ -28,4 +31,5 @@ export interface BookCatalogQuery {
   readonly search?: string;
   readonly author?: string;
   readonly grade?: number;
+  readonly include_private?: boolean;
 }

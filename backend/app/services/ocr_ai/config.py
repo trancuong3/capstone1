@@ -70,6 +70,32 @@ class OcrCorrectionConfig:
     def groq_enabled(self) -> bool:
         return self.cloud_enabled and self.groq_api_key is not None
 
+    def local_only_copy(self) -> "OcrCorrectionConfig":
+        """Return a config restricted strictly to local Ollama (no external cloud calls)."""
+        return OcrCorrectionConfig(
+            cloud_enabled=False,
+            gemini_api_key=None,
+            groq_api_key=None,
+            gemini_primary_model=self.gemini_primary_model,
+            gemini_fallback_model=self.gemini_fallback_model,
+            groq_model=self.groq_model,
+            cloud_timeout_seconds=self.cloud_timeout_seconds,
+            total_timeout_seconds=self.total_timeout_seconds,
+            local=self.local,
+        )
+
+    @staticmethod
+    def private_book_allow_cloud_ai() -> bool:
+        """Private parent book text stays on local Ollama unless explicitly opted in."""
+        return _read_bool("PRIVATE_BOOK_ALLOW_CLOUD_AI", False)
+
+    @classmethod
+    def from_environment_for_private_book(cls) -> "OcrCorrectionConfig":
+        config = cls.from_environment()
+        if not cls.private_book_allow_cloud_ai():
+            return config.local_only_copy()
+        return config
+
     @classmethod
     def from_environment(cls) -> "OcrCorrectionConfig":
         try:

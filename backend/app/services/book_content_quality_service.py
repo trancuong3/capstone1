@@ -13,18 +13,22 @@ from app.database.integrity import is_book_report_idempotency_violation
 from app.models.book_content_quality import (
     BookContentReport,
     BookContentReportHistory,
+    BookContentRightsProfile,
     BookQualityFinding,
     BookQualityScanRun,
 )
 from app.models.admin_ai_workflow import AdminAiWorkflow
 from app.policies.book_approval import (
+    AUTO_APPROVAL_ENABLED,
     BOOK_APPROVAL_POLICY_VERSION,
     COPYRIGHT_BLOCKS_BOOK_APPROVAL,
+    LEGACY_BOOK_APPROVAL_POLICY_VERSIONS,
 )
 from app.repositories.book_content_quality_repository import BookContentQualityRepository
 from app.repositories.admin_ai_workflow_repository import AdminAiWorkflowRepository
 from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.services.admin_ai_workflow_service import AdminAiWorkflowService
+from app.services.admin_ocr_service import AdminOcrService
 from app.schemas.admin_ai_workflow import AdminAiWorkflowCreate
 from app.schemas.admin_ocr import AdminOcrWordInput
 from app.schemas.book_content_quality import (
@@ -34,6 +38,9 @@ from app.schemas.book_content_quality import (
     BookContentReportPage,
     BookContentReportRead,
     BookContentReportStatusUpdate,
+    BookContentRightsProfileRead,
+    BookContentRightsProfileUpsert,
+    BookExpectedPageCountUpdate,
     BookQualityBookDetail,
     BookQualityBookPage,
     BookQualityBookSummary,
@@ -42,6 +49,7 @@ from app.schemas.book_content_quality import (
     BookQualityBookDecisionRead,
     BookQualityFindingRead,
     BookQualityFindingUpdate,
+    BookQualityPageItemRead,
     BookQualityPageScanRead,
     BookQualityReportAdminPage,
     BookQualityScanDetail,
@@ -149,11 +157,132 @@ class BookContentQualityService:
             )
         return snapshot
 
+    @staticmethod
+    def _rights_profile_fingerprint(payload: BookContentRightsProfileUpsert, scope: str) -> str:
+        canonical = {
+            "scope": scope,
+            "source_name": payload.source_name,
+            "rights_holder": payload.rights_holder,
+            "usage_basis": payload.usage_basis,
+            "evidence_url": payload.evidence_url,
+            "evidence_reference": payload.evidence_reference,
+            "notes": payload.notes,
+        }
+        return hashlib.sha256(
+            json.dumps(canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
+    def _rights_profile_read(
+        profile: BookContentRightsProfile | None, book_id: UUID
+    ) -> BookContentRightsProfileRead:
+        if profile is None:
+            return BookContentRightsProfileRead(book_id=book_id, scope="BOOK", status="NOT_ASSESSED")
+        return BookContentRightsProfileRead(
+            id=profile.Id,
+            book_id=profile.BookId,
+            page_id=profile.PageId,
+            scope=profile.Scope,  # type: ignore[arg-type]
+            status=profile.Status,  # type: ignore[arg-type]
+            source_name=profile.SourceName,
+            rights_holder=profile.RightsHolder,
+            usage_basis=profile.UsageBasis,
+            evidence_url=profile.EvidenceUrl,
+            evidence_reference=profile.EvidenceReference,
+            notes=profile.Notes,
+            source_fingerprint=profile.SourceFingerprint,
+            profile_version=int(profile.ProfileVersion or 1),
+            reference_check_status=profile.ReferenceCheckStatus or "NOT_RUN",  # type: ignore[arg-type]
+            reference_check_evidence=list(profile.ReferenceCheckEvidence or []),
+            reviewed_by=profile.ReviewedBy,
+            reviewed_by_name=profile.ReviewedByNameSnapshot,
+            reviewed_at=profile.ReviewedAt,
+            history=list(profile.History or []),
+            updated_at=profile.UpdatedAt,
+        )
+
+    @classmethod
+    def _effective_rights_summary(
+        cls,
+        active_rows: list[tuple],
+        rights_profiles: list[BookContentRightsProfile] | None,
+    ) -> tuple[str, int | None, str | None, int | None, dict[UUID, BookContentRightsProfile], BookContentRightsProfile | None]:
+        book_profile: BookContentRightsProfile | None = None
+        page_overrides: dict[UUID, BookContentRightsProfile] = {}
+        for profile in rights_profiles or []:
+            if getattr(profile, "PageId", None) is None:
+                book_profile = profile
+            else:
+                page_overrides[profile.PageId] = profile
+
+        severity_order = {
+            "REVIEWED": 0,
+            "NOT_ASSESSED": 1,
+            "MISSING_EVIDENCE": 2,
+            "CONCERNS_FOUND": 3,
+        }
+        effective_statuses: list[str] = []
+        concern_count = 0
+        if book_profile is not None:
+            _blockers, resolved_book_status = AdminOcrService._rights_profile_blockers(book_profile)
+            effective_statuses.append(resolved_book_status)
+            if resolved_book_status == "CONCERNS_FOUND":
+                concern_count += 1
+        elif not active_rows:
+            effective_statuses.append("NOT_ASSESSED")
+
+        for row in active_rows:
+            page = row[1] if len(row) == 7 else row[0]
+            effective = page_overrides.get(page.Id) or book_profile
+            _blockers, page_rights_status = AdminOcrService._rights_profile_blockers(effective)
+            effective_statuses.append(page_rights_status)
+            if page_rights_status == "CONCERNS_FOUND":
+                concern_count += 1
+
+        if not effective_statuses:
+            worst_status = "NOT_ASSESSED"
+        else:
+            worst_status = max(effective_statuses, key=lambda item: severity_order.get(item, 1))
+
+        hash_input = [
+            {
+                "scope": p.Scope,
+                "page_id": str(p.PageId) if p.PageId else None,
+                "status": p.Status,
+                "version": int(p.ProfileVersion or 1),
+                "fingerprint": p.SourceFingerprint,
+                "reference_check_status": p.ReferenceCheckStatus,
+            }
+            for p in sorted(
+                rights_profiles or [],
+                key=lambda item: (str(item.PageId or ""), str(item.Id or "")),
+            )
+        ]
+        rights_hash = (
+            hashlib.sha256(
+                json.dumps(hash_input, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            if hash_input
+            else None
+        )
+        version = int(book_profile.ProfileVersion) if book_profile is not None else None
+        overlap_count = sum(
+            len(p.ReferenceCheckEvidence or [])
+            for p in (rights_profiles or [])
+            if p.ReferenceCheckStatus == "OVERLAP_CONCERN"
+        )
+        finding_count = (overlap_count or concern_count) if (overlap_count or concern_count) else (0 if rights_profiles else None)
+        return worst_status, version, rights_hash, finding_count, page_overrides, book_profile
+
     @classmethod
     def _assessment(
         cls,
         rows: list[tuple],
         decisions: list,
+        *,
+        book: object | None = None,
+        rights_profiles: list[BookContentRightsProfile] | None = None,
+        latest_revisions: dict[UUID, object] | None = None,
     ) -> BookApprovalAssessment:
         now = datetime.now(timezone.utc)
         active_rows = []
@@ -161,10 +290,20 @@ class BookContentQualityService:
             page = row[1] if len(row) == 7 else row[0]
             if page.LifecycleStatus in {"ACTIVE", "PROCESSING"}:
                 active_rows.append(row)
+        (
+            rights_status,
+            rights_version,
+            rights_hash,
+            rights_finding_count,
+            page_overrides,
+            book_rights_profile,
+        ) = cls._effective_rights_summary(active_rows, rights_profiles)
         snapshot = cls._page_snapshot(active_rows)
         snapshot_payload = {
             "policy": BOOK_APPROVAL_POLICY_VERSION,
-            "copyright_scanner": "not-configured",
+            "rights_status": rights_status,
+            "rights_profile_version": rights_version,
+            "rights_profile_hash": rights_hash,
             "pages": snapshot,
         }
         assessment_hash = hashlib.sha256(
@@ -189,14 +328,50 @@ class BookContentQualityService:
         review_required = False
         page_blockers: list[str] = []
 
+        missing_image_pages: list[int] = []
+        empty_ocr_pages: list[int] = []
+        image_only_pages: list[int] = []
+        unreviewed_image_only_pages: list[int] = []
+        text_fingerprints: dict[str, list[int]] = {}
+        page_numbers: list[int] = []
+
         for row in active_rows:
             if len(row) == 7:
                 _, page, revision, workflow, *_fingerprints = row
             else:
                 page, revision, workflow, *_fingerprints = row
+            page_no = int(page.PageNumber)
+            page_numbers.append(page_no)
+            page_content_type = str(getattr(page, "ContentType", None) or "CONTENT")
+            if not str(getattr(page, "ImagePath", "") or "").strip():
+                missing_image_pages.append(page_no)
+                page_blockers.append(f"Trang {page_no}: thiếu ảnh gốc.")
+            if page_content_type == "COVER_OR_IMAGE_ONLY":
+                image_only_pages.append(page_no)
+                if workflow is None or getattr(workflow, "ImageSafetyStatus", "NOT_REVIEWED") != "MANUAL_REVIEWED_SAFE":
+                    unreviewed_image_only_pages.append(page_no)
+                    page_blockers.append(
+                        f"Trang {page_no}: trang bìa/hình ảnh chưa được Admin ghi nhận rà soát an toàn bằng tay."
+                    )
+            else:
+                latest_rev = (latest_revisions or {}).get(page.Id) or revision
+                sample_text = (
+                    (getattr(revision, "VerifiedText", None) if revision is not None else None)
+                    or (getattr(latest_rev, "DraftText", None) if latest_rev is not None else None)
+                    or (getattr(latest_rev, "VerifiedText", None) if latest_rev is not None else None)
+                    or ""
+                )
+                normalized_sample = " ".join(str(sample_text).casefold().split())
+                if not normalized_sample:
+                    empty_ocr_pages.append(page_no)
+                    page_blockers.append(f"Trang {page_no}: OCR trống, cần kiểm tra hoặc gắn loại trang bìa/chỉ có hình.")
+                elif len(normalized_sample) >= 20:
+                    fp = hashlib.sha256(normalized_sample.encode("utf-8")).hexdigest()
+                    text_fingerprints.setdefault(fp, []).append(page_no)
+
             if page.LifecycleStatus != "ACTIVE":
                 page_blockers.append(
-                    f"Trang {page.PageNumber}: trang chưa hoàn tất xử lý."
+                    f"Trang {page_no}: trang chưa hoàn tất xử lý."
                 )
             if revision is not None and revision.VerificationStatus == "VERIFIED":
                 ocr_completed += 1
@@ -209,17 +384,17 @@ class BookContentQualityService:
                 if workflow is None:
                     pending_pages += 1
                     page_blockers.append(
-                        f"Trang {page.PageNumber}: chưa có Proofreading và Child Safety cho revision hiện tại."
+                        f"Trang {page_no}: chưa có Proofreading và Child Safety cho revision hiện tại."
                     )
                 elif workflow.Status in {"QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING"}:
                     active_workflows += 1
                     page_blockers.append(
-                        f"Trang {page.PageNumber}: workflow đang xử lý revision khác."
+                        f"Trang {page_no}: workflow đang xử lý revision khác."
                     )
                 else:
                     stale_pages += 1
                     page_blockers.append(
-                        f"Trang {page.PageNumber}: kết quả AI thuộc revision cũ."
+                        f"Trang {page_no}: kết quả AI thuộc revision cũ."
                     )
                 continue
             candidate_is_consistent = bool(
@@ -256,40 +431,53 @@ class BookContentQualityService:
             }:
                 proofreading_completed += 1
             elif workflow.Status == "FAILED":
-                page_blockers.append(f"Trang {page.PageNumber}: Proofreading thất bại.")
+                page_blockers.append(f"Trang {page_no}: Proofreading thất bại.")
             else:
-                page_blockers.append(f"Trang {page.PageNumber}: Proofreading chưa hoàn tất.")
+                page_blockers.append(f"Trang {page_no}: Proofreading chưa hoàn tất.")
             suggestions += len(workflow.CorrectionSuggestions or [])
+            safety_meta = workflow.SafetyMetadata if isinstance(getattr(workflow, "SafetyMetadata", None), dict) else {}
+            coverage_incomplete = (
+                safety_meta.get("coverage_complete") is False
+                or (
+                    isinstance(safety_meta.get("total_chunks"), int)
+                    and isinstance(safety_meta.get("scanned_chunks"), int)
+                    and safety_meta["scanned_chunks"] < safety_meta["total_chunks"]
+                )
+            )
             if (
                 workflow.SafetyStatus in {"PROVISIONAL", "CONFIRMED", "AUTO_CONFIRMED"}
                 and workflow.CandidateHash
                 and candidate_is_consistent
                 and workflow.SafetyInputHash == workflow.CandidateHash
                 and workflow.Status == "READY_FOR_ADMIN_REVIEW"
+                and not coverage_incomplete
             ):
                 safety_completed += 1
+            elif coverage_incomplete:
+                failed_pages += 1
+                page_blockers.append(f"Trang {page_no}: Child Safety chưa quét đủ mọi đoạn văn bản.")
             elif workflow.SafetyStatus == "STALE" or (
                 workflow.SafetyInputHash
                 and workflow.CandidateHash
                 and workflow.SafetyInputHash != workflow.CandidateHash
             ):
                 stale_pages += 1
-                page_blockers.append(f"Trang {page.PageNumber}: Child Safety đã stale.")
+                page_blockers.append(f"Trang {page_no}: Child Safety đã stale.")
             elif workflow.Status not in {"FAILED", "QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING"}:
                 pending_pages += 1
-                page_blockers.append(f"Trang {page.PageNumber}: Child Safety chưa hoàn tất.")
+                page_blockers.append(f"Trang {page_no}: Child Safety chưa hoàn tất.")
             elif workflow.SafetyStatus == "FAILED" or workflow.Status == "FAILED":
-                page_blockers.append(f"Trang {page.PageNumber}: Child Safety thất bại.")
+                page_blockers.append(f"Trang {page_no}: Child Safety thất bại.")
             elif workflow.Status in {"QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING"}:
-                page_blockers.append(f"Trang {page.PageNumber}: Child Safety đang xử lý.")
+                page_blockers.append(f"Trang {page_no}: Child Safety đang xử lý.")
 
             if revision.VerificationStatus != "VERIFIED":
-                page_blockers.append(f"Trang {page.PageNumber}: OCR revision chưa VERIFIED.")
+                page_blockers.append(f"Trang {page_no}: OCR revision chưa VERIFIED.")
             elif not candidate_is_consistent:
-                page_blockers.append(f"Trang {page.PageNumber}: Candidate text/hash không nhất quán.")
+                page_blockers.append(f"Trang {page_no}: Candidate text/hash không nhất quán.")
             elif AdminAiWorkflowService._hash(revision.VerifiedText or "") != workflow.CandidateHash:
                 page_blockers.append(
-                    f"Trang {page.PageNumber}: Candidate khác OCR VERIFIED; cần lưu revision Candidate trước khi duyệt."
+                    f"Trang {page_no}: Candidate khác OCR VERIFIED; cần lưu revision Candidate trước khi duyệt."
                 )
 
             if workflow.Suitability == "NOT_RECOMMENDED":
@@ -300,6 +488,7 @@ class BookContentQualityService:
                 workflow.SafetyStatus in {"PROVISIONAL", "CONFIRMED", "AUTO_CONFIRMED"}
                 and workflow.SafetyInputHash == workflow.CandidateHash
                 and workflow.Status == "READY_FOR_ADMIN_REVIEW"
+                and not coverage_incomplete
             ):
                 continue
             page_findings = workflow.Findings if isinstance(workflow.Findings, list) else []
@@ -327,17 +516,52 @@ class BookContentQualityService:
                     },
                 )
                 group["finding_count"] = int(group["finding_count"]) + 1
-                group["pages"].add(int(page.PageNumber))
+                group["pages"].add(page_no)
                 examples = group["examples"]
                 if len(examples) < 3:
                     examples.append(
                         {
-                            "page_number": int(page.PageNumber),
+                            "page_number": page_no,
                             "evidence_text": str(finding.get("evidence_text") or ""),
                             "explanation": str(finding.get("explanation") or ""),
                             "recommendation": str(finding.get("recommendation") or ""),
                         }
                     )
+
+        duplicate_pages = sorted({
+            num
+            for nums in text_fingerprints.values()
+            if len(nums) > 1
+            for num in nums
+        })
+        if duplicate_pages:
+            page_blockers.append(
+                f"Phát hiện trang trùng nội dung: {', '.join(f'trang {n}' for n in duplicate_pages)}."
+            )
+
+        missing_page_numbers: list[int] = []
+        if page_numbers:
+            present = set(page_numbers)
+            missing_page_numbers = [
+                n for n in range(1, max(present) + 1) if n not in present
+            ]
+            if missing_page_numbers:
+                page_blockers.append(
+                    f"Nghi thiếu trang (khoảng trống số thứ tự): {', '.join(f'trang {n}' for n in missing_page_numbers)}."
+                )
+
+        expected_page_count = getattr(book, "ExpectedPageCount", None) if book is not None else None
+        if expected_page_count is None:
+            expected_page_count_status = "UNKNOWN_SOURCE_PAGE_COUNT"
+        elif page_count < expected_page_count:
+            expected_page_count_status = "UNDER_EXPECTED"
+            page_blockers.append(
+                f"Thiếu trang so với số trang nguồn dự kiến ({page_count}/{expected_page_count})."
+            )
+        elif page_count > expected_page_count:
+            expected_page_count_status = "OVER_EXPECTED"
+        else:
+            expected_page_count_status = "MATCHED"
 
         group_reads = []
         for group in sorted(grouped.values(), key=lambda item: (str(item["category"]), str(item["severity"]))):
@@ -372,7 +596,7 @@ class BookContentQualityService:
             if active_workflows or pending_pages
             else "INCOMPLETE"
         )
-        copyright_status = "NOT_CONFIGURED"
+        copyright_status = rights_status
         blockers: list[str] = []
         if not page_count:
             blockers.append("NO_ACTIVE_PAGES")
@@ -386,9 +610,26 @@ class BookContentQualityService:
             blockers.append("CHILD_SAFETY_FINDINGS")
         if review_required:
             blockers.append("SUITABILITY_REVIEW_REQUIRED")
+        if duplicate_pages:
+            blockers.append("DUPLICATE_PAGES_DETECTED")
+        if missing_page_numbers:
+            blockers.append("SUSPECTED_MISSING_PAGES")
+        if expected_page_count_status == "UNDER_EXPECTED":
+            blockers.append("MISSING_EXPECTED_PAGES")
+        if empty_ocr_pages:
+            blockers.append("EMPTY_OCR_PAGES")
+        if missing_image_pages:
+            blockers.append("MISSING_PAGE_IMAGES")
+        if unreviewed_image_only_pages:
+            blockers.append("IMAGE_ONLY_PAGES_UNREVIEWED")
+        if COPYRIGHT_BLOCKS_BOOK_APPROVAL and rights_status != "REVIEWED":
+            if rights_status == "CONCERNS_FOUND":
+                blockers.append("RIGHTS_CONCERNS_UNRESOLVED")
+            elif rights_status == "MISSING_EVIDENCE":
+                blockers.append("RIGHTS_MISSING_EVIDENCE")
+            else:
+                blockers.append("RIGHTS_NOT_ASSESSED")
         blockers.extend(page_blockers)
-        if COPYRIGHT_BLOCKS_BOOK_APPROVAL and copyright_status == "NOT_CONFIGURED":
-            blockers.append("COPYRIGHT_SCANNER_NOT_CONFIGURED")
 
         ordered_decisions = sorted(
             decisions,
@@ -400,12 +641,21 @@ class BookContentQualityService:
             if latest_decision is not None and isinstance(latest_decision.Metadata, dict)
             else {}
         )
+        legacy_approved = bool(
+            latest_decision
+            and latest_decision.Action == "book.children.approved"
+            and metadata.get("policy") in LEGACY_BOOK_APPROVAL_POLICY_VERSIONS
+            and metadata.get("page_snapshot") == snapshot
+        )
         current_decision = bool(
             latest_decision and metadata.get("assessment_hash") == assessment_hash
         )
         approved = bool(
-            current_decision
-            and latest_decision.Action == "book.children.approved"
+            (current_decision and latest_decision.Action == "book.children.approved")
+            or legacy_approved
+        )
+        legacy_published_needs_rights_review = bool(
+            legacy_approved and rights_status != "REVIEWED"
         )
         auto_published = bool(
             approved and metadata.get("decision_source") == "AUTO_APPROVAL"
@@ -420,6 +670,11 @@ class BookContentQualityService:
             row.Action in {"book.children.approved", "book.children.rejected"}
             and isinstance(row.Metadata, dict)
             and row.Metadata.get("assessment_hash") != assessment_hash
+            and not (
+                row.Action == "book.children.approved"
+                and row.Metadata.get("policy") in LEGACY_BOOK_APPROVAL_POLICY_VERSIONS
+                and row.Metadata.get("page_snapshot") == snapshot
+            )
             and not (
                 row.Action == "book.children.approved"
                 and row.Metadata.get("decision_source") == "AUTO_APPROVAL"
@@ -439,7 +694,13 @@ class BookContentQualityService:
             and not finding_count
             and not review_required
             and not page_blockers
-            and (not COPYRIGHT_BLOCKS_BOOK_APPROVAL or copyright_status != "NOT_CONFIGURED")
+            and not duplicate_pages
+            and not missing_page_numbers
+            and not empty_ocr_pages
+            and not missing_image_pages
+            and not unreviewed_image_only_pages
+            and expected_page_count_status != "UNDER_EXPECTED"
+            and (not COPYRIGHT_BLOCKS_BOOK_APPROVAL or rights_status == "REVIEWED")
         )
         if auto_published:
             status_value = "PUBLISHED"
@@ -459,7 +720,7 @@ class BookContentQualityService:
             status_value = "READY_FOR_CHILDREN"
         else:
             status_value = "PENDING_ADMIN_REVIEW"
-        metadata = metadata if current_decision else {}
+        metadata = metadata if (current_decision or legacy_approved) else {}
         return BookApprovalAssessment(
             status=status_value,
             page_count=page_count,
@@ -473,12 +734,19 @@ class BookContentQualityService:
             processing_pages=active_workflows,
             failed_pages=failed_pages,
             stale_pages=stale_pages,
-            copyright_status=(
-                "ADMIN_CONFIRMED"
-                if approved and metadata.get("rights_confirmed") is True
-                else copyright_status
-            ),
-            copyright_finding_count=None,
+            copyright_status=copyright_status,
+            copyright_finding_count=rights_finding_count,
+            rights_profile_status=rights_status,  # type: ignore[arg-type]
+            rights_profile_version=rights_version,
+            rights_profile_hash=rights_hash,
+            legacy_published_needs_rights_review=legacy_published_needs_rights_review,
+            expected_page_count=expected_page_count,
+            expected_page_count_status=expected_page_count_status,  # type: ignore[arg-type]
+            missing_page_numbers=missing_page_numbers,
+            duplicate_page_numbers=duplicate_pages,
+            empty_ocr_page_numbers=empty_ocr_pages,
+            missing_image_page_numbers=missing_image_pages,
+            image_only_page_numbers=image_only_pages,
             finding_count=finding_count,
             high_finding_count=high_count,
             medium_finding_count=medium_count,
@@ -506,130 +774,16 @@ class BookContentQualityService:
                 if approved
                 else None
             ),
-            rights_confirmed=bool(approved and metadata.get("rights_confirmed") is True),
+            rights_confirmed=bool(rights_status == "REVIEWED"),
             blockers=blockers,
         )
 
     async def auto_publish_if_eligible(self, book_id: UUID) -> bool:
-        """Publish only a fully verified book with clean, exact-match AI results."""
-        book = await self.repository.book(book_id, lock=True)
-        if book is None or book.LifecycleStatus == "RETIRED":
-            await self.repository.rollback()
+        """Silent auto-publication is disabled; books require explicit Admin approval."""
+        del book_id
+        if not AUTO_APPROVAL_ENABLED:
             return False
-        rows = await self.repository.book_assessment_rows(book_id, lock=True)
-        decisions = await self.repository.book_decisions(book_id)
-        assessment = self._assessment(rows, decisions)
-        if (
-            assessment.status != "READY_FOR_CHILDREN"
-            or not assessment.page_count
-            or any(blocker != "BOOK_APPROVAL_STALE" for blocker in assessment.blockers)
-        ):
-            await self.repository.rollback()
-            return False
-
-        approval_rows = [
-            row
-            for row in rows
-            if (row[1] if len(row) == 7 else row[0]).LifecycleStatus == "ACTIVE"
-        ]
-        if len(approval_rows) != assessment.page_count:
-            await self.repository.rollback()
-            return False
-
-        now = datetime.now(timezone.utc)
-        for row in approval_rows:
-            page, revision, workflow = row[:3]
-            if page.LifecycleStatus != "ACTIVE" or revision is None or workflow is None:
-                await self.repository.rollback()
-                return False
-            if (
-                revision.VerificationStatus != "VERIFIED"
-                or revision.VerifiedBy is None
-                or revision.VerifiedAt is None
-            ):
-                await self.repository.rollback()
-                return False
-            if (
-                workflow.PageRevisionId != revision.Id
-                or workflow.Status != "READY_FOR_ADMIN_REVIEW"
-                or workflow.SafetyStatus not in {"PROVISIONAL", "CONFIRMED", "AUTO_CONFIRMED"}
-                or workflow.SafetyInputHash != workflow.CandidateHash
-                or not isinstance(workflow.CandidateText, str)
-                or not workflow.CandidateHash
-                or AdminAiWorkflowService._hash(workflow.CandidateText) != workflow.CandidateHash
-                or workflow.ProofreadText != workflow.CandidateText
-                or not revision.VerifiedText
-                or AdminAiWorkflowService._hash(revision.VerifiedText) != workflow.CandidateHash
-                or workflow.Suitability != "SUITABLE"
-                or workflow.Findings
-            ):
-                await self.repository.rollback()
-                return False
-            if workflow.SafetyStatus == "CONFIRMED" and workflow.SafetyConfirmedBy is None:
-                await self.repository.rollback()
-                return False
-
-        for row in approval_rows:
-            page, revision, workflow = row[:3]
-            if workflow.SafetyStatus == "PROVISIONAL":
-                workflow.SafetyStatus = "AUTO_CONFIRMED"
-                workflow.SafetyConfirmedAt = now
-                workflow.SafetyConfirmedBy = None
-            elif workflow.SafetyStatus == "AUTO_CONFIRMED":
-                workflow.SafetyConfirmedAt = workflow.SafetyConfirmedAt or now
-                workflow.SafetyConfirmedBy = None
-            workflow.OcrApprovedAt = workflow.OcrApprovedAt or revision.VerifiedAt
-            workflow.OcrApprovedBy = workflow.OcrApprovedBy or revision.VerifiedBy
-            workflow.FinalApprovedTextHash = workflow.CandidateHash
-            revision_metadata = dict(revision.ProcessingMeta or {})
-            revision_metadata["admin_ai_workflow"] = {
-                "workflow_id": str(workflow.Id),
-                "candidate_hash": workflow.CandidateHash,
-                "safety_status": workflow.SafetyStatus,
-                "safety_input_hash": workflow.SafetyInputHash,
-                "approval_scope": "AUTO_BOOK_APPROVAL_EXACT_VERIFIED_TEXT",
-                "assessment_policy": BOOK_APPROVAL_POLICY_VERSION,
-            }
-            revision.ProcessingMeta = revision_metadata
-            workflow.ReviewEvents = list(workflow.ReviewEvents or []) + [{
-                "event": "AUTO_BOOK_APPROVAL",
-                "actor_id": "SYSTEM",
-                "assessment_policy": BOOK_APPROVAL_POLICY_VERSION,
-                "created_at": now.isoformat(),
-            }]
-            workflow.UpdatedAt = now
-
-        # Bind the audit to the exact post-confirmation snapshot that catalog
-        # access checks use for Parent and Child reads.
-        approved_assessment = self._assessment(rows, decisions)
-        if (
-            approved_assessment.status != "READY_FOR_CHILDREN"
-            or any(
-                blocker != "BOOK_APPROVAL_STALE"
-                for blocker in approved_assessment.blockers
-            )
-        ):
-            await self.repository.rollback()
-            return False
-        page_snapshot = self._page_snapshot(rows)
-        book.LifecycleStatus = "ACTIVE"
-        await self.repository.add_book_decision(
-            actor_id=None,
-            book_id=book_id,
-            action="book.children.approved",
-            metadata={
-                "decision": "AUTO_APPROVE",
-                "decision_source": "AUTO_APPROVAL",
-                "reason": "All active pages passed OCR verification, proofreading, and Child Safety checks.",
-                "assessment_hash": approved_assessment.assessment_hash,
-                "page_snapshot": page_snapshot,
-                "page_count": approved_assessment.page_count,
-                "policy": BOOK_APPROVAL_POLICY_VERSION,
-            },
-            request_id=str(uuid4()),
-        )
-        await self.repository.commit()
-        return True
+        return False
 
     @staticmethod
     def _finding_read(
@@ -662,8 +816,23 @@ class BookContentQualityService:
         report: BookContentReport,
         reporter_name: str | None,
         history: list[BookContentReportHistory],
+        *,
+        for_parent: bool = False,
     ) -> BookContentReportDetail:
-        related_rows = await self.repository.findings_for_report(report.Id)
+        related_rows = (
+            [] if for_parent else await self.repository.findings_for_report(report.Id)
+        )
+        current_page_revision_id: UUID | None = None
+        page_revision_changed = False
+        if not for_parent and report.PageId is not None and hasattr(self.repository, "page"):
+            page = await self.repository.page(report.PageId)
+            if page is not None:
+                current_page_revision_id = page.CurrentVerifiedRevisionId
+                if (
+                    report.PageRevisionId is not None
+                    and current_page_revision_id != report.PageRevisionId
+                ):
+                    page_revision_changed = True
         report_data = self._report_read(report).model_dump()
         report_data["reporter_name"] = (
             reporter_name or report.ReporterNameSnapshot
@@ -673,13 +842,19 @@ class BookContentQualityService:
             reporter_id=report.ReporterId,
             verified_text_snapshot=report.VerifiedTextSnapshot,
             content_hash_snapshot=report.ContentHashSnapshot,
+            current_page_revision_id=None if for_parent else current_page_revision_id,
+            page_revision_changed=False if for_parent else page_revision_changed,
             admin_resolution_note=report.AdminResolutionNote,
-            reviewed_by=report.ReviewedBy,
-            reviewed_by_name=report.ReviewedByNameSnapshot,
+            reviewed_by=None if for_parent else report.ReviewedBy,
+            reviewed_by_name=None if for_parent else report.ReviewedByNameSnapshot,
             resolved_at=report.ResolvedAt,
             history=[
                 BookContentReportHistoryRead(
-                    actor_name=row.ActorNameSnapshot,
+                    actor_name=(
+                        ("Phụ huynh" if row.ActorId == report.ReporterId else "Admin ViRead")
+                        if for_parent
+                        else row.ActorNameSnapshot
+                    ),
                     from_status=row.FromStatus,
                     to_status=row.ToStatus,
                     note=row.Note,
@@ -715,7 +890,9 @@ class BookContentQualityService:
             if detail is None:
                 raise HTTPException(status_code=404, detail="Resource not found")
             history = await self.repository.report_history(previous.Id)
-            return await self._report_detail_response(detail[0], detail[1], history)
+            return await self._report_detail_response(
+                detail[0], detail[1], history, for_parent=True
+            )
 
         now = datetime.now(timezone.utc)
         if await self.repository.count_recent_reports(
@@ -732,6 +909,13 @@ class BookContentQualityService:
         book = await self.repository.book(book_id, lock=True)
         if book is None or book.LifecycleStatus != "ACTIVE":
             raise HTTPException(status_code=404, detail="Resource not found")
+        if getattr(book, "VisibilityScope", "CATALOG") == "PARENT_PRIVATE":
+            if getattr(book, "OwnerParentId", None) != actor_id:
+                raise HTTPException(status_code=404, detail="Resource not found")
+            raise HTTPException(
+                status_code=404,
+                detail="Resource not found",
+            )
 
         page = None
         revision = None
@@ -826,6 +1010,7 @@ class BookContentQualityService:
                 report,
                 row[1] if row else report.ReporterNameSnapshot,
                 history,
+                for_parent=True,
             )
 
             await self.repository.commit()
@@ -851,7 +1036,7 @@ class BookContentQualityService:
                         )
                     history = await self.repository.report_history(duplicate.Id)
                     return await self._report_detail_response(
-                        detail[0], detail[1], history
+                        detail[0], detail[1], history, for_parent=True
                     )
             raise
         except BaseException:
@@ -882,7 +1067,9 @@ class BookContentQualityService:
         if row is None or row[0].ReporterId != actor_id:
             raise HTTPException(status_code=404, detail="Resource not found")
         history = await self.repository.report_history(report_id)
-        return await self._report_detail_response(row[0], row[1], history)
+        return await self._report_detail_response(
+            row[0], row[1], history, for_parent=True
+        )
 
     async def list_admin_reports(
         self,
@@ -890,6 +1077,7 @@ class BookContentQualityService:
         *,
         status: str | None,
         issue_type: str | None,
+        scope: str | None = None,
         book_id: UUID | None,
         search: str | None,
         created_after: datetime | None,
@@ -907,6 +1095,7 @@ class BookContentQualityService:
         rows, total, summary = await self.repository.admin_reports(
             status=status,
             issue_type=issue_type,
+            scope=scope,
             book_id=book_id,
             search=search,
             created_after=created_after,
@@ -1041,7 +1230,7 @@ class BookContentQualityService:
     ) -> BookQualityScanRead:
         await self._require_role(actor_id, "admin")
         book = await self.repository.book(book_id, lock=True)
-        if book is None:
+        if book is None or getattr(book, "VisibilityScope", "CATALOG") != "CATALOG":
             raise HTTPException(status_code=404, detail="Resource not found")
         if scope not in ("BOOK", "PAGE"):
             raise HTTPException(status_code=422, detail="Invalid scan scope")
@@ -1183,11 +1372,7 @@ class BookContentQualityService:
         if callable(getattr(self.repository.db, "commit", None)) and callable(
             getattr(self.repository, "book", None)
         ):
-            # Release page/workflow locks before the publisher reacquires them
-            # in book → page → workflow order, including when all AI results
-            # were already cached and no worker event will follow.
             await self.repository.db.commit()
-            await self.auto_publish_if_eligible(book_id)
 
     async def list_book_scans(
         self, actor_id: UUID, book_id: UUID
@@ -1245,6 +1430,7 @@ class BookContentQualityService:
         offset: int,
         status_filter: str | None = None,
         alert_filter: str | None = None,
+        issue_filter: str | None = None,
     ) -> BookQualityBookPage:
         await self._require_role(actor_id, "admin")
         rows = await self.repository.all_books_for_assessment(search=search)
@@ -1267,53 +1453,123 @@ class BookContentQualityService:
         for decision in await self.repository.book_decisions_for_books(book_ids):
             if decision.ResourceId is not None:
                 decisions_by_book.setdefault(decision.ResourceId, []).append(decision)
+        rights_by_book: dict[UUID, list[BookContentRightsProfile]] = {book_id: [] for book_id in book_ids}
+        if hasattr(self.repository, "rights_profiles_for_books"):
+            for profile in await self.repository.rights_profiles_for_books(book_ids):
+                rights_by_book.setdefault(profile.BookId, []).append(profile)
+        open_safety_reports_by_book = (
+            await self.repository.open_safety_report_counts_for_books(book_ids)
+            if hasattr(self.repository, "open_safety_report_counts_for_books")
+            else {}
+        )
         assessed_rows = []
         status_counts: dict[str, int] = {}
         alert_counts = {"CHILD_SAFETY": 0, "COPYRIGHT": 0, "BOTH": 0}
+        issue_filter_counts = {
+            "MISSING_CONTENT": 0,
+            "SAFETY_ALERTS": 0,
+            "MISSING_RIGHTS": 0,
+            "OPEN_REPORTS": 0,
+            "READY_FOR_APPROVAL": 0,
+        }
         for row in rows:
             book = row[0]
+            open_report_count = int(row[2] or 0)
+            open_safety_report_count = int(open_safety_reports_by_book.get(book.Id, 0))
             assessment = self._assessment(
                 page_rows_by_book.get(book.Id, []),
                 decisions_by_book.get(book.Id, []),
+                book=book,
+                rights_profiles=rights_by_book.get(book.Id, []),
             )
             status_counts[assessment.status] = status_counts.get(assessment.status, 0) + 1
-            has_safety = assessment.finding_count > 0
+            has_safety = bool(
+                assessment.finding_count > 0
+                or assessment.high_finding_count > 0
+                or "SUITABILITY_REVIEW_REQUIRED" in assessment.blockers
+                or open_safety_report_count > 0
+            )
             has_copyright = bool(
-                assessment.copyright_finding_count is not None
-                and assessment.copyright_finding_count > 0
+                assessment.rights_profile_status != "REVIEWED"
+                or (
+                    assessment.copyright_finding_count is not None
+                    and assessment.copyright_finding_count > 0
+                )
+            )
+            has_missing_content = bool(
+                assessment.page_count == 0
+                or assessment.ocr_completed_pages < assessment.page_count
+                or bool(assessment.missing_page_numbers)
+                or bool(assessment.duplicate_page_numbers)
+                or bool(assessment.empty_ocr_page_numbers)
+                or bool(assessment.missing_image_page_numbers)
+                or assessment.expected_page_count_status == "UNDER_EXPECTED"
+            )
+            has_missing_rights = assessment.rights_profile_status != "REVIEWED"
+            ready_for_approval = assessment.status == "READY_FOR_CHILDREN"
+            issue_page_count = max(
+                assessment.failed_or_unscanned_page_count,
+                assessment.warning_page_count,
+                len(assessment.empty_ocr_page_numbers),
+                len(assessment.missing_image_page_numbers),
+                len(assessment.duplicate_page_numbers),
             )
             if has_safety:
                 alert_counts["CHILD_SAFETY"] += 1
+                issue_filter_counts["SAFETY_ALERTS"] += 1
             if has_copyright:
                 alert_counts["COPYRIGHT"] += 1
             if has_safety and has_copyright:
                 alert_counts["BOTH"] += 1
-            assessed_rows.append((row, assessment))
+            if has_missing_content:
+                issue_filter_counts["MISSING_CONTENT"] += 1
+            if has_missing_rights:
+                issue_filter_counts["MISSING_RIGHTS"] += 1
+            if open_report_count > 0:
+                issue_filter_counts["OPEN_REPORTS"] += 1
+            if ready_for_approval:
+                issue_filter_counts["READY_FOR_APPROVAL"] += 1
+            assessed_rows.append((
+                row,
+                assessment,
+                {
+                    "open_safety_report_count": open_safety_report_count,
+                    "verified_page_count": assessment.ocr_completed_pages,
+                    "issue_page_count": issue_page_count,
+                    "has_missing_content": has_missing_content,
+                    "has_safety_alerts": has_safety,
+                    "has_missing_rights": has_missing_rights,
+                    "ready_for_approval": ready_for_approval,
+                },
+            ))
         if status_filter:
             assessed_rows = [
                 item for item in assessed_rows if item[1].status == status_filter
             ]
         if alert_filter == "CHILD_SAFETY":
-            assessed_rows = [item for item in assessed_rows if item[1].finding_count > 0]
+            assessed_rows = [item for item in assessed_rows if item[2]["has_safety_alerts"]]
         elif alert_filter == "COPYRIGHT":
-            assessed_rows = [
-                item
-                for item in assessed_rows
-                if item[1].copyright_finding_count is not None
-                and item[1].copyright_finding_count > 0
-            ]
+            assessed_rows = [item for item in assessed_rows if item[2]["has_missing_rights"]]
         elif alert_filter == "BOTH":
             assessed_rows = [
                 item
                 for item in assessed_rows
-                if item[1].finding_count > 0
-                and item[1].copyright_finding_count is not None
-                and item[1].copyright_finding_count > 0
+                if item[2]["has_safety_alerts"] and item[2]["has_missing_rights"]
             ]
+        if issue_filter == "MISSING_CONTENT":
+            assessed_rows = [item for item in assessed_rows if item[2]["has_missing_content"]]
+        elif issue_filter == "SAFETY_ALERTS":
+            assessed_rows = [item for item in assessed_rows if item[2]["has_safety_alerts"]]
+        elif issue_filter == "MISSING_RIGHTS":
+            assessed_rows = [item for item in assessed_rows if item[2]["has_missing_rights"]]
+        elif issue_filter == "OPEN_REPORTS":
+            assessed_rows = [item for item in assessed_rows if int(item[0][2] or 0) > 0]
+        elif issue_filter == "READY_FOR_APPROVAL":
+            assessed_rows = [item for item in assessed_rows if item[2]["ready_for_approval"]]
         total = len(assessed_rows)
         page = assessed_rows[offset : offset + limit]
         items = []
-        for (book, report_count, open_report_count, finding_count, review_count), assessment in page:
+        for (book, report_count, open_report_count, finding_count, review_count), assessment, flags in page:
             latest = await self.repository.latest_scan(book.Id)
             items.append(
                 BookQualityBookSummary(
@@ -1321,8 +1577,15 @@ class BookContentQualityService:
                     book_title=book.Title,
                     report_count=int(report_count or 0),
                     open_report_count=int(open_report_count or 0),
+                    open_safety_report_count=int(flags["open_safety_report_count"]),
                     finding_count=int(finding_count or 0),
                     needs_review_finding_count=int(review_count or 0),
+                    verified_page_count=int(flags["verified_page_count"]),
+                    issue_page_count=int(flags["issue_page_count"]),
+                    has_missing_content=bool(flags["has_missing_content"]),
+                    has_safety_alerts=bool(flags["has_safety_alerts"]),
+                    has_missing_rights=bool(flags["has_missing_rights"]),
+                    ready_for_approval=bool(flags["ready_for_approval"]),
                     latest_scan=self._scan_read(latest) if latest else None,
                     assessment=assessment,
                 )
@@ -1334,14 +1597,131 @@ class BookContentQualityService:
             offset=offset,
             summary=status_counts,
             alert_summary=alert_counts,
+            issue_filter_summary=issue_filter_counts,
         )
+
+    @classmethod
+    def _build_page_items(
+        cls,
+        assessment_rows: list[tuple],
+        assessment: BookApprovalAssessment,
+        *,
+        rights_profiles: list[BookContentRightsProfile],
+        latest_revisions: dict[UUID, object],
+        open_reports_by_page: dict[UUID, int],
+    ) -> list[BookQualityPageItemRead]:
+        book_profile = next((p for p in rights_profiles if p.PageId is None), None)
+        overrides = {p.PageId: p for p in rights_profiles if p.PageId is not None}
+        duplicate_set = set(assessment.duplicate_page_numbers)
+        empty_ocr_set = set(assessment.empty_ocr_page_numbers)
+        missing_img_set = set(assessment.missing_image_page_numbers)
+        items: list[BookQualityPageItemRead] = []
+        for row in assessment_rows:
+            if len(row) == 7:
+                _, page, revision, workflow, *_ = row
+            else:
+                page, revision, workflow, *_ = row
+            if page.LifecycleStatus not in {"ACTIVE", "PROCESSING"}:
+                continue
+            page_no = int(page.PageNumber)
+            latest_rev = latest_revisions.get(page.Id) or revision
+            content_type = str(getattr(page, "ContentType", None) or "CONTENT")
+            issues: list[str] = []
+            if page_no in missing_img_set:
+                issues.append("MISSING_IMAGE")
+            if page.LifecycleStatus == "PROCESSING":
+                issues.append("OCR_PROCESSING")
+            if page_no in empty_ocr_set:
+                issues.append("EMPTY_OCR")
+            if page_no in duplicate_set:
+                issues.append("DUPLICATE_PAGE")
+            if revision is None or revision.VerificationStatus != "VERIFIED":
+                issues.append("NOT_VERIFIED")
+            if workflow is None:
+                issues.append("NOT_CHECKED_BY_AI")
+            elif workflow.Status == "FAILED":
+                issues.append("AI_FAILED")
+            elif workflow.SafetyStatus == "STALE":
+                issues.append("NEEDS_RECHECK")
+
+            findings = list(workflow.Findings or []) if workflow is not None else []
+            high_findings = sum(
+                1
+                for item in findings
+                if isinstance(item, dict)
+                and str(item.get("severity") or "").upper() in {"HIGH", "CRITICAL"}
+            )
+            if high_findings or (workflow is not None and workflow.Suitability == "NOT_RECOMMENDED"):
+                issues.append("SAFETY_BLOCKING")
+            elif findings or (workflow is not None and workflow.Suitability == "REVIEW_REQUIRED"):
+                issues.append("SAFETY_WARNING")
+
+            img_safety = (
+                str(getattr(workflow, "ImageSafetyStatus", None) or "NOT_REVIEWED")
+                if workflow is not None
+                else "NOT_REVIEWED"
+            )
+            if content_type == "COVER_OR_IMAGE_ONLY" and img_safety != "MANUAL_REVIEWED_SAFE":
+                issues.append("IMAGE_REVIEW_REQUIRED")
+            elif img_safety == "MANUAL_REVIEWED_CONCERN":
+                issues.append("IMAGE_SAFETY_CONCERN")
+
+            override = overrides.get(page.Id)
+            effective_rights = override or book_profile
+            _r_blockers, effective_rights_status = AdminOcrService._rights_profile_blockers(
+                effective_rights
+            )
+            if effective_rights_status != "REVIEWED":
+                issues.append(f"RIGHTS_{effective_rights_status}")
+
+            open_reports = int(open_reports_by_page.get(page.Id, 0))
+            if open_reports > 0:
+                issues.append("OPEN_PARENT_REPORT")
+
+            items.append(
+                BookQualityPageItemRead(
+                    page_id=page.Id,
+                    page_number=page_no,
+                    lifecycle_status=page.LifecycleStatus,
+                    content_type=content_type,  # type: ignore[arg-type]
+                    current_verified_revision_id=page.CurrentVerifiedRevisionId,
+                    latest_revision_id=getattr(latest_rev, "Id", None),
+                    verification_status=(
+                        str(getattr(revision, "VerificationStatus", None))
+                        if revision is not None
+                        else (
+                            str(getattr(latest_rev, "VerificationStatus", "MISSING"))
+                            if latest_rev is not None
+                            else "MISSING"
+                        )
+                    ),
+                    content_issues=issues,
+                    proofreading_status=(
+                        "COMPLETED"
+                        if workflow is not None and workflow.ProofreadText is not None
+                        else (str(workflow.Status) if workflow is not None else "NOT_STARTED")
+                    ),
+                    uncertain_word_count=len(workflow.UncertainWordIndices or []) if workflow is not None else 0,
+                    safety_status=str(workflow.SafetyStatus) if workflow is not None else "NOT_STARTED",
+                    safety_suitability=workflow.Suitability if workflow is not None else None,
+                    safety_finding_count=len(findings),
+                    high_finding_count=high_findings,
+                    image_safety_status=img_safety,
+                    rights_status=effective_rights_status,  # type: ignore[arg-type]
+                    has_rights_override=override is not None,
+                    open_report_count=open_reports,
+                    latest_workflow_id=workflow.Id if workflow is not None else None,
+                    has_issues=len(issues) > 0,
+                )
+            )
+        return items
 
     async def get_book_detail(
         self, actor_id: UUID, book_id: UUID
     ) -> BookQualityBookDetail:
         await self._require_role(actor_id, "admin")
         book = await self.repository.book(book_id)
-        if book is None:
+        if book is None or getattr(book, "VisibilityScope", "CATALOG") != "CATALOG":
             raise HTTPException(status_code=404, detail="Resource not found")
         reports, _ = await self.repository.reports_for_book(book_id, limit=50)
         scans = await self.repository.scan_runs_for_book(book_id)
@@ -1352,15 +1732,52 @@ class BookContentQualityService:
         workflow_summary = await self.repository.ai_workflow_summary_for_book(book_id)
         assessment_rows = await self.repository.book_assessment_rows(book_id)
         decisions = await self.repository.book_decisions(book_id)
+        rights_profiles = (
+            await self.repository.rights_profiles_for_book(book_id)
+            if hasattr(self.repository, "rights_profiles_for_book")
+            else []
+        )
+        latest_revisions = (
+            await self.repository.latest_revisions_by_page_for_book(book_id)
+            if hasattr(self.repository, "latest_revisions_by_page_for_book")
+            else {}
+        )
+        open_reports_by_page = (
+            await self.repository.open_reports_by_page_for_book(book_id)
+            if hasattr(self.repository, "open_reports_by_page_for_book")
+            else {}
+        )
+        assessment = self._assessment(
+            assessment_rows,
+            decisions,
+            book=book,
+            rights_profiles=rights_profiles,
+            latest_revisions=latest_revisions,
+        )
+        book_rights = next((p for p in rights_profiles if p.PageId is None), None)
+        page_rights_overrides = [p for p in rights_profiles if p.PageId is not None]
+        pages = self._build_page_items(
+            assessment_rows,
+            assessment,
+            rights_profiles=rights_profiles,
+            latest_revisions=latest_revisions,
+            open_reports_by_page=open_reports_by_page,
+        )
         return BookQualityBookDetail(
             book_id=book.Id,
             book_title=str(book.Title),
+            expected_page_count=getattr(book, "ExpectedPageCount", None),
             reports=[self._report_read(report) for report in reports],
             scans=[self._scan_read(run) for run in scans],
             latest_scan_detail=latest_detail,
             ai_workflows=[AdminAiWorkflowService._read(row) for row in workflows],
             ai_workflow_summary=workflow_summary,
-            assessment=self._assessment(assessment_rows, decisions),
+            rights_profile=self._rights_profile_read(book_rights, book.Id),
+            page_rights_overrides=[
+                self._rights_profile_read(item, book.Id) for item in page_rights_overrides
+            ],
+            pages=pages,
+            assessment=assessment,
             decision_history=[self._decision_read(row) for row in decisions],
         )
 
@@ -1386,11 +1803,18 @@ class BookContentQualityService:
     ) -> BookQualityBookDecisionRead:
         await self._require_role(actor_id, "admin")
         book = await self.repository.book(book_id, lock=True)
-        if book is None:
+        if book is None or getattr(book, "VisibilityScope", "CATALOG") != "CATALOG":
             raise HTTPException(status_code=404, detail="Resource not found")
         rows = await self.repository.book_assessment_rows(book_id, lock=True)
         decisions = await self.repository.book_decisions(book_id)
-        current = self._assessment(rows, decisions)
+        rights_profiles = (
+            await self.repository.rights_profiles_for_book(book_id)
+            if hasattr(self.repository, "rights_profiles_for_book")
+            else []
+        )
+        current = self._assessment(
+            rows, decisions, book=book, rights_profiles=rights_profiles
+        )
         now = datetime.now(timezone.utc)
         actor_name = (await self.repository.profile_name(actor_id) or "Admin")[:160]
         action_by_decision = {
@@ -1418,7 +1842,8 @@ class BookContentQualityService:
             and latest_metadata.get("assessment_hash") == current.assessment_hash
             and latest_metadata.get("reason") == payload.reason
             and latest_metadata.get("category") == payload.category
-            and latest_metadata.get("rights_confirmed", False) == payload.rights_confirmed
+            and latest_metadata.get("rights_confirmed", False)
+            == (current.rights_profile_status == "REVIEWED")
         ):
             return BookQualityBookDecisionRead(
                 book_id=book_id,
@@ -1481,6 +1906,41 @@ class BookContentQualityService:
                     or workflow.SafetyInputHash != workflow.CandidateHash
                 ):
                     page_blockers.append(f"{page_label}: Child Safety thiếu hoặc stale")
+            if COPYRIGHT_BLOCKS_BOOK_APPROVAL and current.rights_profile_status != "REVIEWED":
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cần hoàn tất hồ sơ quyền sử dụng ở trạng thái Đã rà soát quyền sử dụng trước khi phê duyệt sách.",
+                )
+            if (
+                current.missing_page_numbers
+                or current.duplicate_page_numbers
+                or current.empty_ocr_page_numbers
+                or current.missing_image_page_numbers
+                or current.expected_page_count_status == "UNDER_EXPECTED"
+                or "IMAGE_ONLY_PAGES_UNREVIEWED" in current.blockers
+            ):
+                if current.missing_page_numbers:
+                    page_blockers.append(
+                        f"Nghi thiếu trang: {', '.join(f'trang {n}' for n in current.missing_page_numbers)}"
+                    )
+                if current.duplicate_page_numbers:
+                    page_blockers.append(
+                        f"Trang trùng nội dung: {', '.join(f'trang {n}' for n in current.duplicate_page_numbers)}"
+                    )
+                if current.empty_ocr_page_numbers:
+                    page_blockers.append(
+                        f"OCR trống: {', '.join(f'trang {n}' for n in current.empty_ocr_page_numbers)}"
+                    )
+                if current.missing_image_page_numbers:
+                    page_blockers.append(
+                        f"Thiếu ảnh gốc: {', '.join(f'trang {n}' for n in current.missing_image_page_numbers)}"
+                    )
+                if current.expected_page_count_status == "UNDER_EXPECTED":
+                    page_blockers.append(
+                        f"Thiếu trang so với số trang nguồn dự kiến ({current.page_count}/{current.expected_page_count})"
+                    )
+                if "IMAGE_ONLY_PAGES_UNREVIEWED" in current.blockers:
+                    page_blockers.append("Còn trang bìa/hình ảnh chưa rà soát an toàn bằng tay")
             if (
                 current.page_count == 0
                 or current.ocr_completed_pages != current.page_count
@@ -1583,16 +2043,21 @@ class BookContentQualityService:
         # now record the confirmed state), and persist both the decision and the
         # page-level work in the same PostgreSQL transaction.
         decision_snapshot = self._page_snapshot(rows)
-        decision_assessment = self._assessment(rows, decisions)
+        decision_assessment = self._assessment(
+            rows, decisions, book=book, rights_profiles=rights_profiles
+        )
         await self.repository.add_book_decision(
             actor_id=actor_id,
             book_id=book_id,
             action=action,
             metadata={
                 "decision": payload.decision,
+                "decision_source": "ADMIN_APPROVAL" if payload.decision == "APPROVE" else "ADMIN_REVIEW",
                 "reason": payload.reason,
                 "category": payload.category,
-                "rights_confirmed": payload.rights_confirmed,
+                "rights_confirmed": decision_assessment.rights_profile_status == "REVIEWED",
+                "rights_profile_version": decision_assessment.rights_profile_version,
+                "rights_profile_hash": decision_assessment.rights_profile_hash,
                 "assessment_hash": decision_assessment.assessment_hash,
                 "page_snapshot": decision_snapshot,
                 "page_count": decision_assessment.page_count,
@@ -1606,9 +2071,271 @@ class BookContentQualityService:
         refreshed_decisions = await self.repository.book_decisions(book_id)
         return BookQualityBookDecisionRead(
             book_id=book_id,
-            assessment=self._assessment(refreshed_rows, refreshed_decisions),
+            assessment=self._assessment(
+                refreshed_rows,
+                refreshed_decisions,
+                book=book,
+                rights_profiles=rights_profiles,
+            ),
             decision_history=[self._decision_read(row) for row in refreshed_decisions],
         )
+
+    async def get_rights_profile(
+        self, actor_id: UUID, book_id: UUID, *, page_id: UUID | None = None
+    ) -> BookContentRightsProfileRead:
+        await self._require_role(actor_id, "admin")
+        book = await self.repository.book(book_id)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        if page_id is not None:
+            page = await self.repository.page(page_id)
+            if page is None or page.BookId != book_id:
+                raise HTTPException(status_code=404, detail="Resource not found")
+            profile = await self.repository.effective_rights_profile(book_id, page_id)
+            return self._rights_profile_read(profile, book_id)
+        profile = await self.repository.rights_profile(book_id, page_id=None)
+        return self._rights_profile_read(profile, book_id)
+
+    async def upsert_rights_profile(
+        self,
+        actor_id: UUID,
+        book_id: UUID,
+        payload: BookContentRightsProfileUpsert,
+        *,
+        page_id: UUID | None = None,
+    ) -> BookContentRightsProfileRead:
+        await self._require_role(actor_id, "admin")
+        book = await self.repository.book(book_id, lock=True)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        scope = "PAGE_OVERRIDE" if page_id is not None else "BOOK"
+        if page_id is not None:
+            page = await self.repository.page(page_id, lock=True)
+            if page is None or page.BookId != book_id:
+                raise HTTPException(status_code=404, detail="Resource not found")
+
+        existing = await self.repository.rights_profile(
+            book_id, page_id=page_id, lock=True
+        )
+        if payload.status == "REVIEWED":
+            has_evidence = bool(
+                payload.evidence_url
+                or payload.evidence_reference
+                or (payload.usage_basis == "OWN_ORIGINAL" and payload.notes)
+            )
+            if (
+                not payload.source_name
+                or not payload.usage_basis
+                or payload.usage_basis == "UNKNOWN"
+                or not has_evidence
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "RIGHTS_EVIDENCE_REQUIRED",
+                        "message": "Để đánh dấu Đã rà soát quyền sử dụng, cần ghi rõ nguồn nội dung, căn cứ sử dụng hợp lệ và liên kết hoặc tài liệu chứng minh.",
+                    },
+                )
+            if (
+                existing is not None
+                and existing.ReferenceCheckStatus == "OVERLAP_CONCERN"
+                and not payload.notes
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "RIGHTS_OVERLAP_EXPLANATION_REQUIRED",
+                        "message": "Đang có nghi vấn trùng khớp trong dữ liệu đối chiếu; cần ghi rõ lý do và căn cứ xử lý trước khi chuyển sang Đã rà soát.",
+                    },
+                )
+
+        now = datetime.now(timezone.utc)
+        actor_name = (await self.repository.profile_name(actor_id) or "Admin")[:160]
+        fingerprint = self._rights_profile_fingerprint(payload, scope)
+        history_entry = {
+            "status": payload.status,
+            "source_name": payload.source_name,
+            "rights_holder": payload.rights_holder,
+            "usage_basis": payload.usage_basis,
+            "source_fingerprint": fingerprint,
+            "actor_id": str(actor_id),
+            "actor_name": actor_name,
+            "notes": payload.notes,
+            "reviewed_at": now.isoformat(),
+        }
+        if existing is None:
+            profile = BookContentRightsProfile(
+                Id=uuid4(),
+                BookId=book_id,
+                PageId=page_id,
+                Scope=scope,
+                Status=payload.status,
+                SourceName=payload.source_name,
+                RightsHolder=payload.rights_holder,
+                UsageBasis=payload.usage_basis,
+                EvidenceUrl=payload.evidence_url,
+                EvidenceReference=payload.evidence_reference,
+                Notes=payload.notes,
+                SourceFingerprint=fingerprint,
+                ProfileVersion=1,
+                ReferenceCheckStatus="NOT_RUN",
+                ReferenceCheckEvidence=[],
+                ReviewedBy=actor_id,
+                ReviewedByNameSnapshot=actor_name,
+                ReviewedAt=now,
+                History=[history_entry],
+                CreatedAt=now,
+                UpdatedAt=now,
+            )
+            await self.repository.add_rights_profile(profile)
+        else:
+            profile = existing
+            changed = (
+                profile.SourceFingerprint != fingerprint
+                or profile.Status != payload.status
+            )
+            if changed:
+                profile.ProfileVersion = int(profile.ProfileVersion or 1) + 1
+            profile.Status = payload.status
+            profile.SourceName = payload.source_name
+            profile.RightsHolder = payload.rights_holder
+            profile.UsageBasis = payload.usage_basis
+            profile.EvidenceUrl = payload.evidence_url
+            profile.EvidenceReference = payload.evidence_reference
+            profile.Notes = payload.notes
+            profile.SourceFingerprint = fingerprint
+            profile.ReviewedBy = actor_id
+            profile.ReviewedByNameSnapshot = actor_name
+            profile.ReviewedAt = now
+            profile.History = list(profile.History or []) + [history_entry]
+            profile.UpdatedAt = now
+        await self.repository.commit()
+        await self.repository.refresh(profile)
+        return self._rights_profile_read(profile, book_id)
+
+    async def run_rights_corpus_overlap_check(
+        self, actor_id: UUID, book_id: UUID
+    ) -> BookContentRightsProfileRead:
+        """Compare active book text ONLY against allowed local catalog rows (no external search)."""
+        await self._require_role(actor_id, "admin")
+        book = await self.repository.book(book_id, lock=True)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        rows = await self.repository.book_assessment_rows(book_id)
+        latest_revisions = await self.repository.latest_revisions_by_page_for_book(book_id)
+        other_pages = await self.repository.other_books_verified_pages(book_id)
+
+        def _shingles(text_value: str, size: int = 8) -> dict[str, str]:
+            tokens = text_value.split()
+            if len(tokens) < size:
+                return {}
+            out: dict[str, str] = {}
+            for idx in range(0, len(tokens) - size + 1):
+                raw_slice = " ".join(tokens[idx : idx + size])
+                key = " ".join(raw_slice.casefold().split())
+                out.setdefault(key, raw_slice)
+            return out
+
+        reference_index: dict[str, tuple[UUID, str, int]] = {}
+        for other_book_id, other_title, other_page_no, other_text in other_pages:
+            for key in _shingles(other_text):
+                reference_index.setdefault(key, (other_book_id, other_title, other_page_no))
+
+        matches: list[dict[str, object]] = []
+        seen_pairs: set[tuple[str, int, int]] = set()
+        for row in rows:
+            page, revision = row[0], row[1]
+            if page.LifecycleStatus != "ACTIVE":
+                continue
+            rev = revision or latest_revisions.get(page.Id)
+            text_value = (
+                (getattr(rev, "VerifiedText", None) if rev else None)
+                or (getattr(rev, "DraftText", None) if rev else None)
+                or ""
+            )
+            for key, raw_slice in _shingles(str(text_value)).items():
+                hit = reference_index.get(key)
+                if hit is None:
+                    continue
+                source_book_id, source_title, source_page_no = hit
+                pair_key = (str(source_book_id), source_page_no, int(page.PageNumber))
+                if pair_key in seen_pairs:
+                    continue
+                seen_pairs.add(pair_key)
+                matches.append({
+                    "source_book_id": str(source_book_id),
+                    "source_book_title": source_title,
+                    "source_page_number": source_page_no,
+                    "target_page_number": int(page.PageNumber),
+                    "matched_excerpt": raw_slice[:240],
+                    "scan_scope": "INTERNAL_CATALOG_CORPUS",
+                })
+                if len(matches) >= 20:
+                    break
+            if len(matches) >= 20:
+                break
+
+        now = datetime.now(timezone.utc)
+        actor_name = (await self.repository.profile_name(actor_id) or "Admin")[:160]
+        profile = await self.repository.rights_profile(book_id, page_id=None, lock=True)
+        if profile is None:
+            profile = BookContentRightsProfile(
+                Id=uuid4(),
+                BookId=book_id,
+                PageId=None,
+                Scope="BOOK",
+                Status="CONCERNS_FOUND" if matches else "NOT_ASSESSED",
+                ProfileVersion=1,
+                ReferenceCheckStatus=(
+                    "OVERLAP_CONCERN" if matches else "NO_MATCH_IN_ALLOWED_CORPUS"
+                ),
+                ReferenceCheckEvidence=matches,
+                ReviewedBy=actor_id,
+                ReviewedByNameSnapshot=actor_name,
+                ReviewedAt=now,
+                History=[{
+                    "event": "ALLOWED_CORPUS_OVERLAP_CHECK",
+                    "scan_scope": "INTERNAL_CATALOG_CORPUS",
+                    "match_count": len(matches),
+                    "actor_id": str(actor_id),
+                    "actor_name": actor_name,
+                    "checked_at": now.isoformat(),
+                }],
+                CreatedAt=now,
+                UpdatedAt=now,
+            )
+            await self.repository.add_rights_profile(profile)
+        else:
+            profile.ReferenceCheckStatus = (
+                "OVERLAP_CONCERN" if matches else "NO_MATCH_IN_ALLOWED_CORPUS"
+            )
+            profile.ReferenceCheckEvidence = matches
+            if matches:
+                profile.Status = "CONCERNS_FOUND"
+                profile.ProfileVersion = int(profile.ProfileVersion or 1) + 1
+            profile.History = list(profile.History or []) + [{
+                "event": "ALLOWED_CORPUS_OVERLAP_CHECK",
+                "scan_scope": "INTERNAL_CATALOG_CORPUS",
+                "match_count": len(matches),
+                "actor_id": str(actor_id),
+                "actor_name": actor_name,
+                "checked_at": now.isoformat(),
+            }]
+            profile.UpdatedAt = now
+        await self.repository.commit()
+        await self.repository.refresh(profile)
+        return self._rights_profile_read(profile, book_id)
+
+    async def update_expected_page_count(
+        self, actor_id: UUID, book_id: UUID, payload: BookExpectedPageCountUpdate
+    ) -> dict[str, object]:
+        await self._require_role(actor_id, "admin")
+        book = await self.repository.book(book_id, lock=True)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        book.ExpectedPageCount = payload.expected_page_count
+        await self.repository.commit()
+        return {"book_id": str(book.Id), "expected_page_count": book.ExpectedPageCount}
 
     async def update_finding(
         self, actor_id: UUID, finding_id: UUID, payload: BookQualityFindingUpdate

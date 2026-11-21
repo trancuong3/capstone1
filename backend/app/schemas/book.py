@@ -120,6 +120,10 @@ class CatalogBookResponse(BaseModel):
     lifecycle_status: Literal["ACTIVE", "RETIRED"] = Field(
         validation_alias=AliasChoices("lifecycle_status", "LifecycleStatus")
     )
+    visibility_scope: Literal["CATALOG", "PARENT_PRIVATE"] = Field(
+        default="CATALOG",
+        validation_alias=AliasChoices("visibility_scope", "VisibilityScope"),
+    )
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -134,6 +138,10 @@ class AdminBookMetadataResponse(BaseModel):
     max_grade: int = Field(validation_alias=AliasChoices("max_grade", "MaxGrade"))
     lifecycle_status: Literal["ACTIVE", "RETIRED"] = Field(
         validation_alias=AliasChoices("lifecycle_status", "LifecycleStatus")
+    )
+    visibility_scope: Literal["CATALOG", "PARENT_PRIVATE"] = Field(
+        default="CATALOG",
+        validation_alias=AliasChoices("visibility_scope", "VisibilityScope"),
     )
     model_config = ConfigDict(from_attributes=True)
 

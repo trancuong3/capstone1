@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import List, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_parent_id, get_db
@@ -77,37 +77,61 @@ async def get_book_pages(book_id: UUID, db: AsyncSession = Depends(get_db)):
 
 @router.get("/catalog", response_model=list[CatalogBookResponse])
 async def get_parent_catalog(
+    response: Response,
     search: str | None = Query(default=None),
     author: str | None = Query(default=None),
     grade: int | None = Query(default=None, ge=1, le=5),
+    include_private: bool = Query(default=False),
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
     service = CatalogService(db)
     await service.require_parent(actor_id)
-    return await service.list(search, author, grade)
+    if include_private:
+        response.headers["Cache-Control"] = "private, no-store, max-age=0"
+        response.headers["Vary"] = "Authorization"
+    return await service.list(
+        search,
+        author,
+        grade,
+        actor_id=actor_id,
+        include_private=include_private,
+    )
 
 
 @router.get("/catalog/{book_id}", response_model=CatalogBookResponse)
 async def get_parent_catalog_book(
     book_id: UUID,
+    response: Response,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
     service = CatalogService(db)
     await service.require_parent(actor_id)
-    return await service.get(book_id)
+    result = await service.get(book_id, actor_id=actor_id)
+    if result.visibility_scope == "PARENT_PRIVATE":
+        response.headers["Cache-Control"] = "private, no-store, max-age=0"
+        response.headers["Vary"] = "Authorization"
+    return result
 
 
 @router.get("/catalog/{book_id}/preview", response_model=list[CatalogPagePreviewResponse])
 async def get_parent_catalog_previews(
     book_id: UUID,
+    request: Request,
+    response: Response,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
     service = CatalogService(db)
     await service.require_parent(actor_id)
-    return await service.previews(book_id)
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Vary"] = "Authorization"
+    return await service.previews(
+        book_id,
+        actor_id=actor_id,
+        base_url=str(request.base_url),
+    )
 
 
 @router.post(

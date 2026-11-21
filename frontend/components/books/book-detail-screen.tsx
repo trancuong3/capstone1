@@ -19,6 +19,7 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useBookService } from "@/hooks/use-book-service";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { isServiceError } from "@/lib/api/service-error";
@@ -51,6 +52,8 @@ function invitationFor(book: BookDetailDTO): string {
 }
 
 export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
+  const authRuntime = useAuthRuntime();
+  const currentUserId = authRuntime.session?.user?.id ?? "";
   const bookService = useBookService();
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const router = useRouter();
@@ -150,7 +153,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
     return () => {
       isActive = false;
     };
-  }, [bookId, bookService, childState, requestKey, targetPageId]);
+  }, [bookId, bookService, childState, currentUserId, requestKey, targetPageId]);
 
   useEffect(() => {
     if (
@@ -358,6 +361,16 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
         </article>
 
         <div className="flex min-w-0 flex-1 flex-col gap-4">
+          {book.visibility_scope === "PARENT_PRIVATE" ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800">
+                Sách riêng của gia đình
+              </span>
+              <span className="text-xs text-muted">
+                Chỉ phụ huynh sở hữu và các hồ sơ trẻ của gia đình được đọc.
+              </span>
+            </div>
+          ) : null}
           <h1 className="text-heading font-extrabold leading-tight text-ink sm:text-4xl">
             {book.title}
           </h1>
@@ -369,44 +382,56 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
               Độ tin cậy {Math.round(targetConfidence * 100)}%
             </p>
           ) : null}
-          <div
-            aria-label="Báo cáo nội dung sách"
-            role="group"
-            className="order-last flex flex-wrap gap-2 border-t border-border pt-4"
-          >
-            <ButtonLink
-              href="/book-reports"
-              variant="quiet"
-              className="sm:w-auto"
+          {book.visibility_scope === "PARENT_PRIVATE" ? (
+            <div className="order-last flex flex-wrap gap-2 border-t border-border pt-4">
+              <ButtonLink
+                href={`/my-books/${encodeURIComponent(book.id)}`}
+                variant="secondary"
+                className="sm:w-auto"
+              >
+                Quản lý trang trong Sách của tôi
+              </ButtonLink>
+            </div>
+          ) : (
+            <div
+              aria-label="Báo cáo nội dung sách"
+              role="group"
+              className="order-last flex flex-wrap gap-2 border-t border-border pt-4"
             >
-              <ClipboardList aria-hidden="true" className="size-4" /> Báo cáo
-              của tôi
-            </ButtonLink>
-            <Button
-              className="sm:w-auto"
-              onClick={() =>
-                setReportTarget({ pageId: null, pageNumber: null })
-              }
-              variant="secondary"
-            >
-              Báo lỗi sách
-            </Button>
-            <Button
-              className="sm:w-auto"
-              disabled={!selectedPage}
-              onClick={() =>
-                selectedPage
-                  ? setReportTarget({
-                      pageId: selectedPage.page_id,
-                      pageNumber: selectedPage.page_number,
-                    })
-                  : undefined
-              }
-              variant="secondary"
-            >
-              Báo lỗi trang này
-            </Button>
-          </div>
+              <ButtonLink
+                href="/book-reports"
+                variant="quiet"
+                className="sm:w-auto"
+              >
+                <ClipboardList aria-hidden="true" className="size-4" /> Báo cáo
+                của tôi
+              </ButtonLink>
+              <Button
+                className="sm:w-auto"
+                onClick={() =>
+                  setReportTarget({ pageId: null, pageNumber: null })
+                }
+                variant="secondary"
+              >
+                Báo lỗi sách
+              </Button>
+              <Button
+                className="sm:w-auto"
+                disabled={!selectedPage}
+                onClick={() =>
+                  selectedPage
+                    ? setReportTarget({
+                        pageId: selectedPage.page_id,
+                        pageNumber: selectedPage.page_number,
+                      })
+                    : undefined
+                }
+                variant="secondary"
+              >
+                Báo lỗi trang này
+              </Button>
+            </div>
+          )}
 
           <p className="text-body text-muted">
             {book.author ?? "Tác giả đang cập nhật"} · {formatGradeRange(book)}

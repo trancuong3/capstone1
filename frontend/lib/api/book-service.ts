@@ -23,6 +23,7 @@ export const bookDtoSchema = z.object({
   min_grade: z.number().int().min(1).max(5),
   max_grade: z.number().int().min(1).max(5),
   lifecycle_status: z.enum(["ACTIVE", "RETIRED"]),
+  visibility_scope: z.enum(["CATALOG", "PARENT_PRIVATE"]).optional(),
 });
 
 const parentBookSchema = bookDtoSchema.refine(
@@ -52,7 +53,12 @@ export function createBookService(): BookService {
   return {
     list: (query) =>
       requestApi(
-        `/books/catalog${apiQuery({ search: query?.search, author: query?.author, grade: query?.grade })}`,
+        `/books/catalog${apiQuery({
+          search: query?.search,
+          author: query?.author,
+          grade: query?.grade,
+          include_private: query?.include_private ? "true" : undefined,
+        })}`,
         z.array(parentBookSchema),
       ),
     get: (bookId) =>

@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from typing import List
 from uuid import UUID
 from app.api.deps import get_db, get_current_parent_id
@@ -68,11 +68,15 @@ async def get_session(
 @router.get("/sessions/{session_id}/page", response_model=ReadingPageDTO)
 async def get_session_current_page(
     session_id: UUID,
+    request: Request,
+    response: Response,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Vary"] = "Authorization"
     return await ReadingContentService(ReadingContentRepository(db)).get_session_page(
-        session_id, actor_id
+        session_id, actor_id, base_url=str(request.base_url)
     )
 
 
@@ -123,13 +127,17 @@ async def navigate_session_page(
 @router.get("/pages/{page_id}", response_model=ReadingPageDTO)
 async def get_reading_page(
     page_id: UUID,
+    request: Request,
+    response: Response,
     session_id: UUID = Query(...),
     revision_id: UUID | None = Query(None),
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Vary"] = "Authorization"
     return await ReadingContentService(ReadingContentRepository(db)).get_page(
-        page_id, session_id, actor_id, revision_id=revision_id
+        page_id, session_id, actor_id, revision_id=revision_id, base_url=str(request.base_url)
     )
 
 
@@ -226,11 +234,22 @@ class HistoryRepository:
         )
 
     async def session_book(self, session_id: UUID, actor_id: UUID):
-        # Historical metadata must not depend on current catalog eligibility.
+        # Historical metadata must not depend on current catalog eligibility,
+        # but private books must always belong to the authenticated parent.
         return await self.db.scalar(
             select(Book).join(ReadingSession, ReadingSession.BookId == Book.Id)
             .join(ChildProfile, ReadingSession.ChildId == ChildProfile.Id)
-            .where(ReadingSession.Id == session_id, ChildProfile.ParentId == actor_id)
+            .where(
+                ReadingSession.Id == session_id,
+                ChildProfile.ParentId == actor_id,
+                or_(
+                    Book.VisibilityScope == "CATALOG",
+                    and_(
+                        Book.VisibilityScope == "PARENT_PRIVATE",
+                        Book.OwnerParentId == actor_id,
+                    ),
+                ),
+            )
         )
 
     async def events(self, session_id: UUID):
@@ -544,7 +563,9 @@ from app.services.storage_service import download_object
 from app.services.vision_page_matcher import vision_page_matcher
 
 
-async def _fetch_stored_page_bytes(image_path: str) -> bytes | None:
+async def _fetch_stored_page_bytes(
+    image_path: str, *, bucket_name: str | None = None
+) -> bytes | None:
     """Đọc ảnh gốc của trang sách từ Supabase Storage, URL hoặc file local."""
     if not image_path:
         return None
@@ -556,7 +577,7 @@ async def _fetch_stored_page_bytes(image_path: str) -> bytes | None:
         if os.path.exists(image_path):
             with open(image_path, "rb") as f:
                 return f.read()
-        return download_object(image_path)
+        return download_object(image_path, bucket_name=bucket_name)
     except Exception:
         return None
 
@@ -606,25 +627,29 @@ async def match_book_page_from_camera(
             matched_page=None,
         )
 
-    # Lấy các trang ACTIVE của cuốn sách
+    # Lấy các trang ACTIVE của cuốn sách (catalog hợp lệ hoặc sách riêng đã sẵn sàng của actor)
+    from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
+    from app.policies.book_access import is_book_private
+
     pages_result = await db.execute(
-        select(BookPage)
+        select(BookPage, Book)
         .join(Book, Book.Id == BookPage.BookId)
         .where(
             BookPage.BookId == book_id,
             BookPage.LifecycleStatus == "ACTIVE",
-            CatalogRepository.eligible_book(),
+            CatalogRepository.readable_book(actor_id),
         )
         .order_by(BookPage.PageNumber)
     )
-    pages = pages_result.scalars().all()
+    rows = pages_result.all()
 
-    if not pages:
+    if not rows:
         raise HTTPException(status_code=404, detail="Resource not found")
 
     candidate_pages = []
-    for p in pages:
-        img_bytes = await _fetch_stored_page_bytes(p.ImagePath)
+    for p, book_row in rows:
+        bucket = SUPABASE_PRIVATE_BOOKS_BUCKET if is_book_private(book_row) else None
+        img_bytes = await _fetch_stored_page_bytes(p.ImagePath, bucket_name=bucket)
         if img_bytes:
             candidate_pages.append(
                 {
@@ -728,22 +753,26 @@ async def match_page_global_from_camera(
             matched_page=None,
         )
 
-    # Lấy toàn bộ các trang sách ACTIVE của tất cả các đầu sách
+    # Lấy toàn bộ các trang sách ACTIVE của các sách mà actor được phép đọc
+    from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
+    from app.policies.book_access import is_book_private
+
     pages_result = await db.execute(
-        select(BookPage)
+        select(BookPage, Book)
         .join(Book, Book.Id == BookPage.BookId)
         .where(BookPage.LifecycleStatus == "ACTIVE")
-        .where(CatalogRepository.eligible_book())
+        .where(CatalogRepository.readable_book(actor_id))
         .order_by(BookPage.BookId, BookPage.PageNumber)
     )
-    pages = pages_result.scalars().all()
+    rows = pages_result.all()
 
-    if not pages:
+    if not rows:
         raise HTTPException(status_code=404, detail="No active books or pages found")
 
     candidate_pages = []
-    for p in pages:
-        img_bytes = await _fetch_stored_page_bytes(p.ImagePath)
+    for p, book_row in rows:
+        bucket = SUPABASE_PRIVATE_BOOKS_BUCKET if is_book_private(book_row) else None
+        img_bytes = await _fetch_stored_page_bytes(p.ImagePath, bucket_name=bucket)
         if img_bytes:
             candidate_pages.append(
                 {

@@ -5,6 +5,7 @@ from app.api.routes import (
     book,
     book_content_quality,
     comprehension,
+    parent_private_book,
     profile,
     reading,
     reading_management,
@@ -28,6 +29,7 @@ api_router.include_router(karaoke.router, prefix="/karaoke", tags=["Karaoke"])
 api_router.include_router(karaoke_processing.router, prefix="/karaoke", tags=["Karaoke processing"])
 
 api_router.include_router(profile.router, prefix="/profiles", tags=["Profiles"])
+api_router.include_router(parent_private_book.router, prefix="/books", tags=["Parent Private Books"])
 api_router.include_router(book.router, prefix="/books", tags=["Books"])
 api_router.include_router(admin_ocr.router, prefix="/books", tags=["Admin OCR"])
 api_router.include_router(admin_viread_training.router, prefix="/books", tags=["Admin ViOCR Training"])

@@ -12,6 +12,7 @@ from app.models import (
 )
 from app.repositories.book_repository import CatalogRepository
 from app.models.reading_comparison_report import ReadingComparisonReport
+from app.policies.book_access import is_private_book, is_private_page_readable
 
 
 class ReadingContentRepository:
@@ -53,7 +54,16 @@ class ReadingContentRepository:
         )
         return found is not None
 
-    async def verified_page(self, page_id: UUID, book_id: UUID | None = None) -> BookPage | None:
+    async def book_by_id(self, book_id: UUID) -> Book | None:
+        return await self.db.scalar(select(Book).where(Book.Id == book_id))
+
+    async def verified_page(
+        self,
+        page_id: UUID,
+        book_id: UUID | None = None,
+        *,
+        actor_id: UUID | None = None,
+    ) -> BookPage | None:
         query = (
             select(BookPage)
             .join(Book, Book.Id == BookPage.BookId)
@@ -62,7 +72,11 @@ class ReadingContentRepository:
                 BookPage.Id == page_id,
                 BookPage.LifecycleStatus == "ACTIVE",
                 Book.LifecycleStatus == "ACTIVE",
-                CatalogRepository.eligible_book(),
+                CatalogRepository.readable_book(actor_id),
+                or_(
+                    ~is_private_book(),
+                    is_private_page_readable(),
+                ),
                 PageRevision.PageId == BookPage.Id,
                 PageRevision.VerificationStatus == "VERIFIED",
             )
@@ -71,17 +85,21 @@ class ReadingContentRepository:
             query = query.where(BookPage.BookId == book_id)
         return await self.db.scalar(query)
 
-    async def book_is_eligible(self, book_id: UUID) -> bool:
+    async def book_is_eligible(
+        self, book_id: UUID, *, actor_id: UUID | None = None
+    ) -> bool:
         return (
             await self.db.scalar(
                 select(Book.Id).where(
                     Book.Id == book_id,
-                    CatalogRepository.eligible_book(),
+                    CatalogRepository.readable_book(actor_id),
                 )
             )
         ) is not None
 
-    async def first_verified_page(self, book_id: UUID) -> BookPage | None:
+    async def first_verified_page(
+        self, book_id: UUID, *, actor_id: UUID | None = None
+    ) -> BookPage | None:
         return await self.db.scalar(
             select(BookPage)
             .join(Book, Book.Id == BookPage.BookId)
@@ -90,7 +108,11 @@ class ReadingContentRepository:
                 BookPage.BookId == book_id,
                 BookPage.LifecycleStatus == "ACTIVE",
                 Book.LifecycleStatus == "ACTIVE",
-                CatalogRepository.eligible_book(),
+                CatalogRepository.readable_book(actor_id),
+                or_(
+                    ~is_private_book(),
+                    is_private_page_readable(),
+                ),
                 PageRevision.PageId == BookPage.Id,
                 PageRevision.VerificationStatus == "VERIFIED",
             )
@@ -137,7 +159,12 @@ class ReadingContentRepository:
         return list(result.scalars().all())
 
     async def verified_pages_between_numbers(
-        self, book_id: UUID, start_page_number: int, end_page_number: int
+        self,
+        book_id: UUID,
+        start_page_number: int,
+        end_page_number: int,
+        *,
+        actor_id: UUID | None = None,
     ) -> list[BookPage]:
         result = await self.db.execute(
             select(BookPage)
@@ -149,7 +176,11 @@ class ReadingContentRepository:
                 BookPage.PageNumber <= end_page_number,
                 BookPage.LifecycleStatus == "ACTIVE",
                 Book.LifecycleStatus == "ACTIVE",
-                CatalogRepository.eligible_book(),
+                CatalogRepository.readable_book(actor_id),
+                or_(
+                    ~is_private_book(),
+                    is_private_page_readable(),
+                ),
                 PageRevision.PageId == BookPage.Id,
                 PageRevision.VerificationStatus == "VERIFIED",
             )
@@ -199,23 +230,27 @@ class ReadingContentRepository:
             raise
         return session
 
-    async def session_for_update(self, session_id: UUID) -> ReadingSession | None:
+    async def session_for_update(
+        self, session_id: UUID, *, actor_id: UUID | None = None
+    ) -> ReadingSession | None:
         return await self.db.scalar(
             select(ReadingSession)
             .join(Book, Book.Id == ReadingSession.BookId)
             .where(ReadingSession.Id == session_id)
-            .where(CatalogRepository.eligible_book())
+            .where(CatalogRepository.readable_book(actor_id))
             .with_for_update()
             .execution_options(populate_existing=True)
         )
 
-    async def session(self, session_id: UUID) -> ReadingSession | None:
+    async def session(
+        self, session_id: UUID, *, actor_id: UUID | None = None
+    ) -> ReadingSession | None:
         return await self.db.scalar(
             select(ReadingSession)
             .join(Book, Book.Id == ReadingSession.BookId)
             .where(
                 ReadingSession.Id == session_id,
-                CatalogRepository.eligible_book(),
+                CatalogRepository.readable_book(actor_id),
             )
         )
 
@@ -226,7 +261,7 @@ class ReadingContentRepository:
             .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
             .where(
                 ChildProfile.ParentId == parent_id,
-                CatalogRepository.eligible_book(),
+                CatalogRepository.readable_book(parent_id),
             )
             .order_by(ReadingSession.StartedAt.desc(), ReadingSession.Id.desc())
         )

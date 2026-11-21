@@ -126,6 +126,16 @@ class ReadingManagementService:
     def __init__(self, repository: ReadingManagementRepository):
         self.repository = repository
 
+    async def _repo_eligible_book(self, book_id: UUID, actor_id: UUID):
+        if isinstance(self.repository, ReadingManagementRepository):
+            return await self.repository.eligible_book(book_id, actor_id=actor_id)
+        return await self.repository.eligible_book(book_id)
+
+    async def _repo_book(self, book_id: UUID, actor_id: UUID | None = None):
+        if isinstance(self.repository, ReadingManagementRepository):
+            return await self.repository.book(book_id, actor_id=actor_id)
+        return await self.repository.book(book_id)
+
     async def require_parent(self, actor_id: UUID):
         if await self.repository.role(actor_id) != "parent":
             raise ManagementForbidden()
@@ -245,7 +255,7 @@ class ReadingManagementService:
         goal.Status = payload.status
         return await self.repository.save(goal)
 
-    async def plan_dict(self, plan: ReadingPlan, now: datetime):
+    async def plan_dict(self, plan: ReadingPlan, now: datetime, *, actor_id: UUID | None = None):
         zone = ZoneInfo(plan.Timezone)
         phase = item_phase(plan.Status, plan.StartsOn, plan.EndsOn, plan.Timezone, now)
         # Once the plan has ended, keep showing its final week instead of an empty one.
@@ -278,7 +288,7 @@ class ReadingManagementService:
         )
         scheduled_count = len(scheduled_dates)
         completed_count = len(completed_dates)
-        book = await self.repository.book(plan.BookId) if plan.BookId else None
+        book = await self._repo_book(plan.BookId, actor_id) if plan.BookId else None
         return {
             "id": plan.Id,
             "child_id": plan.ChildId,
@@ -307,7 +317,7 @@ class ReadingManagementService:
         await self.require_parent(actor_id)
         await self.owned_child(actor_id, child_id)
         now = now or datetime.now(timezone.utc)
-        return [await self.plan_dict(plan, now) for plan in await self.repository.plans(child_id)]
+        return [await self.plan_dict(plan, now, actor_id=actor_id) for plan in await self.repository.plans(child_id)]
 
     @staticmethod
     def check_plan_schedule(
@@ -326,7 +336,9 @@ class ReadingManagementService:
             payload.weekdays, payload.starts_on, payload.ends_on, payload.timezone,
             now or datetime.now(timezone.utc),
         )
-        if payload.book_id is not None and await self.repository.eligible_book(payload.book_id) is None:
+        if payload.book_id is not None and await self._repo_eligible_book(payload.book_id, actor_id) is None:
+            if await self._repo_book(payload.book_id, actor_id) is None:
+                raise ManagementNotFound()
             raise ManagementConflict("BOOK_UNAVAILABLE")
         return await self.repository.save(ReadingPlan(
             ChildId=payload.child_id,
@@ -362,7 +374,9 @@ class ReadingManagementService:
             datetime.now(timezone.utc),
             check_expiry="ends_on" in changes,
         )
-        if changes.get("book_id") is not None and await self.repository.eligible_book(changes["book_id"]) is None:
+        if changes.get("book_id") is not None and await self._repo_eligible_book(changes["book_id"], actor_id) is None:
+            if await self._repo_book(changes["book_id"], actor_id) is None:
+                raise ManagementNotFound()
             raise ManagementConflict("BOOK_UNAVAILABLE")
         for key, value in changes.items():
             if key == "title": plan.Title = value
@@ -390,26 +404,30 @@ class ReadingManagementService:
         return await self.repository.save(plan)
 
     async def list_collections(self, actor_id: UUID, child_id: UUID):
+        from app.policies.book_access import is_book_private
+
         await self.require_parent(actor_id)
         await self.owned_child(actor_id, child_id)
         result = []
         for row, book in await self.repository.collections(child_id):
+            if is_book_private(book) and getattr(book, "OwnerParentId", None) != actor_id:
+                continue
             result.append({
                 "id": row.Id, "child_id": row.ChildId, "book_id": row.BookId,
                 "collection_type": row.CollectionType, "created_at": row.CreatedAt,
                 "book": {"id": book.Id, "title": book.Title, "author": book.Author,
                          "min_grade": book.MinGrade, "max_grade": book.MaxGrade,
                          "lifecycle_status": book.LifecycleStatus,
-                         "available_to_read": await self.repository.eligible_book(book.Id) is not None},
+                         "available_to_read": await self._repo_eligible_book(book.Id, actor_id) is not None},
             })
         return result
 
     async def add_collection(self, actor_id: UUID, book_id: UUID, payload: ChildBookCollectionCreate):
         await self.require_parent(actor_id)
         await self.owned_child(actor_id, payload.child_id)
-        if await self.repository.book(book_id) is None:
+        if await self._repo_book(book_id, actor_id) is None:
             raise ManagementNotFound()
-        if await self.repository.eligible_book(book_id) is None:
+        if await self._repo_eligible_book(book_id, actor_id) is None:
             raise ManagementConflict()
         return await self.repository.add_collection_idempotent(payload.child_id, book_id, payload.collection_type)
 

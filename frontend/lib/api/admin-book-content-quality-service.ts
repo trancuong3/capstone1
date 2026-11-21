@@ -2,7 +2,12 @@ import { z } from "zod";
 
 import { apiQuery, requestApi } from "@/lib/api/api-client";
 import {
+  createAdminUserBooksQualityApi,
+  type AdminUserBooksQualityApi,
+} from "@/lib/api/parent-private-book-service";
+import {
   bookContentReportDetailSchema,
+  bookContentRightsProfileSchema,
   bookQualityBookDetailSchema,
   bookQualityBookDecisionReadSchema,
   bookQualityBookPageSchema,
@@ -12,6 +17,8 @@ import {
   bookQualityScanSchema,
   type BookContentReportDetailDTO,
   type BookContentReportStatus,
+  type BookContentRightsProfileDTO,
+  type BookContentRightsProfileUpsert,
   type BookQualityBookDetailDTO,
   type BookQualityBookDecisionReadDTO,
   type BookQualityBookDecisionRequest,
@@ -19,6 +26,7 @@ import {
   type BookQualityBookPageDTO,
   type BookQualityFindingDTO,
   type BookQualityFindingStatus,
+  type BookQualityIssueFilter,
   type BookQualityReportAdminPageDTO,
   type BookQualityScanDTO,
   type BookQualityScanDetailDTO,
@@ -28,6 +36,7 @@ export interface AdminBookContentQualityService {
   listReports(query?: {
     status?: BookContentReportStatus;
     issue_type?: string;
+    scope?: "BOOK" | "PAGE";
     book_id?: string;
     search?: string;
     created_after?: string;
@@ -45,10 +54,25 @@ export interface AdminBookContentQualityService {
     search?: string;
     approval_status?: BookApprovalStatus;
     alert_filter?: "CHILD_SAFETY" | "COPYRIGHT" | "BOTH";
+    issue_filter?: BookQualityIssueFilter;
     limit?: number;
     offset?: number;
   }): Promise<BookQualityBookPageDTO>;
   getBook(bookId: string): Promise<BookQualityBookDetailDTO>;
+  getRightsProfile(
+    bookId: string,
+    pageId?: string | null,
+  ): Promise<BookContentRightsProfileDTO>;
+  upsertRightsProfile(
+    bookId: string,
+    payload: BookContentRightsProfileUpsert,
+    pageId?: string | null,
+  ): Promise<BookContentRightsProfileDTO>;
+  runRightsOverlapCheck(bookId: string): Promise<BookContentRightsProfileDTO>;
+  updateExpectedPageCount(
+    bookId: string,
+    expectedPageCount: number | null,
+  ): Promise<{ book_id: string; expected_page_count: number | null }>;
   decideBook(
     bookId: string,
     decision: BookQualityBookDecisionRequest,
@@ -62,15 +86,26 @@ export interface AdminBookContentQualityService {
     reviewNote?: string,
   ): Promise<BookQualityFindingDTO>;
   retryPage(scanId: string, pageScanId: string): Promise<BookQualityScanDTO>;
+  listUserBooks?: AdminUserBooksQualityApi["listUserBooks"];
+  getUserBookSubmission?: AdminUserBooksQualityApi["getUserBookSubmission"];
+  decideUserBookSubmission?: AdminUserBooksQualityApi["decideUserBookSubmission"];
+  suspendUserBook?: AdminUserBooksQualityApi["suspendUserBook"];
 }
 
+const expectedPageCountResponseSchema = z.object({
+  book_id: z.guid(),
+  expected_page_count: z.number().int().positive().nullable(),
+});
+
 export function createAdminBookContentQualityService(): AdminBookContentQualityService {
+  const userBooks = createAdminUserBooksQualityApi();
   return {
     listReports: (query) =>
       requestApi(
         `/books/admin/quality/reports${apiQuery({
           status: query?.status,
           issue_type: query?.issue_type,
+          scope: query?.scope,
           book_id: query?.book_id,
           search: query?.search,
           created_after: query?.created_after,
@@ -104,6 +139,7 @@ export function createAdminBookContentQualityService(): AdminBookContentQualityS
           search: query?.search,
           approval_status: query?.approval_status,
           alert_filter: query?.alert_filter,
+          issue_filter: query?.issue_filter,
           limit: query?.limit,
           offset: query?.offset,
         })}`,
@@ -113,6 +149,39 @@ export function createAdminBookContentQualityService(): AdminBookContentQualityS
       requestApi(
         `/books/admin/quality/books/${encodeURIComponent(bookId)}`,
         bookQualityBookDetailSchema,
+      ),
+    getRightsProfile: (bookId, pageId) =>
+      requestApi(
+        `/books/admin/quality/books/${encodeURIComponent(bookId)}/rights-profile${apiQuery({
+          page_id: pageId ?? undefined,
+        })}`,
+        bookContentRightsProfileSchema,
+      ),
+    upsertRightsProfile: (bookId, payload, pageId) =>
+      requestApi(
+        `/books/admin/quality/books/${encodeURIComponent(bookId)}/rights-profile${apiQuery({
+          page_id: pageId ?? undefined,
+        })}`,
+        bookContentRightsProfileSchema,
+        undefined,
+        { method: "PUT", body: payload },
+      ),
+    runRightsOverlapCheck: (bookId) =>
+      requestApi(
+        `/books/admin/quality/books/${encodeURIComponent(bookId)}/rights-profile/overlap-check`,
+        bookContentRightsProfileSchema,
+        undefined,
+        { method: "POST" },
+      ),
+    updateExpectedPageCount: (bookId, expectedPageCount) =>
+      requestApi(
+        `/books/admin/quality/books/${encodeURIComponent(bookId)}/expected-page-count`,
+        expectedPageCountResponseSchema,
+        undefined,
+        {
+          method: "PATCH",
+          body: { expected_page_count: expectedPageCount },
+        },
       ),
     decideBook: (bookId, decision) =>
       requestApi(
@@ -155,5 +224,6 @@ export function createAdminBookContentQualityService(): AdminBookContentQualityS
         undefined,
         { method: "POST" },
       ),
+    ...userBooks,
   };
 }

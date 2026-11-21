@@ -1,15 +1,16 @@
 "use client";
 
-import { BookOpenText, RefreshCw, SearchX } from "lucide-react";
+import { BookMarked, BookOpenText, RefreshCw, SearchX } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { BookCard } from "@/components/books/book-card";
 import { BookChildHeader } from "@/components/books/book-child-header";
-import { Button } from "@/components/common/button";
+import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
+import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useBookService } from "@/hooks/use-book-service";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { useReadingManagementService } from "@/hooks/use-reading-management-service";
@@ -27,6 +28,8 @@ type CatalogState =
   | { status: "error" };
 
 export function BookLibraryScreen() {
+  const authRuntime = useAuthRuntime();
+  const currentUserId = authRuntime.session?.user?.id ?? "";
   const bookService = useBookService();
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const readingManagementService = useReadingManagementService();
@@ -149,13 +152,15 @@ export function BookLibraryScreen() {
         const books = await bookService.list({
           grade: selectedGrade ?? undefined,
           search,
+          include_private: true,
         });
         // A second request is only needed to distinguish an empty catalog
         // from an empty filtered result. Never substitute sample books.
         const hasFilters = selectedGrade !== null || search.trim().length > 0;
         const hasCatalog =
           books.length > 0 ||
-          (hasFilters && (await bookService.list()).length > 0);
+          (hasFilters &&
+            (await bookService.list({ include_private: true })).length > 0);
 
         if (isActive) {
           setCatalogState({
@@ -178,6 +183,7 @@ export function BookLibraryScreen() {
   }, [
     bookService,
     childState.status,
+    currentUserId,
     requestKey,
     search,
     selectedChildId,
@@ -236,9 +242,17 @@ export function BookLibraryScreen() {
 
       <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-6">
         <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-6">
-          <h1 className="book-title min-w-0 text-4xl text-ink sm:text-5xl">
-            Tủ sách{child ? ` của ${child.alias}` : " của bé"}
-          </h1>
+          <div className="flex flex-col gap-2">
+            <h1 className="book-title min-w-0 text-4xl text-ink sm:text-5xl">
+              Tủ sách{child ? ` của ${child.alias}` : " của bé"}
+            </h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <ButtonLink href="/my-books" variant="secondary" className="min-h-10 w-auto px-4 text-sm">
+                <BookMarked aria-hidden="true" className="size-4" />
+                Sách của tôi
+              </ButtonLink>
+            </div>
+          </div>
           <div className="w-full sm:max-w-sm">
             <TextField
               aria-label="Tìm theo tên sách hoặc tác giả"

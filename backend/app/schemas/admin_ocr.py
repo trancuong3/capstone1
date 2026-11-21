@@ -112,3 +112,33 @@ class AdminOcrVerifyRequest(BaseModel):
     corrected_text: str = Field(min_length=1, max_length=500_000)
     words: list[AdminOcrWordInput] = Field(min_length=1, max_length=30_000)
     proofread_audit: AdminOcrProofreadAuditInput
+
+
+class AdminPageVerificationBlocker(BaseModel):
+    code: str
+    stage: Literal["PROOFREADING", "CHILD_SAFETY", "IMAGE_SAFETY", "RIGHTS", "REVISION"]
+    message: str
+
+
+class AdminPageVerificationReadinessRead(BaseModel):
+    page_id: UUID
+    page_revision_id: UUID
+    workflow_id: UUID | None = None
+    ready_to_verify: bool
+    blockers: list[AdminPageVerificationBlocker] = Field(default_factory=list)
+    proofreading_status: str
+    uncertain_word_count: int = 0
+    uncertain_resolved: bool = True
+    child_safety_status: str
+    child_safety_scope: str = "TEXT"
+    child_safety_coverage_complete: bool = False
+    image_safety_status: str = "NOT_REVIEWED"
+    image_safety_required: bool = False
+    page_content_type: Literal["CONTENT", "COVER_OR_IMAGE_ONLY"] = "CONTENT"
+    rights_status: Literal["NOT_ASSESSED", "MISSING_EVIDENCE", "CONCERNS_FOUND", "REVIEWED"] = "NOT_ASSESSED"
+    rights_scope: Literal["BOOK", "PAGE_OVERRIDE"] | None = None
+    rights_profile_version: int | None = None
+
+
+class AdminPageContentTypeUpdate(BaseModel):
+    content_type: Literal["CONTENT", "COVER_OR_IMAGE_ONLY"]

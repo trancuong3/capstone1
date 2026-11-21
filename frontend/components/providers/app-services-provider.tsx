@@ -10,6 +10,10 @@ import { createComprehensionService } from "@/lib/api/tutor-question-service";
 import type { DevicePermissionService } from "@/lib/api/device-permission-service";
 import type { DifficultWordService } from "@/lib/api/difficult-word-service";
 import type { PageMatchService } from "@/lib/api/page-match-service";
+import {
+  createParentPrivateBookService,
+  type ParentPrivateBookService,
+} from "@/lib/api/parent-private-book-service";
 import type { PictureDescriptionService } from "@/lib/api/picture-description-service";
 import type { ProfileService } from "@/lib/api/profile-service";
 import type { ReportService } from "@/lib/api/report-service";
@@ -53,6 +57,7 @@ export interface AppServices {
   devicePermissionService: DevicePermissionService;
   difficultWordService: DifficultWordService;
   pageMatchService: PageMatchService;
+  parentPrivateBookService?: ParentPrivateBookService;
   profileService: ProfileService;
   reportService: ReportService;
   readingService: ReadingService;
@@ -107,6 +112,7 @@ export function AppServicesProvider({
       profileService: createProfileService(),
       bookService: createBookService(),
       bookContentReportService: createBookContentReportService(),
+      parentPrivateBookService: createParentPrivateBookService(),
       difficultWordService: createDifficultWordService(),
       reportService: createReportService(),
       sessionService: createSessionService(),

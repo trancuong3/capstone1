@@ -15,11 +15,40 @@ BookContentIssueType = Literal[
     "IMAGE_QUALITY_ERROR",
     "DUPLICATE_PAGE",
     "PAGE_ORDER_ERROR",
+    "CHILD_UNSAFE_CONTENT",
+    "COPYRIGHT_CONCERN",
     "OTHER",
 ]
 BookContentReportStatus = Literal["OPEN", "UNDER_REVIEW", "RESOLVED", "REJECTED"]
 BookQualityScanStatus = Literal["QUEUED", "RUNNING", "COMPLETED", "PARTIAL", "FAILED"]
 BookQualityFindingStatus = Literal["NEEDS_REVIEW", "CONFIRMED", "DISMISSED", "RESOLVED", "STALE"]
+ContentRightsStatus = Literal[
+    "NOT_ASSESSED",
+    "MISSING_EVIDENCE",
+    "CONCERNS_FOUND",
+    "REVIEWED",
+]
+ContentRightsUsageBasis = Literal[
+    "OWN_ORIGINAL",
+    "WRITTEN_LICENSE",
+    "PUBLIC_DOMAIN",
+    "OPEN_LICENSE",
+    "EDUCATIONAL_PERMISSION",
+    "UNKNOWN",
+    "OTHER",
+]
+ContentRightsReferenceCheckStatus = Literal[
+    "NOT_RUN",
+    "NO_MATCH_IN_ALLOWED_CORPUS",
+    "OVERLAP_CONCERN",
+]
+BookQualityIssueFilter = Literal[
+    "MISSING_CONTENT",
+    "SAFETY_ALERTS",
+    "MISSING_RIGHTS",
+    "OPEN_REPORTS",
+    "READY_FOR_APPROVAL",
+]
 
 
 class BookContentReportCreate(BaseModel):
@@ -126,6 +155,8 @@ class BookContentReportDetail(BookContentReportRead):
     reporter_name: str | None
     verified_text_snapshot: str | None
     content_hash_snapshot: str | None
+    current_page_revision_id: UUID | None = None
+    page_revision_changed: bool = False
     admin_resolution_note: str | None
     reviewed_by: UUID | None
     reviewed_by_name: str | None
@@ -189,13 +220,90 @@ class BookQualityReportAdminPage(BaseModel):
     offset: int
 
 
+class BookContentRightsProfileUpsert(BaseModel):
+    status: ContentRightsStatus
+    source_name: str | None = Field(default=None, max_length=300)
+    rights_holder: str | None = Field(default=None, max_length=300)
+    usage_basis: ContentRightsUsageBasis | None = None
+    evidence_url: str | None = Field(default=None, max_length=1000)
+    evidence_reference: str | None = Field(default=None, max_length=500)
+    notes: str | None = Field(default=None, max_length=2000)
+
+    @field_validator(
+        "source_name", "rights_holder", "evidence_url", "evidence_reference", "notes"
+    )
+    @classmethod
+    def normalize_optional_field(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        return trimmed or None
+
+
+class BookContentRightsProfileRead(BaseModel):
+    id: UUID | None = None
+    book_id: UUID
+    page_id: UUID | None = None
+    scope: Literal["BOOK", "PAGE_OVERRIDE"] = "BOOK"
+    status: ContentRightsStatus = "NOT_ASSESSED"
+    source_name: str | None = None
+    rights_holder: str | None = None
+    usage_basis: str | None = None
+    evidence_url: str | None = None
+    evidence_reference: str | None = None
+    notes: str | None = None
+    source_fingerprint: str | None = None
+    profile_version: int = 0
+    reference_check_status: ContentRightsReferenceCheckStatus = "NOT_RUN"
+    reference_check_evidence: list[dict] = Field(default_factory=list)
+    reviewed_by: UUID | None = None
+    reviewed_by_name: str | None = None
+    reviewed_at: datetime | None = None
+    history: list[dict] = Field(default_factory=list)
+    updated_at: datetime | None = None
+
+
+class BookExpectedPageCountUpdate(BaseModel):
+    expected_page_count: int | None = Field(default=None, ge=1, le=5000)
+
+
+class BookQualityPageItemRead(BaseModel):
+    page_id: UUID
+    page_number: int
+    lifecycle_status: str
+    content_type: Literal["CONTENT", "COVER_OR_IMAGE_ONLY"] = "CONTENT"
+    current_verified_revision_id: UUID | None = None
+    latest_revision_id: UUID | None = None
+    verification_status: str = "MISSING"
+    content_issues: list[str] = Field(default_factory=list)
+    proofreading_status: str = "NOT_STARTED"
+    uncertain_word_count: int = 0
+    safety_status: str = "NOT_STARTED"
+    safety_suitability: str | None = None
+    safety_finding_count: int = 0
+    high_finding_count: int = 0
+    image_safety_status: str = "NOT_REVIEWED"
+    rights_status: ContentRightsStatus = "NOT_ASSESSED"
+    has_rights_override: bool = False
+    open_report_count: int = 0
+    latest_workflow_id: UUID | None = None
+    has_issues: bool = False
+
+
 class BookQualityBookSummary(BaseModel):
     book_id: UUID
     book_title: str
     report_count: int
     open_report_count: int
+    open_safety_report_count: int = 0
     finding_count: int
     needs_review_finding_count: int
+    verified_page_count: int = 0
+    issue_page_count: int = 0
+    has_missing_content: bool = False
+    has_safety_alerts: bool = False
+    has_missing_rights: bool = False
+    ready_for_approval: bool = False
     latest_scan: BookQualityScanRead | None
     assessment: "BookApprovalAssessment"
 
@@ -224,6 +332,19 @@ class BookApprovalAssessment(BaseModel):
     stale_pages: int
     copyright_status: str
     copyright_finding_count: int | None = None
+    rights_profile_status: ContentRightsStatus = "NOT_ASSESSED"
+    rights_profile_version: int | None = None
+    rights_profile_hash: str | None = None
+    legacy_published_needs_rights_review: bool = False
+    expected_page_count: int | None = None
+    expected_page_count_status: Literal[
+        "MATCHED", "UNDER_EXPECTED", "OVER_EXPECTED", "UNKNOWN_SOURCE_PAGE_COUNT"
+    ] = "UNKNOWN_SOURCE_PAGE_COUNT"
+    missing_page_numbers: list[int] = Field(default_factory=list)
+    duplicate_page_numbers: list[int] = Field(default_factory=list)
+    empty_ocr_page_numbers: list[int] = Field(default_factory=list)
+    missing_image_page_numbers: list[int] = Field(default_factory=list)
+    image_only_page_numbers: list[int] = Field(default_factory=list)
     finding_count: int
     high_finding_count: int
     medium_finding_count: int
@@ -251,16 +372,21 @@ class BookQualityBookPage(BaseModel):
     offset: int
     summary: dict[str, int] = Field(default_factory=dict)
     alert_summary: dict[str, int] = Field(default_factory=dict)
+    issue_filter_summary: dict[str, int] = Field(default_factory=dict)
 
 
 class BookQualityBookDetail(BaseModel):
     book_id: UUID
     book_title: str
+    expected_page_count: int | None = None
     reports: list[BookContentReportRead]
     scans: list[BookQualityScanRead]
     latest_scan_detail: BookQualityScanDetail | None
     ai_workflows: list[AdminAiWorkflowRead] = Field(default_factory=list)
     ai_workflow_summary: dict[str, int] = Field(default_factory=dict)
+    rights_profile: BookContentRightsProfileRead | None = None
+    page_rights_overrides: list[BookContentRightsProfileRead] = Field(default_factory=list)
+    pages: list[BookQualityPageItemRead] = Field(default_factory=list)
     assessment: BookApprovalAssessment
     decision_history: list[dict] = Field(default_factory=list)
 
