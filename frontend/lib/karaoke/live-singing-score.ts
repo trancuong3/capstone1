@@ -166,6 +166,17 @@ export class LiveSingingAttempt {
   } | null = null;
 
   beginCapture(id = "capture"): void {
+    this.beginTranscriptGroup(id);
+    this.lastAudioEnd = -1;
+    for (const word of this.words) {
+      word.quietMs = 0;
+      word.uncertainAudio = false;
+    }
+  }
+
+  /** A transcript discontinuity does not restart the physical microphone.
+   * Preserve its quiet/voice evidence until this capture drains or aborts. */
+  beginTranscriptGroup(id: string): void {
     this.capture = {
       id,
       revision: 0,
@@ -173,11 +184,6 @@ export class LiveSingingAttempt {
       lastEnd: this.lastEnd,
       words: this.words.map(({ state, phase }) => ({ state, phase })),
     };
-    this.lastAudioEnd = -1;
-    for (const word of this.words) {
-      word.quietMs = 0;
-      word.uncertainAudio = false;
-    }
   }
 
   closeCapture(): void {
@@ -417,9 +423,7 @@ export class LiveSingingAttempt {
     this.lastAudioEnd = toMs;
     for (const word of this.words) {
       if (word.start === null || word.end === null) continue;
-      const overlap =
-        Math.min(toMs, word.end + 300) -
-        Math.max(fromMs, Math.max(0, word.start - 150));
+      const overlap = Math.min(toMs, word.end) - Math.max(fromMs, word.start);
       if (overlap <= 0) continue;
       if (activity === "quiet") word.quietMs += overlap;
       else word.uncertainAudio = true;
@@ -439,8 +443,12 @@ export class LiveSingingAttempt {
         word.uncertainAudio
       )
         continue;
-      const end = word.end + 300;
-      const duration = end - Math.max(0, word.start - 150);
+      // Capture is sliced at line ends. Requiring samples beyond that boundary
+      // makes a fully silent line impossible to assess. Use its actual timed
+      // interval; successful drain still allows delayed ASR to contradict it.
+      const end = word.end;
+      const duration = end - word.start;
+      if (duration <= 0) continue;
       if (capturedEndMs >= end && word.quietMs >= duration * 0.98) {
         word.state = "omitted";
         word.phase = "settled";

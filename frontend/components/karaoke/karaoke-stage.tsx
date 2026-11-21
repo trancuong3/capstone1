@@ -24,6 +24,7 @@ import {
   formatKaraokeTime,
 } from "@/lib/karaoke/lyrics-timeline";
 import type { KaraokePreview } from "@/types/karaoke";
+import { createCountdownSound } from "@/lib/karaoke/countdown-sound";
 import styles from "./karaoke-stage.module.css";
 
 /** Child view shares the exact native audio/controller used by admin preview. */
@@ -43,6 +44,9 @@ export function KaraokeStage({
   const root = useRef<HTMLElement>(null);
   const expandButton = useRef<HTMLButtonElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownSound = useRef<ReturnType<typeof createCountdownSound> | null>(
+    null,
+  );
   const generation = useRef(0);
   const preparingMic = useRef(false);
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -90,6 +94,7 @@ export function KaraokeStage({
     () => () => {
       generation.current++;
       if (timer.current !== null) clearTimeout(timer.current);
+      countdownSound.current?.stop();
     },
     [],
   );
@@ -105,6 +110,8 @@ export function KaraokeStage({
     generation.current++;
     if (timer.current !== null) clearTimeout(timer.current);
     timer.current = null;
+    countdownSound.current?.stop();
+    countdownSound.current = null;
     setCountdown(null);
     if (preparingMic.current) {
       preparingMic.current = false;
@@ -123,8 +130,10 @@ export function KaraokeStage({
     player.pause();
     player.seek(start);
     const ticket = generation.current;
+    countdownSound.current = createCountdownSound();
     function tick(value: number) {
       if (ticket !== generation.current) return;
+      countdownSound.current?.play(value);
       if (value === 0) {
         preparingMic.current = false;
         timer.current = null;
@@ -142,7 +151,10 @@ export function KaraokeStage({
       void scoring.arm(practiceLineId).then((granted) => {
         if (ticket !== generation.current) return;
         if (granted) tick(3);
-        else preparingMic.current = false;
+        else {
+          preparingMic.current = false;
+          countdownSound.current?.stop();
+        }
       });
     } else tick(3);
   }

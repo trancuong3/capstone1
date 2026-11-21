@@ -14,7 +14,10 @@ import {
   type LiveWordState,
   type SingingActivity,
 } from "@/lib/karaoke/live-singing-score";
-import { monitorSingingTrack } from "@/lib/karaoke/microphone-signal";
+import {
+  monitorSingingTrack,
+  SingingSignalClassifier,
+} from "@/lib/karaoke/microphone-signal";
 
 type Status =
   | "idle"
@@ -110,6 +113,7 @@ class KaraokeMicSession {
   private resolveArm: ((started: boolean) => void) | null = null;
   private emptyRestarts = 0;
   private stopSignal: (() => void) | null = null;
+  private signalClassifier = new SingingSignalClassifier();
 
   getSnapshot = () => this.snapshot;
   subscribe = (listener: () => void) => {
@@ -144,6 +148,7 @@ class KaraokeMicSession {
       track.stop();
     }
     this.stream = null;
+    this.signalClassifier = new SingingSignalClassifier();
   }
 
   private release(abort: boolean, keepStream = false) {
@@ -392,6 +397,7 @@ class KaraokeMicSession {
                   this.update(this.snapshot.status);
                 }
               },
+              this.signalClassifier,
             );
           }
           this.update("listening");

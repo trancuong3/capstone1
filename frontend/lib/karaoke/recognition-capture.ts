@@ -20,7 +20,7 @@ export class CaptureWindows {
     this.parts = [];
     this.captureId = `browser-${++captureSequence}`;
     this.revision = 0;
-    attempt.beginCapture(this.captureId);
+    attempt.beginTranscriptGroup(this.captureId);
   }
   private readonly collector = new BrowserTranscriptCollector();
   private windows: SpeechWindow[] = [];
@@ -67,12 +67,6 @@ export class CaptureWindows {
   };
 
   consume(event: BrowserRecognitionEventLike, attempt: LiveSingingAttempt) {
-    // Transcript activity contradicts a silence verdict, even if ASR rejects
-    // its confidence or cannot locate the words reliably.
-    if (
-      Array.from(event.results).some((result) => result[0]?.transcript?.trim())
-    )
-      attempt.noteSpeech(this.startedAt, this.now());
     let interimText = "";
     const startIdx = Math.max(0, event.resultIndex ?? 0);
     for (let i = startIdx; i < event.results.length; i++) {
@@ -93,6 +87,23 @@ export class CaptureWindows {
       finals.push({ text, usable });
       return usable;
     });
+    // Only new speech can contradict quiet evidence. Native results include
+    // old final slots, and a later utterance must not poison every earlier
+    // silent line. Use native speech intervals even for rejected transcripts.
+    if (finals.length || interimText) {
+      if (this.overflow) {
+        attempt.noteSpeech(this.startedAt, now);
+      } else if (this.windows.length || this.speakingFrom !== null) {
+        for (const range of this.windows)
+          attempt.noteSpeech(range.start, range.end);
+        if (this.speakingFrom !== null)
+          attempt.noteSpeech(this.speakingFrom, now);
+      } else {
+        // Without native speech boundaries, keep the whole new result interval
+        // uncertain; do not infer silence from missing or low-confidence text.
+        attempt.noteSpeech(this.lastFinalMs, now);
+      }
+    }
     if (!finals.length) {
       if (!interimText)
         return { changed: false, preview: emptyPreview, transcript: "" };

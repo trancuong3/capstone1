@@ -73,6 +73,61 @@ async function finishPreparation() {
 }
 
 describe("child karaoke stage", () => {
+  it("sounds 3, 2, 1 and a distinct start cue, and stops sound on cancel or unmount", async () => {
+    const contexts: {
+      frequencies: number[];
+      close: ReturnType<typeof vi.fn>;
+    }[] = [];
+    class CueContext {
+      currentTime = 0;
+      state = "running";
+      destination = {};
+      frequencies: number[] = [];
+      resume = vi.fn(async () => {});
+      close = vi.fn(async () => {
+        this.state = "closed";
+      });
+      createOscillator = () => ({
+        frequency: {
+          setValueAtTime: (hz: number) => this.frequencies.push(hz),
+        },
+        connect: vi.fn(),
+        start: vi.fn(),
+        stop: vi.fn(),
+        onended: null,
+      });
+      createGain = () => ({
+        gain: { setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() },
+        connect: vi.fn(),
+      });
+      constructor() {
+        contexts.push(this);
+      }
+    }
+    vi.stubGlobal("AudioContext", CueContext);
+    const view = stage();
+    expect(contexts).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Bắt đầu hát" }));
+    expect(contexts[0].frequencies).toHaveLength(1);
+    act(() => vi.advanceTimersByTime(2000));
+    expect(contexts[0].frequencies).toHaveLength(3);
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    const [three, two, one, go] = contexts[0].frequencies;
+    expect([two, one]).toEqual([three, three]);
+    expect(go).toBeGreaterThan(three);
+    fireEvent.click(screen.getByRole("button", { name: "Hát lại câu này" }));
+    expect(contexts[0].close).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Hủy chuẩn bị" }));
+    expect(contexts[1].close).toHaveBeenCalledOnce();
+    const count = contexts[1].frequencies.length;
+    await finishPreparation();
+    expect(contexts[1].frequencies).toHaveLength(count);
+    fireEvent.click(screen.getByRole("button", { name: "Hát lại câu này" }));
+    view.unmount();
+    expect(contexts.at(-1)!.close).toHaveBeenCalledOnce();
+  });
   it("waits for a gesture, counts in without moving lyrics, and cancels preparation", async () => {
     stage();
     const audio = audios[0];
