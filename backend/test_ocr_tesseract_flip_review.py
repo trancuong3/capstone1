@@ -122,6 +122,37 @@ class PrivateFlipReviewTests(unittest.TestCase):
             )
             self.assertIn("Không tự suy luận", section)
 
+    def test_trailing_extra_ocr_tokens_do_not_hide_unique_tone_correction(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            image = root / "p.png"
+            Image.new("RGB", (400, 200)).save(image)
+            crops = root / "crops"
+            crops.mkdir()
+            output = fake_output()
+            corrected_word = output["words"][0]
+            output["text"] = "Bé mìm hôm nay I I V"
+            output["words"] = [
+                {"text": "Bé", "bbox": [0.02, 0.20, 0.10, 0.12]},
+                corrected_word,
+                {"text": "hôm", "bbox": [0.43, 0.20, 0.10, 0.12]},
+                {"text": "nay", "bbox": [0.56, 0.20, 0.10, 0.12]},
+                {"text": "I", "bbox": [0.70, 0.20, 0.05, 0.12]},
+                {"text": "I", "bbox": [0.77, 0.20, 0.05, 0.12]},
+                {"text": "V", "bbox": [0.84, 0.20, 0.05, 0.12]},
+            ]
+            section, stats = review._render_page(
+                Case(image, "Bé mỉm hôm nay", "low_light"),
+                1, output, crops,
+            )
+            self.assertEqual(stats["tesseract_line_priority_corrected"], 1)
+            self.assertEqual(stats["tesseract_line_priority_ambiguous"], 0)
+            self.assertEqual(
+                stats["tesseract_line_vietocr_crop_agreement_corrected"], 1
+            )
+            self.assertIn("Đối chứng theo vị trí: mỉm", section)
+            self.assertEqual(len(list(crops.glob("*.png"))), 1)
+
     def test_preserves_xss_safety_in_private_html(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
