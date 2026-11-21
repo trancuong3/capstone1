@@ -91,3 +91,28 @@ F:\c1\capstone1\.venv\Scripts\python.exe -m pytest test_reading_presence.py test
    ```powershell
    python -m app.jobs.reading_presence_alert_worker
    ```
+
+---
+
+## 5. Đợt nâng cấp 2 — Baseline & Cổng nghiệm thu mở rộng (G19–G24 — KHÓA trước khi sửa)
+
+### 5.1 Baseline đo trước khi sửa (trên SHA `1ab03803`)
+1. **Highlight thời gian thực (`BookPageContent`, trang 120 từ, 30 gói interim liên tiếp):**
+   - `p50 = 28.48 ms`, `p95 = 41.35 ms` trong jsdom (`tests/reading/benchmark/highlight-latency.test.tsx`).
+   - Toàn bộ **120/120 từ** re-render mỗi gói interim (chưa `React.memo`), `page.text.matchAll(/\S+/gu)` và `querySelectorAll("[data-word-id]")` chạy lại trên từng lần cập nhật; trong `ReadingScreen` mỗi interim tạo 3 `setState` (`previewSnapshot`, `currentWordId`, `latestTranscript`).
+2. **Đánh vần tiếng Việt lớp 1:** chưa có bộ nhận diện chuỗi đánh vần (`"ô i ôi tờ ôi tôi"`, `"cờ a ca sắc cá"`). Với engine hiện tại, chuỗi 3–6 tiếng đánh vần bị `isOffTopic` loại bỏ (tỷ lệ khớp < 0.5) hoặc bị chấm `SUBSTITUTE` oan.
+3. **Đọc lại trọn câu sau khi luyện từ khó/sai:** chưa có bước mời bé đọc lại trọn câu (ví dụ `"Tôi ăn cơm"`) sau khi hoàn tất luyện từ `"Tôi"`.
+4. **Câu hỏi đọc hiểu cuối bài (`ComprehensionQuestion`):** chưa có TTS đọc câu hỏi/đáp án, chưa có mic/STT; bé phải bấm tối thiểu **6 lần** cho 3 câu hỏi (chọn đáp án + bấm tiếp × 3).
+5. **Thu âm giọng trẻ & ngữ cảnh trang sách:** `AudioQualityMonitor` chế độ `passage` dùng `minPeakRms = 0.008`, `hangoverMs = 350 ms` (dễ coi giọng bé nói nhỏ hoặc ngắt hơi đánh vần là `LOW_VOLUME`/dứt câu); `transcribeRecording` ở chế độ đọc đoạn chưa truyền `keyterms` từ trang sách hiện tại.
+
+### 5.2 Cổng nghiệm thu khóa mới (G19–G24)
+
+| ID | Cổng | Ngưỡng đã khóa (pass nếu) | Bằng chứng mục tiêu | Trạng thái |
+|---|---|---|---|---|
+| G19 | Đánh vần tiếng Việt lớp 1 | ≥ 25 ca test (6 thanh, âm đầu/vần phổ biến, đánh vần chậm/sai/nhiễu): **100%** chấp nhận đánh vần đúng kết thúc bằng tiếng đích, **0** false-positive trên đánh vần rác/ngoài bài, không ngắt lời khi đang đánh vần | `phonics-spelling.test.ts` + `realtime-alignment.ts` | PENDING |
+| G20 | Đọc lại trọn câu sau luyện từ khó/sai | Sau luyện từ (đúng lại hoặc hết lượt), mời đọc lại trọn câu 2–12 từ (hoặc mệnh đề nếu câu dài), tối đa 1 lượt/câu, cho qua/bỏ qua; **0** ghi đè lượt đầu, **0** báo cáo trùng | `sentence-reinforcement.test.ts` + `reading-automation-screen.test.tsx` | PENDING |
+| G21 | Highlight thời gian thực siêu mượt | Trang 120 từ / 30 gói interim: `p95 ≤ 50 ms` (cải thiện rõ rệt so với baseline `41.35 ms`), chỉ re-render từ đổi trạng thái (≤ 3 từ/gói thay vì 120), **0** màu xanh oan từ interim đổi | `highlight-latency.test.tsx` (có đếm số lần render token) | PENDING |
+| G22 | Tối ưu VAD giọng trẻ & `keyterms` trang sách | Giọng nhỏ (`RMS 0.005–0.0075`) & ngắt hơi đánh vần (`~450 ms`) không bị phạt nhầm; `transcribeRecording` gửi `keyterms` an toàn theo trang; **100%** test chống "đọc hộ" (off-topic/low-confidence/wrong-language) vẫn PASS | `audio-quality.test.ts` + `reading-screen.test.tsx` | PENDING |
+| G23 | Giọng đọc mẫu đa dạng & lời thoại tương tác | Kho lời thoại ấm áp xoay vòng không lặp liên tiếp, có giới hạn tần suất; bộ chọn giọng hỗ trợ lọc/gắn nhãn rõ nhóm giọng thân thiện lớp 1 từ metadata thật | `interactive-prompts.test.ts` + `reading-voice-settings.test.tsx` | PENDING |
+| G24 | Câu hỏi đọc hiểu cuối bài bằng giọng nói | **0 lần bấm nút bắt buộc** qua 3 câu hỏi (tự đọc câu hỏi + đáp án A/B/C kèm highlight → hỏi *"Bé chọn đáp án nào?"* → chặn 100% echo → nhận giọng A/B/C, biến thể tiếng Việt hoặc nội dung đáp án → tự chọn, phản hồi & qua câu kế → hoàn tất); bấm tay chen ngang hủy ngay TTS và chọn tức thì; 100% test cũ vẫn PASS | `comprehension-voice-flow.test.tsx` + `reading-autopilot.pw.ts` (desktop & mobile) | PENDING |
+
