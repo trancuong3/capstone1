@@ -118,6 +118,42 @@ if ($exitCode -ne 0 -or $report.successful_cases -ne 10) {
 Chỉ gửi số liệu aggregate hoặc phần output trên; **không gửi**
 `pages.jsonl`, ảnh, dự đoán từng từ hoặc nội dung `.env`.
 
+## Sau kết quả thực tế 10/10 PASS nhưng 0 đề xuất
+
+Người dùng đã chạy TASK 10 với baseline **34/1647 CER, 30/364 WER**.
+Cả `line_majority_2` và `vietocr_line_priority` đều cho
+`flipped_words=0`, `no_proposal=10` và giữ nguyên CER/WER.
+
+Điều này **không phủ định** kết quả TASK 09 có 239 vị trí chứa
+cách đọc dấu khác biệt và 15/15 lỗi dấu có câu trả lời đúng trong bằng
+chứng OCR. TASK 09 kiểm tra cả `ocr_evidence.engine_outputs` lẫn
+`crop_evidence.*_candidate`; TASK 10 chỉ cho các chính sách dùng
+`engine_outputs` của các engine có trạng thái `success` với quy tắc
+riêng (đồng thuận hai engine, hoặc ưu tiên đọc dòng VietOCR).
+Đây là **giả thuyết nguyên nhân**, chưa có thống kê từ ảnh thật để xác định
+phương án đúng nằm ở nguồn nào.
+
+Để phân biệt các khả năng, code TASK 10 hiện xuất thêm:
+
+- `evidence_source_audit`: tổng vị trí có phương án dấu khác biệt;
+  phương án nằm trong kết quả **line** bất kể status, line **đã xác minh
+  status**, **crop**, chỉ crop, raw line bị loại do status, hoặc riêng
+  VietOCR line đủ điều kiện
+- `tone_error_source_audit`: trong các lỗi dấu của reference, số vị trí
+  có đáp án đúng từ raw line, verified line, crop, chỉ crop, hoặc không có
+  đáp án đúng nào; đây là **oracle diagnostic**, không dùng để chọn dấu
+
+Các nhóm **có thể giao nhau** (ví dụ một phương án đúng xuất hiện cả ở
+line và crop), không cộng các nhóm thành tổng 239 hoặc 15. Tệp JSON chỉ
+chứa **số liệu aggregate**, không có từ OCR, nhãn, ảnh hay private paths.
+Hai chính sách A/B và nguyên tắc không nhìn đáp án **không thay đổi**.
+
+Sau khi fetch và chuyển sang nhánh PR #184 mới nhất, chạy lại chính
+script `run_ocr_task10_blind_ab.ps1`: script sẽ tự thực thi test, OCR
+10 ảnh và in cả hai phần audit mới. Nếu chỉ cần gửi kết quả cho người
+đánh giá, gửi `evidence_source_audit`, `tone_error_source_audit` và
+tổng CER/WER; không gửi `pages.jsonl` hoặc token riêng tư.
+
 ## Tiêu chí quyết định
 
 - Dừng nếu chạy không đủ 10 ảnh, checkpoint/profile sai hoặc baseline
