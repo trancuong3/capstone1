@@ -55,7 +55,13 @@ if ($exitCode -ne 0 -or -not $summary.complete -or
     throw "TASK 13 private review incomplete"
 }
 Write-Host "Only proposed token changes were collected for private review." -ForegroundColor Green
+Write-Host "Crop artifacts: $($summary.crop_artifact_count) / $($summary.distinct_positions) unique positions"
+Write-Host "Risk-first positions: $($summary.positions_to_check_first)"
 $summary.policy_flip_review_counts | Format-List
+Write-Host "POSITIONAL REVIEW RISK ASSESSMENT (NOT GROUND TRUTH VERIFIED):" -ForegroundColor Yellow
+$summary.risk_assessment.per_policy | Format-List
+Write-Host "Production eligible: $($summary.risk_assessment.production_deployment_allowed)" -ForegroundColor Yellow
+$summary.risk_assessment.reason_codes | ForEach-Object { Write-Host "  blocked: $_" -ForegroundColor Yellow }
 Start-Process -FilePath (Join-Path $out "index.html")
 Write-Host "TASK 13 PRIVATE REVIEW GALLERY OPENED" -ForegroundColor Green
 Write-Host "Do not upload the HTML or crops; share only aggregate.json counts." -ForegroundColor Yellow
