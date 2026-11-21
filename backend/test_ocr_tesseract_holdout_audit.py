@@ -186,6 +186,33 @@ class HeldoutAggregateTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     summarize_holdout_report(report, _audit(), 20)
 
+    def test_rejects_inconsistent_micro_rates_even_if_numeric(self):
+        for field, wrong in (("micro_cer", 0.5), ("micro_wer", 0.25)):
+            with self.subTest(field=field):
+                report = _report()
+                report["quality"]["baseline_strict"][field] = wrong
+                with self.assertRaises(ValueError):
+                    summarize_holdout_report(report, _audit(), 20)
+
+    def test_rejects_candidate_using_another_reference_denominator(self):
+        for denominator in ("reference_characters", "reference_words"):
+            with self.subTest(denominator=denominator):
+                report = _report()
+                candidate = report["quality"]["ground_truth_blind_rules"][
+                    "tesseract_line_priority"
+                ]["quality"]
+                candidate[denominator] += 1
+                if denominator == "reference_characters":
+                    candidate["micro_cer"] = round(
+                        candidate["character_edits"] / candidate[denominator], 6
+                    )
+                else:
+                    candidate["micro_wer"] = round(
+                        candidate["word_edits"] / candidate[denominator], 6
+                    )
+                with self.assertRaises(ValueError):
+                    summarize_holdout_report(report, _audit(), 20)
+
     def test_unscorable_flips_propagate_as_risk(self):
         report = _report()
         report["quality"]["ground_truth_blind_rules"][
