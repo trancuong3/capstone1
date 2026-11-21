@@ -6,7 +6,7 @@ import json
 import unittest
 
 from scripts.ocr_tone_blind_policy import (
-    audit_evidence_sources, audit_tone_error_sources,
+    audit_engine_attribution, audit_evidence_sources, audit_tone_error_sources,
     choose_word, evaluate_case, propose_text, summarize_cases,
 )
 
@@ -325,6 +325,106 @@ class ToneBlindPolicyTests(unittest.TestCase):
         self.assertEqual(choose_word(target, "paddleocr_line_priority"), "“MỈM!”")
         target["ocr_evidence"]["engine_outputs"]["paddleocr"] = "MÌNH"
         self.assertIsNone(choose_word(target, "paddleocr_line_priority"))
+
+    def test_tesseract_blind_priority_counts_both_correction_and_regression(self):
+        target = word("mìm", {
+            "paddleocr": "mìm", "vietocr": "mìm", "tesseract": "mỉm",
+        })
+        output = {"text": "mìm", "words": [target]}
+        before = copy.deepcopy(output)
+        proposal = propose_text(output, "tesseract_line_priority")
+        self.assertEqual(proposal["flip_indices"], [0])
+        self.assertEqual(proposal["candidate_text"], "mỉm")
+        good = evaluate_case("mỉm", output)["rules"]["tesseract_line_priority"]
+        bad = evaluate_case("mìm", output)["rules"]["tesseract_line_priority"]
+        self.assertEqual(good["corrected_words"], 1)
+        self.assertEqual(bad["regressed_words"], 1)
+        self.assertEqual(output, before)
+
+    def test_tesseract_line_and_vietocr_crop_are_distinct_engine_confirmation(self):
+        target = word("mìm", {
+            "paddleocr": "mìm", "vietocr": "mìm", "tesseract": "mỉm",
+        })
+        crop = {"status": "completed", "vietocr_candidate": "mỉm"}
+        target["ocr_evidence"]["crop_evidence"] = crop
+        self.assertEqual(
+            choose_word(target, "tesseract_line_vietocr_crop_agreement"), "mỉm"
+        )
+        crop["vietocr_candidate"] = "mìm"
+        self.assertIsNone(
+            choose_word(target, "tesseract_line_vietocr_crop_agreement")
+        )
+        crop["vietocr_candidate"] = "mỉm"
+        for status in ("partial", "skipped", "pending", "not_needed"):
+            crop["status"] = status
+            self.assertIsNone(
+                choose_word(target, "tesseract_line_vietocr_crop_agreement")
+            )
+        crop["status"] = "completed"
+        crop["vietocr_error"] = "OSError"
+        self.assertIsNone(
+            choose_word(target, "tesseract_line_vietocr_crop_agreement")
+        )
+        del crop["vietocr_error"]
+        target["ocr_evidence"]["engine_statuses"]["tesseract"] = "error"
+        self.assertIsNone(
+            choose_word(target, "tesseract_line_vietocr_crop_agreement")
+        )
+        target["ocr_evidence"]["engine_statuses"]["tesseract"] = "success"
+        target["ocr_evidence"]["engine_statuses"]["vietocr"] = "no_result"
+        self.assertIsNone(
+            choose_word(target, "tesseract_line_vietocr_crop_agreement")
+        )
+
+    def test_same_tesseract_crop_is_not_independent_vietocr_confirmation(self):
+        target = word("mìm", {
+            "paddleocr": "mìm", "vietocr": "mìm", "tesseract": "mỉm",
+        })
+        target["ocr_evidence"]["crop_evidence"] = {
+            "status": "completed", "tesseract_candidate": "mỉm"
+        }
+        self.assertIsNone(
+            choose_word(target, "tesseract_line_vietocr_crop_agreement")
+        )
+
+    def test_engine_specific_correct_tone_attribution_does_not_choose_correct_answer(self):
+        target = word("mìm", {
+            "paddleocr": "mím", "vietocr": "mìm", "tesseract": "mỉm",
+        })
+        target["ocr_evidence"]["crop_evidence"] = {
+            "status": "completed",
+            "paddleocr_candidate": "mỉm",
+            "vietocr_candidate": "mỉm",
+        }
+        output = {"text": "mìm", "words": [target]}
+        stats = audit_engine_attribution("mỉm", output)
+        self.assertEqual(stats["audited_tone_errors"], 1)
+        self.assertEqual(stats["correct_tone_tesseract_verified_line_errors"], 1)
+        self.assertEqual(stats["correct_tone_paddleocr_verified_line_errors"], 0)
+        self.assertEqual(stats["correct_tone_paddleocr_crop_errors"], 1)
+        self.assertEqual(stats["correct_tone_vietocr_crop_errors"], 1)
+        self.assertEqual(stats["alternative_vietocr_verified_line_positions"], 0)
+        self.assertEqual(
+            propose_text(output, "tesseract_line_vietocr_crop_agreement")["flip_indices"], [0]
+        )
+        self.assertEqual(output["words"][0]["text"], "mìm")
+        summary = summarize_cases([evaluate_case("mỉm", output)])
+        self.assertEqual(
+            summary["engine_attribution_audit"][
+                "correct_tone_tesseract_verified_line_errors"
+            ], 1
+        )
+        for private in ("mìm", "mỉm"):
+            self.assertNotIn(private, json.dumps(summary, ensure_ascii=False))
+
+    def test_engine_audit_rejects_weak_page_alignment(self):
+        output = {"text": "mìm ...", "words": [word("mìm", {
+            "paddleocr": "mỉm",
+        })]}
+        stats = audit_engine_attribution("mỉm", output)
+        self.assertEqual(stats["unaligned_pages"], 1)
+        self.assertEqual(stats["audited_tone_errors"], 0)
+        self.assertEqual(stats["correct_tone_paddleocr_verified_line_errors"], 0)
 
     def test_unknown_rule_is_rejected(self):
         with self.assertRaises(ValueError):
