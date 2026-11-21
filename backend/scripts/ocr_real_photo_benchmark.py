@@ -219,12 +219,18 @@ def main(argv: list[str] | None = None) -> int:
     # an explicitly selected local environment file before the OCR engine
     # imports app.database.config.  Never print secrets or copy them into Git.
     if args.env_file is not None:
-        from dotenv import load_dotenv
+        import os
+        from dotenv import dotenv_values
 
         if not args.env_file.expanduser().is_file():
             parser.error("--env-file does not exist")
-        if not load_dotenv(dotenv_path=args.env_file.expanduser(), override=False):
-            parser.error("--env-file did not provide any values")
+        env_values = dotenv_values(args.env_file.expanduser())
+        if not env_values:
+            parser.error("--env-file is empty")
+        # Match app.database.config's handling of *empty* process values.
+        for key, value in env_values.items():
+            if value is not None and not (os.getenv(key) or "").strip():
+                os.environ[key] = value
     if args.min_pages < 1 or args.min_pages > MAX_CASES:
         parser.error("--min-pages must be between 1 and 1000")
     if args.expected_sha and not re.fullmatch(r"[a-f0-9]{64}", args.expected_sha):
