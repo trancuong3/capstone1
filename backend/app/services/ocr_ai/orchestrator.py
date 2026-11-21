@@ -98,9 +98,14 @@ class OcrCorrectionOrchestrator:
         on_progress: Callable[[int, int], None] | None = None,
         on_provider_event: Callable[[dict[str, object]], None] | None = None,
         on_uncertain_tokens: Callable[[int, tuple[int, ...]], None] | None = None,
+        word_normalizer: Callable[[str], str] | None = None,
     ) -> str:
         try:
-            plan = chunk_ocr_text(text, self.config.local.chunking)
+            plan = chunk_ocr_text(
+                text,
+                self.config.local.chunking,
+                word_normalizer=word_normalizer,
+            )
         except ChunkingError as exc:
             raise OcrOrchestrationError("INVALID_CHUNK_PLAN") from exc
         if len(word_boxes) != len(plan.tokens):

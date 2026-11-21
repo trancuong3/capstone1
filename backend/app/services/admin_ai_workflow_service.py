@@ -300,6 +300,20 @@ class AdminAiWorkflowService:
         row = await self.repo.get(workflow_id, page_id=page_id, lock=True)
         if row is None:
             raise HTTPException(status_code=404, detail="AI workflow not found")
+        if (
+            row.Status == "READY_FOR_ADMIN_REVIEW"
+            and row.ProofreadText is not None
+            and row.SafetyStatus in {"FAILED", "STALE"}
+        ):
+            self.prepare_safety_rescan(
+                row,
+                actor_id,
+                datetime.now(timezone.utc),
+                "Admin retried the Child Safety stage independently",
+            )
+            await self.db.commit()
+            await self.db.refresh(row)
+            return self._read(row)
         if row.Status != "FAILED":
             raise HTTPException(status_code=409, detail="Only a failed workflow stage can be retried")
         if row.Stage == "CHILD_SAFETY_SCANNING" and (not row.CandidateText or not row.CandidateHash):

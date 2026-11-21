@@ -36,6 +36,7 @@ const assessment = {
   admin_approved_by: null,
   admin_approved_by_name: null,
   admin_reason: null,
+  publication_source: null,
   rights_confirmed: false,
   blockers: [],
 };
@@ -107,7 +108,9 @@ describe("book-level approval dashboard", () => {
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Xem kết quả" }));
     expect(
-      await screen.findByText(/Copyright chỉ là thông tin tham khảo/),
+      await screen.findByText(
+        /Copyright hiện tạm thời chưa tham gia quyết định/,
+      ),
     ).toBeInTheDocument();
 
     await user.type(

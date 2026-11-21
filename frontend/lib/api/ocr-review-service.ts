@@ -97,6 +97,7 @@ export const adminAiWorkflowSchema = z.object({
     "STALE",
     "PROVISIONAL",
     "CONFIRMED",
+    "AUTO_CONFIRMED",
     "FAILED",
   ]),
   findings: z.array(z.record(z.string(), z.unknown())),
@@ -373,6 +374,7 @@ export function createOcrReviewService(): OcrReviewService {
       const job = await requestApi(basePath, aiCorrectionJobSchema, undefined, {
         method: "POST",
         body: {
+          idempotency_key: globalThis.crypto.randomUUID(),
           draft_text: draftText,
           words: words.map((word) => ({
             word_index: word.word_index,

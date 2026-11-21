@@ -42,7 +42,7 @@ def _row(page_number: int, *, finding: dict | None = None, suitability: str = "S
         SafetyInputHash=AdminAiWorkflowService._hash(f"candidate-{page_number}"),
         Suitability=suitability,
         Findings=[finding] if finding else [],
-        ProofreadText=f"corrected text {page_number}",
+        ProofreadText=f"candidate-{page_number}",
         CorrectionSuggestions=[],
         OcrApprovedAt=None,
         OcrApprovedBy=None,
@@ -62,6 +62,8 @@ def _row(page_number: int, *, finding: dict | None = None, suitability: str = "S
         VerificationStatus="VERIFIED",
         ContentHash=f"revision-{page_number}",
         VerifiedText=f"candidate-{page_number}",
+        VerifiedBy=uuid4(),
+        VerifiedAt=datetime.now(timezone.utc),
         ProcessingMeta={},
     )
     return page, revision, workflow, f"findings-{page_number}", f"metadata-{page_number}"
@@ -70,6 +72,7 @@ def _row(page_number: int, *, finding: dict | None = None, suitability: str = "S
 class _DecisionRepository:
     def __init__(self, row):
         self.row = row
+        self.rows = [row]
         self.decisions = []
         self.book_row = SimpleNamespace(Id=uuid4(), LifecycleStatus="DRAFT")
         self.committed = False
@@ -82,7 +85,7 @@ class _DecisionRepository:
         return self.book_row
 
     async def book_assessment_rows(self, _book_id, *, lock=False):
-        return [self.row]
+        return self.rows
 
     async def book_decisions(self, _book_id):
         return list(self.decisions)
@@ -106,6 +109,9 @@ class _DecisionRepository:
     async def commit(self):
         self.committed = True
         self.commit_count += 1
+
+    async def rollback(self):
+        return None
 
 
 class BookQualityAssessmentTests(unittest.TestCase):
@@ -222,6 +228,121 @@ class BookQualityAssessmentTests(unittest.TestCase):
         self.assertEqual(assessment.finding_groups[0]["page_count"], 2)
         self.assertEqual(len(assessment.finding_groups[0]["examples"]), 2)
 
+    def test_auto_publication_confirms_clean_pages_and_records_current_snapshot(self):
+        row = _row(1)
+        repository = _DecisionRepository(row)
+        retired_row = _row(2)
+        retired_row[0].LifecycleStatus = "RETIRED"
+        repository.rows.append(retired_row)
+        service = BookContentQualityService(repository)
+
+        published = _run_async(
+            service.auto_publish_if_eligible(repository.book_row.Id)
+        )
+
+        self.assertTrue(published)
+        self.assertTrue(repository.committed)
+        self.assertEqual(repository.book_row.LifecycleStatus, "ACTIVE")
+        self.assertEqual(row[2].SafetyStatus, "AUTO_CONFIRMED")
+        self.assertIsNotNone(row[2].SafetyConfirmedAt)
+        self.assertIsNone(row[2].SafetyConfirmedBy)
+        self.assertEqual(row[2].OcrApprovedBy, row[1].VerifiedBy)
+        self.assertEqual(row[1].ProcessingMeta["admin_ai_workflow"]["safety_status"], "AUTO_CONFIRMED")
+        decision = repository.decisions[0]
+        self.assertIsNone(decision.ActorId)
+        self.assertEqual(decision.Action, "book.children.approved")
+        self.assertEqual(decision.Metadata["decision_source"], "AUTO_APPROVAL")
+        self.assertEqual(
+            decision.Metadata["page_snapshot"],
+            BookContentQualityService._page_snapshot(repository.rows),
+        )
+        assessment = BookContentQualityService._assessment(repository.rows, repository.decisions)
+        self.assertEqual(assessment.status, "PUBLISHED")
+        self.assertEqual(assessment.publication_source, "AUTO_APPROVAL")
+
+    def test_auto_publication_accepts_proofread_corrections_after_verified_revision(self):
+        row = _row(1)
+        row[2].CorrectionSuggestions = [
+            {"original": "ocr", "proposed": "candidate", "decision": "PENDING_ADMIN"}
+        ]
+        repository = _DecisionRepository(row)
+
+        published = _run_async(
+            BookContentQualityService(repository).auto_publish_if_eligible(
+                repository.book_row.Id
+            )
+        )
+
+        self.assertTrue(published)
+        self.assertEqual(row[2].CandidateText, row[1].VerifiedText)
+        self.assertEqual(row[2].ProofreadText, row[1].VerifiedText)
+
+    def test_auto_publication_fails_closed_for_findings_review_and_pending_proofread(self):
+        finding = {"category": "VIOLENCE", "severity": "LOW", "evidence_text": "evidence"}
+        for row in (
+            _row(1, finding=finding),
+            _row(1, suitability="REVIEW_REQUIRED"),
+        ):
+            repository = _DecisionRepository(row)
+            published = _run_async(
+                BookContentQualityService(repository).auto_publish_if_eligible(
+                    repository.book_row.Id
+                )
+            )
+            self.assertFalse(published)
+            self.assertFalse(repository.committed)
+            self.assertEqual(row[2].SafetyStatus, "PROVISIONAL")
+
+        changed = _row(1)
+        changed[2].ProofreadText = "unverified proofread text"
+        repository = _DecisionRepository(changed)
+        published = _run_async(
+            BookContentQualityService(repository).auto_publish_if_eligible(
+                repository.book_row.Id
+            )
+        )
+        self.assertFalse(published)
+        self.assertFalse(repository.committed)
+
+        unverified = _row(1)
+        unverified[1].VerifiedBy = None
+        repository = _DecisionRepository(unverified)
+        published = _run_async(
+            BookContentQualityService(repository).auto_publish_if_eligible(
+                repository.book_row.Id
+            )
+        )
+        self.assertFalse(published)
+        self.assertFalse(repository.committed)
+
+    def test_admin_cannot_approve_a_book_with_unresolved_safety_findings(self):
+        row = _row(
+            1,
+            finding={
+                "category": "VIOLENCE",
+                "severity": "MEDIUM",
+                "evidence_text": "câu trích dẫn thật",
+            },
+        )
+        repository = _DecisionRepository(row)
+        service = BookContentQualityService(repository)
+
+        with self.assertRaises(HTTPException) as raised:
+            _run_async(
+                service.decide_book(
+                    uuid4(),
+                    repository.book_row.Id,
+                    BookQualityBookDecisionRequest(
+                        decision="APPROVE",
+                        reason="Đã xem nội dung.",
+                    ),
+                )
+            )
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertIn("Resolve Child Safety findings", raised.exception.detail)
+        self.assertFalse(repository.committed)
+
     def test_missing_workflow_is_processing_not_declared_safe_or_failed(self):
         page, revision, *_ = _row(1)
         rows = [(page, revision, None, None, None)]
@@ -266,9 +387,19 @@ class BookQualityAssessmentTests(unittest.TestCase):
             CreatedAt=datetime.now(timezone.utc),
             ActorId=uuid4(),
         )
+        new_revision_id = uuid4()
+        changed_page = SimpleNamespace(
+            **{**row[0].__dict__, "CurrentVerifiedRevisionId": new_revision_id}
+        )
         changed = (
-            row[0],
-            SimpleNamespace(**{**row[1].__dict__, "ContentHash": "new-content-hash"}),
+            changed_page,
+            SimpleNamespace(
+                **{
+                    **row[1].__dict__,
+                    "Id": new_revision_id,
+                    "ContentHash": "new-content-hash",
+                }
+            ),
             *row[2:],
         )
 

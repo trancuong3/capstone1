@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass
 
 
@@ -47,6 +48,7 @@ class OcrChunkPlan:
     text: str
     tokens: tuple[OcrToken, ...]
     chunks: tuple[OcrTextChunk, ...]
+    word_normalizer: Callable[[str], str] | None = None
 
 
 @dataclass(frozen=True)
@@ -83,11 +85,26 @@ def _read_int(name: str, default: int, minimum: int, maximum: int) -> int:
     return value
 
 
-def _tokens(text: str) -> tuple[OcrToken, ...]:
-    return tuple(
-        OcrToken(index=index, start=match.start(), end=match.end(), text=match.group(0))
-        for index, match in enumerate(_TOKEN_PATTERN.finditer(text))
-    )
+def _tokens(
+    text: str,
+    word_normalizer: Callable[[str], str] | None = None,
+) -> tuple[OcrToken, ...]:
+    tokens = []
+    for match in _TOKEN_PATTERN.finditer(text):
+        token_text = match.group(0)
+        if word_normalizer is not None and not word_normalizer(token_text):
+            # Keep standalone punctuation in the untouched source spans. It has
+            # no OCR word box, so it must not consume a correction result/box.
+            continue
+        tokens.append(
+            OcrToken(
+                index=len(tokens),
+                start=match.start(),
+                end=match.end(),
+                text=token_text,
+            )
+        )
+    return tuple(tokens)
 
 
 def _boundary_kind(text: str, tokens: tuple[OcrToken, ...], left_index: int) -> int:
@@ -121,13 +138,15 @@ def _context_after(text: str, end: int, limit: int) -> str:
 def chunk_ocr_text(
     value: str,
     config: ChunkingConfig | None = None,
+    *,
+    word_normalizer: Callable[[str], str] | None = None,
 ) -> OcrChunkPlan:
     """Split NFC text under strict UTF-8 byte and token budgets."""
     config = config or ChunkingConfig.from_environment()
     text = unicodedata.normalize("NFC", value)
     if len(text.encode("utf-8")) > config.max_document_bytes:
         raise ChunkingError("OCR text exceeds LOCAL_OCR_MAX_DOCUMENT_BYTES")
-    tokens = _tokens(text)
+    tokens = _tokens(text, word_normalizer)
     if not tokens:
         raise ChunkingError("OCR text must contain at least one token")
     if min(config.max_bytes, config.max_words, config.max_chunks, config.max_document_bytes) < 1 or config.context_bytes < 0:
@@ -182,7 +201,12 @@ def chunk_ocr_text(
                 tokens=chunk_tokens,
             )
         )
-    return OcrChunkPlan(text=text, tokens=tokens, chunks=tuple(chunks))
+    return OcrChunkPlan(
+        text=text,
+        tokens=tokens,
+        chunks=tuple(chunks),
+        word_normalizer=word_normalizer,
+    )
 
 
 def reconstruct_ocr_text(
@@ -251,6 +275,6 @@ def reconstruct_ocr_text(
         cursor = token.end
     pieces.append(plan.text[cursor:])
     result = unicodedata.normalize("NFC", "".join(pieces))
-    if len(_tokens(result)) != len(plan.tokens):
+    if len(_tokens(result, plan.word_normalizer)) != len(plan.tokens):
         raise ChunkingError("Reconstructed text changed the original token count")
     return result

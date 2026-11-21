@@ -79,6 +79,7 @@ const approvalStatusLabels: Record<BookApprovalStatus, string> = {
   SCAN_FAILED: "Scan thất bại",
   PENDING_ADMIN_REVIEW: "Chờ Admin duyệt",
   READY_FOR_CHILDREN: "Đủ điều kiện theo scan",
+  PUBLISHED: "Đã tự động xuất bản",
   APPROVED_BY_ADMIN: "Admin đã phê duyệt",
   REJECTED_FOR_CHILDREN: "Không được phép cho trẻ đọc",
   STALE: "Cần quét lại",
@@ -89,6 +90,7 @@ const approvalStatusStyles: Record<BookApprovalStatus, string> = {
   SCAN_FAILED: "bg-rose-100 text-rose-800",
   PENDING_ADMIN_REVIEW: "bg-amber-100 text-amber-900",
   READY_FOR_CHILDREN: "bg-emerald-100 text-emerald-900",
+  PUBLISHED: "bg-emerald-100 text-emerald-900",
   APPROVED_BY_ADMIN: "bg-emerald-100 text-emerald-900",
   REJECTED_FOR_CHILDREN: "bg-rose-100 text-rose-800",
   STALE: "bg-orange-100 text-orange-900",
@@ -1352,8 +1354,10 @@ export function AdminBookContentQualityScreen() {
               ))}
             </div>
             <div className="mt-4 rounded-control border border-border bg-canvas p-3 text-sm text-muted">
-              Copyright chỉ là thông tin tham khảo trong policy hiện tại; trạng
-              thái thiếu, lỗi, stale hoặc có finding không khóa phê duyệt.
+              Tự động xuất bản chỉ áp dụng khi OCR đã xác minh khớp Candidate,
+              Proofreading đã hoàn tất và Admin xác minh Candidate, Child Safety
+              đạt SUITABLE không có finding. Copyright hiện tạm thời chưa tham
+              gia quyết định.
             </div>
             {selectedBook.assessment.finding_groups.length ? (
               <div className="mt-4 grid gap-3">
@@ -1404,7 +1408,9 @@ export function AdminBookContentQualityScreen() {
             ) : null}
             {selectedBook.assessment.admin_approved_at ? (
               <p className="mt-2 text-sm text-emerald-900">
-                Admin phê duyệt{" "}
+                {selectedBook.assessment.publication_source === "AUTO_APPROVAL"
+                  ? "Tự động xuất bản"
+                  : "Admin phê duyệt"}{" "}
                 {formatDate(selectedBook.assessment.admin_approved_at)}
                 {selectedBook.assessment.admin_approved_by_name
                   ? ` · ${selectedBook.assessment.admin_approved_by_name}`
@@ -1427,13 +1433,16 @@ export function AdminBookContentQualityScreen() {
                   value={bookDecisionReason}
                 />
               </label>
-              {selectedBook.assessment.high_finding_count > 0 ||
+              {selectedBook.assessment.finding_count > 0 ||
+              selectedBook.ai_workflows.some(
+                (workflow) => workflow.suitability === "REVIEW_REQUIRED",
+              ) ||
               selectedBook.ai_workflows.some(
                 (workflow) => workflow.suitability === "NOT_RECOMMENDED",
               ) ? (
                 <p className="rounded-control bg-rose-50 p-3 text-sm font-semibold text-rose-900">
-                  Chính sách hiện tại chặn phê duyệt nếu có finding HIGH hoặc
-                  suitability NOT_RECOMMENDED.
+                  Cần xử lý hết Child Safety findings và trang REVIEW_REQUIRED
+                  trước khi phê duyệt; NOT_RECOMMENDED luôn bị chặn.
                 </p>
               ) : null}
               <div className="flex flex-wrap gap-2">
@@ -1452,7 +1461,10 @@ export function AdminBookContentQualityScreen() {
                       "COMPLETED" ||
                     selectedBook.assessment.failed_or_unscanned_page_count >
                       0 ||
-                    selectedBook.assessment.high_finding_count > 0 ||
+                    selectedBook.assessment.finding_count > 0 ||
+                    selectedBook.ai_workflows.some(
+                      (workflow) => workflow.suitability === "REVIEW_REQUIRED",
+                    ) ||
                     selectedBook.ai_workflows.some(
                       (workflow) => workflow.suitability === "NOT_RECOMMENDED",
                     ) ||
@@ -1681,7 +1693,8 @@ export function AdminBookContentQualityScreen() {
                     ) : (
                       <p className="mt-3 text-sm text-muted">
                         {workflow.safety_status === "PROVISIONAL" ||
-                        workflow.safety_status === "CONFIRMED"
+                        workflow.safety_status === "CONFIRMED" ||
+                        workflow.safety_status === "AUTO_CONFIRMED"
                           ? "Không có safety finding trong scan này."
                           : "Chưa có kết quả Child Safety hợp lệ."}
                       </p>

@@ -250,7 +250,7 @@ class BookContentQualityRepository:
     async def add_book_decision(
         self,
         *,
-        actor_id: UUID,
+        actor_id: UUID | None,
         book_id: UUID,
         action: str,
         metadata: dict,

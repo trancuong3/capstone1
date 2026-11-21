@@ -156,6 +156,7 @@ export const bookApprovalStatusSchema = z.enum([
   "SCAN_FAILED",
   "PENDING_ADMIN_REVIEW",
   "READY_FOR_CHILDREN",
+  "PUBLISHED",
   "APPROVED_BY_ADMIN",
   "REJECTED_FOR_CHILDREN",
   "STALE",
@@ -204,6 +205,10 @@ export const bookApprovalAssessmentSchema = z.object({
   admin_approved_by: z.guid().nullable(),
   admin_approved_by_name: z.string().nullable(),
   admin_reason: z.string().nullable(),
+  publication_source: z
+    .enum(["AUTO_APPROVAL", "ADMIN_APPROVAL"])
+    .nullable()
+    .default(null),
   rights_confirmed: z.boolean(),
   blockers: z.array(z.string()),
 });

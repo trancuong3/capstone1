@@ -39,7 +39,7 @@ class CatalogSafetySqlTests(unittest.TestCase):
         self.assertIn("bookpages.lifecyclestatus IN", sql)
         self.assertIn("bookpages.lifecyclestatus !=", sql)
         self.assertIn("adminaiworkflows.safetyconfirmedby", sql)
-        self.assertIn("adminaiworkflows.findings @>", sql)
+        self.assertIn("adminaiworkflows.findings =", sql)
         self.assertIn("JOIN pagerevisions ON pagerevisions.id = bookpages.currentverifiedrevisionid", sql)
         self.assertNotIn("FROM pagerevisions, bookpages", sql)
         self.assertTrue(
@@ -78,12 +78,13 @@ class CatalogTests(unittest.IsolatedAsyncioTestCase):
             sql,
         )
         self.assertIn("adminaiworkflows.finalapprovedtexthash", sql)
-        self.assertIn("adminaiworkflows.findings @>", sql)
+        self.assertIn("adminaiworkflows.findings =", sql)
         self.assertIn("books.mingrade <=", sql)
         self.assertIn("books.maxgrade >=", sql)
         self.assertIn("ACTIVE", query.params.values())
         self.assertIn("VERIFIED", query.params.values())
         self.assertIn("CONFIRMED", query.params.values())
+        self.assertIn("AUTO_CONFIRMED", query.params.values())
         suitability_allowlist = next(
             (
                 value
@@ -92,10 +93,7 @@ class CatalogTests(unittest.IsolatedAsyncioTestCase):
             ),
             None,
         )
-        self.assertEqual(
-            suitability_allowlist,
-            ["SUITABLE", "SUITABLE_WITH_GUIDANCE", "REVIEW_REQUIRED"],
-        )
+        self.assertEqual(suitability_allowlist, ["SUITABLE", "SUITABLE_WITH_GUIDANCE"])
         self.assertNotIn("NOT_RECOMMENDED", suitability_allowlist)
         self.assertIn("%mèo\\_\\%%", query.params.values())
 

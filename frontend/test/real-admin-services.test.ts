@@ -727,7 +727,11 @@ describe("real Admin adapters", () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain(`/books/admin/pages/${pageId}/ai-correct/jobs`);
     expect(init.method).toBe("POST");
-    expect(JSON.parse(String(init.body))).toMatchObject({
+    const payload = JSON.parse(String(init.body));
+    expect(payload.idempotency_key).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    expect(payload).toMatchObject({
       draft_text: "Chu",
       words: [{ word_index: 0, bbox: [0.1, 0.2, 0.2, 0.05] }],
     });
