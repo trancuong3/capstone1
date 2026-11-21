@@ -31,7 +31,8 @@ from app.api.router import api_router
 from app.database.session import Base
 from app.models import (
     AdminAiWorkflow, AuditLog, Book, BookPage, ChildProfile, PageRevision,
-    PageRevisionWord, Profile, ReadingEvent, ReadingSession, ReadingSessionPage,
+    PageRevisionWord, ParentBookModerationRequest, ParentBookPageSubmission,
+    Profile, ReadingEvent, ReadingSession, ReadingSessionPage,
 )
 from app.models.reading_comparison_report import ReadingComparisonReport
 from app.repositories.reading_content_repository import ReadingContentRepository
@@ -65,6 +66,7 @@ class Phase7PostgresTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self.cleanup_schema)
         tables = [model.__table__ for model in (
             Profile, ChildProfile, Book, BookPage, PageRevision, PageRevisionWord,
+            ParentBookPageSubmission, ParentBookModerationRequest,
             ReadingSession, ReadingSessionPage, ReadingEvent, ReadingComparisonReport,
             AdminAiWorkflow, AuditLog,
         )]

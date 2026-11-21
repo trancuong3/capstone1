@@ -25,7 +25,25 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 MIGRATION_PATH = REPO_ROOT / "supabase" / "migrations" / "20261121220000_parent_private_books.sql"
 
 DEFAULT_LOCAL_ADMIN_PG_URL = "postgresql://postgres:viread_local_test@127.0.0.1:5432/postgres"
-LOCAL_PG_ADMIN_URL = os.getenv("PARENT_PRIVATE_BOOK_TEST_ADMIN_URL", DEFAULT_LOCAL_ADMIN_PG_URL)
+
+
+def _resolve_local_pg_admin_url() -> str:
+    explicit = os.getenv("PARENT_PRIVATE_BOOK_TEST_ADMIN_URL")
+    if explicit:
+        return explicit
+    for env_name in ("ADMIN_OCR_TEST_DATABASE_URL", "READING_REPORT_TEST_DATABASE_URL", "DATABASE_URL"):
+        candidate = (os.getenv(env_name) or "").strip()
+        if not candidate:
+            continue
+        if "127.0.0.1" not in candidate and "localhost" not in candidate:
+            continue
+        sync_candidate = candidate.replace("postgresql+asyncpg://", "postgresql://", 1)
+        if "/" in sync_candidate.rsplit("@", 1)[-1]:
+            return sync_candidate.rsplit("/", 1)[0] + "/postgres"
+    return DEFAULT_LOCAL_ADMIN_PG_URL
+
+
+LOCAL_PG_ADMIN_URL = _resolve_local_pg_admin_url()
 
 PARENT_A = UUID("11111111-1111-4111-8111-111111111111")
 CHILD_A = UUID("11111111-1111-4111-8111-111111111112")
@@ -242,6 +260,8 @@ CREATE TABLE public.adminaiworkflows (
   imagesafetyreviewedby uuid,
   imagesafetyreviewedat timestamptz,
   imagesafetyreviewnote varchar(1000),
+  imagesafetyimagesha256 varchar(64),
+  imagesafetyreason varchar(500),
   rightsprofileid uuid,
   rightsprofileversion integer,
   rightsprofilehash varchar(64),

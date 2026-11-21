@@ -32,7 +32,7 @@ from app.models.reading_presence import ReadingPresenceAlert, ReadingPresenceSet
 from app.repositories.reading_presence_repository import ReadingPresenceRepository
 from app.services.reading_presence_service import PresenceLimits, ReadingPresenceService
 
-BASE_URL = os.getenv("READING_PRESENCE_TEST_DATABASE_URL")
+BASE_URL = os.getenv("READING_PRESENCE_TEST_DATABASE_URL") or os.getenv("READING_REPORT_TEST_DATABASE_URL")
 NOW = datetime(2026, 11, 22, 3, 0, tzinfo=timezone.utc)
 PARENT = UUID("11111111-1111-4111-8111-111111111111")
 OTHER = UUID("99999999-9999-4999-8999-999999999999")

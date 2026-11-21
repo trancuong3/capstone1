@@ -219,4 +219,4 @@ class FinalAssessmentTests(unittest.IsolatedAsyncioTestCase):
         service.repository.create.side_effect = persist
         result = await service.compare(SESSION_ID, ACTOR_ID, self.payload())
         self.assertEqual(result.summary["initial_assessment"], final_report().Summary["initial_assessment"])
-        service.repository.lock_session.assert_awaited_once_with(SESSION_ID)
+        service.repository.lock_session.assert_awaited_once_with(SESSION_ID, actor_id=ACTOR_ID)

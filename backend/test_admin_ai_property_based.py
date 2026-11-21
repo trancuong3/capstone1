@@ -10,7 +10,94 @@ os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 
-from hypothesis import given, settings, strategies as st
+import functools
+import random
+
+try:
+    from hypothesis import given, settings, strategies as st
+except ImportError:  # pragma: no cover - lightweight stdlib fallback when hypothesis is absent
+    class _Strategy:
+        def __init__(self, gen):
+            self._gen = gen
+
+        def draw(self, rng: random.Random):
+            return self._gen(rng)
+
+        def map(self, fn):
+            return _Strategy(lambda rng: fn(self._gen(rng)))
+
+    class _FallbackStrategies:
+        @staticmethod
+        def sampled_from(seq):
+            items = list(seq)
+            return _Strategy(lambda rng: rng.choice(items))
+
+        @staticmethod
+        def integers(*, min_value: int = 0, max_value: int = 100):
+            return _Strategy(lambda rng: rng.randint(min_value, max_value))
+
+        @staticmethod
+        def booleans():
+            return _Strategy(lambda rng: rng.choice([False, True]))
+
+        @staticmethod
+        def none():
+            return _Strategy(lambda _rng: None)
+
+        @staticmethod
+        def just(val):
+            return _Strategy(lambda _rng: val)
+
+        @staticmethod
+        def one_of(*strats):
+            return _Strategy(lambda rng: rng.choice(strats).draw(rng))
+
+        @staticmethod
+        def lists(elem_strat, *, min_size: int = 0, max_size: int = 10):
+            return _Strategy(
+                lambda rng: [
+                    elem_strat.draw(rng) for _ in range(rng.randint(min_size, max_size))
+                ]
+            )
+
+        @staticmethod
+        def text(*, alphabet: str = "abc ", min_size: int = 0, max_size: int = 20):
+            chars = list(alphabet)
+            return _Strategy(
+                lambda rng: "".join(
+                    rng.choice(chars) for _ in range(rng.randint(min_size, max_size))
+                )
+            )
+
+        @staticmethod
+        def composite(fn):
+            def _builder(*args, **kwargs):
+                return _Strategy(lambda rng: fn(lambda s: s.draw(rng), *args, **kwargs))
+
+            return _builder
+
+    st = _FallbackStrategies()
+
+    def settings(*, max_examples: int = 40, **_kwargs):
+        def _decorator(fn):
+            fn._fallback_max_examples = max_examples
+            return fn
+
+        return _decorator
+
+    def given(**strat_kwargs):
+        def _decorator(fn):
+            @functools.wraps(fn)
+            def _wrapped(self):
+                rng = random.Random(20261121)
+                count = getattr(fn, "_fallback_max_examples", 40)
+                for _ in range(count):
+                    kwargs = {k: s.draw(rng) for k, s in strat_kwargs.items()}
+                    fn(self, **kwargs)
+
+            return _wrapped
+
+        return _decorator
 
 from app.services.admin_ocr_chunking import (
     ChunkingConfig,

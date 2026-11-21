@@ -108,8 +108,16 @@ class ParentBookContentQualityPostgresTests(unittest.IsolatedAsyncioTestCase):
                     author varchar,
                     mingrade smallint NOT NULL,
                     maxgrade smallint NOT NULL,
+                    expectedpagecount integer,
                     lifecyclestatus varchar NOT NULL,
                     createdby uuid REFERENCES profiles(id) ON DELETE SET NULL,
+                    visibility_scope text NOT NULL DEFAULT 'CATALOG',
+                    owner_parent_id uuid,
+                    moderation_status text NOT NULL DEFAULT 'ACTIVE',
+                    suspended_at timestamptz,
+                    suspended_by uuid,
+                    suspended_reason text,
+                    source_declaration text,
                     createdat timestamptz NOT NULL DEFAULT now()
                 )
             """))
@@ -122,6 +130,7 @@ class ParentBookContentQualityPostgresTests(unittest.IsolatedAsyncioTestCase):
                     width smallint NOT NULL,
                     height smallint NOT NULL,
                     featurepath varchar,
+                    contenttype varchar(32) NOT NULL DEFAULT 'CONTENT',
                     processingmeta jsonb NOT NULL DEFAULT '{}'::jsonb,
                     currentverifiedrevisionid uuid,
                     lifecyclestatus varchar NOT NULL,
