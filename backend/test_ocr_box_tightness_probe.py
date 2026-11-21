@@ -139,6 +139,9 @@ class BboxProbeTests(unittest.TestCase):
             with Image.open(target) as overlay:
                 self.assertEqual(overlay.getpixel((20, 20)), (220, 50, 50))
                 self.assertEqual(overlay.getpixel((100, 20)), (0, 160, 245))
+                # Inner pixels must remain untouched. A solid legend covering
+                # the first text line previously made this test fail.
+                self.assertEqual(overlay.getpixel((25, 20)), (255, 255, 255))
             self.assertEqual(list(root.iterdir()).__len__(), 2)
 
     def test_cli_requires_private_aggregate_and_no_overwrite(self):
