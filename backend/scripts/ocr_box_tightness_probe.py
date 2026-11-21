@@ -112,8 +112,9 @@ def write_overlay(
                  round((x + w) * width), round((y + h) * height)),
                 outline=color, width=2,
             )
-    draw.rectangle((6, 6, 330, 44), fill=(255, 255, 255))
-    draw.text((12, 10), "RED = reference, BLUE = OCR", fill=(0, 0, 0))
+    # Never paint a legend over word boxes: even a small banner can hide
+    # legitimate labels near the top-left corner, especially on small pages.
+    # Color conventions are documented outside the private image.
     canvas.save(target, format="PNG")
 
 
