@@ -59,6 +59,75 @@ class ArtifactABRunnerTests(unittest.TestCase):
             self.assertNotIn(str(root), json.dumps(report))
             self.assertNotIn("Bé", json.dumps(report, ensure_ascii=False))
 
+    def test_failure_stage_identifies_engine_contract_not_analysis(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            image = root / "p.png"
+            image.write_bytes(b"fixture")
+            engine = types.ModuleType("app.services.ocr_engine")
+            engine.extract_text_and_boxes = lambda _: fake_output(checkpoint="b" * 64)
+            with mock.patch.dict(sys.modules, {
+                "torch": types.ModuleType("torch"),
+                "app.services.ocr_engine": engine,
+            }):
+                report = runner.evaluate(
+                    [Case(image, "Bé", "clean")],
+                    expected_profile="FLOW1_EXTERNAL_TRDG", expected_sha="a" * 64,
+                )
+            self.assertEqual(report["failure_stage_counts"], {
+                "verify_engine_and_checkpoint": 1,
+            })
+            self.assertEqual(report["contract_failure_codes"], {
+                "checkpoint_mismatch": 1,
+            })
+            self.assertNotIn("b" * 64, json.dumps(report))
+            self.assertNotIn(str(root), json.dumps(report))
+
+    def test_failure_stage_identifies_new_ab_analysis_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            image = root / "p.png"
+            image.write_bytes(b"fixture")
+            engine = types.ModuleType("app.services.ocr_engine")
+            engine.extract_text_and_boxes = lambda _: fake_output()
+            with mock.patch.dict(sys.modules, {
+                "torch": types.ModuleType("torch"),
+                "app.services.ocr_engine": engine,
+            }):
+                with mock.patch.object(
+                    runner, "evaluate_case",
+                    side_effect=ValueError("private text from new analysis"),
+                ):
+                    report = runner.evaluate(
+                        [Case(image, "Bé", "clean")],
+                        expected_profile="FLOW1_EXTERNAL_TRDG", expected_sha="a" * 64,
+                    )
+            self.assertEqual(report["failure_stage_counts"], {"ab_analysis": 1})
+            self.assertEqual(report["failure_exception_types"], {"ValueError": 1})
+            self.assertEqual(report["contract_failure_codes"], {})
+            self.assertNotIn("private text", json.dumps(report))
+
+    def test_failure_stage_identifies_image_or_engine_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            image = root / "p.png"
+            image.write_bytes(b"fixture")
+            engine = types.ModuleType("app.services.ocr_engine")
+            engine.extract_text_and_boxes = lambda _: (_ for _ in ()).throw(
+                ValueError("private image path " + str(image))
+            )
+            with mock.patch.dict(sys.modules, {
+                "torch": types.ModuleType("torch"),
+                "app.services.ocr_engine": engine,
+            }):
+                report = runner.evaluate(
+                    [Case(image, "Bé", "clean")],
+                    expected_profile="FLOW1_EXTERNAL_TRDG", expected_sha="a" * 64,
+                )
+            self.assertEqual(report["failure_stage_counts"], {"ocr_inference": 1})
+            self.assertEqual(report["contract_failure_codes"], {})
+            self.assertNotIn(str(image), json.dumps(report))
+
     def test_unexpected_checkpoint_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
