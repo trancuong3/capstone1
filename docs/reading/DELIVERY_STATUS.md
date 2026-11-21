@@ -146,3 +146,26 @@ npx playwright test --config=playwright.real-data.config.ts test/browser/reading
 ```
 
 
+---
+
+## 6. Đợt nâng cấp 3 — Sư phạm Lớp 1, Đánh vần thực chiến & Tương tác cảm xúc (G25–G29 — KHÓA trước khi sửa)
+
+> Đặc tả sư phạm & kỹ thuật chi tiết: `docs/reading/GRADE1_PEDAGOGY_AND_PHONICS_SPEC.md`.
+
+### 6.1 Baseline thực trạng trước khi sửa (trên SHA `5f0c9d58`)
+1. **Đánh vần thực chiến (`"ê tờ ê tê"`, biến âm STT & tách gói rời):**
+   - `RealtimeAlignmentEngine.addFinalTranscript` chưa có `SpellingBuffer` liên đoạn: khi bé đọc rời 4 gói `isFinal` (`"ê"` → `"tờ"` → `"ê"` → `"tê"`) hoặc STT nghe `"tờ"` thành `"tơ"` / `"ê"` thành `"ế"`, các âm đệm lọt vào `pendingToken` và làm nổ `SUBSTITUTE` (đỏ) trước khi bé ghép xong tiếng `"tê"`.
+   - `hasUsableBrowserConfidence >= 0.50` loại bỏ các âm đánh vần đơn lẻ có `confidence` `0.28–0.49` từ Web Speech API (`vi-VN`).
+   - `classifyRetryTranscript` chặn cứng `> 4 tokens` nên từ chối chuỗi đánh vần trong chế độ luyện lại từ sai (`retry mode`).
+2. **Tương tác cảm xúc khi bé đọc sai (`SUBSTITUTE`):**
+   - Khi bé đọc sai 1 từ và dừng lại, ứng dụng chỉ chờ timer im lặng `~9.000 ms` rồi nói câu ngắn `"Cô đọc mẫu cho con nhé."` — chưa có phản hồi vỗ về tức thì (~1.4s), chưa phân biệt lỗi dấu thanh / lỗi âm gần / lỗi lúng túng, chưa có hàm đánh vần mẫu từng bước `generateSpokenPhonicsGuide(word)` chuẩn SGK Lớp 1, và chưa có bong bóng nhân vật đồng hành cảm xúc.
+
+### 6.2 Bảng cổng nghiệm thu đợt 3 (G25–G29 — KHÓA trước khi sửa code)
+
+| ID | Cổng | Ngưỡng đã khóa (pass nếu) | Kết quả thực đo | Trạng thái | Bằng chứng |
+|---|---|---|---|---|---|
+| G25 | Đánh vần thực chiến Lớp 1 & chịu lỗi biến âm STT (`phonics-spelling.ts`) | `≥ 50` ca test trong `phonics-spelling.test.ts` (đủ vần trước–âm đầu sau `"ê tờ ê tê"`, `"a cờ a ca sắc cá"`, `"ô i ôi tờ ôi tôi"`, `"ơ mờ ơm cờ ơm cơm"`; âm đầu trước–vần sau; lặp/ngập ngừng; biến âm STT `"ê tơ ê tê"`, `"ế tờ ê tê"`): **100%** chấp nhận đánh vần đúng, **0** false-positive trên từ ngoài bài hoặc sai thanh cuối (`"ê tờ ê tề"` cho `"tê"` & `"ma"` đơn lẻ cho `"má"` bị từ chối 100%) | *Đang triển khai* | **PENDING** | `phonics-spelling.test.ts` |
+| G26 | Bộ đệm `SpellingBuffer` liên đoạn, confidence âm đánh vần & đồng bộ `retry mode` | Tách 3–6 gói `isFinal` rời (`"ê"` / `"tờ"` / `"ê"` / `"tê"` trong cửa sổ 6s, kể cả `confidence 0.30–0.49`) không nổ `SUBSTITUTE` đỏ giữa chừng, không bị `isOffTopic` loại; đồng bộ 100% sang `classifyRetryTranscript` (`retry mode`) & `SentenceReinforcementTracker` | *Đang triển khai* | **PENDING** | `phonics-spelling.test.ts`, `retry-word-recognition.test.ts`, `reading-automation-screen.test.tsx` |
+| G27 | An ủi nhiều câu ấm áp tức thì (~1.4s) theo đúng nhóm lỗi khi bé đọc sai | Xóa bỏ im lặng 9s khi bé đọc sai: chờ nhịp tự sửa ngắn `~1.4s` (nếu tự sửa ngay thì không cắt lời); nếu chưa sửa → phát lời an ủi nhiều câu đúng nhóm lỗi (**Nhóm A dấu thanh ≥ 8 mẫu**, **Nhóm B âm gần ≥ 8 mẫu**, **Nhóm C lúng túng ≥ 10 mẫu**), không lặp câu liên tiếp, `EchoGuard` chặn **100%** tiếng cô giáo | *Đang triển khai* | **PENDING** | `empathetic-reading-flow.test.tsx` |
+| G28 | Cô giáo đánh vần mẫu từng bước (`generateSpokenPhonicsGuide`), bong bóng đồng hành & chế độ hướng dẫn | Lần sai 2 phát câu đánh vần từng âm chuẩn SGK Lớp 1 + mẫu chậm `0.75×`; hết lượt (lần 4) khen nỗ lực nhiều câu + lưu `assisted` (không tô xanh lượt đầu) + đọc lại trọn câu; bong bóng đồng hành đồng bộ lời nói không che chữ/không giật layout; cài đặt phụ huynh chọn được **Dịu dàng chi tiết (Lớp 1)** vs **Ngắn gọn (Đọc thạo)** | *Đang triển khai* | **PENDING** | `empathetic-reading-flow.test.tsx`, `reading-automation-settings.test.tsx`, `reading-autopilot.pw.ts` |
+| G29 | Kiểm thử thực chứng toàn diện & không hồi quy G1–G24 trên SHA bàn giao | `eslint .` (0), `tsc --noEmit` (0), `next build --webpack` (0), toàn bộ `vitest tests/reading` PASS, holdout `READING_BENCH_HOLDOUT=1` PASS, Playwright E2E desktop & mobile PASS kèm ảnh chụp bằng chứng mới, backend `pytest` PASS; giữ nguyên toàn bộ cổng G1–G24 PASS | *Đang triển khai* | **PENDING** | `DELIVERY_STATUS.md`, `docs/reading/evidence/` |
