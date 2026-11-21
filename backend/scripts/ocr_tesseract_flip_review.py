@@ -155,9 +155,6 @@ def _render_page(
             "Không tự suy luận từ tham chiếu khi lệch vị trí"
         )
         risk_rank = min(severity[label] for label in candidate_categories)
-        stats[f"positions_{candidate_categories[0]}"] += 1 if len(
-            set(candidate_categories)
-        ) == 1 else 0
         stats["positions_to_check_first"] += risk_rank < severity["corrected"]
         cards.append((
             risk_rank, position,
