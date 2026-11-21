@@ -121,6 +121,10 @@ def evaluate(
     checkpoints: Counter[str] = Counter()
     conditions: Counter[str] = Counter()
     condition_quality: dict[str, dict[str, int]] = {}
+    bbox_statuses: Counter[str] = Counter()
+    bbox_invalid_reasons: Counter[str] = Counter()
+    bbox_valid_total = bbox_invalid_total = bbox_word_total = 0
+    bbox_by_condition: dict[str, dict[str, int]] = {}
 
     for case_index, case in enumerate(cases, 1):
         try:
@@ -176,6 +180,28 @@ def evaluate(
             profiles[profile] += 1
             checkpoints[sha] += 1
             conditions[case.condition] += 1
+            from scripts.ocr_bbox_integrity import inspect_word_boxes
+
+            bbox_check = inspect_word_boxes(output.get("words"))
+            bbox_statuses[str(bbox_check["status"])] += 1
+            bbox_word_total += int(bbox_check["reported_words"])
+            bbox_valid_total += int(bbox_check["valid_boxes"])
+            bbox_invalid_total += int(bbox_check["invalid_boxes"])
+            bbox_invalid_reasons.update(bbox_check["invalid_reasons"])
+            bbox_condition = bbox_by_condition.setdefault(case.condition, {
+                "scanned_cases": 0,
+                "reported_words": 0,
+                "valid_boxes": 0,
+                "invalid_boxes": 0,
+                "cases_without_box_assessment": 0,
+            })
+            bbox_condition["scanned_cases"] += 1
+            bbox_condition["reported_words"] += int(bbox_check["reported_words"])
+            bbox_condition["valid_boxes"] += int(bbox_check["valid_boxes"])
+            bbox_condition["invalid_boxes"] += int(bbox_check["invalid_boxes"])
+            bbox_condition["cases_without_box_assessment"] += int(
+                bbox_check["status"] != "complete"
+            )
             # Only aggregated statistics; never emit OCR text or source paths.
             bucket = condition_quality.setdefault(case.condition, {
                 "successful_cases": 0, "exact_page_matches": 0,
@@ -271,6 +297,19 @@ def evaluate(
         },
         "real_photo_origin_and_ground_truth_manual_review_required": True,
         "bbox_and_color_acceptance_not_measured": True,
+        "bbox_integrity_diagnostics": {
+            "status_counts": dict(sorted(bbox_statuses.items())),
+            "reported_words": bbox_word_total,
+            "valid_boxes": bbox_valid_total,
+            "invalid_boxes": bbox_invalid_total,
+            "invalid_reasons": dict(sorted(bbox_invalid_reasons.items())),
+            "by_condition": dict(sorted(bbox_by_condition.items())),
+            "scope_note": (
+                "Only validates normalized word-box structure and image bounds; "
+                "does NOT measure bbox IoU, word matching, color/scoring accuracy "
+                "or human-verified photo provenance"
+            ),
+        },
     }
     if private_error_records is not None:
         # Only safe aggregate counts go in the standard report, never tokens.
