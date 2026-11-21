@@ -233,6 +233,99 @@ class ToneBlindPolicyTests(unittest.TestCase):
         self.assertEqual(errors["uncertain_alignment_pages"], 1)
         self.assertEqual(errors["audited_tone_errors"], 0)
 
+    def test_paddle_line_control_can_correct_or_regress_without_reference_leak(self):
+        output = {
+            "text": "mìm",
+            "words": [word("mìm", {
+                "paddleocr": "mỉm",
+                "vietocr": "mìm",
+                "tesseract": "mìm",
+            })],
+        }
+        before = copy.deepcopy(output)
+        proposal = propose_text(output, "paddleocr_line_priority")
+        self.assertEqual(proposal["candidate_text"], "mỉm")
+        self.assertEqual(proposal["flip_indices"], [0])
+        good = evaluate_case("mỉm", output)["rules"]["paddleocr_line_priority"]
+        bad = evaluate_case("mìm", output)["rules"]["paddleocr_line_priority"]
+        self.assertEqual(good["corrected_words"], 1)
+        self.assertEqual(good["regressed_words"], 0)
+        self.assertEqual(bad["corrected_words"], 0)
+        self.assertEqual(bad["regressed_words"], 1)
+        self.assertEqual(output, before)
+
+    def test_independent_paddle_line_and_vietocr_crop_agreement(self):
+        target = word("mìm", {
+            "paddleocr": "mỉm",
+            "vietocr": "mìm",
+            "tesseract": "mìm",
+        })
+        target["ocr_evidence"]["crop_evidence"] = {
+            "status": "completed", "vietocr_candidate": "mỉm",
+        }
+        self.assertEqual(
+            choose_word(target, "paddle_line_vietocr_crop_agreement"),
+            "mỉm",
+        )
+        self.assertEqual(
+            propose_text(
+                {"text": "mìm", "words": [target]},
+                "paddle_line_vietocr_crop_agreement",
+            )["flip_indices"], [0],
+        )
+        target["ocr_evidence"]["crop_evidence"]["vietocr_candidate"] = "mìm"
+        self.assertIsNone(
+            choose_word(target, "paddle_line_vietocr_crop_agreement")
+        )
+
+    def test_crop_agreement_requires_success_and_no_error(self):
+        target = word("mìm", {
+            "paddleocr": "mỉm", "vietocr": "mìm", "tesseract": "mìm",
+        })
+        crop = {"status": "completed", "vietocr_candidate": "mỉm"}
+        target["ocr_evidence"]["crop_evidence"] = crop
+        for wrong_status in ("partial", "skipped", "not_needed", "pending"):
+            crop["status"] = wrong_status
+            self.assertIsNone(
+                choose_word(target, "paddle_line_vietocr_crop_agreement")
+            )
+        crop["status"] = "completed"
+        crop["vietocr_error"] = "ValueError"
+        self.assertIsNone(
+            choose_word(target, "paddle_line_vietocr_crop_agreement")
+        )
+        del crop["vietocr_error"]
+        target["ocr_evidence"]["engine_statuses"]["paddleocr"] = "error"
+        self.assertIsNone(
+            choose_word(target, "paddle_line_vietocr_crop_agreement")
+        )
+        target["ocr_evidence"]["engine_statuses"]["paddleocr"] = "success"
+        target["ocr_evidence"]["engine_statuses"]["vietocr"] = "error"
+        self.assertIsNone(
+            choose_word(target, "paddle_line_vietocr_crop_agreement")
+        )
+
+    def test_same_engine_paddle_crop_does_not_count_as_two_votes(self):
+        target = word("mìm", {
+            "paddleocr": "mỉm", "vietocr": "mìm", "tesseract": "mìm",
+        })
+        target["ocr_evidence"]["crop_evidence"] = {
+            "status": "completed",
+            "paddleocr_candidate": "mỉm",
+            "vietocr_candidate": None,
+        }
+        self.assertIsNone(
+            choose_word(target, "paddle_line_vietocr_crop_agreement")
+        )
+
+    def test_paddle_policy_preserves_punctuation_and_blocks_unrelated_words(self):
+        target = word("“MÌM!”", {
+            "paddleocr": "MỈM", "vietocr": "MÌM", "tesseract": "MÌM",
+        })
+        self.assertEqual(choose_word(target, "paddleocr_line_priority"), "“MỈM!”")
+        target["ocr_evidence"]["engine_outputs"]["paddleocr"] = "MÌNH"
+        self.assertIsNone(choose_word(target, "paddleocr_line_priority"))
+
     def test_unknown_rule_is_rejected(self):
         with self.assertRaises(ValueError):
             propose_text({"text": "mìm", "words": [word("mìm")]}, "oracle_choose_gt")
