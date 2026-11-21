@@ -113,6 +113,7 @@ def evaluate(
 
     latencies: list[float] = []
     chars_wrong = chars_total = words_wrong = words_total = exact = 0
+    neutral_words_wrong = neutral_words_total = 0
     gpu_allocated: list[float] = []
     gpu_reserved: list[float] = []
     failures: Counter[str] = Counter()
@@ -160,6 +161,12 @@ def evaluate(
                     "condition": case.condition,
                     **analyze_word_errors(gt, predicted),
                 }
+            from scripts.ocr_word_error_diagnostics import edge_punctuation_neutral_tokens
+            neutral_gt = edge_punctuation_neutral_tokens(gt)
+            neutral_predicted = edge_punctuation_neutral_tokens(predicted)
+            neutral_edits = edit_distance(neutral_predicted, neutral_gt)
+            neutral_words_wrong += neutral_edits
+            neutral_words_total += len(neutral_gt)
             chars_wrong += edit_distance(list(predicted), list(gt))
             chars_total += len(gt)
             words_wrong += edit_distance(predicted.split(), gt.split())
@@ -174,6 +181,8 @@ def evaluate(
                 "successful_cases": 0, "exact_page_matches": 0,
                 "character_edits": 0, "reference_characters": 0,
                 "word_edits": 0, "reference_words": 0,
+                "edge_punctuation_neutral_word_edits": 0,
+                "edge_punctuation_neutral_reference_words": 0,
             })
             bucket["successful_cases"] += 1
             bucket["exact_page_matches"] += int(predicted == gt)
@@ -181,6 +190,8 @@ def evaluate(
             bucket["reference_characters"] += len(gt)
             bucket["word_edits"] += edit_distance(predicted.split(), gt.split())
             bucket["reference_words"] += len(gt.split())
+            bucket["edge_punctuation_neutral_word_edits"] += neutral_edits
+            bucket["edge_punctuation_neutral_reference_words"] += len(neutral_gt)
             if torch.cuda.is_available():
                 gpu_allocated.append(torch.cuda.max_memory_allocated() / 1024**2)
                 gpu_reserved.append(torch.cuda.max_memory_reserved() / 1024**2)
@@ -204,6 +215,16 @@ def evaluate(
             "reference_characters": chars_total,
             "word_edits": words_wrong,
             "reference_words": words_total,
+            "edge_punctuation_neutral_wer": round(
+                neutral_words_wrong / neutral_words_total, 6
+            ) if neutral_words_total else None,
+            "edge_punctuation_neutral_word_edits": neutral_words_wrong,
+            "edge_punctuation_neutral_reference_words": neutral_words_total,
+            "edge_punctuation_neutral_note": (
+                "Diagnostic only: removes punctuation/symbols at token edges, "
+                "preserves Vietnamese diacritics, case and internal punctuation; "
+                "not interchangeable with strict micro_wer"
+            ),
         },
         "timing_ms": {
             "mean": round(statistics.mean(latencies), 2) if n else None,
@@ -239,6 +260,12 @@ def evaluate(
                 "reference_characters": bucket["reference_characters"],
                 "word_edits": bucket["word_edits"],
                 "reference_words": bucket["reference_words"],
+                "edge_punctuation_neutral_wer": round(
+                    bucket["edge_punctuation_neutral_word_edits"]
+                    / bucket["edge_punctuation_neutral_reference_words"], 6
+                ) if bucket["edge_punctuation_neutral_reference_words"] else None,
+                "edge_punctuation_neutral_word_edits": bucket["edge_punctuation_neutral_word_edits"],
+                "edge_punctuation_neutral_reference_words": bucket["edge_punctuation_neutral_reference_words"],
             }
             for condition, bucket in sorted(condition_quality.items())
         },
