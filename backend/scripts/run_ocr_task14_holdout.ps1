@@ -39,7 +39,7 @@ if (-not (Test-Path -LiteralPath $development) -or
     Write-Host "Provide at least $MinHeldoutPages NEW manually labeled photos in a separate PRIVATE heldout/pages.jsonl." -ForegroundColor Yellow
     Write-Host "Never reuse the original 10 photos or copy their reference sentences." -ForegroundColor Yellow
     Write-Host "TASK 14 HELD-OUT BENCHMARK NOT RUN — NOT ACCEPTED" -ForegroundColor Yellow
-    return
+    throw "TASK 14 requires an independently collected held-out dataset"
 }
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss-fffffff"
 $out = Join-Path $heldoutDir "aggregate-heldout-$stamp.json"
