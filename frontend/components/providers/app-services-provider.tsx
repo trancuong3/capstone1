@@ -16,6 +16,7 @@ import type { ReportService } from "@/lib/api/report-service";
 import type { ReadingService } from "@/lib/api/reading-service";
 import type { ReadingManagementService } from "@/lib/api/reading-management-service";
 import type { ReadingSocketAdapter } from "@/lib/api/reading-socket-adapter";
+import type { ReadingPresenceService } from "@/lib/api/reading-presence-service";
 import type { SessionService } from "@/lib/api/session-service";
 import type { SentenceShooterService } from "@/lib/api/sentence-shooter-service";
 import type { TutorService } from "@/lib/api/tutor-service";
@@ -34,6 +35,7 @@ import { createReadingManagementService } from "@/lib/api/reading-management-ser
 import { createPageMatchService } from "@/lib/api/page-match-service";
 import { createDevicePermissionService } from "@/lib/api/device-permission-service";
 import { createReadingSocketAdapter } from "@/lib/api/reading-socket-adapter";
+import { createReadingPresenceService } from "@/lib/api/reading-presence-service";
 import { createTutorService } from "@/lib/api/tutor-service";
 import {
   createChildProgressService,
@@ -57,6 +59,8 @@ export interface AppServices {
   reportService: ReportService;
   readingService: ReadingService;
   readingManagementService: ReadingManagementService;
+  /** Opt-in "nobody in frame" parent email; absent in tests and demos. */
+  readingPresenceService?: ReadingPresenceService;
   readingSocketAdapter: ReadingSocketAdapter;
   sessionService: SessionService;
   sentenceShooterService?: SentenceShooterService;
@@ -124,6 +128,9 @@ export function AppServicesProvider({
         : createUnavailableService<ReadingService>("ReadingService"),
 
       readingManagementService: createReadingManagementService(),
+      readingPresenceService: isReadingEnabled
+        ? createReadingPresenceService()
+        : undefined,
 
       pageMatchService: isReadingEnabled
         ? createPageMatchService()

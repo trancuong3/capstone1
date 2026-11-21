@@ -233,6 +233,11 @@ export class RealtimeAlignmentEngine {
    * their words follow the book from the current position (ahead, repeated,
    * re-read or re-anchored). One- and two-word segments cannot be judged.
    */
+  /** True when a final segment would be ignored as not following the book. */
+  isOffTopicText(text: string): boolean {
+    return this.isOffTopic(tokenizeRealtimeText(text));
+  }
+
   private isOffTopic(tokens: readonly string[]): boolean {
     if (tokens.length < 3) return false;
     return this.alignedTokenCount(tokens) / tokens.length < 0.5;
@@ -279,7 +284,11 @@ export class RealtimeAlignmentEngine {
   private findBehindFrom(cursor: number, token: string): number {
     const start = Math.max(0, cursor - REWIND_WINDOW);
     // Nearest first. cursor-1 is the "repeated word" case, handled elsewhere.
-    for (let index = Math.min(cursor, this.bookWords.length) - 2; index >= start; index -= 1) {
+    for (
+      let index = Math.min(cursor, this.bookWords.length) - 2;
+      index >= start;
+      index -= 1
+    ) {
       if (this.bookWords[index].normalizedText === token) return index;
     }
     return -1;

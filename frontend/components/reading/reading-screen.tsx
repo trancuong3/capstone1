@@ -76,6 +76,15 @@ import {
 } from "@/lib/reading/retry-recognition";
 import { isServiceError } from "@/lib/api/service-error";
 import { createSpeechService } from "@/lib/api/speech-service";
+import { useAutomationPreferences } from "@/hooks/use-automation-preferences";
+import { useReadingPresence } from "@/hooks/use-reading-presence";
+import type {
+  SpeechPlayOptions,
+  WordTimedPlayOptions,
+} from "@/hooks/use-speech-player";
+import { EchoGuard } from "@/lib/reading/echo-guard";
+import { parseVoiceIntent } from "@/lib/reading/voice-intent";
+import type { SessionPhase } from "@/lib/reading/presence-monitor";
 import type { BookDetailDTO } from "@/types/book";
 import type { ChildProfileDTO } from "@/types/child";
 import type {
@@ -342,6 +351,51 @@ function ReadingSessionScreen({
   const pendingRetryEventRef = useRef<PendingRetryEvent | null>(null);
   const retryEvaluatedCountsRef = useRef(new Map<string, number>());
   const retryIncorrectCountsRef = useRef(new Map<string, number>());
+
+  // Automatic reading flow: parent switches, echo protection, help ladder.
+  const { preferences: automationPreferences } = useAutomationPreferences();
+  const automationRef = useRef(automationPreferences);
+  const echoGuard = useMemo(() => new EchoGuard(), []);
+  const assistantPlaybackSeqRef = useRef(0);
+  /** Words the app read aloud for the child: practised, never plain green. */
+  const helpedWordIdsRef = useRef<Set<string>>(new Set());
+  /** Words the app encouraged the child past after the allowed attempts. */
+  const gaveUpWordIdsRef = useRef<Set<string>>(new Set());
+  const passageHelpStepsRef = useRef(new Map<string, number>());
+  const waitUntilRef = useRef(0);
+  const pauseReadingRef = useRef<() => Promise<void>>(async () => undefined);
+  const [assistedWordIds, setAssistedWordIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [presencePaused, setPresencePaused] = useState(false);
+  useEffect(() => {
+    automationRef.current = automationPreferences;
+  });
+  const presenceSessionPhase: SessionPhase =
+    uiState === "complete"
+      ? "ended"
+      : uiState === "paused"
+        ? presencePaused
+          ? "paused-by-presence"
+          : "paused-other"
+        : uiState === "reading" && canonicalState === "LISTENING"
+          ? "reading"
+          : "paused-other";
+  // Opt-in only: does nothing unless a parent turned the email reminder on and
+  // the camera is already allowed. Never prompts, never stores or sends images.
+  useReadingPresence({
+    sessionId,
+    sessionPhase: presenceSessionPhase,
+    service: services.readingPresenceService,
+    onPauseRequested: () => {
+      setPresencePaused(true);
+      void pauseReadingRef.current();
+    },
+    onNotice: () =>
+      setLatestTranscript(
+        "ViRead đã tạm dừng vì một lúc không thấy người đọc trong khung hình. Bé quay lại thì bấm Tiếp tục nhé.",
+      ),
+  });
 
   useEffect(() => {
     if (!page?.words?.length) {
@@ -838,6 +892,26 @@ function ReadingSessionScreen({
 
       switch (word.status) {
         case "MATCH":
+          if (helpedWordIdsRef.current.has(word.wordId)) {
+            // The app read this word aloud first. Reading it afterwards is
+            // practice, never a plain first-pass "correct": keep it for review.
+            nextSkippedIds.add(word.wordId);
+            nextCorrectIds.delete(word.wordId);
+            nextMispronouncedIds.delete(word.wordId);
+            nextRepeatedIds.delete(word.wordId);
+            if (retryContext) {
+              retryWordsByIdRef.current.set(word.wordId, {
+                word_id: word.wordId,
+                page_id: retryContext.pageId,
+                page_revision_id: retryContext.pageRevisionId,
+                page_number: retryContext.pageNumber,
+                word_index: retryContext.wordIndex,
+                text: retryContext.text,
+                original_status: "OMISSION",
+              });
+            }
+            break;
+          }
           nextCorrectIds.add(word.wordId);
           nextMispronouncedIds.delete(word.wordId);
           nextSkippedIds.delete(word.wordId);
@@ -915,6 +989,14 @@ function ReadingSessionScreen({
     repeatedWordIdsRef.current = nextRepeatedIds;
     hesitationWordIdsRef.current = nextHesitationIds;
 
+    // Helped words that were then read or passed over show as "assisted".
+    const nextAssisted = new Set<string>();
+    for (const id of helpedWordIdsRef.current) {
+      if (nextSkippedIds.has(id) && !nextMispronouncedIds.has(id)) {
+        nextAssisted.add(id);
+      }
+    }
+    setAssistedWordIds(nextAssisted);
     const nextFailedWords = new Set<string>();
 
     for (const id of nextMispronouncedIds) {
@@ -1065,9 +1147,21 @@ function ReadingSessionScreen({
     engine: RealtimeAlignmentEngine,
     capturePage: ReadingPageDTO,
   ): boolean {
-    if (!isWordHelpRequest(text, "")) return false;
     const nextId = engine.getSnapshot().currentWordId;
     const next = capturePage.words.findIndex((word) => word.word_id === nextId);
+    const upcoming =
+      next < 0
+        ? ""
+        : capturePage.words
+            .slice(next, next + 12)
+            .map((word) => word.text)
+            .join(" ");
+    // "đọc mẫu giúp con", "cô ơi đọc giúp con"… (the passage wins when the
+    // phrase is the next book text).
+    if (parseVoiceIntent(text, { upcomingText: upcoming }).type === "HELP") {
+      return true;
+    }
+    if (!isWordHelpRequest(text, "")) return false;
     return (
       next < 0 ||
       isWordHelpRequest(
@@ -1080,6 +1174,42 @@ function ReadingSessionScreen({
     );
   }
 
+  /** Whole-page sample, registered with the echo guard while it plays. */
+  function playPageSampleGuarded(
+    words: readonly string[],
+    options: WordTimedPlayOptions,
+  ): Promise<void> {
+    const id = `assistant-${(assistantPlaybackSeqRef.current += 1)}`;
+    echoGuard.playbackStarted(
+      id,
+      options.text ?? words.join(" "),
+      performance.now(),
+    );
+    return speechPlayer
+      .playWithWordTimings(words, options)
+      .finally(() => echoGuard.playbackEnded(id, performance.now()));
+  }
+
+  /** Speak one assistant utterance and register it with the echo guard. */
+  async function speakGuarded(
+    text: string,
+    options?: SpeechPlayOptions,
+  ): Promise<void> {
+    const id = `assistant-${(assistantPlaybackSeqRef.current += 1)}`;
+    echoGuard.playbackStarted(id, text, performance.now());
+    try {
+      if (options === undefined) await speechPlayer.play(text);
+      else await speechPlayer.play(text, options);
+    } finally {
+      echoGuard.playbackEnded(id, performance.now());
+    }
+  }
+
+  /**
+   * Help ladder for a word the child is stuck on (silence or a spoken request):
+   * model the word → say it slower → read the phrase → encourage and move on,
+   * remembering the word as "needs practice". Helped words are never green.
+   */
   async function offerPassageHelp(
     engine: RealtimeAlignmentEngine,
     capturePage: ReadingPageDTO,
@@ -1103,27 +1233,53 @@ function ReadingSessionScreen({
         async () => {
           if (!isCurrent()) return;
           const nextId = engine.getSnapshot().currentWordId;
-          const word = capturePage.words.find(
+          const index = capturePage.words.findIndex(
             (entry) => entry.word_id === nextId,
           );
+          const word = capturePage.words[index];
           if (!word) return;
-          if (pageHelpWordRef.current?.wordId === word.word_id) {
-            engine.markUncertain();
-            setLatestTranscript(
-              "Mình nghỉ một chút nhé. Khi sẵn sàng, con bật microphone để đọc tiếp.",
-            );
+          const step = (passageHelpStepsRef.current.get(word.word_id) ?? 0) + 1;
+          passageHelpStepsRef.current.set(word.word_id, step);
+          const phraseWords = capturePage.words.slice(index, index + 3);
+          if (step >= 4) {
+            // Allowed attempts used up: encourage, never colour it green.
+            const encouragement =
+              "Con đã cố gắng rất tốt rồi. Mình đọc tiếp nhé!";
+            setLatestTranscript(encouragement);
+            await speakGuarded(encouragement);
+            if (!isCurrent()) return;
+            gaveUpWordIdsRef.current.add(word.word_id);
+            helpedWordIdsRef.current.add(word.word_id);
+            pageHelpWordRef.current = null;
+            applyRealtimeSnapshot(engine.giveUpWord(word.word_id));
+            resume = engine.getSnapshot().currentWordId !== null;
             return;
+          }
+          for (const helped of step === 3 ? phraseWords : [word]) {
+            helpedWordIdsRef.current.add(helped.word_id);
           }
           pageHelpWordRef.current = {
             wordId: word.word_id,
             awaitingAttempt: true,
           };
-          setLatestTranscript(`Con nghe cô đọc từ “${word.text}” nhé.`);
-          await speechPlayer.play("Cô đọc mẫu cho con nhé.");
+          if (step === 1) {
+            setLatestTranscript(`Con nghe cô đọc từ “${word.text}” nhé.`);
+            await speakGuarded("Cô đọc mẫu cho con nhé.");
+            if (!isCurrent()) return;
+            await speakGuarded(word.text, { wordSample: true });
+          } else if (step === 2) {
+            setLatestTranscript(`Mình đọc chậm từ “${word.text}” nhé.`);
+            await speakGuarded(word.text, {
+              wordSample: true,
+              speedScale: 0.8,
+            });
+          } else {
+            const phrase = phraseWords.map((entry) => entry.text).join(" ");
+            setLatestTranscript(`Mình đọc cả cụm “${phrase}” nhé.`);
+            await speakGuarded(phrase);
+          }
           if (!isCurrent()) return;
-          await speechPlayer.play(word.text, { wordSample: true });
-          if (!isCurrent()) return;
-          await speechPlayer.play("Đến lượt con đọc nhé.");
+          await speakGuarded("Đến lượt con đọc nhé.");
           resume = isCurrent();
         },
         true,
@@ -1173,6 +1329,16 @@ function ReadingSessionScreen({
           alignmentEngineRef.current !== captureEngine
         )
           return;
+        // Parent turned automatic help off, or the child asked us to wait
+        // ("đợi con"): keep listening without intervening.
+        if (
+          !automationRef.current.assist ||
+          performance.now() < waitUntilRef.current
+        ) {
+          quietWindows = 0;
+          armSilenceTimer();
+          return;
+        }
         const speechMs = speechRecorder.getQuality?.()?.speechDurationMs ?? 0;
         quietWindows =
           speechRecorder.getIsSpeaking() || speechMs > lastSpeechMs
@@ -1256,15 +1422,54 @@ function ReadingSessionScreen({
                   markCaptureUncertain(engine, page);
                   return false;
                 }
+                // Our own voice (including the echo after a sample ended) is
+                // never the child's reading, nor a command.
+                if (
+                  !echoGuard.evaluate({
+                    text: part,
+                    receivedAt: performance.now(),
+                  }).accept
+                ) {
+                  return false;
+                }
                 if (page && isPassageHelpRequest(part, engine, page)) {
                   passageContainsHelpRef.current = true;
                   if (!isListeningActiveRef.current) engine.markUncertain();
                   return false;
                 }
+                const command = parseVoiceIntent(part, {
+                  upcomingText: page
+                    ? page.words
+                        .slice(
+                          Math.max(0, engine.getSnapshot().currentWordIndex),
+                          Math.max(0, engine.getSnapshot().currentWordIndex) +
+                            12,
+                        )
+                        .map((word) => word.text)
+                        .join(" ")
+                    : "",
+                });
+                if (command.type === "STOP") {
+                  void pauseReadingRef.current();
+                  return false;
+                }
+                if (command.type === "WAIT") {
+                  waitUntilRef.current = performance.now() + 20_000;
+                  return false;
+                }
+                if (command.type === "RESUME") {
+                  waitUntilRef.current = 0;
+                  return false;
+                }
                 if (pageHelpWordRef.current)
                   pageHelpWordRef.current.awaitingAttempt = false;
-                applyRealtimeSnapshot(engine.addFinalTranscript(part));
-                return true;
+                const rejectedBefore =
+                  engine.getSnapshot().rejectedSegmentCount ?? 0;
+                const scored = engine.addFinalTranscript(part);
+                applyRealtimeSnapshot(scored);
+                // Speech that does not follow the book (TV, another speaker)
+                // is neither scored nor kept in the page transcript.
+                return (scored.rejectedSegmentCount ?? 0) === rejectedBefore;
               },
             );
             if (passageContainsHelpRef.current) {
@@ -1464,6 +1669,7 @@ function ReadingSessionScreen({
 
   useEffect(() => {
     startListeningRef.current = startListening;
+    pauseReadingRef.current = pauseReading;
   });
 
   async function transcribeRecording(
@@ -1609,7 +1815,15 @@ function ReadingSessionScreen({
         "Chưa nghe rõ lời đọc. Kết quả đã xác nhận được giữ lại; phần chưa rõ không được tính là đọc sai.",
       );
     }
-    if (resolvedText && targetPage) {
+    if (
+      resolvedText &&
+      !browserText &&
+      targetEngine &&
+      targetEngine.isOffTopicText(resolvedText)
+    ) {
+      // Provider text that does not follow the book is not the child reading.
+      markCaptureUncertain(targetEngine, targetPage);
+    } else if (resolvedText && targetPage) {
       const timings = timingsForTranscript(
         resolvedText,
         elevenLabsResult?.words,
@@ -1828,7 +2042,7 @@ function ReadingSessionScreen({
     try {
       await playAssistantAudio(
         () =>
-          speechPlayer.playWithWordTimings(
+          playPageSampleGuarded(
             words.map((word) => word.text),
             {
               text: fullText,
@@ -1962,6 +2176,12 @@ function ReadingSessionScreen({
       setRetryFeedback("waiting");
 
       // Reset toàn bộ trạng thái nhận diện.
+      helpedWordIdsRef.current.clear();
+      gaveUpWordIdsRef.current.clear();
+      passageHelpStepsRef.current.clear();
+      waitUntilRef.current = 0;
+      setAssistedWordIds(new Set());
+      setPresencePaused(false);
       correctWordIdsRef.current.clear();
       mispronouncedWordIdsRef.current.clear();
       skippedWordIdsRef.current.clear();
@@ -2007,6 +2227,8 @@ function ReadingSessionScreen({
   }
 
   async function resumeReading() {
+    setPresencePaused(false);
+    waitUntilRef.current = 0;
     if (frozenPageAssessmentsRef.current && !retryModeRef.current) {
       setConfirmFinish(true);
       return;
@@ -2286,16 +2508,28 @@ function ReadingSessionScreen({
   async function autoCompletePageAfterFinalWord(
     snapshot: RealtimeAlignmentSnapshot,
   ): Promise<void> {
+    // Parent turned automatic page turning off: the child ends the page with
+    // the explicit "page finished" button instead.
+    if (!automationRef.current.autoAdvance) return;
     const completedPage = page;
     const progress = pageProgress;
     const finalWord = completedPage?.words.at(-1);
+    const finalStatus = finalWord
+      ? snapshot.statusByWordId.get(finalWord.word_id)?.status
+      : undefined;
     if (
       !completedPage ||
       !progress?.persisted ||
       progress.current_page_id !== completedPage.page_id ||
       !finalWord ||
       snapshot.currentWordId !== null ||
-      snapshot.statusByWordId.get(finalWord.word_id)?.status !== "MATCH" ||
+      // Read correctly, or encouraged past after the allowed attempts. A word
+      // that was merely skipped never completes a page by itself.
+      !(
+        finalStatus === "MATCH" ||
+        (finalStatus === "DELETE" &&
+          gaveUpWordIdsRef.current.has(finalWord.word_id))
+      ) ||
       retryModeRef.current ||
       assistantAudioPendingRef.current ||
       assistantAudioPlayingRef.current ||
@@ -4725,6 +4959,7 @@ function ReadingSessionScreen({
         }
         repeatedWordIds={repeatedWordIds}
         hesitationWordIds={hesitationWordIds}
+        assistedWordIds={assistedWordIds}
         comparisonResult={comparisonResult}
       >
         {uiState === "page-turn" ? (

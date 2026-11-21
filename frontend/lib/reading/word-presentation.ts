@@ -13,6 +13,7 @@ export type WordPresentationState =
   | "hesitation"
   | "self-corrected"
   | "unresolved"
+  | "assisted"
   | "uncertain";
 
 export const wordPresentationLabels: Record<WordPresentationState, string> = {
@@ -26,6 +27,7 @@ export const wordPresentationLabels: Record<WordPresentationState, string> = {
   hesitation: "Ngập ngừng",
   "self-corrected": "Bé đã tự sửa đúng",
   unresolved: "Mình sẽ luyện thêm",
+  assisted: "Cô đã đọc mẫu từ này",
   uncertain: "Chưa nghe rõ",
 };
 
@@ -41,6 +43,9 @@ export const wordPresentationClasses: Record<WordPresentationState, string> = {
   "self-corrected":
     "bg-green-200 text-green-900 ring-2 ring-green-600 ring-offset-2",
   unresolved: "bg-red-200 text-red-900 ring-2 ring-red-600",
+  // Not colour alone: dotted underline marks "the app read this one for you".
+  assisted:
+    "bg-sky text-primary underline decoration-dotted decoration-2 underline-offset-4",
   uncertain: "bg-slate-100 text-slate-700 ring-1 ring-slate-400",
 };
 
@@ -55,6 +60,8 @@ export interface PageWordEvidence {
   hesitationWordIds?: ReadonlySet<string>;
   selfCorrectedWordIds?: ReadonlySet<string>;
   unresolvedWordIds?: ReadonlySet<string>;
+  /** Words the app read aloud first: practised, never plain green. */
+  assistedWordIds?: ReadonlySet<string>;
   uncertainWordIds?: ReadonlySet<string>;
   activeRetryWordId?: string | null;
   comparisonResult?: Pick<
@@ -92,6 +99,7 @@ export function wordStateForPage(props: PageWordEvidence) {
     if (props.selfCorrectedWordIds?.has(id)) return "self-corrected";
     if (id === props.activeRetryWordId) return "current";
     if (props.unresolvedWordIds?.has(id)) return "unresolved";
+    if (props.assistedWordIds?.has(id)) return "assisted";
     // The saved first pass wins over transcript re-alignment. Older reports
     // only have alignment entries, whose indices refer to token positions.
     const status = saved.get(id) ?? aligned.get(index);

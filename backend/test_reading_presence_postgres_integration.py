@@ -14,6 +14,7 @@ import os
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 from uuid import UUID, uuid4
 
 os.environ["DATABASE_URL"] = "postgresql+asyncpg://test:test@127.0.0.1:1/test"
@@ -69,7 +70,9 @@ def with_database(name: str) -> str:
 
 
 @unittest.skipUnless(BASE_URL, "Set READING_PRESENCE_TEST_DATABASE_URL for PostgreSQL coverage")
-class PresencePostgresTests(unittest.IsolatedAsyncioTestCase):
+class PresenceDbCase(unittest.IsolatedAsyncioTestCase):
+    """Throw-away database, schema and fixtures shared by the PostgreSQL tests."""
+
     async def asyncSetUp(self):
         self.database = f"presence_test_{uuid4().hex[:12]}"
         admin = create_async_engine(BASE_URL, poolclass=NullPool, isolation_level="AUTOCOMMIT")
@@ -112,6 +115,8 @@ class PresencePostgresTests(unittest.IsolatedAsyncioTestCase):
             alert, created = await service.arm(PARENT, SESSION, episode or uuid4(), now)
             return alert.Id, created
 
+@unittest.skipUnless(BASE_URL, "Set READING_PRESENCE_TEST_DATABASE_URL for PostgreSQL coverage")
+class PresencePostgresTests(PresenceDbCase):
     async def test_concurrent_arming_of_one_episode_creates_one_row(self):
         async with self.sessionmaker() as session:
             await self.service(session).set_email_enabled(PARENT, True, NOW)
@@ -233,6 +238,188 @@ class PresencePostgresTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessionmaker() as session:
             self.assertFalse(await self.service(session).email_enabled(PARENT))
 
+
+@unittest.skipUnless(BASE_URL, "Set READING_PRESENCE_TEST_DATABASE_URL for PostgreSQL coverage")
+class PresenceHttpEndToEndTests(PresenceDbCase):
+    """HTTP -> FastAPI -> PostgreSQL -> worker -> real e-mail builder -> file mail sink.
+
+    Only two things are substituted: the Supabase login (dependency override) and
+    the verified-address lookup (the sink receives the address the resolver
+    returns, never one supplied by the client).
+    """
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        import tempfile
+
+        import httpx
+        from fastapi import FastAPI
+
+        from app.api import deps
+        from app.api.router import api_router
+        from app.api.routes import reading_presence as route
+
+        self.clock = [NOW]
+        self.actor = [PARENT]
+        self.sink = tempfile.TemporaryDirectory()
+        app = FastAPI()
+        app.include_router(api_router)
+
+        async def override_db():
+            async with self.sessionmaker() as session:
+                yield session
+
+        app.dependency_overrides[deps.get_db] = override_db
+        app.dependency_overrides[deps.get_current_parent_id] = lambda: self.actor[0]
+        self.patches = [
+            patch.object(route, "utcnow", lambda: self.clock[0]),
+            patch(
+                "app.providers.reading_presence_email_provider.READING_PRESENCE_MAIL_SINK_DIR",
+                self.sink.name,
+            ),
+        ]
+        for patcher in self.patches:
+            patcher.start()
+        self.client = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        )
+
+    async def asyncTearDown(self):
+        await self.client.aclose()
+        for patcher in self.patches:
+            patcher.stop()
+        self.sink.cleanup()
+        await super().asyncTearDown()
+
+    def advance(self, seconds: int):
+        self.clock[0] = self.clock[0] + timedelta(seconds=seconds)
+
+    async def run_worker(self, resolver=None):
+        from app.providers.reading_presence_email_provider import send_presence_email
+
+        async def verified(_parent):
+            return "parent@example.test"
+
+        async with self.sessionmaker() as session:
+            return await self.service(session).deliver_due(
+                self.clock[0],
+                recipient_resolver=resolver or verified,
+                email_sender=send_presence_email,
+                parent_email_unavailable=Unverified,
+            )
+
+    def mails(self):
+        return sorted(Path(self.sink.name).glob("*.eml"))
+
+    async def opt_in(self):
+        response = await self.client.put(
+            "/reading-presence/settings", json={"email_enabled": True}
+        )
+        self.assertEqual(response.json(), {"email_enabled": True})
+
+    async def arm(self, episode=None):
+        return await self.client.post(
+            "/reading-presence/alerts",
+            json={"session_id": str(SESSION), "episode_id": str(episode or uuid4())},
+        )
+
+    async def test_off_by_default_arming_is_refused_and_nothing_is_sent(self):
+        self.assertEqual(
+            (await self.client.get("/reading-presence/settings")).json(),
+            {"email_enabled": False},
+        )
+        refused = await self.arm()
+        self.assertEqual((refused.status_code, refused.json()["detail"]), (409, {"code": "PRESENCE_ALERT_DISABLED"}))
+        self.advance(120)
+        self.assertEqual(await self.run_worker(), 0)
+        self.assertEqual(self.mails(), [])
+
+    async def test_opted_in_absence_sends_exactly_one_neutral_email(self):
+        from email import message_from_bytes, policy
+
+        await self.opt_in()
+        episode = uuid4()
+        first = await self.arm(episode)
+        self.assertEqual(first.status_code, 201)
+        alert_id = first.json()["id"]
+        # Refresh, retry and a second device must all land on the same alert.
+        for _ in range(3):
+            again = await self.arm(episode)
+            self.assertEqual(again.json()["id"], alert_id)
+        self.advance(30)
+        self.assertEqual((await self.client.post(f"/reading-presence/alerts/{alert_id}/confirm")).status_code, 200)
+        self.advance(25)
+        await self.client.post(f"/reading-presence/alerts/{alert_id}/confirm")
+        self.advance(6)  # 61 s after arming: due
+        delivered = await asyncio.gather(self.run_worker(), self.run_worker())
+        self.assertEqual(sorted(delivered), [0, 1])
+        self.assertEqual(await self.run_worker(), 0)
+        files = self.mails()
+        self.assertEqual(len(files), 1)
+        message = message_from_bytes(files[0].read_bytes(), policy=policy.default)
+        body = message.get_content()
+        self.assertEqual(message["To"], "parent@example.test")
+        self.assertEqual(message["Subject"], "ViRead đã tạm dừng buổi đọc")
+        self.assertIn("một lúc không thấy người đọc trong khung hình", body)
+        for forbidden in ("transcript", "nguy hiểm", "ở đâu", "ảnh", "ghi âm"):
+            self.assertNotIn(forbidden, body.lower())
+        stored = (await self.client.post(f"/reading-presence/alerts/{alert_id}/cancel", json={"reason": "RETURNED"})).json()
+        self.assertEqual(stored["status"], "SENT")  # too late to cancel: already sent once
+
+    async def test_returning_before_the_time_cancels_and_nothing_is_sent(self):
+        await self.opt_in()
+        alert_id = (await self.arm()).json()["id"]
+        self.advance(20)
+        cancelled = await self.client.post(
+            f"/reading-presence/alerts/{alert_id}/cancel", json={"reason": "RETURNED"}
+        )
+        self.assertEqual(cancelled.json()["status"], "CANCELLED")
+        self.advance(100)
+        self.assertEqual(await self.run_worker(), 0)
+        self.assertEqual(self.mails(), [])
+
+    async def test_opting_out_while_waiting_sends_nothing(self):
+        await self.opt_in()
+        await self.arm()
+        self.advance(30)
+        off = await self.client.put("/reading-presence/settings", json={"email_enabled": False})
+        self.assertEqual(off.json(), {"email_enabled": False})
+        self.advance(40)
+        self.assertEqual(await self.run_worker(), 0)
+        self.assertEqual(self.mails(), [])
+
+    async def test_other_family_unverified_email_and_ended_session_send_nothing(self):
+        await self.opt_in()
+        alert_id = (await self.arm()).json()["id"]
+        self.actor[0] = OTHER
+        self.assertEqual((await self.client.post(f"/reading-presence/alerts/{alert_id}/confirm")).status_code, 404)
+        self.assertEqual((await self.client.post(f"/reading-presence/alerts/{alert_id}/cancel", json={})).status_code, 404)
+        self.assertEqual((await self.arm()).status_code, 404)
+        self.actor[0] = PARENT
+        self.advance(30)
+        await self.client.post(f"/reading-presence/alerts/{alert_id}/confirm")
+        self.advance(31)
+
+        async def unverified(_parent):
+            raise Unverified()
+
+        self.assertEqual(await self.run_worker(unverified), 0)
+        self.assertEqual(self.mails(), [])
+
+        await self.opt_in()
+        async with self.engine.begin() as connection:
+            await connection.execute(text("UPDATE readingsessions SET state = 'FINISHED', endedat = now()"))
+            await connection.execute(text("DELETE FROM readingpresencealerts"))
+        self.assertEqual((await self.arm()).status_code, 409)
+
+    async def test_client_cannot_choose_the_recipient(self):
+        await self.opt_in()
+        response = await self.client.post(
+            "/reading-presence/alerts",
+            json={"session_id": str(SESSION), "episode_id": str(uuid4()), "email": "evil@example.test"},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertNotIn("@", (await self.arm()).text)
 
 @unittest.skipUnless(BASE_URL, "Set READING_PRESENCE_TEST_DATABASE_URL for PostgreSQL coverage")
 class PresenceMigrationTests(unittest.IsolatedAsyncioTestCase):

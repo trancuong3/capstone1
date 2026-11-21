@@ -195,6 +195,11 @@ export function BookPageContent(props: BookPageContentProps) {
                       ?
                     </span>
                   ) : null}
+                  {presentationState === "assisted" ? (
+                    <span aria-hidden="true" className="ml-1 text-sm">
+                      {"\u266A"}
+                    </span>
+                  ) : null}
                 </span>
               </Fragment>
             );

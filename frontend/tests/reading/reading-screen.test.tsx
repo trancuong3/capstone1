@@ -467,9 +467,17 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         ["Đến lượt con đọc nhé."],
       ]);
       expect(speechServiceMock.transcribe).not.toHaveBeenCalled();
+      // Policy change (automatic reading flow): a repeated request is not
+      // ignored any more. The help ladder steps up to a slower model of the same
+      // word, and the command itself is still never scored as reading.
       await act(async () => Recognition.instances[1].say(["con không biết"]));
-      expect(speechPlayerMock.play).toHaveBeenCalledTimes(3);
-      expect(Recognition.instances).toHaveLength(2);
+      await waitFor(() =>
+        expect(speechPlayerMock.play).toHaveBeenCalledWith("nhỏ", {
+          wordSample: true,
+          speedScale: 0.8,
+        }),
+      );
+      await waitFor(() => expect(Recognition.instances).toHaveLength(3));
       await user.click(
         screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
       );
@@ -542,7 +550,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       }
     });
 
-    it("offers one model after two quiet windows, then leaves the mic off after another quiet turn", async () => {
+    it("offers a model after two quiet windows, then keeps stepping the ladder (slower, phrase, encouragement) instead of going silent", async () => {
       await act(async () => {
         renderReading("reading");
       });
@@ -560,9 +568,18 @@ describe("ReadingScreen presentation with typed test-local service responses", (
           wordSample: true,
         });
         expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
-        await act(async () => vi.advanceTimersByTimeAsync(27000));
-        expect(speechPlayerMock.play).toHaveBeenCalledTimes(3);
-        expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
+        // Policy change (automatic reading flow): the old behaviour left the mic
+        // off after one model. Now the ladder continues and the mic reopens.
+        await act(async () => vi.advanceTimersByTimeAsync(45000));
+        expect(speechPlayerMock.play).toHaveBeenCalledWith("Bé", {
+          wordSample: true,
+          speedScale: 0.8,
+        });
+        expect(speechPlayerMock.play).toHaveBeenCalledWith("Bé mèo nhỏ");
+        expect(speechPlayerMock.play).toHaveBeenCalledWith(
+          "Con đã cố gắng rất tốt rồi. Mình đọc tiếp nhé!",
+        );
+        expect(speechRecorderMock.start.mock.calls.length).toBeGreaterThan(2);
         expect(
           screen.getByRole("button", {
             name: "Bé đọc với nhận diện giọng nói",
@@ -616,8 +633,11 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       );
       await waitFor(() => expect(compareTranscriptMock).toHaveBeenCalledOnce());
       expect(compareTranscriptMock.mock.calls[0][1]).toBe("Bé mèo nhỏ đang");
+      // Policy change (automatic reading flow): "Bé" was read aloud by the app
+      // first, so reading it afterwards is practice (kept for review), not a
+      // first-pass CORRECT. The rest of the page is the child own reading.
       expect(compareTranscriptMock.mock.calls[0][3].initial_assessment).toEqual(
-        assessmentFor(pageFour),
+        assessmentFor(pageFour, ["OMISSION", "CORRECT", "CORRECT", "CORRECT"]),
       );
     });
   });

@@ -9,6 +9,7 @@ import { withRequestDeadline } from "@/lib/api/request-deadline";
 import { prepareWordSampleAudio } from "@/lib/reading/short-word-audio";
 import { normalizeVietnameseWord } from "@/lib/reading/vietnamese-text";
 import {
+  clampSpeed,
   getSpeechPreferences,
   type SpeechPreferences,
 } from "@/lib/reading/speech-preferences";
@@ -36,6 +37,8 @@ export interface SpeechPlayOptions {
   wordSample?: boolean;
   /** Prefer a Vietnamese device voice for spoken guidance. */
   coaching?: boolean;
+  /** Relative speed for this utterance only (< 1 = slower, clearer help). */
+  speedScale?: number;
   onPlay?: (duration: number) => void;
   onTimeUpdate?: (currentTime: number, duration: number) => void;
   /** Browser boundaries only; audio without timing never guesses word indexes. */
@@ -206,14 +209,16 @@ export class TtsPlayback {
   private async run(
     action: (operation: Operation) => Promise<void>,
     speedLimit = Infinity,
+    speedScale = 1,
   ): Promise<void> {
     this.stop();
     const preferences = getSpeechPreferences();
+    const limited = Math.min(preferences.speed, speedLimit);
     const operation: Operation = {
       controller: new AbortController(),
       preferences: {
         ...preferences,
-        speed: Math.min(preferences.speed, speedLimit),
+        speed: speedScale === 1 ? limited : clampSpeed(limited * speedScale),
       },
       paused: false,
       started: false,
@@ -402,6 +407,7 @@ export class TtsPlayback {
         : options.coaching
           ? 0.85
           : undefined,
+      options.speedScale,
     );
 
   playWithWordTimings = (

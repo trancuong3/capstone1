@@ -14,6 +14,7 @@ export type ReadingServices = Pick<
   | "comprehensionService"
   | "devicePermissionService"
   | "pageMatchService"
+  | "readingPresenceService"
   | "readingService"
   | "readingSocketAdapter"
   | "tutorService"
