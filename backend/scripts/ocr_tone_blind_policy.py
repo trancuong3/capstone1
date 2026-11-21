@@ -10,6 +10,7 @@ import unicodedata
 from collections import Counter
 
 from scripts.ocr_real_photo_benchmark import normalize
+from scripts.ocr_word_error_diagnostics import analyze_word_errors
 from scripts.ocr_vietnamese_artifact_ab import (
     _base_letters, _core, _word_surface_sequence, score_pair,
 )
@@ -126,6 +127,123 @@ def propose_text(output: dict[str, object], rule: str) -> dict[str, object]:
     }
 
 
+def _evidence_source_sets(word: dict[str, object]) -> tuple[set[str], set[str], set[str]]:
+    """Return different-tone readings by source, never using the reference."""
+    selected = _core(word.get("text"))
+    evidence = word.get("ocr_evidence")
+    if not selected or not isinstance(evidence, dict):
+        return set(), set(), set()
+    outputs = evidence.get("engine_outputs")
+    statuses = evidence.get("engine_statuses")
+    crops = evidence.get("crop_evidence")
+    raw_line, verified_line, crop = set(), set(), set()
+    if isinstance(outputs, dict):
+        for engine in ENGINES:
+            reading = _core(outputs.get(engine))
+            if (
+                reading and reading.casefold() != selected.casefold()
+                and _base_letters(reading) == _base_letters(selected)
+            ):
+                raw_line.add(reading)
+                if isinstance(statuses, dict) and statuses.get(engine) == "success":
+                    verified_line.add(reading)
+    if isinstance(crops, dict):
+        for key in ("paddleocr_candidate", "vietocr_candidate", "tesseract_candidate"):
+            reading = _core(crops.get(key))
+            if (
+                reading and reading.casefold() != selected.casefold()
+                and _base_letters(reading) == _base_letters(selected)
+            ):
+                crop.add(reading)
+    return raw_line, verified_line, crop
+
+
+def audit_evidence_sources(output: dict[str, object]) -> dict[str, int]:
+    """Count candidate provenance without emitting text, paths or bbox data."""
+    names = (
+        "audited_pages", "unaligned_pages", "word_positions",
+        "positions_with_any_alternative",
+        "positions_with_raw_line_alternative",
+        "positions_with_verified_line_alternative",
+        "positions_with_crop_alternative",
+        "positions_with_crop_only_alternative",
+        "positions_with_raw_line_but_no_verified_line_alternative",
+        "positions_with_vietocr_line_alternative",
+    )
+    stats = {key: 0 for key in names}
+    aligned = _word_surface_sequence(output)
+    if aligned is None:
+        stats["unaligned_pages"] = 1
+        return stats
+    stats["audited_pages"] = 1
+    words, _ = aligned
+    stats["word_positions"] = len(words)
+    for word in words:
+        raw_line, verified_line, crop = _evidence_source_sets(word)
+        stats["positions_with_any_alternative"] += bool(raw_line or crop)
+        stats["positions_with_raw_line_alternative"] += bool(raw_line)
+        stats["positions_with_verified_line_alternative"] += bool(verified_line)
+        stats["positions_with_crop_alternative"] += bool(crop)
+        stats["positions_with_crop_only_alternative"] += bool(crop and not raw_line)
+        stats["positions_with_raw_line_but_no_verified_line_alternative"] += bool(
+            raw_line and not verified_line
+        )
+        evidence = word.get("ocr_evidence")
+        outputs = evidence.get("engine_outputs") if isinstance(evidence, dict) else None
+        statuses = evidence.get("engine_statuses") if isinstance(evidence, dict) else None
+        selected = _core(word.get("text"))
+        reading = _core(outputs.get("vietocr")) if isinstance(outputs, dict) else ""
+        stats["positions_with_vietocr_line_alternative"] += bool(
+            reading and selected and reading.casefold() != selected.casefold()
+            and _base_letters(reading) == _base_letters(selected)
+            and isinstance(statuses, dict) and statuses.get("vietocr") == "success"
+        )
+    return stats
+
+
+def audit_tone_error_sources(expected: str, output: dict[str, object]) -> dict[str, int]:
+    """Oracle source coverage for scoring AFTER blind-policy proposals only."""
+    names = (
+        "audited_tone_errors", "errors_with_correct_raw_line_reading",
+        "errors_with_correct_verified_line_reading",
+        "errors_with_correct_crop_reading",
+        "errors_with_correct_crop_only_reading",
+        "errors_with_no_correct_recorded_alternative",
+        "uncertain_alignment_pages",
+    )
+    stats = {key: 0 for key in names}
+    aligned = _word_surface_sequence(output)
+    observed = output.get("text")
+    if aligned is None or not isinstance(observed, str):
+        stats["uncertain_alignment_pages"] = 1
+        return stats
+    errors = analyze_word_errors(normalize(expected), normalize(observed))
+    if errors.get("status") != "complete":
+        stats["uncertain_alignment_pages"] = 1
+        return stats
+    words, _ = aligned
+    for error in errors["errors"]:
+        if error.get("kind") != "diacritic_or_d_stroke":
+            continue
+        index = error.get("observed_position")
+        if not isinstance(index, int) or not 1 <= index <= len(words):
+            continue
+        correct = _core(error.get("expected"))
+        if not correct:
+            continue
+        raw_line, verified_line, crop = _evidence_source_sets(words[index - 1])
+        stats["audited_tone_errors"] += 1
+        got_raw = correct in raw_line
+        got_verified = correct in verified_line
+        got_crop = correct in crop
+        stats["errors_with_correct_raw_line_reading"] += got_raw
+        stats["errors_with_correct_verified_line_reading"] += got_verified
+        stats["errors_with_correct_crop_reading"] += got_crop
+        stats["errors_with_correct_crop_only_reading"] += got_crop and not got_raw
+        stats["errors_with_no_correct_recorded_alternative"] += not (got_raw or got_crop)
+    return stats
+
+
 def evaluate_case(expected: str, output: dict[str, object]) -> dict[str, object]:
     """Reference is *only* used for scoring AFTER independent proposals."""
     observed = output.get("text")
@@ -177,7 +295,11 @@ def evaluate_case(expected: str, output: dict[str, object]) -> dict[str, object]
                 else "unchanged"
             ),
         }
-    return {"baseline": baseline, "rules": results}
+    return {
+        "baseline": baseline, "rules": results,
+        "evidence_source_audit": audit_evidence_sources(output),
+        "tone_error_source_audit": audit_tone_error_sources(expected, output),
+    }
 
 
 def _sum_quality(values: list[dict[str, int]]) -> dict[str, object]:
@@ -222,9 +344,16 @@ def summarize_cases(cases: list[dict[str, object]]) -> dict[str, object]:
                 "other_changed_words", "flips_without_positional_truth",
             )},
         }
+    sources = Counter()
+    tone_errors = Counter()
+    for row in cases:
+        sources.update(row["evidence_source_audit"])
+        tone_errors.update(row["tone_error_source_audit"])
     return {
         "baseline_strict": baseline,
         "ground_truth_blind_rules": result,
+        "evidence_source_audit": dict(sorted(sources.items())),
+        "tone_error_source_audit": dict(sorted(tone_errors.items())),
         "note": (
             "Both policies read ONLY OCR evidence when proposing; reference text "
             "is used afterward to score. Corrected/regressed token flips are "
