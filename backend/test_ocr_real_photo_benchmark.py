@@ -155,6 +155,11 @@ class PhotoBenchmarkTests(unittest.TestCase):
                 )
             self.assertEqual(report["successful_cases"], 1)
             self.assertEqual(report["recognition"]["word_edits"], 1)
+            self.assertEqual(
+                report["private_diagnostic_summary"]["word_error_kind_counts"],
+                {"diacritic_or_d_stroke": 1},
+            )
+            self.assertEqual(report["private_diagnostic_summary"]["analyzed_cases"], 1)
             self.assertEqual(len(sensitive_rows), 1)
             self.assertEqual(sensitive_rows[0]["status"], "complete")
             self.assertEqual(sensitive_rows[0]["error_count"], 1)
