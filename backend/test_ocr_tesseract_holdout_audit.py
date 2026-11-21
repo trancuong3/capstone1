@@ -225,5 +225,14 @@ class HeldoutAggregateTests(unittest.TestCase):
         self.assertIn("unresolved_positional_scoring", result["reason_codes"])
 
 
+class WindowsPowerShellCompatibilityTests(unittest.TestCase):
+    def test_task14_runner_avoids_windows_powershell_51_utf8_without_bom_hazard(self):
+        script = Path(__file__).resolve().parent / "scripts" / "run_ocr_task14_holdout.ps1"
+        self.assertTrue(
+            script.read_bytes().isascii(),
+            "Keep this runner ASCII-only: Windows PowerShell 5.1 can misparse UTF-8 without BOM.",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
