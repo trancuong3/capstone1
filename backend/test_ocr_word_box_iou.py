@@ -106,12 +106,17 @@ class WordBoxIoUTests(unittest.TestCase):
             path.write_text(json.dumps({**good, "words": []}), encoding="utf-8")
             with self.assertRaises(ValueError):
                 load_manual_annotations(path, {"images/a.png"})
+            path.write_text(json.dumps({
+                **good, "words": [{"text": "Bé đang", "bbox": [0.1, 0.1, 0.2, 0.2]}]
+            }), encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_manual_annotations(path, {"images/a.png"})
 
     def test_scores_never_contain_private_words(self):
-        a = [{"text": "tuyệt mật", "bbox": [0.1, 0.2, 0.2, 0.1]}]
+        a = [{"text": "tuyệt_mật", "bbox": [0.1, 0.2, 0.2, 0.1]}]
         summary = summarize_scores([score_page(a, a)])
         report = json.dumps(summary, ensure_ascii=False)
-        self.assertNotIn("tuyệt mật", report)
+        self.assertNotIn("tuyệt_mật", report)
         self.assertNotIn("bbox", report)
 
 
