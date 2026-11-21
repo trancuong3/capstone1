@@ -92,7 +92,7 @@ class BboxProbeTests(unittest.TestCase):
                 )
             self.assertTrue(report["all_runtime_checks_passed"])
             self.assertEqual(report["results"]["baseline"]["0.75"]["geometry"]["tp"], 1)
-            self.assertFalse(report["reading_color_acceptance_not_measured"] is False)
+            self.assertTrue(report["reading_color_acceptance_not_measured"])
             encoded = json.dumps(report, ensure_ascii=False)
             self.assertNotIn("đọc", encoded)
             self.assertNotIn(str(root), encoded)
@@ -120,6 +120,26 @@ class BboxProbeTests(unittest.TestCase):
             self.assertEqual(report["failure_exception_types"]["RuntimeError"], 1)
             self.assertNotIn(str(image), json.dumps(report))
             self.assertIsNone(report["results"])
+
+    def test_overlay_is_private_and_contains_both_box_colors(self):
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            image = root / "original.png"
+            target = root / "overlay.png"
+            Image.new("RGB", (200, 100), color="white").save(image)
+            runner.write_overlay(
+                image,
+                [{"text": "secret OCR", "bbox": [0.5, 0.1, 0.2, 0.2]}],
+                [{"text": "secret reference", "bbox": [0.1, 0.1, 0.2, 0.2]}],
+                target,
+            )
+            self.assertTrue(target.is_file())
+            with Image.open(target) as overlay:
+                self.assertEqual(overlay.getpixel((20, 20)), (220, 50, 50))
+                self.assertEqual(overlay.getpixel((100, 20)), (0, 160, 245))
+            self.assertEqual(list(root.iterdir()).__len__(), 2)
 
     def test_cli_requires_private_aggregate_and_no_overwrite(self):
         with tempfile.TemporaryDirectory() as dirname:
