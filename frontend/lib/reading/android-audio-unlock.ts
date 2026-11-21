@@ -40,8 +40,9 @@ export function unlockAudioNow(): void {
   }
 
   try {
-    if (typeof Audio !== "undefined") {
-      const probe = new Audio(SILENT_WAV_DATA_URI);
+    if (typeof document !== "undefined") {
+      const probe = document.createElement("audio");
+      probe.src = SILENT_WAV_DATA_URI;
       probe.muted = true;
       probe.volume = 0;
       const playPromise = probe.play();

@@ -154,7 +154,8 @@ async function openNewContext(
 test.describe.serial("Parent Private Books Real Full-Stack E2E", () => {
   test.beforeEach(() => {
     test.skip(
-      !fs.existsSync(STACK_INFO_PATH),
+      Boolean(process.env.PLAYWRIGHT_AUTH_FIXTURE_TOKEN) ||
+        !fs.existsSync(STACK_INFO_PATH),
       `Requires live full-stack E2E harness (${STACK_INFO_PATH} not found)`,
     );
   });

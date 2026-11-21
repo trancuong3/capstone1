@@ -2491,6 +2491,10 @@ function ReadingSessionScreen({
     ) {
       // Provider text that does not follow the book is not the child reading.
       markCaptureUncertain(targetEngine, targetPage);
+      if (!options.preserveAlignment) {
+        setLatestTranscript(resolvedText);
+        setComparisonError(null);
+      }
     } else if (resolvedText && targetPage) {
       const timings = timingsForTranscript(
         resolvedText,

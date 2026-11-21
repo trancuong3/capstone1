@@ -114,6 +114,14 @@ async function tapTopNav(page: Page, label: RegExp, expectedUrl: RegExp) {
 }
 
 test.describe("Mobile & Android WebView Full UI + OCR Parity E2E", () => {
+  test.beforeEach(() => {
+    test.skip(
+      Boolean(process.env.PLAYWRIGHT_AUTH_FIXTURE_TOKEN) ||
+        !fs.existsSync(STACK_INFO_PATH),
+      `Requires live full-stack E2E harness (${STACK_INFO_PATH})`,
+    );
+  });
+
   test("completes full Parent & Child flow across Login -> Dashboard -> Books -> My Books -> Book Scanner OCR -> Reading -> Management -> Sessions -> Reports -> Logout with 0 overflow & 0 runtime errors", async ({
     page,
   }, testInfo) => {
