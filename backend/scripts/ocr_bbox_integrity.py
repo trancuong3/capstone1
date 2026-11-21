@@ -20,6 +20,15 @@ def inspect_word_boxes(words: object) -> dict[str, object]:
             "invalid_reasons": {},
         }
 
+    if not words:
+        return {
+            "status": "empty_word_list",
+            "reported_words": 0,
+            "valid_boxes": 0,
+            "invalid_boxes": 0,
+            "invalid_reasons": {},
+        }
+
     invalid: Counter[str] = Counter()
     valid = 0
     for item in words:
