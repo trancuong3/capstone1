@@ -24,6 +24,7 @@ import {
   formatKaraokeTime,
 } from "@/lib/karaoke/lyrics-timeline";
 import type { KaraokePreview } from "@/types/karaoke";
+import { createCountdownSound } from "@/lib/karaoke/countdown-sound";
 import styles from "./karaoke-stage.module.css";
 
 /** Child view shares the exact native audio/controller used by admin preview. */
@@ -43,6 +44,9 @@ export function KaraokeStage({
   const root = useRef<HTMLElement>(null);
   const expandButton = useRef<HTMLButtonElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownSound = useRef<ReturnType<typeof createCountdownSound> | null>(
+    null,
+  );
   const generation = useRef(0);
   const preparingMic = useRef(false);
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -53,12 +57,15 @@ export function KaraokeStage({
   const [scoredMode, setScoredMode] = useState(false);
   const [headphones, setHeadphones] = useState(false);
   const [practiceReturnMs, setPracticeReturnMs] = useState(0);
+  const [manualEnded, setManualEnded] = useState(false);
+  const lastPlaybackMs = useRef<number | null>(null);
   const scoring = useKaraokeScoring(source.lyrics, player.getCurrentMs);
   const {
     resume: resumeMic,
     pause: pauseMic,
     finish: finishMic,
     seekBoundary,
+    observePlayback,
   } = scoring;
   const lines = source.lyrics.lines;
   const activeIndex = activeLyricIndex(lines, player.currentMs);
@@ -75,8 +82,9 @@ export function KaraokeStage({
   const ended =
     countdown === null &&
     !practiceLine &&
-    (player.ended || player.currentMs >= source.duration_ms) &&
-    !player.playing;
+    (manualEnded ||
+      ((player.ended || player.currentMs >= source.duration_ms) &&
+        !player.playing));
   const secondsToNext =
     next?.start_ms === null || next?.start_ms === undefined
       ? null
@@ -86,6 +94,7 @@ export function KaraokeStage({
     () => () => {
       generation.current++;
       if (timer.current !== null) clearTimeout(timer.current);
+      countdownSound.current?.stop();
     },
     [],
   );
@@ -101,6 +110,8 @@ export function KaraokeStage({
     generation.current++;
     if (timer.current !== null) clearTimeout(timer.current);
     timer.current = null;
+    countdownSound.current?.stop();
+    countdownSound.current = null;
     setCountdown(null);
     if (preparingMic.current) {
       preparingMic.current = false;
@@ -119,8 +130,10 @@ export function KaraokeStage({
     player.pause();
     player.seek(start);
     const ticket = generation.current;
+    countdownSound.current = createCountdownSound();
     function tick(value: number) {
       if (ticket !== generation.current) return;
+      countdownSound.current?.play(value);
       if (value === 0) {
         preparingMic.current = false;
         timer.current = null;
@@ -138,23 +151,33 @@ export function KaraokeStage({
       void scoring.arm(practiceLineId).then((granted) => {
         if (ticket !== generation.current) return;
         if (granted) tick(3);
-        else preparingMic.current = false;
+        else {
+          preparingMic.current = false;
+          countdownSound.current?.stop();
+        }
       });
     } else tick(3);
   }
   function restartSong() {
     scoring.reset();
+    setManualEnded(false);
     setPracticeId(null);
     setRepeat(false);
     setStarted(false);
     prepare(0, undefined, false, scoredMode);
+  }
+  function finishAndScoreSong() {
+    cancelPreparation();
+    player.pause();
+    setManualEnded(true);
+    finishMic();
   }
 
   // Native playback (including buffering) determines when sung words are eligible.
   useEffect(() => {
     if (!scoredMode) return;
     if (
-      (player.ended && !practiceId) ||
+      ((player.ended || manualEnded) && !practiceId) ||
       (practiceId && (player.segmentFinished || player.ended))
     )
       finishMic();
@@ -163,6 +186,7 @@ export function KaraokeStage({
   }, [
     scoredMode,
     practiceId,
+    manualEnded,
     player.ended,
     player.segmentFinished,
     player.playing,
@@ -171,6 +195,34 @@ export function KaraokeStage({
     finishMic,
     resumeMic,
     pauseMic,
+  ]);
+  useEffect(() => {
+    if (
+      !scoredMode ||
+      !player.playing ||
+      player.waiting ||
+      Boolean(player.error) ||
+      countdown !== null ||
+      !["listening", "armed"].includes(scoring.status)
+    ) {
+      lastPlaybackMs.current = null;
+      return;
+    }
+    const current = player.currentMs;
+    const previous = lastPlaybackMs.current;
+    lastPlaybackMs.current = current;
+    if (previous !== null && current > previous && current - previous <= 650) {
+      observePlayback(previous, current);
+    }
+  }, [
+    scoredMode,
+    player.playing,
+    player.waiting,
+    player.error,
+    player.currentMs,
+    countdown,
+    scoring.status,
+    observePlayback,
   ]);
   const previousPass = useRef(player.loopPass);
   useEffect(() => {
@@ -193,7 +245,10 @@ export function KaraokeStage({
   function selectMode(scored: boolean) {
     if (scored === scoredMode) return;
     cancelPreparation();
+    player.pause();
     scoring.reset();
+    setManualEnded(false);
+    setStarted(false);
     setHeadphones(false);
     player.setMuted(scored);
     setScoredMode(scored);
@@ -258,6 +313,7 @@ export function KaraokeStage({
       return;
     if (!practiceId)
       setPracticeReturnMs(ended ? source.duration_ms : player.getCurrentMs());
+    setManualEnded(false);
     pauseMic();
     setPracticeId(line.id);
     prepare(line.start_ms, line.end_ms, repeat, scoredMode, line.id);
@@ -332,6 +388,18 @@ export function KaraokeStage({
   const finalScore =
     scoring.score ??
     (scoring.status === "insufficient" ? scoring.liveScore : null);
+  const liveWords = scoring.liveScore?.lineScores.flatMap((l) => l.words) ?? [];
+  const liveMatched = liveWords.filter((w) => w.state === "matched").length;
+  const liveWrong = liveWords.filter((w) => w.state === "different").length;
+  const liveOmitted = liveWords.filter((w) => w.state === "omitted").length;
+  const pendingWords = liveWords.filter(
+    (w) =>
+      w.state === "unknown" &&
+      (w.phase === "processing" || scoring.previewWords.has(w.id)),
+  ).length;
+  const liveEvaluated = liveMatched + liveWrong + liveOmitted;
+  const livePercent =
+    liveEvaluated > 0 ? Math.round((100 * liveMatched) / liveEvaluated) : null;
   return (
     <section
       ref={root}
@@ -389,7 +457,7 @@ export function KaraokeStage({
           className="sm:w-auto"
           variant={scoredMode ? "primary" : "secondary"}
           aria-pressed={scoredMode}
-          disabled={!scoring.supported || (started && !ended && !scoredMode)}
+          disabled={!scoring.supported}
           onClick={() => selectMode(true)}
         >
           <Mic aria-hidden className="size-5" />
@@ -517,11 +585,49 @@ export function KaraokeStage({
                             )
                           : undefined
                       }
+                      previewWords={
+                        scoredMode ? scoring.previewWords : undefined
+                      }
                     />
                   ) : (
                     (next?.text ?? "Cùng nghe nhạc nhé!")
                   )}
                 </p>
+                {scoredMode && (
+                  <div
+                    data-testid="karaoke-live-feedback"
+                    className="mx-auto flex flex-wrap items-center justify-center gap-2 text-xs font-bold sm:text-sm"
+                  >
+                    <span className="rounded-full border border-green-500 bg-green-100 px-3 py-1 text-green-900">
+                      Đúng: {liveMatched}
+                    </span>
+                    <span className="rounded-full border border-red-500 bg-red-100 px-3 py-1 text-red-900">
+                      Chưa đúng: {liveWrong}
+                    </span>
+                    <span className="rounded-full border border-orange-400 bg-orange-100 px-3 py-1 text-orange-900">
+                      Bỏ qua: {liveOmitted}
+                    </span>
+                    {pendingWords > 0 && (
+                      <span className="rounded-full border border-slate-300 bg-slate-50 px-3 py-1 text-slate-700">
+                        Đang xử lý: {pendingWords}
+                      </span>
+                    )}
+                    {livePercent !== null && (
+                      <span className="rounded-full border border-primary bg-sky px-3 py-1 text-primary">
+                        Tỉ lệ đúng: {livePercent}%
+                      </span>
+                    )}
+                  </div>
+                )}
+                {scoredMode && scoring.listening && (
+                  <p className="text-xs text-muted">
+                    {scoring.signal === "uncertain" &&
+                    liveEvaluated === 0 &&
+                    pendingWords === 0
+                      ? "Mình chưa nghe rõ. Bé đưa micro gần hơn một chút nhé."
+                      : "Nét chấm: đang nghe và đối chiếu, chưa tính điểm."}
+                  </p>
+                )}
                 {activeLine && next && (
                   <p className={styles.next}>Tiếp theo: {next.text}</p>
                 )}
@@ -581,6 +687,16 @@ export function KaraokeStage({
               <RotateCcw aria-hidden className="size-5" />
               Hát lại câu này
             </Button>
+            {scoredMode && started && !practiceLine && countdown === null && (
+              <Button
+                variant="secondary"
+                className={`${styles.action} sm:w-auto`}
+                onClick={finishAndScoreSong}
+              >
+                <Star aria-hidden className="size-5" />
+                Kết thúc & chấm điểm
+              </Button>
+            )}
             {practiceLine && (
               <Button
                 variant="secondary"
@@ -646,6 +762,7 @@ export function KaraokeStage({
               player.pause();
               scoring.endPractice();
             }
+            setManualEnded(false);
             setPracticeId(null);
             setRepeat(false);
             player.seek(Number(event.target.value));

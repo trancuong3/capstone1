@@ -11,13 +11,17 @@ on:
     paths:
       - "project-dashboard/**"
       - ".github/workflows/project-dashboard-pages.yml"
+  issues:
+    types: [opened, edited, reopened, closed, deleted]
+  schedule:
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: "github-pages"
+  group: github-pages
   cancel-in-progress: true
 
 jobs:
@@ -27,8 +31,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
-      - name: Extract and validate dashboard JavaScript
+      - name: Validate dashboard and snapshot code
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -36,16 +42,20 @@ jobs:
 
           source = Path("project-dashboard/index.html").read_text(encoding="utf-8")
           match = re.search(r"<script>([\s\S]*?)</script>", source, re.IGNORECASE)
-          if not match:
-              raise SystemExit("Dashboard script block was not found.")
-          if '<html lang="vi"' not in source.lower():
-              raise SystemExit("Expected Vietnamese HTML document language.")
-          if "localStorage" not in source or "api.github.com" not in source:
-              raise SystemExit("Expected local task storage and public GitHub API integration.")
+          if not match or '<html lang="vi"' not in source.lower():
+              raise SystemExit("Invalid dashboard HTML or script")
+          if ('localStorage' not in source or
+              'hub-snapshot.json' not in source or
+              'roadmap-core.js' not in source or
+              'api.github.com' in source):
+              raise SystemExit("Dashboard must use same-origin JSON without direct GitHub API calls")
           Path("/tmp/viread-project-dashboard.js").write_text(match.group(1), encoding="utf-8")
-          print("Dashboard HTML and script block checks passed.")
+          print("Static dashboard source policy passed")
           PY
           node --check /tmp/viread-project-dashboard.js
+          node --check project-dashboard/roadmap-core.js
+          node --check project-dashboard/build-snapshot.cjs
+          node --test project-dashboard/roadmap-core.test.cjs project-dashboard/dashboard-smoke.test.cjs project-dashboard/build-snapshot.test.cjs
 
   deploy:
     name: Deploy GitHub Pages
@@ -53,6 +63,9 @@ jobs:
     needs: validate
     permissions:
       contents: read
+      issues: read
+      pull-requests: read
+      actions: read
       pages: write
       id-token: write
     environment:
@@ -60,16 +73,32 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout trusted main branch
         uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Create validated public JSON snapshot
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: node project-dashboard/build-snapshot.cjs
+
+      - name: Stage only browser-safe assets
+        run: |
+          mkdir -p "$RUNNER_TEMP/viread-pages/data"
+          cp project-dashboard/index.html project-dashboard/roadmap-core.js "$RUNNER_TEMP/viread-pages/"
+          cp project-dashboard/data/hub-snapshot.json "$RUNNER_TEMP/viread-pages/data/hub-snapshot.json"
+          node -e 'const fs=require("node:fs"); const p=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/viread-pages/data/hub-snapshot.json","utf8")); require("./project-dashboard/roadmap-core.js").validateSnapshot(p);'
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload static dashboard
+      - name: Upload public static site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: project-dashboard
+          path: ${{ runner.temp }}/viread-pages
 
       - name: Deploy to GitHub Pages
         id: deployment

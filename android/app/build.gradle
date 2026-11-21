@@ -81,27 +81,73 @@ tasks.register('verifyLiveFrontend') {
     group = 'verification'
     dependsOn tasks.named('verifyVireadFrontend')
     doLast {
+        // Root in frontend/app/page.tsx issues redirect("/login") (HTTP 307).
+        // Probe root WITHOUT following it, then require the actual /login
+        // document to be 200 HTML served by the ViRead Next.js server.
+        java.net.HttpURLConnection rootConnection = null
+        java.net.HttpURLConnection loginConnection = null
         try {
-            def connection = (java.net.HttpURLConnection) new URL(siteUrl).openConnection()
-            connection.connectTimeout = 18000
-            connection.readTimeout = 18000
-            connection.instanceFollowRedirects = false
-            connection.setRequestProperty('User-Agent', 'ViRead-Android-Build/1.0')
-            if (connection.responseCode != 200 ||
-                    !(connection.contentType ?: '').toLowerCase(java.util.Locale.ROOT).contains('text/html')) {
-                throw new GradleException('The HTTPS frontend did not return an HTML document with HTTP 200.')
+            def rootUrl = new URL(siteUrl.endsWith('/') ? siteUrl : siteUrl + '/')
+            def loginUrl = new URL(rootUrl, 'login')
+            def nextHtml = { java.net.HttpURLConnection connection ->
+                if (connection.responseCode != 200 ||
+                        !(connection.contentType ?: '').toLowerCase(java.util.Locale.ROOT).contains('text/html')) {
+                    throw new GradleException('The HTTPS frontend did not return HTML with HTTP 200.')
+                }
+                def html = connection.inputStream.withCloseable {
+                    new String(it.readNBytes(300000), java.nio.charset.StandardCharsets.UTF_8)
+                }
+                def lower = html.toLowerCase(java.util.Locale.ROOT)
+                if (!lower.contains('<html') || !html.contains('/_next/') || !lower.contains('viread')) {
+                    throw new GradleException('The HTTPS page is not a ViRead Next.js document.')
+                }
             }
-            def html = connection.inputStream.withCloseable {
-                new String(it.readNBytes(300000), java.nio.charset.StandardCharsets.UTF_8)
+            def openNoRedirect = { URL url ->
+                def connection = (java.net.HttpURLConnection) url.openConnection()
+                connection.connectTimeout = 18000
+                connection.readTimeout = 18000
+                connection.instanceFollowRedirects = false
+                connection.setRequestProperty('User-Agent', 'ViRead-Android-Build/1.0')
+                connection.setRequestProperty('Accept', 'text/html')
+                return connection
             }
-            if (!html.toLowerCase(java.util.Locale.ROOT).contains('<html') ||
-                    !html.contains('/_next/')) {
-                throw new GradleException('The HTTPS origin is not serving an actual Next.js page.')
+
+            rootConnection = openNoRedirect(rootUrl)
+            def rootStatus = rootConnection.responseCode
+            if ([301, 302, 303, 307, 308].contains(rootStatus)) {
+                def location = rootConnection.getHeaderField('Location')
+                if (!location) {
+                    throw new GradleException('The HTTPS frontend root redirects without Location.')
+                }
+                def dest = rootUrl.toURI().resolve(location)
+                def destHost = dest.host?.toLowerCase(java.util.Locale.ROOT)
+                if (dest.scheme != 'https' ||
+                        destHost != rootUrl.host.toLowerCase(java.util.Locale.ROOT) ||
+                        !(dest.port == -1 || dest.port == 443) ||
+                        dest.rawUserInfo != null ||
+                        dest.rawQuery != null || dest.rawFragment != null ||
+                        !(dest.rawPath == '/login' || dest.rawPath == '/login/')) {
+                    throw new GradleException('Frontend / must redirect only to same-origin /login.')
+                }
+            } else if (rootStatus == 200) {
+                nextHtml(rootConnection)
+            } else {
+                throw new GradleException('Frontend / returned HTTP ' + rootStatus +
+                        ', expected HTML or redirect to /login.')
             }
+
+            loginConnection = openNoRedirect(loginUrl)
+            if (loginConnection.responseCode != 200) {
+                throw new GradleException('Frontend /login did not return HTTP 200.')
+            }
+            nextHtml(loginConnection)
         } catch (GradleException e) {
             throw e
         } catch (Exception e) {
-            throw new GradleException('Could not validate the HTTPS Next.js frontend; no APK packaged.', e)
+            throw new GradleException('Could not validate the HTTPS ViRead Next.js frontend; no APK packaged.', e)
+        } finally {
+            rootConnection?.disconnect()
+            loginConnection?.disconnect()
         }
     }
 }

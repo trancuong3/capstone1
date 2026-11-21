@@ -433,14 +433,17 @@ type ScoringBrowserFixture = {
   liveTracks: number;
   tracksStarted: number;
   sing: (startSeconds: number, endSeconds: number, text: string) => void;
+  preview: (text: string) => void;
 };
 type ScoringPage = Window & { __singingFixture: ScoringBrowserFixture };
 
-test("child live scoring confirms actual syllables and preserves song results after practice", async ({
-  page,
-}) => {
-  await page.addInitScript(() => {
-    // A disconnected Web Audio destination provides silent, real audio tracks.
+async function installScoringCapture(
+  page: Page,
+  quiet: boolean | "stop-singing" = false,
+) {
+  await page.addInitScript((quiet) => {
+    // Synthetic Web Audio provides real tracks with either digital mute or a
+    // calibrated quiet noise floor, without physical microphone access.
     // This test cannot prompt for the device mic or call a speech service.
     const tracks = new Set<MediaStreamTrack>();
     let context: AudioContext | undefined;
@@ -451,7 +454,20 @@ test("child live scoring confirms actual syllables and preserves song results af
         if (!constraints.audio || constraints.video)
           throw new Error("Expected audio-only capture");
         context ??= new AudioContext();
-        const stream = context.createMediaStreamDestination().stream;
+        const destination = context.createMediaStreamDestination();
+        if (quiet) {
+          const oscillator = context.createOscillator();
+          const gain = context.createGain();
+          if (quiet === "stop-singing") {
+            gain.gain.setValueAtTime(0.04, context.currentTime);
+            gain.gain.setValueAtTime(0.002, context.currentTime + 0.5);
+            gain.gain.setValueAtTime(0, context.currentTime + 3);
+          } else gain.gain.value = 0.0002;
+          oscillator.connect(gain).connect(destination);
+          oscillator.start();
+          void context.resume();
+        }
+        const stream = destination.stream;
         stream.getTracks().forEach((track) => tracks.add(track));
         return stream;
       },
@@ -500,6 +516,16 @@ test("child live scoring confirms actual syllables and preserves song results af
       get tracksStarted() {
         return tracksStarted;
       },
+      preview(text: string) {
+        if (!this.audio || !Recognizer.active)
+          throw new Error("No active capture");
+        Recognizer.active.onresult?.({
+          resultIndex: 0,
+          results: [
+            { isFinal: false, 0: { transcript: text, confidence: 0.99 } },
+          ],
+        });
+      },
       sing(startSeconds: number, endSeconds: number, text: string) {
         const current = Recognizer.active;
         if (!current || !this.audio || this.audio.paused)
@@ -529,8 +555,13 @@ test("child live scoring confirms actual syllables and preserves song results af
         return audio;
       },
     });
-  });
+  }, quiet);
+}
 
+test("child live scoring confirms actual syllables and preserves song results after practice", async ({
+  page,
+}, info) => {
+  await installScoringCapture(page);
   const { state, base } = await fixture(page);
   const lyrics = syllableLyrics();
   const line = lyrics.lines[0];
@@ -570,6 +601,23 @@ test("child live scoring confirms actual syllables and preserves song results af
   ).toBe(0);
   await action("Hát tiếp").click();
   await listening();
+  // Let the native clock advance: seeking here triggers buffering and restarts
+  // capture, which would make this an unintended seek-boundary test.
+  await page.waitForFunction(
+    () =>
+      (window as unknown as ScoringPage).__singingFixture.audio.currentTime >=
+      1.1,
+  );
+  await page.evaluate(() =>
+    (window as unknown as ScoringPage).__singingFixture.preview("bé nói"),
+  );
+  await expect(stage.locator('[data-word-state="processing"]')).not.toHaveCount(
+    0,
+  );
+  await expect(stage.locator('[data-word-state="different"]')).toHaveCount(0);
+  await expect(stage.getByTestId("karaoke-live-feedback")).toContainText(
+    "Chưa đúng: 0",
+  );
   await page.evaluate(() =>
     (window as unknown as ScoringPage).__singingFixture.sing(1, 3.1, "bé vui"),
   );
@@ -582,6 +630,19 @@ test("child live scoring confirms actual syllables and preserves song results af
       els.map((el) => el.getAttribute("data-heard")),
     ),
   ).toEqual([line.syllables![0].id + "/0", line.syllables![2].id + "/0"]);
+  expect(
+    await stage
+      .locator('[data-recognition] > [aria-hidden="true"]')
+      .evaluateAll((elements) =>
+        elements.every(
+          (element) => getComputedStyle(element).visibility === "hidden",
+        ),
+      ),
+  ).toBe(true);
+  await page.screenshot({
+    path: info.outputPath("karaoke-v2-confirmed.png"),
+    fullPage: true,
+  });
 
   await page.evaluate(() => {
     const audio = (window as unknown as ScoringPage).__singingFixture.audio;
@@ -639,8 +700,59 @@ test("child live scoring confirms actual syllables and preserves song results af
     audio.currentTime = audio.duration - 0.1;
   });
   await expect(result).toContainText("Mình chưa nghe rõ");
+  await expect(result).toContainText(
+    "Chưa đánh giá: 3 tiếng. Phần này không tính là sai.",
+  );
   await expect(result.getByText(/^\d+\/100$/)).toHaveCount(0);
+  await page.screenshot({
+    path: info.outputPath("karaoke-v2-unassessed.png"),
+    fullPage: true,
+  });
   await noOverflow(page);
+  expect(state.unexpected).toEqual([]);
+  expect(base.unexpected).toEqual([]);
+});
+
+test("child scoring counts stopping singing across recognition slices in live and final results", async ({
+  page,
+}, info) => {
+  await installScoringCapture(page, "stop-singing");
+  const { state, base } = await fixture(page);
+  state.lyrics = {
+    format_version: 1,
+    lines: [
+      { id: lineId, text: "Bé hát, vui!", start_ms: 1000, end_ms: 4000 },
+      { id: versionId, text: "Cùng nhau hát", start_ms: 7500, end_ms: 10000 },
+    ],
+  };
+  await enter(page);
+  await page
+    .getByRole("link", { name: `Hát bài ${state.title}`, exact: true })
+    .click();
+  const stage = page.getByRole("region", { name: "Hát cùng bé", exact: true });
+  await stage
+    .getByRole("button", { name: "Hát có chấm điểm", exact: true })
+    .click();
+  await stage.getByRole("button", { name: "Bắt đầu hát", exact: true }).click();
+  // Natural media time exercises the analyser, scheduled stop and successful
+  // drain. No manual scoring event or fabricated playback seek is involved.
+  await expect(stage.getByTestId("karaoke-live-feedback")).toContainText(
+    "Bỏ qua: 6",
+    { timeout: 20000 },
+  );
+  await stage
+    .getByRole("button", { name: "Kết thúc & chấm điểm", exact: true })
+    .click();
+  const result = stage.getByRole("region", { name: "Kết quả đúng lời" });
+  await expect(result).toContainText("Đã đánh giá 6/6 tiếng");
+  await expect(
+    result
+      .getByTestId("karaoke-score-breakdown")
+      .locator(":scope > div")
+      .filter({ hasText: "Bỏ qua" }),
+  ).toHaveText("Bỏ qua6");
+  await noOverflow(page);
+  await result.screenshot({ path: info.outputPath("karaoke-omissions.png") });
   expect(state.unexpected).toEqual([]);
   expect(base.unexpected).toEqual([]);
 });
@@ -649,6 +761,22 @@ test("child stage supports preparation, practice, slow loops, enlarged view and 
   page,
 }, info) => {
   await page.addInitScript(() => {
+    const cueFrequencies: number[] = [];
+    Object.defineProperty(window, "__cueFrequencies", {
+      value: cueFrequencies,
+    });
+    const originalOscillator = AudioContext.prototype.createOscillator;
+    AudioContext.prototype.createOscillator = function () {
+      const oscillator = originalOscillator.call(this);
+      const setFrequency = oscillator.frequency.setValueAtTime.bind(
+        oscillator.frequency,
+      );
+      oscillator.frequency.setValueAtTime = (frequency, time) => {
+        cueFrequencies.push(frequency);
+        return setFrequency(frequency, time);
+      };
+      return oscillator;
+    };
     const NativeAudio = window.Audio;
     const audios: HTMLAudioElement[] = [];
     Object.defineProperty(window, "__stageAudio", { value: audios });
@@ -712,6 +840,13 @@ test("child stage supports preparation, practice, slow loops, enlarged view and 
   await expect(countdown).toHaveCount(0);
   await start.click();
   await stage.getByRole("button", { name: "Tạm dừng", exact: true }).click();
+  expect(
+    await page.evaluate(() =>
+      (
+        window as unknown as { __cueFrequencies: number[] }
+      ).__cueFrequencies.slice(-4),
+    ),
+  ).toEqual([520, 520, 520, 880]);
   await stage.getByText("Chọn câu để luyện", { exact: true }).click();
   await stage
     .getByRole("button", { name: "Luyện câu 2: Bé hát, vui!", exact: true })

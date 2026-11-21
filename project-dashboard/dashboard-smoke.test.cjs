@@ -1,0 +1,174 @@
+"use strict";
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const {readFileSync} = require("node:fs");
+const vm = require("node:vm");
+const path = require("node:path");
+const core = require("./roadmap-core.js");
+const html = readFileSync(path.join(__dirname, "index.html"), "utf8");
+const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+
+function fakeIssues() {
+  return Array.from({length:14}, (_, i) => {
+    const id = "p" + (i+1);
+    return {
+      number:150+i, title:"[" + id + "] Task " + id,
+      html_url:"https://github.com/trancuong3/capstone1/issues/" + (150+i),
+      updated_at:"2026-11-20T14:00:00Z",
+      body:"<!-- viread-roadmap:v1\nid: " + id + "\nstatus: " + (i===2?"blocked":i===0?"done":"todo")+
+        "\npriority: P1\ncategory: Android\n-->\n## Mô tả\nIssue task " + id + "\n## Evidence\n- https://github.com/trancuong3/capstone1/pull/143\n"
+    };
+  });
+}
+function fakeSnapshot(issues=fakeIssues()){
+  return {
+    schemaVersion:1,repository:"trancuong3/capstone1",generatedAt:new Date().toISOString(),
+    roadmap:issues.map(core.parseIssue),
+    activity:{commits:[],prs:[],issues:[],runs:[],releases:[],repo:{},branch:{}},
+    warnings:[]
+  };
+}
+function boot(options={}) {
+  const nodes=new Map(), handlers=new Map(), store=new Map(Object.entries(options.storage||{}));
+  function getElementById(id){
+    if (!nodes.has(id)) nodes.set(id,{
+      value:(id==="taskCategoryFilter"||id==="taskStatusFilter")?"all":"",textContent:"",innerHTML:"",style:{},disabled:false,className:"",
+      classList:{add(){},remove(){}},
+      addEventListener(type,handler){handlers.set(id+":"+type,handler);}
+    });
+    return nodes.get(id);
+  }
+  const localStorage={
+    getItem(key){return store.has(key)?store.get(key):null;},
+    setItem(key,value){store.set(key,String(value));},
+    removeItem(key){store.delete(key);}
+  };
+  const data=options.snapshot||fakeSnapshot(options.issues||fakeIssues());
+  const fetchCalls=[];
+  async function fetch(url){
+    fetchCalls.push(url);
+    if(options.fail)return {ok:false,status:503};
+    return {ok:true,status:200,json:async()=>data};
+  }
+  const downloads=[],blobs=new Map();
+  let sequence=0;
+  const URL={
+    createObjectURL(blob){const key="blob:testing/"+(++sequence);blobs.set(key,blob);return key;},
+    revokeObjectURL(key){blobs.delete(key);}
+  };
+  const document={
+    getElementById,querySelectorAll:()=>[],addEventListener(){},hidden:false,
+    body:{appendChild(){}},
+    createElement(){return {
+      href:"",download:"",click(){downloads.push(blobs.get(this.href));},remove(){}
+    };}
+  };
+  const window={ViReadRoadmapCore:core,scrollTo(){}};
+  const sandbox={document,window,ViReadRoadmapCore:core,localStorage,fetch,Blob,URL,
+    setInterval(){},clearTimeout(){},setTimeout(){},console};
+  vm.runInNewContext(script,sandbox,{timeout:3000});
+  return {nodes,store,handlers,fetchCalls,downloads,element:getElementById};
+}
+async function flush(){await new Promise(resolve=>setImmediate(resolve));}
+
+test("renders authoritative Issue status and caches it separately from legacy notes",async()=>{
+  const original={tasks:[{id:"p3",title:"Local changed",status:"done"},{id:"custom-x",status:"todo"}],note:"My private note"};
+  const app=boot({storage:{"viread-project-hub-v1":JSON.stringify(original)}});
+  await flush();
+  assert.deepEqual(app.fetchCalls,["./data/hub-snapshot.json"]); // never call api.github.com
+  const html=app.element("taskGrid").innerHTML;
+  assert.match(html,/p3 · Task p3/);
+  assert.match(html,/Bị chặn/);
+  assert.match(html,/GitHub Issue/);
+  assert.equal(app.element("projectNote").value,"My private note");
+  assert.match(app.element("legacyConflictNotice").textContent,/1 trạng thái khác GitHub/);
+  assert.match(app.element("legacyConflictNotice").textContent,/1 task cá nhân/);
+  assert.deepEqual(JSON.parse(app.store.get("viread-project-hub-v1")),original);
+  const cached=JSON.parse(app.store.get("viread-shared-roadmap-v1"));
+  assert.equal(cached.tasks.length,14);
+  assert.equal(cached.tasks[2].status,"blocked");
+  assert.match(app.element("roadmapSyncNotice").textContent,/GitHub Issues/);
+});
+
+test("static JSON fetch failure shows a truthful error and retains cached roadmap",async()=>{
+  const cached={syncedAt:"2026-11-20T11:00:00Z",tasks:fakeIssues().map(core.parseIssue)};
+  const app=boot({fail:true,storage:{"viread-shared-roadmap-v1":JSON.stringify(cached)}});
+  await flush();
+  assert.match(app.element("roadmapSyncNotice").textContent,/Không tải được JSON công khai/);
+  assert.match(app.element("roadmapSyncNotice").textContent,/503/);
+  assert.match(app.element("taskGrid").innerHTML,/Task p3/);
+  assert.equal(JSON.parse(app.store.get("viread-shared-roadmap-v1")).syncedAt,cached.syncedAt);
+});
+
+test("corrupted snapshot cannot replace a valid cached roadmap",async()=>{
+  const cached={syncedAt:"2026-11-20T11:00:00Z",tasks:fakeIssues().map(core.parseIssue)};
+  const invalid=fakeSnapshot();
+  invalid.roadmap[2].status="invalid-state";
+  const app=boot({snapshot:invalid,storage:{"viread-shared-roadmap-v1":JSON.stringify(cached)}});
+  await flush();
+  assert.match(app.element("roadmapSyncNotice").textContent,/Invalid snapshot roadmap item/);
+  assert.match(app.element("taskGrid").innerHTML,/Task p3/);
+  assert.equal(JSON.parse(app.store.get("viread-shared-roadmap-v1")).syncedAt,cached.syncedAt);
+  assert.deepEqual(app.fetchCalls,["./data/hub-snapshot.json"]);
+});
+test("personal note persists after simulated reload without uploading data",async()=>{
+  const app=boot();
+  await flush();
+  const note=app.element("projectNote");
+  note.value="ViRead lưu ghi chú tiếng Việt";
+  app.handlers.get("projectNote:input")();
+  const saved=app.store.get("viread-project-hub-v1");
+  assert.equal(JSON.parse(saved).note,note.value);
+  const reopened=boot({storage:{"viread-project-hub-v1":saved}});
+  await flush();
+  assert.equal(reopened.element("projectNote").value,note.value);
+  assert.deepEqual(reopened.fetchCalls,["./data/hub-snapshot.json"]);
+});
+test("stale but valid published snapshot is clearly labelled",async()=>{
+  const snapshot=fakeSnapshot();
+  snapshot.generatedAt=new Date(Date.now()-3*60*60*1000).toISOString();
+  const app=boot({snapshot});
+  await flush();
+  assert.match(app.element("roadmapSyncNotice").textContent,/snapshot đã quá 2 giờ/);
+  assert.match(app.element("roadmapSyncNotice").textContent,/Không phải thời gian thực/);
+});
+
+test("UI exports note-only localStorage backup and re-imports it without losing shared tasks",async()=>{
+  const original={note:"Lưu ghi chú thử nghiệm tiếng Việt"};
+  const app=boot({storage:{"viread-project-hub-v1":JSON.stringify(original)}});
+  await flush();
+  app.handlers.get("exportLocalBtn:click")();
+  assert.equal(app.downloads.length,1);
+  const backup=JSON.parse(await app.downloads[0].text());
+  assert.equal(backup.format,"viread-local-export-v1");
+  assert.equal(backup.legacy.note,original.note);
+  assert.deepEqual(backup.legacy.tasks,[]);
+  assert.equal(backup.sharedSnapshot.tasks.length,14);
+  const json=JSON.stringify(backup);
+  const input={files:[{size:Buffer.byteLength(json),text:async()=>json}],value:"backup.json"};
+  await app.handlers.get("importLocalFile:change")({target:input});
+  assert.match(app.element("toast").textContent,/Đã nhập bản sao/);
+  assert.match(app.element("legacyConflictNotice").textContent,/1 bản đã nhập/);
+  assert.equal(JSON.parse(app.store.get("viread-project-hub-v1")).note,original.note);
+  assert.equal(JSON.parse(app.store.get("viread-roadmap-local-imports-v1")).length,1);
+  assert.equal(app.element("taskTotal").textContent,14);
+  assert.equal(input.value,"");
+});
+test("UI accepts an older exported JSON with legacy.note but no legacy.tasks",async()=>{
+  const original={note:"Ghi chú hiện tại"};
+  const app=boot({storage:{"viread-project-hub-v1":JSON.stringify(original)}});
+  await flush();
+  const historical={format:"viread-local-export-v1",
+    legacy:{note:"Bản lưu cũ"},
+    imports:[],sharedSnapshot:{syncedAt:"2026-11-20T10:00:00Z",tasks:[]}
+  };
+  const json=JSON.stringify(historical);
+  await app.handlers.get("importLocalFile:change")({
+    target:{files:[{size:Buffer.byteLength(json),text:async()=>json}],value:"old.json"}
+  });
+  assert.match(app.element("toast").textContent,/Đã nhập bản sao/);
+  assert.match(app.element("legacyConflictNotice").textContent,/1 bản đã nhập/);
+  assert.equal(JSON.parse(app.store.get("viread-project-hub-v1")).note,original.note);
+  assert.equal(app.element("taskTotal").textContent,14);
+  assert.deepEqual(JSON.parse(app.store.get("viread-roadmap-local-imports-v1"))[0].tasks,[]);
+});

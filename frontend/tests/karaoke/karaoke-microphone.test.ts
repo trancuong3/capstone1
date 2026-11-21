@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useKaraokeScoring } from "@/hooks/use-karaoke-scoring";
 import type { BrowserRecognitionEventLike } from "@/lib/reading/browser-transcript-collector";
 import type { KaraokeLyrics } from "@/types/karaoke";
+import * as signalMonitor from "@/lib/karaoke/microphone-signal";
 
 class FakeRecognizer {
   static instances: FakeRecognizer[] = [];
@@ -98,8 +99,193 @@ describe("the child's singing microphone", () => {
     vi.stubGlobal("SpeechRecognition", FakeRecognizer);
   });
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it.each(["drained", "network", "timeout"] as const)(
+    "settles measured quiet only after successful drain (%s)",
+    async (ending) => {
+      const probe = microphoneStream();
+      const input = microphoneStream();
+      microphoneInput(
+        vi
+          .fn()
+          .mockResolvedValueOnce(probe.stream)
+          .mockResolvedValueOnce(input.stream),
+      );
+      let observe: signalMonitor.SignalObserver = () => {};
+      const stop = vi.fn();
+      vi.spyOn(signalMonitor, "monitorSingingTrack").mockImplementation(
+        (_stream, _clock, callback) => {
+          observe = callback;
+          return stop;
+        },
+      );
+      const view = mount();
+      await act(async () => {
+        expect(await view.result.current.arm()).toBe(true);
+      });
+      await act(async () => view.result.current.resume());
+      const capture = latest();
+      act(() => capture.onstart?.());
+      act(() => {
+        for (let ms = 0; ms < 3400; ms += 50) {
+          mediaMs = ms + 50;
+          observe(ms, ms + 50, "quiet");
+          view.result.current.observePlayback(ms, ms + 50);
+        }
+      });
+      expect(view.result.current.liveScore?.evaluatedWords).toBe(0);
+      act(() => {
+        if (ending === "network") capture.onerror?.({ error: "network" });
+        view.result.current.finish();
+        if (ending === "drained") capture.onend?.();
+        if (ending === "timeout") vi.advanceTimersByTime(2001);
+      });
+      expect(view.result.current.score?.evaluatedWords ?? 0).toBe(
+        ending === "drained" ? 3 : 0,
+      );
+      expect(stop).toHaveBeenCalledOnce();
+      expect(input.track.stop).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("counts a silent line at the scheduled slice boundary in both live and final results", async () => {
+    const probe = microphoneStream();
+    const input = microphoneStream();
+    microphoneInput(
+      vi
+        .fn()
+        .mockResolvedValueOnce(probe.stream)
+        .mockResolvedValue(input.stream),
+    );
+    let observe: signalMonitor.SignalObserver = () => {};
+    vi.spyOn(signalMonitor, "monitorSingingTrack").mockImplementation(
+      (_stream, _clock, callback) => {
+        observe = callback;
+        return () => {};
+      },
+    );
+    const view = mount();
+    await act(async () => {
+      expect(await view.result.current.arm()).toBe(true);
+    });
+    await act(async () => view.result.current.resume());
+    const first = latest();
+    act(() => first.onstart?.());
+    act(() => {
+      for (let ms = 0; ms < 3000; ms += 50) {
+        mediaMs = ms + 50;
+        observe(ms, mediaMs, "quiet");
+        view.result.current.observePlayback(ms, mediaMs);
+        vi.advanceTimersByTime(50);
+      }
+    });
+    expect(first.stop).toHaveBeenCalledOnce();
+    await act(async () => first.onend?.());
+    expect(
+      view.result.current.liveScore?.lineScores[0].words.map((w) => w.state),
+    ).toEqual(["omitted", "omitted", "omitted"]);
+    act(() => {
+      view.result.current.finish();
+      latest().onend?.();
+    });
+    expect(view.result.current.score?.evaluatedWords).toBe(3);
+    expect(view.result.current.score?.matchedWords).toBe(0);
+  });
+
+  it("reconciles fragmented finals so a repeated syllable is not lost", async () => {
+    const view = mount({
+      ...lyrics,
+      lines: [{ ...lyrics.lines[0], text: "bé bé vui" }],
+    });
+    const capture = await startSinging(view);
+    act(() => sing(capture, 0, 1000, "bé"));
+    expect(view.result.current.liveScore?.matchedWords).toBe(0);
+    act(() => {
+      mediaMs = 1000;
+      capture.onspeechstart?.();
+      mediaMs = 3000;
+      capture.onspeechend?.();
+      capture.onresult?.({
+        resultIndex: 1,
+        results: [
+          { isFinal: true, 0: { transcript: "bé" } },
+          { isFinal: true, 0: { transcript: "bé vui" } },
+        ],
+      });
+    });
+    expect(view.result.current.liveScore?.matchedWords).toBe(3);
+  });
+
+  it("clears interim highlights when the final is rejected and when paused", async () => {
+    const view = mount();
+    const capture = await startSinging(view);
+    act(() => {
+      mediaMs = 1000;
+      capture.onresult?.({
+        resultIndex: 0,
+        results: [{ isFinal: false, 0: { transcript: "bé đi" } }],
+      });
+    });
+    expect(view.result.current.previewWords.size).toBeGreaterThan(0);
+    act(() => {
+      mediaMs = 2000;
+      capture.onresult?.({
+        resultIndex: 0,
+        results: [
+          { isFinal: true, 0: { transcript: "bé đi", confidence: 0.1 } },
+        ],
+      });
+    });
+    expect(view.result.current.previewWords.size).toBe(0);
+    expect(view.result.current.liveScore?.evaluatedWords).toBe(0);
+    act(() => {
+      capture.onresult?.({
+        resultIndex: 1,
+        results: [
+          { isFinal: true, 0: { transcript: "bé đi", confidence: 0.1 } },
+          { isFinal: false, 0: { transcript: "học" } },
+        ],
+      });
+      view.result.current.pause();
+    });
+    expect(view.result.current.previewWords.size).toBe(0);
+  });
+
+  it("does not turn a rejected middle fragment into a missing lyric", async () => {
+    const view = mount();
+    const capture = await startSinging(view);
+    act(() => sing(capture, 0, 1000, "bé"));
+    act(() => {
+      mediaMs = 1000;
+      capture.onspeechstart?.();
+      mediaMs = 1200;
+      capture.onspeechend?.();
+      capture.onresult?.({
+        resultIndex: 1,
+        results: [
+          { isFinal: true, 0: { transcript: "bé" } },
+          { isFinal: true, 0: { transcript: "đi", confidence: 0.1 } },
+        ],
+      });
+      capture.onspeechstart?.();
+      mediaMs = 3000;
+      capture.onspeechend?.();
+      capture.onresult?.({
+        resultIndex: 2,
+        results: [
+          { isFinal: true, 0: { transcript: "bé" } },
+          { isFinal: true, 0: { transcript: "đi", confidence: 0.1 } },
+          { isFinal: true, 0: { transcript: "học" } },
+        ],
+      });
+    });
+    expect(
+      view.result.current.liveScore?.lineScores[0].words.map((w) => w.state),
+    ).toEqual(["matched", "unknown", "matched"]);
   });
 
   it("settles permission once, and discards callbacks from the probe after playback starts", async () => {
