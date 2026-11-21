@@ -1,5 +1,20 @@
 # Execution Progress & Checkpoints
 
+## Checkpoint — M2 AI Correction & Ollama Hardening Complete (2026-11-21)
+
+- **Done:**
+  - Fixed Gemini HTTP error reporting (`upstream_status_code` preserved on all non-200 responses).
+  - Added Ollama 400/422 JSON-mode fallback retry with explicit schema contract (`ollama_provider.py` & `book_quality_ollama.py`).
+  - Added cloud timeout budget reservation in `OcrCorrectionOrchestrator` so slow/hung cloud providers cannot starve local Ollama fallback.
+  - Fixed Vietnamese repeated-word diacritic/d-đ validation in `validators.py` while keeping cross-word reorder and exact token-swap detection strict.
+  - Fixed multi-chunk `chunk_prompt` & `admin_ocr_local._prompt` to emit 0-based chunk-local indices matching `response_json_schema` and `validators.py`.
+  - Fixed `book_quality_ollama.py` double-escaped `\\n`/`\\t`, added `"think": False`, `trust_env=False`, `follow_redirects=False`, and JSON-mode fallback.
+  - Verified **58/58** mocked unit tests (`test_admin_ocr_multimodel`, `test_admin_ocr_local_provider`, `test_book_content_quality`) AND **2/2** real local Ollama fallback tests (`test_admin_ai_real_ollama_live`, 28.57s warm against `http://127.0.0.1:11434`, zero paid cloud calls).
+- **In Progress:** Starting M3 (Workflow Persistence, Child Safety Completeness, Text vs Image Separation).
+- **Next:** Write M3 failing TDD tests, implement Child Safety + Worker + Manual Image Safety review + Dutch UI fix, run targeted & regression tests, commit M3.
+- **Bugs Closed:** BUG-06, BUG-10.
+- **Self-Critique (Vòng D):** Checked repeated 400 fallback failure, single-token uncertain chunk, `\r\n` boundaries, multi-chunk cloud budget depletion, and NFD/Đ accent folding.
+
 ## Checkpoint — M1 Discovery & Isolation Setup (2026-11-21)
 
 - **Done:**

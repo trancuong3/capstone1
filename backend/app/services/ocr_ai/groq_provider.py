@@ -7,7 +7,7 @@ import httpx
 
 from app.services.admin_ocr_chunking import OcrTextChunk
 from app.services.ocr_ai.exceptions import OcrProviderError
-from app.services.ocr_ai.prompts import SYSTEM_PROMPT, chunk_prompt
+from app.services.ocr_ai.prompts import SYSTEM_PROMPT, chunk_prompt, json_output_contract
 from app.services.ocr_ai.schemas import ChunkCorrectionResult
 from app.services.ocr_ai.validators import decode_and_validate_content
 
@@ -41,17 +41,7 @@ class GroqOcrProvider:
         image_mime_type: str,
     ) -> ChunkCorrectionResult:
         image_data = base64.b64encode(image_bytes).decode("ascii")
-        output_contract = (
-            "\n\nOUTPUT JSON CONTRACT:\n"
-            "Return exactly one JSON object with exactly these fields: "
-            '"chunk_id" (integer), "corrected_words" (array of strings), '
-            'and "uncertain_word_indices" (array of zero-based integers). '
-            f'"chunk_id" must be {chunk.chunk_id}. '
-            f'"corrected_words" must contain exactly {chunk.expected_word_count} '
-            "strings, one for each SOURCE WORD in the same order. "
-            "Use an empty uncertain_word_indices array when all words are certain. "
-            "Do not include markdown or any extra fields."
-        )
+        output_contract = json_output_contract(chunk)
         payload = {
             "model": self.model,
             "temperature": 0,

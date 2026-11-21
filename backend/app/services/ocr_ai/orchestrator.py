@@ -115,6 +115,8 @@ class OcrCorrectionOrchestrator:
         except LocalCorrectionError as exc:
             raise OcrOrchestrationError("SOURCE_IMAGE_UNAVAILABLE") from exc
 
+        deadline = time.monotonic() + float(self.config.total_timeout_seconds)
+
         async def run() -> str:
             corrected_by_chunk: dict[int, tuple[str, ...]] = {}
             disabled_families: set[str] = set()
@@ -132,6 +134,7 @@ class OcrCorrectionOrchestrator:
                     chunk=chunk,
                     crop=crop,
                     disabled_families=disabled_families,
+                    deadline=deadline,
                     on_provider_event=on_provider_event,
                     on_uncertain_tokens=on_uncertain_tokens,
                 )
@@ -148,9 +151,48 @@ class OcrCorrectionOrchestrator:
         except asyncio.TimeoutError as exc:
             raise OcrOrchestrationError("DOCUMENT_TIMEOUT") from exc
 
+    @staticmethod
+    def _is_local_provider(provider: OcrCorrectionProvider) -> bool:
+        return provider.family == "ollama" or provider.name.lower().startswith("ollama")
+
+    def _cloud_attempt_timeout(
+        self,
+        *,
+        provider: OcrCorrectionProvider,
+        disabled_families: set[str],
+        deadline: float | None,
+    ) -> float | None:
+        if deadline is None or self._is_local_provider(provider):
+            return None
+        current_index = self.providers.index(provider)
+        remaining_after = [
+            candidate
+            for candidate in self.providers[current_index:]
+            if candidate.family not in disabled_families
+        ]
+        has_local_fallback = any(
+            self._is_local_provider(candidate) for candidate in remaining_after
+        )
+        if not has_local_fallback:
+            return float(self.config.cloud_timeout_seconds)
+        remaining_cloud = [
+            candidate
+            for candidate in remaining_after
+            if not self._is_local_provider(candidate)
+        ]
+        local_reserve = min(
+            float(self.config.local.timeout_seconds),
+            float(self.config.total_timeout_seconds) * 0.5,
+        )
+        cloud_remaining = (deadline - local_reserve) - time.monotonic()
+        if cloud_remaining <= 0:
+            return 0.0
+        per_provider_share = cloud_remaining / max(1, len(remaining_cloud))
+        return min(float(self.config.cloud_timeout_seconds), per_provider_share)
+
     async def _correct_chunk(
-        self, *, chunk_id, chunk, crop, disabled_families, on_provider_event=None,
-        on_uncertain_tokens=None,
+        self, *, chunk_id, chunk, crop, disabled_families, deadline=None,
+        on_provider_event=None, on_uncertain_tokens=None,
     ):
         attempted = False
         has_valid_response = False
@@ -161,7 +203,7 @@ class OcrCorrectionOrchestrator:
         for provider in self.providers:
             if provider.family in disabled_families:
                 continue
-            is_local = provider.family == "ollama" or provider.name.lower().startswith("ollama")
+            is_local = self._is_local_provider(provider)
             # Uncertainty is not provider unavailability. Once a cloud model
             # has returned a schema-valid answer, unresolved words stay for
             # Admin review after the remaining cloud providers are tried.
@@ -194,11 +236,33 @@ class OcrCorrectionOrchestrator:
                 retry_count=max(0, attempt_number),
             )
             try:
-                result = await provider.correct_chunk(
+                cloud_timeout = self._cloud_attempt_timeout(
+                    provider=provider,
+                    disabled_families=disabled_families,
+                    deadline=deadline,
+                )
+                if cloud_timeout is not None and cloud_timeout <= 0:
+                    raise OcrProviderError(
+                        provider=provider.name,
+                        code="PROVIDER_TIMEOUT",
+                        status_code=504,
+                    )
+                coro = provider.correct_chunk(
                     chunk=request_chunk,
                     image_bytes=crop,
                     image_mime_type="image/jpeg",
                 )
+                if cloud_timeout is not None:
+                    try:
+                        result = await asyncio.wait_for(coro, timeout=cloud_timeout)
+                    except asyncio.TimeoutError as exc:
+                        raise OcrProviderError(
+                            provider=provider.name,
+                            code="PROVIDER_TIMEOUT",
+                            status_code=504,
+                        ) from exc
+                else:
+                    result = await coro
             except OcrProviderError as exc:
                 if exc.disables_family:
                     disabled_families.add(provider.family)

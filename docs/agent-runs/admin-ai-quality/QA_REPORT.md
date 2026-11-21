@@ -26,4 +26,6 @@
 - Cloud API keys: Present in local `backend/.env` (never logged; paid cloud calls NOT executed without explicit approval).
 
 ## 2. Milestone Verification Log
-*(Updated at each milestone completion with exact commands and pass/fail/skip counts.)*
+- **M2 (AI Correction & Ollama):**
+  - `unittest test_admin_ocr_multimodel test_admin_ocr_local_provider test_book_content_quality` -> **58 passed, 0 failed, 0 skipped** (1.15s).
+  - `RUN_REAL_OLLAMA_TESTS=1 unittest -v test_admin_ai_real_ollama_live` -> **2 passed, 0 failed, 0 skipped** (28.57s warm; real local Ollama `qwen3-vl:4b-instruct-q4_K_M` at `http://127.0.0.1:11434`, simulated cloud 429/503, zero paid cloud API calls).

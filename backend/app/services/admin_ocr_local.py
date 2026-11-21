@@ -192,7 +192,10 @@ def _response_schema(word_count: int) -> dict[str, object]:
 
 
 def _prompt(chunk: OcrTextChunk) -> str:
-    source_words = [{"index": token.index, "text": token.text} for token in chunk.tokens]
+    source_words = [
+        {"index": local_index, "text": token.text}
+        for local_index, token in enumerate(chunk.tokens)
+    ]
     return (
         "Bạn là hệ thống kiểm tra và sửa lỗi OCR tiếng Việt từ ảnh vùng trang. "
         "IMAGE là bằng chứng trực quan; chỉ sửa lỗi có bằng chứng rõ ràng. "
