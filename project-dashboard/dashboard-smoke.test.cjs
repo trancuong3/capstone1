@@ -50,12 +50,24 @@ function boot(options={}) {
     if(options.fail)return {ok:false,status:503};
     return {ok:true,status:200,json:async()=>data};
   }
-  const document={getElementById,querySelectorAll:()=>[],addEventListener(){},hidden:false};
+  const downloads=[],blobs=new Map();
+  let sequence=0;
+  const URL={
+    createObjectURL(blob){const key="blob:testing/"+(++sequence);blobs.set(key,blob);return key;},
+    revokeObjectURL(key){blobs.delete(key);}
+  };
+  const document={
+    getElementById,querySelectorAll:()=>[],addEventListener(){},hidden:false,
+    body:{appendChild(){}},
+    createElement(){return {
+      href:"",download:"",click(){downloads.push(blobs.get(this.href));},remove(){}
+    };}
+  };
   const window={ViReadRoadmapCore:core,scrollTo(){}};
-  const sandbox={document,window,ViReadRoadmapCore:core,localStorage,fetch,
+  const sandbox={document,window,ViReadRoadmapCore:core,localStorage,fetch,Blob,URL,
     setInterval(){},clearTimeout(){},setTimeout(){},console};
   vm.runInNewContext(script,sandbox,{timeout:3000});
-  return {nodes,store,handlers,fetchCalls,element:getElementById};
+  return {nodes,store,handlers,fetchCalls,downloads,element:getElementById};
 }
 async function flush(){await new Promise(resolve=>setImmediate(resolve));}
 
@@ -119,4 +131,44 @@ test("stale but valid published snapshot is clearly labelled",async()=>{
   await flush();
   assert.match(app.element("roadmapSyncNotice").textContent,/snapshot đã quá 2 giờ/);
   assert.match(app.element("roadmapSyncNotice").textContent,/Không phải thời gian thực/);
+});
+
+test("UI exports note-only localStorage backup and re-imports it without losing shared tasks",async()=>{
+  const original={note:"Lưu ghi chú thử nghiệm tiếng Việt"};
+  const app=boot({storage:{"viread-project-hub-v1":JSON.stringify(original)}});
+  await flush();
+  app.handlers.get("exportLocalBtn:click")();
+  assert.equal(app.downloads.length,1);
+  const backup=JSON.parse(await app.downloads[0].text());
+  assert.equal(backup.format,"viread-local-export-v1");
+  assert.equal(backup.legacy.note,original.note);
+  assert.deepEqual(backup.legacy.tasks,[]);
+  assert.equal(backup.sharedSnapshot.tasks.length,14);
+  const json=JSON.stringify(backup);
+  const input={files:[{size:Buffer.byteLength(json),text:async()=>json}],value:"backup.json"};
+  await app.handlers.get("importLocalFile:change")({target:input});
+  assert.match(app.element("toast").textContent,/Đã nhập bản sao/);
+  assert.match(app.element("legacyConflictNotice").textContent,/1 bản đã nhập/);
+  assert.equal(JSON.parse(app.store.get("viread-project-hub-v1")).note,original.note);
+  assert.equal(JSON.parse(app.store.get("viread-roadmap-local-imports-v1")).length,1);
+  assert.equal(app.element("taskTotal").textContent,14);
+  assert.equal(input.value,"");
+});
+test("UI accepts an older exported JSON with legacy.note but no legacy.tasks",async()=>{
+  const original={note:"Ghi chú hiện tại"};
+  const app=boot({storage:{"viread-project-hub-v1":JSON.stringify(original)}});
+  await flush();
+  const historical={format:"viread-local-export-v1",
+    legacy:{note:"Bản lưu cũ"},
+    imports:[],sharedSnapshot:{syncedAt:"2026-11-20T10:00:00Z",tasks:[]}
+  };
+  const json=JSON.stringify(historical);
+  await app.handlers.get("importLocalFile:change")({
+    target:{files:[{size:Buffer.byteLength(json),text:async()=>json}],value:"old.json"}
+  });
+  assert.match(app.element("toast").textContent,/Đã nhập bản sao/);
+  assert.match(app.element("legacyConflictNotice").textContent,/1 bản đã nhập/);
+  assert.equal(JSON.parse(app.store.get("viread-project-hub-v1")).note,original.note);
+  assert.equal(app.element("taskTotal").textContent,14);
+  assert.deepEqual(JSON.parse(app.store.get("viread-roadmap-local-imports-v1"))[0].tasks,[]);
 });

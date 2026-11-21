@@ -85,6 +85,52 @@
     }
     return snapshot;
   }
-  return { parseIssue, reconcileIssues, compareLegacy, validateSnapshot, ROADMAP_IDS };
+  /* Browser-only legacy data adapter. Never modifies live shared Issue status. */
+  function normalizeLocalTasksAndNote(raw, fallbackNote="") {
+    if (!raw || typeof raw!=="object" || Array.isArray(raw)) {
+      throw new Error("Invalid local backup object");
+    }
+    if (raw.tasks!==undefined && !Array.isArray(raw.tasks)) {
+      throw new Error("Invalid local task list");
+    }
+    if (raw.note!==undefined && typeof raw.note!=="string") {
+      throw new Error("Invalid local note");
+    }
+    const tasks=raw.tasks===undefined?[]:raw.tasks;
+    if (!tasks.every(task=>task && typeof task==="object" && !Array.isArray(task) &&
+        typeof task.id==="string")) {
+      throw new Error("Invalid local task entry");
+    }
+    return {...raw,tasks,note:raw.note===undefined?fallbackNote:raw.note};
+  }
+  function makeLocalExport(original, note, imports, sharedSnapshot, exportedAt) {
+    const source=original===null?{}:original;
+    const legacy=normalizeLocalTasksAndNote(source,note);
+    return {
+      format:"viread-local-export-v1",
+      exportedAt,
+      legacy,
+      imports:Array.isArray(imports)?imports:[],
+      sharedSnapshot
+    };
+  }
+  function parseLocalImport(data) {
+    if (!data || typeof data!=="object" || Array.isArray(data)) {
+      throw new Error("Invalid local backup");
+    }
+    if ("format" in data && data.format!=="viread-local-export-v1") {
+      throw new Error("Unknown local backup format");
+    }
+    const source=data.format==="viread-local-export-v1"?data.legacy:data;
+    if (!source || typeof source!=="object" || Array.isArray(source) ||
+        !("tasks" in source) && !("note" in source)) {
+      throw new Error("Missing local tasks or note");
+    }
+    const legacy=normalizeLocalTasksAndNote(source);
+    return {tasks:legacy.tasks,note:legacy.note};
+  }
+  return { parseIssue, reconcileIssues, compareLegacy, validateSnapshot, ROADMAP_IDS,
+    makeLocalExport, parseLocalImport };
+
 
 });
