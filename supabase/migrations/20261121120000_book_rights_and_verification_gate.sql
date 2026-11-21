@@ -136,4 +136,11 @@ begin
     ));
 end $$;
 
+-- 4. Additive metadata columns on books & bookpages used by quality/page-type checks
+alter table public.books
+  add column if not exists expectedpagecount integer;
+
+alter table public.bookpages
+  add column if not exists contenttype varchar(32) not null default 'CONTENT';
+
 commit;
