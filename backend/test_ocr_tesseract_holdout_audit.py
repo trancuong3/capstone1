@@ -38,7 +38,7 @@ def _report() -> dict[str, object]:
             "regressed_words": regressed,
             "other_changed_words": 0,
             "flips_without_positional_truth": 0,
-            "wer_page_directions": {"improved": 4, "unchanged": 6},
+            "wer_page_directions": {"improved": 4, "unchanged": 16},
         }
     return {
         "dataset_case_count": 20,
@@ -159,6 +159,30 @@ class HeldoutAggregateTests(unittest.TestCase):
         result = summarize_holdout_report(report, _audit(), 20)
         self.assertFalse(result["production_deployment_allowed"])
         self.assertNotIn("observed_correct_to_wrong_regressions", result["reason_codes"])
+
+    def test_count_only_report_rejects_inconsistent_flips_and_pages(self):
+        for key, value in (("flipped_words", 13), ("corrected_words", -1)):
+            with self.subTest(key=key):
+                report = _report()
+                report["quality"]["ground_truth_blind_rules"][
+                    "tesseract_line_priority"
+                ][key] = value
+                with self.assertRaises(ValueError):
+                    summarize_holdout_report(report, _audit(), 20)
+        report = _report()
+        report["quality"]["ground_truth_blind_rules"][
+            "tesseract_line_priority"
+        ]["wer_page_directions"]["improved"] = 5
+        with self.assertRaises(ValueError):
+            summarize_holdout_report(report, _audit(), 20)
+
+    def test_invalid_quality_types_do_not_leak_into_aggregate(self):
+        for bad in ("private label", True, None, float("nan"), float("inf")):
+            with self.subTest(bad=bad):
+                report = _report()
+                report["quality"]["baseline_strict"]["micro_cer"] = bad
+                with self.assertRaises(ValueError):
+                    summarize_holdout_report(report, _audit(), 20)
 
     def test_unscorable_flips_propagate_as_risk(self):
         report = _report()
