@@ -56,6 +56,42 @@ Không tải `index.html`, `crops/`, `pages.jsonl`, `.env`, hay bất kỳ
 ảnh gốc nào lên GitHub, ChatGPT hoặc cloud. Chỉ gửi `aggregate.json`
 nếu cần đánh giá số lượt đổi, nhãn sơ bộ và các lỗi.
 
+## Cập nhật trong cùng PR #187: ưu tiên lỗi và báo cáo rủi ro
+
+Báo cáo HTML đã được người dùng chạy thực tế trên Windows: **10/10 ảnh**,
+**18 vị trí** có ít nhất một đề xuất. Theo cách đếm theo vị trí của script,
+chính sách Tesseract line gồm **12 sửa đúng, 3 làm sai từ đúng,
+2 đổi nhưng vẫn sai, 1 chưa căn chỉnh được**. Chính sách xác nhận
+Tesseract + VietOCR crop gồm **3 sửa đúng, 1 sửa sai, 1 chưa rõ**.
+
+- Các đề xuất **regressed** (đang đúng → sai), sau đó **ambiguous**
+  và **changed_other** được xếp trước các đề xuất corrected trong HTML.
+  Trang có regression được hiển thị trước để người dùng xem ít hơn mà
+  vẫn ưu tiên đánh giá rủi ro. Những nhãn này chỉ dựa trên văn bản
+  tham chiếu, **chưa phải kết luận từ ảnh**.
+- Báo cáo `aggregate.json` có thêm `risk_assessment`: số lượt phải
+  kiểm tra, tỉ lệ sửa đúng và sửa sai theo **vị trí**; xuất mã lý do
+  `not_independent_held_out`, `word_boxes_not_verified` cùng lý do
+  có regression và căn chỉnh chưa rõ. Đây là **đánh giá an toàn nghiên
+  cứu, không cấp quyền deploy**; `production_deployment_allowed=false`
+  cho cả các trường hợp không thấy lỗi hồi quy trong bộ ảnh này.
+- Kiểm tra `crop_artifact_count` khớp `distinct_positions` và tệp
+  crop có nội dung trước khi tuyên bố báo cáo `complete=true`.
+  Thiếu ảnh crop sẽ dừng script, không tự mở một gallery thiếu ảnh.
+- Unit tests bổ sung kiểm tra tính toàn vẹn số đếm, dữ liệu lỗi, ảnh
+  cắt bị thiếu và thứ tự ưu tiên sửa sai. **Các test mới cần chạy
+  lại trên Windows**; kết quả lần chạy TASK 13 cũ không chứng minh
+  các commit bổ sung mới đã pass.
+- Không cần merge PR #187 để kiểm thử nhánh: Vercel Hobby đang giới hạn
+  rate deployment và PR vẫn có thể được cập nhật trên cùng head branch.
+  Thay đổi này chỉ là `backend/**` và không cần deploy frontend.
+
+Sau khi `git fetch` và checkout lại nhánh PR #187 ở commit mới nhất,
+chạy lệnh gốc `run_ocr_task13_flip_review.ps1`. Script in thêm phần
+`POSITIONAL REVIEW RISK ASSESSMENT` trong terminal và viết bản
+`aggregate.json` chỉ chứa số đếm trong thư mục private. Không gửi
+HTML, ảnh crop hoặc tham chiếu riêng tư lên bất kỳ dịch vụ nào.
+
 ## Tiêu chí kiểm tra cuối
 
 Báo cáo này hỗ trợ người dùng **đối chứng** các đề xuất với ảnh, không
