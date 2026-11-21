@@ -7,6 +7,7 @@ Exact hashes cannot discover resized/cropped/rephotographed near-duplicates.
 from __future__ import annotations
 
 import hashlib
+import math
 from pathlib import Path
 
 from scripts.ocr_real_photo_benchmark import Case, normalize
@@ -65,6 +66,28 @@ POLICIES = (
 )
 
 
+def _nonnegative_int(value: object) -> int:
+    if type(value) is not int or value < 0:
+        raise ValueError("Invalid integer counter")
+    return value
+
+
+def _quality(quality: object) -> dict[str, int | float]:
+    if not isinstance(quality, dict):
+        raise ValueError("Missing strict quality metrics")
+    result: dict[str, int | float] = {}
+    for key in ("character_edits", "reference_characters", "word_edits", "reference_words"):
+        result[key] = _nonnegative_int(quality.get(key))
+    if result["reference_characters"] == 0 or result["reference_words"] == 0:
+        raise ValueError("Missing reference characters or words")
+    for key in ("micro_cer", "micro_wer"):
+        value = quality.get(key)
+        if type(value) not in (float, int) or not math.isfinite(value) or value < 0:
+            raise ValueError("Invalid micro error rate")
+        result[key] = float(value)
+    return result
+
+
 def summarize_holdout_report(
     ab_report: dict[str, object],
     audit: dict[str, object],
@@ -73,11 +96,11 @@ def summarize_holdout_report(
     """Publish ONLY aggregate numeric diagnostics, never predicted tokens."""
     if type(minimum_pages) is not int or minimum_pages < 1:
         raise ValueError("Invalid minimum page threshold")
-    tested = ab_report.get("dataset_case_count")
-    successful = ab_report.get("successful_cases")
+    tested = _nonnegative_int(ab_report.get("dataset_case_count"))
+    successful = _nonnegative_int(ab_report.get("successful_cases"))
+    failed = _nonnegative_int(ab_report.get("failed_cases"))
     if (
-        type(tested) is not int or type(successful) is not int
-        or tested < minimum_pages or successful > tested
+        tested < minimum_pages or successful + failed != tested
     ):
         raise ValueError("Invalid evaluation case count")
     if not audit.get("exact_overlap_checks_passed") or audit.get("holdout_pages") != tested:
@@ -89,33 +112,36 @@ def summarize_holdout_report(
     candidates = quality.get("ground_truth_blind_rules")
     if not isinstance(original, dict) or not isinstance(candidates, dict):
         raise ValueError("Missing strict A/B quality")
-    safe_baseline = {
-        key: original[key]
-        for key in ("character_edits", "reference_characters", "micro_cer",
-                    "word_edits", "reference_words", "micro_wer")
-    }
+    safe_baseline = _quality(original)
     selected: dict[str, dict[str, object]] = {}
     for name in POLICIES:
         row = candidates.get(name)
         if not isinstance(row, dict) or not isinstance(row.get("quality"), dict):
             raise ValueError("Missing frozen candidate policy")
-        stats = row["quality"]
+        counts = {
+            key: _nonnegative_int(row.get(key))
+            for key in (
+                "flipped_words", "corrected_words", "regressed_words",
+                "other_changed_words", "flips_without_positional_truth",
+            )
+        }
+        if counts["flipped_words"] != sum(
+            value for key, value in counts.items() if key != "flipped_words"
+        ):
+            raise ValueError("Candidate word-flip counts do not reconcile")
+        directions = row.get("wer_page_directions")
+        if not isinstance(directions, dict):
+            raise ValueError("Missing page comparison counts")
+        page_directions = {
+            key: _nonnegative_int(directions.get(key, 0))
+            for key in ("improved", "unchanged", "worsened")
+        }
+        if sum(page_directions.values()) != successful:
+            raise ValueError("Candidate page comparison counts do not reconcile")
         selected[name] = {
-            "quality": {
-                key: stats[key]
-                for key in ("character_edits", "reference_characters", "micro_cer",
-                            "word_edits", "reference_words", "micro_wer")
-            },
-            **{
-                key: row[key] for key in (
-                    "flipped_words", "corrected_words", "regressed_words",
-                    "other_changed_words", "flips_without_positional_truth",
-                )
-            },
-            "wer_page_directions": {
-                direction: int(row["wer_page_directions"].get(direction, 0))
-                for direction in ("improved", "unchanged", "worsened")
-            },
+            "quality": _quality(row["quality"]),
+            **counts,
+            "wer_page_directions": page_directions,
         }
 
     complete = (
