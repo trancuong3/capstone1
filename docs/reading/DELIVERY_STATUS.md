@@ -9,7 +9,7 @@
 | Repo | `https://github.com/trancuong3/capstone1` (remote `origin`) |
 | Worktree / Branch | `F:\c1\capstone1-reading-auto` (`feat/reading-autopilot-20261121`) |
 | Base commit | `aafa3966f75b0d4671eec49ff0b5550668f2d998` (`origin/main` cục bộ) |
-| Delivery code SHA (đã chạy toàn bộ cổng cuối) | `a30a5e0e` (commit kế tiếp chỉ cập nhật tài liệu bàn giao & file bằng chứng này) |
+| Delivery code SHA (đã chạy toàn bộ cổng cuối) | `1306ed7c` (đợt 1: `a30a5e0e`, đợt 2: `4f097c40`, đợt 3: `1306ed7c`; commit kế tiếp chỉ cập nhật tài liệu bàn giao này) |
 | Công việc chưa commit của người dùng | Nằm nguyên vẹn tại `F:\c1\capstone1` (không bị đụng tới). |
 | Python ABI pins | Không thay đổi (`numpy==1.26.4`, `protobuf==3.20.2`, `opencv-python-headless==4.10.0.84`, `pytesseract==0.3.13`). |
 | Chi phí phát sinh | 0 đồng. Không gọi provider trả phí, không gửi email thật (dùng local `.eml` mail sink). |
@@ -160,12 +160,42 @@ npx playwright test --config=playwright.real-data.config.ts test/browser/reading
 2. **Tương tác cảm xúc khi bé đọc sai (`SUBSTITUTE`):**
    - Khi bé đọc sai 1 từ và dừng lại, ứng dụng chỉ chờ timer im lặng `~9.000 ms` rồi nói câu ngắn `"Cô đọc mẫu cho con nhé."` — chưa có phản hồi vỗ về tức thì (~1.4s), chưa phân biệt lỗi dấu thanh / lỗi âm gần / lỗi lúng túng, chưa có hàm đánh vần mẫu từng bước `generateSpokenPhonicsGuide(word)` chuẩn SGK Lớp 1, và chưa có bong bóng nhân vật đồng hành cảm xúc.
 
-### 6.2 Bảng cổng nghiệm thu đợt 3 (G25–G29 — KHÓA trước khi sửa code)
+### 6.2 Bảng cổng nghiệm thu đợt 3 (G25–G29 — Kết quả thực đo trên SHA `1306ed7c`)
 
-| ID | Cổng | Ngưỡng đã khóa (pass nếu) | Kết quả thực đo | Trạng thái | Bằng chứng |
+| ID | Cổng | Ngưỡng đã khóa (pass nếu) | Kết quả thực đo trên SHA `1306ed7c` | Trạng thái | Bằng chứng |
 |---|---|---|---|---|---|
-| G25 | Đánh vần thực chiến Lớp 1 & chịu lỗi biến âm STT (`phonics-spelling.ts`) | `≥ 50` ca test trong `phonics-spelling.test.ts` (đủ vần trước–âm đầu sau `"ê tờ ê tê"`, `"a cờ a ca sắc cá"`, `"ô i ôi tờ ôi tôi"`, `"ơ mờ ơm cờ ơm cơm"`; âm đầu trước–vần sau; lặp/ngập ngừng; biến âm STT `"ê tơ ê tê"`, `"ế tờ ê tê"`): **100%** chấp nhận đánh vần đúng, **0** false-positive trên từ ngoài bài hoặc sai thanh cuối (`"ê tờ ê tề"` cho `"tê"` & `"ma"` đơn lẻ cho `"má"` bị từ chối 100%) | *Đang triển khai* | **PENDING** | `phonics-spelling.test.ts` |
-| G26 | Bộ đệm `SpellingBuffer` liên đoạn, confidence âm đánh vần & đồng bộ `retry mode` | Tách 3–6 gói `isFinal` rời (`"ê"` / `"tờ"` / `"ê"` / `"tê"` trong cửa sổ 6s, kể cả `confidence 0.30–0.49`) không nổ `SUBSTITUTE` đỏ giữa chừng, không bị `isOffTopic` loại; đồng bộ 100% sang `classifyRetryTranscript` (`retry mode`) & `SentenceReinforcementTracker` | *Đang triển khai* | **PENDING** | `phonics-spelling.test.ts`, `retry-word-recognition.test.ts`, `reading-automation-screen.test.tsx` |
-| G27 | An ủi nhiều câu ấm áp tức thì (~1.4s) theo đúng nhóm lỗi khi bé đọc sai | Xóa bỏ im lặng 9s khi bé đọc sai: chờ nhịp tự sửa ngắn `~1.4s` (nếu tự sửa ngay thì không cắt lời); nếu chưa sửa → phát lời an ủi nhiều câu đúng nhóm lỗi (**Nhóm A dấu thanh ≥ 8 mẫu**, **Nhóm B âm gần ≥ 8 mẫu**, **Nhóm C lúng túng ≥ 10 mẫu**), không lặp câu liên tiếp, `EchoGuard` chặn **100%** tiếng cô giáo | *Đang triển khai* | **PENDING** | `empathetic-reading-flow.test.tsx` |
-| G28 | Cô giáo đánh vần mẫu từng bước (`generateSpokenPhonicsGuide`), bong bóng đồng hành & chế độ hướng dẫn | Lần sai 2 phát câu đánh vần từng âm chuẩn SGK Lớp 1 + mẫu chậm `0.75×`; hết lượt (lần 4) khen nỗ lực nhiều câu + lưu `assisted` (không tô xanh lượt đầu) + đọc lại trọn câu; bong bóng đồng hành đồng bộ lời nói không che chữ/không giật layout; cài đặt phụ huynh chọn được **Dịu dàng chi tiết (Lớp 1)** vs **Ngắn gọn (Đọc thạo)** | *Đang triển khai* | **PENDING** | `empathetic-reading-flow.test.tsx`, `reading-automation-settings.test.tsx`, `reading-autopilot.pw.ts` |
-| G29 | Kiểm thử thực chứng toàn diện & không hồi quy G1–G24 trên SHA bàn giao | `eslint .` (0), `tsc --noEmit` (0), `next build --webpack` (0), toàn bộ `vitest tests/reading` PASS, holdout `READING_BENCH_HOLDOUT=1` PASS, Playwright E2E desktop & mobile PASS kèm ảnh chụp bằng chứng mới, backend `pytest` PASS; giữ nguyên toàn bộ cổng G1–G24 PASS | *Đang triển khai* | **PENDING** | `DELIVERY_STATUS.md`, `docs/reading/evidence/` |
+| G25 | Đánh vần thực chiến Lớp 1 & chịu lỗi biến âm STT (`phonics-spelling.ts`) | `≥ 50` ca test trong `phonics-spelling.test.ts` (đủ vần trước–âm đầu sau `"ê tờ ê tê"`, `"a cờ a ca sắc cá"`, `"ô i ôi tờ ôi tôi"`, `"ơ mờ ơm cờ ơm cơm"`; âm đầu trước–vần sau; lặp/ngập ngừng; biến âm STT `"ê tơ ê tê"`, `"ế tờ ê tê"`): **100%** chấp nhận đánh vần đúng, **0** false-positive trên từ ngoài bài hoặc sai thanh cuối (`"ê tờ ê tề"` cho `"tê"` & `"ma"` đơn lẻ cho `"má"` bị từ chối 100%) | **76/76 PASS** trong `phonics-spelling.test.ts` (36 mẫu đánh vần chuẩn SGK & biến âm STT `"ê tờ ê tê"`, `"ê tơ ê tê"`, `"ế tờ ê tê"`, `"ế tợ ề tê"`, `"a cờ a ca sắc cá"`, `"ô i ôi tờ ôi tôi"`, `"ơ mờ ơm cờ ơm cơm"`, `"cờ a ca à sắc cá"` = **100%** chấp nhận; 14 ca từ chối sai thanh cuối `"ê tờ ê tề"`/`"tế"`, từ đơn sai thanh `"ma"`/`"từ"`/`"ờ"`, lặp từ sách `"tê tê tê"` & nhiễu TV = **0 false-positive**). | **PASS** | `phonics-spelling.test.ts` (76/76) |
+| G26 | Bộ đệm `SpellingBuffer` liên đoạn, confidence âm đánh vần & đồng bộ `retry mode` | Tách 3–6 gói `isFinal` rời (`"ê"` / `"tờ"` / `"ê"` / `"tê"` trong cửa sổ 6s, kể cả `confidence 0.30–0.49`) không nổ `SUBSTITUTE` đỏ giữa chừng, không bị `isOffTopic` loại; đồng bộ 100% sang `classifyRetryTranscript` (`retry mode`) & `SentenceReinforcementTracker` | `SpellingBuffer` gom chuẩn xác 4–6 gói `isFinal` rời (`"ê"` → `"tờ"` → `"ê"` → `"tê"` và `"a"` → `"cờ"` → `"a"` → `"ca"` → `"sắc"` → `"cá"`), **0** `SUBSTITUTE` đỏ giữa chừng; hạ ngưỡng `hasUsablePhonicsBrowserConfidence >= 0.28` có kiểm soát riêng cho âm đánh vần (giữ `>= 0.50` cho lời đọc thường); đồng bộ 100% sang `classifyRetryTranscript` / `classifyPracticePhraseTranscript` và `SentenceReinforcementTracker`. Kiểm chứng cả trên RTL & Playwright Chromium thật (`confidence 0.34–0.36`). | **PASS** | `phonics-spelling.test.ts`, `empathetic-reading-flow.test.tsx`, `reading-autopilot.pw.ts` |
+| G27 | An ủi nhiều câu ấm áp tức thì (~1.4s) theo đúng nhóm lỗi khi bé đọc sai | Xóa bỏ im lặng 9s khi bé đọc sai: chờ nhịp tự sửa ngắn `~1.4s` (nếu tự sửa ngay thì không cắt lời); nếu chưa sửa → phát lời an ủi nhiều câu đúng nhóm lỗi (**Nhóm A dấu thanh ≥ 8 mẫu**, **Nhóm B âm gần ≥ 8 mẫu**, **Nhóm C lúng túng ≥ 10 mẫu**), không lặp câu liên tiếp, `EchoGuard` chặn **100%** tiếng cô giáo | Phản hồi vỗ về sau **`~1.4s`** khi bé đọc sai (xóa hoàn toàn im lặng 9s); tự sửa nhanh `< 1.4s` (`"Bé ghế ... mèo nhỏ"`) **không** cắt lời bé; bộ phân loại `classifyReadingMistake` + kho lời thoại đa câu (**8** mẫu Nhóm A `TONE`, **8** mẫu Nhóm B `NEAR_SOUND`, **10** mẫu Nhóm C `GENERAL`), xoay vòng 0 lặp liên tiếp; `EchoGuard` chặn **100%** tiếng cô giáo an ủi & đánh vần mẫu. | **PASS** | `empathetic-reading-flow.test.tsx` (8/8), `e2e-autopilot-empathetic-{desktop,mobile}.png` |
+| G28 | Cô giáo đánh vần mẫu từng bước (`generateSpokenPhonicsGuide`), bong bóng đồng hành & chế độ hướng dẫn | Lần sai 2 phát câu đánh vần từng âm chuẩn SGK Lớp 1 + mẫu chậm `0.75×`; hết lượt (lần 4) khen nỗ lực nhiều câu + lưu `assisted` (không tô xanh lượt đầu) + đọc lại trọn câu; bong bóng đồng hành đồng bộ lời nói không che chữ/không giật layout; cài đặt phụ huynh chọn được **Dịu dàng chi tiết (Lớp 1)** vs **Ngắn gọn (Đọc thạo)** | `generateSpokenPhonicsGuide(word)` tạo hướng dẫn đánh vần chuẩn SGK Lớp 1 (`"tờ... ê... tê!"`, `"cờ... a... ca... sắc... cá!"`, `"ô... i... ôi, tờ... ôi... tôi!"`) phát ở Lần sai 2 kèm mẫu chậm `0.75×`; Lần 4 phát lời khen dũng cảm nhiều câu (**6** mẫu) + `assisted` (không tô xanh) + đọc lại trọn câu; `ReadingCompanionBubble` đồng bộ 4 tâm trạng (`listening/comforting/teaching/celebrating`), **0** che chữ, **0** tràn ngang; cài đặt phụ huynh chọn được **Dịu dàng chi tiết (Lớp 1)** / **Ngắn gọn (Đọc thạo)**. | **PASS** | `empathetic-reading-flow.test.tsx`, `reading-automation-settings.test.tsx` (8/8), `e2e-autopilot-empathetic-{desktop,mobile}.png` |
+| G29 | Kiểm thử thực chứng toàn diện & không hồi quy G1–G24 trên SHA bàn giao | `eslint .` (0), `tsc --noEmit` (0), `next build --webpack` (0), toàn bộ `vitest tests/reading` PASS, holdout `READING_BENCH_HOLDOUT=1` PASS, Playwright E2E desktop & mobile PASS kèm ảnh chụp bằng chứng mới, backend `pytest` PASS; giữ nguyên toàn bộ cổng G1–G24 PASS | `eslint .` (**0 lỗi, 0 cảnh báo**), `tsc --noEmit` (**0 lỗi**), `next build --webpack` (**exit 0**, 38/38 routes), `vitest tests/reading` (**47/47 files, 664 passed, 0 failed**), highlight latency (`p50 = 6.03 ms`, `p95 = 7.19 ms`), holdout `READING_BENCH_HOLDOUT=1` (**3/3 PASS**, 0 false-correct, 0 false-wrong, 0 echo), Playwright E2E desktop & mobile (**12/12 PASS**), backend `pytest` (**248 passed, 86 subtests, 0 failed**). Toàn bộ G1–G24 giữ nguyên PASS. | **PASS** | `DELIVERY_STATUS.md`, `docs/reading/evidence/e2e-autopilot-empathetic-{desktop,mobile}.png` |
+
+### 6.3 Bảng so sánh Trước / Sau (Đợt nâng cấp 3 — SHA `5f0c9d58` → `1306ed7c`)
+
+| Trải nghiệm & Chỉ số | Trước (SHA `5f0c9d58`) | Sau (SHA `1306ed7c`) |
+|---|---|---|
+| Bé đánh vần tách rời 4 gói `"ê"` → `"tờ"` → `"ê"` → `"tê"` hoặc biến âm STT (`"ê tơ ê tê"`, `"ế tờ ê tê"`) | Lọt `pendingToken` nổ `SUBSTITUTE` đỏ giữa chừng hoặc bị loại vì `confidence < 0.50` | **`SpellingBuffer` + chịu lỗi biến âm âm đệm + `confidence >= 0.28`: khớp 100% (76/76 ca test), 0 false-positive trên `"ê tờ ê tề"`** |
+| Bé đánh vần khi luyện lại từ sai (`retry mode`) | Bị chặn `> 4 tokens` (`UNCERTAIN`/`INCORRECT`) | **Chấm ĐẠT (`CORRECT`/`CONFIRMED`) ngay cả khi tách nhiều gói `isFinal`** |
+| Phản hồi khi bé đọc sai 1 từ và dừng lại (`SUBSTITUTE`) | Tô đỏ rồi im lặng **~9.000 ms**, chỉ nói 1 câu khô khan `"Cô đọc mẫu cho con nhé."` | **Chờ nhịp tự sửa `~1.400 ms` (không cắt lời nếu tự sửa) → Vỗ về nhiều câu ấm áp theo đúng nhóm lỗi (`TONE` / `NEAR_SOUND` / `GENERAL`)** |
+| Hướng dẫn khi bé vấp chữ lần 2 | Chỉ phát lại 1 từ đơn ở tốc độ `0.8×` | **Cô giáo đánh vần mẫu từng bước chuẩn SGK Lớp 1 (`generateSpokenPhonicsGuide`) + đọc trơn chậm `0.75×`** |
+| Giao diện đồng hành & tùy chọn phụ huynh | Chưa có nhân vật đồng hành; 1 kiểu nhắc cố định | **`ReadingCompanionBubble` đồng bộ cảm xúc (0 che chữ, 0 tràn ngang) + tùy chọn `Dịu dàng chi tiết (Lớp 1)` / `Ngắn gọn (Đọc thạo)`** |
+| Tổng kiểm thử tự động trên SHA `1306ed7c` | 46 file / 623 Vitest, 10 Playwright E2E | **47 file / 664 Vitest PASS (0 fail), holdout 3/3 PASS, 12/12 Playwright E2E PASS, 248 backend pytest + 86 subtests PASS** |
+
+### 6.4 Lệnh tái lập Đợt 3 (SHA `1306ed7c`)
+
+```powershell
+cd F:\c1\capstone1-reading-auto\frontend
+$env:NODE_OPTIONS="--max-old-space-size=2048"
+npm run lint
+npm run typecheck
+$env:NEXT_PUBLIC_SUPABASE_URL="https://example.supabase.co"
+$env:NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="sb_publishable_test"
+$env:NEXT_PUBLIC_API_URL="http://127.0.0.1:8000"
+npx next build --webpack
+npx vitest run tests/reading --maxWorkers=2
+$env:READING_BENCH_HOLDOUT="1"
+$env:READING_BENCH_OUT_DIR="F:\c1\capstone1-reading-auto\docs\reading\evidence"
+npx vitest run tests/reading/benchmark/alignment-gates.test.ts
+$env:PLAYWRIGHT_ROUTE_FILTER="/reading"
+npx playwright test --config=playwright.real-data.config.ts test/browser/reading-autopilot.pw.ts
+```
