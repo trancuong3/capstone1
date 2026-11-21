@@ -484,6 +484,7 @@ async function installAutopilotSession(
     });
 
     let activeGainNode: GainNode | null = null;
+    let speechPulseTimer: ReturnType<typeof setTimeout> | null = null;
     Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
       configurable: true,
       value: async (constraints?: MediaStreamConstraints) => {
@@ -500,7 +501,18 @@ async function installAutopilotSession(
         activeGainNode = gain;
         const dest = ctx.createMediaStreamDestination();
         osc.frequency.value = 240;
-        gain.gain.value = 0.12;
+        // Realistic room floor (0.0005) during initial calibration, pulsing to
+        // voice level (0.12) so AudioQualityMonitor detects speech cleanly
+        // instead of treating a constant tone as fan noise.
+        gain.gain.value = 0.0005;
+        setTimeout(() => {
+          if (activeGainNode === gain) {
+            gain.gain.value = 0.12;
+            setTimeout(() => {
+              if (activeGainNode === gain) gain.gain.value = 0.0005;
+            }, 260);
+          }
+        }, 210);
         osc.connect(gain);
         gain.connect(dest);
         osc.start();
@@ -527,11 +539,22 @@ async function installAutopilotSession(
         say: (transcript: string, confidence = 0.95) => {
           const active = instances[instances.length - 1];
           if (!active) throw new Error("No active SpeechRecognition instance");
+          if (activeGainNode) {
+            activeGainNode.gain.value = 0.12;
+            if (speechPulseTimer) clearTimeout(speechPulseTimer);
+            speechPulseTimer = setTimeout(() => {
+              if (activeGainNode) activeGainNode.gain.value = 0.0005;
+            }, 220);
+          }
           active.say(transcript, confidence);
         },
         setQuiet: (quiet: boolean) => {
+          if (speechPulseTimer) {
+            clearTimeout(speechPulseTimer);
+            speechPulseTimer = null;
+          }
           if (activeGainNode) {
-            activeGainNode.gain.value = quiet ? 0 : 0.12;
+            activeGainNode.gain.value = quiet ? 0.0005 : 0.12;
           }
         },
         spoken: () => [...spoken],
@@ -1010,6 +1033,9 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
         ),
       )
       .toBe(1);
+
+    // Wait briefly so AudioQualityMonitor completes room-floor + speech onset calibration
+    await page.waitForTimeout(500);
 
     // 1. Child spells out "Tê" across 4 separate low-confidence events ("ê", "tơ", "ê", "tê")
     for (const [chunk, conf] of [
