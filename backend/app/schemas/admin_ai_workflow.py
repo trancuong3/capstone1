@@ -55,6 +55,33 @@ class AdminAiSafetyDecision(BaseModel):
         return value.strip() or None
 
 
+class AdminAiUncertainResolutionRequest(BaseModel):
+    expected_candidate_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    note: str = Field(min_length=1, max_length=500)
+
+    @field_validator("note")
+    @classmethod
+    def normalize_note(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("note must not be blank")
+        return trimmed
+
+
+class AdminAiImageSafetyReviewRequest(BaseModel):
+    status: Literal["MANUAL_REVIEWED_SAFE", "MANUAL_REVIEWED_CONCERN"]
+    note: str = Field(min_length=1, max_length=1000)
+    page_content_type: Literal["CONTENT", "COVER_OR_IMAGE_ONLY"] | None = None
+
+    @field_validator("note")
+    @classmethod
+    def normalize_note(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("note must not be blank")
+        return trimmed
+
+
 class AdminAiWorkflowRead(BaseModel):
     workflow_id: UUID
     page_id: UUID
@@ -67,6 +94,7 @@ class AdminAiWorkflowRead(BaseModel):
     error_code: str | None
     original_ocr_hash: str
     admin_input_hash: str
+    image_hash: str | None = None
     proofread_text: str | None
     proofread_output_hash: str | None
     corrections: list[dict[str, Any]] = Field(default_factory=list)
@@ -87,6 +115,14 @@ class AdminAiWorkflowRead(BaseModel):
     safety_status: Literal[
         "PENDING", "STALE", "PROVISIONAL", "CONFIRMED", "AUTO_CONFIRMED", "FAILED"
     ]
+    image_safety_status: Literal[
+        "NOT_REVIEWED", "MANUAL_REVIEWED_SAFE", "MANUAL_REVIEWED_CONCERN"
+    ] = "NOT_REVIEWED"
+    image_safety_reviewed_at: datetime | None = None
+    image_safety_review_note: str | None = None
+    rights_profile_id: UUID | None = None
+    rights_profile_version: int | None = None
+    rights_profile_hash: str | None = None
     findings: list[dict[str, Any]] = Field(default_factory=list)
     provider_events: list[dict[str, Any]] = Field(default_factory=list)
     ocr_approved_at: datetime | None

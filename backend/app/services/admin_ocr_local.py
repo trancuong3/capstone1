@@ -66,7 +66,7 @@ class LocalOcrConfig:
         return cls(
             base_url=base_url,
             model=model,
-            timeout_seconds=_read_int("LOCAL_OCR_TIMEOUT_SECONDS", 180, 1, 180),
+            timeout_seconds=_read_int("LOCAL_OCR_TIMEOUT_SECONDS", 180, 1, 600),
             total_timeout_seconds=_read_int(
                 "LOCAL_OCR_TOTAL_TIMEOUT_SECONDS", 7200, 1, 14400
             ),

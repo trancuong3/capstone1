@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, SmallInteger, ForeignKey, DateTime, Float, text
+from sqlalchemy import Column, String, SmallInteger, Integer, ForeignKey, DateTime, Float, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -15,6 +15,7 @@ class Book(Base):
     MaxGrade = Column("maxgrade", SmallInteger, nullable=False)
     LifecycleStatus = Column("lifecyclestatus", String, nullable=False)
     CreatedBy = Column("createdby", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"))
+    ExpectedPageCount = Column("expectedpagecount", Integer, nullable=True)
     CreatedAt = Column("createdat", DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     pages = relationship("BookPage", back_populates="book", cascade="all, delete-orphan")
@@ -33,6 +34,7 @@ class BookPage(Base):
     ProcessingMeta = Column("processingmeta", JSONB, server_default=text("'{}'::jsonb"))
     CurrentVerifiedRevisionId = Column("currentverifiedrevisionid", UUID(as_uuid=True), ForeignKey("pagerevisions.id", ondelete="SET NULL"))
     LifecycleStatus = Column("lifecyclestatus", String, nullable=False)
+    ContentType = Column("contenttype", String(32), nullable=False, server_default=text("'CONTENT'"))
     CreatedAt = Column("createdat", DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     book = relationship("Book", back_populates="pages")

@@ -30,10 +30,11 @@ from app.database.integrity import (
     is_book_report_idempotency_violation,
     postgres_integrity_error_metadata,
 )
-from app.models import Book, BookPage, PageRevision, Profile
+from app.models import AdminAiWorkflow, Book, BookPage, PageRevision, Profile
 from app.models.book_content_quality import (
     BookContentReport,
     BookContentReportHistory,
+    BookContentRightsProfile,
     BookQualityFinding,
     BookQualityPageScan,
     BookQualityReportFinding,
@@ -42,7 +43,10 @@ from app.models.book_content_quality import (
 from app.repositories.book_content_quality_repository import (
     BookContentQualityRepository,
 )
-from app.schemas.book_content_quality import BookContentReportCreate
+from app.schemas.book_content_quality import (
+    BookContentReportCreate,
+    BookContentRightsProfileUpsert,
+)
 from app.services.book_content_quality_service import BookContentQualityService
 
 PARENT_ID = uuid4()
@@ -110,6 +114,7 @@ class ParentBookContentQualityPostgresTests(unittest.IsolatedAsyncioTestCase):
                     maxgrade smallint NOT NULL,
                     lifecyclestatus varchar NOT NULL,
                     createdby uuid REFERENCES profiles(id) ON DELETE SET NULL,
+                    expectedpagecount integer,
                     createdat timestamptz NOT NULL DEFAULT now()
                 )
             """))
@@ -125,6 +130,7 @@ class ParentBookContentQualityPostgresTests(unittest.IsolatedAsyncioTestCase):
                     processingmeta jsonb NOT NULL DEFAULT '{}'::jsonb,
                     currentverifiedrevisionid uuid,
                     lifecyclestatus varchar NOT NULL,
+                    contenttype varchar NOT NULL DEFAULT 'CONTENT',
                     createdat timestamptz NOT NULL DEFAULT now()
                 )
             """))
@@ -160,6 +166,8 @@ class ParentBookContentQualityPostgresTests(unittest.IsolatedAsyncioTestCase):
                 BookQualityFinding.__table__,
                 BookQualityReportFinding.__table__,
                 BookContentReportHistory.__table__,
+                BookContentRightsProfile.__table__,
+                AdminAiWorkflow.__table__,
             )
             for table in tables:
                 await connection.run_sync(
@@ -472,6 +480,107 @@ class ParentBookContentQualityPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(secret, body)
         self.assertNotIn("private SQL text", output)
         self.assertNotIn("private SQL text", body)
+
+    async def test_safety_and_copyright_issue_types_and_parent_isolation_in_postgres(self):
+        other_parent_id = uuid4()
+        async with self.sessions() as session:
+            async with session.begin():
+                session.add(
+                    Profile(
+                        Id=other_parent_id,
+                        Role="parent",
+                        DisplayName="Phụ huynh B",
+                        Active=1,
+                    )
+                )
+
+        safety_report = await self._create_report(
+            report_payload(issue_type="CHILD_UNSAFE_CONTENT")
+        )
+        copyright_report = await self._create_report(
+            report_payload(issue_type="COPYRIGHT_CONCERN")
+        )
+        self.assertEqual(safety_report.issue_type, "CHILD_UNSAFE_CONTENT")
+        self.assertEqual(copyright_report.issue_type, "COPYRIGHT_CONCERN")
+
+        # Parent B cannot read Parent A's report (404 / ownership enforced).
+        async with self.sessions() as session:
+            service = BookContentQualityService(BookContentQualityRepository(session))
+            with self.assertRaises(HTTPException) as caught:
+                await service.get_parent_report(other_parent_id, safety_report.id)
+            self.assertEqual(caught.exception.status_code, 404)
+
+    async def test_rights_profile_versioning_and_local_overlap_check_in_postgres(self):
+        admin_id = uuid4()
+        other_book_id = uuid4()
+        shared_text = (
+            "Ngày xưa ở ngôi làng ven sông có một chú mèo nhỏ rất thích đọc sách cùng bạn bè mỗi buổi sáng."
+        )
+        async with self.sessions() as session:
+            async with session.begin():
+                session.add(
+                    Profile(Id=admin_id, Role="admin", DisplayName="Admin Test", Active=1)
+                )
+                session.add(
+                    Book(
+                        Id=other_book_id,
+                        Title="Sách đối chiếu khác",
+                        MinGrade=1,
+                        MaxGrade=3,
+                        LifecycleStatus="ACTIVE",
+                    )
+                )
+            p1, r1 = uuid4(), uuid4()
+            p2, r2 = uuid4(), uuid4()
+            async with session.begin():
+                session.add(
+                    BookPage(
+                        Id=p1, BookId=BOOK_ID, PageNumber=1,
+                        ImagePath="a.png", Width=600, Height=800, LifecycleStatus="ACTIVE",
+                    )
+                )
+                session.add(
+                    BookPage(
+                        Id=p2, BookId=other_book_id, PageNumber=1,
+                        ImagePath="b.png", Width=600, Height=800, LifecycleStatus="ACTIVE",
+                    )
+                )
+                await session.flush()
+                session.add(
+                    PageRevision(
+                        Id=r1, PageId=p1, RevisionNo="1", VerificationStatus="VERIFIED",
+                        VerifiedText=shared_text, DraftText=shared_text, ContentHash="h1",
+                    )
+                )
+                session.add(
+                    PageRevision(
+                        Id=r2, PageId=p2, RevisionNo="1", VerificationStatus="VERIFIED",
+                        VerifiedText=shared_text, DraftText=shared_text, ContentHash="h2",
+                    )
+                )
+                await session.flush()
+                (await session.get(BookPage, p1)).CurrentVerifiedRevisionId = r1
+                (await session.get(BookPage, p2)).CurrentVerifiedRevisionId = r2
+
+        async with self.sessions() as session:
+            service = BookContentQualityService(BookContentQualityRepository(session))
+            created = await service.upsert_rights_profile(
+                admin_id,
+                BOOK_ID,
+                BookContentRightsProfileUpsert(
+                    status="REVIEWED",
+                    source_name="NXB Giáo dục",
+                    rights_holder="ViRead",
+                    usage_basis="WRITTEN_LICENSE",
+                    evidence_reference="HD-01",
+                ),
+            )
+            self.assertEqual(created.profile_version, 1)
+            self.assertEqual(created.status, "REVIEWED")
+
+            overlap = await service.run_rights_corpus_overlap_check(admin_id, BOOK_ID)
+            self.assertEqual(overlap.reference_check_status, "OVERLAP_CONCERN")
+            self.assertGreater(len(overlap.reference_check_evidence), 0)
 
 
 if __name__ == "__main__":

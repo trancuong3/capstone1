@@ -110,12 +110,14 @@ class ChildSafetyError(RuntimeError):
         *,
         output_mode: str | None = None,
         retry_count: int = 0,
+        chunk_id: int | None = None,
     ):
         super().__init__(code)
         self.code = code
         self.provider_events = provider_events
         self.output_mode = output_mode
         self.retry_count = retry_count
+        self.chunk_id = chunk_id
 
 
 def normalize_safety_text(value: str) -> str:
@@ -416,9 +418,29 @@ class ChildSafetyOrchestrator:
         aggregated_suitability = "SUITABLE"
         candidate_hash = content_hash(text)
         deduped: dict[tuple[int, int, str, str], dict[str, Any]] = {}
+        chunks_summary: list[dict[str, Any]] = []
+        scanned_chunks = 0
         for chunk_index, (offset, chunk_text) in enumerate(chunks):
+            events_before = len(events)
             response = await self._analyze_chunk(chunk_text, events, chunk_index)
             suitability, findings = response
+            scanned_chunks += 1
+            used_provider = next(
+                (
+                    ev.get("provider")
+                    for ev in reversed(events[events_before:])
+                    if ev.get("availability") is True
+                ),
+                None,
+            )
+            chunks_summary.append({
+                "chunk_id": chunk_index,
+                "char_start": offset,
+                "char_end": offset + len(chunk_text),
+                "provider": used_provider,
+                "status": "COMPLETED",
+                "finding_count": len(findings),
+            })
             if _SUITABILITY_ORDER[suitability] > _SUITABILITY_ORDER[aggregated_suitability]:
                 aggregated_suitability = suitability
             for finding in findings:
@@ -446,9 +468,15 @@ class ChildSafetyOrchestrator:
             ).hexdigest()[:32]
         return {
             "target": TARGET,
+            "scope": "TEXT",
+            "image_scope": "MANUAL_REVIEW_REQUIRED",
             "status": "PROVISIONAL",
             "suitability": aggregated_suitability,
             "content_hash": candidate_hash,
+            "total_chunks": len(chunks),
+            "scanned_chunks": scanned_chunks,
+            "coverage_complete": scanned_chunks == len(chunks) and len(chunks) > 0,
+            "chunks_summary": chunks_summary,
             "findings": findings,
             "provider_events": events,
         }
@@ -504,7 +532,11 @@ class ChildSafetyOrchestrator:
             ))
             if status_code in {401, 403, 429} or (isinstance(status_code, int) and status_code >= 500):
                 disabled_families.add(provider.family)
-        raise ChildSafetyError(errors[-1] if errors else "NO_PROVIDER_CONFIGURED", events)
+        raise ChildSafetyError(
+            errors[-1] if errors else "NO_PROVIDER_CONFIGURED",
+            events,
+            chunk_id=chunk_id,
+        )
 
     @staticmethod
     def _output_mode(provider: SafetyProvider) -> str:
@@ -643,6 +675,17 @@ class ChildSafetyOrchestrator:
 def build_child_safety_orchestrator(transport: httpx.AsyncBaseTransport | None = None) -> ChildSafetyOrchestrator:
     try:
         config = OcrCorrectionConfig.from_environment()
+    except OcrConfigurationError:
+        raise
+    return ChildSafetyOrchestrator(config, transport=transport)
+
+
+def build_private_book_child_safety_orchestrator(
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ChildSafetyOrchestrator:
+    """Default to local Ollama for private parent book text (no unauthorized cloud export)."""
+    try:
+        config = OcrCorrectionConfig.from_environment_for_private_book()
     except OcrConfigurationError:
         raise
     return ChildSafetyOrchestrator(config, transport=transport)

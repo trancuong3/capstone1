@@ -53,19 +53,91 @@ class AdminAiWorkflowRepository:
         )
 
     async def by_input_snapshot(
-        self, page_id: UUID, revision_id: UUID, input_hash: str
+        self,
+        page_id: UUID,
+        revision_id: UUID,
+        input_hash: str,
+        *,
+        image_hash: str | None = None,
+    ) -> AdminAiWorkflow | None:
+        query = (
+            select(AdminAiWorkflow)
+            .where(
+                AdminAiWorkflow.PageId == page_id,
+                AdminAiWorkflow.PageRevisionId == revision_id,
+                AdminAiWorkflow.AdminInputHash == input_hash,
+                AdminAiWorkflow.Status != "FAILED",
+            )
+            .order_by(AdminAiWorkflow.CreatedAt.desc(), AdminAiWorkflow.Id.desc())
+            .limit(1)
+            .with_for_update()
+        )
+        if image_hash is not None:
+            query = query.where(
+                or_(
+                    AdminAiWorkflow.ImageHash == image_hash,
+                    AdminAiWorkflow.ImageHash.is_(None),
+                )
+            )
+        return await self.db.scalar(query)
+
+    async def active_for_revision(
+        self, page_id: UUID, revision_id: UUID
     ) -> AdminAiWorkflow | None:
         return await self.db.scalar(
             select(AdminAiWorkflow)
             .where(
                 AdminAiWorkflow.PageId == page_id,
                 AdminAiWorkflow.PageRevisionId == revision_id,
-                AdminAiWorkflow.AdminInputHash == input_hash,
+                AdminAiWorkflow.Status.in_(
+                    ("QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING")
+                ),
             )
             .order_by(AdminAiWorkflow.CreatedAt.desc(), AdminAiWorkflow.Id.desc())
             .limit(1)
             .with_for_update()
         )
+
+    async def mark_stale_for_revision(
+        self,
+        page_id: UUID,
+        revision_id: UUID,
+        *,
+        new_text_hash: str,
+        actor_id: UUID,
+        reason: str,
+    ) -> int:
+        rows = list(
+            (
+                await self.db.scalars(
+                    select(AdminAiWorkflow)
+                    .where(
+                        AdminAiWorkflow.PageId == page_id,
+                        AdminAiWorkflow.PageRevisionId == revision_id,
+                        AdminAiWorkflow.OcrApprovedAt.is_(None),
+                    )
+                    .with_for_update()
+                )
+            ).all()
+        )
+        now = datetime.now(timezone.utc)
+        changed = 0
+        for row in rows:
+            if row.CandidateHash == new_text_hash and row.AdminInputHash == new_text_hash:
+                continue
+            row.SafetyStatus = "STALE"
+            row.SafetyConfirmedAt = None
+            row.SafetyConfirmedBy = None
+            row.ReviewEvents = list(row.ReviewEvents or []) + [{
+                "event": "DRAFT_EDITED_INVALIDATED",
+                "actor_id": str(actor_id),
+                "reason": reason,
+                "new_text_hash": new_text_hash,
+                "created_at": now.isoformat(),
+            }]
+            row.UpdatedAt = now
+            changed += 1
+        return changed
 
     async def claim_next(self, worker_id: str, *, lease_seconds: int) -> UUID | None:
         now = datetime.now(timezone.utc)

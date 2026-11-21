@@ -20,7 +20,10 @@ from app.models import (
     PageRevisionWord,
     Profile,
 )
-from app.policies.book_approval import BOOK_APPROVAL_POLICY_VERSION
+from app.policies.book_approval import (
+    BOOK_APPROVAL_POLICY_VERSION,
+    SUPPORTED_BOOK_APPROVAL_POLICY_VERSIONS,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from app.database.role_cache import get_cached_profile_role
 
@@ -298,7 +301,9 @@ class CatalogRepository:
             select(AuditLog.Id).where(
                 AuditLog.Id == latest_book_decision_id,
                 AuditLog.Action == "book.children.approved",
-                AuditLog.Metadata["policy"].as_string() == BOOK_APPROVAL_POLICY_VERSION,
+                AuditLog.Metadata["policy"].as_string().in_(
+                    tuple(sorted(SUPPORTED_BOOK_APPROVAL_POLICY_VERSIONS))
+                ),
                 AuditLog.Metadata["page_snapshot"] == current_snapshot,
             )
         ).correlate(Book)

@@ -15,7 +15,9 @@ from app.repositories.admin_ai_workflow_repository import AdminAiWorkflowReposit
 from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.schemas.admin_ai_workflow import (
     AdminAiCandidateUpdate,
+    AdminAiImageSafetyReviewRequest,
     AdminAiSafetyDecision,
+    AdminAiUncertainResolutionRequest,
     AdminAiWorkflowCreate,
     AdminAiWorkflowRead,
 )
@@ -89,6 +91,14 @@ class AdminAiWorkflowService:
         return findings
 
     @staticmethod
+    def _image_hash(image_path: str, revision_meta: object | None) -> str:
+        if isinstance(revision_meta, dict):
+            stored = revision_meta.get("source_image_sha256")
+            if isinstance(stored, str) and len(stored.strip()) == 64:
+                return stored.strip().lower()
+        return hashlib.sha256(image_path.encode("utf-8")).hexdigest()
+
+    @staticmethod
     def _read(row: AdminAiWorkflow) -> AdminAiWorkflowRead:
         candidate_hash = row.CandidateHash
         safety_hash = row.SafetyInputHash
@@ -114,6 +124,7 @@ class AdminAiWorkflowService:
             error_code=row.ErrorCode,
             original_ocr_hash=row.OriginalOcrHash,
             admin_input_hash=row.AdminInputHash,
+            image_hash=getattr(row, "ImageHash", None),
             proofread_text=row.ProofreadText,
             proofread_output_hash=row.ProofreadOutputHash,
             corrections=list(row.CorrectionSuggestions or []),
@@ -130,6 +141,12 @@ class AdminAiWorkflowService:
             hash_match=bool(candidate_hash and safety_hash and candidate_hash == safety_hash),
             suitability=row.Suitability,
             safety_status=row.SafetyStatus,
+            image_safety_status=getattr(row, "ImageSafetyStatus", None) or "NOT_REVIEWED",
+            image_safety_reviewed_at=getattr(row, "ImageSafetyReviewedAt", None),
+            image_safety_review_note=getattr(row, "ImageSafetyReviewNote", None),
+            rights_profile_id=getattr(row, "RightsProfileId", None),
+            rights_profile_version=getattr(row, "RightsProfileVersion", None),
+            rights_profile_hash=getattr(row, "RightsProfileHash", None),
             findings=findings,
             provider_events=list(row.ProviderEvents or []),
             ocr_approved_at=row.OcrApprovedAt,
@@ -173,10 +190,23 @@ class AdminAiWorkflowService:
             raise HTTPException(status_code=409, detail="Verified OCR revision is no longer current")
         input_text = prepared.draft_text
         input_hash = self._hash(input_text)
+        image_hash = self._image_hash(prepared.image_path, revision.ProcessingMeta)
+        active_existing = await self.repo.active_for_revision(page_id, revision.Id)
+        if (
+            active_existing is not None
+            and active_existing.AdminInputHash == input_hash
+            and (
+                getattr(active_existing, "ImageHash", None) in (None, image_hash)
+                and active_existing.ImagePath == prepared.image_path
+            )
+        ):
+            response = self._read(active_existing)
+            await self.db.rollback()
+            return response
         existing_snapshot = await self.repo.by_input_snapshot(
-            page_id, revision.Id, input_hash
+            page_id, revision.Id, input_hash, image_hash=image_hash
         )
-        if existing_snapshot is not None:
+        if existing_snapshot is not None and existing_snapshot.ImagePath == prepared.image_path:
             response = self._read(existing_snapshot)
             await self.db.rollback()
             return response
@@ -193,6 +223,7 @@ class AdminAiWorkflowService:
             InputText=input_text,
             InputWords=words,
             ImagePath=prepared.image_path,
+            ImageHash=image_hash,
             OriginalOcrHash=self._hash(revision_text),
             AdminInputHash=input_hash,
             Status="QUEUED",
@@ -200,6 +231,7 @@ class AdminAiWorkflowService:
             TotalChunks=prepared.total_chunks,
             CompletedChunks=0,
             SafetyStatus="PENDING",
+            ImageSafetyStatus="NOT_REVIEWED",
             CreatedAt=now,
             UpdatedAt=now,
         )
@@ -436,6 +468,81 @@ class AdminAiWorkflowService:
             "actor_id": str(actor_id),
             "candidate_hash": row.CandidateHash,
             "reason": payload.reason,
+            "created_at": now.isoformat(),
+        }]
+        row.UpdatedAt = now
+        await self.db.commit()
+        await self.db.refresh(row)
+        return self._read(row)
+
+    async def resolve_uncertain_words(
+        self,
+        actor_id: UUID,
+        page_id: UUID,
+        workflow_id: UUID,
+        payload: AdminAiUncertainResolutionRequest,
+    ) -> AdminAiWorkflowRead:
+        await AdminOcrService(self.db).require_admin(actor_id)
+        row = await self.repo.get(workflow_id, page_id=page_id, lock=True)
+        if row is None:
+            raise HTTPException(status_code=404, detail="AI workflow not found")
+        if payload.expected_candidate_hash != row.CandidateHash:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "CANDIDATE_HASH_MISMATCH",
+                    "message": "Nội dung đã thay đổi; hãy tải lại trước khi xác nhận từ chưa chắc chắn.",
+                },
+            )
+        now = datetime.now(timezone.utc)
+        proofread_meta = dict(row.ProofreadMetadata or {})
+        proofread_meta["uncertain_resolution"] = {
+            "candidate_hash": row.CandidateHash,
+            "resolved_indices": [int(idx) for idx in (row.UncertainWordIndices or [])],
+            "reviewed_by": str(actor_id),
+            "reviewed_at": now.isoformat(),
+            "note": payload.note,
+        }
+        row.ProofreadMetadata = proofread_meta
+        row.ReviewEvents = list(row.ReviewEvents or []) + [{
+            "event": "UNCERTAIN_WORDS_RESOLVED",
+            "actor_id": str(actor_id),
+            "candidate_hash": row.CandidateHash,
+            "uncertain_count": len(row.UncertainWordIndices or []),
+            "note": payload.note,
+            "created_at": now.isoformat(),
+        }]
+        row.UpdatedAt = now
+        await self.db.commit()
+        await self.db.refresh(row)
+        return self._read(row)
+
+    async def review_image_safety(
+        self,
+        actor_id: UUID,
+        page_id: UUID,
+        workflow_id: UUID,
+        payload: AdminAiImageSafetyReviewRequest,
+    ) -> AdminAiWorkflowRead:
+        await AdminOcrService(self.db).require_admin(actor_id)
+        row = await self.repo.get(workflow_id, page_id=page_id, lock=True)
+        if row is None:
+            raise HTTPException(status_code=404, detail="AI workflow not found")
+        now = datetime.now(timezone.utc)
+        if payload.page_content_type is not None:
+            page = await AdminOcrRepository(self.db).page(page_id, lock=True)
+            if page is not None:
+                page.ContentType = payload.page_content_type
+        row.ImageSafetyStatus = payload.status
+        row.ImageSafetyReviewedBy = actor_id
+        row.ImageSafetyReviewedAt = now
+        row.ImageSafetyReviewNote = payload.note
+        row.ReviewEvents = list(row.ReviewEvents or []) + [{
+            "event": "IMAGE_SAFETY_REVIEWED",
+            "actor_id": str(actor_id),
+            "status": payload.status,
+            "image_hash": getattr(row, "ImageHash", None),
+            "note": payload.note,
             "created_at": now.isoformat(),
         }]
         row.UpdatedAt = now

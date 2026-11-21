@@ -12,7 +12,11 @@ import type {
   AdminPageRevisionDetailDTO,
   AdminRevisionSummaryUI,
 } from "@/types/admin";
-import type { AdminAiWorkflowDTO } from "@/lib/api/ocr-review-service";
+import type {
+  AdminAiWorkflowDTO,
+  AdminPageVerificationReadinessDTO,
+} from "@/lib/api/ocr-review-service";
+import type { BookContentRightsProfileDTO } from "@/types/book-content-quality";
 
 export const ADMIN_BOOK_ID = "81000000-0000-4000-8000-000000000001";
 export const ADMIN_PAGE_ID = "83000000-0000-4000-8000-000000000001";
@@ -31,6 +35,7 @@ const workflowFixture: AdminAiWorkflowDTO = {
   error_code: null,
   original_ocr_hash: "a".repeat(64),
   admin_input_hash: "b".repeat(64),
+  image_hash: "e".repeat(64),
   proofread_text: "Nội dung đã sửa bằng AI",
   proofread_output_hash: "c".repeat(64),
   corrections: [],
@@ -47,6 +52,12 @@ const workflowFixture: AdminAiWorkflowDTO = {
   hash_match: true,
   suitability: "SUITABLE",
   safety_status: "PROVISIONAL",
+  image_safety_status: "NOT_REVIEWED",
+  image_safety_reviewed_at: null,
+  image_safety_review_note: null,
+  rights_profile_id: null,
+  rights_profile_version: null,
+  rights_profile_hash: null,
   findings: [],
   provider_events: [],
   ocr_approved_at: null,
@@ -139,6 +150,54 @@ function unavailable() {
   });
 }
 
+const defaultRightsProfileFixture: BookContentRightsProfileDTO = {
+  id: "86000000-0000-4000-8000-000000000001",
+  book_id: ADMIN_BOOK_ID,
+  page_id: null,
+  scope: "BOOK",
+  status: "REVIEWED",
+  source_name: "Nhà xuất bản kiểm thử",
+  rights_holder: "Tác giả kiểm thử",
+  usage_basis: "WRITTEN_LICENSE",
+  evidence_url: "https://example.test/license",
+  evidence_reference: "HD-2026-01",
+  notes: "Đã xác minh giấy phép sử dụng.",
+  source_fingerprint: "f".repeat(64),
+  profile_version: 1,
+  reference_check_status: "NO_MATCH_IN_ALLOWED_CORPUS",
+  reference_check_evidence: [],
+  reviewed_by: "10000000-0000-4000-8000-000000000002",
+  reviewed_by_name: "Test Admin",
+  reviewed_at: createdAt,
+  history: [],
+  updated_at: createdAt,
+};
+
+export function createReadyVerificationReadiness(
+  overrides: Partial<AdminPageVerificationReadinessDTO> = {},
+): AdminPageVerificationReadinessDTO {
+  return {
+    page_id: ADMIN_PAGE_ID,
+    page_revision_id: ADMIN_R2_ID,
+    workflow_id: workflowFixture.workflow_id,
+    ready_to_verify: true,
+    blockers: [],
+    proofreading_status: "COMPLETED",
+    uncertain_word_count: 0,
+    uncertain_resolved: true,
+    child_safety_status: "CONFIRMED",
+    child_safety_scope: "TEXT",
+    child_safety_coverage_complete: true,
+    image_safety_status: "NOT_REVIEWED",
+    image_safety_required: false,
+    page_content_type: "CONTENT",
+    rights_status: "REVIEWED",
+    rights_scope: "BOOK",
+    rights_profile_version: 1,
+    ...overrides,
+  };
+}
+
 function createBookContentQualityServiceFixture() {
   return {
     listReports: vi
@@ -156,6 +215,34 @@ function createBookContentQualityServiceFixture() {
     getBook: vi
       .fn<AdminServices["bookContentQuality"]["getBook"]>()
       .mockRejectedValue(unavailable()),
+    getRightsProfile: vi
+      .fn<AdminServices["bookContentQuality"]["getRightsProfile"]>()
+      .mockResolvedValue(defaultRightsProfileFixture),
+    upsertRightsProfile: vi
+      .fn<AdminServices["bookContentQuality"]["upsertRightsProfile"]>()
+      .mockImplementation(async (bookId, payload, pageId) => ({
+        ...defaultRightsProfileFixture,
+        book_id: bookId,
+        page_id: pageId ?? null,
+        scope: pageId ? "PAGE_OVERRIDE" : "BOOK",
+        status: payload.status,
+        source_name: payload.source_name ?? null,
+        rights_holder: payload.rights_holder ?? null,
+        usage_basis: payload.usage_basis ?? null,
+        evidence_url: payload.evidence_url ?? null,
+        evidence_reference: payload.evidence_reference ?? null,
+        notes: payload.notes ?? null,
+        profile_version: defaultRightsProfileFixture.profile_version + 1,
+      })),
+    runRightsOverlapCheck: vi
+      .fn<AdminServices["bookContentQuality"]["runRightsOverlapCheck"]>()
+      .mockResolvedValue(defaultRightsProfileFixture),
+    updateExpectedPageCount: vi
+      .fn<AdminServices["bookContentQuality"]["updateExpectedPageCount"]>()
+      .mockImplementation(async (bookId, expectedPageCount) => ({
+        book_id: bookId,
+        expected_page_count: expectedPageCount,
+      })),
     decideBook: vi
       .fn<AdminServices["bookContentQuality"]["decideBook"]>()
       .mockRejectedValue(unavailable()),
@@ -330,6 +417,55 @@ export function createAdminServiceFixture() {
           status: "QUEUED",
           stage: "CHILD_SAFETY_SCANNING",
         }),
+      getVerificationReadiness: vi
+        .fn<AdminServices["ocr"]["getVerificationReadiness"]>()
+        .mockImplementation(async (pageId, revisionId, workflowId) =>
+          createReadyVerificationReadiness({
+            page_id: pageId,
+            page_revision_id: revisionId,
+            workflow_id: workflowId ?? null,
+            ready_to_verify: Boolean(workflowId),
+            blockers: workflowId
+              ? []
+              : [
+                  {
+                    code: "PROOFREADING_REQUIRED",
+                    stage: "PROOFREADING",
+                    message:
+                      "Cần chạy AI chỉnh sửa và rà chính tả cho revision này trước khi xác minh.",
+                  },
+                ],
+            proofreading_status: workflowId ? "COMPLETED" : "NOT_STARTED",
+            child_safety_status: workflowId ? "CONFIRMED" : "NOT_STARTED",
+          }),
+        ),
+      resolveUncertainWords: vi
+        .fn<AdminServices["ocr"]["resolveUncertainWords"]>()
+        .mockImplementation(async (_pageId, _workflowId, _hash, note) => ({
+          ...workflowFixture,
+          uncertain_word_indices: [],
+          review_history: [
+            {
+              event: "UNCERTAIN_WORDS_RESOLVED",
+              note,
+              created_at: createdAt,
+            },
+          ],
+        })),
+      reviewImageSafety: vi
+        .fn<AdminServices["ocr"]["reviewImageSafety"]>()
+        .mockImplementation(async (_pageId, _workflowId, status, note) => ({
+          ...workflowFixture,
+          image_safety_status: status,
+          image_safety_reviewed_at: createdAt,
+          image_safety_review_note: note,
+        })),
+      updatePageContentType: vi
+        .fn<AdminServices["ocr"]["updatePageContentType"]>()
+        .mockImplementation(async (pageId, contentType) => ({
+          page_id: pageId,
+          content_type: contentType,
+        })),
     },
     revisions: {
       list: vi

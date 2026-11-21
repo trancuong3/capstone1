@@ -11,6 +11,7 @@ from app.models.reading_comparison_report import ReadingComparisonReport
 from app.models.book_content_quality import (
     BookContentReport,
     BookContentReportHistory,
+    BookContentRightsProfile,
     BookQualityFinding,
     BookQualityPageScan,
     BookQualityReportFinding,

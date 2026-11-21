@@ -11,16 +11,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_parent_id, get_db
 from app.repositories.book_content_quality_repository import BookContentQualityRepository
 from app.schemas.book_content_quality import (
-    BookQualityBookDecisionRead,
-    BookQualityBookDecisionRequest,
+    BookContentIssueType,
     BookContentReportCreate,
     BookContentReportDetail,
     BookContentReportPage,
     BookContentReportStatusUpdate,
+    BookContentRightsProfileRead,
+    BookContentRightsProfileUpsert,
+    BookExpectedPageCountUpdate,
+    BookQualityBookDecisionRead,
+    BookQualityBookDecisionRequest,
     BookQualityBookDetail,
     BookQualityBookPage,
     BookQualityFindingRead,
     BookQualityFindingUpdate,
+    BookQualityIssueFilter,
     BookQualityScanDetail,
     BookQualityScanRead,
 )
@@ -72,10 +77,8 @@ async def get_my_book_report(
 @router.get("/admin/quality/reports")
 async def list_admin_book_reports(
     report_status: Literal["OPEN", "UNDER_REVIEW", "RESOLVED", "REJECTED"] | None = Query(default=None, alias="status"),
-    issue_type: Literal[
-        "BOOK_METADATA_ERROR", "SPELLING_ERROR", "MISSING_CONTENT", "OCR_MISMATCH",
-        "IMAGE_QUALITY_ERROR", "DUPLICATE_PAGE", "PAGE_ORDER_ERROR", "OTHER",
-    ] | None = Query(default=None),
+    issue_type: BookContentIssueType | None = Query(default=None),
+    scope: Literal["BOOK", "PAGE"] | None = Query(default=None),
     book_id: UUID | None = Query(default=None),
     search: str | None = Query(default=None, max_length=120),
     created_after: datetime | None = Query(default=None),
@@ -89,6 +92,7 @@ async def list_admin_book_reports(
         actor_id,
         status=report_status,
         issue_type=issue_type,
+        scope=scope,
         book_id=book_id,
         search=search,
         created_after=created_after,
@@ -128,6 +132,7 @@ async def list_admin_quality_books(
         "PUBLISHED", "APPROVED_BY_ADMIN", "REJECTED_FOR_CHILDREN", "STALE",
     ] | None = Query(default=None),
     alert_filter: Literal["CHILD_SAFETY", "COPYRIGHT", "BOTH"] | None = Query(default=None),
+    issue_filter: BookQualityIssueFilter | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     actor_id: UUID = Depends(get_current_parent_id),
@@ -140,6 +145,7 @@ async def list_admin_quality_books(
         offset=offset,
         status_filter=approval_status,
         alert_filter=alert_filter,
+        issue_filter=issue_filter,
     )
 
 
@@ -150,6 +156,57 @@ async def get_admin_quality_book(
     db: AsyncSession = Depends(get_db),
 ):
     return await _service(db).get_book_detail(actor_id, book_id)
+
+
+@router.get(
+    "/admin/quality/books/{book_id}/rights-profile",
+    response_model=BookContentRightsProfileRead,
+)
+async def get_admin_book_rights_profile(
+    book_id: UUID,
+    page_id: UUID | None = Query(default=None),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _service(db).get_rights_profile(actor_id, book_id, page_id=page_id)
+
+
+@router.put(
+    "/admin/quality/books/{book_id}/rights-profile",
+    response_model=BookContentRightsProfileRead,
+)
+async def upsert_admin_book_rights_profile(
+    book_id: UUID,
+    payload: BookContentRightsProfileUpsert,
+    page_id: UUID | None = Query(default=None),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _service(db).upsert_rights_profile(
+        actor_id, book_id, payload, page_id=page_id
+    )
+
+
+@router.post(
+    "/admin/quality/books/{book_id}/rights-profile/overlap-check",
+    response_model=BookContentRightsProfileRead,
+)
+async def run_admin_book_rights_overlap_check(
+    book_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _service(db).run_rights_corpus_overlap_check(actor_id, book_id)
+
+
+@router.patch("/admin/quality/books/{book_id}/expected-page-count")
+async def update_admin_book_expected_page_count(
+    book_id: UUID,
+    payload: BookExpectedPageCountUpdate,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _service(db).update_expected_page_count(actor_id, book_id, payload)
 
 
 @router.post(

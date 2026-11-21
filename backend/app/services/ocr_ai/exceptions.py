@@ -34,6 +34,20 @@ class OcrProviderError(RuntimeError):
 class OcrOrchestrationError(RuntimeError):
     """No provider supplied a safe correction for the current document."""
 
-    def __init__(self, code: str = "ALL_PROVIDERS_FAILED") -> None:
+    def __init__(
+        self,
+        code: str = "ALL_PROVIDERS_FAILED",
+        *,
+        stage: str = "chunk_correction",
+        provider: str | None = None,
+        chunk_id: int | None = None,
+        last_error_code: str | None = None,
+        upstream_status_code: int | None = None,
+    ) -> None:
         super().__init__(code)
         self.code = code
+        self.stage = stage
+        self.provider = provider
+        self.chunk_id = chunk_id
+        self.last_error_code = last_error_code
+        self.upstream_status_code = upstream_status_code
