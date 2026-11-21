@@ -20,6 +20,8 @@ const frontendPort = Number.parseInt(process.env.VIREAD_FRONTEND_PORT || "3000",
 const backendHost = "127.0.0.1";
 const backendPort = Number.parseInt(process.env.VIREAD_BACKEND_PORT || "8000", 10);
 const apiPrefix = (process.env.VIREAD_API_PREFIX || "/_viread_api").replace(/\/+$/, "");
+const supabasePort = Number.parseInt(process.env.VIREAD_SUPABASE_PORT || "0", 10);
+const supabasePrefix = (process.env.VIREAD_SUPABASE_PREFIX || "/_viread_supabase").replace(/\/+$/, "");
 const certPath = process.env.VIREAD_TLS_CERT;
 const keyPath = process.env.VIREAD_TLS_KEY;
 
@@ -59,11 +61,19 @@ function filterHeaders(rawHeaders) {
 const server = https.createServer(tlsOptions, (req, res) => {
   const rawUrl = req.url || "/";
   const isApi = rawUrl === apiPrefix || rawUrl.startsWith(apiPrefix + "/") || rawUrl.startsWith(apiPrefix + "?");
+  const isSupabase =
+    supabasePort > 0 &&
+    (rawUrl === supabasePrefix ||
+      rawUrl.startsWith(supabasePrefix + "/") ||
+      rawUrl.startsWith(supabasePrefix + "?"));
   const targetHost = isApi ? backendHost : frontendHost;
-  const targetPort = isApi ? backendPort : frontendPort;
+  const targetPort = isApi ? backendPort : isSupabase ? supabasePort : frontendPort;
   let targetPath = rawUrl;
   if (isApi) {
     targetPath = rawUrl.slice(apiPrefix.length) || "/";
+    if (targetPath.startsWith("?")) targetPath = "/" + targetPath;
+  } else if (isSupabase) {
+    targetPath = rawUrl.slice(supabasePrefix.length) || "/";
     if (targetPath.startsWith("?")) targetPath = "/" + targetPath;
   }
 

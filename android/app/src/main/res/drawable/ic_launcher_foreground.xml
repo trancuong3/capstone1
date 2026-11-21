@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Strictly within 66x66dp circular & squircle safe zone (radius <= 31dp from center 54,54) -->
+    <path
+        android:fillColor="#D9F4EB"
+        android:pathData="M42,28L66,28A14,14 0 0,1 80,42L80,66A14,14 0 0,1 66,80L42,80A14,14 0 0,1 28,66L28,42A14,14 0 0,1 42,28z" />
+    <!-- Left open-book page -->
+    <path
+        android:fillColor="#FFFAF0"
+        android:strokeColor="#087467"
+        android:strokeWidth="2.6"
+        android:strokeLineJoin="round"
+        android:pathData="M35,40L54,44.5L54,69.5L35,65Z" />
+    <!-- Right open-book page -->
+    <path
+        android:fillColor="#FFFAF0"
+        android:strokeColor="#087467"
+        android:strokeWidth="2.6"
+        android:strokeLineJoin="round"
+        android:pathData="M73,40L54,44.5L54,69.5L73,65Z" />
+    <!-- Subtle book text lines -->
+    <path
+        android:strokeColor="#0F766E"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:pathData="M39.5,49L49.5,51.4M39.5,56.5L49.5,58.9M68.5,49L58.5,51.4M68.5,56.5L58.5,58.9" />
+    <!-- Warm reading highlight dot -->
+    <path
+        android:fillColor="#FFDB70"
+        android:pathData="M54,34m-2.8,0a2.8,2.8 0 1,1 5.6,0a2.8,2.8 0 1,1 -5.6,0" />
+</vector>

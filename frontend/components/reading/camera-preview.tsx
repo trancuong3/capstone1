@@ -1,6 +1,6 @@
 "use client";
 
-import { Sparkles, VideoOff } from "lucide-react";
+import { Camera, FileImage, Play, Sparkles, VideoOff } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -29,7 +29,10 @@ interface CameraPreviewProps {
     confidence: number,
   ) => void;
   onCameraUnavailable?: () => void;
+  onPickDeviceImage?: () => void;
 }
+
+const AUTO_SCAN_COOLDOWN_MS = 1800;
 
 export function CameraPreview({
   children,
@@ -38,11 +41,13 @@ export function CameraPreview({
   onPageDetected,
   onBookPageDetected,
   onCameraUnavailable,
+  onPickDeviceImage,
 }: CameraPreviewProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const mountedRef = useRef(false);
   const scanAbortRef = useRef<AbortController | null>(null);
+  const scanInFlightRef = useRef(false);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const cameraRequestRef = useRef<Promise<MediaStream> | null>(null);
   const cameraEffectCountRef = useRef(0);
@@ -51,6 +56,8 @@ export function CameraPreview({
 
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraDenied, setCameraDenied] = useState(false);
+  const [cameraSuspended, setCameraSuspended] = useState(false);
+  const [cameraSessionNonce, setCameraSessionNonce] = useState(0);
   const [isScanning, setIsScanning] = useState(false);
   const [autoScan, setAutoScan] = useState(true);
   const [scanResult, setScanResult] = useState<CameraPageMatchDTO | null>(null);
@@ -61,6 +68,7 @@ export function CameraPreview({
       mountedRef.current = false;
       scanAbortRef.current?.abort();
       scanAbortRef.current = null;
+      scanInFlightRef.current = false;
     };
   }, []);
 
@@ -82,25 +90,51 @@ export function CameraPreview({
     if (mountedRef.current) setCameraReady(false);
   }, []);
 
+  const resumeCamera = useCallback(() => {
+    cameraSuspendedRef.current = false;
+    setCameraSuspended(false);
+    setCameraDenied(false);
+    setAutoScan(true);
+    setCameraSessionNonce((prev) => prev + 1);
+  }, []);
+
   useEffect(() => {
     if (!enableScanner) {
       cameraSuspendedRef.current = false;
       return;
     }
     if (cameraSuspendedRef.current) return;
+
     let active = true;
     cameraEffectCountRef.current += 1;
 
     let request = cameraRequestRef.current;
     if (!request) {
-      request = navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      });
+      if (!navigator.mediaDevices?.getUserMedia) {
+        request = Promise.reject(new Error("Camera API unavailable"));
+      } else {
+        request = navigator.mediaDevices
+          .getUserMedia({
+            video: {
+              facingMode: { ideal: "environment" },
+              width: { ideal: 1920 },
+              height: { ideal: 1440 },
+            },
+            audio: false,
+          })
+          .catch((err: unknown) => {
+            if (
+              err instanceof DOMException &&
+              err.name === "OverconstrainedError"
+            ) {
+              return navigator.mediaDevices.getUserMedia({
+                video: { facingMode: { ideal: "environment" } },
+                audio: false,
+              });
+            }
+            throw err;
+          });
+      }
       cameraRequestRef.current = request;
     }
 
@@ -110,11 +144,7 @@ export function CameraPreview({
           cameraRequestRef.current = null;
         }
         if (!active || !mountedRef.current || cameraSuspendedRef.current) {
-          if (cameraSuspendedRef.current) {
-            acquiredStream.getTracks().forEach((track) => track.stop());
-            return;
-          }
-          if (cameraEffectCountRef.current === 0) {
+          if (cameraSuspendedRef.current || cameraEffectCountRef.current === 0) {
             acquiredStream.getTracks().forEach((track) => track.stop());
           }
           return;
@@ -129,6 +159,7 @@ export function CameraPreview({
             if (!active || ignoreCameraEndedRef.current) return;
             scanAbortRef.current?.abort();
             scanAbortRef.current = null;
+            scanInFlightRef.current = false;
             setIsScanning(false);
             setCameraDenied(true);
             stopCamera();
@@ -138,8 +169,12 @@ export function CameraPreview({
         );
 
         if (videoRef.current) videoRef.current.srcObject = acquiredStream;
-        setCameraReady(Boolean(videoTrack && videoTrack.readyState === "live"));
+        setCameraReady(
+          Boolean(videoTrack && videoTrack.readyState === "live") ||
+            acquiredStream.getVideoTracks().length > 0,
+        );
         setCameraDenied(false);
+        setCameraSuspended(false);
       },
       () => {
         if (cameraRequestRef.current === request) {
@@ -160,22 +195,30 @@ export function CameraPreview({
       );
       scanAbortRef.current?.abort();
       scanAbortRef.current = null;
+      scanInFlightRef.current = false;
       if (cameraEffectCountRef.current === 0) stopCamera();
     };
-  }, [enableScanner, onCameraUnavailable, stopCamera]);
+  }, [
+    cameraSessionNonce,
+    enableScanner,
+    onCameraUnavailable,
+    stopCamera,
+  ]);
 
-  // Android native background and browser tab suspension must release camera.
-  // The scanner intentionally requires a fresh user action on resume.
+  // Release camera tracks immediately when Android Activity enters background or tab hides,
+  // while allowing an instant single-tap "Bật lại camera" recovery on return.
   useEffect(() => {
     if (!enableScanner) return;
     const suspend = () => {
       if (cameraSuspendedRef.current) return;
       cameraSuspendedRef.current = true;
       scanAbortRef.current?.abort();
+      scanAbortRef.current = null;
+      scanInFlightRef.current = false;
       setIsScanning(false);
       setAutoScan(false);
+      setCameraSuspended(true);
       stopCamera();
-      onCameraUnavailable?.();
     };
     const onVisibilityChange = () => {
       if (document.visibilityState === "hidden") suspend();
@@ -186,15 +229,17 @@ export function CameraPreview({
       document.removeEventListener("visibilitychange", onVisibilityChange);
       document.removeEventListener("viread:android-background", suspend);
     };
-  }, [enableScanner, onCameraUnavailable, stopCamera]);
+  }, [enableScanner, stopCamera]);
 
   const captureAndScan = useCallback(async () => {
     if (
       !enableScanner ||
       !videoRef.current ||
       !canvasRef.current ||
+      scanInFlightRef.current ||
       isScanning ||
       !cameraReady ||
+      cameraSuspendedRef.current ||
       !mountedRef.current
     ) {
       return;
@@ -203,13 +248,19 @@ export function CameraPreview({
     const video = videoRef.current;
     if (video.readyState < 2) return;
 
+    scanInFlightRef.current = true;
     setIsScanning(true);
     const canvas = canvasRef.current;
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
+    const rawW = video.videoWidth || 1200;
+    const rawH = video.videoHeight || 1600;
+    const maxEdge = 1800;
+    const scale = Math.min(1, maxEdge / Math.max(rawW, rawH));
+    canvas.width = Math.max(1, Math.round(rawW * scale));
+    canvas.height = Math.max(1, Math.round(rawH * scale));
 
     const ctx = canvas.getContext("2d");
     if (!ctx) {
+      scanInFlightRef.current = false;
       setIsScanning(false);
       return;
     }
@@ -220,72 +271,86 @@ export function CameraPreview({
     const controller = new AbortController();
     scanAbortRef.current = controller;
 
-    canvas.toBlob(
-      async (blob) => {
-        if (!mountedRef.current || controller.signal.aborted) return;
-        if (!blob) {
-          if (scanAbortRef.current === controller) {
-            scanAbortRef.current = null;
-            setIsScanning(false);
+    await new Promise<void>((resolve) => {
+      canvas.toBlob(
+        async (blob) => {
+          if (!mountedRef.current || controller.signal.aborted) {
+            resolve();
+            return;
           }
-          return;
-        }
-
-        try {
-          const response = bookId
-            ? await scanCameraFrameForBook(bookId, blob, controller.signal)
-            : await scanCameraFrameGlobal(blob, controller.signal);
-
-          if (!mountedRef.current || controller.signal.aborted) return;
-
-          const resolvedBookId = response.book_id || bookId;
-          if (response.matched) {
-            if (response.matched_page && resolvedBookId) {
-              setScanResult(response);
-              setAutoScan(false);
-              scanAbortRef.current?.abort();
+          if (!blob) {
+            if (scanAbortRef.current === controller) {
               scanAbortRef.current = null;
-              stopCamera();
-              onPageDetected?.(response.matched_page);
-              onBookPageDetected?.(
-                resolvedBookId,
-                response.matched_page,
-                response.confidence,
-              );
-            } else {
-              // A successful match requires both a concrete page and its book.
-              setScanResult({
-                ...response,
-                matched: false,
-                status_code: "LOW_CONFIDENCE",
-                message: response.matched_page
-                  ? "ViRead nhận diện được trang nhưng thiếu thông tin cuốn sách. Ba mẹ hãy căn chỉnh và quét lại nhé."
-                  : "ViRead chưa nhận được thông tin trang sách hợp lệ. Ba mẹ hãy căn chỉnh và quét lại nhé.",
-              });
+              scanInFlightRef.current = false;
+              setIsScanning(false);
             }
-          } else {
-            setScanResult(response);
+            resolve();
+            return;
           }
-        } catch {
-          if (!mountedRef.current || controller.signal.aborted) return;
-          setScanResult({
-            framing_valid: false,
-            matched: false,
-            status_code: "INVALID_IMAGE",
-            message: "Đang kết nối với ViRead. Giữ sách yên trong khung.",
-            confidence: 0,
-            matched_page: null,
-          });
-        } finally {
-          if (mountedRef.current && scanAbortRef.current === controller) {
-            scanAbortRef.current = null;
-            setIsScanning(false);
+
+          try {
+            const response = bookId
+              ? await scanCameraFrameForBook(bookId, blob, controller.signal)
+              : await scanCameraFrameGlobal(blob, controller.signal);
+
+            if (!mountedRef.current || controller.signal.aborted) {
+              resolve();
+              return;
+            }
+
+            const resolvedBookId = response.book_id || bookId;
+            if (response.matched) {
+              if (response.matched_page && resolvedBookId) {
+                setScanResult(response);
+                setAutoScan(false);
+                scanAbortRef.current?.abort();
+                scanAbortRef.current = null;
+                stopCamera();
+                onPageDetected?.(response.matched_page);
+                onBookPageDetected?.(
+                  resolvedBookId,
+                  response.matched_page,
+                  response.confidence,
+                );
+              } else {
+                setScanResult({
+                  ...response,
+                  matched: false,
+                  status_code: "LOW_CONFIDENCE",
+                  message: response.matched_page
+                    ? "ViRead nhận diện được trang nhưng thiếu thông tin cuốn sách. Ba mẹ hãy căn chỉnh và quét lại nhé."
+                    : "ViRead chưa nhận được thông tin trang sách hợp lệ. Ba mẹ hãy căn chỉnh và quét lại nhé.",
+                });
+              }
+            } else {
+              setScanResult(response);
+            }
+          } catch {
+            if (!mountedRef.current || controller.signal.aborted) {
+              resolve();
+              return;
+            }
+            setScanResult({
+              framing_valid: false,
+              matched: false,
+              status_code: "INVALID_IMAGE",
+              message: "Đang kết nối với ViRead. Giữ sách yên trong khung.",
+              confidence: 0,
+              matched_page: null,
+            });
+          } finally {
+            if (mountedRef.current && scanAbortRef.current === controller) {
+              scanAbortRef.current = null;
+              scanInFlightRef.current = false;
+              setIsScanning(false);
+            }
+            resolve();
           }
-        }
-      },
-      "image/jpeg",
-      0.85,
-    );
+        },
+        "image/jpeg",
+        0.88,
+      );
+    });
   }, [
     bookId,
     cameraReady,
@@ -296,19 +361,32 @@ export function CameraPreview({
     stopCamera,
   ]);
 
+  // Sequential non-overlapping auto-scan loop: schedules the next capture ONLY after
+  // any in-flight scan has completed and settled, eliminating overlapping frame spam.
   useEffect(() => {
-    if (!enableScanner || !autoScan || !cameraReady || scanResult?.matched) {
+    if (
+      !enableScanner ||
+      !autoScan ||
+      !cameraReady ||
+      cameraSuspended ||
+      isScanning ||
+      scanResult?.matched
+    ) {
       return;
     }
-    const timer = setInterval(() => {
-      void captureAndScan();
-    }, 2200);
-    return () => clearInterval(timer);
+    const timer = window.setTimeout(() => {
+      if (document.visibilityState !== "hidden") {
+        void captureAndScan();
+      }
+    }, AUTO_SCAN_COOLDOWN_MS);
+    return () => window.clearTimeout(timer);
   }, [
     autoScan,
     cameraReady,
+    cameraSuspended,
     captureAndScan,
     enableScanner,
+    isScanning,
     scanResult?.matched,
   ]);
 
@@ -334,19 +412,21 @@ export function CameraPreview({
   return (
     <section
       aria-label="Khung camera nhận diện trang sách ViRead"
-      className="relative flex w-full flex-col gap-4 rounded-card bg-desk p-4 sm:p-6"
+      className="relative flex w-full flex-col gap-4 rounded-card bg-desk p-3 sm:p-6"
     >
       {/* Thanh trạng thái hướng dẫn bé đặt sách */}
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-cream px-4 py-3">
-        <p className="text-body font-semibold text-ink">
-          {scanResult?.message ??
-            "Đặt trang sách nằm gọn vào trong khung viền bên dưới để bắt đầu nhé!"}
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-cream px-3.5 py-2.5 sm:px-4 sm:py-3">
+        <p className="text-sm font-semibold text-ink sm:text-body">
+          {cameraSuspended
+            ? "Camera đang tạm nghỉ khi bạn rời màn hình. Bấm Bật lại camera để tiếp tục quét."
+            : (scanResult?.message ??
+              "Đặt trang sách dọc gọn vào khung 4 góc bên dưới để nhận diện nhanh nhất.")}
         </p>
 
-        {scanResult && (
+        {scanResult && !cameraSuspended ? (
           <span
             className={cn(
-              "rounded-control px-3 py-1 text-[14px] font-semibold",
+              "rounded-control px-3 py-1 text-xs font-semibold sm:text-[14px]",
               isMatched
                 ? "bg-white text-success-ink"
                 : isFrameValid
@@ -360,21 +440,49 @@ export function CameraPreview({
                 ? "Đã đúng khung · Đang tìm trang…"
                 : "Chưa đúng khung"}
           </span>
-        )}
+        ) : null}
       </div>
 
-      {/* Màn hình Camera & Khung căn chỉnh đặt sách */}
-      <div className="relative aspect-[16/10] w-full overflow-hidden rounded-card bg-ink">
-        {cameraDenied ? (
+      {/* Portrait-first trên điện thoại (aspect-[3/4]), ngang trên màn hình rộng (sm:aspect-[16/10]) */}
+      <div
+        data-testid="scanner-camera-viewport"
+        className="relative aspect-[3/4] w-full overflow-hidden rounded-card bg-ink sm:aspect-[16/10]"
+      >
+        {cameraSuspended ? (
+          <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center text-white">
+            <Camera aria-hidden="true" className="size-11 text-sky" />
+            <p className="text-lg font-extrabold sm:text-[20px]">
+              Camera đã tạm dừng để tiết kiệm pin & bảo mật
+            </p>
+            <p className="max-w-md text-sm text-white/85 sm:text-body">
+              Bấm nút bên dưới để mở lại camera sau ngay lập tức hoặc chọn ảnh
+              trang sách từ máy.
+            </p>
+            <Button
+              className="min-h-12 w-full max-w-[260px]"
+              onClick={resumeCamera}
+            >
+              <Play aria-hidden="true" className="size-4" />
+              Bật lại camera
+            </Button>
+          </div>
+        ) : cameraDenied ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-white">
             <VideoOff aria-hidden="true" className="size-10 text-muted" />
-            <p className="text-[20px] font-semibold">
-              Chưa bật được Camera trên trình duyệt
+            <p className="text-lg font-semibold sm:text-[20px]">
+              Chưa bật được Camera trên thiết bị
             </p>
-            <p className="max-w-md text-body text-white/80">
-              Ba mẹ vui lòng cấp quyền sử dụng Camera trên thanh địa chỉ trình
-              duyệt hoặc chọn trang sách thủ công ở bên dưới nhé.
+            <p className="max-w-md text-sm text-white/80 sm:text-body">
+              Ba mẹ vui lòng cấp quyền sử dụng Camera cho ViRead hoặc dùng nút
+              Chọn ảnh trang sách ở bên dưới nhé.
             </p>
+            <Button
+              className="mt-1 min-h-12 w-full max-w-[260px]"
+              onClick={resumeCamera}
+              variant="secondary"
+            >
+              Thử bật lại camera
+            </Button>
           </div>
         ) : (
           <>
@@ -386,11 +494,11 @@ export function CameraPreview({
               className="h-full w-full object-cover"
             />
 
-            {/* Khung căn chỉnh sách (Framing Guide Overlay) */}
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6 sm:p-10">
+            {/* Khung căn chỉnh sách 4 góc (Portrait-friendly Framing Guide Overlay) */}
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4 sm:p-8">
               <div
                 className={cn(
-                  "relative flex h-[78%] w-[78%] flex-col justify-between rounded-card border-2 border-dashed p-4 transition-colors",
+                  "relative flex h-[86%] w-[86%] flex-col justify-between rounded-card border-2 border-dashed p-3 transition-colors sm:h-[80%] sm:w-[78%] sm:p-4",
                   isMatched
                     ? "border-success-ink bg-white/10"
                     : isFrameValid
@@ -398,28 +506,33 @@ export function CameraPreview({
                       : "border-white/80 bg-black/15",
                 )}
               >
-                {/* 4 góc định vị khung đặt sách */}
-                <div className="flex items-center justify-between">
-                  <span className="rounded-control bg-white/90 px-3 py-1 text-[13px] font-semibold text-ink shadow">
-                    Khung đặt trang sách
+                {/* 4 dấu góc sắc nét định vị trang sách */}
+                <span className="absolute -left-0.5 -top-0.5 size-5 rounded-tl-md border-l-4 border-t-4 border-white" />
+                <span className="absolute -right-0.5 -top-0.5 size-5 rounded-tr-md border-r-4 border-t-4 border-white" />
+                <span className="absolute -bottom-0.5 -left-0.5 size-5 rounded-bl-md border-b-4 border-l-4 border-white" />
+                <span className="absolute -bottom-0.5 -right-0.5 size-5 rounded-br-md border-b-4 border-r-4 border-white" />
+
+                <div className="flex flex-wrap items-center justify-between gap-1.5">
+                  <span className="rounded-control bg-white/92 px-2.5 py-1 text-xs font-bold text-ink shadow">
+                    Khung trang sách
                   </span>
                   {isScanning ? (
-                    <span className="inline-flex items-center gap-1.5 rounded-control bg-primary px-3 py-1 text-[13px] font-semibold text-white shadow">
+                    <span className="inline-flex items-center gap-1.5 rounded-control bg-primary px-2.5 py-1 text-xs font-bold text-white shadow">
                       <Sparkles
                         aria-hidden="true"
-                        className="size-4 animate-spin"
+                        className="size-3.5 animate-spin"
                       />
-                      ViRead đang quét…
+                      Đang quét…
                     </span>
                   ) : null}
                 </div>
 
-                <div className="mx-auto rounded-control bg-black/60 px-4 py-1.5 text-center text-[14px] font-semibold text-white">
+                <div className="mx-auto rounded-control bg-black/65 px-3 py-1.5 text-center text-xs font-semibold text-white sm:text-[14px]">
                   {isMatched
-                    ? `Đã xác nhận khung — Trang ${scanResult?.matched_page?.page_number}`
+                    ? `Đã khớp — Trang ${scanResult?.matched_page?.page_number}`
                     : isFrameValid
-                      ? "Khung hình hợp lệ. Giữ sách yên để nhận diện trang."
-                      : "Căn chỉnh sao cho 4 mép trang sách nằm gọn trong khung"}
+                      ? "Khung hợp lệ · Giữ yên để khớp trang"
+                      : "Canh 4 mép trang sách gọn trong khung"}
                 </div>
               </div>
             </div>
@@ -428,25 +541,37 @@ export function CameraPreview({
         <canvas ref={canvasRef} className="hidden" />
       </div>
 
-      {/* Thanh nút điều khiển Camera */}
-      <div className="flex flex-col gap-4">
+      {/* Thanh nút điều khiển Camera chuẩn thao tác ngón cái trên điện thoại */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Button
-          className="min-h-16 w-full"
-          disabled={!cameraReady || isScanning}
+          className="min-h-14 w-full"
+          disabled={!cameraReady || cameraSuspended || isScanning}
           isLoading={isScanning}
           onClick={() => void captureAndScan()}
         >
-          Xác nhận khung & Quét trang
+          <Camera aria-hidden="true" className="size-5" />
+          Chụp & Quét ngay
         </Button>
 
         <Button
-          className="min-h-16 w-full"
-          disabled={!cameraReady}
+          className="min-h-14 w-full"
+          disabled={!cameraReady || cameraSuspended}
           onClick={() => setAutoScan((prev) => !prev)}
           variant="secondary"
         >
           {autoScan ? "Tự động quét: ĐANG BẬT" : "Tự động quét: ĐANG TẮT"}
         </Button>
+
+        {onPickDeviceImage ? (
+          <Button
+            className="min-h-12 w-full sm:col-span-2"
+            onClick={onPickDeviceImage}
+            variant="secondary"
+          >
+            <FileImage aria-hidden="true" className="size-5" />
+            Chụp bằng Camera máy / Chọn ảnh nét (OCR)
+          </Button>
+        ) : null}
       </div>
     </section>
   );

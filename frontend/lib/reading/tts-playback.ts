@@ -1,4 +1,5 @@
 import type { SpeechService } from "@/lib/api/speech-service";
+import { installAndroidAudioUnlock } from "@/lib/reading/android-audio-unlock";
 import { getSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
 import type {
   TimedSpeech,
@@ -137,7 +138,9 @@ export class TtsPlayback {
   constructor(
     private readonly speech: SpeechService,
     private readonly studio: VoiceStudioService,
-  ) {}
+  ) {
+    installAndroidAudioUnlock();
+  }
 
   handlePreferencesChange = (): void => {
     this.serverRetryAfter = 0;

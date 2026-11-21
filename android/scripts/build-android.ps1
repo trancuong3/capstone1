@@ -62,12 +62,17 @@ try {
     $apkPath = Join-Path $root "app\build\outputs\apk\debug\app-debug.apk"
     if (-not (Test-Path $apkPath)) { throw "Expected APK missing at $apkPath" }
 
-    Write-Host "[3/3] Verifying APK signature and computing SHA-256..."
+    Write-Host "[3/4] Verifying APK signature and computing SHA-256..."
     $apksigner = Join-Path $env:ANDROID_HOME "build-tools\35.0.0\apksigner.bat"
     if (Test-Path $apksigner) {
         & $apksigner verify --verbose --print-certs $apkPath
         if ($LASTEXITCODE -ne 0) { throw "apksigner verification failed (exit $LASTEXITCODE)" }
     }
+
+    Write-Host "[4/4] Running automated APK quality, branding & secret audit..."
+    python (Join-Path $PSScriptRoot "verify_apk_quality.py") $apkPath
+    if ($LASTEXITCODE -ne 0) { throw "APK quality audit failed (exit $LASTEXITCODE)" }
+
     $sha = (Get-FileHash -Algorithm SHA256 -Path $apkPath).Hash.ToLowerInvariant()
     $sizeMb = [math]::Round((Get-Item $apkPath).Length / 1MB, 2)
     Write-Host "Debug APK: $apkPath ($sizeMb MB)"

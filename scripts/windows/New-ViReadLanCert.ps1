@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$LanHost,
     [string]$ExtraDns = "",
+    [string]$ExtraIp = "",
     [string]$RuntimeDir = "F:\c1\viread-host-runtime",
     [switch]$ForceRegenerateLeaf
 )
@@ -84,12 +85,14 @@ if ($needLeaf) {
     if ($LanHost -match "^\d{1,3}(\.\d{1,3}){3}$") {
         $sanEntries.Add("IP.1 = $LanHost")
         $sanEntries.Add("IP.2 = 127.0.0.1")
+        if ($ExtraIp) { $sanEntries.Add("IP.3 = $ExtraIp") }
         $sanEntries.Add("DNS.1 = localhost")
         if ($ExtraDns) { $sanEntries.Add("DNS.2 = $ExtraDns") }
     } else {
         $sanEntries.Add("DNS.1 = $LanHost")
         $sanEntries.Add("DNS.2 = localhost")
         $sanEntries.Add("IP.1 = 127.0.0.1")
+        if ($ExtraIp) { $sanEntries.Add("IP.2 = $ExtraIp") }
         if ($ExtraDns) { $sanEntries.Add("DNS.3 = $ExtraDns") }
     }
 

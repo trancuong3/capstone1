@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="viread_primary">#087467</color>
+    <color name="viread_primary_hover">#07584F</color>
+    <color name="viread_teal">#0F766E</color>
+    <color name="viread_navy">#153A53</color>
+    <color name="viread_surface">#F6FAF8</color>
+    <color name="viread_canvas">#FFFAF0</color>
+    <color name="viread_sky">#D9F4EB</color>
+    <color name="viread_ink">#233E40</color>
+    <color name="viread_muted">#52676B</color>
+    <color name="viread_border">#CEDED8</color>
+    <color name="viread_white">#FFFFFF</color>
+</resources>
