@@ -27,6 +27,7 @@ from app.models import (
     BookRightsEvidence,
     PageRevision,
     PageRevisionWord,
+    ParentBookPageSubmission,
 )
 from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.repositories.reading_content_repository import ReadingContentRepository
@@ -173,6 +174,9 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             await connection.run_sync(
                 lambda sync_connection: BookRightsEvidence.__table__.create(sync_connection)
+            )
+            await connection.run_sync(
+                lambda sync_connection: ParentBookPageSubmission.__table__.create(sync_connection)
             )
             await connection.execute(
                 text("INSERT INTO profiles (id, role) VALUES (:id, 'admin')"),

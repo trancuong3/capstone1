@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import AuditLog, Book, BookPage, PageRevision, Profile
 from app.models.admin_ai_workflow import AdminAiWorkflow
+from app.policies.book_access import is_catalog_book
 from app.models.book_content_quality import (
     BookContentReport,
     BookContentReportHistory,
@@ -226,7 +227,7 @@ class BookContentQualityRepository:
             open_report_count,
             finding_count,
             needs_review_count,
-        )
+        ).where(is_catalog_book())
         if search and search.strip():
             pattern = "%" + search.strip().replace("%", "\\%").replace("_", "\\_") + "%"
             query = query.where(
@@ -960,8 +961,8 @@ class BookContentQualityRepository:
             open_report_count,
             finding_count,
             needs_review_count,
-        )
-        count_query = select(func.count(Book.Id))
+        ).where(is_catalog_book())
+        count_query = select(func.count(Book.Id)).where(is_catalog_book())
         if search and search.strip():
             pattern = "%" + search.strip().replace("%", "\\%").replace("_", "\\_") + "%"
             condition = or_(
