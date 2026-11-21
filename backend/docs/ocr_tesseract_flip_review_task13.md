@@ -92,6 +92,48 @@ chạy lệnh gốc `run_ocr_task13_flip_review.ps1`. Script in thêm phần
 `aggregate.json` chỉ chứa số đếm trong thư mục private. Không gửi
 HTML, ảnh crop hoặc tham chiếu riêng tư lên bất kỳ dịch vụ nào.
 
+## Cập nhật phân tích `index(2).html` — căn chỉnh tối ưu duy nhất
+
+Bản HTML người dùng gửi của TASK 13 gần nhất có 10/10 ảnh, **18**
+vị trí đề xuất, và **3** trường hợp hồi quy trên một ảnh
+`childrens_font`. Bản HTML đã sắp xếp các lỗi hồi quy lên đầu
+trước các đề xuất sửa đúng. Các file ảnh crop không nằm trong tệp
+HTML đã gửi nên hình ảnh và độ chính xác bbox **chưa được kiểm tra độc lập**.
+
+Một vị trí trên trang `low_light` vẫn bị `ambiguous` do trang có
+thêm token OCR ở cuối. Việc đánh dấu toàn bộ trang không thể đối chiếu
+chỉ vì có token thừa là thận trọng nhưng bỏ qua những vị trí vẫn có
+thể căn chỉnh chắc chắn với reference.
+
+Bổ sung module `scripts/ocr_tesseract_alignment.py`: tính khoảng cách
+Levenshtein thuận/ngược giữa **từng token**, cân nhắc **mọi** đường
+căn chỉnh có số phép sửa ít nhất. Một token OCR chỉ được ánh xạ
+sang token tham chiếu khi **tất cả** đường tối ưu đều căn chỉnh token
+OCR đó vào cùng **một** vị trí tham chiếu; nếu tồn tại cách coi nó là
+token thừa, hoặc nhiều vị trí tương đương, bắt buộc giữ
+`ambiguous`. Chẳng hạn, nhiễu OCR ở cuối trang có thể không làm
+mất khả năng chấm điểm một từ giữa trang; trong khi những từ lặp
+với nhiều đường căn chỉnh tương đương vẫn không được đoán.
+
+**Phạm vi chỉ là chấm điểm trong gallery riêng tư:** đề xuất OCR
+được tạo trước khi đọc reference, tuyệt đối không dùng reference
+để chọn từ, thay đổi checkpoint hay OCR sản phẩm. Các nhãn từ mới
+đều là **đối chiếu bằng thuật toán**, không có ý nghĩa xác nhận bằng
+mắt hay chất lượng nhận diện từ ở những ảnh khác. Do cách căn chỉnh
+được cập nhật, số từ `corrected`/`ambiguous` trong báo cáo mới
+có thể khác báo cáo trước, trong khi strict CER/WER của TASK 12
+không thay đổi.
+
+Các unit tests mới `test_ocr_tesseract_alignment.py` và phép kiểm
+tra thực tế trong `test_ocr_tesseract_flip_review.py` bao phủ:
+- nhiều token thừa ở cuối vẫn có vị trí sửa dấu được căn chỉnh duy nhất;
+- nhiều đường tối ưu do từ lặp lại phải giữ `ambiguous`;
+- văn bản rỗng, văn bản dài quá giới hạn bị từ chối;
+- không trả về từ riêng tư trong dữ liệu căn chỉnh.
+
+Chạy lại script Windows như trên để xác thực các commit mới. Mọi
+báo cáo, ảnh crop và reference vẫn **chỉ lưu tại máy**.
+
 ## Tiêu chí kiểm tra cuối
 
 Báo cáo này hỗ trợ người dùng **đối chứng** các đề xuất với ảnh, không
