@@ -22,6 +22,7 @@ foreach ($path in @(
 }
 
 $tests = @(
+    "test_ocr_tesseract_alignment.py",
     "test_ocr_tesseract_flip_review.py",
     "test_ocr_tesseract_review_risk.py",
     "test_ocr_tone_blind_policy.py",
