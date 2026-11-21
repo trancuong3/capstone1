@@ -191,7 +191,7 @@ def evaluate(
             failures[type(exc).__name__] += 1
 
     n = len(latencies)
-    return {
+    report = {
         "dataset_case_count": len(cases),
         "successful_cases": n,
         "failed_cases": len(cases) - n,
@@ -245,6 +245,24 @@ def evaluate(
         "real_photo_origin_and_ground_truth_manual_review_required": True,
         "bbox_and_color_acceptance_not_measured": True,
     }
+    if private_error_records is not None:
+        # Only safe aggregate counts go in the standard report, never tokens.
+        classes: Counter[str] = Counter()
+        complete = 0
+        skipped = 0
+        for row in private_error_records:
+            if row["status"] != "complete":
+                skipped += 1
+                continue
+            complete += 1
+            classes.update(error["kind"] for error in row["errors"])
+        report["private_diagnostic_summary"] = {
+            "analyzed_cases": complete,
+            "skipped_cases": skipped,
+            "word_error_kind_counts": dict(sorted(classes.items())),
+            "alignment_note": "One of potentially multiple optimal token alignments; diagnostic only",
+        }
+    return report
 
 
 def main(argv: list[str] | None = None) -> int:
