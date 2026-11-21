@@ -26,12 +26,15 @@ export interface SpeechRecorder {
   getSettings?(): MediaTrackSettings | null;
 }
 
-const preferredMimeTypes = [
+export const PREFERRED_RECORDER_MIME_TYPES = [
   "audio/webm;codecs=opus",
   "audio/webm",
-  "audio/ogg;codecs=opus",
+  "audio/mp4;codecs=mp4a.40.2",
   "audio/mp4",
-];
+  "audio/ogg;codecs=opus",
+] as const;
+
+const preferredMimeTypes = PREFERRED_RECORDER_MIME_TYPES;
 
 const MAX_RECORDING_BYTES = 20 * 1024 * 1024;
 const MAX_RECORDING_MS = 5 * 60 * 1000;
@@ -291,13 +294,26 @@ export function useSpeechRecorder(
         retainStreamOnStopRef.current = retainStream;
         isRecordingRef.current = true;
 
-        const mimeType = preferredMimeTypes.find((candidate) =>
-          MediaRecorder.isTypeSupported?.(candidate),
-        );
+        const mimeType = preferredMimeTypes.find((candidate) => {
+          try {
+            return Boolean(MediaRecorder.isTypeSupported?.(candidate));
+          } catch {
+            return false;
+          }
+        });
 
-        const recorder = mimeType
-          ? new MediaRecorder(stream, { mimeType })
-          : new MediaRecorder(stream);
+        let recorder: MediaRecorder;
+        if (mimeType) {
+          try {
+            recorder = new MediaRecorder(stream, { mimeType });
+          } catch {
+            // Some OEM Android WebViews report isTypeSupported=true yet throw on options;
+            // fall back cleanly to the platform default MediaRecorder codec.
+            recorder = new MediaRecorder(stream);
+          }
+        } else {
+          recorder = new MediaRecorder(stream);
+        }
 
         recorderRef.current = recorder;
         let bytes = 0;

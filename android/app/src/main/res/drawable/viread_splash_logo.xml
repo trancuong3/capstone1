@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="120dp"
+    android:height="120dp"
+    android:viewportWidth="120"
+    android:viewportHeight="120">
+    <!-- Centered within 76dp inner circle for Android 12+ SplashScreen API -->
+    <path
+        android:fillColor="#D9F4EB"
+        android:pathData="M42,26L78,26A16,16 0 0,1 94,42L94,78A16,16 0 0,1 78,94L42,94A16,16 0 0,1 26,78L26,42A16,16 0 0,1 42,26z" />
+    <path
+        android:fillColor="#FFFAF0"
+        android:strokeColor="#087467"
+        android:strokeWidth="3.2"
+        android:strokeLineJoin="round"
+        android:pathData="M36,42L60,47.5L60,79L36,73.5Z" />
+    <path
+        android:fillColor="#FFFAF0"
+        android:strokeColor="#087467"
+        android:strokeWidth="3.2"
+        android:strokeLineJoin="round"
+        android:pathData="M84,42L60,47.5L60,79L84,73.5Z" />
+    <path
+        android:strokeColor="#0F766E"
+        android:strokeWidth="2.0"
+        android:strokeLineCap="round"
+        android:pathData="M41.5,53L54.5,56M41.5,62L54.5,65M78.5,53L65.5,56M78.5,62L65.5,65" />
+    <path
+        android:fillColor="#FFDB70"
+        android:pathData="M60,35m-3.4,0a3.4,3.4 0 1,1 6.8,0a3.4,3.4 0 1,1 -6.8,0" />
+</vector>

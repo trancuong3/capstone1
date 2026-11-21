@@ -1,8 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ViRead</string>
-    <string name="offline_message">Không kết nối được máy chủ ViRead. Kiểm tra cùng mạng Wi‑Fi và bấm Thử lại.</string>
-    <string name="tls_error_message">Chứng chỉ bảo mật HTTPS của máy chủ không hợp lệ nên ViRead đã chặn kết nối để bảo vệ tài khoản.</string>
+    <string name="loading_title">Đang mở ViRead</string>
+    <string name="loading_subtitle">Kết nối không gian đọc sách cùng bé…</string>
+    <string name="loading_cold_start_hint">Máy chủ đang khởi động (cold-start), ba mẹ vui lòng đợi thêm giây lát…</string>
+
+    <string name="error_title_network">Chưa kết nối được máy chủ ViRead</string>
+    <string name="error_title_server">Máy chủ ViRead đang khởi động hoặc bận</string>
+    <string name="error_title_tls">Chứng chỉ bảo mật không hợp lệ</string>
+
+    <string name="offline_message">Không thể kết nối tới máy chủ ViRead. Ba mẹ hãy kiểm tra mạng Wi‑Fi / 4G hoặc địa chỉ máy chủ rồi bấm Thử lại nhé.</string>
+    <string name="timeout_message">Máy chủ ViRead phản hồi chậm hoặc đang khởi động lại. Ba mẹ hãy đợi vài giây rồi bấm Thử lại.</string>
+    <string name="server_5xx_message">Máy chủ ViRead đang bận hoặc đang khởi động lại (%1$d). Ba mẹ hãy đợi vài giây rồi bấm Thử lại nhé.</string>
+    <string name="tls_error_message">Chứng chỉ bảo mật HTTPS của máy chủ không hợp lệ nên ViRead đã chặn kết nối để bảo vệ tài khoản gia đình.</string>
+    <string name="no_network_toast">Thiết bị hiện chưa có kết nối Internet hoặc Wi‑Fi.</string>
+    <string name="network_ready_toast">Đã phát hiện kết nối mạng. Đang thử tải lại ViRead…</string>
+
     <string name="retry_button">Thử lại</string>
     <string name="open_home_button">Về trang đăng nhập</string>
+    <string name="check_connection_button">Kiểm tra lại kết nối</string>
+    <string name="configure_lan_server_button">Đổi máy chủ LAN HTTPS (Debug)</string>
+
+    <string name="lan_dialog_title">Cấu hình máy chủ LAN HTTPS (Debug)</string>
+    <string name="lan_dialog_hint">Nhập địa chỉ HTTPS của máy chủ Next.js trên cùng Wi‑Fi (ví dụ: https://192.168.1.10:8443). Không nhận HTTP hoặc localhost.</string>
+    <string name="lan_dialog_save">Lưu &amp; Kết nối</string>
+    <string name="lan_dialog_reset">Khôi phục mặc định</string>
+    <string name="lan_dialog_cancel">Đóng</string>
+    <string name="lan_invalid_url_toast">Địa chỉ không hợp lệ. Chỉ chấp nhận HTTPS LAN hợp lệ (không có đường dẫn phụ hay HTTP).</string>
+
+    <string name="file_chooser_title">Chọn ảnh trang sách, chụp ảnh hoặc chọn PDF/DOCX</string>
+    <string name="permission_denied_title">Cần cấp quyền để sử dụng tính năng</string>
+    <string name="permission_denied_message">Quyền Camera hoặc Micro đang bị tắt cho ViRead. Ba mẹ có thể mở Cài đặt ứng dụng để bật lại bất cứ lúc nào.</string>
+    <string name="open_app_settings_button">Mở Cài đặt ứng dụng</string>
+    <string name="back_exit_confirm_toast">Bấm lần nữa để thoát ViRead</string>
 </resources>

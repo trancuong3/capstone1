@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ViRead" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">@color/viread_primary</item>
+        <item name="android:colorPrimaryDark">@color/viread_navy</item>
+        <item name="android:colorAccent">@color/viread_primary</item>
+        <item name="android:windowBackground">@color/viread_surface</item>
+        <item name="android:statusBarColor">@color/viread_surface</item>
+        <item name="android:navigationBarColor">@color/viread_surface</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+    <style name="Theme.ViRead.Splash" parent="Theme.ViRead">
+        <item name="android:windowBackground">@drawable/splash_window_background</item>
+    </style>
+</resources>

@@ -15,9 +15,12 @@ import java.util.Set;
  * Production builds enforce HTTPS on port 443 only. Explicit LAN acceptance debug
  * builds may pass {@code allowCustomPort = true} to permit an exact HTTPS LAN port
  * (e.g. 8443), while still rejecting HTTP, mismatched ports, lookalike hosts,
- * embedded credentials, and non-HTTPS schemes.
+ * loopback addresses, public raw IPs, embedded credentials, and non-HTTPS schemes.
  */
 public final class TrustedNavigation {
+    private static final String DOCX_MIME =
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
     private final String host;
     private final int port;
     private final boolean allowCustomPort;
@@ -28,7 +31,7 @@ public final class TrustedNavigation {
 
     public TrustedNavigation(String frontendUrl, boolean allowCustomPort) {
         this.allowCustomPort = allowCustomPort;
-        URI uri = parse(frontendUrl);
+        URI uri = parse(frontendUrl == null ? null : frontendUrl.trim());
         if (uri == null || !secureHost(uri, allowCustomPort) || !rootOnly(uri)) {
             throw new IllegalArgumentException(
                     allowCustomPort
@@ -39,11 +42,24 @@ public final class TrustedNavigation {
         if (!allowCustomPort && isPrivateOrLocalHost(normalizedHost)) {
             throw new IllegalArgumentException("Production builds reject local or private IP hosts.");
         }
-        if (allowCustomPort && ("localhost".equals(normalizedHost) || "127.0.0.1".equals(normalizedHost))) {
-            throw new IllegalArgumentException("LAN acceptance builds reject loopback hosts unreachable from a phone.");
+        if (allowCustomPort && !isValidLanHost(normalizedHost)) {
+            throw new IllegalArgumentException(
+                    "LAN acceptance builds require a private RFC1918 IPv4 address or valid HTTPS LAN hostname.");
         }
         this.host = normalizedHost;
         this.port = effectivePort(uri);
+    }
+
+    public String getOrigin() {
+        return port == 443 ? "https://" + host : "https://" + host + ":" + port;
+    }
+
+    public String getHost() {
+        return host;
+    }
+
+    public int getPort() {
+        return port;
     }
 
     public boolean isTrusted(String candidateUrl) {
@@ -88,10 +104,9 @@ public final class TrustedNavigation {
     }
 
     /**
-     * Normalize WebView {@code FileChooserParams.getAcceptTypes()} entries.
-     * Some Android WebView builds return comma-joined values like
-     * {@code "image/jpeg,image/png,image/webp"} as a single array element; passing
-     * that unsplit string to {@code Intent.setType()} disables photo selection.
+     * Normalize WebView {@code FileChooserParams.getAcceptTypes()} entries across all
+     * ViRead supported page/document formats (.jpg, .jpeg, .png, .webp, .bmp, .tif, .tiff,
+     * .pdf, .docx, plus standard MIME strings and comma-separated lists).
      */
     public static List<String> normalizeAcceptMimeTypes(String[] rawTypes) {
         Set<String> out = new LinkedHashSet<>();
@@ -101,14 +116,39 @@ public final class TrustedNavigation {
             for (String part : entry.split(",")) {
                 String token = part.trim().toLowerCase(Locale.ROOT);
                 if (token.isEmpty()) continue;
-                if (".jpg".equals(token) || ".jpeg".equals(token)) {
-                    out.add("image/jpeg");
-                } else if (".png".equals(token)) {
-                    out.add("image/png");
-                } else if (".webp".equals(token)) {
-                    out.add("image/webp");
-                } else if (token.matches("[a-z0-9.+_-]+/[a-z0-9.*+_-]+")) {
-                    out.add(token);
+                switch (token) {
+                    case ".jpg":
+                    case ".jpeg":
+                    case "image/jpg":
+                    case "image/pjpeg":
+                        out.add("image/jpeg");
+                        break;
+                    case ".png":
+                    case "image/x-png":
+                        out.add("image/png");
+                        break;
+                    case ".webp":
+                        out.add("image/webp");
+                        break;
+                    case ".bmp":
+                    case "image/x-ms-bmp":
+                        out.add("image/bmp");
+                        break;
+                    case ".tif":
+                    case ".tiff":
+                        out.add("image/tiff");
+                        break;
+                    case ".pdf":
+                        out.add("application/pdf");
+                        break;
+                    case ".docx":
+                        out.add(DOCX_MIME);
+                        break;
+                    default:
+                        if (isValidMimeToken(token)) {
+                            out.add(token);
+                        }
+                        break;
                 }
             }
         }
@@ -118,7 +158,8 @@ public final class TrustedNavigation {
     /**
      * Pick the safest base MIME type for Android's {@code ACTION_OPEN_DOCUMENT}
      * picker so image pickers open directly into Photos/Gallery when all accepted
-     * types are images.
+     * types are images, while multi-category inputs (.jpg + .pdf + .docx) use wildcard
+     * base + EXTRA_MIME_TYPES.
      */
     public static String resolveIntentBaseMimeType(List<String> normalizedTypes) {
         if (normalizedTypes == null || normalizedTypes.isEmpty()) return "*/*";
@@ -133,8 +174,38 @@ public final class TrustedNavigation {
         return allImages ? "image/*" : "*/*";
     }
 
+    /**
+     * True when the file input accepts image captures (either unrestricted or includes image/*).
+     */
+    public static boolean acceptsImages(List<String> normalizedTypes) {
+        if (normalizedTypes == null || normalizedTypes.isEmpty()) return true;
+        for (String mime : normalizedTypes) {
+            if ("*/*".equals(mime) || (mime != null && mime.startsWith("image/"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isValidMimeToken(String token) {
+        if (token.contains("..")) return false;
+        int slash = token.indexOf('/');
+        if (slash <= 0 || slash != token.lastIndexOf('/') || slash == token.length() - 1) {
+            return false;
+        }
+        String type = token.substring(0, slash);
+        String subtype = token.substring(slash + 1);
+        if ("*".equals(type)) {
+            return "*".equals(subtype);
+        }
+        if (!type.matches("[a-z0-9][a-z0-9.+_-]*")) {
+            return false;
+        }
+        return "*".equals(subtype) || subtype.matches("[a-z0-9][a-z0-9.+_-]*");
+    }
+
     private static URI parse(String url) {
-        if (url == null) return null;
+        if (url == null || url.isEmpty()) return null;
         try {
             return new URI(url);
         } catch (URISyntaxException | IllegalArgumentException e) {
@@ -148,7 +219,10 @@ public final class TrustedNavigation {
 
     private static boolean secureHost(URI uri, boolean allowCustomPort) {
         String h = uri.getHost();
-        if (!"https".equalsIgnoreCase(uri.getScheme()) || h == null || uri.getRawUserInfo() != null) {
+        if (!"https".equalsIgnoreCase(uri.getScheme())
+                || h == null
+                || h.contains(":")
+                || uri.getRawUserInfo() != null) {
             return false;
         }
         int p = effectivePort(uri);
@@ -160,10 +234,53 @@ public final class TrustedNavigation {
 
     private static boolean isPrivateOrLocalHost(String host) {
         return "localhost".equals(host)
+                || !host.contains(".")
                 || host.endsWith(".local")
+                || host.endsWith(".lan")
+                || host.endsWith(".home.arpa")
                 || host.endsWith(".invalid")
                 || host.endsWith(".internal")
+                || host.endsWith(".test")
                 || host.matches("[0-9.]+");
+    }
+
+    static boolean isPrivateRfc1918Ipv4(String host) {
+        if (host == null || !host.matches("[0-9]{1,3}(\\.[0-9]{1,3}){3}")) {
+            return false;
+        }
+        String[] parts = host.split("\\.");
+        if (parts.length != 4) return false;
+        int[] octets = new int[4];
+        for (int i = 0; i < 4; i++) {
+            try {
+                octets[i] = Integer.parseInt(parts[i]);
+            } catch (NumberFormatException ex) {
+                return false;
+            }
+            if (octets[i] < 0 || octets[i] > 255) return false;
+        }
+        if (octets[0] == 10) return true;
+        if (octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31) return true;
+        return octets[0] == 192 && octets[1] == 168;
+    }
+
+    private static boolean isValidLanHost(String host) {
+        if ("localhost".equals(host)
+                || host.endsWith(".invalid")
+                || host.endsWith(".internal")
+                || !host.contains(".")) {
+            return false;
+        }
+        if (host.matches("[0-9.]+")) {
+            return isPrivateRfc1918Ipv4(host);
+        }
+        String[] labels = host.split("\\.", -1);
+        for (String label : labels) {
+            if (label.isEmpty() || label.startsWith("-") || label.endsWith("-")) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static boolean rootOnly(URI uri) {

@@ -59,6 +59,17 @@ android {
 
     testOptions {
         unitTests.returnDefaultValues = true
+        unitTests.includeAndroidResources = true
+        unitTests.all {
+            def testTmp = new File(gradle.gradleUserHomeDir, 'test-tmp')
+            testTmp.mkdirs()
+            systemProperty 'java.io.tmpdir', testTmp.absolutePath
+        }
+    }
+
+    lint {
+        abortOnError true
+        checkReleaseBuilds false
     }
 
     if (lanAcceptanceMode) {
@@ -71,7 +82,10 @@ android {
 }
 
 dependencies {
+    implementation 'androidx.core:core:1.13.1'
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'androidx.test:core:1.6.1'
+    testImplementation 'org.robolectric:robolectric:4.14.1'
 }
 
 def isPrivateLanIp = { String host ->

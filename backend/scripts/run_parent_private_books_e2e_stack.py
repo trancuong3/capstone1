@@ -55,6 +55,11 @@ from parent_private_book_pg_fixture import (  # noqa: E402
 AUTH_PORT = int(os.getenv("VIREAD_E2E_AUTH_PORT", "54321"))
 API_PORT = int(os.getenv("VIREAD_E2E_API_PORT", "8010"))
 WEB_ORIGIN = os.getenv("VIREAD_E2E_WEB_ORIGIN", "http://127.0.0.1:3010")
+EXTRA_CORS_ORIGINS = [
+    item.strip()
+    for item in os.getenv("VIREAD_E2E_EXTRA_ORIGINS", "").split(",")
+    if item.strip()
+]
 STACK_INFO_PATH = Path(
     os.getenv(
         "VIREAD_E2E_STACK_INFO",
@@ -135,10 +140,13 @@ def _create_local_supabase_auth_app(sync_db_url: str) -> FastAPI:
     revoked_tokens: set[str] = set()
     refresh_tokens: dict[str, str] = {}  # refresh_token -> user_id
 
+    allowed_origins = list(
+        dict.fromkeys([WEB_ORIGIN, "http://localhost:3010", "http://127.0.0.1:3000", *EXTRA_CORS_ORIGINS])
+    )
     auth_app = FastAPI(title="ViRead Local Test Supabase Auth")
     auth_app.add_middleware(
         CORSMiddleware,
-        allow_origins=[WEB_ORIGIN, "http://localhost:3010", "http://127.0.0.1:3000"],
+        allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -384,7 +392,8 @@ def main() -> None:
     time.sleep(0.8)
     print(f"[E2E] Local Test Supabase Auth running at http://127.0.0.1:{AUTH_PORT}", flush=True)
 
-    # 2. Import real ViRead FastAPI modules bound to the disposable local PostgreSQL DB
+    # 2. Import torch FIRST on Windows (shm.dll ABI rule), then real ViRead FastAPI modules
+    import torch  # noqa: F401, E402
     from app.api.router import api_router  # noqa: E402
     from app.database.session import AsyncSessionLocal  # noqa: E402
     from app.repositories.parent_private_book_repository import ParentPrivateBookRepository  # noqa: E402
@@ -598,12 +607,22 @@ def main() -> None:
     api_app = FastAPI(title="ViRead E2E Backend", lifespan=lifespan)
     api_app.add_middleware(
         CORSMiddleware,
-        allow_origins=[WEB_ORIGIN, "http://localhost:3010", "http://127.0.0.1:3000"],
+        allow_origins=list(
+            dict.fromkeys([WEB_ORIGIN, "http://localhost:3010", "http://127.0.0.1:3000", *EXTRA_CORS_ORIGINS])
+        ),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
     api_app.include_router(api_router)
+
+    @api_app.get("/health")
+    async def root_health() -> dict[str, Any]:
+        return {
+            "status": "ok",
+            "database": {"status": "healthy"},
+            "ocr": {"ready": True},
+        }
 
     @api_app.get("/_e2e/health")
     async def e2e_health() -> dict[str, Any]:

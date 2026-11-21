@@ -36,6 +36,7 @@ import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useParentPrivateBookService } from "@/hooks/use-parent-private-book-service";
 import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
 import { isServiceError } from "@/lib/api/service-error";
+import { preprocessScanImage } from "@/lib/reading/scan-image-preprocess";
 import { CHILD_GRADES } from "@/types/child";
 import {
   SOURCE_USAGE_OPTIONS,
@@ -339,8 +340,9 @@ function ParentPrivateBookManagerContent({
 
     setUploading(true);
     try {
+      const prepared = await preprocessScanImage(selectedFile);
       const response = await service.submitPages(bookId, {
-        file: selectedFile,
+        file: prepared.file,
         idempotency_key: uploadIdempotencyKey,
         source_type: uploadSourceType,
         source_note: uploadSourceNote.trim() || null,
@@ -659,10 +661,11 @@ function ParentPrivateBookManagerContent({
     setActionError(null);
     setActionNotice(null);
     try {
+      const prepared = await preprocessScanImage(file);
       await service.replaceSubmissionFile(
         bookId,
         sub.id,
-        file,
+        prepared.file,
         sub.source_type,
         sub.source_note,
       );

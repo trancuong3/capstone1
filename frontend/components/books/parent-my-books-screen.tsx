@@ -267,7 +267,7 @@ function ParentMyBooksContent({ currentUserId }: { currentUserId: string }) {
 
   return (
     <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 py-6 sm:px-8 sm:py-8">
-      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border pb-5">
+      <header className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
           <p className="text-xs font-bold uppercase tracking-wider text-primary">
             Không gian riêng của gia đình
@@ -282,7 +282,7 @@ function ParentMyBooksContent({ currentUserId }: { currentUserId: string }) {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
           <Button
             className="w-auto"
             onClick={() => void loadBooks()}

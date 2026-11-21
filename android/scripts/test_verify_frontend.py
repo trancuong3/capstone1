@@ -205,6 +205,16 @@ class LanAcceptanceModeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "VIREAD_LAN_CA_CERT"):
             verify_frontend(self.lan_origin, opener=None, lan_mode=True, ca_file=None)
 
+        # CA file without BEGIN CERTIFICATE must be rejected
+        with tempfile.NamedTemporaryFile("w", suffix=".pem", delete=False, encoding="utf-8") as bad_tmp:
+            bad_tmp.write("not a pem certificate at all\n")
+            bad_ca_path = bad_tmp.name
+        try:
+            with self.assertRaisesRegex(ValueError, "PEM certificate"):
+                verify_frontend(self.lan_origin, self.opener, lan_mode=True, ca_file=bad_ca_path)
+        finally:
+            Path(bad_ca_path).unlink(missing_ok=True)
+
         # CA file containing a private key must be rejected
         with tempfile.NamedTemporaryFile("w", suffix=".pem", delete=False, encoding="utf-8") as tmp:
             tmp.write("-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----\n")
