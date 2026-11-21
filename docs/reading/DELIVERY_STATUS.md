@@ -105,14 +105,44 @@ F:\c1\capstone1\.venv\Scripts\python.exe -m pytest test_reading_presence.py test
 4. **Câu hỏi đọc hiểu cuối bài (`ComprehensionQuestion`):** chưa có TTS đọc câu hỏi/đáp án, chưa có mic/STT; bé phải bấm tối thiểu **6 lần** cho 3 câu hỏi (chọn đáp án + bấm tiếp × 3).
 5. **Thu âm giọng trẻ & ngữ cảnh trang sách:** `AudioQualityMonitor` chế độ `passage` dùng `minPeakRms = 0.008`, `hangoverMs = 350 ms` (dễ coi giọng bé nói nhỏ hoặc ngắt hơi đánh vần là `LOW_VOLUME`/dứt câu); `transcribeRecording` ở chế độ đọc đoạn chưa truyền `keyterms` từ trang sách hiện tại.
 
-### 5.2 Cổng nghiệm thu khóa mới (G19–G24)
+### 5.2 Cổng nghiệm thu đợt 2 (G19–G24 — Kết quả thực đo trên SHA `4f097c40`)
 
-| ID | Cổng | Ngưỡng đã khóa (pass nếu) | Bằng chứng mục tiêu | Trạng thái |
-|---|---|---|---|---|
-| G19 | Đánh vần tiếng Việt lớp 1 | ≥ 25 ca test (6 thanh, âm đầu/vần phổ biến, đánh vần chậm/sai/nhiễu): **100%** chấp nhận đánh vần đúng kết thúc bằng tiếng đích, **0** false-positive trên đánh vần rác/ngoài bài, không ngắt lời khi đang đánh vần | `phonics-spelling.test.ts` + `realtime-alignment.ts` | PENDING |
-| G20 | Đọc lại trọn câu sau luyện từ khó/sai | Sau luyện từ (đúng lại hoặc hết lượt), mời đọc lại trọn câu 2–12 từ (hoặc mệnh đề nếu câu dài), tối đa 1 lượt/câu, cho qua/bỏ qua; **0** ghi đè lượt đầu, **0** báo cáo trùng | `sentence-reinforcement.test.ts` + `reading-automation-screen.test.tsx` | PENDING |
-| G21 | Highlight thời gian thực siêu mượt | Trang 120 từ / 30 gói interim: `p95 ≤ 50 ms` (cải thiện rõ rệt so với baseline `41.35 ms`), chỉ re-render từ đổi trạng thái (≤ 3 từ/gói thay vì 120), **0** màu xanh oan từ interim đổi | `highlight-latency.test.tsx` (có đếm số lần render token) | PENDING |
-| G22 | Tối ưu VAD giọng trẻ & `keyterms` trang sách | Giọng nhỏ (`RMS 0.005–0.0075`) & ngắt hơi đánh vần (`~450 ms`) không bị phạt nhầm; `transcribeRecording` gửi `keyterms` an toàn theo trang; **100%** test chống "đọc hộ" (off-topic/low-confidence/wrong-language) vẫn PASS | `audio-quality.test.ts` + `reading-screen.test.tsx` | PENDING |
-| G23 | Giọng đọc mẫu đa dạng & lời thoại tương tác | Kho lời thoại ấm áp xoay vòng không lặp liên tiếp, có giới hạn tần suất; bộ chọn giọng hỗ trợ lọc/gắn nhãn rõ nhóm giọng thân thiện lớp 1 từ metadata thật | `interactive-prompts.test.ts` + `reading-voice-settings.test.tsx` | PENDING |
-| G24 | Câu hỏi đọc hiểu cuối bài bằng giọng nói | **0 lần bấm nút bắt buộc** qua 3 câu hỏi (tự đọc câu hỏi + đáp án A/B/C kèm highlight → hỏi *"Bé chọn đáp án nào?"* → chặn 100% echo → nhận giọng A/B/C, biến thể tiếng Việt hoặc nội dung đáp án → tự chọn, phản hồi & qua câu kế → hoàn tất); bấm tay chen ngang hủy ngay TTS và chọn tức thì; 100% test cũ vẫn PASS | `comprehension-voice-flow.test.tsx` + `reading-autopilot.pw.ts` (desktop & mobile) | PENDING |
+| ID | Cổng | Ngưỡng đã khóa (pass nếu) | Kết quả thực đo trên SHA `4f097c40` | Trạng thái | Bằng chứng |
+|---|---|---|---|---|---|
+| G19 | Đánh vần tiếng Việt lớp 1 | ≥ 25 ca test (6 thanh, âm đầu/vần phổ biến, đánh vần chậm/sai/nhiễu): **100%** chấp nhận đánh vần đúng kết thúc bằng tiếng đích, **0** false-positive trên đánh vần rác/ngoài bài, không ngắt lời khi đang đánh vần | **44/44 PASS** trong `phonics-spelling.test.ts` (20 mẫu đánh vần đủ 6 thanh, 7 ca từ chối sai thanh/ngoài bài = 0 false-positive, 5 ca tích hợp engine đa chunk/preview) + ca màn đọc thực tế giữ im timer 10s khi đang đánh vần `"ô i ôi"` → `"tờ ôi tôi ăn cơm"`. | **PASS** | `phonics-spelling.test.ts`, `reading-automation-screen.test.tsx` |
+| G20 | Đọc lại trọn câu sau luyện từ khó/sai | Sau luyện từ (đúng lại hoặc hết lượt), mời đọc lại trọn câu 2–12 từ (hoặc mệnh đề nếu câu dài), tối đa 1 lượt/câu, cho qua/bỏ qua; **0** ghi đè lượt đầu, **0** báo cáo trùng | **6/6 PASS** trong `sentence-reinforcement.test.ts` + ca `ReadingScreen` `"Tôi ăn cơm. Mẹ nấu canh."`: mời đọc lại câu `"Tôi ăn cơm."`, chấp nhận đánh vần khi đọc lại, tối đa 1 lượt/câu, có nút `"Bỏ qua đọc lại câu"`, **0** ghi đè điểm lượt đầu. | **PASS** | `sentence-reinforcement.test.ts`, `reading-automation-screen.test.tsx` |
+| G21 | Highlight thời gian thực siêu mượt | Trang 120 từ / 30 gói interim: `p95 ≤ 50 ms`, chỉ re-render từ đổi trạng thái (≤ 3 từ/gói thay vì 120), **0** màu xanh oan từ interim đổi | **Trước:** `p50 = 28.48 ms`, `p95 = 41.35 ms`, `120` token/gói. **Sau:** **`p50 = 6.07 ms`** (nhanh hơn **4.7×**), **`p95 = 8.56 ms`** (nhanh hơn **4.8×**), **`maxRendersPerStep = 2`** (giảm **60×** số token render). Đẩy con trỏ tạm tiến trước sang từ kế tiếp tức thời; tối ưu cả `BookPageViewer` overlay + rút ngắn restart recognizer `200ms → 80ms`. | **PASS** | `highlight-latency.test.tsx`, `book-page-viewer.test.tsx` (12/12) |
+| G22 | Tối ưu VAD giọng trẻ & `keyterms` trang sách | Giọng nhỏ (`RMS 0.005–0.0075`) & ngắt hơi đánh vần (`~450 ms`) không bị phạt nhầm; `transcribeRecording` gửi `keyterms` an toàn theo trang; **100%** test chống "đọc hộ" vẫn PASS | Thêm chế độ `child-passage` (`minPeakRms = 0.0045`, `hangoverMs = 480ms`, `calibrationWindowMs = 180ms`) + gửi `keyterms` (tối đa 40 từ NFC duy nhất của trang hiện tại) trong `transcribeRecording`. **10/10** `audio-quality.test.ts` + **75/75** `reading-screen.test.tsx` (gồm toàn bộ ca chống đọc hộ/off-topic/wrong-language/low-confidence) PASS. | **PASS** | `audio-quality.test.ts`, `reading-screen.test.tsx` |
+| G23 | Giọng đọc mẫu đa dạng & lời thoại tương tác | Kho lời thoại ấm áp xoay vòng không lặp liên tiếp, có giới hạn tần suất; bộ chọn giọng hỗ trợ lọc/gắn nhãn rõ nhóm giọng thân thiện lớp 1 từ metadata thật | `InteractivePromptSelector` xoay vòng 13 nhóm lời thoại ấm áp, chống lặp liên tiếp, giới hạn tần suất khen (`25s/15s`). Thêm preset tốc độ `"Chậm rõ (Lớp 1)"` (`0.75×`) và bộ lọc `"Giọng trẻ em"` thuần metadata trong `ReadingVoiceSettings`. | **PASS** | `interactive-prompts.test.ts` (3/3), `reading-voice-settings.test.tsx` (12/12) |
+| G24 | Câu hỏi đọc hiểu cuối bài bằng giọng nói | **0 lần bấm nút bắt buộc** qua 3 câu hỏi (tự đọc câu hỏi + đáp án A/B/C kèm highlight → hỏi *"Bé chọn đáp án nào?"* → chặn 100% echo → nhận giọng A/B/C, biến thể tiếng Việt hoặc nội dung đáp án → tự chọn, phản hồi & qua câu kế → hoàn tất); bấm tay chen ngang hủy ngay TTS và chọn tức thì; 100% test cũ vẫn PASS | **0 lần bấm** qua 3 câu hỏi trên cả RTL (`comprehension-voice-flow.test.tsx`, **14/14 PASS**) và Playwright E2E desktop 1440×1000 & mobile 390×844 (**10/10 PASS**); chặn 100% echo đáp án vừa đọc; chạm tay chen ngang hủy TTS cũ ngay lập tức; `comprehension-question-flow.test.tsx` cũ **4/4 PASS**. | **PASS** | `comprehension-voice-flow.test.tsx`, `reading-autopilot.pw.ts`, `e2e-autopilot-quiz-voice-{desktop,mobile}.png` |
+
+### 5.3 Bảng so sánh Trước / Sau (Đợt nâng cấp 2 — SHA `1ab03803` → `4f097c40`)
+
+| Chỉ số | Trước (SHA `1ab03803`) | Sau (SHA `4f097c40`) |
+|---|---|---|
+| Độ trễ DOM highlight (120 từ, 30 gói interim) | `p50 = 28.48 ms`, `p95 = 41.35 ms` | **`p50 = 6.07 ms` (-78.7%), `p95 = 8.56 ms` (-79.3%)** |
+| Số token re-render mỗi gói interim | `120 / 120` từ | **`2 / 120` từ (giảm 60×)** |
+| Độ trễ restart `SpeechRecognition` sau `onend` | `200 ms` | **`80 ms` (nhanh hơn 2.5×)** |
+| Chấp nhận đánh vần lớp 1 (`ô i ôi tờ ôi tôi`, `cờ a ca sắc cá`, ...) | `0%` (bị loại off-topic hoặc phạt sai) | **100% (20/20 mẫu đủ 6 thanh), 0 false-positive (7/7 ca nhiễu/sai thanh)** |
+| Đọc lại trọn câu sau khi luyện từ sai/khó (`Tôi ăn cơm.`) | Chưa có | **Tự mời 1 lượt/câu, giữ nguyên điểm lượt đầu, có nút bỏ qua** |
+| Số lần bấm bắt buộc ở 3 câu hỏi đọc hiểu cuối bài | `6` lần bấm | **`0` lần bấm (tự đọc câu hỏi + A/B/C + nghe giọng bé + tự qua câu), vẫn chạm tay bất cứ lúc nào** |
+| Tổng kiểm thử tự động trên SHA `4f097c40` | 41 file / 552 tests, 8 Playwright E2E | **46 file / 623 tests PASS (0 fail), holdout 3/3 PASS, 10/10 Playwright E2E PASS, 248 backend tests + 86 subtests PASS, lint/typecheck/build exit 0** |
+
+### 5.4 Lệnh tái lập Đợt 2 (SHA `4f097c40`)
+
+```powershell
+cd F:\c1\capstone1-reading-auto\frontend
+npm run lint
+npm run typecheck
+$env:NEXT_PUBLIC_SUPABASE_URL="https://example.supabase.co"
+$env:NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY="sb_publishable_test"
+$env:NEXT_PUBLIC_API_URL="http://127.0.0.1:8000"
+npx next build --webpack
+npx vitest run tests/reading --maxWorkers=2
+$env:READING_BENCH_HOLDOUT="1"
+npx vitest run tests/reading/benchmark/alignment-gates.test.ts
+$env:PLAYWRIGHT_ROUTE_FILTER="/reading"
+npx playwright test --config=playwright.real-data.config.ts test/browser/reading-autopilot.pw.ts
+```
+
 
