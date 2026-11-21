@@ -20,6 +20,8 @@ RULES = (
     "vietocr_line_priority",
     "paddleocr_line_priority",
     "paddle_line_vietocr_crop_agreement",
+    "tesseract_line_priority",
+    "tesseract_line_vietocr_crop_agreement",
 )
 ENGINES = ("paddleocr", "vietocr", "tesseract")
 
@@ -87,6 +89,27 @@ def choose_word(word: dict[str, object], rule: str) -> str | None:
         # High-risk A/B CONTROL: measures both gains and regressions from
         # blindly trusting the PaddleOCR line instead of the chosen token.
         choice = readings.get("paddleocr")
+    elif rule == "tesseract_line_priority":
+        # Another high-risk control. Whether Tesseract actually supplies
+        # correct alternatives must be measured, not assumed.
+        choice = readings.get("tesseract")
+    elif rule == "tesseract_line_vietocr_crop_agreement":
+        evidence = word.get("ocr_evidence")
+        crop = evidence.get("crop_evidence") if isinstance(evidence, dict) else None
+        statuses = evidence.get("engine_statuses") if isinstance(evidence, dict) else None
+        tesseract_line = readings.get("tesseract")
+        viet_crop = _core(crop.get("vietocr_candidate")) if isinstance(crop, dict) else ""
+        if (
+            tesseract_line
+            and isinstance(crop, dict)
+            and crop.get("status") == "completed"
+            and crop.get("vietocr_error") is None
+            and isinstance(statuses, dict)
+            and statuses.get("vietocr") == "success"
+            and viet_crop
+            and viet_crop.casefold() == tesseract_line.casefold()
+        ):
+            choice = tesseract_line
     elif rule == "paddle_line_vietocr_crop_agreement":
         # Two distinct recognizers must support the SAME reading. A repeated
         # Paddle crop does NOT count as another independent engine.
@@ -272,6 +295,107 @@ def audit_tone_error_sources(expected: str, output: dict[str, object]) -> dict[s
     return stats
 
 
+CROP_KEYS = {
+    "paddleocr": "paddleocr_candidate",
+    "vietocr": "vietocr_candidate",
+    "tesseract": "tesseract_candidate",
+}
+
+
+def _engine_source_candidates(word: dict[str, object]) -> tuple[dict[str, str], dict[str, str]]:
+    """Read same-base-letter alternate engine candidates without ground truth.
+
+    A candidate in raw crop evidence is a diagnostic source only; this does
+    NOT assert that the corresponding engine completed successfully.
+    """
+    selected = _core(word.get("text"))
+    evidence = word.get("ocr_evidence")
+    if not selected or not isinstance(evidence, dict):
+        return {}, {}
+    outputs = evidence.get("engine_outputs")
+    statuses = evidence.get("engine_statuses")
+    crops = evidence.get("crop_evidence")
+    verified_line: dict[str, str] = {}
+    raw_crop: dict[str, str] = {}
+    for engine in ENGINES:
+        candidate = _core(outputs.get(engine)) if isinstance(outputs, dict) else ""
+        if (
+            candidate and candidate.casefold() != selected.casefold()
+            and _base_letters(candidate) == _base_letters(selected)
+            and isinstance(statuses, dict) and statuses.get(engine) == "success"
+        ):
+            verified_line[engine] = candidate
+        crop_key = CROP_KEYS[engine]
+        crop_candidate = _core(crops.get(crop_key)) if isinstance(crops, dict) else ""
+        if (
+            crop_candidate and crop_candidate.casefold() != selected.casefold()
+            and _base_letters(crop_candidate) == _base_letters(selected)
+        ):
+            raw_crop[engine] = crop_candidate
+    return verified_line, raw_crop
+
+
+def audit_engine_attribution(expected: str, output: dict[str, object]) -> dict[str, int]:
+    """Answer which engine supplies different-tone and oracle-correct readings.
+
+    String data are NEVER returned. Ground truth is consulted only to score
+    alternate source coverage; selection policies do not call this function.
+    """
+    keys = [
+        "audited_pages", "unaligned_pages", "word_positions",
+        "audited_tone_errors", "unaligned_tone_errors",
+    ]
+    for engine in ENGINES:
+        keys.extend((
+            f"alternative_{engine}_verified_line_positions",
+            f"alternative_{engine}_crop_positions",
+            f"correct_tone_{engine}_verified_line_errors",
+            f"correct_tone_{engine}_crop_errors",
+        ))
+    totals = {key: 0 for key in keys}
+    aligned = _word_surface_sequence(output)
+    if aligned is None:
+        totals["unaligned_pages"] = 1
+        return totals
+    words, _ = aligned
+    totals["audited_pages"] = 1
+    totals["word_positions"] = len(words)
+    for word in words:
+        line, crop = _engine_source_candidates(word)
+        for engine in ENGINES:
+            totals[f"alternative_{engine}_verified_line_positions"] += engine in line
+            totals[f"alternative_{engine}_crop_positions"] += engine in crop
+
+    original = output.get("text")
+    if not isinstance(original, str):
+        totals["unaligned_pages"] = 1
+        totals["audited_pages"] = 0
+        return totals
+    errors = analyze_word_errors(normalize(expected), normalize(original))
+    if errors.get("status") != "complete":
+        totals["unaligned_pages"] = 1
+        totals["audited_pages"] = 0
+        return totals
+    for error in errors["errors"]:
+        if error.get("kind") != "diacritic_or_d_stroke":
+            continue
+        index = error.get("observed_position")
+        target = _core(error.get("expected"))
+        if not isinstance(index, int) or not 1 <= index <= len(words) or not target:
+            totals["unaligned_tone_errors"] += 1
+            continue
+        totals["audited_tone_errors"] += 1
+        line, crop = _engine_source_candidates(words[index - 1])
+        for engine in ENGINES:
+            totals[f"correct_tone_{engine}_verified_line_errors"] += (
+                line.get(engine) == target
+            )
+            totals[f"correct_tone_{engine}_crop_errors"] += (
+                crop.get(engine) == target
+            )
+    return totals
+
+
 def evaluate_case(expected: str, output: dict[str, object]) -> dict[str, object]:
     """Reference is *only* used for scoring AFTER independent proposals."""
     observed = output.get("text")
@@ -327,6 +451,7 @@ def evaluate_case(expected: str, output: dict[str, object]) -> dict[str, object]
         "baseline": baseline, "rules": results,
         "evidence_source_audit": audit_evidence_sources(output),
         "tone_error_source_audit": audit_tone_error_sources(expected, output),
+        "engine_attribution_audit": audit_engine_attribution(expected, output),
     }
 
 
@@ -374,14 +499,17 @@ def summarize_cases(cases: list[dict[str, object]]) -> dict[str, object]:
         }
     sources = Counter()
     tone_errors = Counter()
+    engine_attribution = Counter()
     for row in cases:
         sources.update(row["evidence_source_audit"])
         tone_errors.update(row["tone_error_source_audit"])
+        engine_attribution.update(row["engine_attribution_audit"])
     return {
         "baseline_strict": baseline,
         "ground_truth_blind_rules": result,
         "evidence_source_audit": dict(sorted(sources.items())),
         "tone_error_source_audit": dict(sorted(tone_errors.items())),
+        "engine_attribution_audit": dict(sorted(engine_attribution.items())),
         "note": (
             "All candidate policies read ONLY OCR evidence when proposing; reference text "
             "is used afterward to score. Corrected/regressed token flips are "
