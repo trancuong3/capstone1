@@ -1,0 +1,155 @@
+{
+  "pipeline": "legacy",
+  "kind": "synthetic transcript-level (no audio, no child voice)",
+  "summary": {
+    "total": {
+      "words": 139,
+      "falseCorrect": 5,
+      "falseWrong": 0,
+      "missedCorrect": 0,
+      "wrongClass": 5,
+      "cases": 20,
+      "failingCases": [
+        "h12-echo-single-word",
+        "h13-echo-phrase",
+        "h14-imitation"
+      ]
+    },
+    "byGroup": {
+      "fluent": {
+        "words": 16,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 2,
+        "failingCases": []
+      },
+      "repeat": {
+        "words": 6,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 1,
+        "failingCases": []
+      },
+      "self-correct": {
+        "words": 16,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 2,
+        "failingCases": []
+      },
+      "restart": {
+        "words": 8,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 1,
+        "failingCases": []
+      },
+      "skip": {
+        "words": 6,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 1,
+        "failingCases": []
+      },
+      "wrong": {
+        "words": 13,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 2,
+        "failingCases": []
+      },
+      "duplicate-words": {
+        "words": 16,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 2,
+        "failingCases": []
+      },
+      "off-topic": {
+        "words": 14,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 2,
+        "failingCases": []
+      },
+      "echo": {
+        "words": 20,
+        "falseCorrect": 5,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 5,
+        "cases": 3,
+        "failingCases": [
+          "h12-echo-single-word",
+          "h13-echo-phrase",
+          "h14-imitation"
+        ]
+      },
+      "pause": {
+        "words": 6,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 1,
+        "failingCases": []
+      },
+      "uncertain": {
+        "words": 8,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 1,
+        "failingCases": []
+      },
+      "unicode-number": {
+        "words": 10,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 2,
+        "failingCases": []
+      }
+    }
+  },
+  "failures": [
+    {
+      "id": "h12-echo-single-word",
+      "failures": [
+        "false-correct 2:H->CORRECT"
+      ]
+    },
+    {
+      "id": "h13-echo-phrase",
+      "failures": [
+        "false-correct 3:H->CORRECT",
+        "false-correct 4:H->CORRECT",
+        "false-correct 5:H->CORRECT"
+      ]
+    },
+    {
+      "id": "h14-imitation",
+      "failures": [
+        "false-correct 2:H->CORRECT"
+      ]
+    }
+  ]
+}
