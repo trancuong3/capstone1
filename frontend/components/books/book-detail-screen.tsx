@@ -153,7 +153,14 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
     return () => {
       isActive = false;
     };
-  }, [bookId, bookService, childState, currentUserId, requestKey, targetPageId]);
+  }, [
+    bookId,
+    bookService,
+    childState,
+    currentUserId,
+    requestKey,
+    targetPageId,
+  ]);
 
   useEffect(() => {
     if (

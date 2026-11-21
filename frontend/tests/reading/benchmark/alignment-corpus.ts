@@ -94,7 +94,12 @@ export const TUNING_CASES: readonly CorpusCase[] = [
     group: "fluent",
     book: A,
     expected: "C C C C C C",
-    events: [f(1000, "Bé"), f(2200, "Lan đi"), f(3400, "học cùng mẹ"), fin(6000)],
+    events: [
+      f(1000, "Bé"),
+      f(2200, "Lan đi"),
+      f(3400, "học cùng mẹ"),
+      fin(6000),
+    ],
     note: "segment boundaries must not matter",
   },
   {
@@ -356,7 +361,10 @@ export const HOLDOUT_CASES: readonly CorpusCase[] = [
     group: "restart",
     book: H1,
     expected: "C C C C C C C C",
-    events: [f(1000, "Chú chó nhỏ chạy Chú chó nhỏ chạy theo bà ra vườn"), fin(9000)],
+    events: [
+      f(1000, "Chú chó nhỏ chạy Chú chó nhỏ chạy theo bà ra vườn"),
+      fin(9000),
+    ],
     note: "restarts after four words",
   },
   {
@@ -380,7 +388,10 @@ export const HOLDOUT_CASES: readonly CorpusCase[] = [
     group: "duplicate-words",
     book: H2,
     expected: "C C C C C C C C C C C",
-    events: [f(1000, "Trời mưa to Mưa rơi trên mái nhà Mưa tạnh rồi"), fin(9000)],
+    events: [
+      f(1000, "Trời mưa to Mưa rơi trên mái nhà Mưa tạnh rồi"),
+      fin(9000),
+    ],
     note: "mưa occurs three times",
   },
   {
@@ -463,7 +474,12 @@ export const HOLDOUT_CASES: readonly CorpusCase[] = [
     group: "pause",
     book: H3,
     expected: "C C C C C C",
-    events: [f(1000, "Em"), f(12000, "hái hoa"), f(14000, "tặng cô giáo"), fin(18000)],
+    events: [
+      f(1000, "Em"),
+      f(12000, "hái hoa"),
+      f(14000, "tặng cô giáo"),
+      fin(18000),
+    ],
     note: "long pause only",
   },
   {

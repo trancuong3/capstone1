@@ -59,10 +59,16 @@ describe("observation: what counts as absent", () => {
   });
 
   it.each([
-    ["bending over the book / turning the head", { faceCount: 0, quality: "ok", motion: 0.3 }],
+    [
+      "bending over the book / turning the head",
+      { faceCount: 0, quality: "ok", motion: 0.3 },
+    ],
     ["dark room", { faceCount: 0, quality: "dark", motion: 0 }],
     ["covered camera", { faceCount: 0, quality: "covered", motion: 0 }],
-    ["no face detector on this device", { faceCount: null, quality: "unsupported", motion: 0 }],
+    [
+      "no face detector on this device",
+      { faceCount: null, quality: "unsupported", motion: 0 },
+    ],
     ["camera error", { faceCount: null, quality: "error", motion: 0 }],
   ] as const)("is uncertain for %s", (_name, sample) => {
     expect(observe({ at: 0, ...sample })).toBe("uncertain");
@@ -123,7 +129,10 @@ describe("when the reader leaves (G11, G12)", () => {
     ["bending over the book", { faceCount: 0, quality: "ok", motion: 0.3 }],
     ["dark room", { faceCount: 0, quality: "dark", motion: 0 }],
     ["covered camera", { faceCount: 0, quality: "covered", motion: 0 }],
-    ["unsupported device", { faceCount: null, quality: "unsupported", motion: 0 }],
+    [
+      "unsupported device",
+      { faceCount: null, quality: "unsupported", motion: 0 },
+    ],
     ["camera error", { faceCount: null, quality: "error", motion: 0 }],
   ] as const)("never alerts for %s, however long", (_name, sample) => {
     const h = harness();
@@ -147,7 +156,10 @@ describe("when the reader leaves (G11, G12)", () => {
   });
 
   it("does not evaluate when the camera is not granted or the app is in the background", () => {
-    for (const patch of [{ cameraGranted: false }, { appVisible: false }] as const) {
+    for (const patch of [
+      { cameraGranted: false },
+      { appVisible: false },
+    ] as const) {
       const h = harness({ ...READING, ...patch });
       h.run(PRESENT, 5);
       h.run(ABSENT, 600);
@@ -202,7 +214,11 @@ describe("cancelling a pending alert", () => {
     ["the session ends", { sessionPhase: "ended" }, "SESSION_ENDED"],
     ["the app goes to the background", { appVisible: false }, "APP_BACKGROUND"],
     ["the camera is lost", { cameraGranted: false }, "CAMERA_UNAVAILABLE"],
-    ["a parent pauses the session", { sessionPhase: "paused-other" }, "PAUSED_BY_PARENT"],
+    [
+      "a parent pauses the session",
+      { sessionPhase: "paused-other" },
+      "PAUSED_BY_PARENT",
+    ],
   ] as const)("cancels when %s", (_name, patch, reason) => {
     const h = armed();
     h.set(patch);
@@ -221,7 +237,9 @@ describe("cancelling a pending alert", () => {
     h.run(PRESENT, 5);
     h.run(ABSENT, 46);
     const armedEpisodes = h.effects.filter((e) => e.type === "ARM_ALERT");
-    expect(armedEpisodes).toEqual([{ type: "ARM_ALERT", episodeId: "episode-2" }]);
+    expect(armedEpisodes).toEqual([
+      { type: "ARM_ALERT", episodeId: "episode-2" },
+    ]);
   });
 });
 
@@ -249,12 +267,20 @@ describe("frame analysis (on-device, no image leaves the function)", () => {
     const same = analyzeFrame(noisy(128, 1), first.luma);
     expect(same.motion).toBe(0);
     const moved = analyzeFrame(noisy(128, 7), first.luma);
-    expect(moved.motion).toBeGreaterThan(DEFAULT_PRESENCE_CONFIG.motionThreshold);
+    expect(moved.motion).toBeGreaterThan(
+      DEFAULT_PRESENCE_CONFIG.motionThreshold,
+    );
   });
 
   it("classifies dark and covered frames as unusable and never as absence", () => {
-    const dark = analyzeFrame(rgba(() => 5), null);
-    const covered = analyzeFrame(rgba(() => 120), null);
+    const dark = analyzeFrame(
+      rgba(() => 5),
+      null,
+    );
+    const covered = analyzeFrame(
+      rgba(() => 120),
+      null,
+    );
     const good = analyzeFrame(noisy(128, 3), null);
     expect(classifyFrame(dark, 0).quality).toBe("dark");
     expect(classifyFrame(covered, 0).quality).toBe("covered");

@@ -14,8 +14,7 @@ import type {
 } from "@/types/parent-private-book";
 
 vi.mock("@/lib/api/api-client", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/lib/api/api-client")>();
+  const actual = await importOriginal<typeof import("@/lib/api/api-client")>();
   return {
     ...actual,
     fetchAuthenticatedBlobUrl: vi.fn(async () => "blob:admin-private-preview"),
@@ -152,7 +151,6 @@ describe("Admin Chất lượng sách -> Sách người dùng tab", () => {
       offset: 0,
       summary: {},
       alert_summary: { CHILD_SAFETY: 0, COPYRIGHT: 0, BOTH: 0 },
-      issue_filter_summary: {},
     });
     vi.mocked(services.bookContentQuality.listReports).mockResolvedValue({
       items: [],
@@ -226,7 +224,9 @@ describe("Admin Chất lượng sách -> Sách người dùng tab", () => {
     ).toBeInTheDocument();
     // No button to promote private book to catalog
     expect(
-      screen.queryByRole("button", { name: /Phê duyệt toàn bộ sách|Xuất bản/i }),
+      screen.queryByRole("button", {
+        name: /Phê duyệt toàn bộ sách|Xuất bản/i,
+      }),
     ).not.toBeInTheDocument();
 
     // Sensitive excerpt MUST be collapsed by default
@@ -238,7 +238,9 @@ describe("Admin Chất lượng sách -> Sách người dùng tab", () => {
     // Reason validation (< 5 chars blocked)
     await user.click(screen.getByRole("button", { name: /Duyệt bản này/ }));
     expect(
-      await screen.findByText(/Vui lòng nhập lý do quyết định tối thiểu 5 ký tự/),
+      await screen.findByText(
+        /Vui lòng nhập lý do quyết định tối thiểu 5 ký tự/,
+      ),
     ).toBeInTheDocument();
     expect(
       services.bookContentQuality.decideUserBookSubmission,
@@ -273,7 +275,6 @@ describe("Admin Chất lượng sách -> Sách người dùng tab", () => {
       offset: 0,
       summary: {},
       alert_summary: { CHILD_SAFETY: 0, COPYRIGHT: 0, BOTH: 0 },
-      issue_filter_summary: {},
     });
     vi.mocked(services.bookContentQuality.listReports).mockResolvedValue({
       items: [],
@@ -318,7 +319,9 @@ describe("Admin Chất lượng sách -> Sách người dùng tab", () => {
     await user.click(
       await screen.findByRole("tab", { name: "Sách người dùng" }),
     );
-    await user.click(await screen.findByRole("button", { name: "Mở để duyệt" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Mở để duyệt" }),
+    );
 
     // Approve button MUST be disabled when policy-blocked
     const approveBtn = await screen.findByRole("button", {

@@ -212,7 +212,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       service.listPlans(childId, controller.signal),
       service.listCollections(childId, controller.signal),
       service.listReminders(childId, controller.signal),
-      bookService.list({ grade: selectedChild?.grade, include_private: true }).catch(() => null),
+      bookService
+        .list({ grade: selectedChild?.grade, include_private: true })
+        .catch(() => null),
     ])
       .then(([goalRows, planRows, savedRows, reminderRows, bookRows]) => {
         if (!active) return;

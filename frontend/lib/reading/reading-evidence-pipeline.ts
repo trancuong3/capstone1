@@ -8,14 +8,8 @@ import {
   tokenizeRealtimeText,
   type RealtimeAlignmentSnapshot,
 } from "@/lib/reading/realtime-alignment";
-import {
-  gradeWords,
-  type GradedWordState,
-} from "@/lib/reading/word-grading";
-import {
-  parseVoiceIntent,
-  type VoiceIntent,
-} from "@/lib/reading/voice-intent";
+import { gradeWords, type GradedWordState } from "@/lib/reading/word-grading";
+import { parseVoiceIntent, type VoiceIntent } from "@/lib/reading/voice-intent";
 import type { ReadingPageWordDTO } from "@/types/reading";
 
 /** Words per millisecond of detected speech beyond which text is implausible. */
@@ -216,7 +210,12 @@ export class ReadingEvidencePipeline {
   }
 
   grade(): Map<string, GradedWordState> {
-    return gradeWords(this.engine.getSnapshot(), this.words, this.helped, this.gaveUp);
+    return gradeWords(
+      this.engine.getSnapshot(),
+      this.words,
+      this.helped,
+      this.gaveUp,
+    );
   }
 
   helpedWordIds(): ReadonlySet<string> {

@@ -56,7 +56,11 @@ function readStackInfo(): StackInfo {
 
 async function setE2EMode(
   apiUrl: string,
-  mode: "real_ollama" | "flagged_medium" | "fail_tool_check_once" | "slow_then_stale",
+  mode:
+    | "real_ollama"
+    | "flagged_medium"
+    | "fail_tool_check_once"
+    | "slow_then_stale",
   extra: Record<string, unknown> = {},
 ) {
   const res = await fetch(`${apiUrl}/_e2e/mode`, {
@@ -134,7 +138,11 @@ async function saveShot(page: Page, name: string) {
   });
 }
 
-async function openNewContext(browser: Browser, baseURL: string, viewport: { width: number; height: number } | null) {
+async function openNewContext(
+  browser: Browser,
+  baseURL: string,
+  viewport: { width: number; height: number } | null,
+) {
   const ctx = await browser.newContext({
     baseURL,
     viewport: viewport ?? { width: 1440, height: 1000 },
@@ -203,7 +211,9 @@ test.describe.serial("Parent Private Books Real Full-Stack E2E", () => {
       } | null;
     };
     expect(healthJson.last_real_ollama_proof).not.toBeNull();
-    expect(healthJson.last_real_ollama_proof?.tool_check_workflow_id).toBeTruthy();
+    expect(
+      healthJson.last_real_ollama_proof?.tool_check_workflow_id,
+    ).toBeTruthy();
     expect(
       healthJson.last_real_ollama_proof?.provider_events.some(
         (ev) => ev.provider === "ollama_local",
@@ -293,7 +303,10 @@ test.describe.serial("Parent Private Books Real Full-Stack E2E", () => {
         info.users.parent_b.child_alias,
       );
       // Navigate to /books via dashboard CTA so Bé Bình stays selected in AppStore
-      await pageB.getByRole("button", { name: /Chọn sách|Thư viện|Tủ sách/i }).first().click();
+      await pageB
+        .getByRole("button", { name: /Chọn sách|Thư viện|Tủ sách/i })
+        .first()
+        .click();
       await pageB.waitForURL(/\/books$/);
       await expect(pageB.getByText("Chú Mèo Nhỏ")).toBeVisible();
       await expect(pageB.getByText(bookTitle)).toHaveCount(0);
@@ -420,7 +433,8 @@ test.describe.serial("Parent Private Books Real Full-Stack E2E", () => {
       const summary = adminPage.getByText("Xem đoạn nhạy cảm bị gắn cờ");
       await expect(summary).toBeVisible();
       const isOpen = await summary.evaluate(
-        (el) => (el.closest("details") as HTMLDetailsElement | null)?.open ?? true,
+        (el) =>
+          (el.closest("details") as HTMLDetailsElement | null)?.open ?? true,
       );
       expect(isOpen).toBe(false);
       await saveShot(adminPage, `s2_admin_user_books_review_${tag}`);
@@ -428,7 +442,9 @@ test.describe.serial("Parent Private Books Real Full-Stack E2E", () => {
       // Admin requests changes on v1
       await adminPage
         .getByLabel("Lý do quyết định Admin")
-        .fill("Đoạn văn v1 hơi bí ẩn, đề nghị phụ huynh chỉnh lại nhẹ nhàng hơn.");
+        .fill(
+          "Đoạn văn v1 hơi bí ẩn, đề nghị phụ huynh chỉnh lại nhẹ nhàng hơn.",
+        );
       await adminPage.getByRole("button", { name: /Yêu cầu sửa/ }).click();
       await expect(
         adminPage.getByText(/Đã gửi yêu cầu chỉnh sửa/),
@@ -436,9 +452,7 @@ test.describe.serial("Parent Private Books Real Full-Stack E2E", () => {
 
       // 4. Parent A refreshes -> still blocked -> edits text to create v2 -> sends v2 to Admin
       await page.getByRole("button", { name: /Làm mới trạng thái/ }).click();
-      await expect(
-        page.getByText(/Đoạn văn v1 hơi bí ẩn/),
-      ).toBeVisible();
+      await expect(page.getByText(/Đoạn văn v1 hơi bí ẩn/)).toBeVisible();
       await expect(
         page.getByRole("button", { name: /Thêm trang vào sách/ }),
       ).toBeDisabled();
@@ -475,7 +489,9 @@ test.describe.serial("Parent Private Books Real Full-Stack E2E", () => {
         .getByLabel("Lý do quyết định Admin")
         .fill("Phiên bản v2 đã phù hợp cho bé đọc cùng phụ huynh.");
       await adminPage.getByRole("button", { name: /Duyệt bản này/ }).click();
-      await expect(adminPage.getByText(/Đã phê duyệt đúng phiên bản v2/)).toBeVisible();
+      await expect(
+        adminPage.getByText(/Đã phê duyệt đúng phiên bản v2/),
+      ).toBeVisible();
     } finally {
       await adminCtx.close();
     }
@@ -553,9 +569,9 @@ test.describe.serial("Parent Private Books Real Full-Stack E2E", () => {
 
     // 2. Click Thử lại kiểm tra -> Stage 3 retries via REAL local Ollama -> PASSED_READY_TO_ADD
     await page.getByRole("button", { name: /Thử lại kiểm tra/ }).click();
-    await expect(
-      page.getByText("Đạt — có thể thêm trang").first(),
-    ).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText("Đạt — có thể thêm trang").first()).toBeVisible(
+      { timeout: 90_000 },
+    );
     await expect(
       page.getByRole("button", { name: /Thêm trang vào sách/ }),
     ).toBeEnabled();
@@ -587,10 +603,9 @@ test.describe.serial("Parent Private Books Real Full-Stack E2E", () => {
       .setInputFiles(info.assets.replaced_png);
 
     // Wait > 4s so the old slow v1 worker finishes AND v2 worker finishes
-    await expect(checkingCard.or(page.locator("article", { hasText: "Phiên bản v2" }))).toContainText(
-      "Phiên bản v2",
-      { timeout: 45_000 },
-    );
+    await expect(
+      checkingCard.or(page.locator("article", { hasText: "Phiên bản v2" })),
+    ).toContainText("Phiên bản v2", { timeout: 45_000 });
     const v2Card = page.locator("article", { hasText: "Phiên bản v2" });
     await expect(v2Card.getByText("Cần Admin duyệt")).toBeVisible({
       timeout: 45_000,

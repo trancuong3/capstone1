@@ -777,7 +777,7 @@ class OcrFallbackOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("UNCERTAIN_TOKENS", "\n".join(logs.output))
         self.assertNotIn("ngay xua", "\n".join(logs.output))
 
-    async def test_all_cloud_providers_uncertain_tries_ollama_and_preserves_remaining_uncertain(self):
+    async def test_all_cloud_providers_uncertain_preserves_original_without_ollama(self):
         calls = []
         partial = ChunkCorrectionResult(0, ("ngay",), (0,))
         providers = [
@@ -791,7 +791,7 @@ class OcrFallbackOrchestratorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "ngay")
         self.assertEqual(
             [entry[0] for entry in calls],
-            ["gemini_3_5", "groq_qwen", "gemini_3_1", "ollama_qwen3_vl"],
+            ["gemini_3_5", "groq_qwen", "gemini_3_1"],
         )
         output = "\n".join(logs.output)
         self.assertIn("ocr_uncertain_tokens_preserved", output)

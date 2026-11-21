@@ -22,7 +22,6 @@ import {
   adminR1Fixture,
   adminR2Fixture,
   createAdminServiceFixture,
-  createReadyVerificationReadiness,
   withAdminFixture,
 } from "@/test/fixtures/admin-service-fixture";
 
@@ -98,18 +97,12 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       error_code: null,
       original_ocr_hash: "a".repeat(64),
       admin_input_hash: "b".repeat(64),
-      image_hash: "e".repeat(64),
       proofread_text: proofreadText,
       proofread_output_hash: hash,
       corrections: [],
       uncertain_word_indices: [],
       proofread_metadata: {},
-      safety_metadata: {
-        scope: "TEXT",
-        total_chunks: 1,
-        scanned_chunks: 1,
-        coverage_complete: true,
-      },
+      safety_metadata: {},
       candidate_history: [],
       safety_history: [],
       review_history: [],
@@ -120,12 +113,6 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       hash_match: true,
       suitability: "SUITABLE",
       safety_status: "PROVISIONAL",
-      image_safety_status: "NOT_REVIEWED",
-      image_safety_reviewed_at: null,
-      image_safety_review_note: null,
-      rights_profile_id: null,
-      rights_profile_version: null,
-      rights_profile_hash: null,
       findings: [],
       provider_events: [],
       ocr_approved_at: null,
@@ -1256,9 +1243,8 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
     expect(screen.getByRole("button", { name: /Lưu bản nháp/ })).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: /^AI chỉnh sửa$/ }),
+      screen.getByRole("button", { name: /XÁC NHẬN & CHẠY AI/ }),
     ).toBeDisabled();
-    expect(screen.getByRole("button", { name: /^Xác minh$/ })).toBeDisabled();
 
     await user.clear(pageText);
     await user.type(pageText, "Ta đi học.");
@@ -1355,7 +1341,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     const originalBoxes = boxLabels.map(
       (label) => (screen.getByLabelText(label) as HTMLInputElement).value,
     );
-    await user.click(screen.getByRole("button", { name: /^AI chỉnh sửa$/ }));
+    await user.click(
+      screen.getByRole("button", { name: /XÁC NHẬN & CHẠY AI/ }),
+    );
 
     const textarea = screen.getByLabelText("Nội dung trang");
     expect(
@@ -1437,12 +1425,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       })),
     };
     services.ocr.getRevision.mockResolvedValue(pending);
-    const readyWorkflow = makeReadyWorkflow(pending.draft_text ?? "");
-    services.ocr.runCombinedWorkflow.mockResolvedValue(readyWorkflow);
-    services.ocr.decideWorkflowSafety.mockResolvedValue({
-      ...readyWorkflow,
-      safety_status: "CONFIRMED",
-    });
+    services.ocr.runCombinedWorkflow.mockResolvedValue(
+      makeReadyWorkflow(pending.draft_text ?? ""),
+    );
     services.revisions.verify.mockResolvedValue(verified);
     const user = userEvent.setup();
     render(
@@ -1462,20 +1447,23 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
       pending.draft_text,
     );
 
-    await user.click(screen.getByRole("button", { name: /^AI chỉnh sửa$/ }));
+    await user.click(
+      screen.getByRole("button", { name: /XÁC NHẬN & CHẠY AI/ }),
+    );
     expect(
       await screen.findByText(/AI chưa phát hiện lỗi chính tả cần chỉnh sửa/),
     ).toBeInTheDocument();
     await user.click(
       screen.getByRole("button", { name: "Xác nhận kết quả Safety" }),
     );
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: /^Xác minh$/ })).toBeEnabled(),
+    await user.click(
+      screen.getByRole("button", {
+        name: /XÁC NHẬN VÀ LƯU NỘI DUNG CUỐI CÙNG/,
+      }),
     );
-    await user.click(screen.getByRole("button", { name: /^Xác minh$/ }));
 
     expect(
-      (await screen.findAllByText(/Đã xác minh/)).length,
+      (await screen.findAllByText(/Đã xác minh revision/)).length,
     ).toBeGreaterThan(0);
     expect(screen.getByLabelText("Nội dung trang")).toBeDisabled();
     expect(screen.getByLabelText("Nội dung trang")).toHaveValue(
@@ -1523,7 +1511,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     await user.click(
       screen.getAllByText("Tọa độ vùng ảnh · chỉnh sửa nâng cao")[0]!,
     );
-    await user.click(screen.getByRole("button", { name: /^AI chỉnh sửa$/ }));
+    await user.click(
+      screen.getByRole("button", { name: /XÁC NHẬN & CHẠY AI/ }),
+    );
     await screen.findByRole("heading", { name: "Rà soát đề xuất AI" });
     expect(textarea).toHaveValue(source.draft_text);
 
@@ -1551,7 +1541,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
 
     const textarea = await screen.findByLabelText("Nội dung trang");
-    await user.click(screen.getByRole("button", { name: /^AI chỉnh sửa$/ }));
+    await user.click(
+      screen.getByRole("button", { name: /XÁC NHẬN & CHẠY AI/ }),
+    );
 
     expect(
       await screen.findByText(
@@ -1594,7 +1586,9 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
 
     const textarea = await screen.findByLabelText("Nội dung trang");
-    await user.click(screen.getByRole("button", { name: /^AI chỉnh sửa$/ }));
+    await user.click(
+      screen.getByRole("button", { name: /XÁC NHẬN & CHẠY AI/ }),
+    );
     await waitFor(() =>
       expect(services.ocr.runCombinedWorkflow).toHaveBeenCalled(),
     );
@@ -1645,9 +1639,11 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     );
 
     const textarea = await screen.findByLabelText("Nội dung trang");
-    await user.click(screen.getByRole("button", { name: /^AI chỉnh sửa$/ }));
+    await user.click(
+      screen.getByRole("button", { name: /XÁC NHẬN & CHẠY AI/ }),
+    );
     expect(
-      await screen.findByText(/Bước 1\/3 · Đang rà chính tả \(đoạn 1\/3\)/i),
+      await screen.findByText(/Proofreading · đoạn 1\/3/i),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Dừng theo dõi/ }));
 
@@ -1656,193 +1652,6 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     ).toBeInTheDocument();
     expect(textarea).toHaveValue(source.draft_text);
     expect(services.ocr.saveDraft).not.toHaveBeenCalled();
-  });
-
-  it("keeps Xác minh locked with backend blockers and re-locks immediately when Admin edits text", async () => {
-    const services = createAdminServiceFixture();
-    const pending = makeEditableDetail();
-    const workflow = makeReadyWorkflow(pending.draft_text ?? "");
-    services.ocr.getRevision.mockResolvedValue(pending);
-    services.ocr.getLatestWorkflow.mockResolvedValue({
-      ...workflow,
-      safety_status: "CONFIRMED",
-    });
-    services.ocr.getVerificationReadiness.mockResolvedValue(
-      createReadyVerificationReadiness({
-        page_revision_id: pending.page_revision_id,
-        workflow_id: workflow.workflow_id,
-        ready_to_verify: false,
-        rights_status: "NOT_ASSESSED",
-        blockers: [
-          {
-            code: "RIGHTS_REVIEW_REQUIRED",
-            stage: "RIGHTS",
-            message:
-              "Hồ sơ quyền sử dụng chưa ở trạng thái Đã rà soát quyền sử dụng.",
-          },
-        ],
-      }),
-    );
-
-    const user = userEvent.setup();
-    render(
-      withAdminFixture(
-        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
-        services,
-      ),
-    );
-
-    expect(
-      await screen.findByText(/Hồ sơ quyền sử dụng chưa ở trạng thái/),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Xác minh$/ })).toBeDisabled();
-
-    // Now simulate readiness turning green after rights review
-    services.ocr.getVerificationReadiness.mockResolvedValue(
-      createReadyVerificationReadiness({
-        page_revision_id: pending.page_revision_id,
-        workflow_id: workflow.workflow_id,
-        ready_to_verify: true,
-        rights_status: "REVIEWED",
-      }),
-    );
-    await user.click(
-      screen.getByRole("button", { name: "Cập nhật hồ sơ quyền sử dụng" }),
-    );
-    await user.selectOptions(
-      screen.getByLabelText("Trạng thái quyền sử dụng"),
-      "REVIEWED",
-    );
-    await user.click(
-      screen.getByRole("button", { name: "Lưu hồ sơ quyền sử dụng" }),
-    );
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: /^Xác minh$/ })).toBeEnabled(),
-    );
-
-    // Edit text -> Xác minh immediately re-locks with "Cần kiểm tra lại"
-    const textarea = screen.getByLabelText("Nội dung trang");
-    await user.clear(textarea);
-    await user.type(textarea, "Nội dung phiên bản mới");
-    expect(screen.getByRole("button", { name: /^Xác minh$/ })).toBeDisabled();
-    expect(screen.getByTestId("verification-gate-status")).toHaveTextContent(
-      /Cần kiểm tra lại/,
-    );
-    expect(services.revisions.verify).not.toHaveBeenCalled();
-  });
-
-  it("never exposes a manual fallback verification bypass when AI fails, while allowing draft save", async () => {
-    const services = createAdminServiceFixture();
-    const pending = makeEditableDetail();
-    services.ocr.getRevision.mockResolvedValue(pending);
-    services.ocr.runCombinedWorkflow.mockRejectedValue(
-      new Error("AI OCR tạm thời không khả dụng"),
-    );
-    services.ocr.saveDraft.mockResolvedValue(pending);
-    const user = userEvent.setup();
-    render(
-      withAdminFixture(
-        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
-        services,
-      ),
-    );
-
-    await screen.findByLabelText("Nội dung trang");
-    await user.click(screen.getByRole("button", { name: /^AI chỉnh sửa$/ }));
-
-    expect(
-      await screen.findByText(/AI OCR tạm thời không khả dụng/),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /Tiếp tục xác minh thủ công/ }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Xác minh$/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /Lưu bản nháp/ })).toBeEnabled();
-
-    await user.click(screen.getByRole("button", { name: /Lưu bản nháp/ }));
-    await waitFor(() => expect(services.ocr.saveDraft).toHaveBeenCalledOnce());
-    expect(services.revisions.verify).not.toHaveBeenCalled();
-  });
-
-  it("supports resolving uncertain words and manual image safety review before verification", async () => {
-    const services = createAdminServiceFixture();
-    const pending = makeEditableDetail();
-    const workflow = {
-      ...makeReadyWorkflow(pending.draft_text ?? ""),
-      uncertain_word_indices: [1],
-      safety_status: "CONFIRMED" as const,
-    };
-    services.ocr.getRevision.mockResolvedValue(pending);
-    services.ocr.getLatestWorkflow.mockResolvedValue(workflow);
-    services.ocr.getVerificationReadiness.mockResolvedValue(
-      createReadyVerificationReadiness({
-        page_revision_id: pending.page_revision_id,
-        workflow_id: workflow.workflow_id,
-        ready_to_verify: false,
-        uncertain_word_count: 1,
-        uncertain_resolved: false,
-        image_safety_required: true,
-        page_content_type: "COVER_OR_IMAGE_ONLY",
-        blockers: [
-          {
-            code: "UNCERTAIN_WORDS_UNRESOLVED",
-            stage: "PROOFREADING",
-            message: "Còn từ nghi vấn chưa đối chiếu ảnh gốc.",
-          },
-          {
-            code: "IMAGE_SAFETY_REVIEW_REQUIRED",
-            stage: "IMAGE_SAFETY",
-            message: "Trang bìa / chỉ có hình cần Admin đối chiếu ảnh gốc.",
-          },
-        ],
-      }),
-    );
-
-    const user = userEvent.setup();
-    render(
-      withAdminFixture(
-        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
-        services,
-      ),
-    );
-
-    expect(
-      await screen.findByText(/Có 1 từ nghi vấn cần Admin đối chiếu ảnh gốc/),
-    ).toBeInTheDocument();
-    expect(screen.getByText("Bắt buộc rà soát ảnh")).toBeInTheDocument();
-
-    await user.type(
-      screen.getByLabelText(/Ghi chú đối chiếu với ảnh gốc/),
-      "Khớp ảnh in.",
-    );
-    await user.click(
-      screen.getByRole("button", { name: "Xác nhận đã đối chiếu từ nghi vấn" }),
-    );
-    await waitFor(() =>
-      expect(services.ocr.resolveUncertainWords).toHaveBeenCalledWith(
-        ADMIN_PAGE_ID,
-        workflow.workflow_id,
-        workflow.candidate_hash,
-        "Khớp ảnh in.",
-      ),
-    );
-
-    await user.type(
-      screen.getByLabelText(/Ghi chú rà soát hình ảnh/),
-      "Ảnh an toàn.",
-    );
-    await user.click(
-      screen.getByRole("button", { name: "Xác nhận ảnh an toàn" }),
-    );
-    await waitFor(() =>
-      expect(services.ocr.reviewImageSafety).toHaveBeenCalledWith(
-        ADMIN_PAGE_ID,
-        workflow.workflow_id,
-        "MANUAL_REVIEWED_SAFE",
-        "Ảnh an toàn.",
-        "COVER_OR_IMAGE_ONLY",
-      ),
-    );
   });
 
   it("creates a draft only from the selected current verified revision", async () => {

@@ -39,7 +39,9 @@ function getErrorText(error: unknown, fallback: string): string {
 export function ParentMyBooksScreen() {
   const authRuntime = useAuthRuntime();
   const currentUserId = authRuntime.session?.user?.id ?? "";
-  return <ParentMyBooksContent key={currentUserId} currentUserId={currentUserId} />;
+  return (
+    <ParentMyBooksContent key={currentUserId} currentUserId={currentUserId} />
+  );
 }
 
 function ParentMyBooksContent({ currentUserId }: { currentUserId: string }) {
@@ -345,7 +347,9 @@ function ParentMyBooksContent({ currentUserId }: { currentUserId: string }) {
             </Button>
           }
           description="Tạo sách riêng để chụp trang sách giấy hoặc tải PDF/DOCX cho bé luyện đọc tại nhà."
-          icon={<BookMarked aria-hidden="true" className="size-10 text-primary" />}
+          icon={
+            <BookMarked aria-hidden="true" className="size-10 text-primary" />
+          }
           title="Bạn chưa có sách riêng nào"
         />
       ) : (

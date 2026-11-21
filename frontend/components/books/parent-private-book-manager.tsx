@@ -18,7 +18,13 @@ import {
   Upload,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
 import { AuthenticatedImage } from "@/components/common/authenticated-image";
 import { Button, ButtonLink } from "@/components/common/button";
@@ -66,7 +72,10 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 function generateClientKey(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     return crypto.randomUUID();
   }
   return `upload-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
@@ -96,7 +105,9 @@ function describeToolCheckScope(scope: ToolCheckScopeDTO): string {
     parts.push("chưa có công cụ quét bản quyền tự động");
   }
   if (scope.total_chunks > 0) {
-    parts.push(`đã kiểm tra ${scope.chunks_checked}/${scope.total_chunks} đoạn`);
+    parts.push(
+      `đã kiểm tra ${scope.chunks_checked}/${scope.total_chunks} đoạn`,
+    );
   }
   return `${parts.join("; ")}.`;
 }
@@ -403,9 +414,7 @@ function ParentPrivateBookManagerContent({
       );
       await loadDetail(true);
     } catch (error) {
-      setActionError(
-        errorText(error, "Không thể thử lại kiểm tra lúc này."),
-      );
+      setActionError(errorText(error, "Không thể thử lại kiểm tra lúc này."));
     } finally {
       setBusyKey(null);
     }
@@ -455,7 +464,10 @@ function ParentPrivateBookManagerContent({
       await loadDetail(true);
     } catch (error) {
       setActionError(
-        errorText(error, "Không thể thay ảnh trang. Hãy chọn đúng 1 ảnh hợp lệ."),
+        errorText(
+          error,
+          "Không thể thay ảnh trang. Hãy chọn đúng 1 ảnh hợp lệ.",
+        ),
       );
     } finally {
       setBusyKey(null);
@@ -495,7 +507,11 @@ function ParentPrivateBookManagerContent({
       <section className="mx-auto flex w-full max-w-[760px] flex-col gap-4 px-4 py-10">
         <EmptyState
           action={
-            <ButtonLink href="/my-books" variant="secondary" className="max-w-64">
+            <ButtonLink
+              href="/my-books"
+              variant="secondary"
+              className="max-w-64"
+            >
               <ArrowLeft aria-hidden="true" className="size-4" />
               Về Sách của tôi
             </ButtonLink>
@@ -718,8 +734,14 @@ function ParentPrivateBookManagerContent({
       </form>
 
       {/* Staged Submissions Queue */}
-      <section aria-labelledby="submissions-heading" className="flex flex-col gap-4">
-        <h2 id="submissions-heading" className="text-xl font-extrabold text-ink">
+      <section
+        aria-labelledby="submissions-heading"
+        className="flex flex-col gap-4"
+      >
+        <h2
+          id="submissions-heading"
+          className="text-xl font-extrabold text-ink"
+        >
           Các trang đang kiểm tra & duyệt ({activeSubmissions.length})
         </h2>
 
@@ -785,7 +807,10 @@ function ParentPrivateBookManagerContent({
                           ) : null}
                           {sub.tool_check_policy_blocked ? (
                             <span className="inline-flex items-center gap-1 rounded-full border border-rose-400 bg-rose-100 px-2.5 py-0.5 text-xs font-bold text-rose-900">
-                              <ShieldAlert aria-hidden="true" className="size-3.5" />
+                              <ShieldAlert
+                                aria-hidden="true"
+                                className="size-3.5"
+                              />
                               Chặn theo chính sách an toàn
                             </span>
                           ) : null}
@@ -811,10 +836,14 @@ function ParentPrivateBookManagerContent({
                         className="grid gap-2 sm:grid-cols-3"
                       >
                         <div className="rounded-control border border-border bg-canvas px-3 py-2 text-xs">
-                          <p className="font-bold text-ink">1. OCR tiếng Việt</p>
+                          <p className="font-bold text-ink">
+                            1. OCR tiếng Việt
+                          </p>
                           <p className="mt-0.5 text-muted">
                             {STAGE_LABELS[sub.ocr_status] ?? sub.ocr_status}
-                            {sub.ocr_error_code ? ` (${sub.ocr_error_code})` : ""}
+                            {sub.ocr_error_code
+                              ? ` (${sub.ocr_error_code})`
+                              : ""}
                           </p>
                         </div>
                         <div className="rounded-control border border-border bg-canvas px-3 py-2 text-xs">
@@ -867,7 +896,9 @@ function ParentPrivateBookManagerContent({
                               : "Trang cần Admin xem xét trước khi thêm vào sách."}
                           </p>
                           {sub.tool_check_parent_notice ? (
-                            <p className="mt-1">{sub.tool_check_parent_notice}</p>
+                            <p className="mt-1">
+                              {sub.tool_check_parent_notice}
+                            </p>
                           ) : null}
                         </div>
                       ) : null}
@@ -889,8 +920,8 @@ function ParentPrivateBookManagerContent({
                         <div className="rounded-control border border-sky-200 bg-sky/40 p-3">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <p className="text-xs font-bold text-primary-hover">
-                              Đề xuất chính tả ({sub.proofread_suggestions.length}
-                              )
+                              Đề xuất chính tả (
+                              {sub.proofread_suggestions.length})
                               {sub.uncertain_word_indices.length > 0
                                 ? ` · ${sub.uncertain_word_indices.length} từ cần chú ý`
                                 : ""}
@@ -916,22 +947,24 @@ function ParentPrivateBookManagerContent({
                             )}
                           </div>
                           <ul className="mt-2 space-y-1 text-xs text-ink">
-                            {sub.proofread_suggestions.slice(0, 6).map((s, idx) => (
-                              <li key={idx}>
-                                <span className="line-through text-rose-700">
-                                  {s.original}
-                                </span>{" "}
-                                →{" "}
-                                <span className="font-bold text-emerald-800">
-                                  {s.suggested}
-                                </span>
-                                {s.uncertain ? (
-                                  <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-900">
-                                    cần kiểm tra
+                            {sub.proofread_suggestions
+                              .slice(0, 6)
+                              .map((s, idx) => (
+                                <li key={idx}>
+                                  <span className="line-through text-rose-700">
+                                    {s.original}
+                                  </span>{" "}
+                                  →{" "}
+                                  <span className="font-bold text-emerald-800">
+                                    {s.suggested}
                                   </span>
-                                ) : null}
-                              </li>
-                            ))}
+                                  {s.uncertain ? (
+                                    <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-900">
+                                      cần kiểm tra
+                                    </span>
+                                  ) : null}
+                                </li>
+                              ))}
                           </ul>
                         </div>
                       ) : null}
@@ -974,7 +1007,9 @@ function ParentPrivateBookManagerContent({
                           <textarea
                             aria-label="Chỉnh sửa văn bản trang"
                             className="mt-2 min-h-24 w-full rounded-control border border-border bg-white p-2.5 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
-                            onChange={(event) => setEditText(event.target.value)}
+                            onChange={(event) =>
+                              setEditText(event.target.value)
+                            }
                             value={editText}
                           />
                           <div className="mt-2 grid gap-2 sm:grid-cols-2">
@@ -1105,17 +1140,25 @@ function ParentPrivateBookManagerContent({
                         {sub.workflow_status !== "ADDED_TO_BOOK" ? (
                           <Button
                             className="min-h-11 w-auto px-4 text-sm"
-                            disabled={!sub.can_add_to_book || isSubBusy || isSuspended}
+                            disabled={
+                              !sub.can_add_to_book || isSubBusy || isSuspended
+                            }
                             isLoading={busyKey === `add:${sub.id}`}
                             onClick={() => void handleAddPage(sub)}
                             type="button"
                           >
-                            <ShieldCheck aria-hidden="true" className="size-4" />
+                            <ShieldCheck
+                              aria-hidden="true"
+                              className="size-4"
+                            />
                             Thêm trang vào sách
                           </Button>
                         ) : (
                           <span className="inline-flex min-h-10 items-center gap-1.5 rounded-control bg-teal-50 px-3 text-xs font-bold text-teal-900">
-                            <CheckCircle2 aria-hidden="true" className="size-4" />
+                            <CheckCircle2
+                              aria-hidden="true"
+                              className="size-4"
+                            />
                             Đã thêm vào sách đọc
                           </span>
                         )}
@@ -1155,7 +1198,8 @@ function ParentPrivateBookManagerContent({
                         ) : null}
 
                         {/* Edit text / Replace image */}
-                        {sub.workflow_status !== "ADDED_TO_BOOK" && !isSuspended ? (
+                        {sub.workflow_status !== "ADDED_TO_BOOK" &&
+                        !isSuspended ? (
                           <>
                             <Button
                               className="min-h-10 w-auto px-3 text-xs"
@@ -1214,7 +1258,10 @@ function ParentPrivateBookManagerContent({
       </section>
 
       {/* Committed Pages List */}
-      <section aria-labelledby="committed-pages-heading" className="flex flex-col gap-3">
+      <section
+        aria-labelledby="committed-pages-heading"
+        className="flex flex-col gap-3"
+      >
         <h2
           id="committed-pages-heading"
           className="text-xl font-extrabold text-ink"

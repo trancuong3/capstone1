@@ -12,7 +12,6 @@ from .reading_presence import ReadingPresenceAlert, ReadingPresenceSetting
 from app.models.book_content_quality import (
     BookContentReport,
     BookContentReportHistory,
-    BookContentRightsProfile,
     BookQualityFinding,
     BookQualityPageScan,
     BookQualityReportFinding,

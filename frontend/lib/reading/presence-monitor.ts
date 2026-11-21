@@ -26,10 +26,7 @@ export interface PresenceSample {
 }
 
 export type SessionPhase =
-  | "reading"
-  | "paused-by-presence"
-  | "paused-other"
-  | "ended";
+  "reading" | "paused-by-presence" | "paused-other" | "ended";
 
 export interface PresenceContext {
   /** Phụ huynh đã bật "nhắc qua email". Mặc định tắt. */
@@ -206,7 +203,10 @@ export class PresenceMonitor {
     }
   }
 
-  private cancelEpisode(effects: PresenceEffect[], reason: CancelReason | "idle"): void {
+  private cancelEpisode(
+    effects: PresenceEffect[],
+    reason: CancelReason | "idle",
+  ): void {
     if (!this.episode) return;
     const cancelReason: CancelReason = reason === "idle" ? "RETURNED" : reason;
     effects.push({

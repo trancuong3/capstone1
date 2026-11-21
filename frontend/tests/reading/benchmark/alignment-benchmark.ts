@@ -12,11 +12,7 @@ import {
 } from "./alignment-corpus";
 
 export type GradedState =
-  | "CORRECT"
-  | "RETRY"
-  | "SKIPPED"
-  | "ASSISTED"
-  | "NO_EVIDENCE";
+  "CORRECT" | "RETRY" | "SKIPPED" | "ASSISTED" | "NO_EVIDENCE";
 
 export interface BenchmarkPipeline {
   feed(event: CorpusEvent): void;

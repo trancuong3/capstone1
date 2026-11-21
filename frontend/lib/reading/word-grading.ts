@@ -1,6 +1,4 @@
-import type {
-  RealtimeAlignmentSnapshot,
-} from "@/lib/reading/realtime-alignment";
+import type { RealtimeAlignmentSnapshot } from "@/lib/reading/realtime-alignment";
 
 /**
  * Trạng thái hiển thị/lưu của từng từ, tách bạch với con trỏ tạm:
@@ -11,11 +9,7 @@ import type {
  * - NO_EVIDENCE  chưa có bằng chứng đáng tin
  */
 export type GradedWordState =
-  | "CORRECT"
-  | "RETRY"
-  | "SKIPPED"
-  | "ASSISTED"
-  | "NO_EVIDENCE";
+  "CORRECT" | "RETRY" | "SKIPPED" | "ASSISTED" | "NO_EVIDENCE";
 
 export interface GradeableWord {
   readonly word_id: string;

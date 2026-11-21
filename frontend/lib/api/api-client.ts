@@ -329,7 +329,8 @@ const safeBackendMessages: Record<string, string> = {
   EMPTY_AUDIO: "Chưa nhận được âm thanh ghi âm. Con hãy thử nói lại nhé.",
   AUDIO_TOO_LARGE: "Đoạn ghi âm quá dài. Con hãy ghi âm ngắn gọn một từ nhé.",
   UNSUPPORTED_AUDIO: "Định dạng âm thanh chưa được hỗ trợ trên thiết bị này.",
-  "Khóa idempotency không hợp lệ.": "Khóa yêu cầu tải lên không hợp lệ. Vui lòng thử lại.",
+  "Khóa idempotency không hợp lệ.":
+    "Khóa yêu cầu tải lên không hợp lệ. Vui lòng thử lại.",
   "Loại nguồn sử dụng không hợp lệ.": "Loại nguồn sử dụng không hợp lệ.",
   "Sách riêng đang bị đình chỉ hoặc ngừng hoạt động nên không thể tải thêm trang.":
     "Sách riêng đang bị đình chỉ hoặc ngừng hoạt động nên không thể tải thêm trang.",
@@ -346,7 +347,8 @@ const safeBackendMessages: Record<string, string> = {
     "Khi thay ảnh cho một trang cụ thể, hãy chọn đúng 1 ảnh hoặc tài liệu 1 trang.",
   "Chỉ có thể thử lại các trang đang ở trạng thái kiểm tra lỗi hoặc cần kiểm tra lại.":
     "Chỉ có thể thử lại các trang đang ở trạng thái kiểm tra lỗi hoặc cần kiểm tra lại.",
-  "Không thể hủy trang đã thêm vào sách.": "Không thể hủy trang đã thêm vào sách.",
+  "Không thể hủy trang đã thêm vào sách.":
+    "Không thể hủy trang đã thêm vào sách.",
   "Phiên bản trang không khớp snapshot hiện tại. Hãy tải lại trước khi gửi Admin.":
     "Phiên bản trang đã thay đổi. Hãy tải lại trước khi gửi Admin.",
   "Chỉ trang đang ở trạng thái Cần Admin duyệt mới có thể gửi yêu cầu xem xét.":

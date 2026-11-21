@@ -5,22 +5,13 @@ import { normalizeVietnameseText } from "@/lib/reading/vietnamese-text";
  * không tìm lệnh bên trong câu dài, và luôn nhường cho văn bản sách khi cụm
  * lệnh trùng với đoạn bé sắp đọc.
  */
-export type VoiceIntentType =
-  | "HELP"
-  | "WAIT"
-  | "STOP"
-  | "RESUME"
-  | "NONE";
+export type VoiceIntentType = "HELP" | "WAIT" | "STOP" | "RESUME" | "NONE";
 
 export interface VoiceIntent {
   readonly type: VoiceIntentType;
   /** Why NONE was returned (diagnostics, tests). */
   readonly reason?:
-    | "not-a-command"
-    | "in-book"
-    | "low-confidence"
-    | "too-long"
-    | "empty";
+    "not-a-command" | "in-book" | "low-confidence" | "too-long" | "empty";
 }
 
 export interface VoiceIntentContext {
@@ -33,9 +24,13 @@ export interface VoiceIntentContext {
 }
 
 const POLITE_PREFIX = /^(?:(?:cô|thầy|mẹ|ba) )?(?:ơi )?/u;
-const POLITE_SUFFIX = /(?: (?:ạ|nhé|nha|đi|với|một chút|chút|xíu|một xíu|chút xíu))*$/u;
+const POLITE_SUFFIX =
+  /(?: (?:ạ|nhé|nha|đi|với|một chút|chút|xíu|một xíu|chút xíu))*$/u;
 
-const COMMANDS: readonly { type: VoiceIntentType; patterns: readonly RegExp[] }[] = [
+const COMMANDS: readonly {
+  type: VoiceIntentType;
+  patterns: readonly RegExp[];
+}[] = [
   {
     type: "HELP",
     patterns: [
@@ -100,7 +95,9 @@ export function parseVoiceIntent(
     );
     if (!matched) continue;
     // The passage takes precedence when the child is simply reading it.
-    if (variants.some((variant) => appearsInBook(variant, context.upcomingText))) {
+    if (
+      variants.some((variant) => appearsInBook(variant, context.upcomingText))
+    ) {
       return { type: "NONE", reason: "in-book" };
     }
     const confidence = context.confidence;

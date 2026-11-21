@@ -342,8 +342,7 @@ describe("Parent Private Books UI (Sách của tôi)", () => {
               workflow_status_label: "Đã duyệt — có thể thêm trang",
               tool_check_status: "FLAGGED",
               admin_decision: "APPROVE",
-              admin_decision_reason:
-                "Phù hợp cho bé lớp 2 đọc cùng phụ huynh.",
+              admin_decision_reason: "Phù hợp cho bé lớp 2 đọc cùng phụ huynh.",
               approved_submission_version: 2,
               approved_snapshot_hash: HASH_V2,
               can_add_to_book: true,
@@ -417,9 +416,7 @@ describe("Parent Private Books UI (Sách của tôi)", () => {
     expect(screen.getByText("Cần Admin duyệt")).toBeInTheDocument();
 
     // 2. Send exact snapshot to Admin
-    await user.click(
-      screen.getByRole("button", { name: /Gửi Admin xem xét/ }),
-    );
+    await user.click(screen.getByRole("button", { name: /Gửi Admin xem xét/ }));
     await user.type(
       screen.getByLabelText("Lời nhắn cho Admin"),
       "Truyện cổ tích lớp 2 an toàn.",
@@ -471,8 +468,8 @@ describe("Parent Private Books UI (Sách của tôi)", () => {
           (call) =>
             call.path ===
               `/books/my-books/${BOOK_ID}/submissions/${SUB_ID}/add-page` &&
-            (call.body as Record<string, unknown>).expected_submission_version ===
-              2 &&
+            (call.body as Record<string, unknown>)
+              .expected_submission_version === 2 &&
             (call.body as Record<string, unknown>).expected_candidate_hash ===
               HASH_V2,
         ),

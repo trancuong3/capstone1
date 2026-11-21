@@ -6,7 +6,11 @@ import {
   type CaptureScope,
 } from "@/lib/reading/reading-evidence-pipeline";
 import { parseVoiceIntent } from "@/lib/reading/voice-intent";
-import { gradeWord, gradeWords, needsPractice } from "@/lib/reading/word-grading";
+import {
+  gradeWord,
+  gradeWords,
+  needsPractice,
+} from "@/lib/reading/word-grading";
 import type { ReadingPageWordDTO } from "@/types/reading";
 
 function pageWords(text: string): ReadingPageWordDTO[] {
@@ -17,7 +21,8 @@ function pageWords(text: string): ReadingPageWordDTO[] {
     bbox: [0, 0, 1, 1],
   }));
 }
-const engineFor = (text: string) => new RealtimeAlignmentEngine(pageWords(text), 3, 1);
+const engineFor = (text: string) =>
+  new RealtimeAlignmentEngine(pageWords(text), 3, 1);
 const status = (e: RealtimeAlignmentEngine, id: string) =>
   e.getSnapshot().statusByWordId.get(id)?.status;
 
@@ -28,7 +33,9 @@ describe("alignment hardening: self-correction, restart, jumps", () => {
     const result = e.finish();
     expect(status(e, "w2")).toBe("MATCH");
     expect([...(result.correctedWordIds ?? [])]).toEqual(["w2"]);
-    expect([...result.statusByWordId.values()].every((w) => w.status === "MATCH")).toBe(true);
+    expect(
+      [...result.statusByWordId.values()].every((w) => w.status === "MATCH"),
+    ).toBe(true);
     expect(result.repeatedItems).toHaveLength(0);
   });
 
@@ -67,7 +74,11 @@ describe("alignment hardening: self-correction, restart, jumps", () => {
   it("keeps duplicate words on their own occurrence when read fluently", () => {
     const e = engineFor("Ba đi làm Ba về nhà Ba ăn cơm");
     e.addFinalTranscript("Ba đi làm Ba về nhà Ba ăn cơm");
-    expect([...e.finish().statusByWordId.values()].every((w) => w.status === "MATCH")).toBe(true);
+    expect(
+      [...e.finish().statusByWordId.values()].every(
+        (w) => w.status === "MATCH",
+      ),
+    ).toBe(true);
   });
 
   it("matches a printed digit with its spoken word in both directions", () => {
@@ -121,32 +132,51 @@ describe("EchoGuard", () => {
     const guard = new EchoGuard();
     guard.playbackStarted("a", "cho", 1000);
     expect(guard.isPlaying()).toBe(true);
-    expect(guard.evaluate({ text: "cho", receivedAt: 1200 }).reason).toBe("playing");
-    expect(guard.evaluate({ text: "gì đó", receivedAt: 1500 }).accept).toBe(false);
+    expect(guard.evaluate({ text: "cho", receivedAt: 1200 }).reason).toBe(
+      "playing",
+    );
+    expect(guard.evaluate({ text: "gì đó", receivedAt: 1500 }).accept).toBe(
+      false,
+    );
   });
 
   it("rejects speech that began during playback even if it arrives after the end", () => {
     const guard = new EchoGuard();
     guard.playbackStarted("a", "cho", 1000);
     guard.playbackEnded("a", 1600);
-    const verdict = guard.evaluate({ text: "cho", receivedAt: 2000, onsetAt: 1200 });
-    expect(verdict).toMatchObject({ accept: false, reason: "onset-during-playback" });
+    const verdict = guard.evaluate({
+      text: "cho",
+      receivedAt: 2000,
+      onsetAt: 1200,
+    });
+    expect(verdict).toMatchObject({
+      accept: false,
+      reason: "onset-during-playback",
+    });
   });
 
   it("accepts the child's own imitation that starts after the echo grace", () => {
     const guard = new EchoGuard();
     guard.playbackStarted("a", "cho", 1000);
     guard.playbackEnded("a", 1600);
-    expect(guard.evaluate({ text: "cho", receivedAt: 2800, onsetAt: 2000 }).accept).toBe(true);
+    expect(
+      guard.evaluate({ text: "cho", receivedAt: 2800, onsetAt: 2000 }).accept,
+    ).toBe(true);
   });
 
   it("without onset info rejects tail echo that repeats the sample but not other words", () => {
     const guard = new EchoGuard();
     guard.playbackStarted("a", "nấu cơm cho", 1000);
     guard.playbackEnded("a", 2400);
-    expect(guard.evaluate({ text: "nấu cơm cho", receivedAt: 3000 }).reason).toBe("tail-overlap");
-    expect(guard.evaluate({ text: "cả nhà ăn", receivedAt: 3000 }).accept).toBe(true);
-    expect(guard.evaluate({ text: "nấu cơm cho", receivedAt: 9000 }).accept).toBe(true);
+    expect(
+      guard.evaluate({ text: "nấu cơm cho", receivedAt: 3000 }).reason,
+    ).toBe("tail-overlap");
+    expect(guard.evaluate({ text: "cả nhà ăn", receivedAt: 3000 }).accept).toBe(
+      true,
+    );
+    expect(
+      guard.evaluate({ text: "nấu cơm cho", receivedAt: 9000 }).accept,
+    ).toBe(true);
   });
 
   it("treats a cancelled sample as ended at the cancel time", () => {
@@ -154,7 +184,9 @@ describe("EchoGuard", () => {
     guard.playbackStarted("a", "cho", 1000);
     guard.playbackEnded("a", 1100);
     expect(guard.isPlaying()).toBe(false);
-    expect(guard.evaluate({ text: "mèo", receivedAt: 5000, onsetAt: 4500 }).accept).toBe(true);
+    expect(
+      guard.evaluate({ text: "mèo", receivedAt: 5000, onsetAt: 4500 }).accept,
+    ).toBe(true);
   });
 });
 
@@ -174,7 +206,9 @@ describe("voice intent", () => {
   });
 
   it("never finds a command inside a longer sentence", () => {
-    expect(parseVoiceIntent("hôm nay con đọc tiếp bài thơ về mùa thu").type).toBe("NONE");
+    expect(
+      parseVoiceIntent("hôm nay con đọc tiếp bài thơ về mùa thu").type,
+    ).toBe("NONE");
   });
 
   it("lets the passage win when the phrase is the next book text", () => {
@@ -185,8 +219,12 @@ describe("voice intent", () => {
   });
 
   it("rejects commands below the confidence floor but accepts unknown confidence", () => {
-    expect(parseVoiceIntent("dừng lại", { confidence: 0.3 }).reason).toBe("low-confidence");
-    expect(parseVoiceIntent("dừng lại", { confidence: undefined }).type).toBe("STOP");
+    expect(parseVoiceIntent("dừng lại", { confidence: 0.3 }).reason).toBe(
+      "low-confidence",
+    );
+    expect(parseVoiceIntent("dừng lại", { confidence: undefined }).type).toBe(
+      "STOP",
+    );
     expect(parseVoiceIntent("dừng lại", { confidence: 0 }).type).toBe("STOP");
   });
 });
@@ -210,7 +248,12 @@ describe("word grading", () => {
     const words = pageWords("mèo chó");
     const e = engineFor("mèo chó");
     e.addFinalTranscript("mèo chó");
-    const graded = gradeWords(e.getSnapshot(), words, new Set(), new Set(["w1"]));
+    const graded = gradeWords(
+      e.getSnapshot(),
+      words,
+      new Set(),
+      new Set(["w1"]),
+    );
     expect(graded.get("w0")).toBe("CORRECT");
     expect(graded.get("w1")).toBe("SKIPPED");
   });
@@ -218,7 +261,12 @@ describe("word grading", () => {
 
 describe("ReadingEvidencePipeline", () => {
   const words = pageWords("Mẹ nấu cơm cho cả nhà ăn");
-  const scope: CaptureScope = { sessionId: "s", pageId: "p1", revisionId: "r1", runId: 1 };
+  const scope: CaptureScope = {
+    sessionId: "s",
+    pageId: "p1",
+    revisionId: "r1",
+    runId: 1,
+  };
 
   it("grades echo of its own sample as assisted, never correct", () => {
     const p = new ReadingEvidencePipeline(words);
@@ -229,7 +277,9 @@ describe("ReadingEvidencePipeline", () => {
       kind: "rejected",
       reason: "playing",
     });
-    expect(p.ingestFinal({ text: "cho", receivedAt: 3000, onsetAt: 2200 })).toMatchObject({
+    expect(
+      p.ingestFinal({ text: "cho", receivedAt: 3000, onsetAt: 2200 }),
+    ).toMatchObject({
       kind: "rejected",
       reason: "onset-during-playback",
     });
@@ -244,13 +294,31 @@ describe("ReadingEvidencePipeline", () => {
   it("drops duplicates, out-of-order and other-page results", () => {
     const p = new ReadingEvidencePipeline(words, { scope });
     expect(
-      p.ingestFinal({ text: "Mẹ nấu", receivedAt: 1, segmentId: "a", seq: 5, scope }).kind,
+      p.ingestFinal({
+        text: "Mẹ nấu",
+        receivedAt: 1,
+        segmentId: "a",
+        seq: 5,
+        scope,
+      }).kind,
     ).toBe("scored");
     expect(
-      p.ingestFinal({ text: "Mẹ nấu", receivedAt: 2, segmentId: "a", seq: 6, scope }),
+      p.ingestFinal({
+        text: "Mẹ nấu",
+        receivedAt: 2,
+        segmentId: "a",
+        seq: 6,
+        scope,
+      }),
     ).toMatchObject({ reason: "duplicate-segment" });
     expect(
-      p.ingestFinal({ text: "cơm cho", receivedAt: 3, segmentId: "b", seq: 4, scope }),
+      p.ingestFinal({
+        text: "cơm cho",
+        receivedAt: 3,
+        segmentId: "b",
+        seq: 4,
+        scope,
+      }),
     ).toMatchObject({ reason: "out-of-order" });
     expect(
       p.ingestFinal({
@@ -280,13 +348,18 @@ describe("ReadingEvidencePipeline", () => {
       receivedAt: 1,
       speechDurationMs: 200,
     });
-    expect(outcome).toMatchObject({ kind: "rejected", reason: "implausible-speed" });
+    expect(outcome).toMatchObject({
+      kind: "rejected",
+      reason: "implausible-speed",
+    });
     expect(p.grade().get("w0")).toBe("NO_EVIDENCE");
   });
 
   it("refuses results the provider gates marked unusable", () => {
     const p = new ReadingEvidencePipeline(words);
-    expect(p.ingestFinal({ text: "Mẹ nấu cơm", receivedAt: 1, usable: false })).toMatchObject({
+    expect(
+      p.ingestFinal({ text: "Mẹ nấu cơm", receivedAt: 1, usable: false }),
+    ).toMatchObject({
       reason: "unusable",
     });
   });
@@ -301,7 +374,9 @@ describe("ReadingEvidencePipeline", () => {
   it("lets a book sentence win over a command phrase", () => {
     const text = pageWords("Con dừng lại ở cổng");
     const p = new ReadingEvidencePipeline(text);
-    expect(p.ingestFinal({ text: "Con dừng lại ở cổng", receivedAt: 1 }).kind).toBe("scored");
+    expect(
+      p.ingestFinal({ text: "Con dừng lại ở cổng", receivedAt: 1 }).kind,
+    ).toBe("scored");
   });
 
   it("resolves which book words a sample covers", () => {

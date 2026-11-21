@@ -695,3 +695,11 @@ def build_child_safety_orchestrator(transport: httpx.AsyncBaseTransport | None =
     except OcrConfigurationError:
         raise
     return ChildSafetyOrchestrator(config, transport=transport)
+
+
+def build_private_book_child_safety_orchestrator(
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> ChildSafetyOrchestrator:
+    """Default to local Ollama for private parent book text (no unauthorized cloud export)."""
+    config = OcrCorrectionConfig.from_environment_for_private_book()
+    return ChildSafetyOrchestrator(config, transport=transport)

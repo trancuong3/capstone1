@@ -182,6 +182,32 @@ function createBookContentQualityServiceFixture() {
         NonNullable<AdminServices["bookContentQuality"]["upsertBookRights"]>
       >()
       .mockRejectedValue(unavailable()),
+    listUserBooks: vi
+      .fn<NonNullable<AdminServices["bookContentQuality"]["listUserBooks"]>>()
+      .mockResolvedValue({
+        items: [],
+        total: 0,
+        summary: {},
+        limit: 30,
+        offset: 0,
+      }),
+    getUserBookSubmission: vi
+      .fn<
+        NonNullable<
+          AdminServices["bookContentQuality"]["getUserBookSubmission"]
+        >
+      >()
+      .mockRejectedValue(unavailable()),
+    decideUserBookSubmission: vi
+      .fn<
+        NonNullable<
+          AdminServices["bookContentQuality"]["decideUserBookSubmission"]
+        >
+      >()
+      .mockRejectedValue(unavailable()),
+    suspendUserBook: vi
+      .fn<NonNullable<AdminServices["bookContentQuality"]["suspendUserBook"]>>()
+      .mockRejectedValue(unavailable()),
   } satisfies AdminServices["bookContentQuality"];
 }
 

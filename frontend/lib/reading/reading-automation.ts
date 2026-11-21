@@ -33,11 +33,7 @@ export type AutomationPhase =
   | "offline";
 
 export type AutomationWordState =
-  | "pending"
-  | "correct"
-  | "retry"
-  | "skipped"
-  | "assisted";
+  "pending" | "correct" | "retry" | "skipped" | "assisted";
 
 export interface AutomationSettings {
   /** Hỗ trợ tự động: tự nhắc nhẹ và tự đọc mẫu khi bé mắc kẹt. */
@@ -126,7 +122,10 @@ export interface AutomationState {
   readonly lastInterventionAt: number;
   readonly promptsThisPage: number;
   readonly promptedAtCursor: number;
-  readonly modeling: { readonly gen: number; readonly wordId: string | null } | null;
+  readonly modeling: {
+    readonly gen: number;
+    readonly wordId: string | null;
+  } | null;
   readonly modelGen: number;
   readonly awaitingRetryWordId: string | null;
   readonly pendingErrorCheckAt: number | null;
@@ -150,7 +149,8 @@ export interface AutomationState {
   readonly pauseReason: PauseReason | null;
 }
 
-export type PauseReason = "child" | "parent" | "background" | "presence" | "voice";
+export type PauseReason =
+  "child" | "parent" | "background" | "presence" | "voice";
 
 export type AutomationEvent =
   | {
@@ -163,8 +163,18 @@ export type AutomationEvent =
       /** Tự động sau khi chuyển trang: bị bỏ nếu bé đã dừng. */
       readonly auto?: boolean;
     }
-  | { readonly type: "LISTEN_RESULT"; readonly at: number; readonly runId: number; readonly ok: boolean; readonly reason?: "permission" | "unavailable" }
-  | { readonly type: "SPEECH_ACTIVITY"; readonly at: number; readonly runId: number }
+  | {
+      readonly type: "LISTEN_RESULT";
+      readonly at: number;
+      readonly runId: number;
+      readonly ok: boolean;
+      readonly reason?: "permission" | "unavailable";
+    }
+  | {
+      readonly type: "SPEECH_ACTIVITY";
+      readonly at: number;
+      readonly runId: number;
+    }
   | {
       readonly type: "WORD_EVIDENCE";
       readonly at: number;
@@ -174,21 +184,44 @@ export type AutomationEvent =
       readonly wordId: string;
       readonly outcome: "correct" | "retry" | "skipped";
     }
-  | { readonly type: "UNSURE_POSITION"; readonly at: number; readonly runId: number }
-  | { readonly type: "HELP_REQUEST"; readonly at: number; readonly scope: "word" | "phrase"; readonly source: "voice" | "button" }
+  | {
+      readonly type: "UNSURE_POSITION";
+      readonly at: number;
+      readonly runId: number;
+    }
+  | {
+      readonly type: "HELP_REQUEST";
+      readonly at: number;
+      readonly scope: "word" | "phrase";
+      readonly source: "voice" | "button";
+    }
   | { readonly type: "MODEL_ENDED"; readonly at: number; readonly gen: number }
   | { readonly type: "MODEL_FAILED"; readonly at: number; readonly gen: number }
   | { readonly type: "PAUSE"; readonly at: number; readonly by: PauseReason }
   | { readonly type: "RESUME"; readonly at: number }
-  | { readonly type: "PERMISSION"; readonly at: number; readonly granted: boolean }
+  | {
+      readonly type: "PERMISSION";
+      readonly at: number;
+      readonly granted: boolean;
+    }
   | { readonly type: "NETWORK"; readonly at: number; readonly online: boolean }
-  | { readonly type: "SAVE_RESULT"; readonly at: number; readonly key: string; readonly ok: boolean }
+  | {
+      readonly type: "SAVE_RESULT";
+      readonly at: number;
+      readonly key: string;
+      readonly ok: boolean;
+    }
   | { readonly type: "MANUAL_NEXT"; readonly at: number }
   | { readonly type: "SESSION_END"; readonly at: number }
-  | { readonly type: "SET_SETTINGS"; readonly at: number; readonly settings: Partial<AutomationSettings> }
+  | {
+      readonly type: "SET_SETTINGS";
+      readonly at: number;
+      readonly settings: Partial<AutomationSettings>;
+    }
   | { readonly type: "TICK"; readonly at: number };
 
-export type ModelKind = "word" | "slow-word" | "phrase" | "orient" | "prompt" | "encourage";
+export type ModelKind =
+  "word" | "slow-word" | "phrase" | "orient" | "prompt" | "encourage";
 
 export type AutomationMessage =
   | "gentle-prompt"
@@ -204,7 +237,10 @@ export type AutomationMessage =
 
 export type AutomationEffect =
   | { readonly type: "START_LISTENING"; readonly runId: number }
-  | { readonly type: "STOP_LISTENING"; readonly reason: "pause" | "model" | "page" | "end" | "permission" }
+  | {
+      readonly type: "STOP_LISTENING";
+      readonly reason: "pause" | "model" | "page" | "end" | "permission";
+    }
   | {
       readonly type: "PLAY_MODEL";
       readonly gen: number;
@@ -215,7 +251,11 @@ export type AutomationEffect =
       readonly speed: number;
     }
   | { readonly type: "STOP_AUDIO" }
-  | { readonly type: "SAVE_PAGE"; readonly key: string; readonly attempt: number }
+  | {
+      readonly type: "SAVE_PAGE";
+      readonly key: string;
+      readonly attempt: number;
+    }
   | { readonly type: "TURN_PAGE"; readonly key: string }
   | { readonly type: "FINISH_SESSION" }
   | { readonly type: "GIVE_UP_WORD"; readonly wordId: string }
@@ -594,7 +634,12 @@ export function reduce(
         turnIssued: false,
         completionRequested: false,
         permissionMissing: false,
-        save: { key: pageKey(event.page), status: "idle", attempts: 0, retryAt: null },
+        save: {
+          key: pageKey(event.page),
+          status: "idle",
+          attempts: 0,
+          retryAt: null,
+        },
       };
       effects.push({ type: "STOP_AUDIO" });
       if (isPageDone(next)) {
@@ -606,10 +651,14 @@ export function reduce(
     }
 
     case "LISTEN_RESULT": {
-      if (event.runId !== state.runId || state.userStopped) return unchanged(state);
+      if (event.runId !== state.runId || state.userStopped)
+        return unchanged(state);
       if (event.ok) {
         const phase: AutomationPhase =
-          state.phase === "ready" || state.phase === "paused" || state.phase === "offline" || state.phase === "permission-needed"
+          state.phase === "ready" ||
+          state.phase === "paused" ||
+          state.phase === "offline" ||
+          state.phase === "permission-needed"
             ? "listening"
             : state.phase;
         return {
@@ -620,13 +669,22 @@ export function reduce(
       if (event.reason === "permission") {
         effects.push({ type: "SHOW", message: "permission-needed" });
         return {
-          state: { ...state, listening: false, permissionMissing: true, phase: "permission-needed" },
+          state: {
+            ...state,
+            listening: false,
+            permissionMissing: true,
+            phase: "permission-needed",
+          },
           effects,
         };
       }
       effects.push({ type: "SHOW", message: "offline" });
       return {
-        state: { ...state, listening: false, phase: state.offline ? "offline" : "paused" },
+        state: {
+          ...state,
+          listening: false,
+          phase: state.offline ? "offline" : "paused",
+        },
         effects,
       };
     }
@@ -636,12 +694,22 @@ export function reduce(
         effects.push({ type: "STOP_LISTENING", reason: "permission" });
         effects.push({ type: "SHOW", message: "permission-needed" });
         return {
-          state: { ...state, permissionMissing: true, listening: false, phase: "permission-needed" },
+          state: {
+            ...state,
+            permissionMissing: true,
+            listening: false,
+            phase: "permission-needed",
+          },
           effects,
         };
       }
       let next: AutomationState = { ...state, permissionMissing: false };
-      if (!next.userStopped && next.page && !isPageDone(next) && next.phase === "permission-needed") {
+      if (
+        !next.userStopped &&
+        next.page &&
+        !isPageDone(next) &&
+        next.phase === "permission-needed"
+      ) {
         next = { ...next, phase: "ready" };
         next = startListeningEffect(next, at, effects);
       }
@@ -673,7 +741,11 @@ export function reduce(
       // Evidence arriving while the app speaks is never the child's reading.
       if (state.modeling) return unchanged(state);
 
-      let next: AutomationState = { ...state, lastEvidenceAt: at, unsure: false };
+      let next: AutomationState = {
+        ...state,
+        lastEvidenceAt: at,
+        unsure: false,
+      };
       if (event.outcome === "correct") {
         const wasHelped = state.helped.includes(event.wordId);
         const gaveUp = state.gaveUp.includes(event.wordId);
@@ -687,7 +759,9 @@ export function reduce(
           // A self-corrected slip is no longer something to practise.
           next = {
             ...next,
-            needsPractice: next.needsPractice.filter((id) => id !== event.wordId),
+            needsPractice: next.needsPractice.filter(
+              (id) => id !== event.wordId,
+            ),
           };
         }
         const gap = at - state.lastEvidenceAt;
@@ -702,14 +776,20 @@ export function reduce(
           attempts: { ...next.attempts },
           awaitingRetryWordId: null,
           pendingErrorCheckAt:
-            state.stuckWordId === event.wordId ? null : state.pendingErrorCheckAt,
-          stuckWordId: state.stuckWordId === event.wordId ? null : state.stuckWordId,
+            state.stuckWordId === event.wordId
+              ? null
+              : state.pendingErrorCheckAt,
+          stuckWordId:
+            state.stuckWordId === event.wordId ? null : state.stuckWordId,
           promptedAtCursor: -1,
           phase: "evidence",
           lingerUntil: at + state.config.evidenceLingerMs,
         };
         // The child moved past an earlier unresolved error: stop waiting on it.
-        if (state.stuckWordId && indexOfWord(state, state.stuckWordId) < index) {
+        if (
+          state.stuckWordId &&
+          indexOfWord(state, state.stuckWordId) < index
+        ) {
           next = { ...next, stuckWordId: null, pendingErrorCheckAt: null };
         }
       } else if (event.outcome === "retry") {
@@ -748,7 +828,8 @@ export function reduce(
     }
 
     case "HELP_REQUEST": {
-      if (!state.page || isPageDone(state) || state.modeling) return unchanged(state);
+      if (!state.page || isPageDone(state) || state.modeling)
+        return unchanged(state);
       const word = state.words[Math.min(state.cursor, state.words.length - 1)];
       if (!word) return unchanged(state);
       let next = startHelp(state, word.id, at, effects, {
@@ -762,7 +843,8 @@ export function reduce(
 
     case "MODEL_ENDED":
     case "MODEL_FAILED": {
-      if (!state.modeling || event.gen !== state.modeling.gen) return unchanged(state);
+      if (!state.modeling || event.gen !== state.modeling.gen)
+        return unchanged(state);
       const wordId = state.modeling.wordId;
       let next: AutomationState = {
         ...state,
@@ -811,7 +893,8 @@ export function reduce(
     }
 
     case "RESUME": {
-      if (!state.userStopped && state.phase !== "paused") return unchanged(state);
+      if (!state.userStopped && state.phase !== "paused")
+        return unchanged(state);
       let next: AutomationState = {
         ...state,
         userStopped: false,
@@ -828,7 +911,8 @@ export function reduce(
         }
         return { state: next, effects };
       }
-      if (next.permissionMissing) return { state: { ...next, phase: "permission-needed" }, effects };
+      if (next.permissionMissing)
+        return { state: { ...next, phase: "permission-needed" }, effects };
       next = startListeningEffect(next, at, effects);
       return { state: next, effects };
     }
@@ -841,7 +925,10 @@ export function reduce(
           state: {
             ...state,
             offline: true,
-            phase: state.userStopped || state.phase === "page-turn" ? state.phase : "offline",
+            phase:
+              state.userStopped || state.phase === "page-turn"
+                ? state.phase
+                : "offline",
           },
           effects,
         };
@@ -852,7 +939,12 @@ export function reduce(
       if (next.save.status === "inflight" && next.save.retryAt !== null) {
         next = { ...next, save: { ...next.save, retryAt: at } };
       }
-      if (next.phase === "offline" && !next.userStopped && next.page && !isPageDone(next)) {
+      if (
+        next.phase === "offline" &&
+        !next.userStopped &&
+        next.page &&
+        !isPageDone(next)
+      ) {
         next = { ...next, phase: "ready" };
         next = startListeningEffect(next, at, effects);
       }
@@ -860,7 +952,11 @@ export function reduce(
     }
 
     case "SAVE_RESULT": {
-      if (!state.page || event.key !== state.save.key || state.save.status !== "inflight") {
+      if (
+        !state.page ||
+        event.key !== state.save.key ||
+        state.save.status !== "inflight"
+      ) {
         return unchanged(state);
       }
       if (event.ok) {
@@ -875,7 +971,8 @@ export function reduce(
       effects.push({ type: "SHOW", message: "unsaved" });
       const delay = Math.min(
         state.config.saveRetryMaxMs,
-        state.config.saveRetryBaseMs * 2 ** Math.max(0, state.save.attempts - 1),
+        state.config.saveRetryBaseMs *
+          2 ** Math.max(0, state.save.attempts - 1),
       );
       return {
         state: {
@@ -890,7 +987,10 @@ export function reduce(
 
     case "MANUAL_NEXT": {
       if (!state.page || state.save.status !== "saved") return unchanged(state);
-      return { state: turnPage({ ...state, userStopped: false }, effects), effects };
+      return {
+        state: turnPage({ ...state, userStopped: false }, effects),
+        effects,
+      };
     }
 
     case "SESSION_END": {
@@ -940,17 +1040,33 @@ function tick(inputState: AutomationState, at: number): ReduceResult {
   ) {
     const attempt = state.save.attempts + 1;
     effects.push({ type: "SAVE_PAGE", key: state.save.key, attempt });
-    state = { ...state, save: { ...state.save, attempts: attempt, retryAt: null } };
+    state = {
+      ...state,
+      save: { ...state.save, attempts: attempt, retryAt: null },
+    };
     return { state, effects };
   }
 
-  if (state.pageTurnAt !== null && at >= state.pageTurnAt && state.settings.autoAdvance) {
+  if (
+    state.pageTurnAt !== null &&
+    at >= state.pageTurnAt &&
+    state.settings.autoAdvance
+  ) {
     state = turnPage(state, effects);
     return { state, effects };
   }
 
-  if (state.resumeListenAt !== null && at >= state.resumeListenAt && state.modeling === null) {
-    if (!state.offline && !state.permissionMissing && state.page && !isPageDone(state)) {
+  if (
+    state.resumeListenAt !== null &&
+    at >= state.resumeListenAt &&
+    state.modeling === null
+  ) {
+    if (
+      !state.offline &&
+      !state.permissionMissing &&
+      state.page &&
+      !isPageDone(state)
+    ) {
       state = startListeningEffect(state, at, effects);
       state = { ...state, phase: "awaiting-retry" };
     } else {
@@ -1034,7 +1150,10 @@ function hesitationPlan(
     return { dueAt: base + threshold, mode: "help" };
   }
   return {
-    dueAt: Math.max(base + threshold, state.lastInterventionAt + config.promptCooldownMs),
+    dueAt: Math.max(
+      base + threshold,
+      state.lastInterventionAt + config.promptCooldownMs,
+    ),
     mode: "prompt",
   };
 }
@@ -1046,22 +1165,32 @@ export function nextWakeAt(state: AutomationState, now: number): number | null {
   if (state.ended || state.userStopped) return null;
   const candidates: number[] = [];
   if (state.lingerUntil !== null) candidates.push(state.lingerUntil);
-  if (state.save.status === "inflight" && state.save.retryAt !== null && !state.offline) {
+  if (
+    state.save.status === "inflight" &&
+    state.save.retryAt !== null &&
+    !state.offline
+  ) {
     candidates.push(state.save.retryAt);
   }
-  if (state.pageTurnAt !== null && state.settings.autoAdvance) candidates.push(state.pageTurnAt);
+  if (state.pageTurnAt !== null && state.settings.autoAdvance)
+    candidates.push(state.pageTurnAt);
   if (state.resumeListenAt !== null) candidates.push(state.resumeListenAt);
   if (canIntervene(state)) {
     const quietAt = state.lastSpeechAt + state.config.speechQuietMs;
     const gate = (time: number) => Math.max(time, quietAt);
-    if (state.pendingErrorCheckAt !== null && state.stuckWordId && state.settings.assist) {
+    if (
+      state.pendingErrorCheckAt !== null &&
+      state.stuckWordId &&
+      state.settings.assist
+    ) {
       candidates.push(gate(state.pendingErrorCheckAt));
     }
     if (state.settings.assist) {
       const plan = hesitationPlan(state);
       if (plan) candidates.push(gate(plan.dueAt));
     }
-  }  if (!candidates.length) return null;
+  }
+  if (!candidates.length) return null;
   return Math.max(now, Math.min(...candidates));
 }
 
@@ -1076,9 +1205,13 @@ export interface AutomationClock {
 }
 
 export interface AutomationPorts {
-  startListening(runId: number): Promise<{ ok: boolean; reason?: "permission" | "unavailable" }>;
+  startListening(
+    runId: number,
+  ): Promise<{ ok: boolean; reason?: "permission" | "unavailable" }>;
   stopListening(reason: string): void;
-  playModel(effect: Extract<AutomationEffect, { type: "PLAY_MODEL" }>): Promise<void>;
+  playModel(
+    effect: Extract<AutomationEffect, { type: "PLAY_MODEL" }>,
+  ): Promise<void>;
   stopAudio(): void;
   savePage(key: string, attempt: number): Promise<boolean>;
   turnPage(key: string): void;
@@ -1135,10 +1268,13 @@ export class ReadingAutomationRuntime {
     const now = this.clock.now();
     const wake = nextWakeAt(this.state, now);
     if (wake === null) return;
-    this.timer = this.clock.setTimeout(() => {
-      this.timer = null;
-      this.apply({ type: "TICK", at: this.clock.now() });
-    }, Math.max(0, wake - now));
+    this.timer = this.clock.setTimeout(
+      () => {
+        this.timer = null;
+        this.apply({ type: "TICK", at: this.clock.now() });
+      },
+      Math.max(0, wake - now),
+    );
   }
 
   private run(effect: AutomationEffect): void {
@@ -1147,9 +1283,19 @@ export class ReadingAutomationRuntime {
       case "START_LISTENING":
         void ports.startListening(effect.runId).then(
           (result) =>
-            this.dispatch({ type: "LISTEN_RESULT", runId: effect.runId, ok: result.ok, reason: result.reason }),
+            this.dispatch({
+              type: "LISTEN_RESULT",
+              runId: effect.runId,
+              ok: result.ok,
+              reason: result.reason,
+            }),
           () =>
-            this.dispatch({ type: "LISTEN_RESULT", runId: effect.runId, ok: false, reason: "unavailable" }),
+            this.dispatch({
+              type: "LISTEN_RESULT",
+              runId: effect.runId,
+              ok: false,
+              reason: "unavailable",
+            }),
         );
         break;
       case "STOP_LISTENING":
@@ -1167,7 +1313,8 @@ export class ReadingAutomationRuntime {
       case "SAVE_PAGE":
         void ports.savePage(effect.key, effect.attempt).then(
           (ok) => this.dispatch({ type: "SAVE_RESULT", key: effect.key, ok }),
-          () => this.dispatch({ type: "SAVE_RESULT", key: effect.key, ok: false }),
+          () =>
+            this.dispatch({ type: "SAVE_RESULT", key: effect.key, ok: false }),
         );
         break;
       case "TURN_PAGE":

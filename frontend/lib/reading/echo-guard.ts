@@ -29,10 +29,7 @@ export interface EchoGuardOptions {
 }
 
 export type EchoVerdictReason =
-  | "ok"
-  | "playing"
-  | "onset-during-playback"
-  | "tail-overlap";
+  "ok" | "playing" | "onset-during-playback" | "tail-overlap";
 
 export interface EchoVerdict {
   readonly accept: boolean;
@@ -93,7 +90,8 @@ export class EchoGuard {
         record.startedAt <= segment.receivedAt &&
         (record.endedAt === null || segment.receivedAt < record.endedAt),
     );
-    if (active) return { accept: false, reason: "playing", playbackId: active.id };
+    if (active)
+      return { accept: false, reason: "playing", playbackId: active.id };
 
     const tokens = tokenizeVietnameseText(segment.text);
     for (let index = this.records.length - 1; index >= 0; index -= 1) {

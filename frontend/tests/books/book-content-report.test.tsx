@@ -17,7 +17,7 @@ vi.mock("@/hooks/use-book-content-report-service", () => ({
 }));
 
 describe("Parent book content reports", () => {
-  it("supports CHILD_UNSAFE_CONTENT and COPYRIGHT_CONCERN alongside legacy issue types in BookContentReportDialog", async () => {
+  it("supports CHILD_SAFETY_CONCERN and COPYRIGHT_CONCERN alongside legacy issue types in BookContentReportDialog", async () => {
     createMock.mockReset();
     createMock.mockResolvedValue({
       id: "91000000-0000-4000-8000-000000000010",
@@ -28,9 +28,7 @@ describe("Parent book content reports", () => {
       page_id: "83000000-0000-4000-8000-000000000001",
       page_number: 2,
       page_revision_id: "84000000-0000-4000-8000-000000000001",
-      current_page_revision_id: null,
-      page_revision_changed: false,
-      issue_type: "CHILD_UNSAFE_CONTENT",
+      issue_type: "CHILD_SAFETY_CONCERN",
       description: "Trang này có nội dung không phù hợp cho bé lớp 1.",
       reported_text: null,
       suggested_correction: null,
@@ -61,16 +59,20 @@ describe("Parent book content reports", () => {
 
     const select = screen.getByLabelText("Loại vấn đề");
     expect(
-      screen.getByRole("option", { name: "Nội dung không phù hợp với trẻ" }),
+      screen.getByRole("option", {
+        name: "Nội dung có dấu hiệu không phù hợp cho trẻ em",
+      }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("option", { name: "Nghi vấn quyền sử dụng" }),
+      screen.getByRole("option", {
+        name: "Nghi ngại bản quyền / quyền sử dụng",
+      }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("option", { name: "Sai chính tả" }),
     ).toBeInTheDocument();
 
-    await user.selectOptions(select, "CHILD_UNSAFE_CONTENT");
+    await user.selectOptions(select, "CHILD_SAFETY_CONCERN");
     await user.type(
       screen.getByLabelText(/Mô tả vấn đề/),
       "Trang này có nội dung không phù hợp cho bé lớp 1.",
@@ -81,7 +83,7 @@ describe("Parent book content reports", () => {
       expect(createMock).toHaveBeenCalledWith(
         "81000000-0000-4000-8000-000000000001",
         expect.objectContaining({
-          issue_type: "CHILD_UNSAFE_CONTENT",
+          issue_type: "CHILD_SAFETY_CONCERN",
           page_id: "83000000-0000-4000-8000-000000000001",
         }),
       ),
@@ -119,7 +121,9 @@ describe("Parent book content reports", () => {
 
     render(<ParentBookReportsScreen />);
     expect(
-      await screen.findByText(/Nghi vấn quyền sử dụng · Toàn bộ sách/),
+      await screen.findByText(
+        /Nghi ngại bản quyền \/ quyền sử dụng · Toàn bộ sách/,
+      ),
     ).toBeInTheDocument();
   });
 });

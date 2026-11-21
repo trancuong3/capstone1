@@ -271,7 +271,9 @@ export function AdminUserBooksQualitySection({
 
     const trimmed = suspendReason.trim() || decisionReason.trim();
     if (trimmed.length < 5) {
-      setActionError("Vui lòng nhập lý do đình chỉ sách riêng tối thiểu 5 ký tự.");
+      setActionError(
+        "Vui lòng nhập lý do đình chỉ sách riêng tối thiểu 5 ký tự.",
+      );
       return;
     }
 
@@ -288,10 +290,7 @@ export function AdminUserBooksQualitySection({
       ]);
     } catch (error) {
       setActionError(
-        getAdminErrorText(
-          error,
-          "Không thể đình chỉ sách riêng lúc này.",
-        ),
+        getAdminErrorText(error, "Không thể đình chỉ sách riêng lúc này."),
       );
     } finally {
       setBusyAction(null);
@@ -318,8 +317,8 @@ export function AdminUserBooksQualitySection({
         />
         <div>
           <p className="font-bold">
-            Khu vực kiểm duyệt Sách người dùng (tách biệt hoàn toàn với Sách danh
-            mục)
+            Khu vực kiểm duyệt Sách người dùng (tách biệt hoàn toàn với Sách
+            danh mục)
           </p>
           <p className="mt-0.5 text-xs text-indigo-900 sm:text-sm">
             Phê duyệt tại đây chỉ mở quyền cho đúng phụ huynh sở hữu thêm đúng
@@ -392,9 +391,7 @@ export function AdminUserBooksQualitySection({
                 <span
                   className={
                     "rounded-full px-1.5 py-0.5 text-[11px] tabular-nums " +
-                    (active
-                      ? "bg-white/20 text-white"
-                      : "bg-canvas text-ink")
+                    (active ? "bg-white/20 text-white" : "bg-canvas text-ink")
                   }
                 >
                   {count}
@@ -697,7 +694,8 @@ export function AdminUserBooksQualitySection({
                           aria-hidden="true"
                           className="size-4 shrink-0"
                         />
-                        Cảnh báo Tool Check ({detail.tool_check_findings.length})
+                        Cảnh báo Tool Check ({detail.tool_check_findings.length}
+                        )
                       </p>
                       <ul className="mt-2 space-y-2 text-xs">
                         {detail.tool_check_findings.map((finding, idx) => (

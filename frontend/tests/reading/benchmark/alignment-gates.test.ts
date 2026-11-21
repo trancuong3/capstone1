@@ -53,17 +53,17 @@ function evaluate(
   return { scores, summary };
 }
 
-function assertGates(
-  label: string,
-  result: ReturnType<typeof evaluate>,
-): void {
+function assertGates(label: string, result: ReturnType<typeof evaluate>): void {
   const { summary, scores } = result;
   const detail = JSON.stringify(
     scores.filter((score) => score.failures.length),
     null,
     1,
   );
-  expect(summary.total.falseCorrect, `${label} G1 false-correct\n${detail}`).toBe(0);
+  expect(
+    summary.total.falseCorrect,
+    `${label} G1 false-correct\n${detail}`,
+  ).toBe(0);
   expect(
     summary.byGroup.fluent?.falseWrong ?? 0,
     `${label} G2 fluent false-wrong\n${detail}`,

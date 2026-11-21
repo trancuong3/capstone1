@@ -198,7 +198,13 @@ export function createParentPrivateBookService(): ParentPrivateBookService {
         undefined,
         { method: "PATCH", body: input },
       ),
-    replaceSubmissionFile: (bookId, submissionId, file, sourceType, sourceNote) => {
+    replaceSubmissionFile: (
+      bookId,
+      submissionId,
+      file,
+      sourceType,
+      sourceNote,
+    ) => {
       const form = new FormData();
       form.append("file", file);
       if (sourceType) form.append("source_type", sourceType);

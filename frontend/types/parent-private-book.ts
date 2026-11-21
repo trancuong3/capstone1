@@ -85,19 +85,22 @@ export const ADMIN_USER_BOOK_FILTER_LABELS: Record<
   SUSPENDED: "Đang đình chỉ",
 };
 
-const safeMediaUrlSchema = z.string().min(1).refine((value) => {
-  if (value.startsWith("/")) return !value.startsWith("//");
-  try {
-    const parsed = new URL(value);
-    return (
-      (parsed.protocol === "https:" || parsed.protocol === "http:") &&
-      !parsed.username &&
-      !parsed.password
-    );
-  } catch {
-    return false;
-  }
-});
+const safeMediaUrlSchema = z
+  .string()
+  .min(1)
+  .refine((value) => {
+    if (value.startsWith("/")) return !value.startsWith("//");
+    try {
+      const parsed = new URL(value);
+      return (
+        (parsed.protocol === "https:" || parsed.protocol === "http:") &&
+        !parsed.username &&
+        !parsed.password
+      );
+    } catch {
+      return false;
+    }
+  });
 
 export const toolCheckScopeSchema = z.object({
   modality: z.string(),
@@ -128,7 +131,9 @@ export const providerEventSummarySchema = z.object({
   error_code: z.string().nullable().optional(),
   duration_ms: z.number().int().nullable().optional(),
 });
-export type ProviderEventSummaryDTO = z.infer<typeof providerEventSummarySchema>;
+export type ProviderEventSummaryDTO = z.infer<
+  typeof providerEventSummarySchema
+>;
 
 export const toolCheckFindingSchema = z.object({
   finding_id: z.string().nullable().optional(),
@@ -204,7 +209,9 @@ export const parentPageSubmissionSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
 });
-export type ParentPageSubmissionDTO = z.infer<typeof parentPageSubmissionSchema>;
+export type ParentPageSubmissionDTO = z.infer<
+  typeof parentPageSubmissionSchema
+>;
 
 export const parentPrivateBookSummarySchema = z.object({
   id: z.guid(),

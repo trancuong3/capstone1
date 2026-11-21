@@ -2,6 +2,10 @@ import { z } from "zod";
 
 import { apiQuery, requestApi } from "@/lib/api/api-client";
 import {
+  createAdminUserBooksQualityApi,
+  type AdminUserBooksQualityApi,
+} from "@/lib/api/parent-private-book-service";
+import {
   bookContentReportDetailSchema,
   bookQualityBookDetailSchema,
   bookQualityBookDecisionReadSchema,
@@ -73,9 +77,14 @@ export interface AdminBookContentQualityService {
     reviewNote?: string,
   ): Promise<BookQualityFindingDTO>;
   retryPage(scanId: string, pageScanId: string): Promise<BookQualityScanDTO>;
+  listUserBooks?: AdminUserBooksQualityApi["listUserBooks"];
+  getUserBookSubmission?: AdminUserBooksQualityApi["getUserBookSubmission"];
+  decideUserBookSubmission?: AdminUserBooksQualityApi["decideUserBookSubmission"];
+  suspendUserBook?: AdminUserBooksQualityApi["suspendUserBook"];
 }
 
 export function createAdminBookContentQualityService(): AdminBookContentQualityService {
+  const userBooks = createAdminUserBooksQualityApi();
   return {
     listReports: (query) =>
       requestApi(
@@ -178,5 +187,6 @@ export function createAdminBookContentQualityService(): AdminBookContentQualityS
         undefined,
         { method: "POST" },
       ),
+    ...userBooks,
   };
 }

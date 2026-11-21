@@ -90,9 +90,12 @@ function setup(settings?: Partial<AutomationSettings>) {
   const clock = new FakeClock();
   const calls: string[] = [];
   const models: Deferred<void>[] = [];
-  const saves: { key: string; attempt: number; result: Deferred<boolean> }[] = [];
+  const saves: { key: string; attempt: number; result: Deferred<boolean> }[] =
+    [];
   const messages: AutomationMessage[] = [];
-  let listenOutcome: { ok: boolean; reason?: "permission" | "unavailable" } = { ok: true };
+  let listenOutcome: { ok: boolean; reason?: "permission" | "unavailable" } = {
+    ok: true,
+  };
   const ports: AutomationPorts = {
     startListening: async (runId) => {
       calls.push(`listen:${runId}`);
@@ -100,7 +103,9 @@ function setup(settings?: Partial<AutomationSettings>) {
     },
     stopListening: (reason) => calls.push(`stop-listen:${reason}`),
     playModel: (effect) => {
-      calls.push(`model:${effect.kind}:${effect.wordIds.join("+")}@${effect.speed}`);
+      calls.push(
+        `model:${effect.kind}:${effect.wordIds.join("+")}@${effect.speed}`,
+      );
       const d = deferred<void>();
       models.push(d);
       return d.promise;
@@ -120,11 +125,11 @@ function setup(settings?: Partial<AutomationSettings>) {
       messages.push(message);
     },
   };
-  const runtime = new ReadingAutomationRuntime(
-    clock,
-    ports,
-    { assist: true, autoAdvance: true, ...settings },
-  );
+  const runtime = new ReadingAutomationRuntime(clock, ports, {
+    assist: true,
+    autoAdvance: true,
+    ...settings,
+  });
   return {
     clock,
     runtime,
@@ -138,7 +143,10 @@ function setup(settings?: Partial<AutomationSettings>) {
     get state() {
       return runtime.getState();
     },
-    async start(pageId = "p1", opts: { isLast?: boolean; startIndex?: number; auto?: boolean } = {}) {
+    async start(
+      pageId = "p1",
+      opts: { isLast?: boolean; startIndex?: number; auto?: boolean } = {},
+    ) {
       runtime.dispatch({
         type: "START_PAGE",
         page: page(pageId, opts.isLast),
@@ -151,7 +159,11 @@ function setup(settings?: Partial<AutomationSettings>) {
     evidence(
       index: number,
       outcome: "correct" | "retry" | "skipped" = "correct",
-      override: Partial<{ runId: number; pageId: string; revisionId: string }> = {},
+      override: Partial<{
+        runId: number;
+        pageId: string;
+        revisionId: string;
+      }> = {},
     ) {
       const state = runtime.getState();
       runtime.dispatch({
@@ -164,7 +176,10 @@ function setup(settings?: Partial<AutomationSettings>) {
       });
     },
     speech() {
-      runtime.dispatch({ type: "SPEECH_ACTIVITY", runId: runtime.getState().runId });
+      runtime.dispatch({
+        type: "SPEECH_ACTIVITY",
+        runId: runtime.getState().runId,
+      });
     },
     count(prefix: string) {
       return calls.filter((call) => call.startsWith(prefix)).length;
@@ -199,7 +214,9 @@ describe("fluent reading, automatic page turn (G5, G8)", () => {
     expect(h.state.phase).toBe("page-turn");
     await h.clock.advance(DEFAULT_AUTOMATION_CONFIG.autoAdvanceDelayMs + 5);
     expect(h.count("turn:")).toBe(1);
-    expect(h.state.wordStates).toEqual(Object.fromEntries(WORDS.map((w) => [w.id, "correct"])));
+    expect(h.state.wordStates).toEqual(
+      Object.fromEntries(WORDS.map((w) => [w.id, "correct"])),
+    );
     expect(h.state.needsPractice).toEqual([]);
     // No intervention happened on the way.
     expect(h.count("model:")).toBe(0);
@@ -226,7 +243,13 @@ describe("fluent reading, automatic page turn (G5, G8)", () => {
     h.saves[0].result.resolve(true);
     await flush();
     remember();
-    expect(seen).toEqual(["listening", "evidence", "listening", "evidence", "page-turn"]);
+    expect(seen).toEqual([
+      "listening",
+      "evidence",
+      "listening",
+      "evidence",
+      "page-turn",
+    ]);
   });
 
   it("finishes the session instead of turning on the last page", async () => {
@@ -310,7 +333,9 @@ describe("hesitation and help (G6, G7, G9)", () => {
     await h.clock.advance(3900);
     expect(h.count("model:")).toBe(0);
     await h.clock.advance(150);
-    expect(h.calls.filter((c) => c.startsWith("model:"))).toEqual(["model:prompt:@1"]);
+    expect(h.calls.filter((c) => c.startsWith("model:"))).toEqual([
+      "model:prompt:@1",
+    ]);
     expect(h.messages.filter((m) => m === "gentle-prompt")).toHaveLength(1);
     expect(h.state.phase).toBe("modeling");
 
@@ -320,7 +345,9 @@ describe("hesitation and help (G6, G7, G9)", () => {
     await h.clock.advance(2500);
     expect(h.count("model:")).toBe(1); // still within promptToHelp
     await h.clock.advance(800);
-    expect(h.calls.filter((c) => c.startsWith("model:"))[1]).toBe("model:word:w0@1");
+    expect(h.calls.filter((c) => c.startsWith("model:"))[1]).toBe(
+      "model:word:w0@1",
+    );
     expect(h.state.helped).toContain("w0");
   });
 
@@ -370,7 +397,9 @@ describe("hesitation and help (G6, G7, G9)", () => {
       h.evidence(Math.min(h.state.cursor, 5));
       if (h.state.phase === "page-turn" || h.state.phase === "complete") break;
     }
-    expect(prompts).toBeLessThanOrEqual(DEFAULT_AUTOMATION_CONFIG.maxPromptsPerPage);
+    expect(prompts).toBeLessThanOrEqual(
+      DEFAULT_AUTOMATION_CONFIG.maxPromptsPerPage,
+    );
   });
 
   it("adapts to a slow reader and to punctuation before intervening", () => {
@@ -381,7 +410,12 @@ describe("hesitation and help (G6, G7, G9)", () => {
       page: page("p1"),
       words: WORDS.map((w, i) => ({ id: w.id, punctAfter: i === 2 })),
     }).state;
-    state = reduce(state, { type: "LISTEN_RESULT", at: 10, runId: state.runId, ok: true }).state;
+    state = reduce(state, {
+      type: "LISTEN_RESULT",
+      at: 10,
+      runId: state.runId,
+      ok: true,
+    }).state;
     const fast = nextWakeAt(state, 0)!;
 
     let slow = state;
@@ -398,22 +432,31 @@ describe("hesitation and help (G6, G7, G9)", () => {
         outcome: "correct",
       }).state;
     }
-    slow = reduce(slow, { type: "TICK", at: t + DEFAULT_AUTOMATION_CONFIG.evidenceLingerMs }).state;
+    slow = reduce(slow, {
+      type: "TICK",
+      at: t + DEFAULT_AUTOMATION_CONFIG.evidenceLingerMs,
+    }).state;
     const slowDelay = nextWakeAt(slow, t)! - t;
     expect(fast).toBe(DEFAULT_AUTOMATION_CONFIG.hesitationMinMs);
-    expect(slowDelay).toBeGreaterThan(DEFAULT_AUTOMATION_CONFIG.hesitationMinMs);
-    expect(slowDelay).toBeLessThanOrEqual(DEFAULT_AUTOMATION_CONFIG.hesitationMaxMs * 1.5);
+    expect(slowDelay).toBeGreaterThan(
+      DEFAULT_AUTOMATION_CONFIG.hesitationMinMs,
+    );
+    expect(slowDelay).toBeLessThanOrEqual(
+      DEFAULT_AUTOMATION_CONFIG.hesitationMaxMs * 1.5,
+    );
 
     // Right after a word that ends a clause, the allowed pause is longer.
     const afterPunctuation = reduce(
       { ...state, cursor: 3 },
       { type: "TICK", at: 10 },
     ).state;
-    const plain = reduce({ ...state, cursor: 2 }, { type: "TICK", at: 10 }).state;
-    expect(nextWakeAt(afterPunctuation, 10)! / nextWakeAt(plain, 10)!).toBeCloseTo(
-      DEFAULT_AUTOMATION_CONFIG.punctuationFactor,
-      5,
-    );
+    const plain = reduce(
+      { ...state, cursor: 2 },
+      { type: "TICK", at: 10 },
+    ).state;
+    expect(
+      nextWakeAt(afterPunctuation, 10)! / nextWakeAt(plain, 10)!,
+    ).toBeCloseTo(DEFAULT_AUTOMATION_CONFIG.punctuationFactor, 5);
   });
 
   it("answers an explicit help request immediately, regardless of the assist setting", async () => {
@@ -422,7 +465,11 @@ describe("hesitation and help (G6, G7, G9)", () => {
       await h.start();
       h.clock.time = 1000;
       const before = h.calls.length;
-      h.runtime.dispatch({ type: "HELP_REQUEST", scope: "word", source: "voice" });
+      h.runtime.dispatch({
+        type: "HELP_REQUEST",
+        scope: "word",
+        source: "voice",
+      });
       const effects = h.runtime.log.filter((e) => e.type === "PLAY_MODEL");
       expect(effects).toHaveLength(1);
       expect(h.calls.slice(before)[1]).toBe("model:word:w0@1");
@@ -483,7 +530,11 @@ describe("hesitation and help (G6, G7, G9)", () => {
   it("a helped word that is then read is assisted, never plain correct", async () => {
     const h = setup();
     await h.start();
-    h.runtime.dispatch({ type: "HELP_REQUEST", scope: "word", source: "button" });
+    h.runtime.dispatch({
+      type: "HELP_REQUEST",
+      scope: "word",
+      source: "button",
+    });
     h.models[0].resolve();
     await h.clock.advance(400);
     h.speech();
@@ -494,7 +545,11 @@ describe("hesitation and help (G6, G7, G9)", () => {
   it("drops evidence that arrives while the app is speaking", async () => {
     const h = setup();
     await h.start();
-    h.runtime.dispatch({ type: "HELP_REQUEST", scope: "word", source: "button" });
+    h.runtime.dispatch({
+      type: "HELP_REQUEST",
+      scope: "word",
+      source: "button",
+    });
     expect(h.state.phase).toBe("modeling");
     h.evidence(0, "correct");
     expect(h.state.wordStates.w0).toBe("pending");
@@ -504,7 +559,11 @@ describe("hesitation and help (G6, G7, G9)", () => {
   it("reopens the microphone after the sample, never before it ended", async () => {
     const h = setup();
     await h.start();
-    h.runtime.dispatch({ type: "HELP_REQUEST", scope: "word", source: "button" });
+    h.runtime.dispatch({
+      type: "HELP_REQUEST",
+      scope: "word",
+      source: "button",
+    });
     await h.clock.advance(5000);
     expect(h.count("listen:")).toBe(1); // still modelling
     h.models[0].resolve();
@@ -519,7 +578,11 @@ describe("pause, permission, offline and recovery (G6, G8, G10)", () => {
   it("a stop is not overridden by late STT, late audio or timers; resume reopens once", async () => {
     const h = setup();
     await h.start();
-    h.runtime.dispatch({ type: "HELP_REQUEST", scope: "word", source: "button" });
+    h.runtime.dispatch({
+      type: "HELP_REQUEST",
+      scope: "word",
+      source: "button",
+    });
     const staleRun = h.state.runId;
     const staleGen = h.state.modeling!.gen;
     h.runtime.dispatch({ type: "PAUSE", by: "child" });
@@ -684,10 +747,16 @@ describe("pause, permission, offline and recovery (G6, G8, G10)", () => {
     await readAllFluently(h);
     h.saves[0].result.resolve(true);
     await flush();
-    h.runtime.dispatch({ type: "SET_SETTINGS", settings: { autoAdvance: false } });
+    h.runtime.dispatch({
+      type: "SET_SETTINGS",
+      settings: { autoAdvance: false },
+    });
     await h.clock.advance(10_000);
     expect(h.count("turn:")).toBe(0);
-    h.runtime.dispatch({ type: "SET_SETTINGS", settings: { autoAdvance: true } });
+    h.runtime.dispatch({
+      type: "SET_SETTINGS",
+      settings: { autoAdvance: true },
+    });
     await h.clock.advance(1000);
     expect(h.count("turn:")).toBe(1);
   });
@@ -711,7 +780,8 @@ function randomEvent(
   at: number,
   pageCounter: number,
 ): AutomationEvent {
-  const pick = <T,>(items: readonly T[]) => items[Math.floor(random() * items.length)];
+  const pick = <T>(items: readonly T[]) =>
+    items[Math.floor(random() * items.length)];
   const staleRun = random() < 0.15;
   const runId = staleRun ? state.runId - 1 : state.runId;
   const pageId = state.page && random() > 0.1 ? state.page.pageId : "other";
@@ -782,9 +852,23 @@ function randomEvent(
         gen: state.modeling?.gen ?? state.modelGen - Math.floor(random() * 2),
       };
     case "MODEL_FAIL":
-      return { type: "MODEL_FAILED", at, gen: state.modeling?.gen ?? state.modelGen };
+      return {
+        type: "MODEL_FAILED",
+        at,
+        gen: state.modeling?.gen ?? state.modelGen,
+      };
     case "PAUSE":
-      return { type: "PAUSE", at, by: pick(["child", "parent", "background", "presence", "voice"] as const) };
+      return {
+        type: "PAUSE",
+        at,
+        by: pick([
+          "child",
+          "parent",
+          "background",
+          "presence",
+          "voice",
+        ] as const),
+      };
     case "RESUME":
       return { type: "RESUME", at };
     case "PERMISSION":
@@ -818,18 +902,30 @@ function assertInvariants(
   event: AutomationEvent,
   after: AutomationState,
   effects: readonly AutomationEffect[],
-  ctx: { pageEpoch: number; saveCount: Map<string, number>; turnCount: Map<number, number> },
+  ctx: {
+    pageEpoch: number;
+    saveCount: Map<string, number>;
+    turnCount: Map<number, number>;
+  },
 ) {
   const manualHelp = event.type === "HELP_REQUEST";
   const stopped = before.userStopped && after.userStopped;
   // I1: stopped => no automatic mic opening or voice, unless explicitly asked.
   if (stopped) {
     expect(effects.some((e) => e.type === "START_LISTENING")).toBe(false);
-    if (!manualHelp) expect(effects.some((e) => e.type === "PLAY_MODEL")).toBe(false);
-    expect(effects.some((e) => e.type === "TURN_PAGE" || e.type === "FINISH_SESSION")).toBe(false);
+    if (!manualHelp)
+      expect(effects.some((e) => e.type === "PLAY_MODEL")).toBe(false);
+    expect(
+      effects.some(
+        (e) => e.type === "TURN_PAGE" || e.type === "FINISH_SESSION",
+      ),
+    ).toBe(false);
   }
   // I5: no intervention while the child is speaking.
-  if (event.type === "TICK" && event.at - before.lastSpeechAt < before.config.speechQuietMs) {
+  if (
+    event.type === "TICK" &&
+    event.at - before.lastSpeechAt < before.config.speechQuietMs
+  ) {
     expect(effects.some((e) => e.type === "PLAY_MODEL")).toBe(false);
   }
   // I6: assisted/skipped never green.
@@ -843,13 +939,18 @@ function assertInvariants(
   for (const effect of effects) {
     if (effect.type === "SAVE_PAGE") {
       // Never a second *first* attempt for a key already persisted.
-      expect(after.savedKeys.includes(effect.key) && effect.attempt === 1).toBe(false);
+      expect(after.savedKeys.includes(effect.key) && effect.attempt === 1).toBe(
+        false,
+      );
       if (effect.attempt === 1) {
         ctx.saveCount.set(effect.key, (ctx.saveCount.get(effect.key) ?? 0) + 1);
       }
     }
     if (effect.type === "TURN_PAGE" || effect.type === "FINISH_SESSION") {
-      ctx.turnCount.set(ctx.pageEpoch, (ctx.turnCount.get(ctx.pageEpoch) ?? 0) + 1);
+      ctx.turnCount.set(
+        ctx.pageEpoch,
+        (ctx.turnCount.get(ctx.pageEpoch) ?? 0) + 1,
+      );
       expect(ctx.turnCount.get(ctx.pageEpoch)).toBe(1);
       // A page only turns after its save was confirmed.
       expect(after.save.status).toBe("saved");

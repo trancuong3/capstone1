@@ -3,7 +3,6 @@
 import os
 import unittest
 import asyncio
-from datetime import datetime, timezone
 import json
 from uuid import UUID, uuid4
 from unittest.mock import patch
@@ -23,16 +22,10 @@ from app.api.router import api_router
 from app.models import (
     AdminAiWorkflow,
     AuditLog,
-    BookContentReport,
-    BookContentRightsProfile,
     BookPage,
-    BookQualityScanRun,
     PageRevision,
     PageRevisionWord,
 )
-from app.services.admin_ai_workflow_service import AdminAiWorkflowService
-
-canonical_text_hash = AdminAiWorkflowService._hash
 from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.repositories.reading_content_repository import ReadingContentRepository
 from app.services.admin_ocr_service import AdminOcrService
@@ -103,14 +96,6 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     maxgrade smallint NOT NULL,
                     lifecyclestatus text NOT NULL,
                     createdby uuid,
-                    visibility_scope text NOT NULL DEFAULT 'CATALOG',
-                    owner_parent_id uuid,
-                    moderation_status text NOT NULL DEFAULT 'ACTIVE',
-                    suspended_at timestamptz,
-                    suspended_by uuid,
-                    suspended_reason text,
-                    source_declaration text,
-                    expectedpagecount integer,
                     createdat timestamptz NOT NULL DEFAULT now()
                 )
                 """,
@@ -126,7 +111,6 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     processingmeta jsonb NOT NULL DEFAULT '{}'::jsonb,
                     currentverifiedrevisionid uuid,
                     lifecyclestatus text NOT NULL,
-                    contenttype text NOT NULL DEFAULT 'CONTENT',
                     createdat timestamptz NOT NULL DEFAULT now()
                 )
                 """,
@@ -166,15 +150,6 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     UNIQUE (pagerevisionid, wordindex)
                 )
                 """,
-                """
-                CREATE TABLE IF NOT EXISTS parent_book_page_submissions (
-                    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-                    book_id uuid NOT NULL,
-                    batch_id uuid,
-                    batch_total_pages integer NOT NULL DEFAULT 1,
-                    workflow_status text NOT NULL DEFAULT 'ADDED_TO_BOOK'
-                )
-                """,
             )
             for statement in statements:
                 await connection.execute(text(statement))
@@ -182,16 +157,7 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 lambda sync_connection: AuditLog.__table__.create(sync_connection)
             )
             await connection.run_sync(
-                lambda sync_connection: BookContentRightsProfile.__table__.create(sync_connection)
-            )
-            await connection.run_sync(
                 lambda sync_connection: AdminAiWorkflow.__table__.create(sync_connection)
-            )
-            await connection.run_sync(
-                lambda sync_connection: BookQualityScanRun.__table__.create(sync_connection)
-            )
-            await connection.run_sync(
-                lambda sync_connection: BookContentReport.__table__.create(sync_connection)
             )
             await connection.execute(
                 text("INSERT INTO profiles (id, role) VALUES (:id, 'admin')"),
@@ -469,84 +435,10 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             verified_revision_id = UUID(r2["page_revision_id"])
             await self._seed_public_revision_reference(verified_revision_id)
 
-            # Without AI workflow & reviewed rights profile, verify must be blocked (409).
-            blocked_verify = await client.post(
-                f"/books/admin/pages/{PAGE_ID}/verify",
-                json={
-                    "page_revision_id": r2["page_revision_id"],
-                    "corrected_text": "Ngày xưa có em.",
-                    "words": saved.json()["words"],
-                    "proofread_audit": {
-                        "mode": "AI_CHECKED",
-                        "checked_text": "Ngày xưa có em.",
-                        "suggestions": [],
-                    },
-                },
-            )
-            self.assertEqual(blocked_verify.status_code, 409, blocked_verify.text)
-
-            # Seed REVIEWED rights profile + completed/confirmed AI workflow for exact candidate text.
-            candidate_hash = canonical_text_hash("Ngày xưa có em.")
-            workflow_id = uuid4()
-            async with self.sessions() as session:
-                session.add(
-                    BookContentRightsProfile(
-                        Id=uuid4(),
-                        BookId=BOOK_ID,
-                        PageId=None,
-                        Scope="BOOK",
-                        Status="REVIEWED",
-                        SourceName="NXB Kiểm thử",
-                        RightsHolder="ViRead",
-                        UsageBasis="WRITTEN_LICENSE",
-                        EvidenceReference="HD-2026-TEST",
-                        SourceFingerprint="f" * 64,
-                        ProfileVersion=1,
-                        ReviewedBy=ACTOR,
-                        ReviewedAt=datetime.now(timezone.utc),
-                    )
-                )
-                session.add(
-                    AdminAiWorkflow(
-                        Id=workflow_id,
-                        PageId=PAGE_ID,
-                        BookId=BOOK_ID,
-                        PageRevisionId=verified_revision_id,
-                        ActorId=ACTOR,
-                        IdempotencyKey=uuid4(),
-                        OriginalText="Ngày xưa có bé.",
-                        InputText="Ngày xưa có em.",
-                        ImagePath="source/page.png",
-                        Status="READY_FOR_ADMIN_REVIEW",
-                        Stage="READY_FOR_ADMIN_REVIEW",
-                        TotalChunks=1,
-                        CompletedChunks=1,
-                        OriginalOcrHash=canonical_text_hash("Ngày xưa có bé."),
-                        AdminInputHash=candidate_hash,
-                        ProofreadText="Ngày xưa có em.",
-                        ProofreadOutputHash=candidate_hash,
-                        CandidateText="Ngày xưa có em.",
-                        CandidateHash=candidate_hash,
-                        CandidateVersion=1,
-                        SafetyInputHash=candidate_hash,
-                        Suitability="SUITABLE",
-                        SafetyStatus="CONFIRMED",
-                        SafetyMetadata={
-                            "scope": "TEXT",
-                            "total_chunks": 1,
-                            "scanned_chunks": 1,
-                            "coverage_complete": True,
-                        },
-                        Findings=[],
-                    )
-                )
-                await session.commit()
-
             verified = await client.post(
                 f"/books/admin/pages/{PAGE_ID}/verify",
                 json={
                     "page_revision_id": r2["page_revision_id"],
-                    "workflow_id": str(workflow_id),
                     "corrected_text": "Ngày xưa có em.",
                     "words": saved.json()["words"],
                     "proofread_audit": {
@@ -593,7 +485,7 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(outbox_event["status"], "PENDING")
             payload = json.loads(outbox_event["payload_text"])
             self.assertEqual(payload["source_flow"], "FLOW1_VERIFIED")
-            self.assertEqual(payload["schema"], "viread-outbox-v2")
+            self.assertEqual(payload["schema"], "viread-outbox-v1")
 
             async with self.sessions() as session:
                 reading_repository = ReadingContentRepository(session)
@@ -865,116 +757,6 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 {"page": PAGE_ID},
             )
             self.assertEqual(count, 2)
-
-    async def test_saving_draft_marks_existing_workflow_stale_and_blocks_verify(self):
-        app = self._test_app()
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            draft = await client.post(
-                f"/books/admin/pages/{PAGE_ID}/revisions/draft",
-                json={"expected_source_revision_id": str(R1_ID)},
-            )
-            self.assertEqual(draft.status_code, 201, draft.text)
-            r2 = draft.json()
-            r2_id = UUID(r2["page_revision_id"])
-            await self._seed_public_revision_reference(r2_id)
-
-            original_hash = canonical_text_hash("Ngày xưa có bé.")
-            workflow_id = uuid4()
-            async with self.sessions() as session:
-                session.add(
-                    BookContentRightsProfile(
-                        Id=uuid4(),
-                        BookId=BOOK_ID,
-                        PageId=None,
-                        Scope="BOOK",
-                        Status="REVIEWED",
-                        SourceName="NXB Kiểm thử",
-                        RightsHolder="ViRead",
-                        UsageBasis="WRITTEN_LICENSE",
-                        EvidenceReference="HD-2026-TEST",
-                        SourceFingerprint="f" * 64,
-                        ProfileVersion=1,
-                        ReviewedBy=ACTOR,
-                        ReviewedAt=datetime.now(timezone.utc),
-                    )
-                )
-                session.add(
-                    AdminAiWorkflow(
-                        Id=workflow_id,
-                        PageId=PAGE_ID,
-                        BookId=BOOK_ID,
-                        PageRevisionId=r2_id,
-                        ActorId=ACTOR,
-                        IdempotencyKey=uuid4(),
-                        OriginalText="Ngày xưa có bé.",
-                        InputText="Ngày xưa có bé.",
-                        ImagePath="source/page.png",
-                        Status="READY_FOR_ADMIN_REVIEW",
-                        Stage="READY_FOR_ADMIN_REVIEW",
-                        TotalChunks=1,
-                        CompletedChunks=1,
-                        OriginalOcrHash=original_hash,
-                        AdminInputHash=original_hash,
-                        ProofreadText="Ngày xưa có bé.",
-                        ProofreadOutputHash=original_hash,
-                        CandidateText="Ngày xưa có bé.",
-                        CandidateHash=original_hash,
-                        CandidateVersion=1,
-                        SafetyInputHash=original_hash,
-                        Suitability="SUITABLE",
-                        SafetyStatus="CONFIRMED",
-                        SafetyMetadata={
-                            "scope": "TEXT",
-                            "total_chunks": 1,
-                            "scanned_chunks": 1,
-                            "coverage_complete": True,
-                        },
-                        Findings=[],
-                    )
-                )
-                await session.commit()
-
-            # Ready before editing draft
-            ready = await client.get(
-                f"/books/admin/pages/{PAGE_ID}/verification-readiness",
-                params={"revision_id": str(r2_id), "workflow_id": str(workflow_id)},
-            )
-            self.assertEqual(ready.status_code, 200, ready.text)
-            self.assertTrue(ready.json()["ready_to_verify"])
-
-            # Edit draft -> workflow must become STALE and verify must return 409
-            edited_words = r2["words"]
-            edited_words[3]["text"] = "cô."
-            edited_words[3]["normalized_text"] = "cô"
-            saved = await client.put(
-                f"/books/admin/pages/{PAGE_ID}/revisions/{r2_id}/draft",
-                json={"draft_text": "Ngày xưa có cô.", "words": edited_words},
-            )
-            self.assertEqual(saved.status_code, 200, saved.text)
-
-            stale_readiness = await client.get(
-                f"/books/admin/pages/{PAGE_ID}/verification-readiness",
-                params={"revision_id": str(r2_id), "workflow_id": str(workflow_id)},
-            )
-            self.assertEqual(stale_readiness.status_code, 200, stale_readiness.text)
-            self.assertFalse(stale_readiness.json()["ready_to_verify"])
-
-            blocked = await client.post(
-                f"/books/admin/pages/{PAGE_ID}/verify",
-                json={
-                    "page_revision_id": str(r2_id),
-                    "workflow_id": str(workflow_id),
-                    "corrected_text": "Ngày xưa có cô.",
-                    "words": saved.json()["words"],
-                    "proofread_audit": {
-                        "mode": "ADMIN_EDITED",
-                        "checked_text": "Ngày xưa có cô.",
-                        "suggestions": [],
-                    },
-                },
-            )
-            self.assertEqual(blocked.status_code, 409, blocked.text)
 
 
 if __name__ == "__main__":

@@ -247,7 +247,11 @@ export function BookLibraryScreen() {
               Tủ sách{child ? ` của ${child.alias}` : " của bé"}
             </h1>
             <div className="flex flex-wrap items-center gap-2">
-              <ButtonLink href="/my-books" variant="secondary" className="min-h-10 w-auto px-4 text-sm">
+              <ButtonLink
+                href="/my-books"
+                variant="secondary"
+                className="min-h-10 w-auto px-4 text-sm"
+              >
                 <BookMarked aria-hidden="true" className="size-4" />
                 Sách của tôi
               </ButtonLink>
