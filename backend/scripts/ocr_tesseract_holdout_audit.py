@@ -80,10 +80,18 @@ def _quality(quality: object) -> dict[str, int | float]:
         result[key] = _nonnegative_int(quality.get(key))
     if result["reference_characters"] == 0 or result["reference_words"] == 0:
         raise ValueError("Missing reference characters or words")
-    for key in ("micro_cer", "micro_wer"):
+    for key, wrong_key, total_key in (
+        ("micro_cer", "character_edits", "reference_characters"),
+        ("micro_wer", "word_edits", "reference_words"),
+    ):
         value = quality.get(key)
         if type(value) not in (float, int) or not math.isfinite(value) or value < 0:
             raise ValueError("Invalid micro error rate")
+        expected = round(result[wrong_key] / result[total_key], 6)
+        # The frozen OCR report rounds both micro metrics to six places.
+        # A mismatch indicates a corrupt/incorrectly assembled aggregate.
+        if not math.isclose(value, expected, rel_tol=0, abs_tol=0.00000051):
+            raise ValueError("Inconsistent strict OCR error rate")
         result[key] = float(value)
     return result
 
@@ -138,8 +146,14 @@ def summarize_holdout_report(
         }
         if sum(page_directions.values()) != successful:
             raise ValueError("Candidate page comparison counts do not reconcile")
+        candidate_quality = _quality(row["quality"])
+        if (
+            candidate_quality["reference_characters"] != safe_baseline["reference_characters"]
+            or candidate_quality["reference_words"] != safe_baseline["reference_words"]
+        ):
+            raise ValueError("Candidate reference totals do not match frozen baseline")
         selected[name] = {
-            "quality": _quality(row["quality"]),
+            "quality": candidate_quality,
             **counts,
             "wer_page_directions": page_directions,
         }
