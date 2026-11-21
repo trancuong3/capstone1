@@ -3,7 +3,7 @@ import type {
   AdminRevisionWordDTO,
 } from "@/types/admin";
 import { z } from "zod";
-import { apiQuery, requestApi } from "@/lib/api/api-client";
+import { requestApi } from "@/lib/api/api-client";
 
 export const aiCorrectResponseSchema = z.object({
   corrected_text: z.string(),
@@ -61,7 +61,6 @@ export const adminAiWorkflowSchema = z.object({
   error_code: z.string().nullable(),
   original_ocr_hash: z.string().regex(/^[a-f0-9]{64}$/u),
   admin_input_hash: z.string().regex(/^[a-f0-9]{64}$/u),
-  image_hash: z.string().nullable().optional().default(null),
   proofread_text: z.string().nullable(),
   proofread_output_hash: z
     .string()
@@ -101,25 +100,40 @@ export const adminAiWorkflowSchema = z.object({
     "AUTO_CONFIRMED",
     "FAILED",
   ]),
+  text_safety_status: z
+    .enum([
+      "PENDING",
+      "STALE",
+      "PROVISIONAL",
+      "CONFIRMED",
+      "AUTO_CONFIRMED",
+      "FAILED",
+    ])
+    .optional(),
   image_safety_status: z
-    .enum(["NOT_REVIEWED", "MANUAL_REVIEWED_SAFE", "MANUAL_REVIEWED_CONCERN"])
-    .optional()
-    .default("NOT_REVIEWED"),
+    .enum([
+      "UNASSESSED_NO_VISION_MODEL",
+      "ADMIN_CONFIRMED_SAFE",
+      "ADMIN_FLAGGED_UNSAFE",
+    ])
+    .optional(),
   image_safety_reviewed_at: z.iso
     .datetime({ offset: true })
     .nullable()
-    .optional()
-    .default(null),
-  image_safety_review_note: z.string().nullable().optional().default(null),
-  rights_profile_id: z.uuid().nullable().optional().default(null),
-  rights_profile_version: z
-    .number()
-    .int()
-    .nonnegative()
+    .optional(),
+  image_safety_reviewed_by: z.uuid().nullable().optional(),
+  image_safety_image_sha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/u)
     .nullable()
-    .optional()
-    .default(null),
-  rights_profile_hash: z.string().nullable().optional().default(null),
+    .optional(),
+  image_safety_reason: z.string().nullable().optional(),
+  source_image_sha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/u)
+    .nullable()
+    .optional(),
+  all_chunks_completed: z.boolean().optional(),
   findings: z.array(z.record(z.string(), z.unknown())),
   provider_events: z.array(z.record(z.string(), z.unknown())),
   ocr_approved_at: z.iso.datetime({ offset: true }).nullable(),
@@ -135,62 +149,6 @@ export type AdminAiWorkflowDTO = z.infer<typeof adminAiWorkflowSchema>;
 export type AdminAiWorkflowProgress = Pick<
   AdminAiWorkflowDTO,
   "status" | "progress"
->;
-
-export const adminPageVerificationBlockerSchema = z.object({
-  code: z.string(),
-  stage: z.enum([
-    "PROOFREADING",
-    "CHILD_SAFETY",
-    "IMAGE_SAFETY",
-    "RIGHTS",
-    "REVISION",
-  ]),
-  message: z.string(),
-});
-
-export const adminPageVerificationReadinessSchema = z.object({
-  page_id: z.uuid(),
-  page_revision_id: z.uuid(),
-  workflow_id: z.uuid().nullable().default(null),
-  ready_to_verify: z.boolean(),
-  blockers: z.array(adminPageVerificationBlockerSchema).default([]),
-  proofreading_status: z.string(),
-  uncertain_word_count: z.number().int().nonnegative().default(0),
-  uncertain_resolved: z.boolean().default(true),
-  child_safety_status: z.string(),
-  child_safety_scope: z.string().default("TEXT"),
-  child_safety_coverage_complete: z.boolean().default(false),
-  image_safety_status: z.string().default("NOT_REVIEWED"),
-  image_safety_required: z.boolean().default(false),
-  page_content_type: z
-    .enum(["CONTENT", "COVER_OR_IMAGE_ONLY"])
-    .default("CONTENT"),
-  rights_status: z
-    .enum(["NOT_ASSESSED", "MISSING_EVIDENCE", "CONCERNS_FOUND", "REVIEWED"])
-    .default("NOT_ASSESSED"),
-  rights_scope: z.enum(["BOOK", "PAGE_OVERRIDE"]).nullable().default(null),
-  rights_profile_version: z
-    .number()
-    .int()
-    .nonnegative()
-    .nullable()
-    .default(null),
-});
-
-export type AdminPageVerificationBlockerDTO = z.infer<
-  typeof adminPageVerificationBlockerSchema
->;
-export type AdminPageVerificationReadinessDTO = z.infer<
-  typeof adminPageVerificationReadinessSchema
->;
-
-export const adminPageContentTypeSchema = z.object({
-  page_id: z.uuid(),
-  content_type: z.enum(["CONTENT", "COVER_OR_IMAGE_ONLY"]),
-});
-export type AdminPageContentTypeDTO = z.infer<
-  typeof adminPageContentTypeSchema
 >;
 
 function waitForJobPoll(signal?: AbortSignal): Promise<void> {
@@ -252,32 +210,17 @@ export interface OcrReviewService {
     confirmed: boolean,
     reason?: string,
   ): Promise<AdminAiWorkflowDTO>;
+  decideWorkflowImageSafety?(
+    pageId: string,
+    workflowId: string,
+    status: "ADMIN_CONFIRMED_SAFE" | "ADMIN_FLAGGED_UNSAFE",
+    expectedImageSha256?: string | null,
+    reason?: string,
+  ): Promise<AdminAiWorkflowDTO>;
   retryWorkflow(
     pageId: string,
     workflowId: string,
   ): Promise<AdminAiWorkflowDTO>;
-  getVerificationReadiness(
-    pageId: string,
-    revisionId: string,
-    workflowId?: string | null,
-  ): Promise<AdminPageVerificationReadinessDTO>;
-  resolveUncertainWords(
-    pageId: string,
-    workflowId: string,
-    expectedCandidateHash: string,
-    note: string,
-  ): Promise<AdminAiWorkflowDTO>;
-  reviewImageSafety(
-    pageId: string,
-    workflowId: string,
-    status: "MANUAL_REVIEWED_SAFE" | "MANUAL_REVIEWED_CONCERN",
-    note: string,
-    pageContentType?: "CONTENT" | "COVER_OR_IMAGE_ONLY",
-  ): Promise<AdminAiWorkflowDTO>;
-  updatePageContentType(
-    pageId: string,
-    contentType: "CONTENT" | "COVER_OR_IMAGE_ONLY",
-  ): Promise<AdminPageContentTypeDTO>;
 }
 
 export const adminRevisionDetailSchema = z.object({
@@ -623,60 +566,32 @@ export function createOcrReviewService(): OcrReviewService {
           body: { expected_candidate_hash: candidateHash, confirmed, reason },
         },
       ),
-    retryWorkflow: (pageId, workflowId) =>
+    decideWorkflowImageSafety: (
+      pageId,
+      workflowId,
+      status,
+      expectedImageSha256,
+      reason,
+    ) =>
       requestApi(
-        workflowPath(pageId, workflowId) + "/retry",
-        adminAiWorkflowSchema,
-        undefined,
-        { method: "POST" },
-      ),
-    getVerificationReadiness: (pageId, revisionId, workflowId) =>
-      requestApi(
-        "/books/admin/pages/" +
-          encodeURIComponent(pageId) +
-          "/verification-readiness" +
-          apiQuery({
-            revision_id: revisionId,
-            workflow_id: workflowId ?? undefined,
-          }),
-        adminPageVerificationReadinessSchema,
-      ),
-    resolveUncertainWords: (pageId, workflowId, expectedCandidateHash, note) =>
-      requestApi(
-        workflowPath(pageId, workflowId) + "/uncertain-resolution",
-        adminAiWorkflowSchema,
-        undefined,
-        {
-          method: "POST",
-          body: {
-            expected_candidate_hash: expectedCandidateHash,
-            note,
-          },
-        },
-      ),
-    reviewImageSafety: (pageId, workflowId, status, note, pageContentType) =>
-      requestApi(
-        workflowPath(pageId, workflowId) + "/image-safety-review",
+        workflowPath(pageId, workflowId) + "/image-safety-decision",
         adminAiWorkflowSchema,
         undefined,
         {
           method: "POST",
           body: {
             status,
-            note,
-            page_content_type: pageContentType,
+            expected_image_sha256: expectedImageSha256 ?? undefined,
+            reason,
           },
         },
       ),
-    updatePageContentType: (pageId, contentType) =>
+    retryWorkflow: (pageId, workflowId) =>
       requestApi(
-        "/books/admin/pages/" + encodeURIComponent(pageId) + "/content-type",
-        adminPageContentTypeSchema,
+        workflowPath(pageId, workflowId) + "/retry",
+        adminAiWorkflowSchema,
         undefined,
-        {
-          method: "PATCH",
-          body: { content_type: contentType },
-        },
+        { method: "POST" },
       ),
   };
 }

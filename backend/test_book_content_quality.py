@@ -14,6 +14,7 @@ os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 
 from pydantic import ValidationError
+import httpx
 
 from app.services.admin_ocr_local import LocalCorrectionError
 from app.services.book_quality_analyzer import (
@@ -23,8 +24,10 @@ from app.services.book_quality_analyzer import (
 from app.services.book_quality_ollama import (
     OllamaTextResponse,
     _decode_model_response,
+    _prompt,
     _text_chunks,
     _unique_excerpt_position,
+    analyse_with_ollama,
 )
 
 
@@ -168,6 +171,62 @@ class OllamaEvidenceValidationTests(unittest.TestCase):
         source = "Bé thích mèo. Mèo thương bé."
         position = _unique_excerpt_position(source, "thương")
         self.assertEqual(position, source.index("thương"))
+
+    def test_prompt_and_chunking_use_real_newlines_not_escaped_backslashes(self):
+        rendered = _prompt("Dòng một\nDòng hai", page_number=3)
+        self.assertIn("PAGE NUMBER: 3\nSOURCE TEXT:\nDòng một\nDòng hai", rendered)
+        self.assertNotIn("\\n", rendered)
+
+        line_a = "a" * 45 + "\n"
+        line_b = "b" * 45
+        ranges = _text_chunks(line_a + line_b, maximum=64, overlap=8)
+        self.assertEqual(ranges[0], (0, len(line_a)))
+
+
+class OllamaBookQualityHttpTests(unittest.IsolatedAsyncioTestCase):
+    async def test_analyse_with_ollama_sets_think_false_and_retries_json_mode_on_400(self):
+        seen_payloads = []
+
+        async def handler(request: httpx.Request):
+            payload = json.loads(request.content)
+            seen_payloads.append(payload)
+            if len(seen_payloads) == 1:
+                return httpx.Response(400, json={"error": "invalid format schema"})
+            return httpx.Response(
+                200,
+                json={
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "findings": [
+                                    {
+                                        "excerpt": "trời mua",
+                                        "issue_type": "SPELLING_SUSPECTED",
+                                        "severity": "MEDIUM",
+                                        "explanation": "Nghi thiếu dấu thanh.",
+                                        "suggested_correction": "trời mưa",
+                                        "confidence": 0.9,
+                                    }
+                                ]
+                            },
+                            ensure_ascii=False,
+                        )
+                    }
+                },
+            )
+
+        result = await analyse_with_ollama(
+            "Hôm nay trời mua rất to.",
+            page_number=2,
+            transport=httpx.MockTransport(handler),
+        )
+        self.assertEqual(len(seen_payloads), 2)
+        self.assertIs(seen_payloads[0]["think"], False)
+        self.assertIsInstance(seen_payloads[0]["format"], dict)
+        self.assertIs(seen_payloads[1]["think"], False)
+        self.assertEqual(seen_payloads[1]["format"], "json")
+        self.assertEqual(len(result.findings), 1)
+        self.assertEqual(result.findings[0].excerpt, "trời mua")
 
 
 if __name__ == "__main__":

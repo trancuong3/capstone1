@@ -28,39 +28,22 @@ def _run_async(coroutine):
     raise AssertionError("Decision fake unexpectedly yielded to an event loop")
 
 
-def _row(
-    page_number: int,
-    *,
-    finding: dict | None = None,
-    suitability: str = "SUITABLE",
-    content_type: str = "CONTENT",
-    image_path: str = "books/test/page.png",
-    verified_text: str | None = None,
-    image_safety_status: str = "NOT_REVIEWED",
-):
+def _row(page_number: int, *, finding: dict | None = None, suitability: str = "SUITABLE"):
     page_id = uuid4()
     revision_id = uuid4()
-    text_value = (
-        verified_text
-        if verified_text is not None
-        else f"Câu chuyện tiếng Việt trang số {page_number} dành cho các bạn nhỏ đọc mỗi ngày."
-    )
     workflow = SimpleNamespace(
         Id=uuid4(),
         PageId=page_id,
         PageRevisionId=revision_id,
         Status="READY_FOR_ADMIN_REVIEW",
         SafetyStatus="PROVISIONAL",
-        CandidateHash=AdminAiWorkflowService._hash(text_value),
-        CandidateText=text_value,
-        SafetyInputHash=AdminAiWorkflowService._hash(text_value),
-        SafetyMetadata={"scope": "TEXT", "total_chunks": 1, "scanned_chunks": 1, "coverage_complete": True},
-        ImageSafetyStatus=image_safety_status,
+        CandidateHash=AdminAiWorkflowService._hash(f"candidate-{page_number}"),
+        CandidateText=f"candidate-{page_number}",
+        SafetyInputHash=AdminAiWorkflowService._hash(f"candidate-{page_number}"),
         Suitability=suitability,
         Findings=[finding] if finding else [],
-        ProofreadText=text_value,
+        ProofreadText=f"candidate-{page_number}",
         CorrectionSuggestions=[],
-        UncertainWordIndices=[],
         OcrApprovedAt=None,
         OcrApprovedBy=None,
         FinalApprovedTextHash=None,
@@ -71,8 +54,6 @@ def _row(
     page = SimpleNamespace(
         Id=page_id,
         PageNumber=page_number,
-        ImagePath=image_path,
-        ContentType=content_type,
         LifecycleStatus="ACTIVE",
         CurrentVerifiedRevisionId=revision_id,
     )
@@ -80,8 +61,7 @@ def _row(
         Id=revision_id,
         VerificationStatus="VERIFIED",
         ContentHash=f"revision-{page_number}",
-        VerifiedText=text_value,
-        DraftText=text_value,
+        VerifiedText=f"candidate-{page_number}",
         VerifiedBy=uuid4(),
         VerifiedAt=datetime.now(timezone.utc),
         ProcessingMeta={},
@@ -89,46 +69,40 @@ def _row(
     return page, revision, workflow, f"findings-{page_number}", f"metadata-{page_number}"
 
 
-def _reviewed_rights_profile(book_id=None, *, page_id=None, status="REVIEWED", version=1, fingerprint="f" * 64):
-    return SimpleNamespace(
-        Id=uuid4(),
-        BookId=book_id or uuid4(),
-        PageId=page_id,
-        Scope="PAGE_OVERRIDE" if page_id else "BOOK",
-        Status=status,
-        SourceName="Nhà xuất bản Giáo dục / Tự biên soạn ViRead",
-        RightsHolder="ViRead Editorial",
-        UsageBasis="OWN_ORIGINAL" if status == "REVIEWED" else "UNKNOWN",
-        EvidenceUrl="https://example.org/license/viread-book-1" if status == "REVIEWED" else None,
-        EvidenceReference="HD-2026-01" if status == "REVIEWED" else None,
-        Notes="Bản quyền đã xác minh." if status == "REVIEWED" else None,
-        SourceFingerprint=fingerprint,
-        ProfileVersion=version,
-        ReferenceCheckStatus="NO_MATCH_IN_ALLOWED_CORPUS",
-        ReferenceCheckEvidence=[],
-        ReviewedBy=uuid4(),
-        ReviewedByNameSnapshot="Admin test",
-        ReviewedAt=datetime.now(timezone.utc),
-        History=[],
-        UpdatedAt=datetime.now(timezone.utc),
-    )
-
-
 class _DecisionRepository:
-    def __init__(self, row, *, rights_profiles=None, expected_page_count=None):
+    def __init__(self, row, *, include_rights: bool = True):
         self.row = row
-        self.rows = [row] if not isinstance(row, list) else list(row)
+        self.rows = [row]
         self.decisions = []
         self.book_row = SimpleNamespace(
-            Id=uuid4(), LifecycleStatus="DRAFT", ExpectedPageCount=expected_page_count
+            Id=uuid4(), Title="Sách Mẫu", Author="Tác giả Mẫu", LifecycleStatus="DRAFT"
         )
-        self.rights_profiles = (
-            [_reviewed_rights_profile(self.book_row.Id)]
-            if rights_profiles is None
-            else list(rights_profiles)
+        self.rights_row = (
+            SimpleNamespace(
+                Id=uuid4(),
+                BookId=self.book_row.Id,
+                PageId=None,
+                Scope="BOOK",
+                Status="RIGHTS_REVIEWED",
+                SourceDescription="Nguồn thư viện giáo dục mở",
+                AuthorOrRightsHolder="Tác giả Mẫu",
+                UsageBasis="OPEN_LICENSE",
+                EvidenceUrlOrRef="https://open.example.org/license",
+                Notes="Đã rà soát hồ sơ quyền sử dụng.",
+                Version=1,
+                ContentFingerprint=None,
+                ReviewedBy=uuid4(),
+                ReviewedByNameSnapshot="Admin test",
+                ReviewedAt=datetime.now(timezone.utc),
+            )
+            if include_rights
+            else None
         )
         self.committed = False
         self.commit_count = 0
+
+    async def get_rights_evidence(self, _book_id, *, page_id=None, lock=False):
+        return self.rights_row if page_id is None else None
 
     async def role(self, _actor_id):
         return "admin"
@@ -141,9 +115,6 @@ class _DecisionRepository:
 
     async def book_decisions(self, _book_id):
         return list(self.decisions)
-
-    async def rights_profiles_for_book(self, _book_id):
-        return list(self.rights_profiles)
 
     async def profile_name(self, _actor_id):
         return "Admin test"
@@ -248,10 +219,24 @@ class BookQualityAssessmentTests(unittest.TestCase):
 
     def test_assessment_aggregates_all_pages_without_history_page_limit(self):
         rows = [_row(number) for number in range(1, 251)]
-        reviewed_rights = [_reviewed_rights_profile()]
+        rights = SimpleNamespace(
+            Id=uuid4(),
+            Scope="BOOK",
+            Status="RIGHTS_REVIEWED",
+            SourceDescription="Nguồn mở",
+            UsageBasis="OPEN_LICENSE",
+            EvidenceUrlOrRef="https://example.org/rights",
+            Version=1,
+            ContentFingerprint=None,
+        )
+
+        assessment_without_rights = BookContentQualityService._assessment(rows, [])
+        self.assertEqual(assessment_without_rights.status, "PENDING_ADMIN_REVIEW")
+        self.assertEqual(assessment_without_rights.copyright_status, "UNASSESSED")
+        self.assertIn("RIGHTS_UNASSESSED", assessment_without_rights.blockers)
 
         assessment = BookContentQualityService._assessment(
-            rows, [], rights_profiles=reviewed_rights
+            rows, [], rights_evidence=rights
         )
 
         self.assertEqual(assessment.page_count, 250)
@@ -264,16 +249,8 @@ class BookQualityAssessmentTests(unittest.TestCase):
         self.assertEqual(assessment.proofreading_status, "COMPLETED")
         self.assertEqual(assessment.child_safety_status, "COMPLETED")
         self.assertEqual(assessment.status, "READY_FOR_CHILDREN")
-        self.assertEqual(assessment.copyright_status, "REVIEWED")
-        self.assertEqual(assessment.expected_page_count_status, "UNKNOWN_SOURCE_PAGE_COUNT")
-        self.assertTrue(assessment.rights_confirmed)
-
-        # Without a rights profile, the system NEVER claims no copyright issue.
-        unassessed = BookContentQualityService._assessment(rows, [], rights_profiles=[])
-        self.assertEqual(unassessed.copyright_status, "NOT_ASSESSED")
-        self.assertEqual(unassessed.status, "PENDING_ADMIN_REVIEW")
-        self.assertIn("RIGHTS_NOT_ASSESSED", unassessed.blockers)
-        self.assertFalse(unassessed.rights_confirmed)
+        self.assertEqual(assessment.copyright_status, "RIGHTS_REVIEWED")
+        self.assertNotIn("RIGHTS_UNASSESSED", assessment.blockers)
 
     def test_safety_findings_are_grouped_and_high_blocks_child_approval(self):
         evidence = {
@@ -294,7 +271,7 @@ class BookQualityAssessmentTests(unittest.TestCase):
         self.assertEqual(assessment.finding_groups[0]["page_count"], 2)
         self.assertEqual(len(assessment.finding_groups[0]["examples"]), 2)
 
-    def test_auto_publication_is_disabled_for_new_content_and_revisions(self):
+    def test_auto_publication_is_disabled_and_never_publishes_without_admin_decision(self):
         row = _row(1)
         repository = _DecisionRepository(row)
         service = BookContentQualityService(repository)
@@ -306,89 +283,63 @@ class BookQualityAssessmentTests(unittest.TestCase):
         self.assertFalse(published)
         self.assertFalse(repository.committed)
         self.assertEqual(repository.book_row.LifecycleStatus, "DRAFT")
-        self.assertEqual(repository.decisions, [])
         self.assertEqual(row[2].SafetyStatus, "PROVISIONAL")
+        self.assertEqual(repository.decisions, [])
 
-    def test_content_diagnostics_cover_empty_image_only_duplicate_gaps_and_expected_count(self):
-        reviewed = [_reviewed_rights_profile()]
-        dup_text = "Đoạn văn trùng hệt nhau trên hai trang khác nhau để kiểm tra phát hiện trùng trang."
-        rows = [
-            _row(1, verified_text=dup_text),
-            _row(2, verified_text=dup_text),
-            # Page 3 intentionally missing -> sequence gap
-            _row(4, content_type="COVER_OR_IMAGE_ONLY", verified_text="", image_safety_status="MANUAL_REVIEWED_SAFE"),
-            _row(5, verified_text="   "),
+    def test_auto_publication_stays_disabled_even_when_proofread_matches_verified(self):
+        row = _row(1)
+        row[2].CorrectionSuggestions = [
+            {"original": "ocr", "proposed": "candidate", "decision": "PENDING_ADMIN"}
         ]
-        book = SimpleNamespace(Id=uuid4(), ExpectedPageCount=6)
-        assessment = BookContentQualityService._assessment(
-            rows, [], book=book, rights_profiles=reviewed
-        )
-        self.assertEqual(assessment.duplicate_page_numbers, [1, 2])
-        self.assertEqual(assessment.missing_page_numbers, [3])
-        self.assertEqual(assessment.image_only_page_numbers, [4])
-        self.assertEqual(assessment.empty_ocr_page_numbers, [5])
-        self.assertEqual(assessment.expected_page_count_status, "UNDER_EXPECTED")
-        self.assertIn("DUPLICATE_PAGES_DETECTED", assessment.blockers)
-        self.assertIn("SUSPECTED_MISSING_PAGES", assessment.blockers)
-        self.assertIn("EMPTY_OCR_PAGES", assessment.blockers)
-        self.assertIn("MISSING_EXPECTED_PAGES", assessment.blockers)
-        self.assertNotIn("IMAGE_ONLY_PAGES_UNREVIEWED", assessment.blockers)
+        repository = _DecisionRepository(row)
 
-        # Book with missing/duplicate pages cannot be approved by Admin.
-        repo = _DecisionRepository(rows, rights_profiles=reviewed, expected_page_count=6)
-        with self.assertRaises(HTTPException) as caught:
-            _run_async(
-                BookContentQualityService(repo).decide_book(
-                    uuid4(),
-                    repo.book_row.Id,
-                    BookQualityBookDecisionRequest(decision="APPROVE", reason="Thử duyệt sách thiếu trang."),
+        published = _run_async(
+            BookContentQualityService(repository).auto_publish_if_eligible(
+                repository.book_row.Id
+            )
+        )
+
+        self.assertFalse(published)
+        self.assertFalse(repository.committed)
+        self.assertEqual(repository.book_row.LifecycleStatus, "DRAFT")
+
+    def test_auto_publication_fails_closed_for_findings_review_and_pending_proofread(self):
+        finding = {"category": "VIOLENCE", "severity": "LOW", "evidence_text": "evidence"}
+        for row in (
+            _row(1, finding=finding),
+            _row(1, suitability="REVIEW_REQUIRED"),
+        ):
+            repository = _DecisionRepository(row)
+            published = _run_async(
+                BookContentQualityService(repository).auto_publish_if_eligible(
+                    repository.book_row.Id
                 )
             )
-        self.assertEqual(caught.exception.status_code, 409)
+            self.assertFalse(published)
+            self.assertFalse(repository.committed)
+            self.assertEqual(row[2].SafetyStatus, "PROVISIONAL")
 
-    def test_rights_profile_change_invalidates_prior_book_approval(self):
-        row = _row(1)
-        profile_v1 = _reviewed_rights_profile(version=1, fingerprint="1" * 64)
-        prior = BookContentQualityService._assessment([row], [], rights_profiles=[profile_v1])
-        decision = SimpleNamespace(
-            Id=uuid4(),
-            Action="book.children.approved",
-            Metadata={"assessment_hash": prior.assessment_hash, "rights_confirmed": True},
-            CreatedAt=datetime.now(timezone.utc),
-            ActorId=uuid4(),
+        changed = _row(1)
+        changed[2].ProofreadText = "unverified proofread text"
+        repository = _DecisionRepository(changed)
+        published = _run_async(
+            BookContentQualityService(repository).auto_publish_if_eligible(
+                repository.book_row.Id
+            )
         )
-        profile_v2 = _reviewed_rights_profile(version=2, fingerprint="2" * 64, status="CONCERNS_FOUND")
-        updated = BookContentQualityService._assessment(
-            [row], [decision], rights_profiles=[profile_v2]
-        )
-        self.assertNotEqual(prior.assessment_hash, updated.assessment_hash)
-        self.assertEqual(updated.status, "STALE")
-        self.assertIn("BOOK_APPROVAL_STALE", updated.blockers)
-        self.assertIn("RIGHTS_CONCERNS_UNRESOLVED", updated.blockers)
+        self.assertFalse(published)
+        self.assertFalse(repository.committed)
 
-    def test_legacy_published_book_stays_readable_and_flags_rights_recheck_without_bulk_pass(self):
-        row = _row(1)
-        legacy_snapshot = BookContentQualityService._page_snapshot([row])
-        legacy_decision = SimpleNamespace(
-            Id=uuid4(),
-            Action="book.children.approved",
-            Metadata={
-                "policy": "book-children-assessment-v2",
-                "decision_source": "ADMIN_APPROVAL",
-                "page_snapshot": legacy_snapshot,
-                "assessment_hash": "legacy-hash",
-                "reason": "Legacy approval",
-            },
-            CreatedAt=datetime.now(timezone.utc),
-            ActorId=uuid4(),
+        unverified = _row(1)
+        unverified[1].VerifiedBy = None
+        repository = _DecisionRepository(unverified)
+        published = _run_async(
+            BookContentQualityService(repository).auto_publish_if_eligible(
+                repository.book_row.Id
+            )
         )
-        assessment = BookContentQualityService._assessment(
-            [row], [legacy_decision], rights_profiles=[]
-        )
-        self.assertEqual(assessment.status, "APPROVED_BY_ADMIN")
-        self.assertTrue(assessment.legacy_published_needs_rights_review)
-        self.assertEqual(assessment.rights_profile_status, "NOT_ASSESSED")
-        self.assertFalse(assessment.rights_confirmed)
+        self.assertFalse(published)
+        self.assertFalse(repository.committed)
 
     def test_admin_cannot_approve_a_book_with_unresolved_safety_findings(self):
         row = _row(
@@ -566,6 +517,7 @@ class BookQualityAssessmentTests(unittest.TestCase):
         self.assertEqual(result.assessment.status, "APPROVED_BY_ADMIN")
         self.assertTrue(result.assessment.rights_confirmed)
         self.assertTrue(repository.decisions[0].Metadata["rights_confirmed"])
+        self.assertEqual(repository.decisions[0].Metadata["rights_evidence_version"], 1)
         self.assertEqual(repository.decisions[0].Action, "book.children.approved")
         self.assertTrue(repository.decisions[0].Metadata["page_snapshot"])
         self.assertEqual(result.assessment.admin_approved_by_name, "Admin test")

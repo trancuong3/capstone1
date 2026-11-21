@@ -14,11 +14,12 @@ from app.models.admin_ai_workflow import AdminAiWorkflow
 from app.models.book_content_quality import (
     BookContentReport,
     BookContentReportHistory,
-    BookContentRightsProfile,
     BookQualityFinding,
     BookQualityPageScan,
     BookQualityReportFinding,
     BookQualityScanRun,
+    BookRightsEvidence,
+    BookRightsEvidenceHistory,
 )
 
 
@@ -212,7 +213,7 @@ class BookContentQualityRepository:
             open_report_count,
             finding_count,
             needs_review_count,
-        ).where(Book.VisibilityScope == "CATALOG")
+        )
         if search and search.strip():
             pattern = "%" + search.strip().replace("%", "\\%").replace("_", "\\_") + "%"
             query = query.where(
@@ -521,7 +522,6 @@ class BookContentQualityRepository:
         *,
         status: str | None,
         issue_type: str | None,
-        scope: str | None = None,
         book_id: UUID | None,
         search: str | None,
         created_after: datetime | None,
@@ -534,10 +534,6 @@ class BookContentQualityRepository:
             filters.append(BookContentReport.Status == status)
         if issue_type:
             filters.append(BookContentReport.IssueType == issue_type)
-        if scope == "BOOK":
-            filters.append(BookContentReport.PageId.is_(None))
-        elif scope == "PAGE":
-            filters.append(BookContentReport.PageId.is_not(None))
         if book_id:
             filters.append(BookContentReport.BookId == book_id)
         if created_after is not None:
@@ -554,30 +550,12 @@ class BookContentQualityRepository:
                     BookContentReport.ReporterNameSnapshot.ilike(pattern, escape="\\"),
                 )
             )
-        priority_rank = case(
-            (
-                (BookContentReport.Status.in_(("OPEN", "UNDER_REVIEW")))
-                & (BookContentReport.IssueType == "CHILD_UNSAFE_CONTENT"),
-                0,
-            ),
-            (
-                (BookContentReport.Status.in_(("OPEN", "UNDER_REVIEW")))
-                & (BookContentReport.IssueType == "COPYRIGHT_CONCERN"),
-                1,
-            ),
-            (BookContentReport.Status.in_(("OPEN", "UNDER_REVIEW")), 2),
-            else_=3,
-        )
         rows = (
             await self.db.execute(
                 select(BookContentReport, Profile.DisplayName)
                 .outerjoin(Profile, Profile.Id == BookContentReport.ReporterId)
                 .where(*filters)
-                .order_by(
-                    priority_rank.asc(),
-                    BookContentReport.CreatedAt.desc(),
-                    BookContentReport.Id.desc(),
-                )
+                .order_by(BookContentReport.CreatedAt.desc(), BookContentReport.Id.desc())
                 .offset(offset)
                 .limit(limit)
             )
@@ -592,7 +570,7 @@ class BookContentQualityRepository:
         summary = {
             key: 0 for key in (
                 "OPEN", "UNDER_REVIEW", "RESOLVED", "REJECTED",
-                "REPORTED_BOOKS", "REPORTED_PAGES", "OPEN_SAFETY", "OPEN_COPYRIGHT",
+                "REPORTED_BOOKS", "REPORTED_PAGES",
             )
         }
         for key, count in summary_rows.all():
@@ -607,22 +585,8 @@ class BookContentQualityRepository:
                 BookContentReport.PageId.is_not(None)
             )
         )
-        open_safety = await self.db.scalar(
-            select(func.count(BookContentReport.Id)).where(
-                BookContentReport.Status.in_(("OPEN", "UNDER_REVIEW")),
-                BookContentReport.IssueType == "CHILD_UNSAFE_CONTENT",
-            )
-        )
-        open_copyright = await self.db.scalar(
-            select(func.count(BookContentReport.Id)).where(
-                BookContentReport.Status.in_(("OPEN", "UNDER_REVIEW")),
-                BookContentReport.IssueType == "COPYRIGHT_CONCERN",
-            )
-        )
         summary["REPORTED_BOOKS"] = int(reported_books or 0)
         summary["REPORTED_PAGES"] = int(reported_pages or 0)
-        summary["OPEN_SAFETY"] = int(open_safety or 0)
-        summary["OPEN_COPYRIGHT"] = int(open_copyright or 0)
         return [(row[0], row[1]) for row in rows], int(total or 0), summary
 
     async def report_detail(
@@ -959,7 +923,7 @@ class BookContentQualityRepository:
             open_report_count,
             finding_count,
             needs_review_count,
-        ).where(Book.VisibilityScope == "CATALOG")
+        )
         count_query = select(func.count(Book.Id))
         if search and search.strip():
             pattern = "%" + search.strip().replace("%", "\\%").replace("_", "\\_") + "%"
@@ -1057,149 +1021,70 @@ class BookContentQualityRepository:
         await self.db.commit()
         return bool(result.rowcount)
 
-    async def rights_profile(
-        self, book_id: UUID, page_id: UUID | None = None, *, lock: bool = False
-    ) -> BookContentRightsProfile | None:
-        query = select(BookContentRightsProfile).where(
-            BookContentRightsProfile.BookId == book_id,
-            BookContentRightsProfile.PageId.is_(None)
-            if page_id is None
-            else BookContentRightsProfile.PageId == page_id,
-        )
+    async def get_rights_evidence(
+        self,
+        book_id: UUID,
+        *,
+        page_id: UUID | None = None,
+        lock: bool = False,
+    ) -> BookRightsEvidence | None:
+        query = select(BookRightsEvidence).where(BookRightsEvidence.BookId == book_id)
+        if page_id is None:
+            query = query.where(
+                BookRightsEvidence.Scope == "BOOK",
+                BookRightsEvidence.PageId.is_(None),
+            )
+        else:
+            query = query.where(
+                BookRightsEvidence.Scope == "PAGE",
+                BookRightsEvidence.PageId == page_id,
+            )
         if lock:
             query = query.with_for_update()
         return await self.db.scalar(query)
 
-    async def rights_profiles_for_book(
-        self, book_id: UUID
-    ) -> list[BookContentRightsProfile]:
-        result = await self.db.scalars(
-            select(BookContentRightsProfile)
-            .where(BookContentRightsProfile.BookId == book_id)
-            .order_by(
-                BookContentRightsProfile.PageId.is_not(None).asc(),
-                BookContentRightsProfile.UpdatedAt.desc(),
-            )
-        )
-        return list(result.all())
-
-    async def rights_profiles_for_books(
+    async def list_rights_evidences_for_books(
         self, book_ids: list[UUID]
-    ) -> list[BookContentRightsProfile]:
+    ) -> list[BookRightsEvidence]:
         if not book_ids:
             return []
         result = await self.db.scalars(
-            select(BookContentRightsProfile).where(
-                BookContentRightsProfile.BookId.in_(book_ids)
+            select(BookRightsEvidence).where(
+                BookRightsEvidence.BookId.in_(book_ids),
+                BookRightsEvidence.Scope == "BOOK",
+                BookRightsEvidence.PageId.is_(None),
             )
         )
         return list(result.all())
 
-    async def effective_rights_profile(
-        self, book_id: UUID, page_id: UUID, *, lock: bool = False
-    ) -> BookContentRightsProfile | None:
-        override = await self.rights_profile(book_id, page_id=page_id, lock=lock)
-        if override is not None:
-            return override
-        return await self.rights_profile(book_id, page_id=None, lock=lock)
-
-    async def add_rights_profile(self, profile: BookContentRightsProfile) -> None:
-        self.db.add(profile)
-        await self.db.flush([profile])
-
-    async def open_image_or_safety_reports_for_page(self, page_id: UUID) -> int:
-        count = await self.db.scalar(
-            select(func.count(BookContentReport.Id)).where(
-                BookContentReport.PageId == page_id,
-                BookContentReport.Status.in_(("OPEN", "UNDER_REVIEW")),
-                BookContentReport.IssueType.in_(
-                    ("IMAGE_QUALITY_ERROR", "CHILD_UNSAFE_CONTENT")
-                ),
-            )
+    async def list_rights_history(
+        self, book_id: UUID, *, page_id: UUID | None = None
+    ) -> list[BookRightsEvidenceHistory]:
+        query = select(BookRightsEvidenceHistory).where(
+            BookRightsEvidenceHistory.BookId == book_id
         )
-        return int(count or 0)
+        if page_id is None:
+            query = query.where(
+                BookRightsEvidenceHistory.Scope == "BOOK",
+                BookRightsEvidenceHistory.PageId.is_(None),
+            )
+        else:
+            query = query.where(
+                BookRightsEvidenceHistory.Scope == "PAGE",
+                BookRightsEvidenceHistory.PageId == page_id,
+            )
+        result = await self.db.scalars(
+            query.order_by(
+                BookRightsEvidenceHistory.Version.desc(),
+                BookRightsEvidenceHistory.CreatedAt.desc(),
+            ).limit(50)
+        )
+        return list(result.all())
 
-    async def open_reports_by_page_for_book(self, book_id: UUID) -> dict[UUID, int]:
-        rows = await self.db.execute(
-            select(BookContentReport.PageId, func.count(BookContentReport.Id))
-            .where(
-                BookContentReport.BookId == book_id,
-                BookContentReport.PageId.is_not(None),
-                BookContentReport.Status.in_(("OPEN", "UNDER_REVIEW")),
-            )
-            .group_by(BookContentReport.PageId)
-        )
-        return {page_id: int(count or 0) for page_id, count in rows.all() if page_id is not None}
+    async def add_rights_evidence(self, row: BookRightsEvidence) -> None:
+        self.db.add(row)
+        await self.db.flush([row])
 
-    async def open_safety_report_counts_for_books(
-        self, book_ids: list[UUID]
-    ) -> dict[UUID, int]:
-        if not book_ids:
-            return {}
-        rows = await self.db.execute(
-            select(BookContentReport.BookId, func.count(BookContentReport.Id))
-            .where(
-                BookContentReport.BookId.in_(book_ids),
-                BookContentReport.Status.in_(("OPEN", "UNDER_REVIEW")),
-                BookContentReport.IssueType == "CHILD_UNSAFE_CONTENT",
-            )
-            .group_by(BookContentReport.BookId)
-        )
-        return {book_id: int(count or 0) for book_id, count in rows.all() if book_id is not None}
-
-    async def latest_revisions_by_page_for_book(
-        self, book_id: UUID
-    ) -> dict[UUID, PageRevision]:
-        ranked = (
-            select(
-                PageRevision.Id.label("revision_id"),
-                PageRevision.PageId.label("page_id"),
-                func.row_number()
-                .over(
-                    partition_by=PageRevision.PageId,
-                    order_by=(PageRevision.CreatedAt.desc(), PageRevision.Id.desc()),
-                )
-                .label("row_number"),
-            )
-            .join(BookPage, BookPage.Id == PageRevision.PageId)
-            .where(BookPage.BookId == book_id)
-            .subquery()
-        )
-        rows = await self.db.scalars(
-            select(PageRevision)
-            .join(ranked, ranked.c.revision_id == PageRevision.Id)
-            .where(ranked.c.row_number == 1)
-        )
-        return {row.PageId: row for row in rows.all()}
-
-    async def other_books_verified_pages(
-        self, exclude_book_id: UUID, *, limit: int = 500
-    ) -> list[tuple[UUID, str, int, str]]:
-        """Return verified page text from other books inside the local catalog only."""
-        rows = await self.db.execute(
-            select(
-                Book.Id,
-                Book.Title,
-                BookPage.PageNumber,
-                PageRevision.VerifiedText,
-            )
-            .join(BookPage, BookPage.BookId == Book.Id)
-            .join(
-                PageRevision,
-                (PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
-                & (PageRevision.PageId == BookPage.Id),
-            )
-            .where(
-                Book.Id != exclude_book_id,
-                BookPage.LifecycleStatus == "ACTIVE",
-                PageRevision.VerificationStatus == "VERIFIED",
-                PageRevision.VerifiedText.is_not(None),
-            )
-            .order_by(Book.CreatedAt.desc(), BookPage.PageNumber.asc())
-            .limit(limit)
-        )
-        return [
-            (book_id, str(title), int(page_number), str(text_value))
-            for book_id, title, page_number, text_value in rows.all()
-            if isinstance(text_value, str) and text_value.strip()
-        ]
+    async def add_rights_history(self, row: BookRightsEvidenceHistory) -> None:
+        self.db.add(row)
+        await self.db.flush([row])

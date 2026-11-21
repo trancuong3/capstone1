@@ -7,7 +7,12 @@ import httpx
 from app.services.admin_ocr_chunking import OcrTextChunk
 from app.services.admin_ocr_local import LocalOcrConfig
 from app.services.ocr_ai.exceptions import OcrProviderError
-from app.services.ocr_ai.prompts import SYSTEM_PROMPT, chunk_prompt, response_json_schema
+from app.services.ocr_ai.prompts import (
+    SYSTEM_PROMPT,
+    chunk_prompt,
+    json_output_contract,
+    response_json_schema,
+)
 from app.services.ocr_ai.schemas import ChunkCorrectionResult
 from app.services.ocr_ai.validators import decode_and_validate_content
 
@@ -26,28 +31,33 @@ class OllamaOcrProvider:
         self.model = config.model
         self._transport = transport
 
-    async def correct_chunk(
+    def _build_payload(
         self,
         *,
         chunk: OcrTextChunk,
-        image_bytes: bytes,
-        image_mime_type: str,
-    ) -> ChunkCorrectionResult:
-        # Ollama accepts raw base64 image bytes; the crop is generated in memory
-        # by the orchestrator and is never written to a public path.
-        payload = {
+        image_b64: str,
+        use_json_fallback: bool,
+    ) -> dict[str, object]:
+        prompt_text = f"{SYSTEM_PROMPT}\n\n{chunk_prompt(chunk)}"
+        if use_json_fallback:
+            prompt_text = f"{prompt_text}{json_output_contract(chunk)}"
+        return {
             "model": self.model,
             "stream": False,
             # Qwen3-VL may put its structured answer in Ollama's separate
             # `thinking` field when reasoning is left enabled. OCR consumes
             # only message.content, so explicitly request a final answer.
             "think": False,
-            "format": response_json_schema(chunk.expected_word_count),
+            "format": (
+                "json"
+                if use_json_fallback
+                else response_json_schema(chunk.expected_word_count)
+            ),
             "messages": [
                 {
                     "role": "user",
-                    "content": f"{SYSTEM_PROMPT}\n\n{chunk_prompt(chunk)}",
-                    "images": [base64.b64encode(image_bytes).decode("ascii")],
+                    "content": prompt_text,
+                    "images": [image_b64],
                 }
             ],
             "options": {
@@ -59,6 +69,17 @@ class OllamaOcrProvider:
                 ),
             },
         }
+
+    async def correct_chunk(
+        self,
+        *,
+        chunk: OcrTextChunk,
+        image_bytes: bytes,
+        image_mime_type: str,
+    ) -> ChunkCorrectionResult:
+        # Ollama accepts raw base64 image bytes; the crop is generated in memory
+        # by the orchestrator and is never written to a public path.
+        image_b64 = base64.b64encode(image_bytes).decode("ascii")
         try:
             async with httpx.AsyncClient(
                 base_url=self._config.base_url + "/",
@@ -67,12 +88,23 @@ class OllamaOcrProvider:
                 follow_redirects=False,
                 transport=self._transport,
             ) as client:
-                response = await client.post("api/chat", json=payload)
-                # Older or stricter Ollama builds may reject JSON Schema in `format`.
-                # Retry once in plain JSON mode; decode_and_validate_content remains authoritative.
-                if response.status_code in {400, 422} and isinstance(payload.get("format"), dict):
-                    fallback_payload = {**payload, "format": "json"}
-                    response = await client.post("api/chat", json=fallback_payload)
+                response = await client.post(
+                    "api/chat",
+                    json=self._build_payload(
+                        chunk=chunk,
+                        image_b64=image_b64,
+                        use_json_fallback=False,
+                    ),
+                )
+                if response.status_code in (400, 422):
+                    response = await client.post(
+                        "api/chat",
+                        json=self._build_payload(
+                            chunk=chunk,
+                            image_b64=image_b64,
+                            use_json_fallback=True,
+                        ),
+                    )
         except httpx.TimeoutException as exc:
             raise OcrProviderError(
                 provider=self.name, code="PROVIDER_TIMEOUT", status_code=504
@@ -82,18 +114,13 @@ class OllamaOcrProvider:
                 provider=self.name, code="PROVIDER_NETWORK", status_code=503
             ) from exc
         if response.status_code != 200:
-            upstream_status = response.status_code
-            if upstream_status == 404:
-                code = "MODEL_UNAVAILABLE"
-            elif upstream_status in {400, 422}:
-                code = "PROVIDER_REJECTED"
-            else:
-                code = "PROVIDER_UNAVAILABLE"
             raise OcrProviderError(
                 provider=self.name,
-                code=code,
+                code="MODEL_UNAVAILABLE"
+                if response.status_code in (400, 404)
+                else "PROVIDER_UNAVAILABLE",
                 status_code=503,
-                upstream_status_code=upstream_status,
+                upstream_status_code=response.status_code,
             )
         try:
             data = response.json()

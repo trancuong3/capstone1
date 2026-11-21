@@ -33,13 +33,7 @@ import {
   AiCorrectionCancelledError,
   type AdminAiWorkflowDTO,
   type AdminAiWorkflowProgress,
-  type AdminPageVerificationReadinessDTO,
 } from "@/lib/api/ocr-review-service";
-import type {
-  BookContentRightsProfileDTO,
-  ContentRightsStatus,
-  ContentRightsUsageBasis,
-} from "@/types/book-content-quality";
 import {
   normalizeVietnameseWord,
   syncPageTextToWords,
@@ -829,36 +823,6 @@ function getWordRangeInText(
   return null;
 }
 
-const rightsStatusLabels: Record<ContentRightsStatus, string> = {
-  NOT_ASSESSED: "Chưa đánh giá",
-  MISSING_EVIDENCE: "Thiếu bằng chứng",
-  CONCERNS_FOUND: "Có nghi vấn",
-  REVIEWED: "Đã rà soát quyền sử dụng",
-};
-
-const rightsStatusStyles: Record<ContentRightsStatus, string> = {
-  NOT_ASSESSED: "bg-slate-100 text-slate-800 border-slate-300",
-  MISSING_EVIDENCE: "bg-amber-100 text-amber-900 border-amber-300",
-  CONCERNS_FOUND: "bg-rose-100 text-rose-900 border-rose-300",
-  REVIEWED: "bg-emerald-100 text-emerald-900 border-emerald-300",
-};
-
-const rightsUsageBasisLabels: Record<ContentRightsUsageBasis, string> = {
-  OWN_ORIGINAL: "Tác phẩm tự sáng tác / sở hữu của đơn vị",
-  WRITTEN_LICENSE: "Có văn bản cấp phép sử dụng",
-  PUBLIC_DOMAIN: "Thuộc phạm vi công cộng",
-  OPEN_LICENSE: "Giấy phép mở (Creative Commons / tương đương)",
-  EDUCATIONAL_PERMISSION: "Được phép dùng cho giáo dục",
-  UNKNOWN: "Chưa rõ nguồn gốc quyền",
-  OTHER: "Căn cứ khác",
-};
-
-const imageSafetyStatusLabels: Record<string, string> = {
-  NOT_REVIEWED: "Chưa rà soát thủ công",
-  MANUAL_REVIEWED_SAFE: "Đã đối chiếu ảnh · An toàn",
-  MANUAL_REVIEWED_CONCERN: "Đã đối chiếu ảnh · Có lo ngại",
-};
-
 export function AdminOcrReviewScreen({
   bookId,
   pageId,
@@ -866,8 +830,7 @@ export function AdminOcrReviewScreen({
   bookId: string;
   pageId: string;
 }) {
-  const { books, bookContentQuality, pages, ocr, revisions } =
-    useAdminServices();
+  const { books, pages, ocr, revisions } = useAdminServices();
   const router = useRouter();
   const searchParams = useSearchParams();
   // Next's compatibility layer can return null outside the App Router (e.g. tests).
@@ -890,6 +853,7 @@ export function AdminOcrReviewScreen({
   const [proofreadAudit, setProofreadAudit] = useState<
     AdminRevisionVerifyRequestDTO["proofread_audit"] | null
   >(null);
+  const [aiCheckUnavailable, setAiCheckUnavailable] = useState(false);
   const [aiAcceptedChanges, setAiAcceptedChanges] = useState<Set<number>>(
     () => new Set(),
   );
@@ -898,26 +862,8 @@ export function AdminOcrReviewScreen({
     null,
   );
   const [aiWorkflow, setAiWorkflow] = useState<AdminAiWorkflowDTO | null>(null);
-  const [readiness, setReadiness] =
-    useState<AdminPageVerificationReadinessDTO | null>(null);
-  const [readinessLoadFailed, setReadinessLoadFailed] = useState(false);
-  const [rightsProfile, setRightsProfile] =
-    useState<BookContentRightsProfileDTO | null>(null);
-  const [rightsFormOpen, setRightsFormOpen] = useState(false);
-  const [rightsStatusInput, setRightsStatusInput] =
-    useState<ContentRightsStatus>("NOT_ASSESSED");
-  const [rightsSourceInput, setRightsSourceInput] = useState("");
-  const [rightsHolderInput, setRightsHolderInput] = useState("");
-  const [rightsBasisInput, setRightsBasisInput] =
-    useState<ContentRightsUsageBasis>("UNKNOWN");
-  const [rightsEvidenceUrlInput, setRightsEvidenceUrlInput] = useState("");
-  const [rightsEvidenceRefInput, setRightsEvidenceRefInput] = useState("");
-  const [rightsNotesInput, setRightsNotesInput] = useState("");
-  const [rightsApplyToBook, setRightsApplyToBook] = useState(true);
   const [safetyDecisionReason, setSafetyDecisionReason] = useState("");
-  const [uncertainResolveNote, setUncertainResolveNote] = useState("");
-  const [imageSafetyNote, setImageSafetyNote] = useState("");
-  const [contentDirtyAfterCheck, setContentDirtyAfterCheck] = useState(false);
+  const [imageSafetyReason, setImageSafetyReason] = useState("");
   const [candidateEditPending, setCandidateEditPending] = useState(false);
   const [busy, setBusy] = useState<
     | "edit"
@@ -927,7 +873,6 @@ export function AdminOcrReviewScreen({
     | "reupload"
     | "ai_correct"
     | "workflow"
-    | "rights"
     | null
   >(null);
   const [replacementFile, setReplacementFile] = useState<File | null>(null);
@@ -939,60 +884,17 @@ export function AdminOcrReviewScreen({
   const autoScrolledRevisionRef = useRef<string | null>(null);
   const aiCorrectionAbortRef = useRef<AbortController | null>(null);
   const candidateSyncRequestRef = useRef(0);
-  const readinessRequestRef = useRef(0);
-
-  const syncRightsForm = useCallback(
-    (profile: BookContentRightsProfileDTO | null) => {
-      setRightsProfile(profile);
-      setRightsStatusInput(profile?.status ?? "NOT_ASSESSED");
-      setRightsSourceInput(profile?.source_name ?? "");
-      setRightsHolderInput(profile?.rights_holder ?? "");
-      setRightsBasisInput(
-        (profile?.usage_basis as ContentRightsUsageBasis | null) ?? "UNKNOWN",
-      );
-      setRightsEvidenceUrlInput(profile?.evidence_url ?? "");
-      setRightsEvidenceRefInput(profile?.evidence_reference ?? "");
-      setRightsNotesInput(profile?.notes ?? "");
-      setRightsApplyToBook(profile?.scope !== "PAGE_OVERRIDE");
-    },
-    [],
-  );
-
-  const refreshReadiness = useCallback(
-    async (revisionId: string, workflowId?: string | null) => {
-      const requestId = ++readinessRequestRef.current;
-      try {
-        const next = await ocr.getVerificationReadiness(
-          pageId,
-          revisionId,
-          workflowId,
-        );
-        if (!mountedRef.current || requestId !== readinessRequestRef.current)
-          return;
-        setReadiness(next);
-        setReadinessLoadFailed(false);
-      } catch {
-        if (!mountedRef.current || requestId !== readinessRequestRef.current)
-          return;
-        setReadiness(null);
-        setReadinessLoadFailed(true);
-      }
-    },
-    [ocr, pageId],
-  );
 
   const applyDetail = useCallback((next: AdminPageRevisionDetailDTO) => {
     draftEditVersionRef.current += 1;
     setDetail(next);
     setAiWorkflow(null);
-    setReadiness(null);
-    setReadinessLoadFailed(false);
-    setContentDirtyAfterCheck(false);
     setCandidateEditPending(false);
     setDraftText(next.draft_text ?? "");
     setWordSyncError(null);
     setAiSuggestion(null);
     setProofreadAudit(null);
+    setAiCheckUnavailable(false);
     setAiAcceptedChanges(new Set());
     setAiDiffPage(0);
     setWordFilter("all");
@@ -1085,31 +987,20 @@ export function AdminOcrReviewScreen({
           )
         : undefined;
       const selectedRevision = preferredRevision ?? active;
-      const [nextDetail, nextImage, nextWorkflow, nextRights] =
-        await Promise.all([
-          ocr.getRevision(pageId, selectedRevision.page_revision_id),
-          pages.getImage(pageId, selectedRevision.page_revision_id),
-          ocr
-            .getLatestWorkflow(pageId, selectedRevision.page_revision_id)
-            .catch(() => null),
-          bookContentQuality
-            .getRightsProfile(bookId, pageId)
-            .catch(() => null),
-        ]);
+      const [nextDetail, nextImage, nextWorkflow] = await Promise.all([
+        ocr.getRevision(pageId, selectedRevision.page_revision_id),
+        pages.getImage(pageId, selectedRevision.page_revision_id),
+        ocr
+          .getLatestWorkflow(pageId, selectedRevision.page_revision_id)
+          .catch(() => null),
+      ]);
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setBook(nextBook);
       setImage(nextImage);
       setHistory(nextHistory);
       applyDetail(nextDetail);
-      syncRightsForm(nextRights);
       setAiWorkflow(nextWorkflow);
       restoreWorkflowReview(nextWorkflow, nextDetail);
-      if (nextDetail.verification_status === "NEEDS_REVIEW") {
-        void refreshReadiness(
-          nextDetail.page_revision_id,
-          nextWorkflow?.workflow_id ?? null,
-        );
-      }
       if (preferredRevisionId && !preferredRevision) {
         setNotice(
           "Revision trong báo cáo không còn trong lịch sử trang. Đang hiển thị revision mới nhất.",
@@ -1127,17 +1018,14 @@ export function AdminOcrReviewScreen({
     }
   }, [
     applyDetail,
-    bookContentQuality,
     bookId,
     books,
     ocr,
     pageId,
     pages,
     preferredRevisionId,
-    refreshReadiness,
     revisions,
     restoreWorkflowReview,
-    syncRightsForm,
   ]);
 
   useEffect(() => {
@@ -1178,15 +1066,6 @@ export function AdminOcrReviewScreen({
           }
           setAiWorkflow(updated);
           setCandidateEditPending(false);
-          if (
-            updated.status === "READY_FOR_ADMIN_REVIEW" &&
-            updated.hash_match &&
-            updated.candidate_text?.normalize("NFC") ===
-              draftText.normalize("NFC")
-          ) {
-            setContentDirtyAfterCheck(false);
-          }
-          void refreshReadiness(requestedRevision, updated.workflow_id);
         })
         .catch(async (cause: unknown) => {
           if (
@@ -1215,15 +1094,7 @@ export function AdminOcrReviewScreen({
       globalThis.clearTimeout(timer);
       candidateSyncRequestRef.current += 1;
     };
-  }, [
-    aiWorkflow,
-    candidateEditPending,
-    detail,
-    draftText,
-    ocr,
-    pageId,
-    refreshReadiness,
-  ]);
+  }, [aiWorkflow, candidateEditPending, detail, draftText, ocr, pageId]);
 
   useEffect(() => {
     if (
@@ -1245,20 +1116,6 @@ export function AdminOcrReviewScreen({
         );
         if (!disposed && latest?.workflow_id === aiWorkflow.workflow_id) {
           setAiWorkflow(latest);
-          if (
-            latest.status === "READY_FOR_ADMIN_REVIEW" ||
-            latest.status === "FAILED"
-          ) {
-            if (
-              latest.status === "READY_FOR_ADMIN_REVIEW" &&
-              latest.hash_match &&
-              latest.candidate_text?.normalize("NFC") ===
-                draftText.normalize("NFC")
-            ) {
-              setContentDirtyAfterCheck(false);
-            }
-            void refreshReadiness(latest.page_revision_id, latest.workflow_id);
-          }
         }
       } catch {
         // The page remains usable while this durable workflow is temporarily unavailable.
@@ -1270,7 +1127,7 @@ export function AdminOcrReviewScreen({
       disposed = true;
       if (timer !== undefined) globalThis.clearTimeout(timer);
     };
-  }, [aiWorkflow, draftText, ocr, pageId, refreshReadiness]);
+  }, [aiWorkflow, ocr, pageId]);
 
   useEffect(() => {
     if (!detail || words.length === 0) return;
@@ -1313,12 +1170,6 @@ export function AdminOcrReviewScreen({
       restoreWorkflowReview(selectedWorkflow, selected);
       setImage(selectedImage);
       setNotice(null);
-      if (selected.verification_status === "NEEDS_REVIEW") {
-        void refreshReadiness(
-          selected.page_revision_id,
-          selectedWorkflow?.workflow_id ?? null,
-        );
-      }
     } catch {
       if (
         !mountedRef.current ||
@@ -1380,7 +1231,7 @@ export function AdminOcrReviewScreen({
     setAiAcceptedChanges(new Set());
     if (!preserveProofread) {
       setProofreadAudit(null);
-      setContentDirtyAfterCheck(true);
+      setAiCheckUnavailable(false);
     }
     setAiDiffPage(0);
     const normalizedText = value.normalize("NFC");
@@ -1402,7 +1253,7 @@ export function AdminOcrReviewScreen({
     setAiSuggestion(null);
     setAiAcceptedChanges(new Set());
     setProofreadAudit(null);
-    setContentDirtyAfterCheck(true);
+    setAiCheckUnavailable(false);
     const nextWords = words.map((word) => {
       if (word.word_index !== index) return word;
       const nextText =
@@ -1450,7 +1301,7 @@ export function AdminOcrReviewScreen({
     setAiSuggestion(null);
     setAiAcceptedChanges(new Set());
     setProofreadAudit(null);
-    setContentDirtyAfterCheck(true);
+    setAiCheckUnavailable(false);
     setWords((current) =>
       current.map((word) => {
         if (word.word_index !== index) return word;
@@ -1466,7 +1317,7 @@ export function AdminOcrReviewScreen({
     setAiSuggestion(null);
     setAiAcceptedChanges(new Set());
     setProofreadAudit(null);
-    setContentDirtyAfterCheck(true);
+    setAiCheckUnavailable(false);
     const nextText = words
       .map((word) => word.text.trim())
       .filter(Boolean)
@@ -1490,7 +1341,7 @@ export function AdminOcrReviewScreen({
     setAiSuggestion(null);
     setAiAcceptedChanges(new Set());
     setProofreadAudit(null);
-    setContentDirtyAfterCheck(true);
+    setAiCheckUnavailable(false);
     const result = syncPageTextToWords(draftText, words);
     if (result.status === "synchronized") {
       setWords([...result.words]);
@@ -1514,11 +1365,7 @@ export function AdminOcrReviewScreen({
       !draftText.trim() ||
       busy !== null ||
       detail?.lifecycle_status !== "ACTIVE" ||
-      detail.verification_status !== "NEEDS_REVIEW" ||
-      (aiWorkflow !== null &&
-        ["QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING"].includes(
-          aiWorkflow.status,
-        ))
+      detail.verification_status !== "NEEDS_REVIEW"
     ) {
       return;
     }
@@ -1535,6 +1382,7 @@ export function AdminOcrReviewScreen({
     setAiProgress(null);
     setAiSuggestion(null);
     setProofreadAudit(null);
+    setAiCheckUnavailable(false);
     setAiAcceptedChanges(new Set());
     setAiDiffPage(0);
     setNotice(null);
@@ -1557,13 +1405,13 @@ export function AdminOcrReviewScreen({
         return;
       }
       setAiWorkflow(workflow);
-      void refreshReadiness(requestedRevisionId, workflow.workflow_id);
       const correctedText = workflow.proofread_text?.normalize("NFC");
       if (!correctedText) {
+        setAiCheckUnavailable(true);
         setNotice(
           workflow.error_code
-            ? `Rà chính tả thất bại (${workflow.error_code}). Nội dung OCR gốc vẫn được giữ nguyên; bạn có thể lưu bản nháp hoặc thử lại.`
-            : "Workflow chưa có kết quả rà chính tả hợp lệ. Nội dung OCR gốc vẫn được giữ nguyên.",
+            ? `Proofreading thất bại (${workflow.error_code}). Nội dung OCR gốc vẫn được giữ nguyên; hãy thử lại.`
+            : "Workflow chưa có kết quả proofreading hợp lệ. Nội dung OCR gốc vẫn được giữ nguyên.",
         );
         return;
       }
@@ -1573,8 +1421,9 @@ export function AdminOcrReviewScreen({
         result.tokens.length !== expectedTokenCount ||
         result.tokens.length !== words.length
       ) {
+        setAiCheckUnavailable(true);
         setNotice(
-          "AI trả về kết quả không thể ghép chắc chắn với các vùng chữ. Văn bản và tọa độ được giữ nguyên; hãy thử lại hoặc lưu bản nháp để chỉnh sửa.",
+          "AI trả về kết quả không thể ghép chắc chắn với các vùng chữ. Văn bản và tọa độ được giữ nguyên; hãy thử lại hoặc tiếp tục xác minh thủ công có ghi audit.",
         );
         return;
       }
@@ -1582,7 +1431,6 @@ export function AdminOcrReviewScreen({
         token === requestedTokens[index] ? [] : [{ index, token }],
       );
       if (changes.length === 0) {
-        setContentDirtyAfterCheck(false);
         setProofreadAudit({
           mode: "AI_CHECKED",
           checked_text: requestedText,
@@ -1590,8 +1438,8 @@ export function AdminOcrReviewScreen({
         });
         setNotice(
           workflow.safety_status === "FAILED"
-            ? "Rà chính tả hoàn tất; Kiểm tra an toàn cho trẻ gặp lỗi và có thể thử lại riêng."
-            : "AI chưa phát hiện lỗi chính tả cần chỉnh sửa. Hãy xem kết quả An toàn cho trẻ và Quyền sử dụng trước khi bấm Xác minh.",
+            ? "Proofreading hoàn tất; Child Safety gặp lỗi và có thể thử lại riêng."
+            : "AI chưa phát hiện lỗi chính tả cần chỉnh sửa. Child Safety đã chạy tự động; hãy kiểm tra hai kết quả trước khi xác nhận.",
         );
         return;
       }
@@ -1599,8 +1447,8 @@ export function AdminOcrReviewScreen({
       setAiAcceptedChanges(new Set());
       setNotice(
         workflow.safety_status === "FAILED"
-          ? `AI đưa ra ${changes.length} thay đổi để rà soát. Kiểm tra an toàn cho trẻ gặp lỗi; kết quả rà chính tả vẫn được giữ và có thể thử lại riêng.`
-          : `AI đưa ra ${changes.length} thay đổi để rà soát. Chưa có thay đổi nào được áp dụng vào bản nháp.`,
+          ? `AI đưa ra ${changes.length} thay đổi để rà soát. Child Safety gặp lỗi; kết quả proofreading vẫn được giữ và có thể thử lại Safety.`
+          : `AI đưa ra ${changes.length} thay đổi để rà soát. Child Safety đã quét Candidate; chưa có thay đổi nào được chọn.`,
       );
     } catch (cause) {
       if (
@@ -1616,6 +1464,7 @@ export function AdminOcrReviewScreen({
       ) {
         setNotice("Đã dừng theo dõi. Workflow bền vững tiếp tục ở Backend.");
       } else {
+        setAiCheckUnavailable(true);
         const safeMessage = isServiceError(cause)
           ? cause.message
           : cause instanceof Error
@@ -1625,10 +1474,9 @@ export function AdminOcrReviewScreen({
           safeMessage.startsWith("Không thể") ||
             safeMessage.startsWith("AI OCR")
             ? safeMessage
-            : "Không thể chạy AI chỉnh sửa: " + safeMessage,
+            : "Không thể kiểm tra văn bản bằng AI: " + safeMessage,
         );
       }
-      void refreshReadiness(requestedRevisionId, null);
     } finally {
       aiCorrectionAbortRef.current = null;
       if (mountedRef.current) {
@@ -1651,162 +1499,66 @@ export function AdminOcrReviewScreen({
       aiWorkflow.suitability !== "SUITABLE";
     if (confirmed && reasonRequired && !reason) {
       setNotice(
-        "Hãy ghi lý do Admin xem xét trước khi xác nhận kết quả An toàn cho trẻ.",
+        "Hãy ghi lý do Admin xem xét trước khi xác nhận kết quả Safety.",
       );
       return;
     }
     setBusy("workflow");
     setNotice(null);
     try {
-      const updated = await ocr.decideWorkflowSafety(
-        pageId,
-        aiWorkflow.workflow_id,
-        aiWorkflow.candidate_hash,
-        confirmed,
-        reason || undefined,
+      setAiWorkflow(
+        await ocr.decideWorkflowSafety(
+          pageId,
+          aiWorkflow.workflow_id,
+          aiWorkflow.candidate_hash,
+          confirmed,
+          reason || undefined,
+        ),
       );
-      setAiWorkflow(updated);
-      if (detail) {
-        await refreshReadiness(detail.page_revision_id, updated.workflow_id);
-      }
     } catch (cause) {
       setNotice(
         isServiceError(cause)
-          ? "Không thể lưu quyết định An toàn cho trẻ: " + cause.message
-          : "Không thể lưu quyết định An toàn cho trẻ. Hãy tải lại kết quả rồi thử lại.",
+          ? "Không thể lưu quyết định Safety: " + cause.message
+          : "Không thể lưu quyết định Safety. Hãy tải lại kết quả rồi thử lại.",
       );
     } finally {
       if (mountedRef.current) setBusy(null);
     }
   }
 
-  async function handleResolveUncertainWords() {
-    if (
-      !aiWorkflow?.candidate_hash ||
-      busy !== null ||
-      !uncertainResolveNote.trim()
-    ) {
+  async function decideImageSafety(
+    status: "ADMIN_CONFIRMED_SAFE" | "ADMIN_FLAGGED_UNSAFE",
+  ) {
+    if (!aiWorkflow || busy !== null || !ocr.decideWorkflowImageSafety) return;
+    const reason = imageSafetyReason.trim();
+    if (status === "ADMIN_FLAGGED_UNSAFE" && !reason) {
+      setNotice(
+        "Hãy ghi rõ lý do trước khi đánh dấu hình ảnh không phù hợp với trẻ em.",
+      );
       return;
     }
     setBusy("workflow");
     setNotice(null);
     try {
-      const updated = await ocr.resolveUncertainWords(
-        pageId,
-        aiWorkflow.workflow_id,
-        aiWorkflow.candidate_hash,
-        uncertainResolveNote.trim(),
-      );
-      setAiWorkflow(updated);
-      setUncertainResolveNote("");
-      setNotice("Đã ghi nhận Admin đối chiếu các từ nghi vấn với ảnh gốc.");
-      if (detail) {
-        await refreshReadiness(detail.page_revision_id, updated.workflow_id);
-      }
-    } catch (cause) {
-      setNotice(
-        isServiceError(cause)
-          ? "Không thể xác nhận đối chiếu từ nghi vấn: " + cause.message
-          : "Không thể xác nhận đối chiếu từ nghi vấn.",
-      );
-    } finally {
-      if (mountedRef.current) setBusy(null);
-    }
-  }
-
-  async function handleReviewImageSafety(
-    status: "MANUAL_REVIEWED_SAFE" | "MANUAL_REVIEWED_CONCERN",
-  ) {
-    if (!aiWorkflow || busy !== null || !imageSafetyNote.trim()) return;
-    setBusy("workflow");
-    setNotice(null);
-    try {
-      const updated = await ocr.reviewImageSafety(
-        pageId,
-        aiWorkflow.workflow_id,
-        status,
-        imageSafetyNote.trim(),
-        readiness?.page_content_type,
-      );
-      setAiWorkflow(updated);
-      setImageSafetyNote("");
-      setNotice(
-        status === "MANUAL_REVIEWED_SAFE"
-          ? "Đã ghi nhận Admin rà soát thủ công ảnh trang gốc: An toàn."
-          : "Đã ghi nhận ảnh trang gốc có lo ngại; nút Xác minh sẽ bị khóa.",
-      );
-      if (detail) {
-        await refreshReadiness(detail.page_revision_id, updated.workflow_id);
-      }
-    } catch (cause) {
-      setNotice(
-        isServiceError(cause)
-          ? "Không thể lưu kết quả rà soát hình ảnh: " + cause.message
-          : "Không thể lưu kết quả rà soát hình ảnh.",
-      );
-    } finally {
-      if (mountedRef.current) setBusy(null);
-    }
-  }
-
-  async function handlePageContentTypeChange(
-    contentType: "CONTENT" | "COVER_OR_IMAGE_ONLY",
-  ) {
-    if (!detail || busy !== null) return;
-    setBusy("workflow");
-    setNotice(null);
-    try {
-      await ocr.updatePageContentType(pageId, contentType);
-      await refreshReadiness(
-        detail.page_revision_id,
-        aiWorkflow?.workflow_id ?? null,
+      setAiWorkflow(
+        await ocr.decideWorkflowImageSafety(
+          pageId,
+          aiWorkflow.workflow_id,
+          status,
+          aiWorkflow.source_image_sha256 ?? undefined,
+          reason || undefined,
+        ),
       );
       setNotice(
-        contentType === "COVER_OR_IMAGE_ONLY"
-          ? "Đã đánh dấu trang là Trang bìa / chỉ có hình. Cần Admin đối chiếu ảnh gốc trước khi xác minh."
-          : "Đã cập nhật loại trang thành Trang nội dung.",
+        status === "ADMIN_CONFIRMED_SAFE"
+          ? "Đã ghi nhận Admin xác nhận hình ảnh trang phù hợp với trẻ em."
+          : "Đã gắn cờ hình ảnh không phù hợp; trang này sẽ bị chặn xác minh.",
       );
     } catch (cause) {
       setNotice(
         isServiceError(cause)
-          ? "Không thể cập nhật loại trang: " + cause.message
-          : "Không thể cập nhật loại trang.",
-      );
-    } finally {
-      if (mountedRef.current) setBusy(null);
-    }
-  }
-
-  async function handleSaveRightsProfile() {
-    if (!detail || busy !== null) return;
-    setBusy("rights");
-    setNotice(null);
-    try {
-      const saved = await bookContentQuality.upsertRightsProfile(
-        bookId,
-        {
-          status: rightsStatusInput,
-          source_name: rightsSourceInput.trim() || null,
-          rights_holder: rightsHolderInput.trim() || null,
-          usage_basis: rightsBasisInput,
-          evidence_url: rightsEvidenceUrlInput.trim() || null,
-          evidence_reference: rightsEvidenceRefInput.trim() || null,
-          notes: rightsNotesInput.trim() || null,
-        },
-        rightsApplyToBook ? null : pageId,
-      );
-      syncRightsForm(saved);
-      setRightsFormOpen(false);
-      await refreshReadiness(
-        detail.page_revision_id,
-        aiWorkflow?.workflow_id ?? null,
-      );
-      setNotice("Đã lưu hồ sơ quyền sử dụng nội dung.");
-    } catch (cause) {
-      setNotice(
-        isServiceError(cause)
-          ? "Không thể lưu hồ sơ quyền sử dụng: " + cause.message
-          : "Không thể lưu hồ sơ quyền sử dụng.",
+          ? "Không thể lưu quyết định an toàn hình ảnh: " + cause.message
+          : "Không thể lưu quyết định an toàn hình ảnh. Hãy tải lại trang rồi thử lại.",
       );
     } finally {
       if (mountedRef.current) setBusy(null);
@@ -1824,15 +1576,11 @@ export function AdminOcrReviewScreen({
     setBusy("workflow");
     setNotice(null);
     try {
-      const retried = await ocr.retryWorkflow(pageId, aiWorkflow.workflow_id);
-      setAiWorkflow(retried);
-      if (detail) {
-        void refreshReadiness(detail.page_revision_id, retried.workflow_id);
-      }
+      setAiWorkflow(await ocr.retryWorkflow(pageId, aiWorkflow.workflow_id));
       setNotice(
         retryingSafety || aiWorkflow.stage === "CHILD_SAFETY_SCANNING"
-          ? "Đã đưa riêng Kiểm tra an toàn cho trẻ vào hàng đợi; kết quả Rà chính tả và OCR được giữ nguyên."
-          : "Đã đưa riêng Rà chính tả vào hàng đợi thử lại.",
+          ? "Đã đưa riêng Child Safety vào hàng đợi; Proofreading và OCR được giữ nguyên."
+          : "Đã đưa riêng Proofreading vào hàng đợi thử lại.",
       );
     } catch (cause) {
       setNotice(
@@ -1874,21 +1622,28 @@ export function AdminOcrReviewScreen({
       setAiSuggestion(null);
       setAiAcceptedChanges(new Set());
     }
-    const candidateMatchesNext =
-      aiWorkflow?.candidate_text?.normalize("NFC") ===
-      nextText.normalize("NFC");
-    setCandidateEditPending(!candidateMatchesNext);
-    setContentDirtyAfterCheck(!candidateMatchesNext);
-    if (candidateMatchesNext && detail && aiWorkflow) {
-      void refreshReadiness(detail.page_revision_id, aiWorkflow.workflow_id);
-    }
+    setCandidateEditPending(true);
     setProofreadAudit({
       mode: "AI_CHECKED",
       checked_text: checkedText,
       suggestions,
     });
+    setAiCheckUnavailable(false);
     setNotice(
-      `Đã ghi nhận ${selected.length} gợi ý được Admin chấp nhận và ${suggestions.length - selected.length} gợi ý bị từ chối. Hãy hoàn tất kiểm tra an toàn và quyền sử dụng trước khi bấm Xác minh.`,
+      `Đã ghi nhận ${selected.length} gợi ý được Admin chấp nhận và ${suggestions.length - selected.length} gợi ý bị từ chối. Hãy rà soát rồi xác nhận VERIFIED.`,
+    );
+  }
+
+  function continueManualVerification() {
+    setProofreadAudit({
+      mode: "MANUAL_FALLBACK",
+      checked_text: draftText,
+      suggestions: [],
+      reason_code: "AI_CHECK_UNAVAILABLE",
+    });
+    setAiCheckUnavailable(false);
+    setNotice(
+      "AI không khả dụng. Bạn đang tiếp tục xác minh thủ công; nội dung này được ghi nhận trong audit.",
     );
   }
 
@@ -1969,14 +1724,13 @@ export function AdminOcrReviewScreen({
         return;
       }
       applyDetail(created);
-      void refreshReadiness(created.page_revision_id, null);
       try {
         setHistory(await revisions.list(pageId));
       } catch {
         // The new revision remains usable if history refresh fails.
       }
       setNotice(
-        "Đã tạo revision nháp từ nội dung đã xác minh. Hãy sửa, chạy AI chỉnh sửa và kiểm tra đầy đủ trước khi Xác minh.",
+        "Đã tạo revision nháp từ nội dung đã xác minh. Hãy sửa, lưu bản nháp và xác minh để áp dụng cho lượt đọc mới.",
       );
     } catch (cause) {
       if (isServiceError(cause) && cause.status === 409) {
@@ -2019,6 +1773,12 @@ export function AdminOcrReviewScreen({
     ) {
       return;
     }
+    if (candidateEditPending && aiWorkflow?.proofread_text) {
+      setNotice(
+        "Đang đồng bộ Candidate và lên lịch Safety rescan. Hãy lưu lại sau khi hoàn tất bước này.",
+      );
+      return;
+    }
     const requestedRevisionId = detail.page_revision_id;
     const requestedVersion = draftEditVersionRef.current;
     setBusy("save");
@@ -2037,19 +1797,15 @@ export function AdminOcrReviewScreen({
       ) {
         return;
       }
-      const latestWorkflow = await ocr
-        .getLatestWorkflow(pageId, requestedRevisionId)
-        .catch(() => null);
+      const latestWorkflow = aiWorkflow
+        ? await ocr
+            .getLatestWorkflow(pageId, requestedRevisionId)
+            .catch(() => aiWorkflow)
+        : null;
       applyDetail(saved);
       setAiWorkflow(latestWorkflow);
       restoreWorkflowReview(latestWorkflow, saved);
-      void refreshReadiness(
-        saved.page_revision_id,
-        latestWorkflow?.workflow_id ?? null,
-      );
-      setNotice(
-        "Đã lưu bản nháp vào cơ sở dữ liệu. Lưu bản nháp không đồng nghĩa đã xác minh trang.",
-      );
+      setNotice("Đã lưu bản nháp vào database.");
       try {
         setHistory(await revisions.list(pageId));
       } catch {
@@ -2081,36 +1837,30 @@ export function AdminOcrReviewScreen({
     ) {
       return;
     }
-    if (!aiWorkflow || !aiWorkflow.proofread_text) {
-      setNotice(
-        "Cần chạy AI chỉnh sửa và hoàn tất các bước kiểm tra bắt buộc trước khi Xác minh.",
-      );
-      return;
-    }
     if (aiSuggestion !== null) {
       setNotice(
-        "Hãy xác nhận lựa chọn với các gợi ý chính tả của AI trước khi Xác minh.",
+        "Hãy xác nhận lựa chọn với các gợi ý AI trước khi hoàn tất VERIFIED.",
       );
       return;
     }
-    if (candidateEditPending || contentDirtyAfterCheck) {
+    let finalProofreadAudit = proofreadAudit;
+    if (finalProofreadAudit === null && aiWorkflow?.proofread_text) {
+      finalProofreadAudit = {
+        mode: "ADMIN_EDITED",
+        checked_text: draftText,
+        suggestions: [],
+      };
+    }
+    if (finalProofreadAudit === null) {
+      await correctWithAi();
+      return;
+    }
+    if (candidateEditPending && aiWorkflow?.proofread_text) {
       setNotice(
-        "Nội dung vừa chỉnh sửa cần được lưu và kiểm tra lại an toàn cho trẻ trước khi Xác minh.",
+        "Candidate đang được lưu và Child Safety sẽ tự chạy lại. Vui lòng đợi hash được cập nhật.",
       );
       return;
     }
-    if (!readiness?.ready_to_verify) {
-      setNotice(
-        readiness?.blockers[0]?.message ??
-          "Chưa đủ điều kiện Xác minh. Vui lòng hoàn tất các bước kiểm tra bắt buộc.",
-      );
-      return;
-    }
-    const finalProofreadAudit = proofreadAudit ?? {
-      mode: "ADMIN_EDITED" as const,
-      checked_text: draftText,
-      suggestions: [],
-    };
     const requestedRevisionId = detail.page_revision_id;
     const requestedVersion = draftEditVersionRef.current;
     setBusy("verify");
@@ -2118,7 +1868,9 @@ export function AdminOcrReviewScreen({
     try {
       const verifiedResult = await revisions.verify(pageId, {
         page_revision_id: requestedRevisionId,
-        workflow_id: aiWorkflow.workflow_id,
+        workflow_id: aiWorkflow?.proofread_text
+          ? aiWorkflow.workflow_id
+          : undefined,
         corrected_text: draftText,
         words,
         proofread_audit: finalProofreadAudit,
@@ -2132,12 +1884,12 @@ export function AdminOcrReviewScreen({
       }
       applyDetail(verifiedResult);
       setNotice(
-        "Đã xác minh trang (VERIFIED). Bản nội dung này sẽ được dùng cho lượt đọc mới sau khi sách được phê duyệt.",
+        "Đã xác minh revision. Revision này có thể làm ground truth cho session mới nếu trang đang ACTIVE.",
       );
       try {
         setHistory(await revisions.list(pageId));
       } catch {
-        setNotice("Đã xác minh trang, nhưng chưa tải lại được lịch sử.");
+        setNotice("Đã xác minh revision, nhưng chưa tải lại được lịch sử.");
       }
     } catch (cause) {
       if (
@@ -2147,11 +1899,10 @@ export function AdminOcrReviewScreen({
       ) {
         return;
       }
-      void refreshReadiness(requestedRevisionId, aiWorkflow.workflow_id);
       setNotice(
         isServiceError(cause)
           ? "Không thể xác minh: " + cause.message
-          : "Không thể xác minh. Hãy kiểm tra lại các điều kiện bắt buộc và thử lại.",
+          : "Không thể xác minh. Hãy đồng bộ văn bản với danh sách từ, kiểm tra bbox và thử lại.",
       );
     } finally {
       if (mountedRef.current) setBusy(null);
@@ -2257,12 +2008,6 @@ export function AdminOcrReviewScreen({
         revision.page_revision_id === detail?.page_revision_id &&
         revision.is_current_verified,
     ) === true;
-  const workflowActive = Boolean(
-    aiWorkflow &&
-    ["QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING"].includes(
-      aiWorkflow.status,
-    ),
-  );
   const workflowHasHighRisk = Boolean(
     aiWorkflow &&
     (aiWorkflow.suitability === "NOT_RECOMMENDED" ||
@@ -2270,84 +2015,30 @@ export function AdminOcrReviewScreen({
         (finding) => String(finding.severity ?? "").toUpperCase() === "HIGH",
       )),
   );
-  const draftMatchesWorkflowCandidate = Boolean(
-    aiWorkflow?.candidate_text !== null &&
-    aiWorkflow?.candidate_text !== undefined &&
-    aiWorkflow.candidate_text.normalize("NFC") === draftText.normalize("NFC"),
+  const workflowCanAutoConfirmSafety = Boolean(
+    aiWorkflow?.safety_status === "PROVISIONAL" &&
+    aiWorkflow.suitability === "SUITABLE" &&
+    aiWorkflow.findings.length === 0 &&
+    aiWorkflow.safety_input_hash === aiWorkflow.candidate_hash,
   );
-  const effectiveRightsStatus: ContentRightsStatus =
-    readiness?.rights_status ?? rightsProfile?.status ?? "NOT_ASSESSED";
-  const verificationBlockers = useMemo(() => {
-    const items: string[] = [];
-    if (wordSyncError) {
-      items.push("Văn bản và danh sách từ/vùng chữ chưa khớp nhau.");
-    }
-    if (words.length === 0) {
-      items.push("Trang chưa có danh sách từ hợp lệ.");
-    }
-    if (contentDirtyAfterCheck || candidateEditPending) {
-      items.push(
-        "Cần kiểm tra lại: nội dung vừa được chỉnh sửa, hãy đợi đồng bộ và kiểm tra lại an toàn cho trẻ.",
-      );
-    }
-    if (aiSuggestion !== null) {
-      items.push(
-        "Cần xác nhận lựa chọn đối với các gợi ý rà chính tả của AI trước khi Xác minh.",
-      );
-    }
-    if (workflowActive) {
-      items.push(
-        "Quy trình AI chỉnh sửa đang chạy; vui lòng chờ hoàn tất trước khi Xác minh.",
-      );
-    }
-    if (aiWorkflow?.proofread_text && !draftMatchesWorkflowCandidate) {
-      items.push(
-        "Nội dung đang hiển thị khác với bản đã kiểm tra gần nhất; cần kiểm tra lại.",
-      );
-    }
-    if (readinessLoadFailed) {
-      items.push(
-        "Chưa thể lấy trạng thái điều kiện xác minh từ máy chủ. Hãy tải lại trang hoặc thử lại.",
-      );
-    }
-    if (readiness) {
-      for (const blocker of readiness.blockers) {
-        if (!items.includes(blocker.message)) {
-          items.push(blocker.message);
-        }
-      }
-    } else if (!readinessLoadFailed && !workflowActive) {
-      items.push("Đang kiểm tra điều kiện xác minh từ hệ thống…");
-    }
-    return items;
-  }, [
-    aiSuggestion,
-    aiWorkflow?.proofread_text,
-    candidateEditPending,
-    contentDirtyAfterCheck,
-    draftMatchesWorkflowCandidate,
-    readiness,
-    readinessLoadFailed,
-    wordSyncError,
-    words.length,
-    workflowActive,
-  ]);
-  const canVerifyNow = Boolean(
-    !verified &&
-    detail?.lifecycle_status === "ACTIVE" &&
-    busy === null &&
-    words.length > 0 &&
-    wordSyncError === null &&
-    !contentDirtyAfterCheck &&
-    !candidateEditPending &&
-    aiSuggestion === null &&
-    aiWorkflow !== null &&
-    aiWorkflow.proofread_text !== null &&
-    !workflowActive &&
-    draftMatchesWorkflowCandidate &&
-    !workflowHasHighRisk &&
-    readiness?.ready_to_verify === true &&
-    !readinessLoadFailed,
+  const workflowSafetyConfirmed = Boolean(
+    aiWorkflow?.safety_status === "CONFIRMED" ||
+    aiWorkflow?.safety_status === "AUTO_CONFIRMED",
+  );
+  const workflowImageSafetyStatus =
+    aiWorkflow?.image_safety_status ?? "UNASSESSED_NO_VISION_MODEL";
+  const workflowImageFlaggedUnsafe =
+    workflowImageSafetyStatus === "ADMIN_FLAGGED_UNSAFE";
+  const workflowImageUnassessed =
+    Boolean(aiWorkflow?.image_safety_status) &&
+    workflowImageSafetyStatus !== "ADMIN_CONFIRMED_SAFE";
+  const workflowFinalApprovalBlocked = Boolean(
+    aiWorkflow?.proofread_text &&
+    (!(workflowSafetyConfirmed || workflowCanAutoConfirmSafety) ||
+      !aiWorkflow.hash_match ||
+      workflowHasHighRisk ||
+      workflowImageFlaggedUnsafe ||
+      workflowImageUnassessed),
   );
 
   const draftTokens = useMemo(() => tokenizePageText(draftText), [draftText]);
@@ -2531,8 +2222,6 @@ export function AdminOcrReviewScreen({
           setDraftText((current) => `${current.trim()} Từ mới`.trim());
           setSelectedWord(nextIndex);
           setWordSyncError(null);
-          setContentDirtyAfterCheck(true);
-          setCandidateEditPending(true);
           draftEditVersionRef.current += 1;
         }}
         onComplete={() => router.push(viewHref("review"))}
@@ -2564,8 +2253,6 @@ export function AdminOcrReviewScreen({
           setDraftText(nextText.normalize("NFC"));
           setSelectedWord(nextWords[0]?.word_index ?? null);
           setWordSyncError(null);
-          setContentDirtyAfterCheck(true);
-          setCandidateEditPending(true);
           draftEditVersionRef.current += 1;
         }}
         onSelectWord={setSelectedWord}
@@ -2844,10 +2531,11 @@ export function AdminOcrReviewScreen({
               />
             </label>
             <p className="mt-2 text-sm text-muted" id="ocr-help">
-              Bấm “AI chỉnh sửa” để chạy tuần tự quy trình: Rà chính tả → Kiểm
-              tra an toàn cho trẻ → Đối chiếu quyền sử dụng. AI chỉ đề xuất và
-              không bao giờ tự xác minh trang; Admin xem kết quả rồi mới bấm
-              “Xác minh”.
+              Khi bấm “XÁC NHẬN & CHẠY AI”, Backend bắt đầu Proofreading và
+              Child Safety song song trên cùng OCR snapshot. Nếu Proofreading
+              đổi nội dung, Safety tự quét lại Candidate theo hash mới. Ollama
+              chỉ được dùng cuối cùng khi cloud không trả được inference hợp lệ.
+              AI chỉ đề xuất; Admin quyết định nội dung VERIFIED.
             </p>
             {busy === "ai_correct" ? (
               <div
@@ -2858,16 +2546,16 @@ export function AdminOcrReviewScreen({
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <span className="font-semibold">
                     {aiProgress?.status === "QUEUED"
-                      ? "Đang xếp hàng chạy AI chỉnh sửa…"
+                      ? "Workflow đang chờ worker"
                       : aiProgress?.status === "PROOFREADING"
-                        ? `Bước 1/3 · Đang rà chính tả (đoạn ${aiProgress.progress.completed_chunks}/${aiProgress.progress.total_chunks})`
+                        ? `Proofreading · đoạn ${aiProgress.progress.completed_chunks}/${aiProgress.progress.total_chunks}`
                         : aiProgress?.status === "CHILD_SAFETY_SCANNING"
-                          ? "Bước 2/3 · Rà chính tả xong, đang kiểm tra an toàn cho trẻ…"
+                          ? "Proofreading xong · Child Safety đang quét"
                           : aiProgress?.status === "FAILED"
-                            ? "Quy trình AI chỉnh sửa gặp lỗi"
+                            ? "Workflow gặp lỗi"
                             : aiProgress?.status === "READY_FOR_ADMIN_REVIEW"
-                              ? "Đã hoàn tất rà chính tả và kiểm tra an toàn cho trẻ"
-                              : "Đang khởi tạo quy trình AI chỉnh sửa…"}
+                              ? "Proofreading và Child Safety hoàn tất"
+                              : "Đang chuẩn bị workflow bền vững…"}
                   </span>
                   <Button
                     className="min-h-9 w-auto border-red-300 px-3 text-red-800 hover:bg-red-50"
@@ -2879,14 +2567,14 @@ export function AdminOcrReviewScreen({
                   </Button>
                 </div>
                 <progress
-                  aria-label="Tiến độ AI chỉnh sửa"
+                  aria-label="Tiến độ AI OCR"
                   className="h-2 w-full accent-purple-700"
                   max={aiProgress?.progress.total_chunks ?? 1}
                   value={aiProgress?.progress.completed_chunks ?? 0}
                 />
                 <span className="text-xs text-purple-900">
-                  Kết quả chỉ là gợi ý. Bản nháp và trạng thái xác minh sẽ không
-                  đổi cho đến khi Admin xem xét và quyết định.
+                  Kết quả chỉ là gợi ý. Bản nháp sẽ không đổi cho đến khi bạn áp
+                  dụng.
                 </span>
               </div>
             ) : null}
@@ -3129,1048 +2817,624 @@ export function AdminOcrReviewScreen({
                       busy !== null ||
                       detail.lifecycle_status !== "ACTIVE" ||
                       words.length === 0 ||
-                      !draftText.trim() ||
                       wordSyncError !== null ||
-                      workflowActive
+                      candidateEditPending ||
+                      workflowFinalApprovalBlocked ||
+                      aiSuggestion !== null ||
+                      (aiWorkflow !== null &&
+                        [
+                          "QUEUED",
+                          "PROOFREADING",
+                          "CHILD_SAFETY_SCANNING",
+                        ].includes(aiWorkflow.status))
                     }
-                    isLoading={busy === "ai_correct"}
-                    onClick={() => void correctWithAi()}
-                    type="button"
-                    variant="secondary"
-                  >
-                    <Sparkles aria-hidden className="size-4" />
-                    {busy === "ai_correct" || workflowActive
-                      ? "Đang chạy AI chỉnh sửa…"
-                      : "AI chỉnh sửa"}
-                  </Button>
-
-                  <Button
-                    className="sm:w-auto"
-                    disabled={!canVerifyNow}
-                    isLoading={busy === "verify"}
+                    isLoading={busy === "verify" || busy === "ai_correct"}
                     onClick={() => void verifyRevision()}
                     type="button"
                   >
-                    <CheckCircle2 aria-hidden className="size-4" /> Xác minh
+                    {proofreadAudit ? (
+                      <CheckCircle2 aria-hidden className="size-4" />
+                    ) : (
+                      <Sparkles aria-hidden className="size-4" />
+                    )}
+                    {busy === "ai_correct"
+                      ? "Proofreading và Child Safety đang chạy…"
+                      : proofreadAudit || aiWorkflow?.proofread_text
+                        ? "XÁC NHẬN VÀ LƯU NỘI DUNG CUỐI CÙNG"
+                        : "XÁC NHẬN & CHẠY AI"}
                   </Button>
-                </>
-              )}
-            </div>
-            {!verified ? (
-              <p className="mt-2 text-xs text-muted">
-                Lưu bản nháp luôn khả dụng kể cả khi AI gặp lỗi, nhưng không
-                đồng nghĩa trang đã được xác minh.
-              </p>
-            ) : null}
-            {!verified ? (
-              <div
-                className={
-                  "mt-4 rounded-control border p-3 text-sm " +
-                  (canVerifyNow
-                    ? "border-emerald-300 bg-emerald-50 text-emerald-950"
-                    : "border-amber-300 bg-amber-50 text-amber-950")
-                }
-                data-testid="verification-gate-status"
-                role="status"
-              >
-                <p className="font-bold">
-                  {canVerifyNow
-                    ? "Sẵn sàng Xác minh"
-                    : contentDirtyAfterCheck || candidateEditPending
-                      ? "Cần kiểm tra lại — Nút Xác minh đã tự động khóa"
-                      : "Nút Xác minh đang khóa"}
-                </p>
-                {canVerifyNow ? (
-                  <p className="mt-1 text-xs">
-                    Rà chính tả, Kiểm tra an toàn cho trẻ và Hồ sơ quyền sử dụng
-                    đều đã hoàn tất cho đúng bản nội dung đang hiển thị.
-                  </p>
-                ) : (
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
-                    {verificationBlockers.map((message, index) => (
-                      <li key={`${index}-${message}`}>{message}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            ) : null}
-          </Card>
-
-          {!verified || aiWorkflow ? (
-            <Card className="bg-white" data-testid="admin-ai-workflow">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-xl font-black text-ink">
-                    Quy trình kiểm tra trước khi Xác minh
-                  </h2>
-                  <p className="mt-1 text-sm text-muted">
-                    Hoàn tất đủ 3 bước cho đúng bản nội dung hiện tại để mở nút
-                    Xác minh.
-                  </p>
-                </div>
-                {aiWorkflow ? (
-                  <span className="rounded-full border border-border bg-canvas px-3 py-1 text-xs font-bold text-ink">
-                    {aiWorkflow.status === "READY_FOR_ADMIN_REVIEW"
-                      ? "Đã chạy xong · Chờ Admin xác nhận"
-                      : aiWorkflow.status === "FAILED"
-                        ? `Lỗi · ${aiWorkflow.error_code ?? "UNKNOWN"}`
-                        : aiWorkflow.stage === "PROOFREADING"
-                          ? "Bước 1 · Đang rà chính tả"
-                          : aiWorkflow.stage === "CHILD_SAFETY_SCANNING"
-                            ? "Bước 2 · Đang kiểm tra an toàn"
-                            : "Đang chờ xử lý"}
-                  </span>
-                ) : null}
-              </div>
-
-              <ol
-                aria-label="Tiến trình 3 bước kiểm tra"
-                className="mt-4 grid gap-2 sm:grid-cols-3"
-              >
-                <li className="rounded-control border border-border bg-canvas p-3">
-                  <p className="text-xs font-semibold text-muted">
-                    Bước 1 · Rà chính tả
-                  </p>
-                  <p className="mt-1 text-sm font-bold text-ink">
-                    {!aiWorkflow
-                      ? "Chưa chạy"
-                      : aiWorkflow.status === "FAILED" &&
-                          !aiWorkflow.proofread_text
-                        ? "Thất bại"
-                        : aiWorkflow.stage === "PROOFREADING" && workflowActive
-                          ? "Đang chạy…"
-                          : aiWorkflow.uncertain_word_indices.length > 0 &&
-                              readiness?.uncertain_resolved === false
-                            ? `Còn ${aiWorkflow.uncertain_word_indices.length} từ nghi vấn`
-                            : aiWorkflow.proofread_text
-                              ? "Hoàn tất"
-                              : "Đang chờ"}
-                  </p>
-                </li>
-                <li className="rounded-control border border-border bg-canvas p-3">
-                  <p className="text-xs font-semibold text-muted">
-                    Bước 2 · An toàn cho trẻ
-                  </p>
-                  <p className="mt-1 text-sm font-bold text-ink">
-                    {!aiWorkflow
-                      ? "Chưa chạy"
-                      : aiWorkflow.safety_status === "CONFIRMED" &&
-                          aiWorkflow.hash_match &&
-                          !workflowHasHighRisk
-                        ? "Admin đã xác nhận"
-                        : workflowHasHighRisk
-                          ? "Có cảnh báo chặn (HIGH)"
-                          : aiWorkflow.safety_status === "FAILED"
-                            ? "Thất bại"
-                            : aiWorkflow.safety_status === "STALE" ||
-                                contentDirtyAfterCheck
-                              ? "Cần kiểm tra lại"
-                              : aiWorkflow.safety_status === "PROVISIONAL"
-                                ? "Chờ Admin xác nhận"
-                                : "Đang quét…"}
-                  </p>
-                </li>
-                <li className="rounded-control border border-border bg-canvas p-3">
-                  <p className="text-xs font-semibold text-muted">
-                    Bước 3 · Quyền sử dụng
-                  </p>
-                  <p className="mt-1 text-sm font-bold text-ink">
-                    {rightsStatusLabels[effectiveRightsStatus]}
-                  </p>
-                </li>
-              </ol>
-
-              {aiWorkflow ? (
-                <>
-                  {/* Bước 1 — Rà chính tả & từ nghi vấn */}
-                  {aiWorkflow.uncertain_word_indices.length > 0 ? (
-                    <section className="mt-4 rounded-control border border-amber-400 bg-amber-50 p-4 text-sm text-amber-950">
-                      <h3 className="font-bold">
-                        Bước 1 · Có {aiWorkflow.uncertain_word_indices.length}{" "}
-                        từ nghi vấn cần Admin đối chiếu ảnh gốc
-                      </h3>
-                      <p className="mt-1 text-xs">
-                        Vị trí từ:{" "}
-                        {aiWorkflow.uncertain_word_indices
-                          .map((index) => index + 1)
-                          .join(", ")}
-                        . AI giữ nguyên các từ này để tránh đoán sai.
-                      </p>
-                      {readiness?.uncertain_resolved ? (
-                        <p className="mt-2 text-xs font-semibold text-emerald-900">
-                          Admin đã xác nhận đối chiếu các từ nghi vấn cho bản
-                          nội dung hiện tại.
-                        </p>
-                      ) : aiWorkflow.candidate_hash ? (
-                        <div className="mt-3 grid gap-2">
-                          <label className="text-xs font-bold text-amber-950">
-                            Ghi chú đối chiếu với ảnh gốc · bắt buộc
-                            <input
-                              className="mt-1 min-h-10 w-full rounded-control border border-amber-400 bg-white px-3 font-normal text-ink"
-                              maxLength={500}
-                              onChange={(event) =>
-                                setUncertainResolveNote(event.target.value)
-                              }
-                              placeholder="Ví dụ: Đã đối chiếu ảnh gốc các từ nghi vấn, giữ nguyên chính xác theo trang in."
-                              value={uncertainResolveNote}
-                            />
-                          </label>
-                          <div>
-                            <Button
-                              className="h-10 w-auto px-3 text-sm"
-                              disabled={
-                                busy !== null || !uncertainResolveNote.trim()
-                              }
-                              isLoading={busy === "workflow"}
-                              onClick={() => void handleResolveUncertainWords()}
-                              type="button"
-                              variant="secondary"
-                            >
-                              Xác nhận đã đối chiếu từ nghi vấn
-                            </Button>
-                          </div>
-                        </div>
-                      ) : null}
-                    </section>
-                  ) : null}
-
-                  {/* Bước 2 — Kiểm tra an toàn cho trẻ (Văn bản & Hình ảnh) */}
-                  <section className="mt-5 border-t border-border pt-4">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div>
-                        <h3 className="text-base font-extrabold text-ink">
-                          Bước 2 · Kiểm tra an toàn cho trẻ (Lớp 1–5)
-                        </h3>
-                        <p className="mt-1 text-xs text-muted">
-                          Phạm vi tự động chỉ kiểm tra Văn bản; Hình ảnh luôn
-                          cần Admin xem ảnh trang gốc.
-                        </p>
-                      </div>
-                      {(() => {
-                        const totalChunks = Number(
-                          aiWorkflow.safety_metadata.total_chunks ?? 0,
-                        );
-                        const scannedChunks = Number(
-                          aiWorkflow.safety_metadata.scanned_chunks ?? 0,
-                        );
-                        const coverageComplete =
-                          readiness?.child_safety_coverage_complete ??
-                          (aiWorkflow.safety_metadata.coverage_complete ===
-                            true ||
-                            (totalChunks > 0 && scannedChunks >= totalChunks));
-                        return (
-                          <span
-                            className={
-                              "rounded-full border px-2.5 py-1 text-xs font-bold " +
-                              (coverageComplete
-                                ? "border-emerald-300 bg-emerald-50 text-emerald-900"
-                                : "border-amber-300 bg-amber-50 text-amber-900")
-                            }
-                          >
-                            {totalChunks > 0
-                              ? `Phạm vi văn bản: đã quét ${scannedChunks}/${totalChunks} đoạn`
-                              : coverageComplete
-                                ? "Phạm vi văn bản: đã quét đủ"
-                                : "Phạm vi văn bản: chưa đủ độ phủ"}
-                          </span>
-                        );
-                      })()}
-                    </div>
-
-                    <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                      <div className="rounded-control bg-canvas p-3">
-                        <p className="text-xs text-muted">Đánh giá phù hợp</p>
-                        <p className="mt-1 text-sm font-extrabold text-ink">
-                          {aiWorkflow.suitability ?? "CHƯA CÓ KẾT QUẢ"}
-                        </p>
-                      </div>
-                      <div className="rounded-control bg-canvas p-3">
-                        <p className="text-xs text-muted">
-                          Trạng thái An toàn (Văn bản)
-                        </p>
-                        <p className="mt-1 text-sm font-extrabold text-ink">
-                          {aiWorkflow.safety_status}
-                        </p>
-                      </div>
-                      <div className="rounded-control bg-canvas p-3">
-                        <p className="text-xs text-muted">
-                          Khớp bản nội dung hiện tại
-                        </p>
-                        <p className="mt-1 text-sm font-extrabold text-ink">
-                          {candidateEditPending || contentDirtyAfterCheck
-                            ? "Cần kiểm tra lại"
-                            : aiWorkflow.hash_match
-                              ? "Khớp bản hiện tại"
-                              : "Chưa khớp / cần quét lại"}
-                        </p>
-                      </div>
-                      <div className="rounded-control bg-canvas p-3">
-                        <p className="text-xs text-muted">
-                          An toàn hình ảnh (Thủ công)
-                        </p>
-                        <p className="mt-1 text-sm font-extrabold text-ink">
-                          {imageSafetyStatusLabels[
-                            aiWorkflow.image_safety_status
-                          ] ?? aiWorkflow.image_safety_status}
-                        </p>
-                      </div>
-                    </div>
-
-                    {aiWorkflow.status === "FAILED" ||
-                    aiWorkflow.safety_status === "FAILED"
-                      ? (() => {
-                          const safetyFailure =
-                            aiWorkflow.stage === "CHILD_SAFETY_SCANNING" ||
-                            (aiWorkflow.proofread_text !== null &&
-                              aiWorkflow.safety_status === "FAILED");
-                          const failureEvent = [...aiWorkflow.provider_events]
-                            .reverse()
-                            .find(
-                              (event) =>
-                                Boolean(event.error_code) &&
-                                (!event.stage ||
-                                  event.stage === aiWorkflow.stage),
-                            );
-                          const failedStageEvent = [
-                            ...aiWorkflow.review_history,
-                          ]
-                            .reverse()
-                            .find(
-                              (event) =>
-                                event.event === "WORKFLOW_STAGE_FAILED" &&
-                                event.stage ===
-                                  (safetyFailure
-                                    ? "CHILD_SAFETY_SCANNING"
-                                    : "PROOFREADING"),
-                            );
-                          const recordedFailureCode =
-                            failedStageEvent?.error_code;
-                          const failureCode =
-                            aiWorkflow.error_code ??
-                            (typeof recordedFailureCode === "string"
-                              ? recordedFailureCode
-                              : null);
-                          const failureMessage =
-                            failureCode === "INVALID_EVIDENCE"
-                              ? "AI trả về evidence không thể đối chiếu chính xác với Candidate. Nội dung OCR và Candidate vẫn được giữ nguyên."
-                              : failureCode === "INVALID_JSON"
-                                ? "Provider trả về JSON không hợp lệ; kết quả Safety chưa được lưu."
-                                : failureCode === "MISSING_REQUIRED_FIELDS"
-                                  ? "Provider thiếu trường bắt buộc; Safety chưa được xác nhận."
-                                  : failureCode === "INVALID_OUTPUT_SCHEMA"
-                                    ? "Provider trả kết quả không đúng cấu trúc Safety yêu cầu."
-                                    : failureCode === "PROVIDER_TIMEOUT"
-                                      ? "Provider hết thời gian chờ; Candidate chưa được đánh giá an toàn."
-                                      : failureCode === "PROVIDER_UNAVAILABLE"
-                                        ? "Provider không khả dụng; Candidate chưa được đánh giá an toàn."
-                                        : safetyFailure
-                                          ? "Safety chưa hoàn tất; Candidate hiện tại chưa được đánh giá an toàn."
-                                          : "Proofreading chưa hoàn tất; Candidate hiện tại chưa được cập nhật.";
-                          return (
-                            <div
-                              className="mt-4 rounded-control border border-amber-500 bg-amber-50 p-3 text-sm text-amber-950"
-                              role="alert"
-                            >
-                              <p className="font-bold">
-                                {safetyFailure
-                                  ? "Child Safety chưa hoàn tất."
-                                  : "Rà chính tả chưa hoàn tất."}
-                              </p>
-                              <p className="mt-1">{failureMessage}</p>
-                              <p className="mt-1 text-xs">
-                                Lỗi: {failureCode ?? "UNKNOWN"}
-                                {failureEvent?.provider
-                                  ? ` · Provider ${String(failureEvent.provider)}`
-                                  : ""}
-                                {failureEvent?.model
-                                  ? ` · Model ${String(failureEvent.model)}`
-                                  : ""}
-                                {failureEvent?.duration_ms != null
-                                  ? ` · ${String(failureEvent.duration_ms)} ms`
-                                  : ""}
-                                {` · Lần thử ${aiWorkflow.attempts}`}
-                                {` · ${new Date(aiWorkflow.updated_at).toLocaleString("vi-VN")}`}
-                              </p>
-                              <p className="mt-1 text-xs">
-                                {safetyFailure
-                                  ? "Có thể thử lại riêng giai đoạn Safety; Rà chính tả và OCR được giữ nguyên."
-                                  : "Có thể thử lại riêng Rà chính tả hoặc Lưu bản nháp; OCR gốc được giữ nguyên."}
-                              </p>
-                            </div>
-                          );
-                        })()
-                      : null}
-
-                    {aiWorkflow.status === "READY_FOR_ADMIN_REVIEW" &&
-                    aiWorkflow.safety_status === "STALE" ? (
-                      <p
-                        className="mt-4 rounded-control border border-amber-400 bg-amber-50 p-3 text-sm text-amber-950"
-                        role="status"
-                      >
-                        Bản nội dung đã thay đổi sau khi kiểm tra. Hãy chạy lại
-                        Kiểm tra an toàn cho trẻ trước khi Xác minh.
-                      </p>
-                    ) : null}
-
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {aiWorkflow.status === "FAILED" ||
-                      (aiWorkflow.proofread_text !== null &&
-                        (aiWorkflow.safety_status === "FAILED" ||
-                          aiWorkflow.safety_status === "STALE") &&
-                        !workflowActive) ? (
-                        <Button
-                          className="h-10 w-auto px-3"
-                          disabled={busy !== null}
-                          isLoading={busy === "workflow"}
-                          onClick={() => void retryWorkflow()}
-                          type="button"
-                          variant="secondary"
-                        >
-                          <RefreshCw aria-hidden className="size-4" />
-                          {aiWorkflow.status === "FAILED" &&
-                          aiWorkflow.stage === "PROOFREADING"
-                            ? "Thử lại Rà chính tả"
-                            : "Thử lại Child Safety"}
-                        </Button>
-                      ) : null}
-                      {aiWorkflow.safety_status === "PROVISIONAL" &&
-                      aiWorkflow.hash_match &&
-                      (aiWorkflow.findings.length > 0 ||
-                        aiWorkflow.suitability !== "SUITABLE") ? (
-                        <label className="basis-full text-sm font-bold text-ink">
-                          Lý do Admin xem xét Safety · bắt buộc
-                          <textarea
-                            className="mt-1 min-h-20 w-full rounded-control border border-border bg-white p-3 font-normal"
-                            maxLength={500}
-                            onChange={(event) =>
-                              setSafetyDecisionReason(event.target.value)
-                            }
-                            value={safetyDecisionReason}
-                          />
-                        </label>
-                      ) : null}
-                      {aiWorkflow.safety_status === "PROVISIONAL" &&
-                      aiWorkflow.hash_match ? (
-                        <Button
-                          className="h-10 w-auto px-3"
-                          disabled={
-                            busy !== null ||
-                            candidateEditPending ||
-                            ((Boolean(aiWorkflow.findings.length) ||
-                              aiWorkflow.suitability !== "SUITABLE") &&
-                              !safetyDecisionReason.trim())
-                          }
-                          isLoading={busy === "workflow"}
-                          onClick={() => void decideSafety(true)}
-                          type="button"
-                          variant="secondary"
-                        >
-                          <CheckCircle2 aria-hidden className="size-4" /> Xác
-                          nhận kết quả Safety
-                        </Button>
-                      ) : aiWorkflow.safety_status === "CONFIRMED" &&
-                        aiWorkflow.hash_match ? (
-                        <Button
-                          className="h-10 w-auto px-3"
-                          disabled={busy !== null}
-                          isLoading={busy === "workflow"}
-                          onClick={() => void decideSafety(false)}
-                          type="button"
-                          variant="secondary"
-                        >
-                          Bỏ xác nhận Safety
-                        </Button>
-                      ) : null}
-                    </div>
-
-                    <section className="mt-4">
-                      <h4 className="text-sm font-extrabold text-ink">
-                        Cảnh báo an toàn văn bản (Safety findings)
-                      </h4>
-                      {aiWorkflow.findings.length ? (
-                        <ul className="mt-2 grid gap-3">
-                          {aiWorkflow.findings.map((finding, index) => {
-                            const severity = String(
-                              finding.severity ?? "REVIEW",
-                            ).toUpperCase();
-                            const category = String(
-                              finding.category ?? "OTHER_SENSITIVE",
-                            ).replaceAll("_", " ");
-                            const evidence = String(
-                              finding.evidence_text ?? "",
-                            );
-                            const compactEvidence =
-                              evidence.length > 240
-                                ? evidence.slice(0, 240).trimEnd() + "…"
-                                : evidence;
-                            const high = severity === "HIGH";
-                            return (
-                              <li key={String(finding.finding_id ?? index)}>
-                                <details
-                                  className={
-                                    "rounded-control border p-3 " +
-                                    (high
-                                      ? "border-red-400 bg-red-50"
-                                      : "border-border bg-white")
-                                  }
-                                >
-                                  <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 focus-visible:outline-3 focus-visible:outline-primary">
-                                    <span className="font-extrabold">
-                                      {category}
-                                    </span>
-                                    <span className="text-xs text-muted">
-                                      {String(
-                                        finding.content_type ?? "MENTION",
-                                      ).replaceAll("_", " ")}
-                                    </span>
-                                    <span
-                                      className={
-                                        "rounded-full px-2.5 py-1 text-xs font-extrabold " +
-                                        (high
-                                          ? "bg-red-700 text-white"
-                                          : "bg-canvas text-ink")
-                                      }
-                                    >
-                                      {severity}
-                                    </span>
-                                    <span className="ml-auto text-xs text-muted">
-                                      Mở chi tiết
-                                    </span>
-                                  </summary>
-                                  <div className="mt-3 border-t border-border pt-3">
-                                    <p className="text-xs font-bold uppercase tracking-wide text-muted">
-                                      Bằng chứng
-                                    </p>
-                                    <blockquote className="mt-1 border-l-2 border-primary pl-3 text-sm">
-                                      “{compactEvidence}”
-                                      <span className="ml-2 font-mono text-xs text-muted">
-                                        [{String(finding.evidence_start ?? "?")}
-                                        –{String(finding.evidence_end ?? "?")}]
-                                      </span>
-                                    </blockquote>
-                                    {evidence.length > 240 ? (
-                                      <details className="mt-2 text-sm">
-                                        <summary className="cursor-pointer font-bold text-primary">
-                                          Xem toàn bộ trích dẫn nguyên văn (
-                                          {evidence.length} ký tự)
-                                        </summary>
-                                        <blockquote className="mt-2 border-l-2 border-primary pl-3">
-                                          “{evidence}”
-                                        </blockquote>
-                                      </details>
-                                    ) : null}
-                                    <p className="mt-3 text-xs font-bold uppercase tracking-wide text-muted">
-                                      Giải thích
-                                    </p>
-                                    <p className="mt-1 text-sm">
-                                      {String(finding.explanation ?? "")}
-                                    </p>
-                                    <p className="mt-3 text-xs font-bold uppercase tracking-wide text-muted">
-                                      Khuyến nghị
-                                    </p>
-                                    <p className="mt-1 text-sm text-muted">
-                                      {String(finding.recommendation ?? "")}
-                                    </p>
-                                  </div>
-                                </details>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      ) : (
-                        <p className="mt-2 text-sm text-muted">
-                          {aiWorkflow.safety_status === "PROVISIONAL" ||
-                          aiWorkflow.safety_status === "CONFIRMED" ||
-                          aiWorkflow.safety_status === "AUTO_CONFIRMED"
-                            ? "AI chưa phát hiện cảnh báo an toàn trong văn bản này."
-                            : "Kết quả sẽ hiển thị sau khi Kiểm tra an toàn hoàn tất."}
-                        </p>
-                      )}
-                    </section>
-
-                    {/* Phạm vi Hình ảnh — Thủ công */}
-                    <section className="mt-4 rounded-control border border-border bg-canvas p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <h4 className="text-sm font-bold text-ink">
-                            Phạm vi Hình ảnh · chưa kiểm tra tự động
-                          </h4>
-                          <p className="mt-0.5 text-xs text-muted">
-                            AI chỉ kiểm tra văn bản; Admin đối chiếu trực tiếp
-                            ảnh trang gốc ở cột bên trái.
-                          </p>
-                        </div>
-                        {readiness?.image_safety_required ? (
-                          <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-bold text-amber-900">
-                            Bắt buộc rà soát ảnh
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className="mt-3 flex flex-wrap items-center gap-3">
-                        <label className="text-xs font-semibold text-ink">
-                          Loại trang:
-                          <select
-                            className="ml-2 min-h-9 rounded-control border border-border bg-white px-2 text-xs font-normal text-ink"
-                            disabled={busy !== null || verified}
-                            onChange={(event) =>
-                              void handlePageContentTypeChange(
-                                event.target.value as
-                                  | "CONTENT"
-                                  | "COVER_OR_IMAGE_ONLY",
-                              )
-                            }
-                            value={readiness?.page_content_type ?? "CONTENT"}
-                          >
-                            <option value="CONTENT">Trang nội dung</option>
-                            <option value="COVER_OR_IMAGE_ONLY">
-                              Trang bìa / chỉ có hình
-                            </option>
-                          </select>
-                        </label>
-                        {aiWorkflow.image_safety_review_note ? (
-                          <span className="text-xs text-muted">
-                            Ghi chú gần nhất:{" "}
-                            {aiWorkflow.image_safety_review_note}
-                          </span>
-                        ) : null}
-                      </div>
-                      {!verified ? (
-                        <div className="mt-3 grid gap-2">
-                          <label className="text-xs font-semibold text-ink">
-                            Ghi chú rà soát hình ảnh (Admin)
-                            <input
-                              className="mt-1 min-h-9 w-full rounded-control border border-border bg-white px-3 text-xs font-normal"
-                              maxLength={1000}
-                              onChange={(event) =>
-                                setImageSafetyNote(event.target.value)
-                              }
-                              placeholder="Ví dụ: Đã xem trực tiếp hình minh họa trên trang, phù hợp với học sinh tiểu học."
-                              value={imageSafetyNote}
-                            />
-                          </label>
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              className="h-9 w-auto px-3 text-xs"
-                              disabled={
-                                busy !== null || !imageSafetyNote.trim()
-                              }
-                              isLoading={busy === "workflow"}
-                              onClick={() =>
-                                void handleReviewImageSafety(
-                                  "MANUAL_REVIEWED_SAFE",
-                                )
-                              }
-                              type="button"
-                              variant="secondary"
-                            >
-                              Xác nhận ảnh an toàn
-                            </Button>
-                            <Button
-                              className="h-9 w-auto border-rose-300 px-3 text-xs text-rose-800 hover:bg-rose-50"
-                              disabled={
-                                busy !== null || !imageSafetyNote.trim()
-                              }
-                              isLoading={busy === "workflow"}
-                              onClick={() =>
-                                void handleReviewImageSafety(
-                                  "MANUAL_REVIEWED_CONCERN",
-                                )
-                              }
-                              type="button"
-                              variant="secondary"
-                            >
-                              Đánh dấu ảnh có lo ngại
-                            </Button>
-                          </div>
-                        </div>
-                      ) : null}
-                    </section>
-                  </section>
-                </>
-              ) : (
-                <p className="mt-4 rounded-control border border-border bg-canvas p-3 text-sm text-muted">
-                  Bấm <strong>AI chỉnh sửa</strong> ở phía trên để bắt đầu Bước
-                  1 (Rà chính tả) và Bước 2 (Kiểm tra an toàn cho trẻ) cho bản
-                  nội dung hiện tại.
-                </p>
-              )}
-
-              {/* Bước 3 — Tình trạng quyền sử dụng nội dung */}
-              <section
-                className="mt-5 border-t border-border pt-4"
-                data-testid="page-rights-section"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <h3 className="text-base font-extrabold text-ink">
-                      Bước 3 · Tình trạng quyền sử dụng nội dung
-                    </h3>
-                    <p className="mt-1 text-xs text-muted">
-                      Phạm vi tự động chỉ kiểm tra trùng lặp nội bộ kho sách
-                      ViRead; Admin xác nhận nguồn và căn cứ quyền sử dụng.
+                  {aiWorkflow?.proofread_text &&
+                  workflowFinalApprovalBlocked ? (
+                    <p
+                      className="basis-full text-sm text-amber-900"
+                      role="status"
+                    >
+                      {workflowHasHighRisk
+                        ? "Safety có cảnh báo mức HIGH hoặc NOT_RECOMMENDED. Luồng hiện tại chưa có chính sách Admin override cho trường hợp này nên chưa thể lưu VERIFIED."
+                        : workflowImageFlaggedUnsafe
+                          ? "Hình ảnh trang đã bị Admin đánh dấu không phù hợp nên không thể xác minh."
+                          : workflowImageUnassessed
+                            ? "Chưa có AI kiểm tra an toàn hình ảnh. Admin cần kiểm tra trực tiếp ảnh trang và xác nhận an toàn hình ảnh trước khi xác minh."
+                            : aiWorkflow.safety_status !== "CONFIRMED" &&
+                                !workflowCanAutoConfirmSafety
+                              ? "Cần Child Safety hoàn tất cho Candidate hiện tại; tự xác nhận chỉ áp dụng khi kết quả SUITABLE và không có finding."
+                              : "Safety hash chưa khớp Candidate hiện tại; hãy chờ quét lại trước khi lưu VERIFIED."}
                     </p>
-                  </div>
-                  <span
-                    className={`rounded-full border px-3 py-1 text-xs font-bold ${rightsStatusStyles[effectiveRightsStatus]}`}
-                  >
-                    {rightsStatusLabels[effectiveRightsStatus]}
-                  </span>
-                </div>
-                <div className="mt-3 grid gap-2 rounded-control bg-canvas p-3 text-xs text-ink sm:grid-cols-2">
-                  <div>
-                    <span className="text-muted">Áp dụng từ: </span>
-                    <strong>
-                      {rightsProfile?.scope === "PAGE_OVERRIDE" ||
-                      readiness?.rights_scope === "PAGE_OVERRIDE"
-                        ? "Ngoại lệ riêng của trang"
-                        : "Hồ sơ quyền sử dụng toàn sách"}
-                    </strong>
-                  </div>
-                  <div>
-                    <span className="text-muted">Người rà soát: </span>
-                    <strong>
-                      {rightsProfile?.reviewed_by_name
-                        ? `${rightsProfile.reviewed_by_name}${
-                            rightsProfile.reviewed_at
-                              ? ` · ${new Date(rightsProfile.reviewed_at).toLocaleString("vi-VN")}`
-                              : ""
-                          }`
-                        : "Chưa có xác nhận Admin"}
-                    </strong>
-                  </div>
-                  {rightsProfile?.source_name ? (
-                    <div>
-                      <span className="text-muted">Nguồn tài liệu: </span>
-                      <span>{rightsProfile.source_name}</span>
-                    </div>
                   ) : null}
-                  {rightsProfile?.rights_holder ? (
-                    <div>
-                      <span className="text-muted">Chủ thể quyền: </span>
-                      <span>{rightsProfile.rights_holder}</span>
-                    </div>
-                  ) : null}
-                </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  {!verified ? (
+                  {aiCheckUnavailable && proofreadAudit === null ? (
                     <Button
-                      className="h-9 w-auto px-3 text-xs"
+                      className="sm:w-auto"
                       disabled={busy !== null}
-                      onClick={() => setRightsFormOpen((open) => !open)}
+                      onClick={continueManualVerification}
                       type="button"
                       variant="secondary"
                     >
-                      {rightsFormOpen
-                        ? "Ẩn biểu mẫu quyền sử dụng"
-                        : "Cập nhật hồ sơ quyền sử dụng"}
+                      Tiếp tục xác minh thủ công
                     </Button>
                   ) : null}
-                  <Link
-                    className="inline-flex min-h-9 items-center rounded-control border border-border px-3 text-xs font-semibold text-primary hover:bg-canvas"
-                    href="/admin/metadata-quality"
-                  >
-                    Mở màn Chất lượng sách
-                  </Link>
+                </>
+              )}
+            </div>
+          </Card>
+
+          {aiWorkflow ? (
+            <Card className="bg-white" data-testid="admin-ai-workflow">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-2xl font-black">
+                    Child Safety · GRADE_1_TO_5
+                  </h2>
+                  <p className="mt-1 text-sm text-muted">
+                    Quét văn bản Candidate sau Proofreading. Kết quả là
+                    provisional cho đến khi Admin xác nhận.
+                  </p>
                 </div>
-                {rightsFormOpen && !verified ? (
-                  <div className="mt-3 grid gap-3 rounded-control border border-border bg-white p-3 text-xs">
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <label className="font-semibold text-ink">
-                        Trạng thái quyền sử dụng
-                        <select
-                          className="mt-1 min-h-9 w-full rounded-control border border-border bg-white px-2 font-normal"
-                          onChange={(event) =>
-                            setRightsStatusInput(
-                              event.target.value as ContentRightsStatus,
-                            )
-                          }
-                          value={rightsStatusInput}
-                        >
-                          {Object.entries(rightsStatusLabels).map(
-                            ([value, label]) => (
-                              <option key={value} value={value}>
-                                {label}
-                              </option>
-                            ),
-                          )}
-                        </select>
-                      </label>
-                      <label className="font-semibold text-ink">
-                        Căn cứ sử dụng
-                        <select
-                          className="mt-1 min-h-9 w-full rounded-control border border-border bg-white px-2 font-normal"
-                          onChange={(event) =>
-                            setRightsBasisInput(
-                              event.target.value as ContentRightsUsageBasis,
-                            )
-                          }
-                          value={rightsBasisInput}
-                        >
-                          {Object.entries(rightsUsageBasisLabels).map(
-                            ([value, label]) => (
-                              <option key={value} value={value}>
-                                {label}
-                              </option>
-                            ),
-                          )}
-                        </select>
-                      </label>
-                      <label className="font-semibold text-ink">
-                        Nguồn tài liệu
-                        <input
-                          className="mt-1 min-h-9 w-full rounded-control border border-border px-2 font-normal"
-                          maxLength={300}
-                          onChange={(event) =>
-                            setRightsSourceInput(event.target.value)
-                          }
-                          placeholder="Ví dụ: NXB Giáo dục / Tài liệu biên soạn nội bộ"
-                          value={rightsSourceInput}
-                        />
-                      </label>
-                      <label className="font-semibold text-ink">
-                        Chủ thể quyền
-                        <input
-                          className="mt-1 min-h-9 w-full rounded-control border border-border px-2 font-normal"
-                          maxLength={300}
-                          onChange={(event) =>
-                            setRightsHolderInput(event.target.value)
-                          }
-                          placeholder="Tác giả / đơn vị nắm quyền"
-                          value={rightsHolderInput}
-                        />
-                      </label>
-                      <label className="font-semibold text-ink">
-                        Mã hồ sơ / Số văn bản
-                        <input
-                          className="mt-1 min-h-9 w-full rounded-control border border-border px-2 font-normal"
-                          maxLength={500}
-                          onChange={(event) =>
-                            setRightsEvidenceRefInput(event.target.value)
-                          }
-                          placeholder="Số hợp đồng / giấy phép"
-                          value={rightsEvidenceRefInput}
-                        />
-                      </label>
-                      <label className="font-semibold text-ink">
-                        Liên kết bằng chứng (nếu có)
-                        <input
-                          className="mt-1 min-h-9 w-full rounded-control border border-border px-2 font-normal"
-                          maxLength={1000}
-                          onChange={(event) =>
-                            setRightsEvidenceUrlInput(event.target.value)
-                          }
-                          placeholder="https://..."
-                          value={rightsEvidenceUrlInput}
-                        />
-                      </label>
-                    </div>
-                    <label className="font-semibold text-ink">
-                      Ghi chú rà soát quyền sử dụng
-                      <textarea
-                        className="mt-1 min-h-16 w-full rounded-control border border-border p-2 font-normal"
-                        maxLength={2000}
-                        onChange={(event) =>
-                          setRightsNotesInput(event.target.value)
-                        }
-                        value={rightsNotesInput}
-                      />
-                    </label>
-                    <label className="flex items-center gap-2 font-semibold text-ink">
-                      <input
-                        checked={rightsApplyToBook}
-                        onChange={(event) =>
-                          setRightsApplyToBook(event.target.checked)
-                        }
-                        type="checkbox"
-                      />
-                      Áp dụng cho toàn bộ sách (bỏ chọn để lưu ngoại lệ riêng
-                      cho trang này)
-                    </label>
-                    <div>
-                      <Button
-                        className="h-9 w-auto px-3 text-xs"
-                        disabled={busy !== null}
-                        isLoading={busy === "rights"}
-                        onClick={() => void handleSaveRightsProfile()}
-                        type="button"
-                      >
-                        Lưu hồ sơ quyền sử dụng
-                      </Button>
-                    </div>
+                <span className="rounded-full border border-border px-3 py-1 text-sm font-bold">
+                  {aiWorkflow.status === "READY_FOR_ADMIN_REVIEW"
+                    ? "Sẵn sàng Admin review"
+                    : aiWorkflow.status === "FAILED"
+                      ? `Lỗi · ${aiWorkflow.error_code ?? "UNKNOWN"}`
+                      : aiWorkflow.stage === "PROOFREADING"
+                        ? "Đang Proofreading"
+                        : aiWorkflow.stage === "CHILD_SAFETY_SCANNING"
+                          ? "Đang quét Safety"
+                          : "Đang chờ xử lý"}
+                </span>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="min-w-0 rounded-control bg-canvas p-3">
+                  <p className="text-xs text-muted">Overall suitability</p>
+                  <p className="mt-1 break-words font-extrabold text-ink">
+                    {aiWorkflow.suitability ?? "CHƯA CÓ KẾT QUẢ"}
+                  </p>
+                </div>
+                <div className="min-w-0 rounded-control bg-canvas p-3">
+                  <p className="text-xs text-muted">
+                    An toàn văn bản (Text Safety)
+                  </p>
+                  <p className="mt-1 break-words font-extrabold text-ink">
+                    {aiWorkflow.text_safety_status ?? aiWorkflow.safety_status}
+                  </p>
+                </div>
+                <div className="min-w-0 rounded-control bg-canvas p-3 sm:col-span-2">
+                  <p className="text-xs text-muted">
+                    An toàn hình ảnh (Image Safety)
+                  </p>
+                  <p
+                    className="mt-1 break-words font-extrabold text-ink"
+                    data-testid="image-safety-status"
+                  >
+                    {workflowImageSafetyStatus === "ADMIN_CONFIRMED_SAFE"
+                      ? "Admin đã xác nhận ảnh an toàn"
+                      : workflowImageSafetyStatus === "ADMIN_FLAGGED_UNSAFE"
+                        ? "Admin gắn cờ ảnh không phù hợp"
+                        : "Chưa đánh giá ảnh (chưa có model vision)"}
+                  </p>
+                </div>
+                <div className="min-w-0 rounded-control bg-canvas p-3">
+                  <p className="text-xs text-muted">Candidate version</p>
+                  <p className="mt-1 break-words font-extrabold text-ink">
+                    {aiWorkflow.candidate_version}
+                  </p>
+                </div>
+                <div className="min-w-0 rounded-control bg-canvas p-3">
+                  <p className="text-xs text-muted">Safety hash match</p>
+                  <p className="mt-1 break-words font-extrabold text-ink">
+                    {candidateEditPending
+                      ? "Đang lưu Candidate…"
+                      : aiWorkflow.hash_match
+                        ? "Khớp Candidate hiện tại"
+                        : "Chưa khớp / cần quét lại"}
+                  </p>
+                </div>
+              </div>
+
+              <div
+                className="mt-4 rounded-control border border-border bg-canvas/60 p-3"
+                data-testid="image-safety-review-panel"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-extrabold text-ink">
+                      Kiểm tra an toàn hình ảnh (Admin kiểm tra thủ công)
+                    </p>
+                    <p className="mt-1 text-xs text-muted">
+                      AI Child Safety hiện chỉ đánh giá văn bản (không kiểm tra
+                      nội dung trực quan trong ảnh). Admin cần đối chiếu ảnh
+                      trang sách trước khi xác nhận.
+                    </p>
                   </div>
+                </div>
+                <div className="mt-3 flex flex-col gap-3">
+                  <label className="block w-full text-xs font-bold text-ink">
+                    Ghi chú kiểm tra ảnh (bắt buộc nếu gắn cờ không phù hợp)
+                    <input
+                      className="mt-1 h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal"
+                      maxLength={500}
+                      onChange={(event) =>
+                        setImageSafetyReason(event.target.value)
+                      }
+                      placeholder="Ví dụ: Ảnh minh họa rõ nét, phù hợp học sinh tiểu học"
+                      type="text"
+                      value={imageSafetyReason}
+                    />
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      className="h-10 w-auto px-3"
+                      disabled={busy !== null}
+                      isLoading={busy === "workflow"}
+                      onClick={() =>
+                        void decideImageSafety("ADMIN_CONFIRMED_SAFE")
+                      }
+                      type="button"
+                      variant="secondary"
+                    >
+                      <CheckCircle2 aria-hidden className="size-4" /> Xác nhận
+                      ảnh an toàn
+                    </Button>
+                    <Button
+                      className="h-10 w-auto px-3"
+                      disabled={busy !== null || !imageSafetyReason.trim()}
+                      isLoading={busy === "workflow"}
+                      onClick={() =>
+                        void decideImageSafety("ADMIN_FLAGGED_UNSAFE")
+                      }
+                      type="button"
+                      variant="secondary"
+                    >
+                      Gắn cờ ảnh không phù hợp
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {aiWorkflow.uncertain_word_indices.length > 0 ? (
+                <p className="mt-4 rounded-control border border-amber-400 bg-amber-50 p-3 text-sm text-amber-950">
+                  Proofreading còn {aiWorkflow.uncertain_word_indices.length} từ
+                  chưa chắc chắn (vị trí{" "}
+                  {aiWorkflow.uncertain_word_indices
+                    .map((index) => index + 1)
+                    .join(", ")}
+                  ). Các từ này được giữ nguyên để Admin đối chiếu.
+                </p>
+              ) : null}
+
+              <dl className="mt-4 grid gap-2 break-all rounded-control border border-border p-3 font-mono text-xs">
+                <div>
+                  <dt className="font-bold">CandidateHash</dt>
+                  <dd>{aiWorkflow.candidate_hash ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt className="font-bold">SafetyInputHash</dt>
+                  <dd>{aiWorkflow.safety_input_hash ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt className="font-bold">FinalApprovedTextHash</dt>
+                  <dd>
+                    {aiWorkflow.final_approved_text_hash ??
+                      "Chưa xác nhận OCR cuối cùng"}
+                  </dd>
+                </div>
+              </dl>
+
+              {aiWorkflow.status === "FAILED" ||
+              aiWorkflow.safety_status === "FAILED"
+                ? (() => {
+                    const safetyFailure =
+                      aiWorkflow.stage === "CHILD_SAFETY_SCANNING" ||
+                      (aiWorkflow.proofread_text !== null &&
+                        aiWorkflow.safety_status === "FAILED");
+                    const failureEvent = [...aiWorkflow.provider_events]
+                      .reverse()
+                      .find(
+                        (event) =>
+                          Boolean(event.error_code) &&
+                          (!event.stage || event.stage === aiWorkflow.stage),
+                      );
+                    const failedStageEvent = [...aiWorkflow.review_history]
+                      .reverse()
+                      .find(
+                        (event) =>
+                          event.event === "WORKFLOW_STAGE_FAILED" &&
+                          event.stage ===
+                            (safetyFailure
+                              ? "CHILD_SAFETY_SCANNING"
+                              : "PROOFREADING"),
+                      );
+                    const recordedFailureCode = failedStageEvent?.error_code;
+                    const failureCode =
+                      aiWorkflow.error_code ??
+                      (typeof recordedFailureCode === "string"
+                        ? recordedFailureCode
+                        : null);
+                    const failureMessage =
+                      failureCode === "INVALID_EVIDENCE"
+                        ? "AI trả về evidence không thể đối chiếu chính xác với Candidate. Nội dung OCR và Candidate vẫn được giữ nguyên."
+                        : failureCode === "INVALID_JSON"
+                          ? "Provider trả về JSON không hợp lệ; kết quả Safety chưa được lưu."
+                          : failureCode === "MISSING_REQUIRED_FIELDS"
+                            ? "Provider thiếu trường bắt buộc; Safety chưa được xác nhận."
+                            : failureCode === "INVALID_OUTPUT_SCHEMA"
+                              ? "Provider trả kết quả không đúng cấu trúc Safety yêu cầu."
+                              : failureCode === "PROVIDER_TIMEOUT"
+                                ? "Provider hết thời gian chờ; Candidate chưa được đánh giá an toàn."
+                                : failureCode === "PROVIDER_UNAVAILABLE"
+                                  ? "Provider không khả dụng; Candidate chưa được đánh giá an toàn."
+                                  : safetyFailure
+                                    ? "Safety chưa hoàn tất; Candidate hiện tại chưa được đánh giá an toàn."
+                                    : "Proofreading chưa hoàn tất; Candidate hiện tại chưa được cập nhật.";
+                    return (
+                      <div
+                        className="mt-4 rounded-control border border-amber-500 bg-amber-50 p-3 text-sm text-amber-950"
+                        role="alert"
+                      >
+                        <p className="font-bold">
+                          {safetyFailure
+                            ? "Child Safety chưa hoàn tất."
+                            : "Proofreading chưa hoàn tất."}
+                        </p>
+                        <p className="mt-1">{failureMessage}</p>
+                        <p className="mt-1">
+                          Lỗi: {failureCode ?? "UNKNOWN"}
+                          {failureEvent?.provider
+                            ? ` · Provider ${String(failureEvent.provider)}`
+                            : ""}
+                          {failureEvent?.model
+                            ? ` · Model ${String(failureEvent.model)}`
+                            : ""}
+                          {failureEvent?.duration_ms != null
+                            ? ` · ${String(failureEvent.duration_ms)} ms`
+                            : ""}
+                          {` · Lần thử ${aiWorkflow.attempts}`}
+                          {` · ${new Date(aiWorkflow.updated_at).toLocaleString("vi-VN")}`}
+                        </p>
+                        <p className="mt-1">
+                          {safetyFailure
+                            ? "Có thể thử lại riêng giai đoạn Safety; Proofreading và OCR được giữ nguyên."
+                            : "Có thể thử lại riêng Proofreading; OCR được giữ nguyên."}
+                        </p>
+                      </div>
+                    );
+                  })()
+                : null}
+
+              {aiWorkflow.status === "READY_FOR_ADMIN_REVIEW" &&
+              aiWorkflow.safety_status === "STALE" ? (
+                <p
+                  className="mt-4 rounded-control border border-amber-400 bg-amber-50 p-3 text-sm text-amber-950"
+                  role="status"
+                >
+                  Candidate đã đổi sau Proofreading. Child Safety cần chạy riêng
+                  trên Candidate mới trước khi xác minh hoặc xuất bản.
+                </p>
+              ) : null}
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {aiWorkflow.status === "FAILED" ||
+                (aiWorkflow.proofread_text !== null &&
+                  (aiWorkflow.safety_status === "FAILED" ||
+                    aiWorkflow.safety_status === "STALE") &&
+                  !["QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING"].includes(
+                    aiWorkflow.status,
+                  )) ? (
+                  <Button
+                    className="h-10 w-auto px-3"
+                    disabled={busy !== null}
+                    isLoading={busy === "workflow"}
+                    onClick={() => void retryWorkflow()}
+                    type="button"
+                    variant="secondary"
+                  >
+                    <RefreshCw aria-hidden className="size-4" />
+                    {aiWorkflow.status === "FAILED" &&
+                    aiWorkflow.stage === "PROOFREADING"
+                      ? "Thử lại Proofreading"
+                      : "Thử lại Child Safety"}
+                  </Button>
                 ) : null}
+                {aiWorkflow.safety_status === "PROVISIONAL" &&
+                aiWorkflow.hash_match &&
+                (aiWorkflow.findings.length > 0 ||
+                  aiWorkflow.suitability !== "SUITABLE") ? (
+                  <label className="basis-full text-sm font-bold text-ink">
+                    Lý do Admin xem xét Safety · bắt buộc
+                    <textarea
+                      className="mt-1 min-h-20 w-full rounded-control border border-border bg-white p-3 font-normal"
+                      maxLength={500}
+                      onChange={(event) =>
+                        setSafetyDecisionReason(event.target.value)
+                      }
+                      value={safetyDecisionReason}
+                    />
+                  </label>
+                ) : null}
+                {aiWorkflow.safety_status === "PROVISIONAL" &&
+                aiWorkflow.hash_match ? (
+                  <Button
+                    className="h-10 w-auto px-3"
+                    disabled={
+                      busy !== null ||
+                      candidateEditPending ||
+                      ((Boolean(aiWorkflow.findings.length) ||
+                        aiWorkflow.suitability !== "SUITABLE") &&
+                        !safetyDecisionReason.trim())
+                    }
+                    isLoading={busy === "workflow"}
+                    onClick={() => void decideSafety(true)}
+                    type="button"
+                    variant="secondary"
+                  >
+                    <CheckCircle2 aria-hidden className="size-4" /> Xác nhận kết
+                    quả Safety
+                  </Button>
+                ) : aiWorkflow.safety_status === "CONFIRMED" &&
+                  aiWorkflow.hash_match ? (
+                  <Button
+                    className="h-10 w-auto px-3"
+                    disabled={busy !== null}
+                    isLoading={busy === "workflow"}
+                    onClick={() => void decideSafety(false)}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Bỏ xác nhận Safety
+                  </Button>
+                ) : null}
+              </div>
+
+              <section className="mt-5">
+                <h3 className="font-extrabold">Safety findings</h3>
+                {aiWorkflow.findings.length ? (
+                  <ul className="mt-2 grid gap-3">
+                    {aiWorkflow.findings.map((finding, index) => {
+                      const severity = String(
+                        finding.severity ?? "REVIEW",
+                      ).toUpperCase();
+                      const category = String(
+                        finding.category ?? "OTHER_SENSITIVE",
+                      ).replaceAll("_", " ");
+                      const evidence = String(finding.evidence_text ?? "");
+                      const compactEvidence =
+                        evidence.length > 240
+                          ? evidence.slice(0, 240).trimEnd() + "…"
+                          : evidence;
+                      const high = severity === "HIGH";
+                      return (
+                        <li key={String(finding.finding_id ?? index)}>
+                          <details
+                            className={
+                              "rounded-control border p-3 " +
+                              (high
+                                ? "border-red-400 bg-red-50"
+                                : "border-border bg-white")
+                            }
+                          >
+                            <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 focus-visible:outline-3 focus-visible:outline-primary">
+                              <span className="font-extrabold">{category}</span>
+                              <span className="text-xs text-muted">
+                                {String(
+                                  finding.content_type ?? "MENTION",
+                                ).replaceAll("_", " ")}
+                              </span>
+                              <span
+                                className={
+                                  "rounded-full px-2.5 py-1 text-xs font-extrabold " +
+                                  (high
+                                    ? "bg-red-700 text-white"
+                                    : "bg-canvas text-ink")
+                                }
+                              >
+                                {severity}
+                              </span>
+                              <span className="ml-auto text-xs text-muted">
+                                Mở chi tiết
+                              </span>
+                            </summary>
+                            <div className="mt-3 border-t border-border pt-3">
+                              <p className="text-xs font-bold uppercase tracking-wide text-muted">
+                                Bằng chứng
+                              </p>
+                              <blockquote className="mt-1 border-l-2 border-primary pl-3 text-sm">
+                                “{compactEvidence}”
+                                <span className="ml-2 font-mono text-xs text-muted">
+                                  [{String(finding.evidence_start ?? "?")}–
+                                  {String(finding.evidence_end ?? "?")}]
+                                </span>
+                              </blockquote>
+                              {evidence.length > 240 ? (
+                                <details className="mt-2 text-sm">
+                                  <summary className="cursor-pointer font-bold text-primary">
+                                    Xem toàn bộ trích dẫn nguyên văn (
+                                    {evidence.length} ký tự)
+                                  </summary>
+                                  <blockquote className="mt-2 border-l-2 border-primary pl-3">
+                                    “{evidence}”
+                                  </blockquote>
+                                </details>
+                              ) : null}
+                              <p className="mt-3 text-xs font-bold uppercase tracking-wide text-muted">
+                                Giải thích
+                              </p>
+                              <p className="mt-1 text-sm">
+                                {String(finding.explanation ?? "")}
+                              </p>
+                              <p className="mt-3 text-xs font-bold uppercase tracking-wide text-muted">
+                                Khuyến nghị
+                              </p>
+                              <p className="mt-1 text-sm text-muted">
+                                {String(finding.recommendation ?? "")}
+                              </p>
+                            </div>
+                          </details>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p className="mt-2 text-sm text-muted">
+                    {aiWorkflow.safety_status === "PROVISIONAL" ||
+                    aiWorkflow.safety_status === "CONFIRMED" ||
+                    aiWorkflow.safety_status === "AUTO_CONFIRMED"
+                      ? "AI chưa phát hiện finding trong Candidate này."
+                      : "Findings sẽ hiển thị sau khi Safety hoàn tất."}
+                  </p>
+                )}
               </section>
 
-              {/* Chi tiết kỹ thuật — thu gọn mặc định */}
-              {aiWorkflow ? (
-                <details className="mt-5 rounded-control border border-border bg-canvas p-3">
-                  <summary className="cursor-pointer text-xs font-bold text-ink">
-                    Chi tiết kỹ thuật & nhật ký kiểm tra (Hash, Provider, Lịch
-                    sử Safety)
-                  </summary>
-                  <div className="mt-3 space-y-4">
-                    <dl className="grid gap-2 break-all rounded-control border border-border bg-white p-3 font-mono text-xs">
-                      <div>
-                        <dt className="font-bold">CandidateHash</dt>
-                        <dd>{aiWorkflow.candidate_hash ?? "—"}</dd>
-                      </div>
-                      <div>
-                        <dt className="font-bold">SafetyInputHash</dt>
-                        <dd>{aiWorkflow.safety_input_hash ?? "—"}</dd>
-                      </div>
-                      <div>
-                        <dt className="font-bold">FinalApprovedTextHash</dt>
-                        <dd>
-                          {aiWorkflow.final_approved_text_hash ??
-                            "Chưa xác minh"}
-                        </dd>
-                      </div>
-                    </dl>
-
-                    {aiWorkflow.safety_history.length > 0 ? (
-                      <section>
-                        <h4 className="text-xs font-extrabold">
-                          Safety history · kết quả cũ
-                        </h4>
-                        <p className="mt-1 text-xs text-muted">
-                          Chỉ phục vụ audit; không áp dụng cho bản nội dung hiện
-                          tại.
-                        </p>
-                        <div className="mt-2 grid gap-2">
-                          {aiWorkflow.safety_history.map((scan, scanIndex) => {
-                            const historicalFindings = Array.isArray(
-                              scan.findings,
-                            )
-                              ? scan.findings.filter(
-                                  (item): item is Record<string, unknown> =>
-                                    typeof item === "object" &&
-                                    item !== null &&
-                                    !Array.isArray(item),
-                                )
-                              : [];
-                            return (
-                              <details
-                                className="rounded-control border border-border bg-white p-2"
-                                key={`${String(scan.scan_id ?? scanIndex)}-${scanIndex}`}
-                              >
-                                <summary className="cursor-pointer text-xs font-bold">
-                                  {String(scan.status ?? "UNKNOWN")} ·{" "}
-                                  {String(
-                                    scan.suitability ?? "Chưa có suitability",
-                                  )}
-                                  {` · ${historicalFindings.length} finding`}
-                                  {scan.content_hash
-                                    ? ` · hash ${String(scan.content_hash).slice(0, 12)}…`
-                                    : " · chưa có hash"}
-                                </summary>
-                                {historicalFindings.length ? (
-                                  <ul className="mt-2 grid gap-2">
-                                    {historicalFindings.map(
-                                      (finding, findingIndex) => (
-                                        <li
-                                          className="border-l-2 border-border pl-3 text-xs"
-                                          key={`${String(finding.finding_id ?? findingIndex)}-${findingIndex}`}
-                                        >
-                                          <p className="font-bold">
-                                            {String(
-                                              finding.category ??
-                                                "OTHER_SENSITIVE",
-                                            )}{" "}
-                                            ·{" "}
-                                            {String(
-                                              finding.severity ?? "UNKNOWN",
-                                            )}
-                                          </p>
-                                          <p>
-                                            “
-                                            {String(
-                                              finding.evidence_text ?? "",
-                                            )}
-                                            ”
-                                          </p>
-                                        </li>
-                                      ),
-                                    )}
-                                  </ul>
-                                ) : (
-                                  <p className="mt-2 text-xs">
-                                    Không có finding trong scan lịch sử.
-                                  </p>
-                                )}
-                              </details>
-                            );
-                          })}
-                        </div>
-                      </section>
-                    ) : null}
-
-                    <section>
-                      <h4 className="text-xs font-extrabold">
-                        Provider và model provenance
-                      </h4>
-                      <p className="mt-1 break-all font-mono text-xs text-muted">
-                        Run{" "}
-                        {String(
-                          aiWorkflow.proofread_metadata.run_id ??
-                            aiWorkflow.workflow_id,
-                        )}
-                        {" · Prompt "}
-                        {String(
-                          aiWorkflow.proofread_metadata.prompt_version ?? "—",
-                        )}
-                        {" · "}
-                        {String(
-                          aiWorkflow.proofread_metadata.processing_time_ms ?? 0,
-                        )}{" "}
-                        ms
-                        {" · Safety prompt "}
-                        {String(
-                          aiWorkflow.safety_metadata.prompt_version ?? "—",
-                        )}
-                      </p>
-                      {aiWorkflow.provider_events.length ? (
-                        <ul className="mt-2 grid gap-2 text-xs">
-                          {aiWorkflow.provider_events.map((event, index) => (
-                            <li
-                              className="rounded-control bg-white p-2"
-                              key={`${String(event.provider ?? "provider")}-${index}`}
-                            >
-                              <span className="font-bold">
-                                {String(event.provider ?? "—")}
-                              </span>
-                              {" · "}
-                              {String(event.model ?? "—")}
-                              {" · "}
-                              {event.availability === true
-                                ? "khả dụng"
-                                : event.availability === false
-                                  ? "không khả dụng"
-                                  : "đang kiểm tra"}
-                              {" · HTTP "}
-                              {String(event.http_status ?? "—")}
-                              {" · "}
-                              {String(event.duration_ms ?? 0)} ms
-                              {event.output_mode
-                                ? ` · ${String(event.output_mode)}`
-                                : ""}
-                              {Number(event.retry_count ?? 0) > 0
-                                ? ` · fallback ${String(event.retry_count)}`
-                                : ""}
-                              {event.error_code
-                                ? ` · ${String(event.error_code)}`
-                                : ""}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="mt-2 text-xs text-muted">
-                          Chưa có provider event.
-                        </p>
-                      )}
-                    </section>
+              {aiWorkflow.safety_history.length > 0 ? (
+                <section className="mt-5">
+                  <h3 className="font-extrabold">
+                    Safety history · kết quả cũ
+                  </h3>
+                  <p className="mt-1 text-xs text-muted">
+                    Các scan này chỉ phục vụ audit; không áp dụng cho Candidate
+                    hiện tại.
+                  </p>
+                  <div className="mt-2 grid gap-2">
+                    {aiWorkflow.safety_history.map((scan, scanIndex) => {
+                      const historicalFindings = Array.isArray(scan.findings)
+                        ? scan.findings.filter(
+                            (item): item is Record<string, unknown> =>
+                              typeof item === "object" &&
+                              item !== null &&
+                              !Array.isArray(item),
+                          )
+                        : [];
+                      return (
+                        <details
+                          className="rounded-control border border-border p-3"
+                          key={`${String(scan.scan_id ?? scanIndex)}-${scanIndex}`}
+                        >
+                          <summary className="cursor-pointer text-sm font-bold">
+                            {String(scan.status ?? "UNKNOWN")} ·{" "}
+                            {String(scan.suitability ?? "Chưa có suitability")}
+                            {` · ${historicalFindings.length} finding`}
+                            {scan.content_hash
+                              ? ` · hash ${String(scan.content_hash).slice(0, 12)}…`
+                              : " · chưa có hash"}
+                          </summary>
+                          {historicalFindings.length ? (
+                            <ul className="mt-2 grid gap-2">
+                              {historicalFindings.map(
+                                (finding, findingIndex) => {
+                                  return (
+                                    <li
+                                      className="border-l-2 border-border pl-3 text-sm"
+                                      key={`${String(finding.finding_id ?? findingIndex)}-${findingIndex}`}
+                                    >
+                                      <p className="font-bold">
+                                        {String(
+                                          finding.category ?? "OTHER_SENSITIVE",
+                                        )}{" "}
+                                        ·{" "}
+                                        {String(finding.severity ?? "UNKNOWN")}
+                                      </p>
+                                      <p>
+                                        “{String(finding.evidence_text ?? "")}”
+                                      </p>
+                                    </li>
+                                  );
+                                },
+                              )}
+                            </ul>
+                          ) : (
+                            <p className="mt-2 text-sm">
+                              Không có finding trong scan lịch sử.
+                            </p>
+                          )}
+                        </details>
+                      );
+                    })}
                   </div>
-                </details>
+                </section>
               ) : null}
+
+              <section className="mt-5">
+                <h3 className="font-extrabold">Provider và model provenance</h3>
+                <p className="mt-1 break-all font-mono text-xs text-muted">
+                  Run{" "}
+                  {String(
+                    aiWorkflow.proofread_metadata.run_id ??
+                      aiWorkflow.workflow_id,
+                  )}
+                  {" · Prompt "}
+                  {String(aiWorkflow.proofread_metadata.prompt_version ?? "—")}
+                  {" · "}
+                  {String(
+                    aiWorkflow.proofread_metadata.processing_time_ms ?? 0,
+                  )}{" "}
+                  ms
+                  {" · Safety prompt "}
+                  {String(aiWorkflow.safety_metadata.prompt_version ?? "—")}
+                </p>
+                {aiWorkflow.provider_events.length ? (
+                  <ul className="mt-2 grid gap-2 text-xs">
+                    {aiWorkflow.provider_events.map((event, index) => (
+                      <li
+                        className="rounded-control bg-canvas p-3"
+                        key={`${String(event.provider ?? "provider")}-${index}`}
+                      >
+                        <span className="font-bold">
+                          {String(event.provider ?? "—")}
+                        </span>
+                        {" · "}
+                        {String(event.model ?? "—")}
+                        {" · "}
+                        {event.availability === true
+                          ? "khả dụng"
+                          : event.availability === false
+                            ? "không khả dụng"
+                            : "đang kiểm tra"}
+                        {" · HTTP "}
+                        {String(event.http_status ?? "—")}
+                        {" · "}
+                        {String(event.duration_ms ?? 0)} ms
+                        {event.output_mode
+                          ? ` · ${String(event.output_mode)}`
+                          : ""}
+                        {Number(event.retry_count ?? 0) > 0
+                          ? ` · fallback ${String(event.retry_count)}`
+                          : ""}
+                        {event.error_code
+                          ? ` · ${String(event.error_code)}`
+                          : ""}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="mt-2 text-sm text-muted">
+                    Chưa có provider event.
+                  </p>
+                )}
+              </section>
+
+              <p className="mt-4 text-xs text-muted">
+                Kết quả AI không bảo đảm nội dung an toàn tuyệt đối. Với
+                workflow AI, chỉ có thể lưu VERIFIED sau khi Admin xác nhận
+                Safety cho đúng Candidate hiện tại.
+              </p>
             </Card>
           ) : null}
           <div className="grid gap-3">
@@ -5086,7 +4350,6 @@ function AdminOcrHistoryPanel({
     | "reupload"
     | "ai_correct"
     | "workflow"
-    | "rights"
     | null;
   detail: AdminPageRevisionDetailDTO;
   history: readonly AdminRevisionSummaryUI[];

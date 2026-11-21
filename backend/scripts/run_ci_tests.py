@@ -25,6 +25,7 @@ approved = {
     "test_ocr_adjudication.RealOcrFixtureGate": "dedicated OCR gate",
     "test_ocr_false_yellow_suite.RealOcrIntegration": "dedicated OCR gate",
     "test_karaoke_processing_engine_smoke.RealLocalEngineSmoke": "opt-in audio research smoke",
+    "test_admin_ai_real_ollama_live.RealLocalOllamaFallbackTests": "opt-in real local Ollama integration",
 }
 unexpected = [
     (test.id(), reason)

@@ -1,4 +1,5 @@
 """Mocked boundaries and orchestration tests for cloud-to-local OCR fallback."""
+import asyncio
 import json
 import logging
 import os
@@ -29,6 +30,7 @@ from app.services.ocr_ai.gemini_provider import GeminiOcrProvider
 from app.services.ocr_ai.groq_provider import GroqOcrProvider
 from app.services.ocr_ai.ollama_provider import OllamaOcrProvider
 from app.services.ocr_ai.orchestrator import OcrCorrectionOrchestrator
+from app.services.ocr_ai.prompts import chunk_prompt
 from app.services.ocr_ai.schemas import ChunkCorrectionResult
 from app.services.ocr_ai.validators import validate_chunk_result
 from app.services.ocr_engine import normalize_word
@@ -1011,6 +1013,178 @@ class OcrStructuredValidationTests(unittest.TestCase):
                 chunk=self.chunk,
                 provider="test",
             )
+
+    def test_repeated_word_vietnamese_diacritic_fix_is_accepted_while_exact_swap_is_rejected(self):
+        repeated_chunk = chunk_ocr_text(
+            "một con mèo và mot con chó di đi", _config().local.chunking
+        ).chunks[0]
+        result = validate_chunk_result(
+            {
+                "chunk_id": repeated_chunk.chunk_id,
+                "corrected_words": ["một", "con", "mèo", "và", "một", "con", "chó", "đi", "đi"],
+                "uncertain_word_indices": [],
+            },
+            chunk=repeated_chunk,
+            provider="test",
+        )
+        self.assertEqual(
+            result.corrected_words,
+            ("một", "con", "mèo", "và", "một", "con", "chó", "đi", "đi"),
+        )
+        self.assertEqual(result.uncertain_word_indices, ())
+
+        swap_chunk = chunk_ocr_text("ngay ngày", _config().local.chunking).chunks[0]
+        swapped = validate_chunk_result(
+            {
+                "chunk_id": swap_chunk.chunk_id,
+                "corrected_words": ["ngày", "ngay"],
+                "uncertain_word_indices": [],
+            },
+            chunk=swap_chunk,
+            provider="test",
+        )
+        self.assertEqual(swapped.corrected_words, ("ngay", "ngày"))
+        self.assertEqual(swapped.uncertain_word_indices, (0, 1))
+
+    def test_chunk_prompt_uses_zero_based_local_indices_for_later_chunks(self):
+        plan = chunk_ocr_text(
+            "một hai ba bốn năm sáu",
+            _config(max_words=2).local.chunking,
+        )
+        self.assertGreaterEqual(len(plan.chunks), 2)
+        second_chunk = plan.chunks[1]
+        prompt = chunk_prompt(second_chunk)
+        words_json = prompt.split("SOURCE WORDS JSON (only these words may be returned, in this order):\n", 1)[1]
+        words = json.loads(words_json)
+        self.assertEqual([item["index"] for item in words], list(range(second_chunk.expected_word_count)))
+
+
+class OcrProviderHardeningTests(unittest.IsolatedAsyncioTestCase):
+    async def test_gemini_http_errors_preserve_upstream_status_code(self):
+        chunk = chunk_ocr_text("ngay xua.", _config().local.chunking).chunks[0]
+        for status_code, expected_code in (
+            (401, "PROVIDER_AUTHENTICATION"),
+            (429, "PROVIDER_QUOTA"),
+            (404, "MODEL_UNAVAILABLE"),
+            (503, "PROVIDER_UNAVAILABLE"),
+            (400, "PROVIDER_REJECTED"),
+        ):
+            with self.subTest(status_code=status_code):
+                transport = httpx.MockTransport(
+                    lambda _req, code=status_code: httpx.Response(code, json={"error": {"message": "raw detail"}})
+                )
+                provider = GeminiOcrProvider(
+                    name="gemini_3_5",
+                    model="gemini-test",
+                    api_key="test-key",
+                    timeout_seconds=5,
+                    transport=transport,
+                )
+                with self.assertRaises(OcrProviderError) as caught:
+                    await provider.correct_chunk(
+                        chunk=chunk, image_bytes=_image(), image_mime_type="image/jpeg"
+                    )
+                self.assertEqual(caught.exception.code, expected_code)
+                self.assertEqual(caught.exception.upstream_status_code, status_code)
+
+    async def test_ollama_provider_retries_with_json_mode_on_schema_400_or_422(self):
+        chunk = chunk_ocr_text("ngay xua.", _config().local.chunking).chunks[0]
+        for reject_status in (400, 422):
+            with self.subTest(reject_status=reject_status):
+                requests_seen = []
+
+                async def handler(request: httpx.Request):
+                    payload = json.loads(request.content)
+                    requests_seen.append(payload)
+                    if len(requests_seen) == 1:
+                        return httpx.Response(reject_status, json={"error": "schema unsupported"})
+                    return httpx.Response(
+                        200,
+                        json={
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "chunk_id": chunk.chunk_id,
+                                        "corrected_words": ["ngày", "xưa."],
+                                        "uncertain_word_indices": [],
+                                    },
+                                    ensure_ascii=False,
+                                )
+                            }
+                        },
+                    )
+
+                provider = OllamaOcrProvider(
+                    _config().local,
+                    transport=httpx.MockTransport(handler),
+                )
+                result = await provider.correct_chunk(
+                    chunk=chunk, image_bytes=_image(), image_mime_type="image/jpeg"
+                )
+                self.assertEqual(result.corrected_words, ("ngày", "xưa."))
+                self.assertEqual(len(requests_seen), 2)
+                self.assertIsInstance(requests_seen[0]["format"], dict)
+                self.assertEqual(requests_seen[1]["format"], "json")
+                self.assertIs(requests_seen[1]["think"], False)
+                self.assertIn("corrected_words", requests_seen[1]["messages"][0]["content"])
+
+    async def test_slow_cloud_providers_do_not_starve_local_ollama_fallback(self):
+        calls = []
+        events = []
+
+        class SlowCloudProvider:
+            def __init__(self, name: str, family: str):
+                self.name = name
+                self.family = family
+                self.model = f"{name}-model"
+
+            async def correct_chunk(self, *, chunk, image_bytes, image_mime_type):
+                calls.append(self.name)
+                await asyncio.sleep(5.0)
+                return ChunkCorrectionResult(chunk.chunk_id, tuple(t.text for t in chunk.tokens), ())
+
+        class FastOllamaProvider:
+            name = "ollama_qwen3_vl"
+            family = "ollama"
+            model = "qwen3-vl:4b-instruct-q4_K_M"
+
+            async def correct_chunk(self, *, chunk, image_bytes, image_mime_type):
+                calls.append(self.name)
+                return ChunkCorrectionResult(chunk.chunk_id, ("ngày", "xưa."), ())
+
+        cfg = OcrCorrectionConfig(
+            cloud_timeout_seconds=5,
+            total_timeout_seconds=1,
+            local=LocalOcrConfig(
+                timeout_seconds=1,
+                total_timeout_seconds=1,
+                chunking=ChunkingConfig(
+                    max_bytes=100, max_words=10, max_chunks=10,
+                    context_bytes=20, max_document_bytes=1000,
+                ),
+            ),
+        )
+        result = await OcrCorrectionOrchestrator(
+            cfg,
+            providers=[
+                SlowCloudProvider("gemini_3_5", "google"),
+                SlowCloudProvider("groq_qwen", "groq"),
+                FastOllamaProvider(),
+            ],
+        ).correct(
+            "ngay xua.",
+            _image(),
+            _boxes(2),
+            on_provider_event=events.append,
+        )
+        self.assertEqual(result, "ngày xưa.")
+        self.assertEqual(calls, ["gemini_3_5", "groq_qwen", "ollama_qwen3_vl"])
+        self.assertTrue(
+            any(e["provider"] == "gemini_3_5" and e["error_code"] == "PROVIDER_TIMEOUT" for e in events)
+        )
+        self.assertTrue(
+            any(e["provider"] == "ollama_qwen3_vl" and e["status"] == "succeeded" for e in events)
+        )
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,14 +17,11 @@ from app.schemas.admin_ocr import (
     AdminOcrDraftRequest,
     AdminOcrVerifyRequest,
     AdminOcrWordInput,
-    AdminPageContentTypeUpdate,
-    AdminPageVerificationReadinessRead,
 )
 from app.schemas.admin_ai_workflow import (
     AdminAiCandidateUpdate,
-    AdminAiImageSafetyReviewRequest,
+    AdminAiImageSafetyDecision,
     AdminAiSafetyDecision,
-    AdminAiUncertainResolutionRequest,
     AdminAiWorkflowCreate,
     AdminAiWorkflowRead,
 )
@@ -412,60 +409,16 @@ async def decide_admin_ai_safety(
 
 
 @router.post(
-    "/admin/pages/{page_id}/ai-workflows/{workflow_id}/uncertain-resolution",
+    "/admin/pages/{page_id}/ai-workflows/{workflow_id}/image-safety-decision",
     response_model=AdminAiWorkflowRead,
 )
-async def resolve_admin_ai_uncertain_words(
+async def decide_admin_ai_image_safety(
     page_id: UUID,
     workflow_id: UUID,
-    payload: AdminAiUncertainResolutionRequest,
+    payload: AdminAiImageSafetyDecision,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    return await AdminAiWorkflowService(db).resolve_uncertain_words(
+    return await AdminAiWorkflowService(db).decide_image_safety(
         actor_id, page_id, workflow_id, payload
-    )
-
-
-@router.post(
-    "/admin/pages/{page_id}/ai-workflows/{workflow_id}/image-safety-review",
-    response_model=AdminAiWorkflowRead,
-)
-async def review_admin_ai_image_safety(
-    page_id: UUID,
-    workflow_id: UUID,
-    payload: AdminAiImageSafetyReviewRequest,
-    actor_id: UUID = Depends(get_current_parent_id),
-    db: AsyncSession = Depends(get_db),
-):
-    return await AdminAiWorkflowService(db).review_image_safety(
-        actor_id, page_id, workflow_id, payload
-    )
-
-
-@router.get(
-    "/admin/pages/{page_id}/verification-readiness",
-    response_model=AdminPageVerificationReadinessRead,
-)
-async def get_admin_page_verification_readiness(
-    page_id: UUID,
-    revision_id: UUID = Query(...),
-    workflow_id: UUID | None = Query(default=None),
-    actor_id: UUID = Depends(get_current_parent_id),
-    db: AsyncSession = Depends(get_db),
-):
-    return await AdminOcrService(db).verification_readiness(
-        actor_id, page_id, revision_id=revision_id, workflow_id=workflow_id
-    )
-
-
-@router.patch("/admin/pages/{page_id}/content-type")
-async def update_admin_page_content_type(
-    page_id: UUID,
-    payload: AdminPageContentTypeUpdate,
-    actor_id: UUID = Depends(get_current_parent_id),
-    db: AsyncSession = Depends(get_db),
-):
-    return await AdminOcrService(db).update_page_content_type(
-        actor_id, page_id, payload.content_type
     )

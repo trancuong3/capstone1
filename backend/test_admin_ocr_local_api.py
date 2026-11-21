@@ -16,7 +16,7 @@ from app.api.deps import get_current_parent_id, get_db
 from app.api.routes.admin_ocr import router as admin_ocr_router
 from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.services.admin_ocr_local import LocalOcrConfig
-from app.services.admin_ocr_service import AdminOcrService
+from app.services.admin_ocr_service import AdminOcrService, normalize_word
 from app.services.ocr_ai.config import OcrCorrectionConfig
 from app.services.ocr_ai.exceptions import OcrOrchestrationError
 

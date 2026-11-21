@@ -12,6 +12,7 @@ import { useBookContentReportService } from "@/hooks/use-book-content-report-ser
 import { isServiceError } from "@/lib/api/service-error";
 import type {
   BookContentIssueType,
+  BookContentReportDetailDTO,
   BookContentReportDTO,
   BookContentReportStatus,
 } from "@/types/book-content-quality";
@@ -24,8 +25,8 @@ const issueLabels: Record<BookContentIssueType, string> = {
   IMAGE_QUALITY_ERROR: "Ảnh trang sách bị lỗi",
   DUPLICATE_PAGE: "Trang có dấu hiệu bị trùng",
   PAGE_ORDER_ERROR: "Trang sai thứ tự",
-  CHILD_UNSAFE_CONTENT: "Nội dung không phù hợp với trẻ",
-  COPYRIGHT_CONCERN: "Nghi vấn quyền sử dụng",
+  CHILD_SAFETY_CONCERN: "Nội dung có dấu hiệu không phù hợp cho trẻ em",
+  COPYRIGHT_CONCERN: "Nghi ngại bản quyền / quyền sử dụng",
   OTHER: "Lỗi khác",
 };
 
@@ -45,7 +46,28 @@ export function ParentBookReportsScreen() {
   const [error, setError] = useState<"auth" | "forbidden" | "safe" | null>(
     null,
   );
+  const [selectedDetail, setSelectedDetail] =
+    useState<BookContentReportDetailDTO | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null);
   const limit = 20;
+
+  async function toggleDetail(reportId: string) {
+    if (selectedDetail?.id === reportId) {
+      setSelectedDetail(null);
+      setDetailError(null);
+      return;
+    }
+    setLoadingDetailId(reportId);
+    setDetailError(null);
+    try {
+      setSelectedDetail(await reportService.getMine(reportId));
+    } catch {
+      setDetailError("Không thể tải chi tiết phản hồi của báo cáo này.");
+    } finally {
+      setLoadingDetailId(null);
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -179,6 +201,48 @@ export function ParentBookReportsScreen() {
                   Mã yêu cầu kiểm tra toàn sách:{" "}
                   <span className="font-mono">{item.scan_run_id}</span>
                 </p>
+              ) : null}
+              <div className="mt-3">
+                <Button
+                  className="h-9 w-auto px-3 text-xs"
+                  disabled={loadingDetailId === item.id}
+                  onClick={() => void toggleDetail(item.id)}
+                  type="button"
+                  variant="secondary"
+                >
+                  {selectedDetail?.id === item.id
+                    ? "Ẩn phản hồi Admin"
+                    : "Xem chi tiết & phản hồi Admin"}
+                </Button>
+              </div>
+              {detailError && loadingDetailId === null ? (
+                <p className="mt-2 text-xs text-danger" role="alert">
+                  {detailError}
+                </p>
+              ) : null}
+              {selectedDetail?.id === item.id ? (
+                <div
+                  className="mt-3 rounded-control border border-border bg-canvas p-3 text-sm"
+                  data-testid="parent-report-detail"
+                >
+                  <p className="font-bold text-ink">Phản hồi từ Admin</p>
+                  <p className="mt-1 text-muted">
+                    {selectedDetail.admin_resolution_note ??
+                      "Admin đang tiếp nhận và chưa có ghi chú xử lý cuối cùng."}
+                  </p>
+                  {selectedDetail.history.length ? (
+                    <ul className="mt-2 grid gap-1 border-t border-border pt-2 text-xs text-muted">
+                      {selectedDetail.history.map((entry, idx) => (
+                        <li key={`${entry.created_at}:${idx}`}>
+                          <span className="font-semibold text-ink">
+                            {statusLabels[entry.to_status]}
+                          </span>
+                          {entry.note ? ` · ${entry.note}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
               ) : null}
             </article>
           ))}

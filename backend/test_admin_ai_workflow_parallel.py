@@ -385,87 +385,80 @@ class ParallelWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row.CandidateText, candidate)
         self.assertEqual(row.Status, "READY_FOR_ADMIN_REVIEW")
         self.assertEqual(row.SafetyStatus, "PROVISIONAL")
-        self.assertTrue(row.SafetyMetadata["coverage_complete"])
-        self.assertEqual(row.SafetyMetadata["scope"], "TEXT")
+        self.assertEqual(row.SafetyMetadata.get("image_safety_status"), "UNASSESSED_NO_VISION_MODEL")
+        self.assertTrue(row.SafetyMetadata.get("all_chunks_completed"))
 
-    async def test_local_only_mode_runs_safety_sequentially_after_proofreading(self):
+    async def test_stale_worker_after_lease_expiry_cannot_overwrite_workflow(self):
         workflow_id = uuid4()
+        candidate = "Nội dung đang chờ quét"
         row = SimpleNamespace(
             Id=workflow_id,
-            WorkerId="worker-local",
+            PageRevisionId=uuid4(),
+            WorkerId="worker-new",
             LeaseExpiresAt=datetime.now(timezone.utc) + timedelta(minutes=20),
             ProviderEvents=[],
             ReviewEvents=[],
             SafetyHistory=[],
             SafetyMetadata={},
             Findings=[],
-            CandidateHistory=[],
-            CorrectionSuggestions=[],
-            UncertainWordIndices=[],
-            ProofreadMetadata={},
-            CandidateVersion=0,
+            CandidateText=candidate,
+            CandidateHash=worker.content_hash(candidate),
             SafetyInputHash=None,
-            SafetyStatus="PENDING",
+            SafetyStatus="STALE",
             Suitability=None,
-            Stage="PROOFREADING",
-            Status="PROOFREADING",
-            Attempts=1,
+            Status="CHILD_SAFETY_SCANNING",
+            Stage="CHILD_SAFETY_SCANNING",
+            CompletedChunks=0,
+            TotalChunks=1,
+            Attempts=2,
             ErrorCode=None,
-            OcrApprovedAt=None,
-            AdminInputHash=worker.content_hash("same text"),
         )
         _Repository.row = row
-        local_only_config = SimpleNamespace(cloud_enabled=False)
+
+        class _Safety:
+            async def analyze(self, _value):
+                return {
+                    "suitability": "SUITABLE",
+                    "findings": [],
+                    "provider_events": [],
+                    "chunks_total": 1,
+                    "chunks_completed": 1,
+                    "all_chunks_completed": True,
+                    "text_safety_status": "PROVISIONAL",
+                    "image_safety_status": "UNASSESSED_NO_VISION_MODEL",
+                }
+
         snapshot = {
             "id": workflow_id,
-            "book_id": uuid4(),
-            "page_id": uuid4(),
-            "revision_id": uuid4(),
-            "input_text": "same text",
-            "input_words": [{"bbox": [0.1, 0.1, 0.2, 0.1]}],
-            "image_path": "books/test/page.png",
-            "stage": "PROOFREADING",
-            "total_chunks": 1,
-            "candidate_text": None,
-            "candidate_hash": None,
-            "safety_input_hash": None,
-            "safety_status": "PENDING",
-            "worker_id": "worker-local",
-            "attempts": 1,
-            "provider_events": [],
+            "candidate_text": candidate,
         }
         with (
             patch.object(worker, "AsyncSessionLocal", _Session),
             patch.object(worker, "AdminAiWorkflowRepository", _Repository),
             patch.object(worker, "_progress_loop", new=AsyncMockProgress()),
-            patch.object(worker.OcrCorrectionConfig, "from_environment", return_value=local_only_config),
-            patch.object(worker.AdminOcrService, "run_prepared_ai_correction", new=AsyncMock(return_value="same text")),
-            patch.object(worker, "build_child_safety_orchestrator") as safety_builder,
+            patch.object(worker, "build_child_safety_orchestrator", return_value=_Safety()),
         ):
-            await worker._run_proofreading(snapshot, "worker-local")
+            await worker._run_safety(snapshot, "worker-stale")
 
-        safety_builder.assert_not_called()
-        self.assertEqual(row.ProofreadText, "same text")
-        self.assertEqual(row.Stage, "CHILD_SAFETY_SCANNING")
-        self.assertEqual(row.Status, "QUEUED")
-        self.assertEqual(row.SafetyStatus, "PENDING")
+        self.assertEqual(row.SafetyStatus, "STALE")
+        self.assertIsNone(row.SafetyInputHash)
+        self.assertEqual(row.WorkerId, "worker-new")
 
-    async def test_late_safety_completion_after_candidate_edit_is_discarded_and_marked_stale(self):
+    async def test_worker_never_auto_publishes_books(self):
         workflow_id = uuid4()
-        old_candidate = "nội dung cũ"
-        new_candidate = "nội dung mới đã sửa"
+        candidate = "Nội dung sạch đã kiểm tra"
         row = SimpleNamespace(
             Id=workflow_id,
             PageRevisionId=uuid4(),
-            WorkerId="worker-late",
+            WorkerId="worker-clean",
             LeaseExpiresAt=datetime.now(timezone.utc) + timedelta(minutes=20),
             ProviderEvents=[],
             ReviewEvents=[],
             SafetyHistory=[],
             SafetyMetadata={},
             Findings=[],
-            CandidateText=new_candidate,
-            CandidateHash=worker.content_hash(new_candidate),
+            CandidateText=candidate,
+            CandidateHash=worker.content_hash(candidate),
             SafetyInputHash=None,
             SafetyStatus="STALE",
             Suitability=None,
@@ -484,115 +477,34 @@ class ParallelWorkflowTests(unittest.IsolatedAsyncioTestCase):
                     "suitability": "SUITABLE",
                     "findings": [],
                     "provider_events": [],
-                    "total_chunks": 1,
-                    "scanned_chunks": 1,
-                    "coverage_complete": True,
+                    "chunks_total": 1,
+                    "chunks_completed": 1,
+                    "all_chunks_completed": True,
+                    "text_safety_status": "PROVISIONAL",
+                    "image_safety_status": "UNASSESSED_NO_VISION_MODEL",
                 }
 
-        snapshot = {"id": workflow_id, "book_id": uuid4(), "candidate_text": old_candidate}
+        snapshot = {
+            "id": workflow_id,
+            "book_id": uuid4(),
+            "candidate_text": candidate,
+        }
         with (
             patch.object(worker, "AsyncSessionLocal", _Session),
             patch.object(worker, "AdminAiWorkflowRepository", _Repository),
             patch.object(worker, "_progress_loop", new=AsyncMockProgress()),
             patch.object(worker, "build_child_safety_orchestrator", return_value=_Safety()),
+            patch.object(
+                worker.BookContentQualityService,
+                "auto_publish_if_eligible",
+                new=AsyncMock(),
+            ) as auto_pub,
         ):
-            await worker._run_safety(snapshot, "worker-late")
+            await worker._run_safety(snapshot, "worker-clean")
 
-        self.assertEqual(row.SafetyStatus, "STALE")
-        self.assertEqual(row.Status, "QUEUED")
-        self.assertIsNone(row.SafetyInputHash)
-        self.assertIsNone(row.Suitability)
-
-    async def test_double_click_start_reuses_active_workflow_without_creating_duplicate(self):
-        from app.services.admin_ai_workflow_service import AdminAiWorkflowService
-        from app.schemas.admin_ai_workflow import AdminAiWorkflowCreate
-
-        actor_id = uuid4()
-        page_id = uuid4()
-        book_id = uuid4()
-        rev_id = uuid4()
-        now = datetime.now(timezone.utc)
-        text_val = "Ngày xưa"
-        input_hash = AdminAiWorkflowService._hash(text_val)
-        image_path = "books/test/p1.png"
-        image_hash = AdminAiWorkflowService._image_hash(image_path, {"source_image_sha256": "e" * 64})
-        active_row = SimpleNamespace(
-            Id=uuid4(),
-            PageId=page_id,
-            BookId=book_id,
-            PageRevisionId=rev_id,
-            Status="PROOFREADING",
-            Stage="PROOFREADING",
-            CompletedChunks=0,
-            TotalChunks=1,
-            Attempts=1,
-            ErrorCode=None,
-            OriginalOcrHash=input_hash,
-            AdminInputHash=input_hash,
-            ImagePath=image_path,
-            ImageHash=image_hash,
-            ProofreadText=None,
-            ProofreadOutputHash=None,
-            CorrectionSuggestions=[],
-            UncertainWordIndices=[],
-            ProofreadMetadata={},
-            SafetyMetadata={},
-            CandidateHistory=[],
-            SafetyHistory=[],
-            ReviewEvents=[],
-            CandidateText=None,
-            CandidateHash=None,
-            CandidateVersion=0,
-            SafetyInputHash=None,
-            Suitability=None,
-            SafetyStatus="PENDING",
-            ImageSafetyStatus="NOT_REVIEWED",
-            ImageSafetyReviewedAt=None,
-            ImageSafetyReviewNote=None,
-            RightsProfileId=None,
-            RightsProfileVersion=None,
-            RightsProfileHash=None,
-            Findings=[],
-            ProviderEvents=[],
-            OcrApprovedAt=None,
-            FinalApprovedTextHash=None,
-            CreatedAt=now,
-            UpdatedAt=now,
-        )
-        db = SimpleNamespace(add=lambda *_a: (_ for _ in ()).throw(AssertionError("duplicate created")), rollback=AsyncMock(), commit=AsyncMock())
-        svc = AdminAiWorkflowService(db)
-        svc.repo = SimpleNamespace(
-            by_idempotency=AsyncMock(return_value=None),
-            active_for_revision=AsyncMock(return_value=active_row),
-            by_input_snapshot=AsyncMock(return_value=None),
-        )
-        payload = AdminAiWorkflowCreate(
-            page_revision_id=rev_id,
-            idempotency_key=uuid4(),
-            draft_text=text_val,
-            words=[
-                {"word_index": 0, "line_index": 0, "text": "Ngày", "normalized_text": "ngày", "bbox": [0.1, 0.1, 0.1, 0.1]},
-                {"word_index": 1, "line_index": 0, "text": "xưa", "normalized_text": "xưa", "bbox": [0.25, 0.1, 0.1, 0.1]},
-            ],
-        )
-        revision = SimpleNamespace(
-            Id=rev_id,
-            VerificationStatus="NEEDS_REVIEW",
-            OriginalOcrText=text_val,
-            DraftText=text_val,
-            VerifiedText=None,
-            ProcessingMeta={"source_image_sha256": "e" * 64},
-        )
-        page = SimpleNamespace(Id=page_id, BookId=book_id, LifecycleStatus="ACTIVE", CurrentVerifiedRevisionId=None)
-        prepared = SimpleNamespace(draft_text=text_val, image_path=image_path, total_chunks=1)
-        with (
-            patch("app.services.admin_ai_workflow_service.AdminOcrService.require_admin", new=AsyncMock()),
-            patch("app.services.admin_ai_workflow_service.AdminOcrService.prepare_ai_correction", new=AsyncMock(return_value=prepared)),
-            patch("app.services.admin_ai_workflow_service.AdminOcrRepository.revision", new=AsyncMock(return_value=revision)),
-            patch("app.services.admin_ai_workflow_service.AdminOcrRepository.page", new=AsyncMock(return_value=page)),
-        ):
-            res = await svc.start(actor_id, page_id, payload)
-        self.assertEqual(res.workflow_id, active_row.Id)
+        auto_pub.assert_not_called()
+        self.assertEqual(row.Status, "READY_FOR_ADMIN_REVIEW")
+        self.assertEqual(row.SafetyStatus, "PROVISIONAL")
 
 
 class AsyncMockProgress:

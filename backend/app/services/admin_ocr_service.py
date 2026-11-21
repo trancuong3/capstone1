@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import math
@@ -23,16 +24,12 @@ from sqlalchemy import select, text
 from starlette.concurrency import run_in_threadpool
 
 from app.diagnostic_logging import log_diagnostic
-from app.models import AdminAiWorkflow, AuditLog, Book, BookContentRightsProfile, BookPage, PageRevision
-from app.repositories.admin_ai_workflow_repository import AdminAiWorkflowRepository
+from app.models import AdminAiWorkflow, Book, BookPage, BookRightsEvidence, PageRevision
 from app.repositories.admin_ocr_repository import AdminOcrRepository
-from app.repositories.book_content_quality_repository import BookContentQualityRepository
 from app.schemas.admin_ocr import (
     AdminOcrDraftRequest,
     AdminOcrVerifyRequest,
     AdminOcrWordInput,
-    AdminPageVerificationBlocker,
-    AdminPageVerificationReadinessRead,
     normalize_ocr_bbox,
 )
 from app.schemas.book import (
@@ -2547,14 +2544,9 @@ class AdminOcrService:
                 draft_text=draft_text,
                 content_hash=content_hash,
             )
-            if hasattr(self.db, "scalars"):
-                await AdminAiWorkflowRepository(self.db).mark_stale_for_revision(
-                    page.Id,
-                    revision.Id,
-                    new_text_hash=safety_content_hash(draft_text),
-                    actor_id=actor_id,
-                    reason="Admin saved edited draft text",
-                )
+            await self._invalidate_workflows_for_draft_change(
+                page.Id, revision.Id, draft_text, actor_id
+            )
             await self.db.commit()
         except Exception:
             await self.db.rollback()
@@ -2590,18 +2582,10 @@ class AdminOcrService:
         proofread = payload.proofread_audit
         if proofread.mode == "AI_AUTO_VERIFIED":
             raise HTTPException(
-                status_code=422,
+                status_code=409,
                 detail={
-                    "code": "AUTO_VERIFICATION_DISABLED",
-                    "message": "Không cho phép tự động xác minh trang; Admin phải tự xem kết quả và bấm Xác minh.",
-                },
-            )
-        if proofread.mode == "MANUAL_FALLBACK":
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "code": "MANUAL_BYPASS_DISABLED",
-                    "message": "Không thể bỏ qua kiểm tra AI và quyền sử dụng để xác minh thủ công. Bạn vẫn có thể Lưu nháp.",
+                    "code": "AI_AUTO_VERIFY_DISABLED",
+                    "message": "Hệ thống đã tắt chế độ tự động xác minh AI (AI_AUTO_VERIFIED). Admin phải rà soát và xác minh thủ công.",
                 },
             )
         checked_text = unicodedata.normalize("NFC", proofread.checked_text.strip())
@@ -2613,15 +2597,8 @@ class AdminOcrService:
             raise HTTPException(
                 status_code=409,
                 detail={
-                    "code": "AI_WORKFLOW_REQUIRED",
-                    "message": "Cần chạy AI chỉnh sửa và hoàn tất rà chính tả, an toàn cho trẻ và hồ sơ quyền sử dụng trước khi xác minh trang.",
-                    "blockers": [
-                        {
-                            "code": "AI_WORKFLOW_REQUIRED",
-                            "stage": "PROOFREADING",
-                            "message": "Chưa chạy AI chỉnh sửa cho bản nội dung hiện tại.",
-                        }
-                    ],
+                    "code": "WORKFLOW_REQUIRED",
+                    "message": "Cần hoàn tất quy trình AI Proofreading và kiểm tra an toàn (workflow_id) trước khi xác minh trang.",
                 },
             )
         workflow = await self.db.scalar(
@@ -2634,38 +2611,26 @@ class AdminOcrService:
         )
         if workflow is None or workflow.PageRevisionId != revision.Id:
             raise HTTPException(
-                status_code=409,
+                status_code=404,
                 detail={
                     "code": "WORKFLOW_REVISION_MISMATCH",
-                    "message": "Workflow AI không thuộc trang hoặc revision đang mở.",
-                    "blockers": [
-                        {
-                            "code": "WORKFLOW_REVISION_MISMATCH",
-                            "stage": "REVISION",
-                            "message": "Workflow AI không khớp trang hoặc phiên bản hiện tại.",
-                        }
-                    ],
+                    "message": "Workflow AI không thuộc về revision hiện tại của trang.",
                 },
             )
-        quality_repo = BookContentQualityRepository(self.db)
-        rights_profile = await quality_repo.effective_rights_profile(
-            page.BookId, page.Id, lock=True
-        )
-        open_image_safety_reports = await quality_repo.open_image_or_safety_reports_for_page(
-            page.Id
-        )
         self._validate_ai_workflow_for_verification(
             workflow,
             workflow_text_hash,
-            page=page,
             revision=revision,
-            rights_profile=rights_profile,
-            open_image_safety_reports=open_image_safety_reports,
+            expected_image_sha256=payload.expected_image_sha256,
+        )
+        rights_evidence = await self._validate_rights_for_verification(
+            page.BookId,
+            page.Id,
+            expected_rights_version=payload.expected_rights_version,
         )
         content_hash = hashlib.sha256(
             json.dumps({"text": corrected_text, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
-        now = datetime.now(timezone.utc)
         try:
             existing_rows = await self.repo.words(revision.Id)
             self._preserve_trusted_word_scores(revision, words, existing_rows)
@@ -2691,21 +2656,32 @@ class AdminOcrService:
                     "verification_source": "admin",
                     "reference_text": str(word["text"]),
                     "reference_alignment": "match",
-                    "review_reason": "Admin đã xác minh nội dung từ này trong revision hiện tại.",
+                    "review_reason": (
+                        "Hệ thống tự động xác minh nội dung sau khi AI rà soát theo yêu cầu Admin."
+                        if proofread.mode == "AI_AUTO_VERIFIED"
+                        else "Admin đã xác minh nội dung từ này trong revision hiện tại."
+                    ),
                 })
                 admin_verified_evidence.append(evidence)
             verification_metadata["word_review_statuses"] = ["verified"] * len(words)
             verification_metadata["word_evidence_v2"] = admin_verified_evidence
             verification_metadata["word_evidence_v2_authoritative"] = True
-            audit_timestamp = now.isoformat()
+            audit_timestamp = datetime.now(timezone.utc).isoformat()
+            automatic_verification = proofread.mode == "AI_AUTO_VERIFIED"
             verification_metadata["ai_proofread_audit"] = {
                 "mode": proofread.mode,
                 "outcome": (
-                    "AI_NO_SUGGESTIONS"
+                    "AUTO_VERIFIED_WITH_AI_CHANGES"
+                    if proofread.mode == "AI_AUTO_VERIFIED" and decisions
+                    else "AUTO_VERIFIED_NO_CHANGES"
+                    if proofread.mode == "AI_AUTO_VERIFIED"
+                    else "AI_NO_SUGGESTIONS"
                     if proofread.mode == "AI_CHECKED" and not decisions
                     else "ADMIN_REVIEWED"
                     if proofread.mode == "AI_CHECKED"
                     else "ADMIN_EDITED_AFTER_AI_REVIEW"
+                    if proofread.mode == "ADMIN_EDITED"
+                    else "MANUAL_FALLBACK"
                 ),
                 "source_revision_id": str(revision.Id),
                 "checked_text_sha256": hashlib.sha256(checked_text.encode("utf-8")).hexdigest(),
@@ -2713,49 +2689,50 @@ class AdminOcrService:
                 "suggestions": decisions,
                 "reason_code": proofread.reason_code,
                 "final_content_sha256": content_hash,
-                "reviewed_by": str(actor_id),
-                "automated_by": None,
-                "reviewed_at": audit_timestamp,
-                "automated_at": None,
+                "reviewed_by": None if automatic_verification else str(actor_id),
+                "automated_by": str(actor_id) if automatic_verification else None,
+                "reviewed_at": None if automatic_verification else audit_timestamp,
+                "automated_at": audit_timestamp if automatic_verification else None,
             }
-            if (
-                workflow.SafetyStatus == "PROVISIONAL"
-                and workflow.SafetyInputHash == workflow_text_hash
-                and workflow.Suitability == "SUITABLE"
-                and not workflow.Findings
-            ):
-                workflow.SafetyStatus = "CONFIRMED"
-                workflow.SafetyConfirmedAt = now
-                workflow.SafetyConfirmedBy = actor_id
-            rights_profile_id = getattr(rights_profile, "Id", None) if rights_profile is not None else None
-            rights_profile_version = getattr(rights_profile, "ProfileVersion", None) if rights_profile is not None else None
-            rights_profile_hash = getattr(rights_profile, "SourceFingerprint", None) if rights_profile is not None else None
-            workflow.RightsProfileId = rights_profile_id
-            workflow.RightsProfileVersion = rights_profile_version
-            workflow.RightsProfileHash = rights_profile_hash
-            verification_metadata["admin_ai_workflow"] = {
-                "workflow_id": str(workflow.Id),
-                "candidate_hash": workflow_text_hash,
-                "safety_status": workflow.SafetyStatus,
-                "safety_input_hash": workflow.SafetyInputHash,
-                "image_hash": getattr(workflow, "ImageHash", None),
-                "image_safety_status": getattr(workflow, "ImageSafetyStatus", "NOT_REVIEWED"),
-                "rights_profile_id": str(rights_profile_id) if rights_profile_id else None,
-                "rights_profile_version": rights_profile_version,
-                "rights_profile_hash": rights_profile_hash,
-            }
-            workflow.OcrApprovedAt = now
-            workflow.OcrApprovedBy = actor_id
-            workflow.FinalApprovedTextHash = workflow_text_hash
-            workflow.ReviewEvents = list(workflow.ReviewEvents or []) + [{
-                "event": "OCR_FINAL_APPROVED",
-                "actor_id": str(actor_id),
-                "content_hash": workflow_text_hash,
-                "rights_profile_version": rights_profile_version,
-                "rights_profile_hash": rights_profile_hash,
-                "created_at": audit_timestamp,
-            }]
-            workflow.UpdatedAt = now
+            if workflow is None:
+                # A manual verification must not inherit an earlier workflow
+                # approval marker from this revision's JSON metadata.
+                verification_metadata.pop("admin_ai_workflow", None)
+            if workflow is not None:
+                now = datetime.now(timezone.utc)
+                if workflow.SafetyStatus == "PROVISIONAL":
+                    workflow.SafetyStatus = "CONFIRMED"
+                    workflow.SafetyConfirmedAt = now
+                    workflow.SafetyConfirmedBy = actor_id
+                revision_meta = revision.ProcessingMeta if isinstance(revision.ProcessingMeta, dict) else {}
+                verification_metadata["admin_ai_workflow"] = {
+                    "workflow_id": str(workflow.Id),
+                    "candidate_hash": workflow_text_hash,
+                    "safety_status": workflow.SafetyStatus,
+                    "safety_input_hash": workflow.SafetyInputHash,
+                    "image_safety_status": getattr(
+                        workflow, "ImageSafetyStatus", "ADMIN_CONFIRMED_SAFE"
+                    ),
+                    "source_image_sha256": revision_meta.get("source_image_sha256")
+                    or getattr(workflow, "SourceImageSha256", None),
+                    "rights_evidence_id": str(rights_evidence.Id),
+                    "rights_evidence_version": int(rights_evidence.Version),
+                    "rights_evidence_scope": rights_evidence.Scope,
+                }
+                workflow.OcrApprovedAt = now
+                workflow.OcrApprovedBy = actor_id
+                workflow.FinalApprovedTextHash = workflow_text_hash
+                workflow.ReviewEvents = list(workflow.ReviewEvents or []) + [{
+                    "event": "OCR_FINAL_APPROVED",
+                    "actor_id": str(actor_id),
+                    "content_hash": workflow_text_hash,
+                    "rights_evidence_version": int(rights_evidence.Version),
+                    "image_safety_status": getattr(
+                        workflow, "ImageSafetyStatus", "ADMIN_CONFIRMED_SAFE"
+                    ),
+                    "created_at": now.isoformat(),
+                }]
+                workflow.UpdatedAt = now
             revision.ProcessingMeta = verification_metadata
             await self.repo.sync_words(revision.Id, words)
             self.repo.update_revision_verification(
@@ -2763,7 +2740,7 @@ class AdminOcrService:
                 corrected_text=corrected_text,
                 content_hash=content_hash,
                 verified_by=actor_id,
-                verified_at=now,
+                verified_at=datetime.now(timezone.utc),
             )
             source_meta = dict(revision.ProcessingMeta or {})
             source_path = source_meta.get("source_image_path")
@@ -2782,30 +2759,6 @@ class AdminOcrService:
                 )
             if page.LifecycleStatus == "ACTIVE":
                 self.repo.set_current_verified_revision(page, revision.Id)
-            # Audit every explicit Admin page verification in the same transaction.
-            if hasattr(self.db, "add"):
-                self.db.add(
-                    AuditLog(
-                        ActorId=actor_id,
-                        Action="page.ocr.verified",
-                        ResourceType="book_page",
-                        ResourceId=page.Id,
-                        Metadata={
-                            "book_id": str(page.BookId),
-                            "page_id": str(page.Id),
-                            "page_revision_id": str(revision.Id),
-                            "workflow_id": str(workflow.Id),
-                            "content_hash": content_hash,
-                            "candidate_hash": workflow_text_hash,
-                            "safety_status": workflow.SafetyStatus,
-                            "image_safety_status": getattr(workflow, "ImageSafetyStatus", "NOT_REVIEWED"),
-                            "rights_profile_id": str(rights_profile_id) if rights_profile_id else None,
-                            "rights_profile_version": rights_profile_version,
-                            "rights_profile_hash": rights_profile_hash,
-                        },
-                        RequestId=str(uuid4()),
-                    )
-                )
             # This insert shares the VERIFIED revision's PostgreSQL transaction. The worker
             # cannot observe an event unless this exact verification commits successfully.
             await self.db.execute(
@@ -2820,22 +2773,17 @@ class AdminOcrService:
                     "page_id": page.Id,
                     "revision_id": revision.Id,
                     "actor_id": actor_id,
-                    "payload": json.dumps({
-                        "source_flow": "FLOW1_VERIFIED",
-                        "schema": "viread-outbox-v2",
-                        "proofread_mode": proofread.mode,
-                        "verified_by_admin": True,
-                        "verification_source": "admin",
-                        "verified_content_sha256": content_hash,
-                    }),
+                    "payload": json.dumps({"source_flow": "FLOW1_VERIFIED", "schema": "viread-outbox-v1",
+                                            "proofread_mode": proofread.mode,
+                                            "verified_content_sha256": content_hash}),
                 },
             )
             await self.db.commit()
         except Exception:
             await self.db.rollback()
             raise
-        # Page verification is deliberately separated from Book Approval:
-        # never auto-publish a book when a page is verified.
+        # Page verification and book publication are strictly independent:
+        # verifying a page never triggers automatic book publication.
         response_page = await self.repo.page(response_page_id)
         response_revision = await self.repo.revision(
             response_page_id, response_revision_id
@@ -2921,448 +2869,273 @@ class AdminOcrService:
 
         return await self.revision_detail(page, revision)
 
-    @staticmethod
-    def _revision_image_binding(
-        page: BookPage | None, revision: PageRevision | None
-    ) -> tuple[str | None, str | None]:
-        meta = revision.ProcessingMeta if revision is not None and isinstance(revision.ProcessingMeta, dict) else {}
-        source_path = meta.get("source_image_path")
-        image_path = (
-            source_path
-            if isinstance(source_path, str) and source_path.strip()
-            else (getattr(page, "ImagePath", None) if page is not None else None)
-        )
-        stored_sha = meta.get("source_image_sha256")
-        if isinstance(stored_sha, str) and len(stored_sha.strip()) == 64:
-            return image_path, stored_sha.strip().lower()
-        if isinstance(image_path, str) and image_path.strip():
-            return image_path, hashlib.sha256(image_path.encode("utf-8")).hexdigest()
-        return image_path, None
-
-    @staticmethod
-    def _rights_profile_blockers(
-        rights_profile: BookContentRightsProfile | None,
-    ) -> tuple[list[AdminPageVerificationBlocker], str]:
-        if rights_profile is None:
-            return (
-                [
-                    AdminPageVerificationBlocker(
-                        code="RIGHTS_NOT_ASSESSED",
-                        stage="RIGHTS",
-                        message="Chưa đánh giá hồ sơ quyền sử dụng nội dung cho sách hoặc trang này.",
-                    )
-                ],
-                "NOT_ASSESSED",
-            )
-        status_value = str(getattr(rights_profile, "Status", "NOT_ASSESSED") or "NOT_ASSESSED")
-        if status_value == "NOT_ASSESSED":
-            return (
-                [
-                    AdminPageVerificationBlocker(
-                        code="RIGHTS_NOT_ASSESSED",
-                        stage="RIGHTS",
-                        message="Hồ sơ quyền sử dụng đang ở trạng thái Chưa đánh giá.",
-                    )
-                ],
-                status_value,
-            )
-        if status_value == "MISSING_EVIDENCE":
-            return (
-                [
-                    AdminPageVerificationBlocker(
-                        code="RIGHTS_MISSING_EVIDENCE",
-                        stage="RIGHTS",
-                        message="Hồ sơ quyền sử dụng đang Thiếu bằng chứng; cần bổ sung nguồn và căn cứ sử dụng.",
-                    )
-                ],
-                status_value,
-            )
-        if status_value == "CONCERNS_FOUND":
-            return (
-                [
-                    AdminPageVerificationBlocker(
-                        code="RIGHTS_CONCERNS_UNRESOLVED",
-                        stage="RIGHTS",
-                        message="Hồ sơ quyền sử dụng đang Có nghi vấn chưa được xử lý.",
-                    )
-                ],
-                status_value,
-            )
-        source_name = str(getattr(rights_profile, "SourceName", "") or "").strip()
-        usage_basis = str(getattr(rights_profile, "UsageBasis", "") or "").strip()
-        evidence_url = str(getattr(rights_profile, "EvidenceUrl", "") or "").strip()
-        evidence_ref = str(getattr(rights_profile, "EvidenceReference", "") or "").strip()
-        notes = str(getattr(rights_profile, "Notes", "") or "").strip()
-        reviewed_by = getattr(rights_profile, "ReviewedBy", None)
-        reviewed_at = getattr(rights_profile, "ReviewedAt", None)
-        has_evidence = bool(evidence_url or evidence_ref or (usage_basis == "OWN_ORIGINAL" and notes))
-        if (
-            status_value != "REVIEWED"
-            or reviewed_by is None
-            or reviewed_at is None
-            or not source_name
-            or not usage_basis
-            or usage_basis == "UNKNOWN"
-            or not has_evidence
-        ):
-            return (
-                [
-                    AdminPageVerificationBlocker(
-                        code="RIGHTS_MISSING_EVIDENCE",
-                        stage="RIGHTS",
-                        message="Hồ sơ quyền sử dụng thiếu người rà soát, căn cứ sử dụng hoặc tài liệu chứng minh hợp lệ.",
-                    )
-                ],
-                "MISSING_EVIDENCE",
-            )
-        return [], "REVIEWED"
-
-    @classmethod
-    def _evaluate_verification_gate(
-        cls,
-        *,
-        workflow: AdminAiWorkflow | None,
-        candidate_hash: str,
-        page: BookPage | None = None,
-        revision: PageRevision | None = None,
-        rights_profile: BookContentRightsProfile | None = None,
-        require_rights: bool = True,
-        open_image_safety_reports: int = 0,
-    ) -> tuple[list[AdminPageVerificationBlocker], dict[str, object]]:
-        blockers: list[AdminPageVerificationBlocker] = []
-        page_content_type = str(getattr(page, "ContentType", None) or "CONTENT")
-        image_safety_required = bool(
-            page_content_type == "COVER_OR_IMAGE_ONLY" or open_image_safety_reports > 0
-        )
-        rights_status = "NOT_ASSESSED"
-        if require_rights:
-            rights_blockers, rights_status = cls._rights_profile_blockers(rights_profile)
-            blockers.extend(rights_blockers)
-
-        if workflow is None:
-            blockers.insert(
-                0,
-                AdminPageVerificationBlocker(
-                    code="AI_WORKFLOW_REQUIRED",
-                    stage="PROOFREADING",
-                    message="Chưa chạy AI chỉnh sửa cho bản nội dung hiện tại.",
-                ),
-            )
-            return blockers, {
-                "proofreading_status": "NOT_STARTED",
-                "uncertain_word_count": 0,
-                "uncertain_resolved": True,
-                "child_safety_status": "PENDING",
-                "child_safety_scope": "TEXT",
-                "child_safety_coverage_complete": False,
-                "image_safety_status": "NOT_REVIEWED",
-                "image_safety_required": image_safety_required,
-                "page_content_type": page_content_type,
-                "rights_status": rights_status,
-            }
-
-        if page is not None and getattr(workflow, "PageId", page.Id) != page.Id:
-            blockers.append(
-                AdminPageVerificationBlocker(
-                    code="WORKFLOW_REVISION_MISMATCH",
-                    stage="REVISION",
-                    message="Workflow AI không thuộc trang đang mở.",
-                )
-            )
-        if revision is not None and getattr(workflow, "PageRevisionId", revision.Id) != revision.Id:
-            blockers.append(
-                AdminPageVerificationBlocker(
-                    code="WORKFLOW_REVISION_MISMATCH",
-                    stage="REVISION",
-                    message="Workflow AI thuộc phiên bản nội dung khác.",
-                )
-            )
-
-        expected_image_path, expected_image_hash = cls._revision_image_binding(page, revision)
-        wf_image_path = getattr(workflow, "ImagePath", None)
-        wf_image_hash = getattr(workflow, "ImageHash", None)
-        if (
-            (expected_image_path and wf_image_path and wf_image_path != expected_image_path)
-            or (expected_image_hash and wf_image_hash and wf_image_hash != expected_image_hash)
-        ):
-            blockers.append(
-                AdminPageVerificationBlocker(
-                    code="WORKFLOW_IMAGE_STALE",
-                    stage="REVISION",
-                    message="Ảnh trang đã thay đổi sau khi chạy AI; cần chạy lại AI chỉnh sửa trên ảnh mới.",
-                )
-            )
-
-        proofread_text = getattr(workflow, "ProofreadText", None)
-        wf_status = getattr(workflow, "Status", None)
-        if wf_status != "READY_FOR_ADMIN_REVIEW" or proofread_text is None:
-            blockers.append(
-                AdminPageVerificationBlocker(
-                    code="PROOFREADING_INCOMPLETE",
-                    stage="PROOFREADING",
-                    message="Rà chính tả AI chưa hoàn tất cho phiên bản hiện tại.",
-                )
-            )
-
-        stored_candidate_hash = (
-            safety_content_hash(workflow.CandidateText)
-            if isinstance(getattr(workflow, "CandidateText", None), str)
-            else None
-        )
-        if workflow.CandidateHash != candidate_hash or stored_candidate_hash != candidate_hash:
-            blockers.append(
-                AdminPageVerificationBlocker(
-                    code="CANDIDATE_HASH_MISMATCH",
-                    stage="PROOFREADING",
-                    message="Nội dung đang hiển thị đã thay đổi so với bản đã kiểm tra AI; cần chạy kiểm tra lại.",
-                )
-            )
-
-        uncertain_indices = list(getattr(workflow, "UncertainWordIndices", None) or [])
-        proofread_meta = (
-            dict(getattr(workflow, "ProofreadMetadata", None) or {})
-            if isinstance(getattr(workflow, "ProofreadMetadata", None), dict)
-            else {}
-        )
-        resolution = proofread_meta.get("uncertain_resolution")
-        uncertain_resolved = True
-        if uncertain_indices:
-            resolved_explicitly = bool(
-                isinstance(resolution, dict)
-                and resolution.get("candidate_hash") == candidate_hash
-                and resolution.get("reviewed_by")
-            )
-            if not resolved_explicitly:
-                uncertain_resolved = False
-                blockers.append(
-                    AdminPageVerificationBlocker(
-                        code="UNCERTAIN_WORDS_UNRESOLVED",
-                        stage="PROOFREADING",
-                        message=f"Còn {len(uncertain_indices)} từ chưa chắc chắn cần Admin đối chiếu ảnh gốc và xác nhận.",
-                    )
-                )
-
-        safety_meta = (
-            dict(getattr(workflow, "SafetyMetadata", None) or {})
-            if isinstance(getattr(workflow, "SafetyMetadata", None), dict)
-            else {}
-        )
-        safety_scope = str(safety_meta.get("scope") or "TEXT")
-        total_chunks = safety_meta.get("total_chunks")
-        scanned_chunks = safety_meta.get("scanned_chunks")
-        coverage_flag = safety_meta.get("coverage_complete")
-        coverage_complete = True
-        if coverage_flag is False or (
-            isinstance(total_chunks, int)
-            and isinstance(scanned_chunks, int)
-            and (total_chunks < 1 or scanned_chunks < total_chunks)
-        ):
-            coverage_complete = False
-            blockers.append(
-                AdminPageVerificationBlocker(
-                    code="CHILD_SAFETY_PARTIAL_COVERAGE",
-                    stage="CHILD_SAFETY",
-                    message="Kiểm tra an toàn cho trẻ chưa quét hết toàn bộ các đoạn văn bản trên trang.",
-                )
-            )
-
-        safety_status = str(getattr(workflow, "SafetyStatus", "PENDING") or "PENDING")
-        safety_input_hash = getattr(workflow, "SafetyInputHash", None)
-        findings = list(getattr(workflow, "Findings", None) or [])
-        suitability = getattr(workflow, "Suitability", None)
-        safety_confirmed_by = getattr(workflow, "SafetyConfirmedBy", None)
-
-        has_high_risk = suitability == "NOT_RECOMMENDED" or any(
-            isinstance(finding, dict)
-            and str(finding.get("severity") or "").upper() in {"HIGH", "CRITICAL"}
-            for finding in findings
-        )
-        if has_high_risk:
-            blockers.append(
-                AdminPageVerificationBlocker(
-                    code="CHILD_SAFETY_BLOCKED_HIGH_RISK",
-                    stage="CHILD_SAFETY",
-                    message="Phát hiện nội dung mức độ nghiêm trọng không phù hợp với trẻ em; trang bị chặn xác minh.",
-                )
-            )
-        elif safety_status not in {"PROVISIONAL", "CONFIRMED"} or safety_input_hash != candidate_hash:
-            blockers.append(
-                AdminPageVerificationBlocker(
-                    code="CHILD_SAFETY_INCOMPLETE_OR_STALE",
-                    stage="CHILD_SAFETY",
-                    message="Kiểm tra an toàn cho trẻ chưa hoàn tất hoặc đã cũ so với nội dung hiện tại.",
-                )
-            )
-        else:
-            needs_admin_safety_review = bool(findings) or suitability == "REVIEW_REQUIRED"
-            if needs_admin_safety_review and not (
-                safety_status == "CONFIRMED" and safety_confirmed_by is not None
-            ):
-                blockers.append(
-                    AdminPageVerificationBlocker(
-                        code="CHILD_SAFETY_REVIEW_REQUIRED",
-                        stage="CHILD_SAFETY",
-                        message="Có cảnh báo an toàn cần Admin xem xét ngữ cảnh và xác nhận kèm lý do.",
-                    )
-                )
-
-        image_safety_status = str(
-            getattr(workflow, "ImageSafetyStatus", None) or "NOT_REVIEWED"
-        )
-        if image_safety_status == "MANUAL_REVIEWED_CONCERN":
-            blockers.append(
-                AdminPageVerificationBlocker(
-                    code="IMAGE_SAFETY_CONCERN_UNRESOLVED",
-                    stage="IMAGE_SAFETY",
-                    message="Hình ảnh trang đang bị đánh dấu có nghi vấn an toàn chưa được xử lý.",
-                )
-            )
-        elif image_safety_required and image_safety_status != "MANUAL_REVIEWED_SAFE":
-            blockers.append(
-                AdminPageVerificationBlocker(
-                    code="IMAGE_SAFETY_MANUAL_REVIEW_REQUIRED",
-                    stage="IMAGE_SAFETY",
-                    message="Trang hình minh họa hoặc trang có báo cáo hình ảnh cần Admin xem ảnh gốc và ghi nhận đã rà soát an toàn hình ảnh.",
-                )
-            )
-
-        return blockers, {
-            "proofreading_status": (
-                "COMPLETED"
-                if wf_status == "READY_FOR_ADMIN_REVIEW" and proofread_text is not None
-                else str(wf_status or "PENDING")
-            ),
-            "uncertain_word_count": len(uncertain_indices),
-            "uncertain_resolved": uncertain_resolved,
-            "child_safety_status": (
-                "STALE" if safety_input_hash != candidate_hash and safety_status != "FAILED" else safety_status
-            ),
-            "child_safety_scope": safety_scope,
-            "child_safety_coverage_complete": (
-                coverage_complete
-                and safety_status in {"PROVISIONAL", "CONFIRMED"}
-                and safety_input_hash == candidate_hash
-            ),
-            "image_safety_status": image_safety_status,
-            "image_safety_required": image_safety_required,
-            "page_content_type": page_content_type,
-            "rights_status": rights_status,
-        }
-
-    @classmethod
-    def _validate_ai_workflow_for_verification(
-        cls,
-        workflow: AdminAiWorkflow,
-        candidate_hash: str,
-        *,
-        page: BookPage | None = None,
-        revision: PageRevision | None = None,
-        rights_profile: BookContentRightsProfile | None = None,
-        require_rights: bool = True,
-        open_image_safety_reports: int = 0,
+    async def _invalidate_workflows_for_draft_change(
+        self,
+        page_id: UUID,
+        revision_id: UUID,
+        draft_text: str,
+        actor_id: UUID,
     ) -> None:
-        blockers, _state = cls._evaluate_verification_gate(
-            workflow=workflow,
-            candidate_hash=candidate_hash,
-            page=page,
-            revision=revision,
-            rights_profile=rights_profile,
-            require_rights=require_rights,
-            open_image_safety_reports=open_image_safety_reports,
+        """Mark existing workflow safety results stale whenever draft text changes."""
+        scalars_fn = getattr(self.db, "scalars", None)
+        if not callable(scalars_fn):
+            return
+        draft_hash = safety_content_hash(draft_text)
+        pending = scalars_fn(
+            select(AdminAiWorkflow)
+            .where(
+                AdminAiWorkflow.PageId == page_id,
+                AdminAiWorkflow.PageRevisionId == revision_id,
+            )
+            .with_for_update()
         )
-        if blockers:
+        if not inspect.isawaitable(pending):
+            return
+        result = await pending
+        workflows = list(result.all()) if result is not None and hasattr(result, "all") else []
+        now = datetime.now(timezone.utc)
+        for workflow in workflows:
+            if (
+                workflow.CandidateHash == draft_hash
+                and workflow.SafetyInputHash == draft_hash
+            ):
+                continue
+            if workflow.SafetyInputHash or workflow.Findings:
+                history = list(workflow.SafetyHistory or [])
+                history.append({
+                    "scan_id": (workflow.SafetyMetadata or {}).get("scan_id"),
+                    "content_hash": workflow.SafetyInputHash,
+                    "status": workflow.SafetyStatus,
+                    "suitability": workflow.Suitability,
+                    "findings": list(workflow.Findings or []),
+                    "metadata": dict(workflow.SafetyMetadata or {}),
+                    "archived_at": now.isoformat(),
+                    "reason": "DRAFT_EDITED_OUTSIDE_WORKFLOW",
+                })
+                workflow.SafetyHistory = history
+            workflow.SafetyStatus = "STALE"
+            workflow.SafetyInputHash = None
+            workflow.Suitability = None
+            workflow.Findings = []
+            workflow.SafetyConfirmedAt = None
+            workflow.SafetyConfirmedBy = None
+            workflow.ReviewEvents = list(workflow.ReviewEvents or []) + [{
+                "event": "WORKFLOW_INVALIDATED_BY_DRAFT_EDIT",
+                "actor_id": str(actor_id),
+                "draft_hash": draft_hash,
+                "created_at": now.isoformat(),
+            }]
+            workflow.UpdatedAt = now
+
+    async def _validate_rights_for_verification(
+        self,
+        book_id: UUID,
+        page_id: UUID,
+        *,
+        expected_rights_version: int | None = None,
+    ) -> BookRightsEvidence:
+        """Require persisted RIGHTS_REVIEWED evidence at page or book scope."""
+        page_rights = await self.db.scalar(
+            select(BookRightsEvidence).where(
+                BookRightsEvidence.BookId == book_id,
+                BookRightsEvidence.Scope == "PAGE",
+                BookRightsEvidence.PageId == page_id,
+            )
+        )
+        rights = page_rights
+        if rights is None:
+            rights = await self.db.scalar(
+                select(BookRightsEvidence).where(
+                    BookRightsEvidence.BookId == book_id,
+                    BookRightsEvidence.Scope == "BOOK",
+                    BookRightsEvidence.PageId.is_(None),
+                )
+            )
+        if rights is None:
             raise HTTPException(
                 status_code=409,
                 detail={
-                    "code": blockers[0].code,
-                    "message": blockers[0].message,
-                    "blockers": [item.model_dump() for item in blockers],
+                    "code": "RIGHTS_EVIDENCE_REQUIRED",
+                    "message": "Chưa có hồ sơ bằng chứng quyền sử dụng cho sách hoặc trang này. Hãy hoàn tất rà soát quyền sử dụng trước khi xác minh.",
                 },
             )
+        if rights.Status == "CONCERN_FLAGGED":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "RIGHTS_CONCERN_BLOCKED",
+                    "message": "Sách hoặc trang đang bị gắn cờ nghi ngại bản quyền / quyền sử dụng nên không thể xác minh.",
+                },
+            )
+        if rights.Status != "RIGHTS_REVIEWED" or not (
+            rights.SourceDescription and rights.UsageBasis and rights.EvidenceUrlOrRef
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "RIGHTS_EVIDENCE_REQUIRED",
+                    "message": "Hồ sơ quyền sử dụng chưa đầy đủ bằng chứng (nguồn, cơ sở sử dụng, đường dẫn/mã lưu trữ) nên chưa thể xác minh.",
+                },
+            )
+        if (
+            expected_rights_version is not None
+            and int(rights.Version or 0) != expected_rights_version
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "RIGHTS_VERSION_MISMATCH",
+                    "message": "Phiên bản hồ sơ quyền sử dụng đã thay đổi; hãy tải lại trang trước khi xác minh.",
+                },
+            )
+        return rights
 
-    async def verification_readiness(
-        self,
-        actor_id: UUID,
-        page_id: UUID,
+    @staticmethod
+    def _validate_ai_workflow_for_verification(
+        workflow: AdminAiWorkflow,
+        candidate_hash: str,
         *,
-        revision_id: UUID,
-        workflow_id: UUID | None = None,
-        draft_text: str | None = None,
-    ) -> AdminPageVerificationReadinessRead:
-        await self.require_admin(actor_id)
-        page = await self.repo.page(page_id)
-        if page is None:
-            raise HTTPException(status_code=404, detail="Page not found")
-        revision = await self.repo.revision(page_id, revision_id)
-        if revision is None:
-            raise HTTPException(status_code=404, detail="Revision not found for this page")
-        workflow = None
-        if workflow_id is not None:
-            workflow = await AdminAiWorkflowRepository(self.db).get(
-                workflow_id, page_id=page_id
+        revision: PageRevision | None = None,
+        expected_image_sha256: str | None = None,
+    ) -> None:
+        revision_meta = (
+            revision.ProcessingMeta
+            if revision is not None and isinstance(revision.ProcessingMeta, dict)
+            else {}
+        )
+        revision_sha = (
+            str(revision_meta["source_image_sha256"])
+            if isinstance(revision_meta.get("source_image_sha256"), str)
+            and len(str(revision_meta.get("source_image_sha256"))) == 64
+            else None
+        )
+        revision_path = (
+            str(revision_meta["source_image_path"])
+            if isinstance(revision_meta.get("source_image_path"), str)
+            and revision_meta.get("source_image_path")
+            else None
+        )
+        workflow_sha = getattr(workflow, "SourceImageSha256", None)
+        workflow_path = getattr(workflow, "ImagePath", None)
+        if (
+            (revision_sha and workflow_sha and revision_sha != workflow_sha)
+            or (revision_path and workflow_path and revision_path != workflow_path)
+            or (expected_image_sha256 and revision_sha and expected_image_sha256 != revision_sha)
+            or (expected_image_sha256 and workflow_sha and expected_image_sha256 != workflow_sha)
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "IMAGE_REVISION_MISMATCH",
+                    "message": "Ảnh nguồn của trang đã thay đổi so với lúc chạy AI; cần chạy lại quy trình cho ảnh hiện tại.",
+                },
             )
-        else:
-            workflow = await AdminAiWorkflowRepository(self.db).latest_for_revision(
-                actor_id, page_id, revision_id
+        stored_candidate_hash = (
+            safety_content_hash(workflow.CandidateText)
+            if isinstance(workflow.CandidateText, str)
+            else None
+        )
+        if (
+            workflow.CandidateHash != candidate_hash
+            or stored_candidate_hash != candidate_hash
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "CANDIDATE_HASH_MISMATCH",
+                    "message": "Nội dung đã thay đổi sau lần chạy AI; hãy lưu Candidate và đợi kiểm tra an toàn khớp hash mới.",
+                },
             )
-        text_to_check = (
-            draft_text
-            if isinstance(draft_text, str) and draft_text.strip()
-            else (revision.DraftText or revision.VerifiedText or "")
+        if workflow.Status != "READY_FOR_ADMIN_REVIEW":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "WORKFLOW_NOT_READY",
+                    "message": "Workflow AI chưa ở trạng thái sẵn sàng cho Admin xác minh.",
+                },
+            )
+        safety_meta = getattr(workflow, "SafetyMetadata", None)
+        if isinstance(safety_meta, dict):
+            if safety_meta.get("all_chunks_completed") is False:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "TEXT_SAFETY_INCOMPLETE_CHUNKS",
+                        "message": "Kiểm tra an toàn văn bản chưa hoàn tất đủ mọi đoạn (chunks); chưa thể xác minh.",
+                    },
+                )
+            chunks_total = safety_meta.get("chunks_total")
+            chunks_completed = safety_meta.get("chunks_completed")
+            if (
+                isinstance(chunks_total, int)
+                and isinstance(chunks_completed, int)
+                and (chunks_total <= 0 or chunks_completed < chunks_total)
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "TEXT_SAFETY_INCOMPLETE_CHUNKS",
+                        "message": "Kiểm tra an toàn văn bản chưa hoàn tất đủ mọi đoạn (chunks); chưa thể xác minh.",
+                    },
+                )
+        manually_confirmed = (
+            workflow.SafetyStatus == "CONFIRMED"
+            and workflow.SafetyInputHash == candidate_hash
+            and getattr(workflow, "SafetyConfirmedBy", None) is not None
         )
-        candidate_hash = safety_content_hash(text_to_check)
-        quality_repo = BookContentQualityRepository(self.db)
-        rights_profile = await quality_repo.effective_rights_profile(page.BookId, page.Id)
-        open_image_safety_reports = await quality_repo.open_image_or_safety_reports_for_page(
-            page.Id
+        clean_provisional_for_admin_verify = (
+            workflow.SafetyStatus == "PROVISIONAL"
+            and workflow.SafetyInputHash == candidate_hash
+            and workflow.Suitability == "SUITABLE"
+            and not workflow.Findings
         )
-        blockers, state = self._evaluate_verification_gate(
-            workflow=workflow,
-            candidate_hash=candidate_hash,
-            page=page,
-            revision=revision,
-            rights_profile=rights_profile,
-            require_rights=True,
-            open_image_safety_reports=open_image_safety_reports,
+        if not (manually_confirmed or clean_provisional_for_admin_verify):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "TEXT_SAFETY_NOT_READY",
+                    "message": "Kết quả kiểm tra an toàn văn bản chưa hoàn tất, đã cũ (stale) hoặc cần Admin xác nhận trước khi xác minh.",
+                },
+            )
+        if workflow.Suitability == "NOT_RECOMMENDED" or any(
+            isinstance(finding, dict) and finding.get("severity") == "HIGH"
+            for finding in workflow.Findings or []
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "TEXT_SAFETY_HIGH_RISK_BLOCKED",
+                    "message": "Nội dung có cảnh báo mức HIGH hoặc NOT_RECOMMENDED cho trẻ em; hệ thống chặn xác minh.",
+                },
+            )
+        image_safety_status = getattr(
+            workflow, "ImageSafetyStatus", "UNASSESSED_NO_VISION_MODEL"
         )
-        return AdminPageVerificationReadinessRead(
-            page_id=page.Id,
-            page_revision_id=revision.Id,
-            workflow_id=workflow.Id if workflow is not None else None,
-            ready_to_verify=len(blockers) == 0,
-            blockers=blockers,
-            proofreading_status=str(state["proofreading_status"]),
-            uncertain_word_count=int(state["uncertain_word_count"]),
-            uncertain_resolved=bool(state["uncertain_resolved"]),
-            child_safety_status=str(state["child_safety_status"]),
-            child_safety_scope=str(state["child_safety_scope"]),
-            child_safety_coverage_complete=bool(state["child_safety_coverage_complete"]),
-            image_safety_status=str(state["image_safety_status"]),
-            image_safety_required=bool(state["image_safety_required"]),
-            page_content_type=str(state["page_content_type"]),  # type: ignore[arg-type]
-            rights_status=str(state["rights_status"]),  # type: ignore[arg-type]
-            rights_scope=(
-                str(rights_profile.Scope)  # type: ignore[arg-type]
-                if rights_profile is not None
-                else None
-            ),
-            rights_profile_version=(
-                int(rights_profile.ProfileVersion)
-                if rights_profile is not None
-                else None
-            ),
-        )
-
-    async def update_page_content_type(
-        self, actor_id: UUID, page_id: UUID, content_type: str
-    ) -> dict[str, object]:
-        await self.require_admin(actor_id)
-        page = await self.repo.page(page_id, lock=True)
-        if page is None:
-            raise HTTPException(status_code=404, detail="Page not found")
-        page.ContentType = content_type
-        await self.db.commit()
-        return {"page_id": str(page.Id), "content_type": page.ContentType}
+        if image_safety_status == "ADMIN_FLAGGED_UNSAFE":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "IMAGE_SAFETY_FLAGGED_UNSAFE",
+                    "message": "Hình ảnh trang đã bị Admin gắn cờ không phù hợp cho trẻ em; không thể xác minh.",
+                },
+            )
+        if image_safety_status != "ADMIN_CONFIRMED_SAFE":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "IMAGE_SAFETY_UNASSESSED",
+                    "message": "Chưa có AI kiểm tra hình ảnh; Admin bắt buộc xem ảnh và xác nhận an toàn hình ảnh trước khi xác minh.",
+                },
+            )
+        reviewed_sha = getattr(workflow, "ImageSafetyImageSha256", None)
+        if revision_sha and reviewed_sha != revision_sha:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "IMAGE_SAFETY_STALE",
+                    "message": "Xác nhận an toàn hình ảnh thuộc về ảnh cũ; hãy kiểm tra lại ảnh hiện tại trước khi xác minh.",
+                },
+            )
 
     async def reprocess(self, actor_id: UUID, page_id: UUID) -> AdminRevisionDetailRead:
         await self.require_admin(actor_id)
@@ -3682,21 +3455,16 @@ class AdminOcrService:
         except OcrOrchestrationError as exc:
             if exc.code in {"INVALID_CHUNK_PLAN", "WORD_BOX_MISMATCH"}:
                 status_code = 422
-            elif exc.code == "DOCUMENT_TIMEOUT" or exc.last_error_code == "PROVIDER_TIMEOUT":
+            elif exc.code == "DOCUMENT_TIMEOUT":
                 status_code = 504
             elif exc.code in {"SOURCE_IMAGE_UNAVAILABLE", "CHUNK_IMAGE_UNAVAILABLE"}:
                 status_code = 502
             else:
                 status_code = 503
-            http_error = HTTPException(
+            raise HTTPException(
                 status_code=status_code,
                 detail="Không thể hoàn tất AI OCR; bản nháp hiện tại vẫn được giữ nguyên.",
-            )
-            http_error.ocr_error_code = exc.last_error_code or exc.code  # type: ignore[attr-defined]
-            http_error.ocr_stage = exc.stage  # type: ignore[attr-defined]
-            http_error.ocr_provider = exc.provider  # type: ignore[attr-defined]
-            http_error.ocr_chunk_id = exc.chunk_id  # type: ignore[attr-defined]
-            raise http_error from exc
+            ) from exc
 
     async def image_url(self, page: BookPage) -> str:
         image_path = page.ImagePath

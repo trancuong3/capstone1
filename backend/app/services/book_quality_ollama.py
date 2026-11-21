@@ -74,7 +74,7 @@ def _text_chunks(
         if end < len(value):
             lower = start + maximum // 2
             boundaries = [
-                value.rfind("\\n", lower, end),
+                value.rfind("\n", lower, end),
                 value.rfind("。", lower, end),
                 value.rfind(".", lower, end),
                 value.rfind("!", lower, end),
@@ -92,8 +92,8 @@ def _text_chunks(
         ):
             whitespace = max(
                 value.rfind(" ", start + 1, end),
-                value.rfind("\\n", start + 1, end),
-                value.rfind("\\t", start + 1, end),
+                value.rfind("\n", start + 1, end),
+                value.rfind("\t", start + 1, end),
             )
             end = whitespace if whitespace > start else end - 1
         if end <= start:
@@ -107,7 +107,7 @@ def _text_chunks(
         search_end = min(end, next_start + overlap)
         boundaries = [
             value.find(" ", next_start, search_end),
-            value.find("\\n", next_start, search_end),
+            value.find("\n", next_start, search_end),
         ]
         valid_boundaries = [item for item in boundaries if item >= 0]
         if valid_boundaries:
@@ -167,7 +167,19 @@ def _json_schema() -> dict[str, object]:
     }
 
 
-def _prompt(chunk: str, page_number: int) -> str:
+def _prompt(chunk: str, page_number: int, *, include_json_contract: bool = False) -> str:
+    contract = (
+        "\nOUTPUT JSON CONTRACT:\n"
+        'Return only {"findings": [...]}. Each item must have exact keys: '
+        '"excerpt" (string copied verbatim from SOURCE TEXT), '
+        '"issue_type" (one of SPELLING_SUSPECTED, OCR_SUSPECTED, PUNCTUATION_SUSPECTED, SENTENCE_ANOMALY), '
+        '"severity" (LOW, MEDIUM, HIGH), '
+        '"explanation" (string), '
+        '"suggested_correction" (string or null), '
+        '"confidence" (number 0..1 or null). No extra fields.'
+        if include_json_contract
+        else ""
+    )
     return (
         "Bạn là công cụ rà soát chất lượng văn bản tiếng Việt của sách thiếu nhi. "
         "Chỉ đưa ra cảnh báo để con người xem xét, tuyệt đối không viết lại toàn đoạn. "
@@ -179,7 +191,8 @@ def _prompt(chunk: str, page_number: int) -> str:
         "không dùng dấu ba chấm và không diễn giải excerpt. Nếu không chắc, bỏ qua. "
         "Không được tự động sửa VerifiedText. Trả duy nhất JSON phù hợp schema, tối đa "
         "20 findings. Đây là phân tích văn bản, KHÔNG phải kiểm tra ảnh trang sách. "
-        f"PAGE NUMBER: {page_number}\\nSOURCE TEXT:\\n{chunk}"
+        f"{contract}\n"
+        f"PAGE NUMBER: {page_number}\nSOURCE TEXT:\n{chunk}"
     )
 
 
@@ -209,6 +222,8 @@ def _decode_model_response(payload: object) -> OllamaTextResponse:
 async def analyse_with_ollama(
     value: str,
     page_number: int,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> OllamaAnalysisResult:
     """Text-only review. It never inspects a page image or edits published content."""
     config = LocalOcrConfig.from_environment()
@@ -241,15 +256,21 @@ async def analyse_with_ollama(
     rejected = 0
     try:
         async with asyncio.timeout(config.total_timeout_seconds):
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with httpx.AsyncClient(
+                timeout=timeout,
+                trust_env=False,
+                follow_redirects=False,
+                transport=transport,
+            ) as client:
                 for start, end in ranges:
                     chunk = value[start:end]
-                    response = await client.post(
-                        f"{config.base_url}/api/chat",
-                        json={
+
+                    def _request_body(use_json_fallback: bool) -> dict[str, object]:
+                        return {
                             "model": config.model,
                             "stream": False,
-                            "format": _json_schema(),
+                            "think": False,
+                            "format": "json" if use_json_fallback else _json_schema(),
                             "messages": [
                                 {
                                     "role": "system",
@@ -257,7 +278,11 @@ async def analyse_with_ollama(
                                 },
                                 {
                                     "role": "user",
-                                    "content": _prompt(chunk, page_number),
+                                    "content": _prompt(
+                                        chunk,
+                                        page_number,
+                                        include_json_contract=use_json_fallback,
+                                    ),
                                 },
                             ],
                             "options": {
@@ -265,8 +290,17 @@ async def analyse_with_ollama(
                                 "num_ctx": config.num_ctx,
                                 "num_predict": min(config.num_predict, 1024),
                             },
-                        },
+                        }
+
+                    response = await client.post(
+                        f"{config.base_url}/api/chat",
+                        json=_request_body(use_json_fallback=False),
                     )
+                    if response.status_code in (400, 422):
+                        response = await client.post(
+                            f"{config.base_url}/api/chat",
+                            json=_request_body(use_json_fallback=True),
+                        )
                     if response.status_code == 404:
                         raise LocalCorrectionError(
                             503,

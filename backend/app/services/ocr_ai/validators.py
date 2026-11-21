@@ -24,6 +24,12 @@ def _punctuation_boundary(value: str) -> tuple[str, str, str]:
     return value[:prefix_end], value[prefix_end:suffix_start], value[suffix_start:]
 
 
+def _vietnamese_base(value: str) -> str:
+    folded = unicodedata.normalize("NFD", value.casefold())
+    stripped = "".join(ch for ch in folded if unicodedata.category(ch) != "Mn")
+    return stripped.replace("đ", "d")
+
+
 def _invalid(provider: str, code: str = "INVALID_RESPONSE") -> OcrProviderError:
     return OcrProviderError(provider=provider, code=code, status_code=502)
 
@@ -63,6 +69,12 @@ def validate_chunk_result(
 
     uncertain_set = set(uncertain_indices)
     source_cores = [_punctuation_boundary(token.text)[1] for token in chunk.tokens]
+    candidate_cores: list[str | None] = [
+        _punctuation_boundary(unicodedata.normalize("NFC", item))[1]
+        if isinstance(item, str)
+        else None
+        for item in words
+    ]
     corrected: list[str] = []
     for index, (source, candidate) in enumerate(zip(chunk.tokens, words, strict=True)):
         if (
@@ -98,16 +110,27 @@ def validate_chunk_result(
             uncertain_set.add(index)
             continue
         # A word copied from another source position may indicate model
-        # reordering, but can also be a legitimate spelling correction. Keep
-        # this source token unchanged instead of failing the whole chunk.
-        if (
-            normalized != source.text
-            and candidate_core in source_cores
-            and source_cores.index(candidate_core) != index
-        ):
-            corrected.append(source.text)
-            uncertain_set.add(index)
-            continue
+        # reordering. Allow pure Vietnamese diacritic/d-đ fixes of a repeated
+        # word (e.g., "một ... mot" -> "một ... một") unless the two positions
+        # directly swapped their exact tokens.
+        if normalized != source.text and candidate_core in source_cores:
+            other_positions = [
+                other_idx
+                for other_idx, other_core in enumerate(source_cores)
+                if other_idx != index and other_core == candidate_core
+            ]
+            if other_positions:
+                same_vietnamese_base = _vietnamese_base(candidate_core) == _vietnamese_base(
+                    source_core
+                )
+                is_exact_swap = any(
+                    candidate_cores[other_idx] == source_core
+                    for other_idx in other_positions
+                )
+                if not same_vietnamese_base or is_exact_swap:
+                    corrected.append(source.text)
+                    uncertain_set.add(index)
+                    continue
         corrected.append(normalized)
     return ChunkCorrectionResult(
         chunk_id=chunk.chunk_id,

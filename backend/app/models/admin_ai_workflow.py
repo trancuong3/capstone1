@@ -23,7 +23,7 @@ class AdminAiWorkflow(Base):
     InputText = Column("inputtext", Text, nullable=False)
     InputWords = Column("inputwords", JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     ImagePath = Column("imagepath", String, nullable=False)
-    ImageHash = Column("imagehash", String(64))
+    SourceImageSha256 = Column("sourceimagesha256", String(64))
     OriginalOcrHash = Column("originalocrhash", String(64), nullable=False)
     AdminInputHash = Column("admininputhash", String(64), nullable=False)
     ProofreadText = Column("proofreadtext", Text)
@@ -54,13 +54,16 @@ class AdminAiWorkflow(Base):
     RetryAfter = Column("retryafter", DateTime(timezone=True))
     SafetyConfirmedAt = Column("safetyconfirmedat", DateTime(timezone=True))
     SafetyConfirmedBy = Column("safetyconfirmedby", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"))
-    ImageSafetyStatus = Column("imagesafetystatus", String(32), nullable=False, server_default=text("'NOT_REVIEWED'"))
-    ImageSafetyReviewedBy = Column("imagesafetyreviewedby", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"))
+    ImageSafetyStatus = Column(
+        "imagesafetystatus",
+        String(40),
+        nullable=False,
+        server_default=text("'UNASSESSED_NO_VISION_MODEL'"),
+    )
     ImageSafetyReviewedAt = Column("imagesafetyreviewedat", DateTime(timezone=True))
-    ImageSafetyReviewNote = Column("imagesafetyreviewnote", String(1000))
-    RightsProfileId = Column("rightsprofileid", UUID(as_uuid=True), ForeignKey("bookcontentrightsprofiles.id", ondelete="SET NULL"))
-    RightsProfileVersion = Column("rightsprofileversion", Integer)
-    RightsProfileHash = Column("rightsprofilehash", String(64))
+    ImageSafetyReviewedBy = Column("imagesafetyreviewedby", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"))
+    ImageSafetyImageSha256 = Column("imagesafetyimagesha256", String(64))
+    ImageSafetyReason = Column("imagesafetyreason", String(500))
     OcrApprovedAt = Column("ocrapprovedat", DateTime(timezone=True))
     OcrApprovedBy = Column("ocrapprovedby", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"))
     FinalApprovedTextHash = Column("finalapprovedtexthash", String(64))

@@ -1962,6 +1962,58 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     expect(createButton).toBeDisabled();
     expect(services.revisions.createDraft).not.toHaveBeenCalled();
   });
+
+  it("separates text safety from image safety and requires manual Admin image review when unassessed", async () => {
+    const services = createAdminServiceFixture();
+    const editable = makeEditableDetail();
+    const unassessedWorkflow: AdminAiWorkflowDTO = {
+      ...makeReadyWorkflow(editable.draft_text ?? ""),
+      text_safety_status: "PROVISIONAL",
+      image_safety_status: "UNASSESSED_NO_VISION_MODEL",
+      source_image_sha256: "e".repeat(64),
+      all_chunks_completed: true,
+    };
+    services.ocr.getRevision.mockResolvedValue(editable);
+    services.ocr.getLatestWorkflow.mockResolvedValue(unassessedWorkflow);
+    services.ocr.decideWorkflowImageSafety = vi.fn().mockResolvedValue({
+      ...unassessedWorkflow,
+      image_safety_status: "ADMIN_CONFIRMED_SAFE",
+      image_safety_image_sha256: "e".repeat(64),
+    });
+
+    const user = userEvent.setup();
+    render(
+      withAdminFixture(
+        <AdminOcrReviewScreen bookId={ADMIN_BOOK_ID} pageId={ADMIN_PAGE_ID} />,
+        services,
+      ),
+    );
+
+    expect(await screen.findByTestId("image-safety-status")).toHaveTextContent(
+      /Chưa đánh giá ảnh/i,
+    );
+    const verifyButton = screen.getByRole("button", {
+      name: /XÁC NHẬN VÀ LƯU NỘI DUNG CUỐI CÙNG/i,
+    });
+    expect(verifyButton).toBeDisabled();
+
+    await user.click(
+      screen.getByRole("button", { name: /Xác nhận ảnh an toàn/i }),
+    );
+    await waitFor(() => {
+      expect(services.ocr.decideWorkflowImageSafety).toHaveBeenCalledWith(
+        ADMIN_PAGE_ID,
+        unassessedWorkflow.workflow_id,
+        "ADMIN_CONFIRMED_SAFE",
+        "e".repeat(64),
+        undefined,
+      );
+    });
+    expect(await screen.findByTestId("image-safety-status")).toHaveTextContent(
+      /Admin đã xác nhận ảnh an toàn/i,
+    );
+    expect(verifyButton).not.toBeDisabled();
+  });
 });
 
 vi.mock("next/navigation", async (importOriginal) => {

@@ -103,6 +103,7 @@ class GeminiOcrProvider:
                 provider=self.name,
                 code="PROVIDER_AUTHENTICATION",
                 status_code=502,
+                upstream_status_code=status_code,
                 disables_family=True,
             )
         if status_code == 429:
@@ -110,6 +111,7 @@ class GeminiOcrProvider:
                 provider=self.name,
                 code="PROVIDER_QUOTA",
                 status_code=503,
+                upstream_status_code=status_code,
                 disables_family=True,
             )
         if status_code >= 500:
@@ -117,12 +119,19 @@ class GeminiOcrProvider:
                 provider=self.name,
                 code="PROVIDER_UNAVAILABLE",
                 status_code=503,
+                upstream_status_code=status_code,
                 disables_family=True,
             )
         if status_code == 404:
             return OcrProviderError(
-                provider=self.name, code="MODEL_UNAVAILABLE", status_code=502
+                provider=self.name,
+                code="MODEL_UNAVAILABLE",
+                status_code=502,
+                upstream_status_code=status_code,
             )
         return OcrProviderError(
-            provider=self.name, code="PROVIDER_REJECTED", status_code=502
+            provider=self.name,
+            code="PROVIDER_REJECTED",
+            status_code=502,
+            upstream_status_code=status_code,
         )

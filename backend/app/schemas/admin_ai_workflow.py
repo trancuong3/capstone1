@@ -14,6 +14,11 @@ WorkflowStatus = Literal[
 WorkflowStage = Literal[
     "PROOFREADING", "CHILD_SAFETY_SCANNING", "READY_FOR_ADMIN_REVIEW", "FAILED",
 ]
+ImageSafetyStatus = Literal[
+    "UNASSESSED_NO_VISION_MODEL",
+    "ADMIN_CONFIRMED_SAFE",
+    "ADMIN_FLAGGED_UNSAFE",
+]
 
 
 class AdminAiWorkflowCreate(BaseModel):
@@ -55,31 +60,17 @@ class AdminAiSafetyDecision(BaseModel):
         return value.strip() or None
 
 
-class AdminAiUncertainResolutionRequest(BaseModel):
-    expected_candidate_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
-    note: str = Field(min_length=1, max_length=500)
+class AdminAiImageSafetyDecision(BaseModel):
+    status: Literal["ADMIN_CONFIRMED_SAFE", "ADMIN_FLAGGED_UNSAFE"]
+    expected_image_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    reason: str | None = Field(default=None, max_length=500)
 
-    @field_validator("note")
+    @field_validator("reason")
     @classmethod
-    def normalize_note(cls, value: str) -> str:
-        trimmed = value.strip()
-        if not trimmed:
-            raise ValueError("note must not be blank")
-        return trimmed
-
-
-class AdminAiImageSafetyReviewRequest(BaseModel):
-    status: Literal["MANUAL_REVIEWED_SAFE", "MANUAL_REVIEWED_CONCERN"]
-    note: str = Field(min_length=1, max_length=1000)
-    page_content_type: Literal["CONTENT", "COVER_OR_IMAGE_ONLY"] | None = None
-
-    @field_validator("note")
-    @classmethod
-    def normalize_note(cls, value: str) -> str:
-        trimmed = value.strip()
-        if not trimmed:
-            raise ValueError("note must not be blank")
-        return trimmed
+    def normalize_reason(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
 
 
 class AdminAiWorkflowRead(BaseModel):
@@ -94,7 +85,6 @@ class AdminAiWorkflowRead(BaseModel):
     error_code: str | None
     original_ocr_hash: str
     admin_input_hash: str
-    image_hash: str | None = None
     proofread_text: str | None
     proofread_output_hash: str | None
     corrections: list[dict[str, Any]] = Field(default_factory=list)
@@ -115,14 +105,16 @@ class AdminAiWorkflowRead(BaseModel):
     safety_status: Literal[
         "PENDING", "STALE", "PROVISIONAL", "CONFIRMED", "AUTO_CONFIRMED", "FAILED"
     ]
-    image_safety_status: Literal[
-        "NOT_REVIEWED", "MANUAL_REVIEWED_SAFE", "MANUAL_REVIEWED_CONCERN"
-    ] = "NOT_REVIEWED"
+    text_safety_status: Literal[
+        "PENDING", "STALE", "PROVISIONAL", "CONFIRMED", "AUTO_CONFIRMED", "FAILED"
+    ] = "PENDING"
+    image_safety_status: ImageSafetyStatus = "UNASSESSED_NO_VISION_MODEL"
     image_safety_reviewed_at: datetime | None = None
-    image_safety_review_note: str | None = None
-    rights_profile_id: UUID | None = None
-    rights_profile_version: int | None = None
-    rights_profile_hash: str | None = None
+    image_safety_reviewed_by: UUID | None = None
+    image_safety_image_sha256: str | None = None
+    image_safety_reason: str | None = None
+    source_image_sha256: str | None = None
+    all_chunks_completed: bool = False
     findings: list[dict[str, Any]] = Field(default_factory=list)
     provider_events: list[dict[str, Any]] = Field(default_factory=list)
     ocr_approved_at: datetime | None

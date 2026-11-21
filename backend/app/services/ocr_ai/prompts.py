@@ -20,7 +20,10 @@ Chỉ trả về JSON đúng schema. Không Markdown, không lời chào, không
 
 
 def chunk_prompt(chunk: OcrTextChunk) -> str:
-    source_words = [{"index": token.index, "text": token.text} for token in chunk.tokens]
+    source_words = [
+        {"index": local_index, "text": token.text}
+        for local_index, token in enumerate(chunk.tokens)
+    ]
     return (
         f"CHUNK_ID: {chunk.chunk_id}\n"
         "PREVIOUS CONTEXT (read-only):\n"
@@ -31,6 +34,20 @@ def chunk_prompt(chunk: OcrTextChunk) -> str:
         f"{chunk.next_context}\n"
         "SOURCE WORDS JSON (only these words may be returned, in this order):\n"
         f"{json.dumps(source_words, ensure_ascii=False, separators=(',', ':'))}"
+    )
+
+
+def json_output_contract(chunk: OcrTextChunk) -> str:
+    return (
+        "\n\nOUTPUT JSON CONTRACT:\n"
+        "Return exactly one JSON object with exactly these fields: "
+        '"chunk_id" (integer), "corrected_words" (array of strings), '
+        'and "uncertain_word_indices" (array of zero-based integers). '
+        f'"chunk_id" must be {chunk.chunk_id}. '
+        f'"corrected_words" must contain exactly {chunk.expected_word_count} '
+        "strings, one for each SOURCE WORD in the same order. "
+        "Use an empty uncertain_word_indices array when all words are certain. "
+        "Do not include markdown or any extra fields."
     )
 
 

@@ -18,8 +18,8 @@ const issueLabels: Record<BookContentIssueType, string> = {
   IMAGE_QUALITY_ERROR: "Ảnh trang sách bị lỗi",
   DUPLICATE_PAGE: "Trang có dấu hiệu bị trùng",
   PAGE_ORDER_ERROR: "Trang sai thứ tự",
-  CHILD_UNSAFE_CONTENT: "Nội dung không phù hợp với trẻ",
-  COPYRIGHT_CONCERN: "Nghi vấn quyền sử dụng",
+  CHILD_SAFETY_CONCERN: "Nội dung có dấu hiệu không phù hợp cho trẻ em",
+  COPYRIGHT_CONCERN: "Nghi ngại bản quyền / quyền sử dụng",
   OTHER: "Lỗi khác",
 };
 

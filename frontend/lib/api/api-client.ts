@@ -20,6 +20,70 @@ const safeBackendMessages: Record<string, string> = {
     "Có trang chưa có kết quả Safety hiện hành. Hãy tải lại đánh giá và quét lại trang đó.",
   "A category is required for a false-positive decision.":
     "Hãy nhập category trước khi ghi nhận false positive.",
+  "Resolve Child Safety findings and REVIEW_REQUIRED pages before approving this book.":
+    "Cần xử lý các cảnh báo Child Safety và trang REVIEW_REQUIRED trước khi phê duyệt sách.",
+  "Bạn đã gửi nhiều báo cáo trong thời gian ngắn. Vui lòng thử lại sau.":
+    "Bạn đã gửi nhiều báo cáo trong thời gian ngắn. Vui lòng thử lại sau.",
+  "Trang chưa có nội dung VERIFIED để lưu snapshot báo cáo.":
+    "Trang chưa có nội dung VERIFIED để lưu snapshot báo cáo.",
+  "Cần ghi chú xử lý khi giải quyết hoặc từ chối báo cáo.":
+    "Cần ghi chú xử lý khi giải quyết hoặc từ chối báo cáo.",
+  "Cần tạo và xác minh revision mới cho trang được báo lỗi trước khi giải quyết báo cáo.":
+    "Cần tạo và xác minh revision mới cho trang được báo lỗi trước khi giải quyết báo cáo.",
+  "Revision hiện tại chưa được xác minh; chưa thể giải quyết báo cáo.":
+    "Revision hiện tại chưa được xác minh; chưa thể giải quyết báo cáo.",
+  "Cần ghi chú khi mở lại báo cáo đã đóng.":
+    "Cần ghi chú khi mở lại báo cáo đã đóng.",
+  "Cần ghi lý do khi bỏ qua cảnh báo.": "Cần ghi lý do khi bỏ qua cảnh báo.",
+  "Revision nguồn đã thay đổi; finding đã được chuyển sang STALE.":
+    "Revision nguồn đã thay đổi; cảnh báo đã chuyển sang STALE.",
+  "Chỉ đánh dấu đã sửa sau khi một revision VERIFIED mới được xuất bản.":
+    "Chỉ đánh dấu đã sửa sau khi một revision VERIFIED mới được xác minh.",
+  AI_AUTO_VERIFY_DISABLED:
+    "Hệ thống đã tắt chế độ tự động xác minh AI. Admin cần trực tiếp rà soát và xác minh trang.",
+  WORKFLOW_REQUIRED:
+    "Cần hoàn tất quy trình AI Proofreading và kiểm tra an toàn trước khi xác minh trang.",
+  WORKFLOW_REVISION_MISMATCH:
+    "Workflow AI không thuộc về revision hiện tại của trang. Hãy tải lại trang.",
+  WORKFLOW_NOT_FOUND: "Không tìm thấy workflow AI cho trang này.",
+  IMAGE_REVISION_MISMATCH:
+    "Ảnh trang đã thay đổi so với lúc chạy AI; hãy tải lại và chạy lại quy trình cho ảnh mới.",
+  CANDIDATE_HASH_MISMATCH:
+    "Nội dung đã thay đổi sau lần chạy AI; hãy lưu Candidate và đợi kiểm tra an toàn khớp hash mới.",
+  WORKFLOW_NOT_READY:
+    "Workflow AI chưa ở trạng thái sẵn sàng cho Admin xác minh.",
+  TEXT_SAFETY_INCOMPLETE_CHUNKS:
+    "Kiểm tra an toàn văn bản chưa hoàn tất đủ mọi đoạn (chunks). Hãy chạy lại kiểm tra an toàn.",
+  TEXT_SAFETY_NOT_READY:
+    "Kết quả kiểm tra an toàn văn bản chưa hoàn tất hoặc đã cũ (stale). Hãy quét lại an toàn.",
+  TEXT_SAFETY_HIGH_RISK_BLOCKED:
+    "Nội dung có cảnh báo mức HIGH hoặc NOT_RECOMMENDED cho trẻ em; hệ thống chặn xác minh.",
+  IMAGE_SAFETY_UNASSESSED:
+    "Chưa có AI kiểm tra hình ảnh; Admin bắt buộc xem ảnh và xác nhận an toàn hình ảnh trước khi xác minh.",
+  IMAGE_SAFETY_FLAGGED_UNSAFE:
+    "Hình ảnh trang đã bị Admin gắn cờ không phù hợp cho trẻ em; không thể xác minh.",
+  IMAGE_SAFETY_STALE:
+    "Xác nhận an toàn hình ảnh thuộc về ảnh cũ; hãy kiểm tra lại ảnh hiện tại trước khi xác minh.",
+  IMAGE_SAFETY_REASON_REQUIRED:
+    "Hãy ghi rõ lý do khi đánh dấu ảnh trang không phù hợp với trẻ em.",
+  SAFETY_REVIEW_REASON_REQUIRED:
+    "Hãy ghi lý do Admin xác nhận kết quả Safety có cảnh báo hoặc cần xem xét.",
+  RIGHTS_EVIDENCE_REQUIRED:
+    "Chưa có hồ sơ bằng chứng quyền sử dụng đầy đủ cho sách hoặc trang này. Hãy hoàn tất rà soát quyền sử dụng trước khi tiếp tục.",
+  RIGHTS_CONCERN_BLOCKED:
+    "Sách hoặc trang đang bị gắn cờ nghi ngại bản quyền / quyền sử dụng nên không thể xác minh hoặc phê duyệt.",
+  RIGHTS_EVIDENCE_STALE:
+    "Nội dung sách đã thay đổi sau lần rà soát quyền sử dụng trước đó; cần cập nhật hồ sơ quyền sử dụng.",
+  RIGHTS_VERSION_MISMATCH:
+    "Phiên bản hồ sơ quyền sử dụng đã thay đổi; hãy tải lại trang trước khi xác minh.",
+  RIGHTS_EVIDENCE_INCOMPLETE:
+    "Cần nhập đầy đủ nguồn tài liệu, cơ sở sử dụng và đường dẫn/mã bằng chứng trước khi đánh dấu Đã rà soát quyền sử dụng.",
+  RIGHTS_CONCERN_NOTE_REQUIRED:
+    "Cần ghi rõ lý do/mô tả nghi ngại bản quyền khi gắn cờ nghi ngại.",
+  RIGHTS_PAGE_ID_REQUIRED:
+    "Cần chỉ định trang khi lưu bằng chứng quyền ở phạm vi trang.",
+  RIGHTS_BOOK_SCOPE_PAGE_FORBIDDEN:
+    "Hồ sơ quyền phạm vi sách không được gắn mã trang cụ thể.",
   ...readingManagementMessages,
   INSUFFICIENT_CONTENT:
     "Cuốn sách này chưa có đủ câu đã xác minh cho lượt chơi. Bé có thể chọn sách hoặc độ khó khác nhé.",
@@ -351,10 +415,19 @@ async function safeBackendMessage(response: Response): Promise<string> {
     if (
       typeof payload === "object" &&
       payload !== null &&
-      "detail" in payload &&
-      typeof payload.detail === "string"
+      "detail" in payload
     ) {
-      return safeBackendMessages[payload.detail] ?? safeMessage;
+      if (typeof payload.detail === "string") {
+        return safeBackendMessages[payload.detail] ?? safeMessage;
+      }
+      if (
+        typeof payload.detail === "object" &&
+        payload.detail !== null &&
+        "code" in payload.detail &&
+        typeof payload.detail.code === "string"
+      ) {
+        return safeBackendMessages[payload.detail.code] ?? safeMessage;
+      }
     }
   } catch {
     // A non-JSON error body must not be reflected to the browser.
