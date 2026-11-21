@@ -47,6 +47,7 @@ function wav(): Buffer {
 interface AutopilotHarness {
   completeCalls: string[];
   presenceSettingsUpdates: boolean[];
+  ttsRequests: string[];
   currentPageIndex: () => number;
 }
 
@@ -67,6 +68,7 @@ async function installAutopilotSession(
   let presenceEnabled = false;
   const completeCalls: string[] = [];
   const presenceSettingsUpdates: boolean[] = [];
+  const ttsRequests: string[] = [];
 
   const corsHeaders = {
     "access-control-allow-origin": "http://127.0.0.1:3106",
@@ -268,6 +270,12 @@ async function installAutopilotSession(
       });
     }
     if (path === "/voice/text-to-speech") {
+      try {
+        const body = route.request().postDataJSON() as { text?: string } | null;
+        if (body?.text) ttsRequests.push(body.text);
+      } catch {
+        // ignore non-JSON body
+      }
       return route.fulfill({
         headers: corsHeaders,
         contentType: "audio/wav",
@@ -387,7 +395,8 @@ async function installAutopilotSession(
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         const dest = ctx.createMediaStreamDestination();
-        gain.gain.value = 0.001;
+        osc.frequency.value = 240;
+        gain.gain.value = 0.12;
         osc.connect(gain);
         gain.connect(dest);
         osc.start();
@@ -427,6 +436,7 @@ async function installAutopilotSession(
   return {
     completeCalls,
     presenceSettingsUpdates,
+    ttsRequests,
     currentPageIndex: () => currentIndex,
   };
 }
@@ -482,6 +492,14 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
     expect(harness.completeCalls).toEqual([PAGE_1_ID]);
 
     // Mic automatically reopens on page 2
+    await expect(
+      page.getByRole("button", { name: "An", exact: true }),
+    ).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(
+      page.getByRole("button", { name: "Dừng nhận diện giọng nói" }),
+    ).toBeVisible({ timeout: 10_000 });
     await expect
       .poll(
         () =>
@@ -524,7 +542,9 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
     page,
   }, testInfo) => {
     mkdirSync(EVIDENCE_DIR, { recursive: true });
-    await installAutopilotSession(page, { initialState: "reading" });
+    const harness = await installAutopilotSession(page, {
+      initialState: "reading",
+    });
 
     await page
       .getByRole("button", { name: "Bé đọc với nhận diện giọng nói" })
@@ -562,18 +582,22 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
       ).__autopilotSpeech.say("đọc mẫu giúp con"),
     );
 
-    // App speaks sample for "nhỏ" and reopens recognition
+    // App speaks sample for "nhỏ" (via device speechSynthesis or /voice/text-to-speech)
+    // and reopens recognition automatically.
     await expect
-      .poll(() =>
-        page.evaluate(() =>
+      .poll(async () => {
+        const spoken = await page.evaluate(() =>
           (
             window as unknown as {
               __autopilotSpeech: { spoken: () => string[] };
             }
           ).__autopilotSpeech.spoken(),
-        ),
-      )
-      .toContain("nhỏ. nhỏ.");
+        );
+        return [...spoken, ...harness.ttsRequests].some((t) =>
+          t.toLowerCase().includes("nhỏ"),
+        );
+      })
+      .toBe(true);
 
     await expect
       .poll(() =>
@@ -705,18 +729,18 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
       name: /Nhắc ba mẹ qua email/i,
     });
 
-    await expect(assistSwitch).toHaveAttribute("aria-checked", "true");
-    await expect(autoAdvanceSwitch).toHaveAttribute("aria-checked", "true");
-    await expect(emailSwitch).toHaveAttribute("aria-checked", "false");
+    await expect(assistSwitch).toBeChecked();
+    await expect(autoAdvanceSwitch).toBeChecked();
+    await expect(emailSwitch).not.toBeChecked();
 
     // Toggle autoAdvance OFF (independent of assist)
     await autoAdvanceSwitch.click();
-    await expect(autoAdvanceSwitch).toHaveAttribute("aria-checked", "false");
-    await expect(assistSwitch).toHaveAttribute("aria-checked", "true");
+    await expect(autoAdvanceSwitch).not.toBeChecked();
+    await expect(assistSwitch).toBeChecked();
 
     // Opt-in parent email reminder -> saves to backend
     await emailSwitch.click();
-    await expect(emailSwitch).toHaveAttribute("aria-checked", "true");
+    await expect(emailSwitch).toBeChecked();
     expect(harness.presenceSettingsUpdates).toEqual([true]);
 
     await page.screenshot({
@@ -729,7 +753,7 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
 
     // Opt-out immediately -> saves false to backend
     await emailSwitch.click();
-    await expect(emailSwitch).toHaveAttribute("aria-checked", "false");
+    await expect(emailSwitch).not.toBeChecked();
     expect(harness.presenceSettingsUpdates).toEqual([true, false]);
   });
 });
