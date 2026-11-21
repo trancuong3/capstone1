@@ -15,7 +15,12 @@ from scripts.ocr_vietnamese_artifact_ab import (
     _base_letters, _core, _word_surface_sequence, score_pair,
 )
 
-RULES = ("line_majority_2", "vietocr_line_priority")
+RULES = (
+    "line_majority_2",
+    "vietocr_line_priority",
+    "paddleocr_line_priority",
+    "paddle_line_vietocr_crop_agreement",
+)
 ENGINES = ("paddleocr", "vietocr", "tesseract")
 
 
@@ -78,6 +83,29 @@ def choose_word(word: dict[str, object], rule: str) -> str | None:
     choice: str | None = None
     if rule == "vietocr_line_priority":
         choice = readings.get("vietocr")
+    elif rule == "paddleocr_line_priority":
+        # High-risk A/B CONTROL: measures both gains and regressions from
+        # blindly trusting the PaddleOCR line instead of the chosen token.
+        choice = readings.get("paddleocr")
+    elif rule == "paddle_line_vietocr_crop_agreement":
+        # Two distinct recognizers must support the SAME reading. A repeated
+        # Paddle crop does NOT count as another independent engine.
+        evidence = word.get("ocr_evidence")
+        crop = evidence.get("crop_evidence") if isinstance(evidence, dict) else None
+        statuses = evidence.get("engine_statuses") if isinstance(evidence, dict) else None
+        paddle = readings.get("paddleocr")
+        viet_crop = _core(crop.get("vietocr_candidate")) if isinstance(crop, dict) else ""
+        if (
+            paddle
+            and isinstance(crop, dict)
+            and crop.get("status") == "completed"
+            and crop.get("vietocr_error") is None
+            and isinstance(statuses, dict)
+            and statuses.get("vietocr") == "success"
+            and viet_crop
+            and viet_crop.casefold() == paddle.casefold()
+        ):
+            choice = paddle
     else:
         counts = Counter(value.casefold() for value in readings.values())
         eligible = [
@@ -355,7 +383,7 @@ def summarize_cases(cases: list[dict[str, object]]) -> dict[str, object]:
         "evidence_source_audit": dict(sorted(sources.items())),
         "tone_error_source_audit": dict(sorted(tone_errors.items())),
         "note": (
-            "Both policies read ONLY OCR evidence when proposing; reference text "
+            "All candidate policies read ONLY OCR evidence when proposing; reference text "
             "is used afterward to score. Corrected/regressed token flips are "
             "positional counts ONLY when reference and OCR token lengths match; "
             "all other flips are reported separately. No production changes."
