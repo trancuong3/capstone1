@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
+import { ReadingAutomationSettings } from "@/components/reading/reading-automation-settings";
 import { useSpeechPreferences } from "@/hooks/use-speech-preferences";
 import {
   createVoiceStudioService,
@@ -355,6 +356,8 @@ export function ReadingVoiceSettings({
               </div>
             )}
           </section>
+
+          <ReadingAutomationSettings />
 
           <footer className="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-border bg-cream pt-3">
             <Button

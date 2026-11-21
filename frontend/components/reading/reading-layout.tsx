@@ -80,6 +80,7 @@ interface ReadingLayoutProps {
   skippedWordIds?: Set<string>;
   repeatedWordIds?: Set<string>;
   hesitationWordIds?: Set<string>;
+  assistedWordIds?: ReadonlySet<string>;
 }
 
 export function ReadingLayout({
@@ -133,6 +134,7 @@ export function ReadingLayout({
   skippedWordIds,
   repeatedWordIds,
   hesitationWordIds,
+  assistedWordIds,
   previewSnapshot,
 }: ReadingLayoutProps) {
   return (
@@ -206,6 +208,7 @@ export function ReadingLayout({
           skippedWordIds={skippedWordIds}
           repeatedWordIds={repeatedWordIds}
           hesitationWordIds={hesitationWordIds}
+          assistedWordIds={assistedWordIds}
           comparisonResult={comparisonResult}
         />
       </section>

@@ -620,4 +620,42 @@ describe("Phase 3 TTS lifecycle", () => {
     act(() => a3.finish());
     await p4;
   });
+
+  it("applies per-utterance speedScale for slower help without mutating saved preferences and preserves Vietnamese tones, questions, numbers, and punctuation", async () => {
+    setSpeechPreferences({ voiceId: "v-child", speed: 1.0 });
+    const { result } = renderHook(() => useSpeechPlayer());
+
+    // 1. Slower single-word model uses scaled speed on browser voice and keeps saved speed at 1.0
+    const slowWord = result.current.play("khủng", {
+      wordSample: true,
+      speedScale: 0.8,
+    });
+    await waitFor(() => expect(utterances).toHaveLength(1));
+    expect(utterances[0].text).toBe("khủng. khủng.");
+    expect(utterances[0].rate).toBeLessThan(0.7); // scaled below WORD_SAMPLE_MAX_RATE (0.7)
+    act(() =>
+      utterances[0].onend?.({ elapsedTime: 0.9 } as SpeechSynthesisEvent),
+    );
+    await slowWord;
+
+    // 2. Next phrase with proper nouns, questions, numbers, and dense punctuation uses full saved speed (1.0)
+    const complex =
+      "An, Minh đi đâu thế?! Có 3 quả táo, 10 bông hoa — đẹp quá…";
+    const phrase = result.current.play(complex, { speedScale: 1 });
+    const audio = await audioAt(0);
+    expect(speech.synthesize).toHaveBeenCalledWith(
+      complex,
+      expect.objectContaining({ voiceId: "v-child", speed: 1.0 }),
+    );
+    // 3. Starting a new sample immediately aborts the active playback (no overlap / late audio)
+    const replacement = result.current.play("mạ", { wordSample: true });
+    await expect(phrase).rejects.toMatchObject({ name: "AbortError" });
+    expect(audio.pause).toHaveBeenCalled();
+    await waitFor(() => expect(utterances).toHaveLength(2));
+    expect(utterances[1].text).toBe("mạ. mạ.");
+    act(() =>
+      utterances[1].onend?.({ elapsedTime: 0.5 } as SpeechSynthesisEvent),
+    );
+    await replacement;
+  });
 });

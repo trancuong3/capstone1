@@ -38,6 +38,10 @@ export interface RealtimeAlignmentSnapshot {
   hesitations: RealtimeHesitation[];
   spokenWords: string[];
   previewMatchedWordIds: Set<string>;
+  /** Words first read wrongly/skipped, then fixed by the child in the same capture. */
+  correctedWordIds?: Set<string>;
+  /** Final segments ignored because they did not follow the book (TV, other speakers). */
+  rejectedSegmentCount?: number;
 }
 
 export interface RealtimeSpokenWord {
@@ -52,6 +56,11 @@ interface IndexedBookWord {
   text: string;
   normalizedText: string;
 }
+
+/** How far behind the cursor a re-read may start (restart / self-correction). */
+const REWIND_WINDOW = 8;
+/** How far ahead two consecutive spoken words may re-anchor (line jump). */
+const REANCHOR_WINDOW = 30;
 
 /**
  * Chuẩn hóa từ để so sánh.
@@ -71,13 +80,39 @@ interface IndexedBookWord {
  * "da" và "đa" => khác nhau
  */
 export function normalizeRealtimeWord(text: string): string {
-  return normalizeVietnameseWord(text);
+  return canonicalNumberToken(normalizeVietnameseWord(text));
 }
+
+const NUMBER_WORDS = [
+  "không",
+  "một",
+  "hai",
+  "ba",
+  "bốn",
+  "năm",
+  "sáu",
+  "bảy",
+  "tám",
+  "chín",
+  "mười",
+] as const;
+
+/**
+ * Sách in "2" còn bộ nhận dạng trả về "hai" (và ngược lại). Chỉ quy đổi các
+ * số một tiếng 0–10 để cả hai phía so khớp cùng một dạng; số nhiều tiếng
+ * (ví dụ 15 → "mười lăm") chưa được hỗ trợ.
+ */
+function canonicalNumberToken(token: string): string {
+  if (!/^\d{1,2}$/u.test(token)) return token;
+  const value = Number(token);
+  return value <= 10 ? NUMBER_WORDS[value] : token;
+}
+
 /**
  * Tách transcript thành các từ.
  */
 export function tokenizeRealtimeText(text: string): string[] {
-  return tokenizeVietnameseText(text);
+  return tokenizeVietnameseText(text).map(canonicalNumberToken);
 }
 
 /** Timestamps must correspond one-to-one to the tokens actually scored. */
@@ -108,6 +143,16 @@ export class RealtimeAlignmentEngine {
   private readonly bookWords: IndexedBookWord[];
 
   private uncertain = false;
+  /** Set by finish(): later re-reads can no longer overwrite a settled result. */
+  private finished = false;
+  /**
+   * While the child re-reads words behind the cursor (restart / self-fix) the
+   * next book index expected in that replay. Replayed words are not counted
+   * twice and never move the cursor.
+   */
+  private replayPos: number | null = null;
+  private readonly correctedWordIds = new Set<string>();
+  private rejectedSegments = 0;
   private readonly finalSegmentIds = new Set<string>();
   private currentBookIndex = 0;
   private spokenWords: string[] = [];
@@ -169,6 +214,13 @@ export class RealtimeAlignmentEngine {
     if (segmentId) this.finalSegmentIds.add(segmentId);
     const tokens = tokenizeRealtimeText(text);
 
+    // Speech that does not follow the book (TV, another speaker) must neither
+    // colour words nor penalise the child.
+    if (this.isOffTopic(tokens)) {
+      this.rejectedSegments += 1;
+      return this.getSnapshot();
+    }
+
     for (const token of tokens) {
       this.processToken(token);
     }
@@ -176,11 +228,94 @@ export class RealtimeAlignmentEngine {
     return this.getSnapshot();
   }
 
+  /**
+   * Segments of three or more words are scored only when at least half of
+   * their words follow the book from the current position (ahead, repeated,
+   * re-read or re-anchored). One- and two-word segments cannot be judged.
+   */
+  /** True when a final segment would be ignored as not following the book. */
+  isOffTopicText(text: string): boolean {
+    return this.isOffTopic(tokenizeRealtimeText(text));
+  }
+
+  private isOffTopic(tokens: readonly string[]): boolean {
+    if (tokens.length < 3) return false;
+    return this.alignedTokenCount(tokens) / tokens.length < 0.5;
+  }
+
+  private alignedTokenCount(tokens: readonly string[]): number {
+    let cursor = this.currentBookIndex;
+    let matched = 0;
+    for (let index = 0; index < tokens.length; index += 1) {
+      const token = tokens[index];
+      if (cursor < this.bookWords.length) {
+        if (this.bookWords[cursor].normalizedText === token) {
+          matched += 1;
+          cursor += 1;
+          continue;
+        }
+      }
+      if (cursor > 0 && this.bookWords[cursor - 1]?.normalizedText === token) {
+        matched += 1;
+        continue;
+      }
+      const ahead = this.findAheadFrom(cursor, token);
+      if (ahead !== -1) {
+        matched += 1;
+        cursor = ahead + 1;
+        continue;
+      }
+      if (this.findBehindFrom(cursor, token) !== -1) {
+        matched += 1;
+        continue;
+      }
+      if (index + 1 < tokens.length) {
+        const anchor = this.findReanchor(cursor, token, tokens[index + 1]);
+        if (anchor !== -1) {
+          matched += 2;
+          index += 1;
+          cursor = anchor + 2;
+        }
+      }
+    }
+    return matched;
+  }
+
+  private findBehindFrom(cursor: number, token: string): number {
+    const start = Math.max(0, cursor - REWIND_WINDOW);
+    // Nearest first. cursor-1 is the "repeated word" case, handled elsewhere.
+    for (
+      let index = Math.min(cursor, this.bookWords.length) - 2;
+      index >= start;
+      index -= 1
+    ) {
+      if (this.bookWords[index].normalizedText === token) return index;
+    }
+    return -1;
+  }
+
+  /** Two consecutive spoken words found together further ahead (line jump). */
+  private findReanchor(cursor: number, first: string, second: string): number {
+    const last = Math.min(cursor + REANCHOR_WINDOW, this.bookWords.length - 2);
+    for (let index = cursor + 1; index <= last; index += 1) {
+      if (
+        this.bookWords[index].normalizedText === first &&
+        this.bookWords[index + 1].normalizedText === second
+      ) {
+        return index;
+      }
+    }
+    return -1;
+  }
+
   previewAlignment(text: string): RealtimeAlignmentSnapshot {
     const tokens = tokenizeRealtimeText(text);
 
     // Lấy snapshot hiện tại nhưng không thay đổi trạng thái chính thức.
     const snapshot = this.getSnapshot();
+
+    // Interim speech that does not follow the book must not move the cursor.
+    if (this.isOffTopic(tokens)) return snapshot;
 
     const statusByWordId = new Map(snapshot.statusByWordId);
     const repeatedWordIds = new Set(snapshot.repeatedWordIds);
@@ -337,6 +472,22 @@ export class RealtimeAlignmentEngine {
     }
 
     /*
+     * Re-reading words behind the cursor (restart of the sentence or going
+     * back to fix a word) is replayed without counting anything twice.
+     */
+    if (this.replayPos !== null) {
+      const replayIndex = this.replayPos;
+      if (
+        replayIndex < this.currentBookIndex &&
+        this.bookWords[replayIndex].normalizedText === token
+      ) {
+        this.applyReplayMatch(replayIndex);
+        return;
+      }
+      this.replayPos = null;
+    }
+
+    /*
      * Nếu đang có một từ chưa khớp:
      * - Từ mới khớp vị trí hiện tại: bỏ từ pending (có thể là nhiễu
      *   hoặc lỗi nhận dạng), không làm lệch con trỏ.
@@ -378,6 +529,22 @@ export class RealtimeAlignmentEngine {
         return;
       }
 
+      // Two consecutive words that only fit together further ahead: the child
+      // jumped over a line. Skip what was not read and follow the new position.
+      const anchor = this.findReanchor(
+        this.currentBookIndex,
+        pending.token,
+        token,
+      );
+      if (anchor !== -1) {
+        this.jumpTo(anchor, pending.spokenIndex, spokenIndex);
+        return;
+      }
+
+      // The child went back to a word behind the cursor: the pending word was
+      // a self-corrected slip, not a confirmed error.
+      if (this.tryStartReplay(token)) return;
+
       // Hai từ liên tiếp đều không khớp: xác nhận từ trước là đọc sai.
       this.setWordStatus(this.currentBookIndex, "SUBSTITUTE");
       this.spokenToBookIndex.set(pending.spokenIndex, this.currentBookIndex);
@@ -394,6 +561,8 @@ export class RealtimeAlignmentEngine {
     }
 
     if (this.tryMarkRepeatedWord(token, spokenIndex)) return;
+
+    if (this.tryStartReplay(token)) return;
 
     // Từ xuất hiện ở phía trước: chỉ xác nhận bỏ sót khi đã có từ
     // tiếp theo làm bằng chứng, tránh kết luận DELETE quá sớm.
@@ -440,6 +609,8 @@ export class RealtimeAlignmentEngine {
       return;
     }
 
+    if (this.tryStartReplay(token)) return;
+
     const matchedIndex = this.findAhead(token);
 
     if (matchedIndex !== -1) {
@@ -458,6 +629,44 @@ export class RealtimeAlignmentEngine {
     }
 
     this.pendingToken = { token, spokenIndex };
+  }
+
+  /**
+   * The child re-reads a word behind the cursor that is not also a plausible
+   * skip-ahead. Wrong/skipped words they fix are upgraded; nothing is counted
+   * twice and the cursor stays where it was.
+   */
+  private tryStartReplay(token: string): boolean {
+    if (this.finished) return false;
+    if (this.findAhead(token) !== -1) return false;
+    const behind = this.findBehindFrom(this.currentBookIndex, token);
+    if (behind === -1) return false;
+    this.pendingToken = null;
+    this.applyReplayMatch(behind);
+    return true;
+  }
+
+  private applyReplayMatch(bookIndex: number): void {
+    const word = this.bookWords[bookIndex];
+    if (!word) return;
+    const status = this.statusByWordId.get(word.wordId)?.status;
+    if (!this.finished && (status === "SUBSTITUTE" || status === "DELETE")) {
+      this.setWordStatus(bookIndex, "MATCH");
+      this.correctedWordIds.add(word.wordId);
+    }
+    this.replayPos =
+      bookIndex + 1 < this.currentBookIndex ? bookIndex + 1 : null;
+  }
+
+  private jumpTo(anchor: number, firstSpoken: number, secondSpoken: number) {
+    for (let index = this.currentBookIndex; index < anchor; index += 1) {
+      this.setWordStatus(index, "DELETE");
+    }
+    this.setWordStatus(anchor, "MATCH");
+    this.setWordStatus(anchor + 1, "MATCH");
+    this.spokenToBookIndex.set(firstSpoken, anchor);
+    this.spokenToBookIndex.set(secondSpoken, anchor + 1);
+    this.currentBookIndex = anchor + 2;
   }
 
   private processConfirmedMatch(spokenIndex: number, bookIndex: number): void {
@@ -596,10 +805,27 @@ export class RealtimeAlignmentEngine {
   }
 
   /**
+   * The app gave up on a word after the allowed attempts (and encouraged the
+   * child): it counts as skipped — never green — and the cursor moves past it.
+   */
+  giveUpWord(wordId: string): RealtimeAlignmentSnapshot {
+    const index = this.bookWords.findIndex((word) => word.wordId === wordId);
+    if (index === -1) return this.getSnapshot();
+    this.pendingToken = null;
+    this.replayPos = null;
+    const from = index >= this.currentBookIndex ? this.currentBookIndex : index;
+    for (let at = from; at <= index; at += 1) this.setWordStatus(at, "DELETE");
+    this.currentBookIndex = Math.max(this.currentBookIndex, index + 1);
+    return this.getSnapshot();
+  }
+
+  /**
    * Gọi khi kết thúc đọc một trang.
    * Những từ còn lại phía sau con trỏ được đánh dấu DELETE.
    */
   finish(): RealtimeAlignmentSnapshot {
+    this.finished = true;
+    this.replayPos = null;
     if (this.uncertain) return this.getSnapshot();
     this.flushPendingToken();
 
@@ -617,6 +843,10 @@ export class RealtimeAlignmentEngine {
   reset(): RealtimeAlignmentSnapshot {
     this.currentBookIndex = 0;
     this.uncertain = false;
+    this.finished = false;
+    this.replayPos = null;
+    this.correctedWordIds.clear();
+    this.rejectedSegments = 0;
     this.finalSegmentIds.clear();
     this.spokenWords = [];
     this.pendingToken = null;
@@ -645,6 +875,8 @@ export class RealtimeAlignmentEngine {
       hesitations: [...this.hesitations],
       spokenWords: [...this.spokenWords],
       previewMatchedWordIds: new Set(),
+      correctedWordIds: new Set(this.correctedWordIds),
+      rejectedSegmentCount: this.rejectedSegments,
     };
   }
 }

@@ -9,6 +9,7 @@ import { withRequestDeadline } from "@/lib/api/request-deadline";
 import { prepareWordSampleAudio } from "@/lib/reading/short-word-audio";
 import { normalizeVietnameseWord } from "@/lib/reading/vietnamese-text";
 import {
+  clampSpeed,
   getSpeechPreferences,
   type SpeechPreferences,
 } from "@/lib/reading/speech-preferences";
@@ -36,6 +37,8 @@ export interface SpeechPlayOptions {
   wordSample?: boolean;
   /** Prefer a Vietnamese device voice for spoken guidance. */
   coaching?: boolean;
+  /** Relative speed for this utterance only (< 1 = slower, clearer help). */
+  speedScale?: number;
   onPlay?: (duration: number) => void;
   onTimeUpdate?: (currentTime: number, duration: number) => void;
   /** Browser boundaries only; audio without timing never guesses word indexes. */
@@ -53,6 +56,8 @@ export interface WordTimedPlayOptions {
 interface Operation {
   readonly controller: AbortController;
   readonly preferences: SpeechPreferences;
+  /** Allows slower-than-0.7 device speech for step-2 clearer word models. */
+  readonly browserRate: number;
   paused: boolean;
   started: boolean;
   resumeWait?: () => void;
@@ -206,15 +211,22 @@ export class TtsPlayback {
   private async run(
     action: (operation: Operation) => Promise<void>,
     speedLimit = Infinity,
+    speedScale = 1,
   ): Promise<void> {
     this.stop();
     const preferences = getSpeechPreferences();
+    const limited = Math.min(preferences.speed, speedLimit);
+    const scaled = speedScale === 1 ? limited : limited * speedScale;
     const operation: Operation = {
       controller: new AbortController(),
       preferences: {
         ...preferences,
-        speed: Math.min(preferences.speed, speedLimit),
+        speed: speedScale === 1 ? limited : clampSpeed(scaled),
       },
+      browserRate:
+        speedScale === 1
+          ? limited
+          : Number(Math.min(1.2, Math.max(0.5, scaled)).toFixed(2)),
       paused: false,
       started: false,
     };
@@ -290,7 +302,7 @@ export class TtsPlayback {
               onStart,
               undefined,
               onTime,
-              operation.preferences.speed,
+              operation.browserRate,
             );
             continue;
           }
@@ -402,6 +414,7 @@ export class TtsPlayback {
         : options.coaching
           ? 0.85
           : undefined,
+      options.speedScale,
     );
 
   playWithWordTimings = (
@@ -725,12 +738,12 @@ export class TtsPlayback {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "vi-VN";
     utterance.voice = voice;
-    utterance.rate = operation.preferences.speed;
+    utterance.rate = operation.browserRate;
     utterance.pitch = 1;
     utterance.volume = 1;
     const estimate = Math.max(
       0.5,
-      (text.match(/\S+/gu)?.length ?? 0) / (2.25 * operation.preferences.speed),
+      (text.match(/\S+/gu)?.length ?? 0) / (2.25 * operation.browserRate),
     );
     return new Promise<number>((resolve, reject) => {
       let settled = false;
