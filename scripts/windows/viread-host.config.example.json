@@ -2,7 +2,7 @@
   "lanHost": "192.168.1.4",
   "httpsPort": 8443,
   "frontendPort": 3001,
-  "backendPort": 8000,
+  "backendPort": 8001,
   "frontendMode": "production",
   "apiProxyPrefix": "/_viread_api",
   "runtimeDir": "F:\\c1\\viread-host-runtime",
