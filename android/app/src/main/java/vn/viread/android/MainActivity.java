@@ -105,7 +105,7 @@ public final class MainActivity extends Activity {
 
             @Override
             public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
-                handler.cancel(); // Never disable TLS verification.
+                handler.cancel(); // Never disable TLS verification (navigation.shouldProceedOnSslError() == false).
                 lastFailedUrl = error != null ? error.getUrl() : BuildConfig.FRONTEND_URL;
                 showErrorOverlay(getString(R.string.tls_error_message));
             }
@@ -160,16 +160,10 @@ public final class MainActivity extends Activity {
                 pendingFiles = callback;
                 Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
                 intent.addCategory(Intent.CATEGORY_OPENABLE);
-                intent.setType("*/*");
-                String[] types = params.getAcceptTypes();
-                List<String> validTypes = new ArrayList<>();
-                for (String type : types) {
-                    if (type != null && !type.trim().isEmpty() && type.contains("/")) {
-                        validTypes.add(type.trim());
-                    }
-                }
-                if (validTypes.size() == 1) intent.setType(validTypes.get(0));
-                else if (!validTypes.isEmpty()) {
+                List<String> validTypes = TrustedNavigation.normalizeAcceptMimeTypes(
+                        params.getAcceptTypes());
+                intent.setType(TrustedNavigation.resolveIntentBaseMimeType(validTypes));
+                if (validTypes.size() > 1) {
                     intent.putExtra(Intent.EXTRA_MIME_TYPES, validTypes.toArray(new String[0]));
                 }
                 intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,

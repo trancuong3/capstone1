@@ -1,5 +1,7 @@
 package vn.viread.android;
 
+import java.util.Arrays;
+import java.util.List;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
@@ -87,5 +89,29 @@ public final class TrustedNavigationTest {
         assertFalse(policy.isTrusted(null));
         assertFalse(policy.isTrusted("https://["));
         assertFalse(policy.shouldOpenExternally(null));
+    }
+
+    @Test public void sslCertificateErrorsAreNeverBypassedInAnyMode() {
+        TrustedNavigation prodPolicy = new TrustedNavigation("https://viread.example.com");
+        TrustedNavigation lanPolicy = new TrustedNavigation("https://192.168.1.4:8443", true);
+        assertFalse(prodPolicy.shouldProceedOnSslError());
+        assertFalse(lanPolicy.shouldProceedOnSslError());
+    }
+
+    @Test public void normalizesCommaJoinedWebViewFileChooserAcceptMimeTypes() {
+        List<String> parsed = TrustedNavigation.normalizeAcceptMimeTypes(
+                new String[]{"image/jpeg, image/png, image/webp", ".jpg", "bad token", null});
+        assertEquals(Arrays.asList("image/jpeg", "image/png", "image/webp"), parsed);
+        assertEquals("image/*", TrustedNavigation.resolveIntentBaseMimeType(parsed));
+
+        List<String> single = TrustedNavigation.normalizeAcceptMimeTypes(new String[]{"image/png"});
+        assertEquals(Arrays.asList("image/png"), single);
+        assertEquals("image/png", TrustedNavigation.resolveIntentBaseMimeType(single));
+
+        List<String> mixed = TrustedNavigation.normalizeAcceptMimeTypes(
+                new String[]{"image/jpeg", "application/pdf"});
+        assertEquals("*/*", TrustedNavigation.resolveIntentBaseMimeType(mixed));
+        assertEquals("*/*", TrustedNavigation.resolveIntentBaseMimeType(
+                TrustedNavigation.normalizeAcceptMimeTypes(null)));
     }
 }

@@ -12,8 +12,8 @@
 |---|---|
 | Tên tệp trong gói bàn giao | `F:\c1\viread-android-delivery\viread-lan-acceptance-debug.apk` |
 | Tệp nguồn build | `F:\c1\capstone1-android-lan\android\app\build\outputs\apk\debug\app-debug.apk` |
-| Dung lượng | `19,989 bytes` (~`0.02 MB`) |
-| **SHA-256** | `dd73ef1ce9d7ff52f10e3903350149015619a294a8d854e023f71a4e37515171` |
+| Dung lượng | `31,055 bytes` (~`0.03 MB`) |
+| **SHA-256** | `8856b71a72ed0aba088f4e3cd98aecf0e028871e84c989052eacde45d32ee361` |
 | Package ID | `vn.viread.android` |
 | `versionCode` / `versionName` | `1` / `0.1.0` |
 | `minSdk` / `targetSdk` | `24` / `35` |
@@ -61,7 +61,7 @@ Kết quả lần chạy gần nhất (`2026-11-21 20:54 ICT`):
 
 | # | Hạng mục kiểm thử trên điện thoại thật | Trạng thái | Ghi chú / Bằng chứng cần điền |
 |---|---|---|---|
-| 1 | Cài sạch đúng APK có SHA-256 `dd73ef1c...5171` (ADB hoặc copy file cài trực tiếp) | **BLOCKED** | Chưa cắm điện thoại |
+| 1 | Cài sạch đúng APK có SHA-256 `8856b71a...e361` (ADB hoặc copy file cài trực tiếp) | **BLOCKED** | Chưa cắm điện thoại |
 | 2 | Mở app `ViRead`, tải được `https://192.168.1.4:8443/login` không báo lỗi chứng chỉ TLS, logcat không có `onReceivedSslError`/`ERR_CLEARTEXT` | **BLOCKED** | Chưa cắm điện thoại |
 | 3 | Đăng nhập bằng tài khoản nghiệm thu Parent A (xem `F:\c1\viread-host-runtime\acceptance-accounts.json`) | **BLOCKED** | Chưa cắm điện thoại |
 | 4 | Chọn hồ sơ trẻ `Bé Minh Nghiệm Thu` → bấm **Quét sách** | **BLOCKED** | Chưa cắm điện thoại |

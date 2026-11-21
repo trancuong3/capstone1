@@ -72,7 +72,7 @@ https://192.168.1.4:8443   (Node.js HTTPS Reverse Proxy — cổng duy nhất m�
 | M5 | Cài bộ công cụ Android cô lập tại `F:\c1\tools` (JDK 17, Gradle 8.11.1, Android SDK 35, platform-tools, build-tools 35.0.0) | **PASS** | Xác minh SHA-256 nguồn upstream; không ảnh hưởng môi trường hệ thống khác. |
 | M6 | Cấu hình Android LAN Acceptance opt-in (`verify_frontend.py`, `TrustedNavigation.java`, `MainActivity.java`, `network_security_config.xml`, `build.gradle`, `build-android.ps1`, `test-device.ps1`) + giữ nguyên cổng phát hành HTTPS công khai 443 | **PASS** | `test_verify_frontend.py` **`14/14 PASS`**; Gradle `:app:testDebugUnitTest :app:lintDebug` **BUILD SUCCESSFUL**; cổng chặn ngược `assembleRelease` với `VIREAD_LAN_MODE=1` **FAIL CLOSED** (`preReleaseBuild FAILED: LAN acceptance mode is strictly forbidden for release builds`). |
 | M7 | Toàn bộ kiểm thử Frontend + Playwright E2E dữ liệu thật chạy qua `https://192.168.1.4:8443` với Supabase Auth + Windows FastAPI + OCR cục bộ thật | **PASS** | `format:check` PASS, `lint` PASS, `typecheck` PASS, Vitest **`143/143` files (`2217/2217` tests)** PASS; Real-LAN E2E (`real-lan-ocr.pw.ts`) **`1/1 PASS` (52.5s)** — chi tiết tại `docs/android/E2E_REAL_LAN_PROOF.json`. |
-| M8 | Build & ký APK nghiệm thu LAN đối chiếu host live, kiểm toán bảo mật APK, đóng gói thư mục bàn giao local (`F:\c1\viread-android-delivery\`) + hướng dẫn tiếng Việt | **PASS** | `apksigner verify` **PASS** (v2); SHA-256 `dd73ef1ce9d7ff52f10e3903350149015619a294a8d854e023f71a4e37515171`; `APK_SECURITY_AUDIT=PASS` (7 entries, 0 secret/private key). |
+| M8 | Build & ký APK nghiệm thu LAN đối chiếu host live, kiểm toán bảo mật APK, đóng gói thư mục bàn giao local (`F:\c1\viread-android-delivery\`) + hướng dẫn tiếng Việt | **PASS** | `apksigner verify` **PASS** (v2); SHA-256 `8856b71a72ed0aba088f4e3cd98aecf0e028871e84c989052eacde45d32ee361` (`31,055 bytes`); `APK_SECURITY_AUDIT=PASS` (0 secret/private key); tách MIME `onShowFileChooser` và CI parity `.github/workflows/android-apk.yml` đều PASS. |
 | M9 | Nghiệm thu thực tế trên điện thoại Android thật (`test-device.ps1` + `docs/android/DEVICE_ACCEPTANCE.md`) | **BLOCKED (PENDING PHONE + ADMIN FIREWALL)** | Chưa có điện thoại Android cắm USB/ADB (`adb devices` trống) và Wi-Fi đang ở `Public`/chưa mở rule tường lửa TCP 8443 (cần UAC Administrator). Đã bàn giao đầy đủ biên bản & lệnh tự động hóa. |
 
 ---
@@ -137,7 +137,8 @@ Ngưỡng khóa trước khi chạy `holdout`: `clean_max_cer=0.03`, `photo_pert
 | Frontend Vitest Suite | `npm test` + re-run 5 CPU-contended files with `--maxWorkers=2` | `0` | **143/143 files, 2217/2217 tests PASS** |
 | Real-Data LAN HTTPS + Windows Local OCR E2E | `npx playwright test --config=playwright.real-lan.config.ts --reporter=list` | `0` | **1 passed / 0 failed / 0 skipped** (`52.5s`, `docs/android/E2E_REAL_LAN_PROOF.json`) |
 | Android Negative Release Gate (`VIREAD_LAN_MODE=1 :app:assembleRelease`) | `gradle --no-daemon :app:assembleRelease` | `1` (expected) | **VERIFIED FAIL-CLOSED** (`preReleaseBuild FAILED: LAN acceptance mode is strictly forbidden`) |
-| Android LAN Acceptance APK Build + Unit Tests + Lint + `apksigner` | `android\scripts\build-android.ps1 -FrontendUrl "https://192.168.1.4:8443" -LanMode -CaCert "F:\c1\viread-host-runtime\certs\viread-lan-ca.pem"` | `0` | **BUILD SUCCESSFUL (51 tasks)**, **`apksigner` v2 Verifies**, **`APK_SECURITY_AUDIT=PASS`** |
+| Android CI Parity Check (`.github/workflows/android-apk.yml`, public HTTPS `https://example.org`) | `python -m unittest discover -s android/scripts -p 'test_verify_frontend.py' -v` + `gradle --no-daemon :app:testDebugUnitTest :app:compileDebugJavaWithJavac :app:lintDebug` | `0` | **14 Python + 11 JUnit tests PASS, Lint 0 errors** |
+| Android LAN Acceptance APK Build + Unit Tests + Lint + `apksigner` | `android\scripts\build-android.ps1 -FrontendUrl "https://192.168.1.4:8443" -LanMode -CaCert "F:\c1\viread-host-runtime\certs\viread-lan-ca.pem"` | `0` | **BUILD SUCCESSFUL (51 tasks)**, **`apksigner` v2 Verifies**, **`APK_SECURITY_AUDIT=PASS`**, SHA-256 `8856b71a72ed0aba088f4e3cd98aecf0e028871e84c989052eacde45d32ee361` |
 | Real Android Phone ADB Gate | `android\scripts\test-device.ps1 -ApkPath ... -ExpectedLanOrigin "https://192.168.1.4:8443"` | `2` (blocked) | **BLOCKED** — `NO AUTHORIZED ANDROID DEVICE DETECTED via ADB` |
 
 ---
@@ -145,7 +146,7 @@ Ngưỡng khóa trước khi chạy `holdout`: `clean_max_cer=0.03`, `photo_pert
 ## 7. Gói bàn giao nội bộ & thao tác tối thiểu phía người dùng
 
 - **Thư mục bàn giao sạch (ngoài Git, không chứa keystore/private key/secret/token):** `F:\c1\viread-android-delivery\`
-  - `viread-lan-acceptance-debug.apk` (SHA-256: `dd73ef1ce9d7ff52f10e3903350149015619a294a8d854e023f71a4e37515171`)
+  - `viread-lan-acceptance-debug.apk` (SHA-256: `8856b71a72ed0aba088f4e3cd98aecf0e028871e84c989052eacde45d32ee361`, `31,055 bytes`)
   - `viread-lan-ca.crt` (chứng chỉ CA công khai)
   - `SHA256SUMS.txt`
   - `HUONG_DAN_CAI_DAT_VA_VAN_HANH.md`

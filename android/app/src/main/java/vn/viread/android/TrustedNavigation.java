@@ -2,7 +2,11 @@ package vn.viread.android;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * Exact-origin policy for top-level navigation and WebRTC permission requests.
@@ -72,6 +76,61 @@ public final class TrustedNavigation {
 
     public boolean isAllowCustomPort() {
         return allowCustomPort;
+    }
+
+    /**
+     * TLS certificate errors must NEVER be bypassed in either production or LAN
+     * acceptance builds. LAN builds trust only the explicitly scoped public test CA
+     * via Android's network_security_config.xml.
+     */
+    public boolean shouldProceedOnSslError() {
+        return false;
+    }
+
+    /**
+     * Normalize WebView {@code FileChooserParams.getAcceptTypes()} entries.
+     * Some Android WebView builds return comma-joined values like
+     * {@code "image/jpeg,image/png,image/webp"} as a single array element; passing
+     * that unsplit string to {@code Intent.setType()} disables photo selection.
+     */
+    public static List<String> normalizeAcceptMimeTypes(String[] rawTypes) {
+        Set<String> out = new LinkedHashSet<>();
+        if (rawTypes == null) return new ArrayList<>(out);
+        for (String entry : rawTypes) {
+            if (entry == null) continue;
+            for (String part : entry.split(",")) {
+                String token = part.trim().toLowerCase(Locale.ROOT);
+                if (token.isEmpty()) continue;
+                if (".jpg".equals(token) || ".jpeg".equals(token)) {
+                    out.add("image/jpeg");
+                } else if (".png".equals(token)) {
+                    out.add("image/png");
+                } else if (".webp".equals(token)) {
+                    out.add("image/webp");
+                } else if (token.matches("[a-z0-9.+_-]+/[a-z0-9.*+_-]+")) {
+                    out.add(token);
+                }
+            }
+        }
+        return new ArrayList<>(out);
+    }
+
+    /**
+     * Pick the safest base MIME type for Android's {@code ACTION_OPEN_DOCUMENT}
+     * picker so image pickers open directly into Photos/Gallery when all accepted
+     * types are images.
+     */
+    public static String resolveIntentBaseMimeType(List<String> normalizedTypes) {
+        if (normalizedTypes == null || normalizedTypes.isEmpty()) return "*/*";
+        if (normalizedTypes.size() == 1) return normalizedTypes.get(0);
+        boolean allImages = true;
+        for (String mime : normalizedTypes) {
+            if (mime == null || !mime.startsWith("image/")) {
+                allImages = false;
+                break;
+            }
+        }
+        return allImages ? "image/*" : "*/*";
     }
 
     private static URI parse(String url) {
