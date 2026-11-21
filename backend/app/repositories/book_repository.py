@@ -9,7 +9,6 @@ from uuid import UUID
 
 from sqlalchemy import and_, case, cast, exists, func, not_, or_, select, String
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.dialects.postgresql import aggregate_order_by
 
 from app.models import (
     AdminAiWorkflow,
@@ -18,18 +17,12 @@ from app.models import (
     BookPage,
     PageRevision,
     PageRevisionWord,
-    Profile,
-)
-from app.policies.book_approval import (
-    BOOK_APPROVAL_POLICY_VERSION,
-    SUPPORTED_BOOK_APPROVAL_POLICY_VERSIONS,
 )
 from app.policies.book_access import (
     is_catalog_book,
     is_private_book_readable_by,
     is_private_page_readable,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from app.database.role_cache import get_cached_profile_role
 
 
@@ -165,131 +158,6 @@ class CatalogRepository:
                 ),
             ).correlate(Book)
         )
-        latest_workflows = (
-            select(
-                AdminAiWorkflow.Id.label("workflow_id"),
-                AdminAiWorkflow.PageId.label("page_id"),
-                AdminAiWorkflow.CandidateHash.label("candidate_hash"),
-                AdminAiWorkflow.SafetyInputHash.label("safety_input_hash"),
-                AdminAiWorkflow.Suitability.label("suitability"),
-                AdminAiWorkflow.Status.label("workflow_status"),
-                AdminAiWorkflow.SafetyStatus.label("safety_status"),
-                AdminAiWorkflow.FinalApprovedTextHash.label("final_approved_text_hash"),
-                AdminAiWorkflow.SafetyConfirmedAt.label("safety_confirmed_at"),
-                AdminAiWorkflow.SafetyConfirmedBy.label("safety_confirmed_by"),
-                AdminAiWorkflow.OcrApprovedAt.label("ocr_approved_at"),
-                AdminAiWorkflow.OcrApprovedBy.label("ocr_approved_by"),
-                AdminAiWorkflow.Findings.label("findings"),
-                AdminAiWorkflow.SafetyMetadata.label("safety_metadata"),
-                AdminAiWorkflow.ProofreadMetadata.label("proofread_metadata"),
-                func.row_number().over(
-                    partition_by=AdminAiWorkflow.PageId,
-                    order_by=(AdminAiWorkflow.CreatedAt.desc(), AdminAiWorkflow.Id.desc()),
-                ).label("row_number"),
-            )
-            .subquery()
-        )
-        snapshot_pages = (
-            select(
-                BookPage.Id.label("page_id"),
-                BookPage.PageNumber.label("page_number"),
-                BookPage.LifecycleStatus.label("lifecycle_status"),
-                PageRevision.Id.label("revision_id"),
-                PageRevision.ContentHash.label("revision_content_hash"),
-                PageRevision.VerificationStatus.label("revision_status"),
-                PageRevision.ProcessingMeta["admin_ai_workflow"]["workflow_id"].as_string().label("revision_workflow_id"),
-                PageRevision.ProcessingMeta["admin_ai_workflow"]["candidate_hash"].as_string().label("revision_candidate_hash"),
-                PageRevision.ProcessingMeta["admin_ai_workflow"]["safety_input_hash"].as_string().label("revision_safety_input_hash"),
-                latest_workflows.c.workflow_id,
-                latest_workflows.c.candidate_hash,
-                latest_workflows.c.safety_input_hash,
-                latest_workflows.c.suitability,
-                latest_workflows.c.workflow_status,
-                latest_workflows.c.safety_status,
-                latest_workflows.c.final_approved_text_hash,
-                latest_workflows.c.safety_confirmed_at.is_not(None).label("safety_confirmed"),
-                latest_workflows.c.safety_confirmed_by.is_not(None).label("safety_confirmed_by"),
-                (
-                    latest_workflows.c.ocr_approved_at.is_not(None)
-                    & latest_workflows.c.ocr_approved_by.is_not(None)
-                ).label("ocr_approved"),
-                func.md5(
-                    cast(
-                        func.coalesce(latest_workflows.c.findings, func.jsonb_build_array()),
-                        String,
-                    )
-                ).label("findings_hash"),
-                func.md5(
-                    cast(
-                        func.coalesce(latest_workflows.c.safety_metadata, func.jsonb_build_object()),
-                        String,
-                    )
-                ).label("safety_metadata_hash"),
-                func.md5(
-                    cast(
-                        func.coalesce(latest_workflows.c.proofread_metadata, func.jsonb_build_object()),
-                        String,
-                    )
-                ).label("proofread_metadata_hash"),
-            )
-            .select_from(BookPage)
-            .outerjoin(
-                PageRevision,
-                (PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
-                & (PageRevision.PageId == BookPage.Id),
-            )
-            .outerjoin(
-                latest_workflows,
-                (latest_workflows.c.page_id == BookPage.Id)
-                & (latest_workflows.c.row_number == 1),
-            )
-            .where(
-                BookPage.BookId == Book.Id,
-                BookPage.LifecycleStatus.in_(("ACTIVE", "PROCESSING")),
-            )
-            .correlate(Book)
-            .subquery()
-        )
-        page_object = func.jsonb_build_object(
-            "page_id", cast(snapshot_pages.c.page_id, String),
-            "page_number", snapshot_pages.c.page_number,
-            "lifecycle_status", snapshot_pages.c.lifecycle_status,
-            "revision_id", cast(snapshot_pages.c.revision_id, String),
-            "revision_content_hash", snapshot_pages.c.revision_content_hash,
-            "revision_status", snapshot_pages.c.revision_status,
-            "revision_workflow_id", snapshot_pages.c.revision_workflow_id,
-            "revision_candidate_hash", snapshot_pages.c.revision_candidate_hash,
-            "revision_safety_input_hash", snapshot_pages.c.revision_safety_input_hash,
-            "workflow_id", cast(snapshot_pages.c.workflow_id, String),
-            "candidate_hash", snapshot_pages.c.candidate_hash,
-            "safety_input_hash", snapshot_pages.c.safety_input_hash,
-            "suitability", snapshot_pages.c.suitability,
-            "workflow_status", snapshot_pages.c.workflow_status,
-            "safety_status", snapshot_pages.c.safety_status,
-            "final_approved_text_hash", snapshot_pages.c.final_approved_text_hash,
-            "safety_confirmed", snapshot_pages.c.safety_confirmed,
-            "safety_confirmed_by", snapshot_pages.c.safety_confirmed_by,
-            "ocr_approved", snapshot_pages.c.ocr_approved,
-            "findings_hash", snapshot_pages.c.findings_hash,
-            "safety_metadata_hash", snapshot_pages.c.safety_metadata_hash,
-            "proofread_metadata_hash", snapshot_pages.c.proofread_metadata_hash,
-        )
-        current_snapshot = (
-            select(
-                func.coalesce(
-                    func.jsonb_agg(
-                        aggregate_order_by(
-                            page_object,
-                            snapshot_pages.c.page_number,
-                            snapshot_pages.c.page_id,
-                        )
-                    ),
-                    cast("[]", JSONB),
-                )
-            )
-            .select_from(snapshot_pages)
-            .scalar_subquery()
-        )
         latest_book_decision_id = (
             select(AuditLog.Id)
             .where(
@@ -302,17 +170,22 @@ class CatalogRepository:
             .correlate(Book)
             .scalar_subquery()
         )
-        current_book_approval = exists(
+        # Once Admin has verified every active page through the full Kho sách gate
+        # (OCR + Proofreading + Text/Image Child Safety with zero findings), the book
+        # enters the parent/child library automatically without a second book-level
+        # approval click — unless explicitly rejected in Chất lượng sách.
+        explicitly_rejected_book = exists(
             select(AuditLog.Id).where(
                 AuditLog.Id == latest_book_decision_id,
-                AuditLog.Action == "book.children.approved",
-                AuditLog.Metadata["policy"].as_string().in_(
-                    tuple(sorted(SUPPORTED_BOOK_APPROVAL_POLICY_VERSIONS))
-                ),
-                AuditLog.Metadata["page_snapshot"] == current_snapshot,
+                AuditLog.Action == "book.children.rejected",
             )
         ).correlate(Book)
-        criteria = [is_catalog_book(), child_content_page, not_(unready_page), current_book_approval]
+        criteria = [
+            is_catalog_book(),
+            child_content_page,
+            not_(unready_page),
+            not_(explicitly_rejected_book),
+        ]
         if require_active:
             criteria.append(Book.LifecycleStatus == "ACTIVE")
         return and_(*criteria)

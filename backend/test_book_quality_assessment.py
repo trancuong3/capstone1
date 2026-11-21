@@ -434,18 +434,17 @@ class BookQualityAssessmentTests(unittest.TestCase):
         self.assertEqual(assessment.status, "STALE")
         self.assertIn("BOOK_APPROVAL_STALE", assessment.blockers)
 
-    def test_public_book_gate_requires_current_audited_book_approval(self):
+    def test_public_book_gate_allows_verified_pages_and_blocks_explicit_rejection(self):
         statement = select(Book.Id).where(CatalogRepository.eligible_book())
         compiled_query = statement.compile(dialect=postgresql.dialect())
         compiled = str(compiled_query)
         parameters = compiled_query.params
 
         self.assertIn("auditlogs", compiled)
-        self.assertIn("book.children.approved", parameters.values())
-        self.assertIn("jsonb_agg", compiled)
-        self.assertIn("page_snapshot", parameters.values())
-        self.assertIn("proofread_metadata_hash", compiled)
-        self.assertIn("final_approved_text_hash", compiled)
+        self.assertIn("book.children.rejected", parameters.values())
+        self.assertNotIn("book.children.approved", parameters.values())
+        self.assertIn("adminaiworkflows.finalapprovedtexthash", compiled)
+        self.assertIn("adminaiworkflows.safetyconfirmedat", compiled)
         self.assertNotIn("rights_confirmed", parameters.values())
 
     def test_book_approval_uses_current_verified_revision_without_per_page_reapproval(self):
