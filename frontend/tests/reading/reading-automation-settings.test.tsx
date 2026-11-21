@@ -10,6 +10,7 @@ import { ReadingAutomationSettings } from "@/components/reading/reading-automati
 import type { ReadingPresenceService } from "@/lib/api/reading-presence-service";
 import {
   getAutomationPreferences,
+  getCoachingStyle,
   resetAutomationPreferencesCache,
   setAutomationPreferences,
 } from "@/lib/reading/automation-preferences";
@@ -205,5 +206,26 @@ describe("ReadingAutomationSettings (G14: three independent parent switches)", (
     expect(await screen.findByRole("status")).toHaveTextContent(
       /Chưa lưu được/,
     );
+  });
+
+  it("lets parents switch coaching style between Dịu dàng chi tiết (Lớp 1) and Ngắn gọn (Đọc thạo) without altering the 3 independent switches (G28)", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+    const gentleBtn = screen.getByRole("button", {
+      name: /Dịu dàng chi tiết \(Lớp 1\)/i,
+    });
+    const conciseBtn = screen.getByRole("button", {
+      name: /Ngắn gọn \(Đọc thạo\)/i,
+    });
+    expect(gentleBtn).toHaveAttribute("aria-pressed", "true");
+    expect(getCoachingStyle()).toBe("gentle");
+
+    await user.click(conciseBtn);
+    expect(conciseBtn).toHaveAttribute("aria-pressed", "true");
+    expect(getCoachingStyle()).toBe("concise");
+    expect(getAutomationPreferences()).toEqual({
+      assist: true,
+      autoAdvance: true,
+    });
   });
 });

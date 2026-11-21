@@ -47,6 +47,8 @@ function wav(): Buffer {
 interface AutopilotHarness {
   completeCalls: string[];
   presenceSettingsUpdates: boolean[];
+  ttsRequests: string[];
+  quizSubmissions: Array<{ questionId: string; answer: string }>;
   currentPageIndex: () => number;
 }
 
@@ -54,7 +56,8 @@ async function installAutopilotSession(
   page: Page,
   options: {
     failFirstComplete?: boolean;
-    initialState?: "ready" | "reading";
+    initialState?: "ready" | "reading" | "question";
+    customFirstPageWords?: readonly string[];
   } = {},
 ): Promise<AutopilotHarness> {
   await installApiFixture(page);
@@ -67,6 +70,41 @@ async function installAutopilotSession(
   let presenceEnabled = false;
   const completeCalls: string[] = [];
   const presenceSettingsUpdates: boolean[] = [];
+  const ttsRequests: string[] = [];
+  const quizSubmissions: Array<{ questionId: string; answer: string }> = [];
+  let quizIndex = 0;
+  const quizQuestions = [
+    {
+      id: "81000000-0000-4000-8000-000000000001",
+      prompt: "Bạn nào thích ăn cá?",
+      correct: "Con mèo",
+      choices: [
+        { id: "A", label: "Con mèo", value: "Con mèo" },
+        { id: "B", label: "Con vịt", value: "Con vịt" },
+        { id: "C", label: "Con gà", value: "Con gà" },
+      ],
+    },
+    {
+      id: "81000000-0000-4000-8000-000000000002",
+      prompt: "Bé đi đâu buổi sáng?",
+      correct: "Đi học",
+      choices: [
+        { id: "A", label: "Đi ngủ", value: "Đi ngủ" },
+        { id: "B", label: "Đi học", value: "Đi học" },
+        { id: "C", label: "Đi bơi", value: "Đi bơi" },
+      ],
+    },
+    {
+      id: "81000000-0000-4000-8000-000000000003",
+      prompt: "Ai nấu cơm cho bé?",
+      correct: "Mẹ của bé",
+      choices: [
+        { id: "A", label: "Bác gấu", value: "Bác gấu" },
+        { id: "B", label: "Chú thỏ", value: "Chú thỏ" },
+        { id: "C", label: "Mẹ của bé", value: "Mẹ của bé" },
+      ],
+    },
+  ];
 
   const corsHeaders = {
     "access-control-allow-origin": "http://127.0.0.1:3106",
@@ -81,6 +119,16 @@ async function installAutopilotSession(
       body: JSON.stringify(body),
     });
 
+  const activeFirstPageWords = options.customFirstPageWords
+    ? options.customFirstPageWords.map((text, index) => ({
+        word_id: `91000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+        word_index: index,
+        text,
+        bbox: [0.08 + index * 0.21, 0.22, 0.18, 0.08] as const,
+        line_index: 0,
+      }))
+    : pageOneWords;
+
   const pages = [
     {
       page_id: PAGE_1_ID,
@@ -91,8 +139,8 @@ async function installAutopilotSession(
       height: 800,
       image_overlay_safe: false,
       image_url: null,
-      text: "Bé mèo nhỏ đang",
-      words: pageOneWords,
+      text: activeFirstPageWords.map((w) => w.text).join(" "),
+      words: activeFirstPageWords,
     },
     {
       page_id: PAGE_2_ID,
@@ -268,6 +316,12 @@ async function installAutopilotSession(
       });
     }
     if (path === "/voice/text-to-speech") {
+      try {
+        const body = route.request().postDataJSON() as { text?: string } | null;
+        if (body?.text) ttsRequests.push(body.text);
+      } catch {
+        // ignore non-JSON body
+      }
       return route.fulfill({
         headers: corsHeaders,
         contentType: "audio/wav",
@@ -282,6 +336,62 @@ async function installAutopilotSession(
       );
     }
     return json(route, {}, 404);
+  });
+
+  await page.route("http://127.0.0.1:8000/tutor/**", (route) => {
+    if (route.request().method() === "OPTIONS")
+      return route.fulfill({ status: 204, headers: corsHeaders });
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/questions/next")) {
+      const q = quizQuestions[quizIndex];
+      if (!q) {
+        return json(route, {
+          question: null,
+          choices: [],
+          progress_label: "Hoàn thành",
+          position: quizQuestions.length,
+          total: quizQuestions.length,
+          completed: true,
+        });
+      }
+      return json(route, {
+        question: {
+          id: q.id,
+          type: "FACTUAL",
+          prompt: q.prompt,
+          page_revision_id: PAGE_1_REV,
+          source_span: {
+            start_word_index: 0,
+            end_word_index_exclusive: 3,
+            sentence_index: 0,
+          },
+          difficulty: 1,
+          answered: false,
+        },
+        choices: q.choices,
+        progress_label: `Câu ${quizIndex + 1}/${quizQuestions.length}`,
+        position: quizIndex + 1,
+        total: quizQuestions.length,
+        completed: false,
+      });
+    }
+    if (path.includes("/questions/") && path.endsWith("/answer")) {
+      const body = route.request().postDataJSON() as { answer?: string };
+      const answer = body?.answer ?? "";
+      const q = quizQuestions[quizIndex] ?? quizQuestions[0];
+      const isCorrect = answer === q.correct;
+      quizSubmissions.push({ questionId: q.id, answer });
+      if (isCorrect) quizIndex += 1;
+      return json(route, {
+        answer_id: "82000000-0000-4000-8000-000000000001",
+        question_id: q.id,
+        submitted_answer: answer,
+        is_correct: isCorrect,
+        score: isCorrect ? 1 : 0,
+        feedback_code: isCorrect ? "CORRECT" : "TRY_AGAIN",
+      });
+    }
+    return route.fallback();
   });
 
   await page.addInitScript(() => {
@@ -373,6 +483,8 @@ async function installAutopilotSession(
       },
     });
 
+    let activeGainNode: GainNode | null = null;
+    let speechPulseTimer: ReturnType<typeof setTimeout> | null = null;
     Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
       configurable: true,
       value: async (constraints?: MediaStreamConstraints) => {
@@ -386,19 +498,21 @@ async function installAutopilotSession(
         await ctx.resume();
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
+        activeGainNode = gain;
         const dest = ctx.createMediaStreamDestination();
         osc.frequency.value = 240;
-        const start = ctx.currentTime;
-        // Keep the opening 280ms calibration window quiet, then pulse speech-level
-        // energy so AudioQualityMonitor detects genuine speech rather than silence
-        // or flat background noise.
-        gain.gain.setValueAtTime(0, start);
-        for (let n = 0; n < 100; n += 1) {
-          gain.gain.setValueAtTime(
-            n % 2 === 0 ? 0.12 : 0.035,
-            start + 0.28 + n * 0.15,
-          );
-        }
+        // Realistic room floor (0.0005) during initial calibration, pulsing to
+        // voice level (0.12) so AudioQualityMonitor detects speech cleanly
+        // instead of treating a constant tone as fan noise.
+        gain.gain.value = 0.0005;
+        setTimeout(() => {
+          if (activeGainNode === gain) {
+            gain.gain.value = 0.12;
+            setTimeout(() => {
+              if (activeGainNode === gain) gain.gain.value = 0.0005;
+            }, 260);
+          }
+        }, 210);
         osc.connect(gain);
         gain.connect(dest);
         osc.start();
@@ -425,7 +539,23 @@ async function installAutopilotSession(
         say: (transcript: string, confidence = 0.95) => {
           const active = instances[instances.length - 1];
           if (!active) throw new Error("No active SpeechRecognition instance");
+          if (activeGainNode) {
+            activeGainNode.gain.value = 0.12;
+            if (speechPulseTimer) clearTimeout(speechPulseTimer);
+            speechPulseTimer = setTimeout(() => {
+              if (activeGainNode) activeGainNode.gain.value = 0.0005;
+            }, 220);
+          }
           active.say(transcript, confidence);
+        },
+        setQuiet: (quiet: boolean) => {
+          if (speechPulseTimer) {
+            clearTimeout(speechPulseTimer);
+            speechPulseTimer = null;
+          }
+          if (activeGainNode) {
+            activeGainNode.gain.value = quiet ? 0.0005 : 0.12;
+          }
         },
         spoken: () => [...spoken],
       },
@@ -438,6 +568,8 @@ async function installAutopilotSession(
   return {
     completeCalls,
     presenceSettingsUpdates,
+    ttsRequests,
+    quizSubmissions,
     currentPageIndex: () => currentIndex,
   };
 }
@@ -476,7 +608,6 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
       .toBeGreaterThanOrEqual(1);
 
     await assertNoHorizontalOverflow(page);
-    await page.waitForTimeout(650);
 
     // Child reads page 1 fluently
     await page.evaluate(() =>
@@ -494,6 +625,14 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
     expect(harness.completeCalls).toEqual([PAGE_1_ID]);
 
     // Mic automatically reopens on page 2
+    await expect(
+      page.getByRole("button", { name: "An", exact: true }),
+    ).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(
+      page.getByRole("button", { name: "Dừng nhận diện giọng nói" }),
+    ).toBeVisible({ timeout: 10_000 });
     await expect
       .poll(
         () =>
@@ -507,8 +646,6 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
         { timeout: 10_000 },
       )
       .toBeGreaterThanOrEqual(2);
-
-    await page.waitForTimeout(650);
 
     // Child reads page 2 fluently
     await page.evaluate(() =>
@@ -538,7 +675,9 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
     page,
   }, testInfo) => {
     mkdirSync(EVIDENCE_DIR, { recursive: true });
-    await installAutopilotSession(page, { initialState: "reading" });
+    const harness = await installAutopilotSession(page, {
+      initialState: "reading",
+    });
 
     await page
       .getByRole("button", { name: "Bé đọc với nhận diện giọng nói" })
@@ -554,8 +693,6 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
         ),
       )
       .toBe(1);
-
-    await page.waitForTimeout(650);
 
     // Child reads first two words then asks for help on "nhỏ"
     await page.evaluate(() =>
@@ -578,18 +715,22 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
       ).__autopilotSpeech.say("đọc mẫu giúp con"),
     );
 
-    // App speaks sample for "nhỏ" and reopens recognition
+    // App speaks sample for "nhỏ" (via device speechSynthesis or /voice/text-to-speech)
+    // and reopens recognition automatically.
     await expect
-      .poll(() =>
-        page.evaluate(() =>
+      .poll(async () => {
+        const spoken = await page.evaluate(() =>
           (
             window as unknown as {
               __autopilotSpeech: { spoken: () => string[] };
             }
           ).__autopilotSpeech.spoken(),
-        ),
-      )
-      .toContain("nhỏ. nhỏ.");
+        );
+        return [...spoken, ...harness.ttsRequests].some((t) =>
+          t.toLowerCase().includes("nhỏ"),
+        );
+      })
+      .toBe(true);
 
     await expect
       .poll(() =>
@@ -721,18 +862,18 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
       name: /Nhắc ba mẹ qua email/i,
     });
 
-    await expect(assistSwitch).toHaveAttribute("aria-checked", "true");
-    await expect(autoAdvanceSwitch).toHaveAttribute("aria-checked", "true");
-    await expect(emailSwitch).toHaveAttribute("aria-checked", "false");
+    await expect(assistSwitch).toBeChecked();
+    await expect(autoAdvanceSwitch).toBeChecked();
+    await expect(emailSwitch).not.toBeChecked();
 
     // Toggle autoAdvance OFF (independent of assist)
     await autoAdvanceSwitch.click();
-    await expect(autoAdvanceSwitch).toHaveAttribute("aria-checked", "false");
-    await expect(assistSwitch).toHaveAttribute("aria-checked", "true");
+    await expect(autoAdvanceSwitch).not.toBeChecked();
+    await expect(assistSwitch).toBeChecked();
 
     // Opt-in parent email reminder -> saves to backend
     await emailSwitch.click();
-    await expect(emailSwitch).toHaveAttribute("aria-checked", "true");
+    await expect(emailSwitch).toBeChecked();
     expect(harness.presenceSettingsUpdates).toEqual([true]);
 
     await page.screenshot({
@@ -745,7 +886,213 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
 
     // Opt-out immediately -> saves false to backend
     await emailSwitch.click();
-    await expect(emailSwitch).toHaveAttribute("aria-checked", "false");
+    await expect(emailSwitch).not.toBeChecked();
     expect(harness.presenceSettingsUpdates).toEqual([true, false]);
+  });
+
+  test("G24: Voice-interactive 3-question comprehension quiz completes with 0 clicks (reads question & A/B/C, blocks echo, accepts voice)", async ({
+    page,
+  }, testInfo) => {
+    mkdirSync(EVIDENCE_DIR, { recursive: true });
+    const harness = await installAutopilotSession(page, {
+      initialState: "question",
+    });
+
+    await expect(page.getByText("Bạn nào thích ăn cá?")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Wait for Q1 TTS to finish and recognition #1 to open with 0 clicks
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (
+            window as unknown as {
+              __autopilotSpeech: { count: () => number };
+            }
+          ).__autopilotSpeech.count(),
+        ),
+      )
+      .toBeGreaterThanOrEqual(1);
+
+    await assertNoHorizontalOverflow(page);
+    await page.screenshot({
+      path: resolve(
+        EVIDENCE_DIR,
+        `e2e-autopilot-quiz-voice-${testInfo.project.name}.png`,
+      ),
+      fullPage: false,
+    });
+
+    // Immediate echo of an option right after TTS ends is blocked
+    await page.evaluate(() =>
+      (
+        window as unknown as {
+          __autopilotSpeech: { say: (t: string) => void };
+        }
+      ).__autopilotSpeech.say("Đáp án B: Con vịt"),
+    );
+    expect(harness.quizSubmissions).toHaveLength(0);
+
+    // Wait past 1.5s echo tail guard -> answer Q1 by letter "đáp án A"
+    await page.waitForTimeout(1700);
+    await page.evaluate(() =>
+      (
+        window as unknown as {
+          __autopilotSpeech: { say: (t: string) => void };
+        }
+      ).__autopilotSpeech.say("đáp án A"),
+    );
+
+    // Automatically advances to Q2 with 0 clicks
+    await expect(page.getByText("Bé đi đâu buổi sáng?")).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (
+            window as unknown as {
+              __autopilotSpeech: { count: () => number };
+            }
+          ).__autopilotSpeech.count(),
+        ),
+      )
+      .toBeGreaterThanOrEqual(2);
+
+    // Wait past echo guard -> answer Q2 using Vietnamese letter name "con chọn bê"
+    await page.waitForTimeout(1700);
+    await page.evaluate(() =>
+      (
+        window as unknown as {
+          __autopilotSpeech: { say: (t: string) => void };
+        }
+      ).__autopilotSpeech.say("con chọn bê"),
+    );
+
+    // Automatically advances to Q3 with 0 clicks
+    await expect(page.getByText("Ai nấu cơm cho bé?")).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (
+            window as unknown as {
+              __autopilotSpeech: { count: () => number };
+            }
+          ).__autopilotSpeech.count(),
+        ),
+      )
+      .toBeGreaterThanOrEqual(3);
+
+    // Wait past echo guard -> answer Q3 by speaking option content "Mẹ của bé"
+    await page.waitForTimeout(1700);
+    await page.evaluate(() =>
+      (
+        window as unknown as {
+          __autopilotSpeech: { say: (t: string) => void };
+        }
+      ).__autopilotSpeech.say("Mẹ của bé"),
+    );
+
+    // Automatically finishes the quiz and transitions to completion view with 0 clicks!
+    await expect
+      .poll(() => harness.quizSubmissions.length, { timeout: 15_000 })
+      .toBe(3);
+    expect(harness.quizSubmissions.map((s) => s.answer)).toEqual([
+      "Con mèo",
+      "Đi học",
+      "Mẹ của bé",
+    ]);
+    await expect(page.getByText("Ai nấu cơm cho bé?")).not.toBeVisible({
+      timeout: 15_000,
+    });
+  });
+
+  test("G25-G28: Multi-chunk low-confidence Grade-1 spelling ('ê' -> 'tơ' -> 'ê' -> 'tê') & ~1.5s empathetic multi-sentence comfort with companion bubble", async ({
+    page,
+  }, testInfo) => {
+    mkdirSync(EVIDENCE_DIR, { recursive: true });
+    const harness = await installAutopilotSession(page, {
+      initialState: "reading",
+      customFirstPageWords: ["Tê", "mèo", "nhỏ", "đang"],
+    });
+
+    await page
+      .getByRole("button", { name: "Bé đọc với nhận diện giọng nói" })
+      .click();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (
+            window as unknown as {
+              __autopilotSpeech: { count: () => number };
+            }
+          ).__autopilotSpeech.count(),
+        ),
+      )
+      .toBe(1);
+
+    // Wait briefly so AudioQualityMonitor completes room-floor + speech onset calibration
+    await page.waitForTimeout(500);
+
+    // 1. Child spells out "Tê" across 4 separate low-confidence events ("ê", "tơ", "ê", "tê")
+    for (const [chunk, conf] of [
+      ["ê", 0.34],
+      ["tơ", 0.36],
+      ["ê", 0.35],
+      ["tê", 0.88],
+    ] as const) {
+      await page.evaluate(
+        ([text, c]) =>
+          (
+            window as unknown as {
+              __autopilotSpeech: { say: (t: string, conf?: number) => void };
+            }
+          ).__autopilotSpeech.say(text, c),
+        [chunk, conf] as const,
+      );
+      await page.waitForTimeout(120);
+    }
+
+    await expect(page.getByRole("button", { name: "Tê" })).toHaveAttribute(
+      "data-reading-state",
+      "correct",
+    );
+    await expect(page.getByTestId("reading-companion-bubble")).toHaveAttribute(
+      "data-companion-mood",
+      "celebrating",
+    );
+
+    // 2. Child misreads "mèo" as "méo" (tone error) and goes quiet -> empathetic multi-sentence comfort fires ~1.5s later!
+    await page.evaluate(() => {
+      const api = (
+        window as unknown as {
+          __autopilotSpeech: {
+            say: (t: string) => void;
+            setQuiet: (q: boolean) => void;
+          };
+        }
+      ).__autopilotSpeech;
+      api.say("méo");
+      api.setQuiet(true);
+    });
+
+    const bubble = page.getByTestId("reading-companion-bubble");
+    await expect(bubble).toHaveAttribute("data-companion-mood", "comforting", {
+      timeout: 6_000,
+    });
+    await expect(bubble).toContainText(/dấu thanh/i);
+    expect(harness.ttsRequests.some((t) => t.includes("mèo"))).toBe(true);
+
+    await assertNoHorizontalOverflow(page);
+    await page.screenshot({
+      path: resolve(
+        EVIDENCE_DIR,
+        `e2e-autopilot-empathetic-${testInfo.project.name}.png`,
+      ),
+      fullPage: false,
+    });
   });
 });

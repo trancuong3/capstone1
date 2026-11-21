@@ -21,7 +21,11 @@ export class BrowserTranscriptCollector {
 
   addResults(
     event: BrowserRecognitionEventLike,
-    acceptFinal?: (text: string, usable: boolean) => boolean,
+    acceptFinal?: (
+      text: string,
+      usable: boolean,
+      confidence?: number,
+    ) => boolean,
   ): string[] {
     const newFinals: string[] = [];
     const start = Math.max(
@@ -34,9 +38,12 @@ export class BrowserTranscriptCollector {
       if (!result?.isFinal || this.currentCycle.has(index)) continue;
       const text = result[0]?.transcript?.trim();
       if (text) {
-        const usable = hasUsableBrowserConfidence(result[0]?.confidence);
-        const accept = acceptFinal?.(text, usable) ?? usable;
-        if (!accept || !usable) {
+        const confidence = result[0]?.confidence;
+        const usable = hasUsableBrowserConfidence(confidence);
+        const accept = acceptFinal
+          ? acceptFinal(text, usable, confidence)
+          : usable;
+        if (!accept) {
           // A discarded command or uncertain final still occupies its slot.
           this.currentCycle.set(index, "");
           continue;

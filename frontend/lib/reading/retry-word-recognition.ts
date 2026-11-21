@@ -3,9 +3,11 @@
  *
  * Không xóa dấu thanh tiếng Việt và không chuyển "đ" thành "d".
  * Một từ chỉ được xác nhận đúng khi transcript có từ mục tiêu như một token
- * hoàn chỉnh. Dấu thanh tiếng Việt vẫn được giữ nguyên.
+ * hoàn chỉnh (hoặc chuỗi đánh vần Lớp 1 kết thúc chính xác bằng từ mục tiêu).
+ * Dấu thanh tiếng Việt vẫn được giữ nguyên.
  */
 
+import { matchPhonicsSpelling } from "@/lib/reading/phonics-spelling";
 import {
   normalizeVietnameseText,
   normalizeVietnameseWord,
@@ -32,6 +34,11 @@ const ASSISTANT_BLEED_PHRASES = [
   "chính xác rồi",
   "con giỏi lắm",
   "máy chưa nghe",
+  "đánh vần chậm cùng cô",
+  "ghép vần cùng cô",
+  "nghe cô đánh vần",
+  "đọc trơn là",
+  "đến lượt con giỏi lắm",
 ] as const;
 
 export function isAssistantPromptBleed(
@@ -170,11 +177,29 @@ function matchesExpectedInsideContextPhrase(
 }
 
 /**
+ * True when `tokens` contains a valid Grade-1 phonics spelling-out of
+ * `expected` without unrelated trailing chatter (at most 1 trailing repeat of
+ * `expected`).
+ */
+function matchesRetryPhonicsSpelling(
+  tokens: readonly string[],
+  expected: string,
+): boolean {
+  if (tokens.length < 2) return false;
+  const direct = matchPhonicsSpelling(tokens, expected);
+  if (direct) {
+    const rest = tokens.slice(direct.consumedCount);
+    return rest.length === 0 || rest.every((t) => t === expected);
+  }
+  return false;
+}
+
+/**
  * Đánh giá từ đích trong một transcript ngắn.
  *
- * Cụm từ ngắn được chấp nhận khi từ đích xuất hiện như một token riêng.
- * Transcript dài hơn cần được coi là không chắc chắn vì có thể là hội thoại
- * không liên quan, trừ khi cụm đọc khớp liên tiếp trong câu ngữ cảnh của từ đó.
+ * Cụm từ ngắn hoặc chuỗi đánh vần Lớp 1 (ví dụ "ê tờ ê tê", "ô i ôi tờ ôi tôi")
+ * được chấp nhận khi kết thúc bằng đúng từ đích. Transcript dài hơn không thuộc
+ * đánh vần hoặc câu ngữ cảnh cần được coi là không chắc chắn.
  * Không dùng nội dung keyterm làm bằng chứng nhận diện.
  */
 export function classifyRetryTranscript(
@@ -207,9 +232,19 @@ export function classifyRetryTranscript(
     return "UNCERTAIN";
   }
 
+  // Grade-1 phonics spelling-out in retry mode (G26): e.g. "ê tờ ê tê",
+  // "ô i ôi tờ ôi tôi", "a cờ a ca sắc cá".
+  if (matchesRetryPhonicsSpelling(tokens, expected)) {
+    return "CORRECT";
+  }
+
   const collapsed = tokens.filter(
     (token, idx) => idx === 0 || token !== tokens[idx - 1],
   );
+  if (matchesRetryPhonicsSpelling(collapsed, expected)) {
+    return "CORRECT";
+  }
+
   const candidateTokens =
     tokens.length > 4 &&
     collapsed.length <= 4 &&
@@ -262,18 +297,42 @@ export function classifyPracticePhraseTranscript(
     return "UNCERTAIN";
   }
 
+  // Allow spelling out words inside a practice phrase as well.
+  const reducedTokens: string[] = [];
+  let expectedCursor = 0;
+  for (let i = 0; i < tokens.length;) {
+    if (expectedCursor < expectedTokens.length) {
+      const target = expectedTokens[expectedCursor];
+      if (tokens[i] === target) {
+        reducedTokens.push(target);
+        expectedCursor += 1;
+        i += 1;
+        continue;
+      }
+      const phonics = matchPhonicsSpelling(tokens.slice(i), target);
+      if (phonics) {
+        reducedTokens.push(target);
+        expectedCursor += 1;
+        i += phonics.consumedCount;
+        continue;
+      }
+    }
+    reducedTokens.push(tokens[i]);
+    i += 1;
+  }
+
   const maxTokens = Math.max(4, expectedTokens.length + 3);
-  if (tokens.length > maxTokens) {
+  if (reducedTokens.length > maxTokens) {
     return matchesExpectedInsideContextPhrase(
       expectedTokens,
-      tokens,
+      reducedTokens,
       options?.contextPhrase,
     )
       ? "CORRECT"
       : "UNCERTAIN";
   }
 
-  if (containsContiguousTokenSubslice(expectedTokens, tokens)) {
+  if (containsContiguousTokenSubslice(expectedTokens, reducedTokens)) {
     return "CORRECT";
   }
   return "INCORRECT";

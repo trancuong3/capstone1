@@ -5,10 +5,28 @@ import { useContext, useEffect, useId, useState } from "react";
 import { AppServicesContext } from "@/components/providers/app-services-provider";
 import { useAutomationPreferences } from "@/hooks/use-automation-preferences";
 import { announcePresenceOptIn } from "@/lib/reading/presence-opt-in";
+import type { CoachingStyle } from "@/lib/reading/automation-preferences";
 import { cn } from "@/lib/utils/cn";
 
 type EmailState =
   "loading" | "off" | "on" | "saving" | "error" | "camera-needed";
+
+const COACHING_STYLE_OPTIONS: readonly {
+  readonly value: CoachingStyle;
+  readonly label: string;
+  readonly hint: string;
+}[] = [
+  {
+    value: "gentle",
+    label: "Dịu dàng chi tiết (Lớp 1)",
+    hint: "An ủi nhiều câu ấm áp và hướng dẫn đánh vần từng bước khi bé vấp chữ.",
+  },
+  {
+    value: "concise",
+    label: "Ngắn gọn (Đọc thạo)",
+    hint: "Nhắc ngắn gọn, tiết kiệm lời cho bé đã đọc trơn nhanh.",
+  },
+];
 
 /** Ask for the camera once, at the parent's explicit request, then release it. */
 async function confirmCameraAccess(): Promise<boolean> {
@@ -66,15 +84,14 @@ function Switch({
 }
 
 /**
- * The three parent switches for the automatic reading flow. Each can be turned
- * off on its own. Assist and auto-advance are remembered on this device; the
- * email reminder is a per-parent setting stored on the server and is off until
- * a parent turns it on.
+ * The three parent switches for the automatic reading flow plus the teacher
+ * coaching style selector (G14, G28).
  */
 export function ReadingAutomationSettings() {
   const services = useContext(AppServicesContext);
   const presence = services?.readingPresenceService;
-  const { preferences, update } = useAutomationPreferences();
+  const { preferences, update, coachingStyle, updateCoachingStyle } =
+    useAutomationPreferences();
   const [email, setEmail] = useState<EmailState>(presence ? "loading" : "off");
 
   useEffect(() => {
@@ -122,10 +139,43 @@ export function ReadingAutomationSettings() {
       </h3>
       <Switch
         checked={preferences.assist}
-        description="Tự nhắc nhẹ và đọc mẫu khi bé đọc chậm hoặc mắc kẹt."
+        description="Tự nhắc nhẹ, vỗ về và đọc mẫu khi bé đọc sai hoặc ngập ngừng."
         label="Hỗ trợ tự động"
         onChange={(assist) => update({ assist })}
       />
+      <div
+        aria-label="Mức độ tương tác của cô giáo"
+        className="ml-8 space-y-1.5"
+        role="group"
+      >
+        <span className="block text-xs font-semibold text-muted">
+          Phong cách cô giáo hướng dẫn
+        </span>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {COACHING_STYLE_OPTIONS.map((option) => {
+            const selected = coachingStyle === option.value;
+            return (
+              <button
+                aria-pressed={selected}
+                className={cn(
+                  "flex min-h-11 flex-col items-start rounded-control border px-3 py-2 text-left transition-colors",
+                  selected
+                    ? "border-primary bg-sky text-ink"
+                    : "border-border bg-white text-ink hover:bg-canvas",
+                  !preferences.assist && "opacity-60",
+                )}
+                disabled={!preferences.assist}
+                key={option.value}
+                onClick={() => updateCoachingStyle(option.value)}
+                type="button"
+              >
+                <span className="text-xs font-bold">{option.label}</span>
+                <span className="mt-0.5 text-xs text-muted">{option.hint}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
       <Switch
         checked={preferences.autoAdvance}
         description="Tự sang trang tiếp theo sau khi đã lưu kết quả trang."

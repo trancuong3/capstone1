@@ -72,4 +72,20 @@ describe("audio quality and adaptive activity", () => {
       m.addFrame(frame(t % 40 ? 0.004 : 0.001), t);
     expect(m.getSnapshot().isSpeaking).toBe(false);
   });
+
+  it("child-passage mode accepts soft child voices (RMS 0.0055) and holds across ~450ms spelling pauses (G22)", () => {
+    const m = new AudioQualityMonitor({ mode: "child-passage" });
+    feed(m, 0.0005, 0, 200);
+    // Soft Grade-1 child voice at RMS 0.0055 -> SPEECH_DETECTED (not LOW_VOLUME)
+    expect(feed(m, 0.0055, 220, 700).status).toBe("SPEECH_DETECTED");
+    // 420ms breath/spelling pause between "ô i ôi" and "tờ ôi tôi" -> still speaking
+    expect(feed(m, 0.0005, 720, 1120).isSpeaking).toBe(true);
+    // Longer 600ms silence -> ends speaking cleanly
+    expect(feed(m, 0.0005, 1140, 1340).isSpeaking).toBe(false);
+    // Constant loud fan noise is still rejected as BACKGROUND_NOISE
+    expect(
+      feed(new AudioQualityMonitor({ mode: "child-passage" }), 0.15, 0, 2000)
+        .status,
+    ).toBe("BACKGROUND_NOISE");
+  });
 });

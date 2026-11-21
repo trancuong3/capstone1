@@ -1,7 +1,14 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { BookPageContent } from "@/components/reading/book-page-content";
 import {
   fetchAuthenticatedBlobUrl,
@@ -26,6 +33,103 @@ interface BookPageViewerProps extends PageWordEvidence {
   spokenWords?: Set<string>;
 }
 
+const OVERLAY_COLORS: Record<WordPresentationState, string> = {
+  unread: "",
+  current: "bg-yellow-300/25 ring-2 ring-yellow-500",
+  "preview-correct": "bg-green-300/15 ring-1 ring-green-600/60",
+  correct: "bg-green-300/25 ring-1 ring-green-600",
+  incorrect: "bg-red-300/25 ring-1 ring-red-600",
+  repeated: "bg-purple-300/25 ring-1 ring-purple-600",
+  hesitation: "bg-purple-300/25 ring-1 ring-purple-600",
+  omission: "bg-red-300/25 ring-1 ring-red-600",
+  "self-corrected": "bg-green-300/25 ring-2 ring-green-700 ring-offset-1",
+  unresolved: "bg-red-300/25 ring-2 ring-red-700",
+  assisted: "bg-sky-300/25 ring-2 ring-sky-600",
+  uncertain: "bg-slate-300/20 ring-1 ring-slate-500",
+};
+
+interface OverlayWordButtonProps {
+  readonly word: ReadingPageWordDTO;
+  readonly pageRevisionId: string;
+  readonly state: WordPresentationState;
+  readonly isCurrent: boolean;
+  readonly onSelectWord: (word: ReadingPageWordDTO) => void;
+  readonly registerNode: (
+    wordId: string,
+    node: HTMLButtonElement | null,
+  ) => void;
+}
+
+const MemoOverlayWordButton = memo(function OverlayWordButton({
+  word,
+  pageRevisionId,
+  state,
+  isCurrent,
+  onSelectWord,
+  registerNode,
+}: OverlayWordButtonProps) {
+  const handleRef = useCallback(
+    (node: HTMLButtonElement | null) => registerNode(word.word_id, node),
+    [registerNode, word.word_id],
+  );
+  const handleClick = useCallback(
+    () => onSelectWord(word),
+    [onSelectWord, word],
+  );
+  return (
+    <button
+      ref={handleRef}
+      type="button"
+      aria-label={word.text}
+      aria-describedby={`image-word-state-${pageRevisionId}-${word.word_id}`}
+      aria-current={isCurrent ? "true" : undefined}
+      data-word-id={word.word_id}
+      data-reading-state={state}
+      data-page-revision-id={pageRevisionId}
+      data-bbox={word.bbox.join(",")}
+      onClick={handleClick}
+      className={cn(
+        "absolute rounded-sm transition-colors duration-100 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+        OVERLAY_COLORS[state],
+      )}
+      style={{
+        left: `${word.bbox[0] * 100}%`,
+        top: `${word.bbox[1] * 100}%`,
+        width: `${word.bbox[2] * 100}%`,
+        height: `${word.bbox[3] * 100}%`,
+      }}
+    >
+      <span className="sr-only">{word.text}</span>
+      <span hidden id={`image-word-state-${pageRevisionId}-${word.word_id}`}>
+        {wordPresentationLabels[state]}
+      </span>
+      {[
+        "self-corrected",
+        "unresolved",
+        "uncertain",
+        "incorrect",
+        "omission",
+        "assisted",
+      ].includes(state) ? (
+        <span
+          aria-hidden="true"
+          className="absolute -right-1 -top-3 rounded-full bg-white px-1 text-xs font-semibold text-ink"
+        >
+          {state === "self-corrected"
+            ? "↺"
+            : state === "uncertain"
+              ? "?"
+              : state === "unresolved"
+                ? "◇"
+                : state === "assisted"
+                  ? "♪"
+                  : "!"}
+        </span>
+      ) : null}
+    </button>
+  );
+});
+
 export function BookPageViewer(props: BookPageViewerProps) {
   return (
     <PageSurface
@@ -44,6 +148,21 @@ function PageSurface(props: BookPageViewerProps) {
     previewSnapshot,
   } = props;
   const rootRef = useRef<HTMLDivElement>(null);
+  const overlayNodesRef = useRef(new Map<string, HTMLButtonElement>());
+  const onWordClickRef = useRef(onWordClick);
+  useEffect(() => {
+    onWordClickRef.current = onWordClick;
+  });
+  const handleSelectOverlayWord = useCallback((word: ReadingPageWordDTO) => {
+    onWordClickRef.current?.(word);
+  }, []);
+  const registerOverlayNode = useCallback(
+    (wordId: string, node: HTMLButtonElement | null) => {
+      if (node) overlayNodesRef.current.set(wordId, node);
+      else overlayNodesRef.current.delete(wordId);
+    },
+    [],
+  );
   const [frame, setFrame] = useState({ width: 0, height: 0 });
   const [image, setImage] = useState<
     { width: number; height: number } | "failed" | null
@@ -138,11 +257,8 @@ function PageSurface(props: BookPageViewerProps) {
     ? previewSnapshot.currentWordId
     : currentWordId;
   useEffect(() => {
-    if (!overlay) return;
-    const active = [
-      ...(rootRef.current?.querySelectorAll<HTMLElement>("[data-word-id]") ??
-        []),
-    ].find((element) => element.dataset.wordId === activeId);
+    if (!overlay || !activeId) return;
+    const active = overlayNodesRef.current.get(activeId);
     active?.scrollIntoView?.({
       block: "nearest",
       inline: "nearest",
@@ -153,20 +269,6 @@ function PageSurface(props: BookPageViewerProps) {
   }, [activeId, overlay]);
 
   const stateFor = wordStateForPage(props);
-  const overlayColors: Record<WordPresentationState, string> = {
-    unread: "",
-    current: "bg-yellow-300/25 ring-2 ring-yellow-500",
-    "preview-correct": "bg-green-300/15 ring-1 ring-green-600/60",
-    correct: "bg-green-300/25 ring-1 ring-green-600",
-    incorrect: "bg-red-300/25 ring-1 ring-red-600",
-    repeated: "bg-purple-300/25 ring-1 ring-purple-600",
-    hesitation: "bg-purple-300/25 ring-1 ring-purple-600",
-    omission: "bg-red-300/25 ring-1 ring-red-600",
-    "self-corrected": "bg-green-300/25 ring-2 ring-green-700 ring-offset-1",
-    unresolved: "bg-red-300/25 ring-2 ring-red-700",
-    assisted: "bg-sky-300/25 ring-2 ring-sky-600",
-    uncertain: "bg-slate-300/20 ring-1 ring-slate-500",
-  };
   return (
     <article
       aria-busy={isTransitioning || undefined}
@@ -245,63 +347,17 @@ function PageSurface(props: BookPageViewerProps) {
                 height: rect.height,
               }}
             >
-              {page.words.map((word, index) => {
-                const state = stateFor(word, index);
-                return (
-                  <button
-                    key={word.word_id}
-                    type="button"
-                    aria-label={word.text}
-                    aria-describedby={`image-word-state-${page.page_revision_id}-${word.word_id}`}
-                    aria-current={
-                      word.word_id === activeId ? "true" : undefined
-                    }
-                    data-word-id={word.word_id}
-                    data-reading-state={state}
-                    data-page-revision-id={page.page_revision_id}
-                    data-bbox={word.bbox.join(",")}
-                    onClick={() => onWordClick?.(word)}
-                    className={cn(
-                      "absolute rounded-sm focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
-                      overlayColors[state],
-                    )}
-                    style={{
-                      left: `${word.bbox[0] * 100}%`,
-                      top: `${word.bbox[1] * 100}%`,
-                      width: `${word.bbox[2] * 100}%`,
-                      height: `${word.bbox[3] * 100}%`,
-                    }}
-                  >
-                    <span className="sr-only">{word.text}</span>
-                    <span
-                      hidden
-                      id={`image-word-state-${page.page_revision_id}-${word.word_id}`}
-                    >
-                      {wordPresentationLabels[state]}
-                    </span>
-                    {[
-                      "self-corrected",
-                      "unresolved",
-                      "uncertain",
-                      "incorrect",
-                      "omission",
-                    ].includes(state) ? (
-                      <span
-                        aria-hidden="true"
-                        className="absolute -right-1 -top-3 rounded-full bg-white px-1 text-xs font-semibold text-ink"
-                      >
-                        {state === "self-corrected"
-                          ? "↺"
-                          : state === "uncertain"
-                            ? "?"
-                            : state === "unresolved"
-                              ? "◇"
-                              : "!"}
-                      </span>
-                    ) : null}
-                  </button>
-                );
-              })}
+              {page.words.map((word, index) => (
+                <MemoOverlayWordButton
+                  key={word.word_id}
+                  word={word}
+                  pageRevisionId={page.page_revision_id}
+                  state={stateFor(word, index)}
+                  isCurrent={word.word_id === activeId}
+                  onSelectWord={handleSelectOverlayWord}
+                  registerNode={registerOverlayNode}
+                />
+              ))}
             </div>
           </div>
         ) : (

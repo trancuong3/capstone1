@@ -3,6 +3,7 @@ import {
   hasUnusableAudio,
   type AudioQualitySnapshot,
 } from "@/lib/reading/audio-quality";
+import { matchPhonicsSpelling } from "@/lib/reading/phonics-spelling";
 import { tokenizeVietnameseText } from "@/lib/reading/vietnamese-text";
 import { normalizeShortWordTranscript } from "@/lib/reading/retry-word-recognition";
 
@@ -21,6 +22,32 @@ export function isConfidentExactBrowserRead(
     return false;
   const expected = normalizeShortWordTranscript(target);
   return Boolean(expected && normalizeShortWordTranscript(text) === expected);
+}
+
+/**
+ * True when the browser recognizer captured a complete Grade-1 phonics
+ * spelling-out sequence ending in the exact target word (e.g. "ê tờ ê tê")
+ * with usable phonics confidence (`>= 0.30` or unspecified `0`).
+ */
+export function isConfidentPhonicsBrowserRead(
+  target: string,
+  text?: string | null,
+  confidence?: number | null,
+): boolean {
+  if (!text) return false;
+  if (
+    confidence != null &&
+    confidence !== 0 &&
+    (!Number.isFinite(confidence) || confidence < 0.3 || confidence > 1)
+  ) {
+    return false;
+  }
+  const expected = normalizeShortWordTranscript(target);
+  if (!expected || /\s/u.test(expected)) return false;
+  const tokens = tokenizeVietnameseText(text);
+  if (tokens.length < 2) return false;
+  const match = matchPhonicsSpelling(tokens, expected);
+  return Boolean(match && match.consumedCount === tokens.length);
 }
 
 /** Conservative rejection gates, not calibrated pronunciation probabilities.
@@ -81,5 +108,21 @@ export function hasUsableBrowserConfidence(confidence?: number): boolean {
     confidence === undefined ||
     confidence === 0 ||
     (Number.isFinite(confidence) && confidence >= 0.5 && confidence <= 1)
+  );
+}
+
+/**
+ * Controlled lower confidence floor (`>= 0.28`) used EXCLUSIVELY when the
+ * spoken tokens match legal Grade-1 phonics cues for the active target word.
+ * Web Speech API (`vi-VN`) frequently scores isolated vowel/consonant names
+ * ("ê", "tờ", "ô") between `0.28` and `0.49`.
+ */
+export function hasUsablePhonicsBrowserConfidence(
+  confidence?: number,
+): boolean {
+  return (
+    confidence === undefined ||
+    confidence === 0 ||
+    (Number.isFinite(confidence) && confidence >= 0.28 && confidence <= 1)
   );
 }

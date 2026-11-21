@@ -2332,7 +2332,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     const spy = vi
       .spyOn(globalThis, "setTimeout")
       .mockImplementation((callback, delay, ...args) => {
-        if (delay === 200) {
+        if (delay === 80) {
           callbacks.push(() => callback(...args));
           return originalTimeout(() => undefined, 0);
         }

@@ -6,6 +6,10 @@ import type { BookDetailDTO } from "@/types/book";
 import type { ChildProfileDTO } from "@/types/child";
 import { BookCover } from "@/components/books/book-cover";
 import { BookPageViewer } from "@/components/reading/book-page-viewer";
+import {
+  ReadingCompanionBubble,
+  type CompanionBubbleState,
+} from "@/components/reading/reading-companion-bubble";
 import { ReadingControls } from "@/components/reading/reading-controls";
 import { ReadingProgress } from "@/components/reading/reading-progress";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
@@ -81,6 +85,8 @@ interface ReadingLayoutProps {
   repeatedWordIds?: Set<string>;
   hesitationWordIds?: Set<string>;
   assistedWordIds?: ReadonlySet<string>;
+  companionBubble?: CompanionBubbleState | null;
+  isCompanionSpeaking?: boolean;
 }
 
 export function ReadingLayout({
@@ -135,6 +141,8 @@ export function ReadingLayout({
   repeatedWordIds,
   hesitationWordIds,
   assistedWordIds,
+  companionBubble = null,
+  isCompanionSpeaking = false,
   previewSnapshot,
 }: ReadingLayoutProps) {
   return (
@@ -428,6 +436,13 @@ export function ReadingLayout({
             &ldquo;{latestTranscript}&rdquo;
           </p>
         </div>
+      ) : null}
+
+      {!retryMode && companionBubble ? (
+        <ReadingCompanionBubble
+          isSpeaking={isCompanionSpeaking}
+          state={companionBubble}
+        />
       ) : null}
 
       <ReadingProgress
