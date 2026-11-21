@@ -52,6 +52,7 @@ Permitted `priority`: `P0` to `P3`. Preserve issue ID, URLs and evidence when ed
 The previous `viread-project-hub-v1` localStorage object is left in place. Personal notes continue to save there. Existing task status edits and custom local tasks are **not** automatically published, discarded or applied to the shared roadmap.
 
 - **Xuất dữ liệu cục bộ** exports legacy data, previously imported snapshots and the last shared snapshot to a local JSON file.
+- Exported `viread-local-export-v1` files always contain a `legacy.tasks` array (possibly empty) and `legacy.note`. Older valid note-only files without `legacy.tasks` are accepted on import; they are normalized to zero legacy tasks without overwriting notes or the shared Issue roadmap. Importing one does not apply `sharedSnapshot` as local edits.
 - **Nhập bản lưu cục bộ** saves another legacy backup in `viread-roadmap-local-imports-v1` for comparison. It does **not** overwrite the user's current browser notes or task data, and never writes to GitHub.
 - The dashboard shows how many local task statuses differ from the shared Issues and how many local-only tasks remain. Reconciliation is manual to avoid overwriting unseen user changes.
 - Back up browser data before clearing localStorage. Imported JSON remains on this browser only; do not publish it to public GitHub Issues.
