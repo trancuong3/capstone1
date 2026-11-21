@@ -54,6 +54,20 @@ bao nhiêu lỗi có cách đọc đúng xuất hiện ở một engine khác.
 Không dùng `ground_truth` để chọn từ trong sản phẩm; không dùng từ
 điển thêm từ mới; không tự xác nhận engine nào đúng.
 
+## Chạy ngắn gọn bằng một script
+
+Nếu đã lấy nhánh TASK 09 về worktree OCR, chỉ cần:
+
+```powershell
+& "F:\\c1\\capstone1-ocr-acceptance\\backend\\scripts\\run_ocr_task09_ab.ps1"
+```
+
+Script tự chạy 4 bộ unit tests, dừng ngay nếu có lỗi, sau đó benchmark
+10 trang, lưu aggregate dưới thư mục riêng tư với tên theo timestamp và
+in kết quả A/B. Nếu PowerShell chặn file chưa ký, thiết lập
+`Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned` theo
+quy định máy trước khi chạy; không đổi policy toàn hệ thống.
+
 ## Lệnh Windows
 
 ```powershell
