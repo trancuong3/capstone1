@@ -97,10 +97,13 @@ class AdminOcrCorrectionApiTests(unittest.TestCase):
         self.assertEqual(response.json(), {"corrected_text": "Ngày xưa."})
         download.assert_called_once_with("books/test.png")
         provider.assert_called_once()
+        from app.services.ocr_engine import normalize_word
+
         corrector.correct.assert_awaited_once_with(
             "ngay xua.",
             b"test-image-bytes",
             [(0.1, 0.1, 0.2, 0.1), (0.35, 0.1, 0.2, 0.1)],
+            word_normalizer=normalize_word,
             on_progress=None,
         )
 

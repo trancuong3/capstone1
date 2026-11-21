@@ -5,7 +5,7 @@ import json
 import os
 import unicodedata
 import unittest
-from unittest.mock import patch
+from uuid import uuid4
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:1/test")
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
@@ -454,7 +454,8 @@ class WorkflowVerificationGuardTests(unittest.TestCase):
         for state in ("PROVISIONAL", "AUTO_CONFIRMED"):
             with self.subTest(state=state):
                 AdminOcrService._validate_ai_workflow_for_verification(
-                    self.workflow(SafetyStatus=state), content_hash(candidate)
+                    self.workflow(SafetyStatus=state, SafetyConfirmedBy=None),
+                    content_hash(candidate),
                 )
 
     def test_provisional_safety_with_findings_or_review_required_is_blocked(self):

@@ -231,6 +231,7 @@ class ParallelWorkflowTests(unittest.IsolatedAsyncioTestCase):
         snapshot = {
             "id": workflow_id,
             "page_id": uuid4(),
+            "book_id": uuid4(),
             "revision_id": uuid4(),
             "input_text": "same text",
             "input_words": [{"bbox": [0.1, 0.1, 0.2, 0.1]}],
@@ -298,6 +299,7 @@ class ParallelWorkflowTests(unittest.IsolatedAsyncioTestCase):
         snapshot = {
             "id": workflow_id,
             "page_id": uuid4(),
+            "book_id": uuid4(),
             "revision_id": uuid4(),
             "input_text": "same text",
             "input_words": [{"bbox": [0.1, 0.1, 0.2, 0.1]}],
