@@ -25,8 +25,8 @@ from scripts.ocr_box_tightness_probe import verify_ocr_output
 from scripts.ocr_real_photo_benchmark import MAX_CASES, Case, load_cases, normalize
 from scripts.ocr_tone_blind_policy import propose_text
 from scripts.ocr_tesseract_review_risk import assess_review_risk
+from scripts.ocr_tesseract_alignment import unambiguous_optimal_token_alignment
 from scripts.ocr_vietnamese_artifact_ab import _word_surface_sequence, score_pair
-from scripts.ocr_word_error_diagnostics import analyze_word_errors
 
 REVIEW_RULES = (
     "tesseract_line_priority",
@@ -69,12 +69,12 @@ def _bbox_crop(image: Path, box: object, target: Path) -> None:
 
 def _flip_category(
     reference_tokens: list[str], baseline_tokens: list[str],
-    index: int, changed: str, *, positional_alignment_safe: bool,
+    index: int, changed: str, *, reference_index: int | None,
 ) -> str:
-    if not positional_alignment_safe or index >= len(reference_tokens):
+    if reference_index is None or not 0 <= reference_index < len(reference_tokens):
         return "ambiguous"
     old = baseline_tokens[index]
-    truth = reference_tokens[index]
+    truth = reference_tokens[reference_index]
     if old == truth and changed != truth:
         return "regressed"
     if old != truth and changed == truth:
@@ -97,14 +97,11 @@ def _render_page(
     words, base_tokens = words_and_tokens
     reference = normalize(case.truth)
     reference_tokens = reference.split()
-    differences = analyze_word_errors(reference, baseline)
-    positional_safe = (
-        differences.get("status") == "complete"
-        and len(reference_tokens) == len(base_tokens)
-        and not any(
-            entry["kind"] in {"missing_token", "extra_token"}
-            for entry in differences["errors"]
-        )
+    # Do not mark an entire page ambiguous just because a trailing false
+    # OCR token exists. Only score a given changed word if *all* optimal
+    # token edit paths uniquely map it to one reference position.
+    safe_reference_indices = unambiguous_optimal_token_alignment(
+        reference_tokens, base_tokens,
     )
     index_to_policies: dict[int, dict[str, str]] = {}
     for rule, proposal in proposals.items():
@@ -141,7 +138,7 @@ def _render_page(
         for rule, new_text in choices.items():
             category = _flip_category(
                 reference_tokens, base_tokens, position, new_text,
-                positional_alignment_safe=positional_safe,
+                reference_index=safe_reference_indices.get(position),
             )
             stats[f"{rule}_{category}"] += 1
             candidate_categories.append(category)
@@ -150,8 +147,9 @@ def _render_page(
                 f"<strong>{_safe(new_text)}</strong> "
                 f"<small>({category}; chỉ để kiểm tra)</small></li>"
             )
+        gt_position = safe_reference_indices.get(position)
         ref_word = (
-            reference_tokens[position] if positional_safe else
+            reference_tokens[gt_position] if gt_position is not None else
             "Không tự suy luận từ tham chiếu khi lệch vị trí"
         )
         risk_rank = min(severity[label] for label in candidate_categories)
@@ -206,8 +204,9 @@ li {{ margin:7px 0; }} small {{ color:#6b6670; }}
 có khả năng gây sai hoặc chưa xác định lên đầu danh sách.
 Ảnh, chữ,
 văn bản tham chiếu KHÔNG được gửi lên GitHub, chat hay cloud.
-Nhãn corrected/regressed dựa trên token ở cùng vị trí và có thể
-không phản ánh căn chỉnh thực; hãy kiểm tra lại trên ảnh gốc.
+Nhãn corrected/regressed chỉ được gán khi tất cả đường căn chỉnh
+Levenshtein tối ưu đều trỏ đến cùng một từ tham chiếu; nhãn vẫn cần
+được kiểm tra lại trên ảnh gốc.
 Đây không phải nhãn ground truth độc lập, không bật trong production.</div>
 <p>Đã xử lý {_safe(stats["successful_pages"])}/{_safe(stats["dataset_pages"])} trang;
 vị trí khác nhau cần đối chứng: {_safe(stats["distinct_positions"])}.</p>
