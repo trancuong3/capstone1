@@ -82,4 +82,8 @@ foreach ($policy in @("line_majority_2", "vietocr_line_priority")) {
     $result.wer_page_directions | Format-List
 }
 
+Write-Host "TONE ALTERNATIVE SOURCE AUDIT:" -ForegroundColor Cyan
+$report.quality.evidence_source_audit | Format-List
+Write-Host "CORRECT TONE READING SOURCE (ORACLE DIAGNOSTIC ONLY):" -ForegroundColor Cyan
+$report.quality.tone_error_source_audit | Format-List
 Write-Host "TASK 10 BLIND POLICY A/B COMPLETED (OFFLINE)" -ForegroundColor Green
