@@ -52,6 +52,70 @@ class PhotoBenchmarkTests(unittest.TestCase):
         self.assertEqual(module.percentile([10, 20, 30, 40], 0.95), 40)
         self.assertIsNone(module.percentile([], 0.50))
 
+    def test_quality_by_condition_is_aggregate_only(self):
+        import sys
+        import types
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            pages = [
+                ("clean.png", "Bé đọc sách.", "clean"),
+                ("shadow.png", "Trời hôm nay đẹp.", "shadow"),
+            ]
+            for name, _, _ in pages:
+                (root / name).write_bytes(b"test-only-image-data")
+            cases = [
+                module.Case(root / name, truth, condition)
+                for name, truth, condition in pages
+            ]
+            predictions = iter(["Bé đọc sách.", "Trời hôm nay dep."])
+            fake_engine = types.ModuleType("app.services.ocr_engine")
+            fake_engine.extract_text_and_boxes = lambda _data: {
+                "text": next(predictions),
+                "metadata": {
+                    "engine_statuses": {
+                        "paddleocr": "success",
+                        "vietocr": "success",
+                        "tesseract": "success",
+                    },
+                    "vietocr_runtime_provenance": {
+                        "model_load_status": "loaded",
+                        "model_inference_status": "success",
+                        "fallback_reason": None,
+                        "model_profile": "FLOW1_EXTERNAL_TRDG",
+                        "checkpoint_sha256": "a" * 64,
+                    },
+                },
+            }
+            fake_torch = types.ModuleType("torch")
+            fake_torch.cuda = types.SimpleNamespace(is_available=lambda: False)
+            with mock.patch.dict(sys.modules, {
+                "torch": fake_torch,
+                "app.services.ocr_engine": fake_engine,
+            }):
+                report = module.evaluate(
+                    cases, expected_profile="FLOW1_EXTERNAL_TRDG",
+                    expected_sha="a" * 64,
+                )
+            self.assertEqual(report["successful_cases"], 2)
+            self.assertEqual(report["failed_cases"], 0)
+            clean = report["quality_by_condition"]["clean"]
+            shadow = report["quality_by_condition"]["shadow"]
+            self.assertEqual(clean["micro_cer"], 0)
+            self.assertEqual(clean["micro_wer"], 0)
+            self.assertEqual(clean["exact_page_match_rate"], 1)
+            self.assertGreater(shadow["micro_cer"], 0)
+            self.assertGreater(shadow["micro_wer"], 0)
+            self.assertEqual(shadow["exact_page_match_rate"], 0)
+            self.assertEqual(
+                sum(item["character_edits"] for item in report["quality_by_condition"].values()),
+                report["recognition"]["character_edits"],
+            )
+            encoded = json.dumps(report, ensure_ascii=False)
+            self.assertNotIn("Trời hôm nay", encoded)
+            self.assertNotIn(str(root), encoded)
+
     def test_cli_loads_private_env_without_printing_credentials(self):
         import contextlib
         import io

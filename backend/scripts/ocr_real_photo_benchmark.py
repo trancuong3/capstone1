@@ -118,6 +118,7 @@ def evaluate(
     profiles: Counter[str] = Counter()
     checkpoints: Counter[str] = Counter()
     conditions: Counter[str] = Counter()
+    condition_quality: dict[str, dict[str, int]] = {}
 
     for case in cases:
         try:
@@ -159,6 +160,18 @@ def evaluate(
             profiles[profile] += 1
             checkpoints[sha] += 1
             conditions[case.condition] += 1
+            # Only aggregated statistics; never emit OCR text or source paths.
+            bucket = condition_quality.setdefault(case.condition, {
+                "successful_cases": 0, "exact_page_matches": 0,
+                "character_edits": 0, "reference_characters": 0,
+                "word_edits": 0, "reference_words": 0,
+            })
+            bucket["successful_cases"] += 1
+            bucket["exact_page_matches"] += int(predicted == gt)
+            bucket["character_edits"] += edit_distance(list(predicted), list(gt))
+            bucket["reference_characters"] += len(gt)
+            bucket["word_edits"] += edit_distance(predicted.split(), gt.split())
+            bucket["reference_words"] += len(gt.split())
             if torch.cuda.is_available():
                 gpu_allocated.append(torch.cuda.max_memory_allocated() / 1024**2)
                 gpu_reserved.append(torch.cuda.max_memory_reserved() / 1024**2)
@@ -199,6 +212,25 @@ def evaluate(
             "engine_contract": list(REQUIRED_ENGINES),
         },
         "conditions_case_counts": dict(conditions),
+        "quality_by_condition": {
+            condition: {
+                "successful_cases": bucket["successful_cases"],
+                "exact_page_match_rate": round(
+                    bucket["exact_page_matches"] / bucket["successful_cases"], 6
+                ),
+                "micro_cer": round(
+                    bucket["character_edits"] / bucket["reference_characters"], 6
+                ) if bucket["reference_characters"] else None,
+                "micro_wer": round(
+                    bucket["word_edits"] / bucket["reference_words"], 6
+                ) if bucket["reference_words"] else None,
+                "character_edits": bucket["character_edits"],
+                "reference_characters": bucket["reference_characters"],
+                "word_edits": bucket["word_edits"],
+                "reference_words": bucket["reference_words"],
+            }
+            for condition, bucket in sorted(condition_quality.items())
+        },
         "real_photo_origin_and_ground_truth_manual_review_required": True,
         "bbox_and_color_acceptance_not_measured": True,
     }
