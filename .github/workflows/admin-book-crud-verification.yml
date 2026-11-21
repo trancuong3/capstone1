@@ -48,6 +48,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Temporary read-only formatting diagnostic. Restore files before all gates.
+      - name: Diagnose exact hosting Prettier differences
+        run: |
+          npx prettier --write scripts/verify-hosting-env.mjs scripts/verify-hosting-env.test.mjs
+          node -e 'for (const path of ["scripts/verify-hosting-env.mjs","scripts/verify-hosting-env.test.mjs"]) { const fs=require("node:fs"); console.log("VI_FORMAT:" + JSON.stringify({path,content:fs.readFileSync(path,"utf8")})) }'
+          git restore -- scripts/verify-hosting-env.mjs scripts/verify-hosting-env.test.mjs
+
       - name: Check formatting of feature files
         run: |
           npx prettier --check \
