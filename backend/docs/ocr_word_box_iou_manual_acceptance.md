@@ -14,7 +14,7 @@ JSONL files to GitHub/CI/chat. The aggregate JSON contains counts only.
    relative `image` paths from `pages.jsonl`. There can be no missing pages,
    empty reference lists or duplicate page identifiers.
 4. A reference word is stored as `{"text":"Bé","bbox":[x,y,w,h]}`,
-   in normalized **original-image** coordinates. If the original dimensions
+   in normalized **original-image** coordinates. Each entry must contain exactly **one whitespace-delimited word**, not an entire phrase or line. If the original dimensions
    are `W x H` and the hand-drawn rectangle is `left,top,right,bottom`
    in original pixels, calculate:
    `x=left/W`, `y=top/H`, `w=(right-left)/W`, `h=(bottom-top)/H`.
