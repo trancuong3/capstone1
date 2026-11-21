@@ -582,7 +582,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         expect(speechRecorderMock.start.mock.calls.length).toBeGreaterThan(2);
         expect(
           screen.getByRole("button", {
-            name: "Bé đọc với nhận diện giọng nói",
+            name: "Dừng nhận diện giọng nói",
           }),
         ).toBeEnabled();
         expect(compareTranscriptMock).not.toHaveBeenCalled();

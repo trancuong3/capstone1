@@ -378,7 +378,8 @@ function ReadingSessionScreen({
         ? presencePaused
           ? "paused-by-presence"
           : "paused-other"
-        : uiState === "reading" && canonicalState === "LISTENING"
+        : uiState === "reading" &&
+            (isMicRecording || canonicalState === "LISTENING")
           ? "reading"
           : "paused-other";
   // Opt-in only: does nothing unless a parent turned the email reminder on and
@@ -2576,10 +2577,11 @@ function ReadingSessionScreen({
         setUiState("page-turn");
       }
     } catch {
+      resumeCaptureAfterPageTurnRef.current = false;
       if (mountedRef.current) {
         setIsMicRecording(false);
         setPageNavigationError(
-          "Chưa tự chuyển được sau trang này. Bé có thể bấm ‘Đánh dấu trang đã đọc xong’ để thử lại.",
+          "Chưa lưu được trang này. Bé có thể bấm ‘Đánh dấu trang đã đọc xong’ để thử lại.",
         );
       }
     } finally {

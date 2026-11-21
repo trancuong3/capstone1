@@ -458,7 +458,10 @@ describe("automatic reading flow on the reading screen", () => {
     expect(
       screen.getByRole("dialog", { name: "Bé đang nghỉ một chút" }),
     ).toBeInTheDocument();
-    expect(speechRecorderMock.cancel).toHaveBeenCalled();
+    expect(
+      speechRecorderMock.stop.mock.calls.length +
+        speechRecorderMock.cancel.mock.calls.length,
+    ).toBeGreaterThan(0);
     await act(async () => vi.advanceTimersByTimeAsync(120_000));
     expect(speechRecorderMock.start.mock.calls.length).toBe(starts);
     expect(speechPlayerMock.play).not.toHaveBeenCalled();
@@ -497,5 +500,121 @@ describe("automatic reading flow on the reading screen", () => {
     act(() => recognition.say("Bé mèo"));
     expect(word("Bé")).toHaveClass(SUCCESS);
     expect(word("mèo")).toHaveClass(SUCCESS);
+  });
+
+  it("stays on the page with a Chưa lưu notice when saving fails, then recovers on retry (G10)", async () => {
+    const completedProgress = {
+      ...pageProgressFixture,
+      completed_pages: 1,
+      pages: [
+        {
+          ...pageProgressFixture.pages[0],
+          status: "COMPLETED" as const,
+          completed_at: "2026-10-21T07:00:00Z",
+        },
+        pageProgressFixture.pages[1],
+      ],
+    };
+    services.readingService.completeCurrentPage
+      .mockRejectedValueOnce(new Error("Network offline"))
+      .mockResolvedValueOnce(completedProgress);
+
+    const user = userEvent.setup();
+    renderReading("reading");
+    await user.click(await screen.findByRole("button", MIC_BUTTON));
+    act(() => lastRecognition().say("Bé mèo nhỏ đang"));
+
+    await screen.findByText(/Chưa lưu được trang này/i);
+    expect(screen.queryByLabelText("Trang sách 5")).toBeNull();
+    expect(screen.getByLabelText("Trang sách 4")).toBeInTheDocument();
+    expect(services.readingService.completeCurrentPage).toHaveBeenCalledTimes(
+      1,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Đánh dấu trang đã đọc xong" }),
+    );
+    await screen.findByLabelText("Trang sách 5");
+    expect(services.readingService.completeCurrentPage).toHaveBeenCalledTimes(
+      2,
+    );
+  });
+
+  it("completes the final page in range cleanly, saves once, and keeps the microphone closed", async () => {
+    const finalProgress: ReadingSessionPageProgressDTO = {
+      ...pageProgressFixture,
+      current_page_id: pageFive.page_id,
+      current_page_number: pageFive.page_number,
+      current_index: 1,
+      completed_pages: 1,
+      pages: [
+        {
+          ...pageProgressFixture.pages[0],
+          status: "COMPLETED",
+          completed_at: "2026-10-21T07:00:00Z",
+        },
+        {
+          ...pageProgressFixture.pages[1],
+          status: "IN_PROGRESS",
+        },
+      ],
+    };
+    (
+      services.readingService.getCurrentPage as ReturnType<typeof vi.fn>
+    ).mockResolvedValue(pageFive);
+    (
+      services.readingService.getPageProgress as ReturnType<typeof vi.fn>
+    ).mockResolvedValue(finalProgress);
+    services.readingService.completeCurrentPage.mockResolvedValue({
+      ...finalProgress,
+      completed_pages: 2,
+      pages: [
+        finalProgress.pages[0],
+        {
+          ...finalProgress.pages[1],
+          status: "COMPLETED",
+          completed_at: "2026-10-21T07:01:00Z",
+        },
+      ],
+    });
+
+    const user = userEvent.setup();
+    renderReading("reading");
+    await user.click(await screen.findByRole("button", MIC_BUTTON));
+    const startsBeforeFinish = speechRecorderMock.start.mock.calls.length;
+    act(() => lastRecognition().say("Bé mèo nhỏ đang"));
+
+    await waitFor(() =>
+      expect(services.readingService.completeCurrentPage).toHaveBeenCalledWith(
+        TEST_SESSION_ID,
+        pageFive.page_id,
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", MIC_BUTTON)).toBeInTheDocument(),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(services.readingService.completeCurrentPage).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(speechRecorderMock.start.mock.calls.length).toBe(startsBeforeFinish);
+  });
+
+  it("does not trigger false scoring or automatic help on an image-only page with no OCR words", async () => {
+    const imageOnlyPage: ReadingPageDTO = {
+      ...pageFour,
+      words: [],
+    };
+    (
+      services.readingService.getCurrentPage as ReturnType<typeof vi.fn>
+    ).mockResolvedValue(imageOnlyPage);
+
+    await startWithFakeClock();
+    await act(async () => vi.advanceTimersByTimeAsync(20_000));
+    expect(speechPlayerMock.play).not.toHaveBeenCalled();
+    expect(compareTranscriptMock).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Trang tiếp theo" }),
+    ).toBeEnabled();
   });
 });

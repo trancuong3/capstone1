@@ -56,6 +56,8 @@ export interface WordTimedPlayOptions {
 interface Operation {
   readonly controller: AbortController;
   readonly preferences: SpeechPreferences;
+  /** Allows slower-than-0.7 device speech for step-2 clearer word models. */
+  readonly browserRate: number;
   paused: boolean;
   started: boolean;
   resumeWait?: () => void;
@@ -214,12 +216,17 @@ export class TtsPlayback {
     this.stop();
     const preferences = getSpeechPreferences();
     const limited = Math.min(preferences.speed, speedLimit);
+    const scaled = speedScale === 1 ? limited : limited * speedScale;
     const operation: Operation = {
       controller: new AbortController(),
       preferences: {
         ...preferences,
-        speed: speedScale === 1 ? limited : clampSpeed(limited * speedScale),
+        speed: speedScale === 1 ? limited : clampSpeed(scaled),
       },
+      browserRate:
+        speedScale === 1
+          ? limited
+          : Number(Math.min(1.2, Math.max(0.5, scaled)).toFixed(2)),
       paused: false,
       started: false,
     };
@@ -295,7 +302,7 @@ export class TtsPlayback {
               onStart,
               undefined,
               onTime,
-              operation.preferences.speed,
+              operation.browserRate,
             );
             continue;
           }
@@ -731,12 +738,12 @@ export class TtsPlayback {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "vi-VN";
     utterance.voice = voice;
-    utterance.rate = operation.preferences.speed;
+    utterance.rate = operation.browserRate;
     utterance.pitch = 1;
     utterance.volume = 1;
     const estimate = Math.max(
       0.5,
-      (text.match(/\S+/gu)?.length ?? 0) / (2.25 * operation.preferences.speed),
+      (text.match(/\S+/gu)?.length ?? 0) / (2.25 * operation.browserRate),
     );
     return new Promise<number>((resolve, reject) => {
       let settled = false;
