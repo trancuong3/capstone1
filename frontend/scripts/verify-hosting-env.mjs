@@ -29,6 +29,7 @@ export function publicHttpsOrigin(name, value) {
     hostname.endsWith(".invalid") ||
     hostname.endsWith(".test") ||
     hostname.endsWith(".example") ||
+    hostname.endsWith(".example.com") ||
     hostname.startsWith("example.") ||
     /^\d+(?:\.\d+){3}$/.test(hostname) ||
     hostname.includes(":");
@@ -44,7 +45,10 @@ export function publicHttpsOrigin(name, value) {
     parsed.search ||
     parsed.hash
   ) {
-    throw new Error(name + ": must be a public HTTPS origin without a path, query, credentials, or nonstandard port");
+    throw new Error(
+      name +
+        ": must be a public HTTPS origin without a path, query, credentials, or nonstandard port",
+    );
   }
 
   return parsed.origin;
@@ -61,7 +65,9 @@ export function checkPublishableKey(key) {
     if (parts.length !== 3 || parts.some((part) => !part)) {
       throw new Error("not a JWT");
     }
-    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    const payload = JSON.parse(
+      Buffer.from(parts[1], "base64url").toString("utf8"),
+    );
     if (payload?.role === "anon") return;
   } catch {
     // Do not report the key or decoder details.
@@ -81,10 +87,16 @@ export function verifyHostingEnvironment(env = process.env) {
       /(?:SECRET|SERVICE_ROLE|PRIVATE|PASSWORD|ACCESS_TOKEN|ROOT_KEY)/i.test(name),
     )
   ) {
-    throw new Error("Hosting environment contains a forbidden browser-public secret variable name");
+    throw new Error(
+      "Hosting environment contains a forbidden browser-public secret variable name",
+    );
   }
-  if (/^(?:1|true|yes|on)$/i.test(env.PLAYWRIGHT_AUTH_FIXTURES?.trim() ?? "")) {
-    throw new Error("PLAYWRIGHT_AUTH_FIXTURES must not be enabled in hosted deployments");
+  if (
+    /^(?:1|true|yes|on)$/i.test(env.PLAYWRIGHT_AUTH_FIXTURES?.trim() ?? "")
+  ) {
+    throw new Error(
+      "PLAYWRIGHT_AUTH_FIXTURES must not be enabled in hosted deployments",
+    );
   }
 
   const supabaseUrl = publicHttpsOrigin(
@@ -115,9 +127,13 @@ export function verifyHostingEnvironment(env = process.env) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     verifyHostingEnvironment();
-    console.log("ViRead hosting preflight passed (public HTTPS origins and safe key type).");
+    console.log(
+      "ViRead hosting preflight passed (public HTTPS origins and safe key type).",
+    );
   } catch (error) {
-    console.error(error instanceof Error ? error.message : "Invalid hosting environment");
+    console.error(
+      error instanceof Error ? error.message : "Invalid hosting environment",
+    );
     process.exitCode = 1;
   }
 }
