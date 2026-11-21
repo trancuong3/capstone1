@@ -116,6 +116,57 @@ class PhotoBenchmarkTests(unittest.TestCase):
             self.assertNotIn("Trời hôm nay", encoded)
             self.assertNotIn(str(root), encoded)
 
+    def test_bbox_integrity_is_aggregate_only_not_accuracy(self):
+        import sys
+        import types
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            (root / "page.png").write_bytes(b"fixture")
+            fake_engine = types.ModuleType("app.services.ocr_engine")
+            fake_engine.extract_text_and_boxes = lambda _data: {
+                "text": "Bé đọc",
+                "words": [
+                    {"text": "Bé", "bbox": [0.1, 0.1, 0.2, 0.1]},
+                    {"text": "đọc", "bbox": [0.8, 0.8, 0.3, 0.3]},
+                ],
+                "metadata": {
+                    "engine_statuses": {
+                        "paddleocr": "success",
+                        "vietocr": "success",
+                        "tesseract": "success",
+                    },
+                    "vietocr_runtime_provenance": {
+                        "model_load_status": "loaded",
+                        "model_inference_status": "success",
+                        "fallback_reason": None,
+                        "model_profile": "FLOW1_EXTERNAL_TRDG",
+                        "checkpoint_sha256": "a" * 64,
+                    },
+                },
+            }
+            fake_torch = types.ModuleType("torch")
+            fake_torch.cuda = types.SimpleNamespace(is_available=lambda: False)
+            with mock.patch.dict(sys.modules, {
+                "torch": fake_torch, "app.services.ocr_engine": fake_engine,
+            }):
+                report = module.evaluate(
+                    [module.Case(root / "page.png", "Bé đọc", "clean")],
+                    expected_profile="FLOW1_EXTERNAL_TRDG",
+                    expected_sha="a" * 64,
+                )
+            bbox = report["bbox_integrity_diagnostics"]
+            self.assertEqual(report["successful_cases"], 1)
+            self.assertEqual(bbox["reported_words"], 2)
+            self.assertEqual(bbox["valid_boxes"], 1)
+            self.assertEqual(bbox["invalid_boxes"], 1)
+            self.assertEqual(bbox["invalid_reasons"]["out_of_image_bounds"], 1)
+            self.assertEqual(bbox["by_condition"]["clean"]["scanned_cases"], 1)
+            self.assertTrue(report["bbox_and_color_acceptance_not_measured"])
+            self.assertNotIn("Bé", json.dumps(bbox, ensure_ascii=False))
+            self.assertNotIn(str(root), json.dumps(bbox))
+
     def test_private_word_diagnostics_do_not_leak_into_aggregate(self):
         import sys
         import types
