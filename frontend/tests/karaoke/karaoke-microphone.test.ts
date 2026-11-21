@@ -152,6 +152,50 @@ describe("the child's singing microphone", () => {
     },
   );
 
+  it("counts a silent line at the scheduled slice boundary in both live and final results", async () => {
+    const probe = microphoneStream();
+    const input = microphoneStream();
+    microphoneInput(
+      vi
+        .fn()
+        .mockResolvedValueOnce(probe.stream)
+        .mockResolvedValue(input.stream),
+    );
+    let observe: signalMonitor.SignalObserver = () => {};
+    vi.spyOn(signalMonitor, "monitorSingingTrack").mockImplementation(
+      (_stream, _clock, callback) => {
+        observe = callback;
+        return () => {};
+      },
+    );
+    const view = mount();
+    await act(async () => {
+      expect(await view.result.current.arm()).toBe(true);
+    });
+    await act(async () => view.result.current.resume());
+    const first = latest();
+    act(() => first.onstart?.());
+    act(() => {
+      for (let ms = 0; ms < 3000; ms += 50) {
+        mediaMs = ms + 50;
+        observe(ms, mediaMs, "quiet");
+        view.result.current.observePlayback(ms, mediaMs);
+        vi.advanceTimersByTime(50);
+      }
+    });
+    expect(first.stop).toHaveBeenCalledOnce();
+    await act(async () => first.onend?.());
+    expect(
+      view.result.current.liveScore?.lineScores[0].words.map((w) => w.state),
+    ).toEqual(["omitted", "omitted", "omitted"]);
+    act(() => {
+      view.result.current.finish();
+      latest().onend?.();
+    });
+    expect(view.result.current.score?.evaluatedWords).toBe(3);
+    expect(view.result.current.score?.matchedWords).toBe(0);
+  });
+
   it("reconciles fragmented finals so a repeated syllable is not lost", async () => {
     const view = mount({
       ...lyrics,

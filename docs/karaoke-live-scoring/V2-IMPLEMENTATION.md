@@ -39,9 +39,11 @@ and TMP. This environmental failure is not counted as a product failure.
   official score, and may be replaced or removed.
 - Missing text is not evidence of silence. Omission requires either reliable
   bounding words in the same line, or almost complete healthy quiet coverage
-  around the true timed unit AND successful recognition drain.
+  over the true timed unit AND successful recognition drain.
 - Any ambiguous/voiced audio prevents a silence verdict for that unit. Digital
-  zero, clipped input, low volume and unavailable monitoring are uncertain.
+  zero before established audible input, clipped input, uncalibrated low volume
+  and unavailable monitoring are uncertain. Noise-suppressed zero after voice
+  on the same healthy, enabled, unmuted track can establish quiet.
 - Line-only lyrics use the entire real line interval for acoustic evidence;
   evenly divided display times are not word timing evidence.
 - Quiet detection is an energy heuristic, not identification of the child.
@@ -70,6 +72,87 @@ and TMP. This environmental failure is not counted as a product failure.
   the progress-copy text no longer draws over recognition colors.
 
 ## Measured outcomes
+
+### Follow-up: omissions remained at zero
+
+The reported result showed 61/126 assessed words and zero omissions. The image
+does not identify which of the remaining 65 words were actually skipped, but
+three reproducible defects prevented valid quiet evidence from being counted:
+
+1. Every transcript event marked the entire capture from its start as speech,
+   including earlier quiet lines and old final slots repeated in native events.
+2. Splitting transcript groups restarted acoustic evidence even though the
+   physical microphone capture had not restarted.
+3. Quiet coverage required 300 ms beyond a lyric's end, while scheduled capture
+   could stop at that exact end. Fully monitored silent lines stayed unknown.
+
+The fix confines speech contradictions to native speech intervals for new
+results, preserves acoustic evidence when only transcript grouping changes,
+and measures quiet coverage over the actual lyric interval. Real microphone
+restarts still reset evidence. Final drain must still succeed; missing audio,
+network errors, disabled/muted tracks and uncertain/voiced samples do not become skips.
+Line-only lyrics still require coverage of the complete real line.
+
+Regression tests reproduced four engine/capture failures and one hook failure
+before the fix. Browser coverage adds a real Web Audio track at a calibrated
+quiet level, natural playback, scheduled capture drain and assertions for both
+the live omission count and the final result card. This synthetic signal checks
+the complete omission path; it does not establish real child-voice accuracy.
+
+Follow-up verification: 8 karaoke test files / 108 tests passed, TypeScript,
+scoped ESLint and formatting checks exited 0. The new browser scenario verifies
+that skipping a monitored three-word line produces `Bỏ qua: 3` while singing
+and `Bỏ qua 3` in the final card. The previous confirmed-speech, practice and
+unassessed-input scenario remains included in the browser gate.
+Both scenarios passed on desktop and mobile: **4/4 browser tests**, exit 0.
+The final result screenshot was inspected and shows the expected omission
+count of 3. The test server shuts down at the end; the user's project services
+remain stopped as requested before this fix.
+
+### Follow-up: stopping after singing still produced zero skips
+
+The next report showed 24/126 assessed words with zero skips. The previous
+browser fixture used a constant 0.0002 amplitude signal, which did not exercise
+two reproducible failures in the input classifier: a 0.002 room-noise signal
+after 0.04 singing stayed uncertain, and noise-suppressed digital zero remained
+uncertain even after the same input had carried audible voice. Two new tests
+failed before the fix.
+
+Quiet classification now uses the measured prior voice level, with a bounded
+relative threshold and the existing 300 ms voice holdoff. A live, enabled,
+unmuted input can classify zero as quiet only after audible voice on that same
+track. Initial zero, clipped/invalid samples and an uncalibrated higher noise
+floor stay uncertain. Track state is checked before classification.
+
+The classifier persists across recognition slices that reuse the same physical
+stream, and is reset when the stream closes (pause, device change or new
+attempt). This prevents every slice from losing proof that the input works.
+The browser regression now supplies audible audio, then room noise and exact
+zero across two lyric lines and a capture restart, using natural playback.
+This reproduces signal-processing failure modes; no recording from the user's
+microphone was available to prove the precise cause in their session.
+
+Final verification for this follow-up: **110 tests / 8 karaoke files passed**;
+TypeScript, scoped ESLint and formatting exited 0. The stopping-singing and
+existing confirmed-speech scenarios passed on desktop and mobile (**4/4**,
+exit 0). The stopping scenario counts **6/6 omitted words** across two lines
+and a recognition slice, both live and in the final card; the final screenshot
+was visually checked. Frontend/backend user servers remain stopped.
+
+### Countdown sound
+
+Preparation now plays one short, low-volume 520 Hz tone per visual 3–2–1 tick,
+then a distinct 880 Hz start tone. Sound is unlocked in the start gesture
+before asynchronous microphone permission. Cancel, failed permission and
+unmount close the cue's audio context; the final tone closes it on completion.
+Unsupported/blocked Web Audio preserves the existing visual countdown.
+This applies to song starts, replay and line practice. No asset or speech
+service is needed. User frontend/backend servers were stopped for this change.
+Validation: 111 tests / 8 karaoke files passed; TypeScript, scoped ESLint and
+formatting exited 0. Desktop/mobile stage and scored-singing browser scenarios
+passed 4/4, including observed oscillator frequencies for all four cues.
+
+### Original v2 benchmark results
 
 The deterministic replay improved from **11/16 to 16/16 cases** against base
 commit `8ca22412`. Its 52 expected token states comprise 20 matched, 4 different,
@@ -120,7 +203,7 @@ The existing 2 s final-drain timeout remains: observed clean endings were
 omissions. There is no evidence here to justify increasing that deadline or
 loosening recognition confidence globally.
 
-## Final verification
+## Initial v2 verification (before the omission follow-up)
 
 - Full frontend Vitest: **141 files, 2,201 tests passed**, exit 0. This run
   started before the last small phase/rendering changes; the fresh scoped run
@@ -208,7 +291,10 @@ commit for rollback; the existing free-singing mode remains available.
   final scoped 7 files/101 tests; final lint/types/format exit 0; 14 existing
   browser scenarios plus final 2/2 scoring scenarios and inspected screenshots;
   five native Chrome inputs plus number retest, one Edge input, five offline
-  model inputs. See final verification for exact timing/scope boundaries.
+  model inputs. See initial v2 verification for timing/scope boundaries.
+  Follow-up: omission regressions failed before the fix; 8 files/110
+  karaoke tests and 4/4 desktop/mobile browser tests pass after the fix;
+  TypeScript, scoped ESLint, formatting and whitespace checks exit 0.
 - NEXT: No remaining implementation or local verification work in this scope.
   Child-voice field qualification remains unverified as explicitly documented.
 - DO_NOT_REPEAT: Do not use clock-only omission or treat synthetic tests as ASR accuracy.
