@@ -17,6 +17,19 @@ Các khu vực giao diện đã có:
 
 **Lưu ý phạm vi:** Các thao tác API có token và backend/database phù hợp có thể được lưu bền vững; chỉ những đường dẫn fixture/mock phục vụ demo/test mới giữ dữ liệu ở bộ nhớ trình duyệt. Không mặc định mọi màn hình chỉ dùng mock hoặc mọi dịch vụ backend đều sẵn sàng trên production.
 
+## Chuẩn bị Next.js HTTPS production (chưa triển khai)
+
+Hướng dẫn hosting SSR chi phí thấp, bảo mật Supabase/Auth, cấu hình FastAPI
+CORS và quy trình xin duyệt production được ghi trong
+[Frontend HTTPS hosting plan](../docs/frontend-https-hosting-plan.md).
+
+- `frontend/vercel.json` sử dụng Next.js server-side runtime, không static export.
+- `npm run build:hosting` kiểm tra ba biến `NEXT_PUBLIC_*` hợp lệ trước khi build.
+- PR/CI **không tạo dịch vụ, thay đổi secrets hoặc triển khai production**.
+- GitHub Pages Project Hub và Render FastAPI không thay thế được frontend SSR.
+- Sau khi có website thật, cần kiểm chứng đăng nhập, cookie/SSR, API/CORS và APK;
+  không được chuyển Issue #152 sang DONE chỉ vì build source thành công.
+
 ## Yêu cầu môi trường
 
 - Node.js `>= 22.13.0` (khuyến nghị Node 22 LTS)
