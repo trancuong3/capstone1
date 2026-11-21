@@ -34,6 +34,73 @@ export const cameraPageMatchSchema = z.object({
 
 export type CameraPageMatchDTO = z.infer<typeof cameraPageMatchSchema>;
 
+export const localOcrWordSchema = z.object({
+  word_index: z.number().int().nonnegative(),
+  line_index: z.number().int().nonnegative(),
+  text: z.string(),
+  normalized_text: z.string(),
+  bbox: z.tuple([z.number(), z.number(), z.number(), z.number()]),
+  ocr_confidence: z.number().min(0).max(1).nullable().optional(),
+});
+
+export const localOcrProvenanceSchema = z.object({
+  engine: z.string(),
+  device: z.enum(["cuda", "cpu", "unknown"]),
+  engine_statuses: z.record(z.string(), z.string()),
+  model_profile: z.string().nullable().optional(),
+  checkpoint_sha256: z.string().nullable().optional(),
+  model_load_status: z.string().nullable().optional(),
+  cloud_ocr_used: z.boolean(),
+  elapsed_ms: z.number().int().nonnegative(),
+});
+
+export const localOcrPageScanSchema = z.object({
+  scan_job_id: z.string(),
+  request_id: z.string(),
+  idempotency_key: z.string().nullable().optional(),
+  status: z.literal("SUCCEEDED"),
+  ocr_text: z.string(),
+  word_count: z.number().int().nonnegative(),
+  words: z.array(localOcrWordSchema),
+  provenance: localOcrProvenanceSchema,
+  matched: z.boolean(),
+  matched_book_id: z.string().nullable().optional(),
+  matched_book_title: z.string().nullable().optional(),
+  match_confidence: z.number().min(0).max(1),
+  matched_page: readingPageDtoSchema.nullable(),
+  message: z.string(),
+});
+
+export type LocalOcrPageScanDTO = z.infer<typeof localOcrPageScanSchema>;
+
+export async function scanPageImageWithLocalOcr(
+  file: Blob,
+  options: {
+    readonly fileName?: string;
+    readonly bookId?: string;
+    readonly childId?: string;
+    readonly idempotencyKey?: string;
+    readonly signal?: AbortSignal;
+  } = {},
+): Promise<LocalOcrPageScanDTO> {
+  const formData = new FormData();
+  formData.append("file", file, options.fileName || "book-page.jpg");
+  if (options.bookId) formData.append("book_id", options.bookId);
+  if (options.childId) formData.append("child_id", options.childId);
+  if (options.idempotencyKey) {
+    formData.append("idempotency_key", options.idempotencyKey);
+  }
+  return requestApi(
+    "/reading/scan-page-ocr",
+    localOcrPageScanSchema,
+    options.signal,
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
+}
+
 /**
  * Gửi frame ảnh chụp từ camera lên ViRead Vision Backend để kiểm tra khung
  * và nhận diện trang sách thuộc cuốn `bookId`.

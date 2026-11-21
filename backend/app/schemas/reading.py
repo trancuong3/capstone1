@@ -422,3 +422,41 @@ class CameraPageMatchRead(BaseModel):
     confidence: float = Field(ge=0, le=1)
     matched_page: ReadingPageRead | None = None
 
+
+class LocalOcrWordRead(BaseModel):
+    word_index: int = Field(ge=0)
+    line_index: int = Field(ge=0)
+    text: str
+    normalized_text: str
+    bbox: tuple[float, float, float, float]
+    ocr_confidence: float | None = Field(default=None, ge=0, le=1)
+
+
+class LocalOcrProvenanceRead(BaseModel):
+    engine: str
+    device: Literal["cuda", "cpu", "unknown"]
+    engine_statuses: dict[str, str]
+    model_profile: str | None = None
+    checkpoint_sha256: str | None = None
+    model_load_status: str | None = None
+    cloud_ocr_used: bool = False
+    elapsed_ms: int = Field(ge=0)
+
+
+class LocalOcrPageScanRead(BaseModel):
+    scan_job_id: UUID
+    request_id: str
+    idempotency_key: UUID | None = None
+    status: Literal["SUCCEEDED"] = "SUCCEEDED"
+    ocr_text: str
+    word_count: int = Field(ge=0)
+    words: list[LocalOcrWordRead]
+    provenance: LocalOcrProvenanceRead
+    matched: bool
+    matched_book_id: UUID | None = None
+    matched_book_title: str | None = None
+    match_confidence: float = Field(ge=0, le=1)
+    matched_page: ReadingPageRead | None = None
+    message: str
+
+

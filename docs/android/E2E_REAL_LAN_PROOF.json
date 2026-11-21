@@ -1,0 +1,32 @@
+{
+  "verifiedAt": "2026-11-21T13:51:55.197Z",
+  "lanOrigin": "https://192.168.1.4:8443",
+  "ocrScanJobId": "541ea378-8bbb-4118-a8b0-ae12402fed69",
+  "ocrRequestId": "67877c701933413fbfba2144000e26ac",
+  "ocrProvenance": {
+    "engine": "paddleocr_vietocr_dual",
+    "device": "cuda",
+    "engine_statuses": {
+      "paddleocr": "success",
+      "vietocr": "success",
+      "tesseract": "success"
+    },
+    "model_profile": "FLOW1_EXTERNAL_TRDG",
+    "checkpoint_sha256": "200edce460606275481dda19c50b7763620a112ddc66a8378982bddc013114a6",
+    "model_load_status": "loaded",
+    "cloud_ocr_used": false,
+    "elapsed_ms": 5306
+  },
+  "ocrWordCount": 28,
+  "matchedBookId": "60ffdba4-1790-482a-963a-a7351e5ea58a",
+  "matchedPageNumber": 1,
+  "readingSessionId": "17dabd34-f796-4e6e-874d-48dadf888c65",
+  "historyPersistedAfterReload": true,
+  "logPrivacyVerified": true,
+  "logoutVerified": true,
+  "crossAccountIsolation": {
+    "childStatus": 404,
+    "historyStatus": 404,
+    "sessionStatus": 404
+  }
+}

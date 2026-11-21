@@ -3,8 +3,13 @@ node_modules/
 
 # Next.js generated output
 .next/
+.next-lan/
+.next-e2e/
 out/
 next-env.d.ts
+
+# Local Windows LAN host config (machine-specific LAN IP/paths; example is committed)
+scripts/windows/viread-host.config.json
 
 # Test and coverage output
 coverage/

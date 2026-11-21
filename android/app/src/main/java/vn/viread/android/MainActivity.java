@@ -7,13 +7,15 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.net.Uri;
+import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.PermissionRequest;
 import android.webkit.SslErrorHandler;
-import android.net.http.SslError;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -21,38 +23,51 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.ProgressBar;
-import android.widget.Toast;
+import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+import android.widget.Toast;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Server-backed Android shell, not a static copy of the Next.js application.
- * No JS bridge, no service secrets, no permission grants to untrusted origins.
+ * No JS bridge, no service secrets, no permission grants to untrusted origins,
+ * and never bypasses TLS/SSL certificate verification.
  */
 public final class MainActivity extends Activity {
     private static final int WEB_PERMISSION_CODE = 151;
     private static final int FILE_CHOOSER_CODE = 152;
     private WebView webView;
     private ProgressBar progress;
+    private LinearLayout errorOverlay;
+    private TextView errorMessageView;
     private TrustedNavigation navigation;
     private PermissionRequest pendingPermission;
     private ValueCallback<Uri[]> pendingFiles;
+    private String lastFailedUrl;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        navigation = new TrustedNavigation(BuildConfig.FRONTEND_URL);
+        navigation = new TrustedNavigation(
+                BuildConfig.FRONTEND_URL, BuildConfig.LAN_ACCEPTANCE_MODE);
         getWindow().setStatusBarColor(0xFF153A53);
         getWindow().setNavigationBarColor(0xFF153A53);
 
         FrameLayout content = new FrameLayout(this);
         webView = new WebView(this);
         content.addView(webView, new FrameLayout.LayoutParams(-1, -1));
+
+        errorOverlay = buildErrorOverlay();
+        errorOverlay.setVisibility(View.GONE);
+        content.addView(errorOverlay, new FrameLayout.LayoutParams(-1, -1));
+
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(100);
-        content.addView(progress, new FrameLayout.LayoutParams(-1, 5));
+        content.addView(progress, new FrameLayout.LayoutParams(-1, 6));
         setContentView(content);
 
         WebSettings settings = webView.getSettings();
@@ -91,19 +106,26 @@ public final class MainActivity extends Activity {
             @Override
             public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
                 handler.cancel(); // Never disable TLS verification.
-                Toast.makeText(MainActivity.this, R.string.offline_message, Toast.LENGTH_LONG).show();
+                lastFailedUrl = error != null ? error.getUrl() : BuildConfig.FRONTEND_URL;
+                showErrorOverlay(getString(R.string.tls_error_message));
             }
 
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) {
-                    Toast.makeText(MainActivity.this, R.string.offline_message, Toast.LENGTH_LONG).show();
+                    lastFailedUrl = request.getUrl() != null
+                            ? request.getUrl().toString()
+                            : BuildConfig.FRONTEND_URL;
+                    showErrorOverlay(getString(R.string.offline_message));
                 }
             }
 
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 progress.setVisibility(View.VISIBLE);
+                if (url != null && !"about:blank".equals(url)) {
+                    errorOverlay.setVisibility(View.GONE);
+                }
             }
 
             @Override
@@ -143,7 +165,7 @@ public final class MainActivity extends Activity {
                 List<String> validTypes = new ArrayList<>();
                 for (String type : types) {
                     if (type != null && !type.trim().isEmpty() && type.contains("/")) {
-                        validTypes.add(type);
+                        validTypes.add(type.trim());
                     }
                 }
                 if (validTypes.size() == 1) intent.setType(validTypes.get(0));
@@ -154,7 +176,9 @@ public final class MainActivity extends Activity {
                         params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE);
                 intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 try {
-                    startActivityForResult(Intent.createChooser(intent, "Chọn ảnh hoặc tài liệu"), FILE_CHOOSER_CODE);
+                    startActivityForResult(
+                            Intent.createChooser(intent, "Chọn ảnh hoặc tài liệu"),
+                            FILE_CHOOSER_CODE);
                 } catch (ActivityNotFoundException ex) {
                     pendingFiles = null;
                     callback.onReceiveValue(null);
@@ -169,13 +193,78 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private LinearLayout buildErrorOverlay() {
+        int pad = dp(28);
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setGravity(Gravity.CENTER);
+        layout.setBackgroundColor(0xFFF6FAF8);
+        layout.setPadding(pad, pad, pad, pad);
+
+        TextView title = new TextView(this);
+        title.setText(R.string.app_name);
+        title.setTextColor(0xFF153A53);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
+        title.setGravity(Gravity.CENTER);
+        layout.addView(title);
+
+        errorMessageView = new TextView(this);
+        errorMessageView.setText(R.string.offline_message);
+        errorMessageView.setTextColor(0xFF334E58);
+        errorMessageView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        errorMessageView.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams msgParams = new LinearLayout.LayoutParams(-1, -2);
+        msgParams.topMargin = dp(12);
+        msgParams.bottomMargin = dp(24);
+        layout.addView(errorMessageView, msgParams);
+
+        Button retryBtn = new Button(this);
+        retryBtn.setText(R.string.retry_button);
+        retryBtn.setMinHeight(dp(48));
+        retryBtn.setOnClickListener(v -> {
+            errorOverlay.setVisibility(View.GONE);
+            if (webView != null) {
+                String target = (lastFailedUrl != null && navigation.isTrusted(lastFailedUrl))
+                        ? lastFailedUrl
+                        : BuildConfig.FRONTEND_URL;
+                webView.loadUrl(target);
+            }
+        });
+        layout.addView(retryBtn, new LinearLayout.LayoutParams(-1, -2));
+
+        Button homeBtn = new Button(this);
+        homeBtn.setText(R.string.open_home_button);
+        homeBtn.setMinHeight(dp(48));
+        homeBtn.setOnClickListener(v -> {
+            errorOverlay.setVisibility(View.GONE);
+            if (webView != null) {
+                webView.loadUrl(BuildConfig.FRONTEND_URL);
+            }
+        });
+        LinearLayout.LayoutParams homeParams = new LinearLayout.LayoutParams(-1, -2);
+        homeParams.topMargin = dp(12);
+        layout.addView(homeBtn, homeParams);
+
+        return layout;
+    }
+
+    private int dp(int value) {
+        return Math.round(TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, value, getResources().getDisplayMetrics()));
+    }
+
+    private void showErrorOverlay(String message) {
+        runOnUiThread(() -> {
+            if (errorMessageView != null) errorMessageView.setText(message);
+            if (errorOverlay != null) errorOverlay.setVisibility(View.VISIBLE);
+            if (progress != null) progress.setVisibility(View.GONE);
+        });
+    }
+
     private boolean handleNavigation(Uri uri) {
         String url = uri.toString();
         if (navigation.isTrusted(url)) return false;
-        String scheme = uri.getScheme();
-        if (scheme != null && (scheme.equalsIgnoreCase("https")
-                || scheme.equalsIgnoreCase("mailto")
-                || scheme.equalsIgnoreCase("tel"))) {
+        if (navigation.shouldOpenExternally(url)) {
             try {
                 startActivity(new Intent(Intent.ACTION_VIEW, uri));
             } catch (ActivityNotFoundException e) {
@@ -186,7 +275,8 @@ public final class MainActivity extends Activity {
     }
 
     private void requestWebPermission(PermissionRequest request) {
-        if (isFinishing() || !navigation.isTrusted(request.getOrigin().toString())) {
+        String origin = request.getOrigin() != null ? request.getOrigin().toString() : null;
+        if (isFinishing() || !navigation.isTrustedMediaOrigin(origin)) {
             request.deny();
             return;
         }
@@ -221,8 +311,13 @@ public final class MainActivity extends Activity {
     private void grantPending() {
         PermissionRequest request = pendingPermission;
         pendingPermission = null;
-        if (request != null && navigation.isTrusted(request.getOrigin().toString())) {
+        String origin = request != null && request.getOrigin() != null
+                ? request.getOrigin().toString()
+                : null;
+        if (request != null && navigation.isTrustedMediaOrigin(origin)) {
             request.grant(request.getResources());
+        } else if (request != null) {
+            request.deny();
         }
     }
 
@@ -277,6 +372,10 @@ public final class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (errorOverlay != null && errorOverlay.getVisibility() == View.VISIBLE) {
+            errorOverlay.setVisibility(View.GONE);
+            return;
+        }
         if (webView != null && webView.canGoBack()) webView.goBack();
         else super.onBackPressed();
     }
