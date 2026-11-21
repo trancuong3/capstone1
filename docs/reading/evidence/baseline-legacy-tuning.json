@@ -1,0 +1,236 @@
+{
+  "pipeline": "legacy",
+  "split": "tuning",
+  "kind": "synthetic transcript-level (no audio, no child voice)",
+  "summary": {
+    "total": {
+      "words": 157,
+      "falseCorrect": 8,
+      "falseWrong": 24,
+      "missedCorrect": 0,
+      "wrongClass": 32,
+      "cases": 24,
+      "failingCases": [
+        "t06-self-correct-after-advance",
+        "t07-restart-sentence",
+        "t08-restart-after-error",
+        "t14-off-topic-tv",
+        "t15-off-topic-one-coincidence",
+        "t16-off-topic-two-coincidences",
+        "t17-echo-during-and-tail",
+        "t18-echo-phrase-after-tts",
+        "t19-imitation-after-sample",
+        "t20-number-word"
+      ]
+    },
+    "byGroup": {
+      "fluent": {
+        "words": 18,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 3,
+        "failingCases": []
+      },
+      "repeat": {
+        "words": 6,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 1,
+        "failingCases": []
+      },
+      "self-correct": {
+        "words": 14,
+        "falseCorrect": 0,
+        "falseWrong": 4,
+        "missedCorrect": 0,
+        "wrongClass": 4,
+        "cases": 2,
+        "failingCases": [
+          "t06-self-correct-after-advance"
+        ]
+      },
+      "restart": {
+        "words": 12,
+        "falseCorrect": 0,
+        "falseWrong": 5,
+        "missedCorrect": 0,
+        "wrongClass": 5,
+        "cases": 2,
+        "failingCases": [
+          "t07-restart-sentence",
+          "t08-restart-after-error"
+        ]
+      },
+      "skip": {
+        "words": 12,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 2,
+        "failingCases": []
+      },
+      "wrong": {
+        "words": 18,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 3,
+        "failingCases": []
+      },
+      "off-topic": {
+        "words": 25,
+        "falseCorrect": 3,
+        "falseWrong": 14,
+        "missedCorrect": 0,
+        "wrongClass": 17,
+        "cases": 3,
+        "failingCases": [
+          "t14-off-topic-tv",
+          "t15-off-topic-one-coincidence",
+          "t16-off-topic-two-coincidences"
+        ]
+      },
+      "echo": {
+        "words": 21,
+        "falseCorrect": 5,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 5,
+        "cases": 3,
+        "failingCases": [
+          "t17-echo-during-and-tail",
+          "t18-echo-phrase-after-tts",
+          "t19-imitation-after-sample"
+        ]
+      },
+      "unicode-number": {
+        "words": 11,
+        "falseCorrect": 0,
+        "falseWrong": 1,
+        "missedCorrect": 0,
+        "wrongClass": 1,
+        "cases": 2,
+        "failingCases": [
+          "t20-number-word"
+        ]
+      },
+      "duplicate-words": {
+        "words": 7,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 1,
+        "failingCases": []
+      },
+      "pause": {
+        "words": 6,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 1,
+        "failingCases": []
+      },
+      "uncertain": {
+        "words": 7,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 1,
+        "failingCases": []
+      }
+    }
+  },
+  "failures": [
+    {
+      "id": "t06-self-correct-after-advance",
+      "failures": [
+        "false-wrong 2:C->RETRY",
+        "false-wrong 4:C->RETRY",
+        "false-wrong 5:C->RETRY",
+        "false-wrong 6:C->RETRY"
+      ]
+    },
+    {
+      "id": "t07-restart-sentence",
+      "failures": [
+        "false-wrong 4:C->RETRY",
+        "false-wrong 5:C->RETRY"
+      ]
+    },
+    {
+      "id": "t08-restart-after-error",
+      "failures": [
+        "false-wrong 3:C->RETRY",
+        "false-wrong 4:C->RETRY",
+        "false-wrong 5:C->RETRY"
+      ]
+    },
+    {
+      "id": "t14-off-topic-tv",
+      "failures": [
+        "false-wrong 0:N->RETRY",
+        "false-wrong 1:N->RETRY",
+        "false-wrong 2:N->RETRY",
+        "false-wrong 3:N->RETRY",
+        "false-wrong 4:N->RETRY"
+      ]
+    },
+    {
+      "id": "t15-off-topic-one-coincidence",
+      "failures": [
+        "false-correct 0:N->CORRECT",
+        "false-wrong 1:N->RETRY",
+        "false-wrong 2:N->SKIPPED",
+        "false-wrong 3:N->SKIPPED",
+        "false-wrong 4:N->SKIPPED",
+        "false-correct 5:N->CORRECT",
+        "false-wrong 6:N->RETRY"
+      ]
+    },
+    {
+      "id": "t16-off-topic-two-coincidences",
+      "failures": [
+        "false-correct 0:N->CORRECT",
+        "false-wrong 1:N->RETRY",
+        "false-wrong 2:N->RETRY",
+        "false-wrong 3:N->RETRY",
+        "false-wrong 4:N->RETRY"
+      ]
+    },
+    {
+      "id": "t17-echo-during-and-tail",
+      "failures": [
+        "false-correct 3:H->CORRECT"
+      ]
+    },
+    {
+      "id": "t18-echo-phrase-after-tts",
+      "failures": [
+        "false-correct 1:H->CORRECT",
+        "false-correct 2:H->CORRECT",
+        "false-correct 3:H->CORRECT"
+      ]
+    },
+    {
+      "id": "t19-imitation-after-sample",
+      "failures": [
+        "false-correct 3:H->CORRECT"
+      ]
+    },
+    {
+      "id": "t20-number-word",
+      "failures": [
+        "false-wrong 2:C->RETRY"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,126 @@
+{
+  "pipeline": "autopilot",
+  "kind": "synthetic transcript-level (no audio, no child voice)",
+  "summary": {
+    "total": {
+      "words": 157,
+      "falseCorrect": 0,
+      "falseWrong": 0,
+      "missedCorrect": 0,
+      "wrongClass": 0,
+      "cases": 24,
+      "failingCases": []
+    },
+    "byGroup": {
+      "fluent": {
+        "words": 18,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 3,
+        "failingCases": []
+      },
+      "repeat": {
+        "words": 6,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 1,
+        "failingCases": []
+      },
+      "self-correct": {
+        "words": 14,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 2,
+        "failingCases": []
+      },
+      "restart": {
+        "words": 12,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 2,
+        "failingCases": []
+      },
+      "skip": {
+        "words": 12,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 2,
+        "failingCases": []
+      },
+      "wrong": {
+        "words": 18,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 3,
+        "failingCases": []
+      },
+      "off-topic": {
+        "words": 25,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 3,
+        "failingCases": []
+      },
+      "echo": {
+        "words": 21,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 3,
+        "failingCases": []
+      },
+      "unicode-number": {
+        "words": 11,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 2,
+        "failingCases": []
+      },
+      "duplicate-words": {
+        "words": 7,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 1,
+        "failingCases": []
+      },
+      "pause": {
+        "words": 6,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 1,
+        "failingCases": []
+      },
+      "uncertain": {
+        "words": 7,
+        "falseCorrect": 0,
+        "falseWrong": 0,
+        "missedCorrect": 0,
+        "wrongClass": 0,
+        "cases": 1,
+        "failingCases": []
+      }
+    }
+  },
+  "failures": []
+}
