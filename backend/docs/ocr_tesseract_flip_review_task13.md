@@ -40,7 +40,7 @@ git -C "F:\c1\capstone1-ocr-acceptance" switch --detach origin/test/ocr-tesserac
 & "F:\c1\capstone1-ocr-acceptance\backend\scripts\run_ocr_task13_flip_review.ps1"
 ```
 
-Script tự động kiểm tra ba bộ unit tests, OCR trên 10 ảnh bằng checkpoint
+Script tự động kiểm tra năm bộ unit tests, OCR trên 10 ảnh bằng checkpoint
 và profile đang dùng, tạo thư mục riêng dưới
 `F:\c1\ocr-private-eval\tesseract-flip-review-<timestamp>`,
 rồi mở `index.html` trong trình duyệt. Nếu có lỗi hoặc thiếu ảnh,
@@ -133,6 +133,43 @@ tra thực tế trong `test_ocr_tesseract_flip_review.py` bao phủ:
 
 Chạy lại script Windows như trên để xác thực các commit mới. Mọi
 báo cáo, ảnh crop và reference vẫn **chỉ lưu tại máy**.
+
+## Kết quả báo cáo `index(3).html` — căn chỉnh duy nhất đã hoạt động
+
+Bản HTML được người dùng gửi sau sửa lỗi assertion `cfcbd562` cho
+thấy **10/10 trang** và **18 vị trí** đề xuất, với 18 đường dẫn ảnh
+crop độc lập trong HTML (chưa nhận được file ảnh thực tế, nên **không
+thể tự xác nhận nội dung ảnh hoặc bbox**). Khi dùng căn chỉnh dựa
+trên **mọi đường Levenshtein tối ưu**, vị trí từng bị `ambiguous`
+trên trang `low_light` nay được gắn nhãn `corrected` theo tham
+chiếu, dù OCR vẫn có token thừa ở cuối. Điều này thay đổi **nhãn
+đánh giá**, không thay đổi cách chọn từ hoặc strict CER/WER đã đo.
+
+| Chính sách A/B | Lượt thay | Đối chiếu đúng | Làm sai từ đang đúng | Thay vẫn sai | Chưa căn chỉnh |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Tesseract line | 18 | **13** | **3** | 2 | **0** |
+| Tesseract line + VietOCR crop | 5 | **4** | **1** | 0 | **0** |
+
+Bản trước chỉ có **12/3/2/1** và **3/1/0/1** theo thứ tự
+đúng/sai/vẫn sai/chưa căn chỉnh. Không được dùng số liệu cũ
+để mô tả kết quả của báo cáo HTML mới.
+
+Trong báo cáo mới, số vị trí phải xem trước là **5** (3 regression +
+2 vẫn sai, đều thuộc một trang `childrens_font`), không phải 6.
+Tổng `review_required` của hai chính sách, tính riêng cho mỗi
+chính sách, là **5** và **1**; không cộng trực tiếp hai số này
+vì có đề xuất trùng vị trí. Mọi nhãn là **đối chiếu theo tham chiếu
+bằng thuật toán**, không phải xác nhận độc lập bằng ảnh.
+
+Đã bổ sung unit test **chỉ sử dụng số đếm**, không chứa văn bản OCR,
+ảnh crop hoặc tham chiếu của bộ thử nghiệm. Test chặn
+`production_deployment_allowed` dù số vị trí chưa căn chỉnh bằng 0:
+vẫn tồn tại hồi quy và chưa có tập held-out độc lập.
+
+**Trạng thái nghiệm thu:** Chưa chạy unit tests của commit cập nhật
+số đếm mới trên Windows. Không merge, không bật chính sách sửa dấu
+trên production; cần tập ảnh độc lập và kiểm tra bbox/nhãn thực tế
+trước khi quyết định sản phẩm.
 
 ## Tiêu chí kiểm tra cuối
 
