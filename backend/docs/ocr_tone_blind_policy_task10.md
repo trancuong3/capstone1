@@ -47,6 +47,19 @@ Không chọn policy tốt nhất vì chấm trên chính bộ 10 ảnh. Để �
 hiệu quả thật, cần thêm ảnh giữ lại từ người khác, có tham chiếu đã được
 kiểm tra độc lập; cần đảm bảo không mất từ đúng.
 
+## Cách nhanh nhất: một script trên Windows
+
+Sau khi `git fetch` và chuyển sang nhánh TASK 10, chạy:
+
+```powershell
+& "F:\\c1\\capstone1-ocr-acceptance\\backend\\scripts\\run_ocr_task10_blind_ab.ps1"
+```
+
+Script tự chạy 4 bộ unit tests, đo benchmark 10 ảnh với checkpoint
+đã xác minh, kiểm tra baseline **34/1647, 30/364** và in số từ sửa đúng
+so với số từ sửa sai của từng chính sách. Nếu có lỗi, script dừng; dữ liệu
+đối chứng chỉ nằm trong thư mục private.
+
 ## Chạy PowerShell trên máy Windows
 
 ```powershell
