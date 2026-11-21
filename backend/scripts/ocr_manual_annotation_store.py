@@ -33,12 +33,12 @@ def validate_draft_path(dataset: Path, draft: Path, repository_root: Path) -> tu
     if root.is_relative_to(repository_root.resolve()):
         raise ValueError("Private dataset must be outside repository")
     if (
-        not file_path.is_relative_to(root)
+        file_path.parent != root
         or file_path.suffix.lower() != ".jsonl"
         or file_path == dataset.expanduser().resolve()
         or "draft" not in file_path.stem.lower()
     ):
-        raise ValueError("Draft must be a separate .jsonl with 'draft' in its name within private dataset")
+        raise ValueError("Draft must be a separate .jsonl named 'draft' in private dataset directory")
     return root, file_path
 
 
