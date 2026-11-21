@@ -52,6 +52,44 @@ class PhotoBenchmarkTests(unittest.TestCase):
         self.assertEqual(module.percentile([10, 20, 30, 40], 0.95), 40)
         self.assertIsNone(module.percentile([], 0.50))
 
+    def test_cli_loads_private_env_without_printing_credentials(self):
+        import contextlib
+        import io
+        import os
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            (root / "page.png").write_bytes(b"placeholder")
+            manifest = root / "pages.jsonl"
+            manifest.write_text(
+                json.dumps({"image": "page.png", "ground_truth": "Xin chào"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            env_file = root / "local.env"
+            env_file.write_text(
+                "DATABASE_URL=postgresql+asyncpg://testing:testing@127.0.0.1:1/test\n"
+                "SUPABASE_URL=https://example.invalid\n"
+                "SUPABASE_KEY=private-test-key-not-for-output\n",
+                encoding="utf-8",
+            )
+
+            def fake_evaluate(cases, *, expected_profile, expected_sha):
+                self.assertEqual(len(cases), 1)
+                self.assertEqual(os.environ["SUPABASE_KEY"], "private-test-key-not-for-output")
+                self.assertEqual(os.environ["DATABASE_URL"].split("@")[0], "postgresql+asyncpg://testing:testing")
+                return {"failed_cases": 0, "recognition": {"micro_cer": 0.0, "micro_wer": 0.0}}
+
+            stdout = io.StringIO()
+            with mock.patch.dict(os.environ, {"DATABASE_URL": "", "SUPABASE_URL": "", "SUPABASE_KEY": ""}):
+                with mock.patch.object(module, "evaluate", side_effect=fake_evaluate):
+                    with contextlib.redirect_stdout(stdout):
+                        exit_code = module.main([
+                            str(manifest), "--min-pages", "1", "--env-file", str(env_file),
+                        ])
+            self.assertEqual(exit_code, 0)
+            self.assertNotIn("private-test-key-not-for-output", stdout.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
