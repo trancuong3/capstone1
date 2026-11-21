@@ -546,6 +546,10 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       path === "/reading-management/reminders/due"
     )
       return respond(route, []);
+    if (path === "/reading-presence/settings")
+      return respond(route, { email_enabled: false, updated_at: timestamp });
+    if (path.startsWith("/reading-presence/"))
+      return respond(route, { ok: true, cancelled: 0 });
     if (path === "/profiles/me")
       return respond(route, {
         id: ids.parent,

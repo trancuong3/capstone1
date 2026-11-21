@@ -20,7 +20,11 @@ from app.services.training_storage.base import (
     StoredArtifact,
     TrainingArtifactStore,
 )
+from app.services.training_storage.google_apps_script_store import GoogleAppsScriptDriveStore
+from app.services.training_storage.google_drive_desktop_store import GoogleDriveDesktopStore
 from app.services.training_storage.google_drive_store import GoogleDriveTrainingStore
+
+DriveStoreType = GoogleDriveTrainingStore | GoogleAppsScriptDriveStore | GoogleDriveDesktopStore
 from app.services.training_storage.references import (
     StorageProvider,
     parse_artifact_ref,
@@ -150,7 +154,7 @@ class TrainingArtifactStoreRouter:
     def __init__(
         self,
         *,
-        drive_store_factory: Callable[[], GoogleDriveTrainingStore | None] | None = None,
+        drive_store_factory: Callable[[], DriveStoreType | None] | None = None,
         legacy_store: SupabaseLegacyTrainingStore | None = None,
         write_provider: StorageProvider | None = None,
     ) -> None:
@@ -164,7 +168,7 @@ class TrainingArtifactStoreRouter:
             return self._write_provider_override
         return flow2_storage_provider_setting()
 
-    def get_drive_store(self) -> GoogleDriveTrainingStore:
+    def get_drive_store(self) -> DriveStoreType:
         store = self._drive_store_factory() if self._drive_store_factory else None
         if store is None:
             raise DriveNotConnectedError(
@@ -230,7 +234,10 @@ class TrainingArtifactStoreRouter:
         preloaded_meta: ArtifactMetadata | None = None,
     ) -> Iterator[bytes]:
         store = self.store_for_reference(reference)
-        if isinstance(store, GoogleDriveTrainingStore) and preloaded_meta is not None:
+        if isinstance(
+            store,
+            (GoogleDriveTrainingStore, GoogleAppsScriptDriveStore, GoogleDriveDesktopStore),
+        ) and preloaded_meta is not None:
             return store.open_stream(
                 reference,
                 chunk_size=chunk_size,
@@ -303,11 +310,11 @@ class TrainingArtifactStoreRouter:
 
 
 _runtime_factory_lock = threading.Lock()
-_runtime_drive_store_factory: Callable[[], GoogleDriveTrainingStore | None] | None = None
+_runtime_drive_store_factory: Callable[[], DriveStoreType | None] | None = None
 
 
 def register_runtime_drive_store_factory(
-    factory: Callable[[], GoogleDriveTrainingStore | None] | None,
+    factory: Callable[[], DriveStoreType | None] | None,
 ) -> None:
     """Register or override the process-level Google Drive store factory (also useful in tests)."""
     global _runtime_drive_store_factory

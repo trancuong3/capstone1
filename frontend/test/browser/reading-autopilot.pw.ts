@@ -387,7 +387,18 @@ async function installAutopilotSession(
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         const dest = ctx.createMediaStreamDestination();
-        gain.gain.value = 0.001;
+        osc.frequency.value = 240;
+        const start = ctx.currentTime;
+        // Keep the opening 280ms calibration window quiet, then pulse speech-level
+        // energy so AudioQualityMonitor detects genuine speech rather than silence
+        // or flat background noise.
+        gain.gain.setValueAtTime(0, start);
+        for (let n = 0; n < 100; n += 1) {
+          gain.gain.setValueAtTime(
+            n % 2 === 0 ? 0.12 : 0.035,
+            start + 0.28 + n * 0.15,
+          );
+        }
         osc.connect(gain);
         gain.connect(dest);
         osc.start();
@@ -465,6 +476,7 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
       .toBeGreaterThanOrEqual(1);
 
     await assertNoHorizontalOverflow(page);
+    await page.waitForTimeout(650);
 
     // Child reads page 1 fluently
     await page.evaluate(() =>
@@ -495,6 +507,8 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
         { timeout: 10_000 },
       )
       .toBeGreaterThanOrEqual(2);
+
+    await page.waitForTimeout(650);
 
     // Child reads page 2 fluently
     await page.evaluate(() =>
@@ -540,6 +554,8 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
         ),
       )
       .toBe(1);
+
+    await page.waitForTimeout(650);
 
     // Child reads first two words then asks for help on "nhỏ"
     await page.evaluate(() =>

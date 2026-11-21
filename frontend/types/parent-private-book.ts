@@ -151,6 +151,7 @@ export const parentPrivatePageSchema = z.object({
   page_id: z.guid(),
   page_number: z.number().int().positive(),
   current_verified_revision_id: z.guid().nullable(),
+  verified_text: z.string().default(""),
   verified_text_preview: z.string(),
   image_url: safeMediaUrlSchema,
   created_at: z.string(),
@@ -269,6 +270,27 @@ export const parentAddPageResponseSchema = z.object({
 });
 export type ParentAddPageResponseDTO = z.infer<
   typeof parentAddPageResponseSchema
+>;
+
+export const parentDeletePrivateBookResponseSchema = z.object({
+  status: z.literal("deleted"),
+  book_id: z.guid(),
+  retired_pages_count: z.number().int().nonnegative(),
+  cancelled_submissions_count: z.number().int().nonnegative(),
+});
+export type ParentDeletePrivateBookResponseDTO = z.infer<
+  typeof parentDeletePrivateBookResponseSchema
+>;
+
+export const parentDeletePrivatePageResponseSchema = z.object({
+  status: z.literal("deleted"),
+  book_id: z.guid(),
+  page_id: z.guid(),
+  committed_page_count: z.number().int().nonnegative(),
+  readable_for_children: z.boolean(),
+});
+export type ParentDeletePrivatePageResponseDTO = z.infer<
+  typeof parentDeletePrivatePageResponseSchema
 >;
 
 export const adminUserBookQueueItemSchema = z.object({

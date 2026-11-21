@@ -16,6 +16,21 @@ from app.services.training_storage.base import (
     TrainingArtifactStore,
     TrainingStorageError,
 )
+from app.services.training_storage.google_apps_script_store import (
+    APPS_SCRIPT_BRIDGE_SCOPE,
+    DEFAULT_APPS_SCRIPT_CHUNK_BYTES,
+    GoogleAppsScriptDriveStore,
+    apps_script_config_readiness,
+    sign_apps_script_envelope,
+    validate_apps_script_web_app_url,
+)
+from app.services.training_storage.google_drive_desktop_store import (
+    DRIVE_DESKTOP_SYNC_SCOPE,
+    GoogleDriveDesktopStore,
+    detect_google_drive_desktop_mounts,
+    drive_desktop_config_readiness,
+    resolve_flow2_sync_root,
+)
 from app.services.training_storage.google_drive_oauth import (
     GOOGLE_DRIVE_REQUIRED_SCOPE,
     GoogleDriveOAuthConfig,
@@ -72,11 +87,14 @@ from app.services.training_storage.supabase_legacy_store import SupabaseLegacyTr
 
 __all__ = [
     "ALLOWED_DRIVE_CATEGORIES",
+    "APPS_SCRIPT_BRIDGE_SCOPE",
     "ArtifactMetadata",
     "ArtifactRef",
+    "DEFAULT_APPS_SCRIPT_CHUNK_BYTES",
     "DEFAULT_DOWNLOAD_CHUNK_BYTES",
     "DEFAULT_MIN_FREE_BUFFER_BYTES",
     "DEFAULT_UPLOAD_CHUNK_BYTES",
+    "DRIVE_DESKTOP_SYNC_SCOPE",
     "DRIVE_FILE_ID_RE",
     "DRIVE_ROOT_DISPLAY_PATH",
     "DRIVE_ROOT_SEGMENTS",
@@ -91,6 +109,8 @@ __all__ = [
     "DriveTransientError",
     "GDRIVE_REF_PREFIX",
     "GOOGLE_DRIVE_REQUIRED_SCOPE",
+    "GoogleAppsScriptDriveStore",
+    "GoogleDriveDesktopStore",
     "GoogleDriveOAuthConfig",
     "GoogleDriveTrainingStore",
     "OAuthStartResult",
@@ -106,6 +126,7 @@ __all__ = [
     "TrainingArtifactStoreRouter",
     "TrainingStorageError",
     "WorkerArtifactStreamClaims",
+    "apps_script_config_readiness",
     "create_oauth_authorization",
     "decrypt_refresh_token",
     "drive_file_id_from_reference",
@@ -123,7 +144,9 @@ __all__ = [
     "refresh_access_token",
     "register_runtime_drive_store_factory",
     "revoke_token",
+    "sign_apps_script_envelope",
     "sign_worker_artifact_token",
+    "validate_apps_script_web_app_url",
     "validate_drive_file_id",
     "validate_granted_scopes",
     "validate_logical_path",

@@ -17,11 +17,14 @@ from app.schemas.parent_private_book import (
     ParentAcceptSpellingRequest,
     ParentAddPageRequest,
     ParentAddPageResponse,
+    ParentDeletePrivateBookResponse,
+    ParentDeletePrivatePageResponse,
     ParentPageSubmissionRead,
     ParentPrivateBookCreate,
     ParentPrivateBookDetailRead,
     ParentPrivateBookSummaryRead,
     ParentPrivateBookUpdate,
+    ParentPrivatePageEditRequest,
     ParentRequestAdminReviewRequest,
     ParentRetrySubmissionRequest,
     ParentSubmissionEditRequest,
@@ -96,6 +99,80 @@ async def update_my_private_book(
 ):
     _apply_no_store(response)
     return await ParentPrivateBookService(db).update_book(actor_id, book_id, payload)
+
+
+@router.delete("/my-books/{book_id}", response_model=ParentDeletePrivateBookResponse)
+async def delete_my_private_book(
+    book_id: UUID,
+    response: Response,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    _apply_no_store(response)
+    return await ParentPrivateBookService(db).delete_book(actor_id, book_id)
+
+
+@router.patch(
+    "/my-books/{book_id}/pages/{page_id}",
+    response_model=ParentPageSubmissionRead,
+)
+async def edit_my_private_book_page(
+    book_id: UUID,
+    page_id: UUID,
+    payload: ParentPrivatePageEditRequest,
+    request: Request,
+    response: Response,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    _apply_no_store(response)
+    return await ParentPrivateBookService(db).edit_committed_page(
+        actor_id, book_id, page_id, payload, base_url=str(request.base_url)
+    )
+
+
+@router.put(
+    "/my-books/{book_id}/pages/{page_id}/file",
+    response_model=ParentPageSubmissionRead,
+)
+async def replace_my_private_book_page_file(
+    book_id: UUID,
+    page_id: UUID,
+    request: Request,
+    response: Response,
+    file: UploadFile = File(...),
+    source_type: str | None = Form(default=None),
+    source_note: str | None = Form(default=None),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    _apply_no_store(response)
+    return await ParentPrivateBookService(db).replace_committed_page_file(
+        actor_id,
+        book_id,
+        page_id,
+        file,
+        source_type=source_type,
+        source_note=source_note,
+        base_url=str(request.base_url),
+    )
+
+
+@router.delete(
+    "/my-books/{book_id}/pages/{page_id}",
+    response_model=ParentDeletePrivatePageResponse,
+)
+async def delete_my_private_book_page(
+    book_id: UUID,
+    page_id: UUID,
+    response: Response,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    _apply_no_store(response)
+    return await ParentPrivateBookService(db).delete_committed_page(
+        actor_id, book_id, page_id
+    )
 
 
 @router.post(

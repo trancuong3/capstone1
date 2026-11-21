@@ -417,3 +417,264 @@ class LocalDriveJobStateStore:
                 if filename != MANIFEST_NAME:
                     remote_path.unlink(missing_ok=True)
             return {name: record["sha256"] for name, record in records.items()}
+
+
+_REMOTE_CHUNK_BYTES = 8 * 1024 * 1024  # Stay safely below Render / reverse-proxy upload limits
+
+
+class RemoteBackendJobStateStore:
+    """Cross-account Colab resume store proxied through ViRead Backend into the owner's Google Drive.
+
+    Because every read and write goes through the authenticated ViRead worker API,
+    switching Google Colab accounts (Account A -> Account B -> Account C) never
+    mounts or writes to the secondary account's Drive: 100% of resume snapshots,
+    datasets, checkpoints, and benchmarks stay inside the single owner Google Drive
+    connected in ViRead Admin.
+    """
+
+    def __init__(
+        self,
+        worker: Any,
+        identity: dict[str, str],
+        run_dir: str | Path,
+        *,
+        api_prefix: str = "/books/admin/viread-training/worker",
+        chunk_bytes: int = _REMOTE_CHUNK_BYTES,
+    ) -> None:
+        missing = [field for field in REQUIRED_IDENTITY_FIELDS if not identity.get(field)]
+        if missing:
+            raise ValueError("resume identity is incomplete: " + ", ".join(missing))
+        if not JOB_ID_RE.fullmatch(identity["training_job_id"]):
+            raise ValueError("resume state requires a canonical training job UUID")
+        for field in ("dataset_manifest_sha256", "parent_checkpoint_sha256", "config_sha256"):
+            if not re.fullmatch(r"[a-f0-9]{64}", identity[field].lower()):
+                raise ValueError(f"resume identity {field} must be a SHA-256 digest")
+        commit_val = str(identity["repository_commit"]).lower()
+        if commit_val != "local-unpinned" and not re.fullmatch(r"[a-f0-9]{40}", commit_val):
+            raise ValueError("resume identity repository_commit must be a pinned Git SHA")
+        if identity["profile"] not in {"FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED"}:
+            raise ValueError("resume state has an unsupported training profile")
+
+        self.worker = worker
+        self.api_prefix = api_prefix.rstrip("/")
+        self.job_id = str(identity["training_job_id"]).lower()
+        self.identity = {key: str(identity.get(key) or "unregistered") for key in IDENTITY_FIELDS}
+        self.run_dir = Path(run_dir)
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.chunk_bytes = max(64 * 1024, int(chunk_bytes))
+        self._lock = threading.RLock()
+        self._uploaded: dict[str, tuple[int, int, str]] = {}
+
+    def _base_path(self) -> str:
+        return f"{self.api_prefix}/jobs/{self.job_id}/resume-state"
+
+    def _list_remote(self) -> dict[str, dict[str, Any]]:
+        payload = self.worker.call(
+            "GET",
+            self._base_path(),
+            params={"worker_id": self.worker.worker_id},
+        )
+        files = payload.get("files") if isinstance(payload, dict) else []
+        out: dict[str, dict[str, Any]] = {}
+        for item in files or []:
+            if isinstance(item, dict) and item.get("name"):
+                out[str(item["name"])] = item
+        return out
+
+    def _download_bytes(self, object_path: str) -> bytes:
+        url = f"{self.worker.api_base}{self._base_path()}/{object_path}"
+        with self.worker.session.get(
+            url,
+            params={"worker_id": self.worker.worker_id},
+            stream=True,
+            timeout=300,
+        ) as resp:
+            resp.raise_for_status()
+            buf = bytearray()
+            for block in resp.iter_content(1024 * 1024):
+                if block:
+                    buf.extend(block)
+        return bytes(buf)
+
+    def _upload_bytes(self, object_path: str, data: bytes, expected_sha256: str) -> None:
+        self.worker.call(
+            "PUT",
+            f"{self._base_path()}/{object_path}",
+            data={"worker_id": self.worker.worker_id, "expected_sha256": expected_sha256},
+            files={"file": (Path(object_path).name, data, "application/octet-stream")},
+        )
+
+    def _delete_remote(self, object_path: str) -> None:
+        self.worker.call(
+            "DELETE",
+            f"{self._base_path()}/{object_path}",
+            params={"worker_id": self.worker.worker_id},
+        )
+
+    def _read_manifest(self) -> tuple[dict[str, Any] | None, dict[str, dict[str, Any]]]:
+        remote = self._list_remote()
+        if MANIFEST_NAME not in remote:
+            if any(not name.startswith("blobs/") for name in remote):
+                raise ValueError(
+                    "uncommitted remote Drive resume files exist without a manifest; refusing a fresh run"
+                )
+            return None, remote
+        try:
+            manifest = json.loads(self._download_bytes(MANIFEST_NAME).decode("utf-8"))
+        except Exception as exc:
+            raise ValueError("Remote Drive resume manifest cannot be read") from exc
+        if manifest.get("schema") != SCHEMA or manifest.get("identity") != self.identity:
+            raise ValueError(
+                "Remote Drive resume manifest identity mismatch; refusing to mix training lineage"
+            )
+        files = manifest.get("files")
+        if not isinstance(files, dict):
+            raise ValueError("Remote Drive resume manifest files are invalid")
+        for filename, record in files.items():
+            if filename == MANIFEST_NAME or not _safe_name(filename) or not isinstance(record, dict):
+                raise ValueError("Remote Drive resume manifest contains an unsafe file record")
+            if (
+                not isinstance(record.get("bytes"), int)
+                or record["bytes"] < 0
+                or not re.fullmatch(r"[a-f0-9]{64}", str(record.get("sha256", "")))
+            ):
+                raise ValueError("Remote Drive resume manifest contains invalid size or checksum")
+        return manifest, remote
+
+    def restore(self) -> dict[str, str]:
+        """Restore committed resume files from the owner's Google Drive via ViRead backend."""
+        with self._lock:
+            manifest, remote = self._read_manifest()
+            if manifest is None:
+                return {}
+            restored: dict[str, str] = {}
+            for filename, record in manifest["files"].items():
+                destination = self.run_dir / filename
+                temporary = destination.with_name(destination.name + ".remote-restore")
+                temporary.unlink(missing_ok=True)
+                try:
+                    parts = record.get("parts")
+                    with temporary.open("wb") as out_fh:
+                        if isinstance(parts, list) and parts:
+                            for part in parts:
+                                part_name = str(part["name"])
+                                if part_name not in remote:
+                                    raise ValueError(f"Remote Drive resume part missing: {part_name}")
+                                raw = self._download_bytes(part_name)
+                                if (
+                                    len(raw) != int(part["bytes"])
+                                    or hashlib.sha256(raw).hexdigest() != str(part["sha256"])
+                                ):
+                                    raise ValueError(f"Remote Drive resume part integrity failed: {part_name}")
+                                out_fh.write(raw)
+                        else:
+                            blob_name = str(record.get("blob") or filename)
+                            if blob_name not in remote:
+                                raise ValueError(f"Remote Drive resume object missing: {filename}")
+                            out_fh.write(self._download_bytes(blob_name))
+                    if temporary.stat().st_size != record["bytes"] or _sha256(temporary) != record["sha256"]:
+                        raise ValueError(f"Remote Drive resume integrity check failed: {filename}")
+                    temporary.replace(destination)
+                finally:
+                    temporary.unlink(missing_ok=True)
+                if filename.endswith(".json"):
+                    try:
+                        json.loads(destination.read_text(encoding="utf-8"))
+                    except Exception as exc:
+                        destination.unlink(missing_ok=True)
+                        raise ValueError(f"Remote Drive resume JSON is invalid: {filename}") from exc
+                self._uploaded[filename] = (
+                    destination.stat().st_mtime_ns,
+                    destination.stat().st_size,
+                    record["sha256"],
+                )
+                restored[filename] = record["sha256"]
+            return restored
+
+    def _local_files(self) -> dict[str, Path]:
+        selected: dict[str, Path] = {}
+        for path in self.run_dir.iterdir():
+            if path.is_file() and path.name != MANIFEST_NAME and _safe_name(path.name):
+                if path.name.endswith(".json"):
+                    try:
+                        json.loads(path.read_text(encoding="utf-8"))
+                    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                        continue
+                selected[path.name] = path
+        return selected
+
+    def sync(self) -> dict[str, str]:
+        """Upload content-addressed chunks via ViRead backend to owner's Drive, commit manifest last, then prune."""
+        with self._lock:
+            old_manifest, remote_files = self._read_manifest()
+            local_files = self._local_files()
+            if not local_files:
+                return (
+                    {k: v["sha256"] for k, v in old_manifest.get("files", {}).items()}
+                    if old_manifest
+                    else {}
+                )
+
+            records: dict[str, dict[str, Any]] = {}
+            keep_remote: set[str] = {MANIFEST_NAME}
+            for filename, path in sorted(local_files.items()):
+                stat = path.stat()
+                digest = _sha256(path)
+                signature = (stat.st_mtime_ns, stat.st_size, digest)
+                if stat.st_size <= self.chunk_bytes:
+                    blob_name = f"blobs/{digest}"
+                    keep_remote.add(blob_name)
+                    existing = remote_files.get(blob_name)
+                    if not (
+                        existing
+                        and int(existing.get("size_bytes") or 0) == stat.st_size
+                        and str(existing.get("sha256") or "").lower() == digest
+                    ):
+                        self._upload_bytes(blob_name, path.read_bytes(), digest)
+                    records[filename] = {
+                        "bytes": stat.st_size,
+                        "sha256": digest,
+                        "blob": blob_name,
+                    }
+                else:
+                    parts_meta: list[dict[str, Any]] = []
+                    with path.open("rb") as src_fh:
+                        part_idx = 0
+                        while True:
+                            chunk = src_fh.read(self.chunk_bytes)
+                            if not chunk:
+                                break
+                            part_sha = hashlib.sha256(chunk).hexdigest()
+                            part_name = f"blobs/{digest}.part{part_idx:04d}"
+                            keep_remote.add(part_name)
+                            existing = remote_files.get(part_name)
+                            if not (
+                                existing
+                                and int(existing.get("size_bytes") or 0) == len(chunk)
+                                and str(existing.get("sha256") or "").lower() == part_sha
+                            ):
+                                self._upload_bytes(part_name, chunk, part_sha)
+                            parts_meta.append(
+                                {"name": part_name, "bytes": len(chunk), "sha256": part_sha}
+                            )
+                            part_idx += 1
+                    records[filename] = {
+                        "bytes": stat.st_size,
+                        "sha256": digest,
+                        "parts": parts_meta,
+                    }
+                self._uploaded[filename] = signature
+
+            manifest = {"schema": SCHEMA, "identity": self.identity, "files": records}
+            encoded = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            manifest_sha = hashlib.sha256(encoded).hexdigest()
+            self._upload_bytes(MANIFEST_NAME, encoded, manifest_sha)
+
+            # Prune obsolete blobs/files ONLY after the new manifest has committed.
+            for remote_name in list(remote_files.keys()):
+                if remote_name not in keep_remote:
+                    try:
+                        self._delete_remote(remote_name)
+                    except Exception:
+                        pass
+            return {name: record["sha256"] for name, record in records.items()}

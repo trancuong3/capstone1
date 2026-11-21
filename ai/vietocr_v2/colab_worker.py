@@ -21,7 +21,7 @@ from typing import Any, Callable
 import requests
 
 from .artifact_store import assemble_shards, shard_file
-from .colab_state_store import LocalDriveJobStateStore
+from .colab_state_store import LocalDriveJobStateStore, RemoteBackendJobStateStore
 from .contracts import DatasetRow, ORIGINAL_CHECKPOINT_SHA256, canonical_sha256, sha256_file, write_jsonl
 
 logger = logging.getLogger("viread.vietocr.colab_worker")
@@ -82,6 +82,30 @@ def build_local_drive_state_store_factory(
     return _factory
 
 
+def build_remote_backend_state_store_factory(
+    worker: Any,
+    *,
+    repository_commit: str | None = None,
+) -> Callable[[dict[str, Any], Path], RemoteBackendJobStateStore]:
+    """Create a cross-account resume state store proxied into the owner's Drive via ViRead backend."""
+    commit_sha = repository_commit or _current_repo_commit()
+
+    def _factory(job: dict[str, Any], run_dir: Path) -> RemoteBackendJobStateStore:
+        identity = {
+            "training_job_id": str(job["id"]),
+            "profile": str(job["profile"]),
+            "dataset_manifest_sha256": str(job["manifest_sha256"]),
+            "parent_checkpoint_sha256": str(job["parent_checkpoint_sha256"]),
+            "config_sha256": str(job["config_sha256"]),
+            "repository_commit": commit_sha,
+            "locked_test_manifest_sha256": str(job.get("locked_test_manifest_sha256") or "unregistered"),
+            "locked_test_version_id": str(job.get("locked_test_version_id") or "unregistered"),
+        }
+        return RemoteBackendJobStateStore(worker, identity, run_dir, api_prefix=API_PREFIX)
+
+    return _factory
+
+
 class ColabWorker:
     def __init__(
         self,
@@ -93,6 +117,7 @@ class ColabWorker:
         state_store_factory: Callable[[dict[str, Any], Path], Any] | None = None,
         drive_root: str | Path | None = None,
         resume_root: str | Path | None = None,
+        use_remote_resume_store: bool = False,
     ):
         if not api_base.startswith(("https://", "http://localhost", "http://127.0.0.1")):
             raise ValueError("VIREAD_API_BASE must use HTTPS outside localhost")
@@ -105,9 +130,12 @@ class ColabWorker:
         self.drive_root = Path(drive_root) if (drive_root is not None and str(drive_root).strip()) else None
         self.poll_seconds = max(5, poll_seconds)
         has_resume_root = resume_root is not None and str(resume_root).strip() != ""
-        if state_store_factory is None and (has_resume_root or self.drive_root is not None):
-            effective_resume_root = Path(resume_root) if has_resume_root else (self.drive_root / "resume")
-            state_store_factory = build_local_drive_state_store_factory(effective_resume_root)
+        if state_store_factory is None:
+            if has_resume_root or self.drive_root is not None:
+                effective_resume_root = Path(resume_root) if has_resume_root else (self.drive_root / "resume")
+                state_store_factory = build_local_drive_state_store_factory(effective_resume_root)
+            elif use_remote_resume_store:
+                state_store_factory = build_remote_backend_state_store_factory(self)
         self.state_store_factory = state_store_factory
         self.worker_id = f"colab-{uuid.uuid4()}"
         self.runtime_data: dict[str, Any] = {}
@@ -895,6 +923,7 @@ def run_worker(
     poll_seconds: int = 30,
     drive_root: str | Path | None = None,
     resume_root: str | Path | None = None,
+    use_remote_resume_store: bool = False,
 ) -> None:
     ColabWorker(
         api_base,
@@ -903,6 +932,7 @@ def run_worker(
         poll_seconds=poll_seconds,
         drive_root=drive_root,
         resume_root=resume_root,
+        use_remote_resume_store=use_remote_resume_store,
     ).run_forever()
 
 
@@ -913,6 +943,7 @@ def run_next_job_once(
     *,
     drive_root: str | Path | None = None,
     resume_root: str | Path | None = None,
+    use_remote_resume_store: bool = False,
 ) -> bool:
     """Process no more than one ready job; intended for a user-started Colab cell."""
     return ColabWorker(
@@ -921,4 +952,5 @@ def run_next_job_once(
         work_root,
         drive_root=drive_root,
         resume_root=resume_root,
+        use_remote_resume_store=use_remote_resume_store,
     ).run_next_job_once()

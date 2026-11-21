@@ -35,12 +35,15 @@ def is_private_book():
     return Book.VisibilityScope == VISIBILITY_PARENT_PRIVATE
 
 
-def is_private_book_owned_by(actor_id: UUID):
-    """Match private books owned by `actor_id` (management scope; includes drafts/suspended)."""
-    return and_(
+def is_private_book_owned_by(actor_id: UUID, *, include_retired: bool = False):
+    """Match private books owned by `actor_id` (management scope; includes drafts/suspended, excludes deleted/RETIRED by default)."""
+    criteria = [
         Book.VisibilityScope == VISIBILITY_PARENT_PRIVATE,
         Book.OwnerParentId == actor_id,
-    )
+    ]
+    if not include_retired:
+        criteria.append(Book.LifecycleStatus == "ACTIVE")
+    return and_(*criteria)
 
 
 def _private_page_has_incomplete_multipage_batch():

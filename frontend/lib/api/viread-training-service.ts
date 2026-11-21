@@ -20,6 +20,7 @@ const driveStatusSchema = z.object({
   migration_applied: z.boolean(),
   status: z.string(),
   connected: z.boolean(),
+  connection_mode: z.string().nullable().optional(),
   oauth_configured: z.boolean(),
   oauth_readiness: z
     .object({
@@ -29,8 +30,38 @@ const driveStatusSchema = z.object({
       redirect_uri_configured: z.boolean(),
       encryption_key_configured: z.boolean(),
       required_scope: z.string(),
+      required_account_email: z.string().nullable().optional(),
     })
     .optional(),
+  apps_script_readiness: z
+    .object({
+      bridge_ready: z.boolean(),
+      encryption_key_configured: z.boolean(),
+      server_secret_configured: z.boolean(),
+      web_app_url_configured: z.boolean(),
+      required_account_email: z.string().nullable().optional(),
+      script_path: z.string().optional(),
+    })
+    .optional(),
+  drive_desktop_readiness: z
+    .object({
+      desktop_ready: z.boolean(),
+      encryption_key_configured: z.boolean(),
+      detected_mounts: z
+        .array(
+          z.object({
+            drive_root: z.string(),
+            flow2_root: z.string(),
+            account_email: z.string().nullable().optional(),
+            source: z.string().optional(),
+          }),
+        )
+        .default([]),
+      default_mount_path: z.string().nullable().optional(),
+      required_account_email: z.string().nullable().optional(),
+    })
+    .optional(),
+  required_account_email: z.string().nullable().optional(),
   account_email: z.string().nullable(),
   account_display_name: z.string().nullable(),
   oauth_scope: z.string().nullable(),
@@ -261,6 +292,14 @@ export interface VireadTrainingService {
     code: string;
     state: string;
   }): Promise<GoogleDriveTrainingStatus>;
+  connectDriveAppsScript(input: {
+    web_app_url: string;
+    bridge_secret?: string;
+  }): Promise<GoogleDriveTrainingStatus>;
+  connectDriveDesktop(input?: {
+    sync_root_path?: string;
+    account_email?: string;
+  }): Promise<GoogleDriveTrainingStatus>;
   checkDriveHealth(): Promise<GoogleDriveTrainingStatus>;
   runDriveSelfTest(): Promise<GoogleDriveSelfTestResult>;
   disconnectDrive(): Promise<GoogleDriveTrainingStatus>;
@@ -346,6 +385,20 @@ export function createVireadTrainingService(): VireadTrainingService {
         driveStatusSchema,
         undefined,
         { method: "POST", body: input },
+      ),
+    connectDriveAppsScript: (input) =>
+      requestApi(
+        "/books/admin/viread-training/drive/connect/apps-script",
+        driveStatusSchema,
+        undefined,
+        { method: "POST", body: input },
+      ),
+    connectDriveDesktop: (input) =>
+      requestApi(
+        "/books/admin/viread-training/drive/connect/desktop",
+        driveStatusSchema,
+        undefined,
+        { method: "POST", body: input ?? {} },
       ),
     checkDriveHealth: () =>
       requestApi(

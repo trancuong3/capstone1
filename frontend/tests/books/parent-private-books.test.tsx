@@ -366,6 +366,7 @@ describe("Parent Private Books UI (Sách của tôi)", () => {
               page_id: PAGE_ID,
               page_number: 1,
               current_verified_revision_id: REV_ID,
+              verified_text: "Đoạn văn đã duyệt.",
               verified_text_preview: "Đoạn văn đã duyệt.",
               image_url: `http://127.0.0.1:8000/books/my-books/${BOOK_ID}/pages/${PAGE_ID}/image`,
               created_at: NOW,
@@ -480,5 +481,282 @@ describe("Parent Private Books UI (Sách của tôi)", () => {
     expect(
       await screen.findByRole("link", { name: /Mở đọc cùng bé/ }),
     ).toHaveAttribute("href", `/books/${BOOK_ID}`);
+  });
+
+  it("edits a private book with full re-check warning and deletes a book immediately without re-check", async () => {
+    let currentBook: ParentPrivateBookSummaryDTO | null = makeBookSummary({
+      title: "test tạo",
+      committed_page_count: 1,
+      readable_for_children: true,
+    });
+    const requests: Array<{ method: string; path: string; body?: unknown }> =
+      [];
+
+    apiFetchFixture.mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.pathname === "/books/my-books" && method === "GET") {
+        return new Response(JSON.stringify(currentBook ? [currentBook] : []), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.pathname === `/books/my-books/${BOOK_ID}` && method === "PATCH") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as Record<
+          string,
+          unknown
+        >;
+        requests.push({ method, path: url.pathname, body });
+        currentBook = makeBookSummary({
+          title: String(body.title ?? "test tạo"),
+          committed_page_count: 0,
+          pending_submission_count: 1,
+          readable_for_children: false,
+        });
+        return new Response(JSON.stringify(currentBook), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (
+        url.pathname === `/books/my-books/${BOOK_ID}` &&
+        method === "DELETE"
+      ) {
+        requests.push({ method, path: url.pathname });
+        currentBook = null;
+        return new Response(
+          JSON.stringify({
+            status: "deleted",
+            book_id: BOOK_ID,
+            retired_pages_count: 0,
+            cancelled_submissions_count: 1,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    });
+
+    const user = userEvent.setup();
+    render(
+      <AuthRuntimeContext.Provider value={makeAuthRuntime("parent-a")}>
+        <AppServicesProvider>
+          <ParentMyBooksScreen />
+        </AppServicesProvider>
+      </AuthRuntimeContext.Provider>,
+    );
+
+    expect(await screen.findByText("test tạo")).toBeInTheDocument();
+    expect(screen.getByText("Bé có thể đọc")).toBeInTheDocument();
+
+    // 1. Edit book -> shows full re-check warning -> saves -> resets readable status
+    await user.click(screen.getByRole("button", { name: "Sửa sách test tạo" }));
+    expect(
+      screen.getByText(/toàn bộ các trang của sách sẽ phải kiểm tra lại từ đầu/),
+    ).toBeInTheDocument();
+    const titleInput = screen.getByLabelText("Tên sách chỉnh sửa");
+    await user.clear(titleInput);
+    await user.type(titleInput, "Truyện Mèo Con Sửa Lại");
+    await user.click(
+      screen.getByRole("button", { name: /Lưu & kiểm tra lại toàn bộ/ }),
+    );
+
+    await waitFor(() => {
+      expect(requests[0]).toEqual({
+        method: "PATCH",
+        path: `/books/my-books/${BOOK_ID}`,
+        body: expect.objectContaining({ title: "Truyện Mèo Con Sửa Lại" }),
+      });
+    });
+    expect(
+      await screen.findByText("Truyện Mèo Con Sửa Lại"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Chưa sẵn sàng đọc")).toBeInTheDocument();
+    expect(
+      screen.getByText(/đã được đưa về kiểm tra lại từ đầu/),
+    ).toBeInTheDocument();
+
+    // 2. Delete book -> inline confirm says no re-check -> deletes immediately
+    await user.click(
+      screen.getByRole("button", { name: "Xóa sách Truyện Mèo Con Sửa Lại" }),
+    );
+    expect(screen.getByText(/không cần kiểm tra lại/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Xác nhận xóa" }));
+
+    await waitFor(() => {
+      expect(requests[1]).toEqual({
+        method: "DELETE",
+        path: `/books/my-books/${BOOK_ID}`,
+      });
+    });
+    expect(
+      await screen.findByText("Bạn chưa có sách riêng nào"),
+    ).toBeInTheDocument();
+  });
+
+  it("edits a committed page (triggering re-check) and deletes a committed page without re-check", async () => {
+    const PAGE_2_ID = "dd000000-0000-4000-8000-000000000002";
+    let detail: ParentPrivateBookDetailDTO = {
+      book: makeBookSummary({
+        committed_page_count: 2,
+        readable_for_children: true,
+      }),
+      pages: [
+        {
+          page_id: PAGE_ID,
+          page_number: 1,
+          current_verified_revision_id: REV_ID,
+          verified_text: "Mèo con đi học buổi sáng.",
+          verified_text_preview: "Mèo con đi học buổi sáng.",
+          image_url: `http://127.0.0.1:8000/books/my-books/${BOOK_ID}/pages/${PAGE_ID}/image`,
+          created_at: NOW,
+        },
+        {
+          page_id: PAGE_2_ID,
+          page_number: 2,
+          current_verified_revision_id: REV_ID,
+          verified_text: "Thỏ trắng chơi ngoài vườn.",
+          verified_text_preview: "Thỏ trắng chơi ngoài vườn.",
+          image_url: `http://127.0.0.1:8000/books/my-books/${BOOK_ID}/pages/${PAGE_2_ID}/image`,
+          created_at: NOW,
+        },
+      ],
+      submissions: [],
+    };
+    const calls: Array<{ method: string; path: string; body?: unknown }> = [];
+
+    apiFetchFixture.mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      const method = (init?.method ?? "GET").toUpperCase();
+
+      if (url.pathname.endsWith("/image")) {
+        return new Response(new Blob(["png"], { type: "image/png" }), {
+          status: 200,
+          headers: { "Content-Type": "image/png" },
+        });
+      }
+      if (url.pathname === `/books/my-books/${BOOK_ID}` && method === "GET") {
+        return new Response(JSON.stringify(detail), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (
+        url.pathname === `/books/my-books/${BOOK_ID}/pages/${PAGE_2_ID}` &&
+        method === "DELETE"
+      ) {
+        calls.push({ method, path: url.pathname });
+        detail = {
+          ...detail,
+          book: makeBookSummary({
+            committed_page_count: 1,
+            readable_for_children: true,
+          }),
+          pages: [detail.pages[0]],
+        };
+        return new Response(
+          JSON.stringify({
+            status: "deleted",
+            book_id: BOOK_ID,
+            page_id: PAGE_2_ID,
+            committed_page_count: 1,
+            readable_for_children: true,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      if (
+        url.pathname === `/books/my-books/${BOOK_ID}/pages/${PAGE_ID}` &&
+        method === "PATCH"
+      ) {
+        const body = JSON.parse(String(init?.body ?? "{}")) as Record<
+          string,
+          unknown
+        >;
+        calls.push({ method, path: url.pathname, body });
+        const recheckSub = makeSubmission({
+          workflow_status: "CHECKING",
+          workflow_status_label: "Đang kiểm tra",
+          ocr_status: "COMPLETED",
+          proofread_status: "PENDING",
+          tool_check_status: "PENDING",
+          candidate_text: String(body.candidate_text ?? ""),
+          can_add_to_book: false,
+          can_request_admin_review: false,
+        });
+        detail = {
+          book: makeBookSummary({
+            committed_page_count: 0,
+            pending_submission_count: 1,
+            readable_for_children: false,
+          }),
+          pages: [],
+          submissions: [recheckSub],
+        };
+        return new Response(JSON.stringify(recheckSub), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ detail: "Not found" }), {
+        status: 404,
+      });
+    });
+
+    const user = userEvent.setup();
+    render(
+      <AuthRuntimeContext.Provider value={makeAuthRuntime("parent-a")}>
+        <AppServicesProvider>
+          <ParentPrivateBookManager bookId={BOOK_ID} />
+        </AppServicesProvider>
+      </AuthRuntimeContext.Provider>,
+    );
+
+    expect(
+      await screen.findByText("Các trang đã thêm vào sách đọc (2)"),
+    ).toBeInTheDocument();
+
+    // 1. Delete Page 2 immediately -> no re-check on Page 1
+    await user.click(screen.getByRole("button", { name: "Xóa trang 2" }));
+    await user.click(screen.getByRole("button", { name: "Xác nhận xóa" }));
+
+    await waitFor(() => {
+      expect(calls[0]).toEqual({
+        method: "DELETE",
+        path: `/books/my-books/${BOOK_ID}/pages/${PAGE_2_ID}`,
+      });
+    });
+    expect(
+      await screen.findByText("Các trang đã thêm vào sách đọc (1)"),
+    ).toBeInTheDocument();
+
+    // 2. Edit Page 1 -> retires from readable book & re-queues full check
+    await user.click(
+      screen.getByRole("button", { name: "Sửa nội dung trang 1" }),
+    );
+    const textarea = screen.getByLabelText("Chỉnh sửa văn bản trang 1");
+    await user.clear(textarea);
+    await user.type(textarea, "Mèo con đi học rất vui vẻ.");
+    await user.click(
+      screen.getByRole("button", { name: /Lưu & kiểm tra lại/ }),
+    );
+
+    await waitFor(() => {
+      expect(calls[1]).toEqual({
+        method: "PATCH",
+        path: `/books/my-books/${BOOK_ID}/pages/${PAGE_ID}`,
+        body: expect.objectContaining({
+          candidate_text: "Mèo con đi học rất vui vẻ.",
+          auto_recheck: true,
+        }),
+      });
+    });
+    expect(
+      await screen.findByText("Các trang đã thêm vào sách đọc (0)"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Đang kiểm tra")).toBeInTheDocument();
   });
 });

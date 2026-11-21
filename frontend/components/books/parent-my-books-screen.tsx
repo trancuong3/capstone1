@@ -5,9 +5,11 @@ import {
   BookMarked,
   BookOpen,
   Lock,
+  Pencil,
   Plus,
   RefreshCw,
   ShieldCheck,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -34,6 +36,29 @@ function getErrorText(error: unknown, fallback: string): string {
     return error.message;
   }
   return fallback;
+}
+
+const VALID_SOURCE_TYPES = new Set<string>(
+  SOURCE_USAGE_OPTIONS.map((opt) => opt.value),
+);
+
+function parseSourceDeclaration(raw: string | null): {
+  sourceType: SourceUsageType;
+  sourceNote: string;
+} {
+  const cleaned = (raw ?? "").trim();
+  if (!cleaned) {
+    return { sourceType: "OWNED_PHYSICAL_BOOK", sourceNote: "" };
+  }
+  if (cleaned.startsWith("[") && cleaned.includes("]")) {
+    const closeIdx = cleaned.indexOf("]");
+    const tag = cleaned.slice(1, closeIdx).trim();
+    const rest = cleaned.slice(closeIdx + 1).trim();
+    if (VALID_SOURCE_TYPES.has(tag)) {
+      return { sourceType: tag as SourceUsageType, sourceNote: rest };
+    }
+  }
+  return { sourceType: "OWNED_PHYSICAL_BOOK", sourceNote: cleaned };
 }
 
 export function ParentMyBooksScreen() {
@@ -65,6 +90,23 @@ function ParentMyBooksContent({ currentUserId }: { currentUserId: string }) {
   );
   const [sourceNote, setSourceNote] = useState("");
   const [creating, setCreating] = useState(false);
+
+  // Inline Edit & Delete book state
+  const [editingBookId, setEditingBookId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editAuthor, setEditAuthor] = useState("");
+  const [editMinGrade, setEditMinGrade] = useState<number>(1);
+  const [editMaxGrade, setEditMaxGrade] = useState<number>(3);
+  const [editSourceType, setEditSourceType] = useState<SourceUsageType>(
+    "OWNED_PHYSICAL_BOOK",
+  );
+  const [editSourceNote, setEditSourceNote] = useState("");
+  const [savingBookId, setSavingBookId] = useState<string | null>(null);
+
+  const [confirmDeleteBookId, setConfirmDeleteBookId] = useState<string | null>(
+    null,
+  );
+  const [deletingBookId, setDeletingBookId] = useState<string | null>(null);
 
   const loadBooks = useCallback(() => {
     setReloadKey((prev) => prev + 1);
@@ -139,6 +181,87 @@ function ParentMyBooksContent({ currentUserId }: { currentUserId: string }) {
       );
     } finally {
       setCreating(false);
+    }
+  }
+
+  function startEditBook(book: ParentPrivateBookSummaryDTO) {
+    const parsed = parseSourceDeclaration(book.source_declaration);
+    setConfirmDeleteBookId(null);
+    setEditingBookId(book.id);
+    setEditTitle(book.title);
+    setEditAuthor(book.author ?? "");
+    setEditMinGrade(book.min_grade);
+    setEditMaxGrade(book.max_grade);
+    setEditSourceType(parsed.sourceType);
+    setEditSourceNote(parsed.sourceNote);
+    setActionError(null);
+    setActionNotice(null);
+  }
+
+  async function handleSaveBookEdit(
+    event: FormEvent<HTMLFormElement>,
+    book: ParentPrivateBookSummaryDTO,
+  ) {
+    event.preventDefault();
+    setActionError(null);
+    setActionNotice(null);
+    const trimmedTitle = editTitle.trim();
+    if (!trimmedTitle) {
+      setActionError("Tên sách riêng không được để trống.");
+      return;
+    }
+    if (editMinGrade > editMaxGrade) {
+      setActionError("Lớp tối thiểu không được lớn hơn lớp tối đa.");
+      return;
+    }
+
+    setSavingBookId(book.id);
+    try {
+      const updated = await service.update(book.id, {
+        title: trimmedTitle,
+        author: editAuthor.trim() || null,
+        min_grade: editMinGrade,
+        max_grade: editMaxGrade,
+        source_type: editSourceType,
+        source_note: editSourceNote.trim() || null,
+      });
+      setBooks((prev) =>
+        prev.map((item) => (item.id === updated.id ? updated : item)),
+      );
+      setEditingBookId(null);
+      const totalRecheck = updated.pending_submission_count;
+      setActionNotice(
+        totalRecheck > 0
+          ? `Đã sửa sách "${updated.title}". Toàn bộ ${totalRecheck} trang đã được đưa về kiểm tra lại từ đầu (OCR → Rà chính tả → Tool Check an toàn).`
+          : `Đã cập nhật thông tin sách "${updated.title}".`,
+      );
+    } catch (error) {
+      setActionError(
+        getErrorText(error, "Không thể sửa sách riêng. Vui lòng thử lại."),
+      );
+    } finally {
+      setSavingBookId(null);
+    }
+  }
+
+  async function handleDeleteBook(book: ParentPrivateBookSummaryDTO) {
+    setActionError(null);
+    setActionNotice(null);
+    setDeletingBookId(book.id);
+    try {
+      await service.delete(book.id);
+      setBooks((prev) => prev.filter((item) => item.id !== book.id));
+      setConfirmDeleteBookId(null);
+      if (editingBookId === book.id) {
+        setEditingBookId(null);
+      }
+      setActionNotice(`Đã xóa sách riêng "${book.title}".`);
+    } catch (error) {
+      setActionError(
+        getErrorText(error, "Không thể xóa sách riêng. Vui lòng thử lại."),
+      );
+    } finally {
+      setDeletingBookId(null);
     }
   }
 
@@ -458,7 +581,198 @@ function ParentMyBooksContent({ currentUserId }: { currentUserId: string }) {
                       Chưa mở đọc cùng bé
                     </span>
                   )}
+
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      aria-label={`Sửa sách ${book.title}`}
+                      className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control border border-border bg-white px-3 text-xs font-bold text-ink transition hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={
+                        isSuspended ||
+                        savingBookId === book.id ||
+                        deletingBookId === book.id
+                      }
+                      onClick={() =>
+                        editingBookId === book.id
+                          ? setEditingBookId(null)
+                          : startEditBook(book)
+                      }
+                      type="button"
+                    >
+                      <Pencil aria-hidden="true" className="size-3.5" />
+                      Sửa sách
+                    </button>
+                    <button
+                      aria-label={`Xóa sách ${book.title}`}
+                      className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={
+                        savingBookId === book.id || deletingBookId === book.id
+                      }
+                      onClick={() => {
+                        setEditingBookId(null);
+                        setConfirmDeleteBookId((prev) =>
+                          prev === book.id ? null : book.id,
+                        );
+                      }}
+                      type="button"
+                    >
+                      <Trash2 aria-hidden="true" className="size-3.5" />
+                      Xóa sách
+                    </button>
+                  </div>
                 </div>
+
+                {editingBookId === book.id ? (
+                  <form
+                    aria-label={`Chỉnh sửa sách ${book.title}`}
+                    className="flex flex-col gap-3 rounded-control border border-amber-300 bg-amber-50/60 p-3.5 text-xs"
+                    onSubmit={(event) => void handleSaveBookEdit(event, book)}
+                  >
+                    <p className="font-bold text-amber-950">
+                      Lưu ý: Khi sửa sách, toàn bộ các trang của sách sẽ phải
+                      kiểm tra lại từ đầu (OCR → Rà chính tả → Tool Check an
+                      toàn) và tạm khóa đọc cùng bé cho đến khi hoàn tất.
+                    </p>
+                    <label className="flex flex-col gap-1 font-semibold text-ink">
+                      Tên sách *
+                      <input
+                        aria-label="Tên sách chỉnh sửa"
+                        className="min-h-10 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
+                        onChange={(event) => setEditTitle(event.target.value)}
+                        required
+                        type="text"
+                        value={editTitle}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 font-semibold text-ink">
+                      Tác giả
+                      <input
+                        aria-label="Tác giả chỉnh sửa"
+                        className="min-h-10 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
+                        onChange={(event) => setEditAuthor(event.target.value)}
+                        type="text"
+                        value={editAuthor}
+                      />
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="flex flex-col gap-1 font-semibold text-ink">
+                        Từ lớp
+                        <select
+                          aria-label="Từ lớp chỉnh sửa"
+                          className="min-h-10 rounded-control border border-border bg-white px-2 text-xs text-ink"
+                          onChange={(event) =>
+                            setEditMinGrade(Number(event.target.value))
+                          }
+                          value={editMinGrade}
+                        >
+                          {CHILD_GRADES.map((grade) => (
+                            <option key={grade} value={grade}>
+                              Lớp {grade}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1 font-semibold text-ink">
+                        Đến lớp
+                        <select
+                          aria-label="Đến lớp chỉnh sửa"
+                          className="min-h-10 rounded-control border border-border bg-white px-2 text-xs text-ink"
+                          onChange={(event) =>
+                            setEditMaxGrade(Number(event.target.value))
+                          }
+                          value={editMaxGrade}
+                        >
+                          {CHILD_GRADES.map((grade) => (
+                            <option key={grade} value={grade}>
+                              Lớp {grade}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <label className="flex flex-col gap-1 font-semibold text-ink">
+                      Nguồn nội dung
+                      <select
+                        aria-label="Nguồn nội dung chỉnh sửa"
+                        className="min-h-10 rounded-control border border-border bg-white px-2 text-xs text-ink"
+                        onChange={(event) =>
+                          setEditSourceType(
+                            event.target.value as SourceUsageType,
+                          )
+                        }
+                        value={editSourceType}
+                      >
+                        {SOURCE_USAGE_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1 font-semibold text-ink">
+                      Ghi chú nguồn
+                      <input
+                        aria-label="Ghi chú nguồn chỉnh sửa"
+                        className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
+                        onChange={(event) =>
+                          setEditSourceNote(event.target.value)
+                        }
+                        type="text"
+                        value={editSourceNote}
+                      />
+                    </label>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <Button
+                        className="min-h-10 w-auto px-3 text-xs"
+                        isLoading={savingBookId === book.id}
+                        type="submit"
+                      >
+                        Lưu & kiểm tra lại toàn bộ
+                      </Button>
+                      <Button
+                        className="min-h-10 w-auto px-3 text-xs"
+                        onClick={() => setEditingBookId(null)}
+                        type="button"
+                        variant="secondary"
+                      >
+                        Hủy
+                      </Button>
+                    </div>
+                  </form>
+                ) : null}
+
+                {confirmDeleteBookId === book.id ? (
+                  <div
+                    role="alertdialog"
+                    aria-label={`Xác nhận xóa sách ${book.title}`}
+                    className="flex flex-col gap-2.5 rounded-control border border-rose-300 bg-rose-50 p-3.5 text-xs text-rose-950"
+                  >
+                    <p className="font-bold">
+                      Xóa sách &ldquo;{book.title}&rdquo;?
+                    </p>
+                    <p>
+                      Sách sẽ bị xóa ngay khỏi Sách của tôi (không cần kiểm tra
+                      lại).
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        className="min-h-10 w-auto bg-rose-700 px-3 text-xs text-white hover:bg-rose-800"
+                        isLoading={deletingBookId === book.id}
+                        onClick={() => void handleDeleteBook(book)}
+                        type="button"
+                      >
+                        Xác nhận xóa
+                      </Button>
+                      <Button
+                        className="min-h-10 w-auto px-3 text-xs"
+                        onClick={() => setConfirmDeleteBookId(null)}
+                        type="button"
+                        variant="secondary"
+                      >
+                        Hủy
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
               </article>
             );
           })}

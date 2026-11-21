@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 import hashlib
+import json
 import logging
 import os
 import threading
@@ -26,6 +27,19 @@ from app.services.training_storage.base import (
     DriveQuotaExceededError,
     StorageQuotaStatus,
     TrainingStorageError,
+)
+from app.services.training_storage.google_apps_script_store import (
+    APPS_SCRIPT_BRIDGE_SCOPE,
+    GoogleAppsScriptDriveStore,
+    apps_script_config_readiness,
+    validate_apps_script_web_app_url,
+)
+from app.services.training_storage.google_drive_desktop_store import (
+    DRIVE_DESKTOP_SYNC_SCOPE,
+    GoogleDriveDesktopStore,
+    detect_google_drive_desktop_mounts,
+    drive_desktop_config_readiness,
+    resolve_flow2_sync_root,
 )
 from app.services.training_storage.google_drive_oauth import (
     GOOGLE_DRIVE_REQUIRED_SCOPE,
@@ -53,9 +67,11 @@ from app.services.training_storage.router import (
 
 logger = logging.getLogger(__name__)
 
+DriveStoreType = GoogleDriveTrainingStore | GoogleAppsScriptDriveStore | GoogleDriveDesktopStore
+
 _sync_store_lock = threading.Lock()
-_sync_store_cache: tuple[float, GoogleDriveTrainingStore | None] = (0.0, None)
-_warm_store_cache: dict[tuple[str, str], GoogleDriveTrainingStore] = {}
+_sync_store_cache: tuple[float, DriveStoreType | None] = (0.0, None)
+_warm_store_cache: dict[tuple[str, str], DriveStoreType] = {}
 _SYNC_STORE_CACHE_TTL_SECONDS = 60.0
 
 
@@ -66,7 +82,7 @@ def invalidate_sync_google_drive_store_cache() -> None:
         _warm_store_cache.clear()
 
 
-def _set_sync_google_drive_store_cache(store: GoogleDriveTrainingStore | None) -> None:
+def _set_sync_google_drive_store_cache(store: DriveStoreType | None) -> None:
     global _sync_store_cache
     with _sync_store_lock:
         _sync_store_cache = (time.monotonic() + _SYNC_STORE_CACHE_TTL_SECONDS, store)
@@ -197,6 +213,8 @@ def _serialize_connection_status(
     migration_applied: bool,
 ) -> dict[str, Any]:
     readiness = oauth_config_readiness()
+    bridge_readiness = apps_script_config_readiness()
+    desktop_readiness = drive_desktop_config_readiness()
     configured_provider = flow2_storage_provider_setting().value
     if not migration_applied:
         return {
@@ -204,8 +222,12 @@ def _serialize_connection_status(
             "migration_applied": False,
             "status": "DISCONNECTED",
             "connected": False,
+            "connection_mode": None,
             "oauth_configured": readiness["oauth_configured"],
             "oauth_readiness": readiness,
+            "apps_script_readiness": bridge_readiness,
+            "drive_desktop_readiness": desktop_readiness,
+            "required_account_email": readiness.get("required_account_email"),
             "account_email": None,
             "account_display_name": None,
             "oauth_scope": None,
@@ -221,17 +243,31 @@ def _serialize_connection_status(
             "disconnected_at": None,
         }
     status_val = str(row.get("status") or "DISCONNECTED") if row else "DISCONNECTED"
-    scope_val = str(row.get("oauth_scope") or "") if row else ""
+    scope_val = str(row.get("oauth_scope") or "").strip() if row else ""
     scope_tokens = {tok for tok in scope_val.split() if tok}
-    scope_valid = scope_tokens == {GOOGLE_DRIVE_REQUIRED_SCOPE}
+    is_apps_script = scope_val == APPS_SCRIPT_BRIDGE_SCOPE
+    is_drive_desktop = scope_val == DRIVE_DESKTOP_SYNC_SCOPE
+    scope_valid = is_apps_script or is_drive_desktop or (scope_tokens == {GOOGLE_DRIVE_REQUIRED_SCOPE})
+    if is_drive_desktop:
+        connection_mode = "drive_desktop_sync"
+    elif is_apps_script:
+        connection_mode = "apps_script_bridge"
+    elif scope_val:
+        connection_mode = "oauth"
+    else:
+        connection_mode = None
     subfolders = row.get("subfolder_ids") if (row and isinstance(row.get("subfolder_ids"), dict)) else {}
     return {
         "provider": configured_provider,
         "migration_applied": True,
         "status": status_val,
         "connected": status_val == "CONNECTED" and bool(row and row.get("encrypted_refresh_token")),
+        "connection_mode": connection_mode,
         "oauth_configured": readiness["oauth_configured"],
         "oauth_readiness": readiness,
+        "apps_script_readiness": bridge_readiness,
+        "drive_desktop_readiness": desktop_readiness,
+        "required_account_email": readiness.get("required_account_email"),
         "account_email": row.get("account_email") if row else None,
         "account_display_name": row.get("account_display_name") if row else None,
         "oauth_scope": scope_val or None,
@@ -260,13 +296,14 @@ def build_google_drive_store_from_row(
     access_token_expires_at: float = 0.0,
     session: requests.Session | None = None,
     use_warm_cache: bool = True,
-) -> GoogleDriveTrainingStore:
+) -> DriveStoreType:
     if str(row.get("status") or "") != "CONNECTED":
         raise DriveNotConnectedError("Google Drive is not connected for Flow 2 training")
     encrypted = str(row.get("encrypted_refresh_token") or "").strip()
     if not encrypted:
-        raise DriveNotConnectedError("Google Drive refresh token is not stored; reconnect Drive")
+        raise DriveNotConnectedError("Google Drive credential is not stored; reconnect Drive")
     root_folder_id = str(row.get("root_folder_id") or "")
+    scope_val = str(row.get("oauth_scope") or "").strip()
     cache_key = (hashlib.sha256(encrypted.encode("utf-8")).hexdigest(), root_folder_id)
     if use_warm_cache and session is None and access_token is None:
         with _sync_store_lock:
@@ -274,29 +311,86 @@ def build_google_drive_store_from_row(
             if warm is not None:
                 return warm
 
-    client_id = (os.getenv("VIREAD_GDRIVE_OAUTH_CLIENT_ID") or "").strip()
-    client_secret = (os.getenv("VIREAD_GDRIVE_OAUTH_CLIENT_SECRET") or "").strip()
     enc_key = (os.getenv("VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY") or "").strip()
-    if not client_id or not client_secret or not enc_key:
-        raise TrainingStorageError(
-            "Google Drive server OAuth credentials or encryption key are not configured",
-            code="DRIVE_OAUTH_NOT_CONFIGURED",
-            http_status=503,
-        )
-    refresh_token = decrypt_refresh_token(encrypted, enc_key)
     subfolders = row.get("subfolder_ids") if isinstance(row.get("subfolder_ids"), dict) else {}
-    store = GoogleDriveTrainingStore(
-        client_id=client_id,
-        client_secret=client_secret,
-        refresh_token=refresh_token,
-        access_token=access_token,
-        access_token_expires_at=access_token_expires_at,
-        granted_scope=str(row.get("oauth_scope") or GOOGLE_DRIVE_REQUIRED_SCOPE),
-        root_folder_id=root_folder_id or None,
-        subfolder_ids={str(k): str(v) for k, v in subfolders.items() if v},
-        session=session,
-        on_token_revoked=_mark_token_revoked_via_postgrest,
-    )
+
+    if scope_val == DRIVE_DESKTOP_SYNC_SCOPE:
+        if len(enc_key) < 32:
+            raise TrainingStorageError(
+                "Server VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY is not configured",
+                code="DRIVE_ENCRYPTION_KEY_MISSING",
+                http_status=503,
+            )
+        decrypted = decrypt_refresh_token(encrypted, enc_key)
+        try:
+            cred = json.loads(decrypted)
+        except Exception as exc:
+            raise DriveAuthError(
+                "Stored Google Drive Desktop configuration is corrupted; reconnect Drive",
+                code="DRIVE_DESKTOP_CREDENTIAL_CORRUPTED",
+                http_status=500,
+            ) from exc
+        if not isinstance(cred, dict) or cred.get("kind") != "drive_desktop_sync":
+            raise DriveAuthError(
+                "Stored Google Drive Desktop configuration has invalid type; reconnect Drive",
+                code="DRIVE_DESKTOP_CREDENTIAL_CORRUPTED",
+                http_status=500,
+            )
+        store = GoogleDriveDesktopStore(
+            root_dir=str(cred.get("root_dir") or ""),
+            account_email=str(cred.get("account_email") or row.get("account_email") or "") or None,
+        )
+    elif scope_val == APPS_SCRIPT_BRIDGE_SCOPE:
+        if len(enc_key) < 32:
+            raise TrainingStorageError(
+                "Server VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY is not configured",
+                code="DRIVE_ENCRYPTION_KEY_MISSING",
+                http_status=503,
+            )
+        decrypted = decrypt_refresh_token(encrypted, enc_key)
+        try:
+            cred = json.loads(decrypted)
+        except Exception as exc:
+            raise DriveAuthError(
+                "Stored Apps Script Drive bridge credential is corrupted; reconnect Drive",
+                code="DRIVE_BRIDGE_CREDENTIAL_CORRUPTED",
+                http_status=500,
+            ) from exc
+        if not isinstance(cred, dict) or cred.get("kind") != "apps_script_bridge":
+            raise DriveAuthError(
+                "Stored Drive bridge credential has invalid type; reconnect Drive",
+                code="DRIVE_BRIDGE_CREDENTIAL_CORRUPTED",
+                http_status=500,
+            )
+        store: DriveStoreType = GoogleAppsScriptDriveStore(
+            web_app_url=str(cred.get("web_app_url") or ""),
+            bridge_secret=str(cred.get("bridge_secret") or ""),
+            root_folder_id=root_folder_id or None,
+            subfolder_ids={str(k): str(v) for k, v in subfolders.items() if v},
+            session=session,
+        )
+    else:
+        client_id = (os.getenv("VIREAD_GDRIVE_OAUTH_CLIENT_ID") or "").strip()
+        client_secret = (os.getenv("VIREAD_GDRIVE_OAUTH_CLIENT_SECRET") or "").strip()
+        if not client_id or not client_secret or not enc_key:
+            raise TrainingStorageError(
+                "Google Drive server OAuth credentials or encryption key are not configured",
+                code="DRIVE_OAUTH_NOT_CONFIGURED",
+                http_status=503,
+            )
+        refresh_token = decrypt_refresh_token(encrypted, enc_key)
+        store = GoogleDriveTrainingStore(
+            client_id=client_id,
+            client_secret=client_secret,
+            refresh_token=refresh_token,
+            access_token=access_token,
+            access_token_expires_at=access_token_expires_at,
+            granted_scope=scope_val or GOOGLE_DRIVE_REQUIRED_SCOPE,
+            root_folder_id=root_folder_id or None,
+            subfolder_ids={str(k): str(v) for k, v in subfolders.items() if v},
+            session=session,
+            on_token_revoked=_mark_token_revoked_via_postgrest,
+        )
     if use_warm_cache and session is None:
         with _sync_store_lock:
             _warm_store_cache.clear()
@@ -304,7 +398,7 @@ def build_google_drive_store_from_row(
     return store
 
 
-def load_sync_google_drive_store() -> GoogleDriveTrainingStore | None:
+def load_sync_google_drive_store() -> DriveStoreType | None:
     """Synchronous Google Drive store loader for OCR runtime model hydration (zero new DB drivers)."""
     now = time.monotonic()
     with _sync_store_lock:
@@ -358,7 +452,7 @@ class VireadDriveConnectionService:
         row, migration_applied = await self.repo.get_primary()
         return _serialize_connection_status(row, migration_applied=migration_applied)
 
-    async def get_connected_store(self) -> GoogleDriveTrainingStore:
+    async def get_connected_store(self) -> DriveStoreType:
         row, migration_applied = await self.repo.get_primary()
         if not migration_applied:
             raise DriveNotConnectedError(
@@ -378,7 +472,7 @@ class VireadDriveConnectionService:
         write_provider: StorageProvider | None = None,
     ) -> TrainingArtifactStoreRouter:
         target_provider = write_provider or flow2_storage_provider_setting()
-        drive_store: GoogleDriveTrainingStore | None = None
+        drive_store: DriveStoreType | None = None
         drive_init_error: TrainingStorageError | None = None
         row, migration_applied = await self.repo.get_primary()
         if migration_applied and row and row.get("status") == "CONNECTED":
@@ -388,7 +482,7 @@ class VireadDriveConnectionService:
             except TrainingStorageError as exc:
                 drive_init_error = exc
 
-        def _drive_factory() -> GoogleDriveTrainingStore | None:
+        def _drive_factory() -> DriveStoreType | None:
             if drive_init_error is not None:
                 raise drive_init_error
             return drive_store
@@ -473,6 +567,16 @@ class VireadDriveConnectionService:
 
             def _bootstrap_drive() -> tuple[dict[str, str | None], str, dict[str, str], StorageQuotaStatus]:
                 acc = store.get_account_info()
+                if config.required_account_email:
+                    actual_email = (acc.get("email") or "").strip().lower()
+                    if actual_email != config.required_account_email:
+                        revoke_token(tokens.refresh_token, session=self._session)
+                        raise DrivePermissionError(
+                            f"Google Drive must be connected with the required owner account "
+                            f"({config.required_account_email}), not {actual_email or 'unknown'}",
+                            code="DRIVE_ACCOUNT_EMAIL_MISMATCH",
+                            http_status=403,
+                        )
                 r_id, subs = store.ensure_directory_tree()
                 q = store.quota_check(incoming_bytes=0)
                 return acc, r_id, subs, q
@@ -498,6 +602,201 @@ class VireadDriveConnectionService:
         )
         _set_sync_google_drive_store_cache(store)
         row_with_token = {**row, "encrypted_refresh_token": encrypted_token}
+        return _serialize_connection_status(row_with_token, migration_applied=True)
+
+    async def connect_apps_script(
+        self,
+        *,
+        actor_id: UUID,
+        web_app_url: str,
+        bridge_secret: str | None = None,
+    ) -> dict[str, Any]:
+        """Connect Flow 2 Google Drive via owner-deployed Apps Script Web App (0 card, no GCP billing)."""
+        _, migration_applied = await self.repo.get_primary()
+        if not migration_applied:
+            raise HTTPException(
+                status_code=503,
+                detail="Apply migration 20261121210000_flow2_google_drive_storage.sql before connecting Google Drive",
+            )
+        enc_key = (os.getenv("VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY") or "").strip()
+        if len(enc_key) < 32:
+            raise HTTPException(
+                status_code=503,
+                detail="DRIVE_ENCRYPTION_KEY_MISSING: Server VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY must be >= 32 characters",
+            )
+        resolved_secret = (bridge_secret or "").strip() or (
+            os.getenv("VIREAD_GDRIVE_APPS_SCRIPT_SECRET") or ""
+        ).strip()
+        required_email = (os.getenv("VIREAD_GDRIVE_REQUIRED_ACCOUNT_EMAIL") or "").strip().lower() or None
+
+        try:
+            clean_url = validate_apps_script_web_app_url(web_app_url)
+            store = GoogleAppsScriptDriveStore(
+                web_app_url=clean_url,
+                bridge_secret=resolved_secret,
+                session=self._session,
+            )
+
+            def _bootstrap_bridge() -> tuple[dict[str, str | None], str, dict[str, str], StorageQuotaStatus]:
+                health = store.health_check()
+                if not health.healthy or not health.root_folder_id:
+                    code = health.error_code or "DRIVE_BRIDGE_ERROR"
+                    http_status = 401 if code in {"DRIVE_AUTH_FAILED", "DRIVE_BRIDGE_SECRET_NOT_SET"} else (
+                        403 if code in {"DRIVE_BRIDGE_ACCESS_DENIED", "DRIVE_PERMISSION_DENIED"} else 502
+                    )
+                    raise TrainingStorageError(
+                        health.detail or "Failed to verify Google Apps Script Drive bridge",
+                        code=code,
+                        http_status=http_status,
+                    )
+                actual_email = (health.account_email or "").strip().lower()
+                if required_email and actual_email != required_email:
+                    raise DrivePermissionError(
+                        f"Google Drive bridge must be deployed by the required owner account "
+                        f"({required_email}), not {actual_email or 'unknown'}",
+                        code="DRIVE_ACCOUNT_EMAIL_MISMATCH",
+                        http_status=403,
+                    )
+                acc = {
+                    "email": actual_email or None,
+                    "display_name": (actual_email.split("@", 1)[0] if actual_email else None),
+                }
+                quota = health.quota or store.quota_check(incoming_bytes=0)
+                return acc, health.root_folder_id, store.subfolder_ids, quota
+
+            account, root_id, subfolders, quota = await asyncio.to_thread(_bootstrap_bridge)
+        except (DriveAuthError, DrivePermissionError, DriveQuotaExceededError, TrainingStorageError) as exc:
+            raise _http_exception_from_storage_error(exc) from exc
+
+        cred_blob = json.dumps(
+            {
+                "kind": "apps_script_bridge",
+                "web_app_url": clean_url,
+                "bridge_secret": resolved_secret,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        encrypted_cred, fingerprint = encrypt_refresh_token(cred_blob, enc_key)
+        row = await self.repo.upsert_connected(
+            account_email=account.get("email"),
+            account_display_name=account.get("display_name"),
+            oauth_scope=APPS_SCRIPT_BRIDGE_SCOPE,
+            encrypted_refresh_token=encrypted_cred,
+            token_key_fingerprint=fingerprint,
+            root_folder_id=root_id,
+            root_folder_path=DRIVE_ROOT_DISPLAY_PATH,
+            subfolder_ids=subfolders,
+            quota_limit_bytes=quota.limit_bytes,
+            quota_usage_bytes=quota.usage_bytes,
+            quota_usage_in_drive_bytes=quota.usage_in_drive_bytes,
+            quota_usage_in_trash_bytes=quota.usage_in_trash_bytes,
+            connected_by=actor_id,
+        )
+        _set_sync_google_drive_store_cache(store)
+        row_with_token = {**row, "encrypted_refresh_token": encrypted_cred}
+        return _serialize_connection_status(row_with_token, migration_applied=True)
+
+    async def connect_drive_desktop(
+        self,
+        *,
+        actor_id: UUID,
+        sync_root_path: str | None = None,
+        account_email: str | None = None,
+    ) -> dict[str, Any]:
+        """Connect Flow 2 Google Drive via official Google Drive for Desktop synced mount (Advanced-Protection safe)."""
+        _, migration_applied = await self.repo.get_primary()
+        if not migration_applied:
+            raise HTTPException(
+                status_code=503,
+                detail="Apply migration 20261121210000_flow2_google_drive_storage.sql before connecting Google Drive",
+            )
+        enc_key = (os.getenv("VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY") or "").strip()
+        if len(enc_key) < 32:
+            raise HTTPException(
+                status_code=503,
+                detail="DRIVE_ENCRYPTION_KEY_MISSING: Server VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY must be >= 32 characters",
+            )
+        required_email = (os.getenv("VIREAD_GDRIVE_REQUIRED_ACCOUNT_EMAIL") or "").strip().lower() or None
+
+        try:
+            detected = detect_google_drive_desktop_mounts()
+            raw_path = (sync_root_path or "").strip()
+            if not raw_path:
+                if detected:
+                    raw_path = str(detected[0]["drive_root"])
+                else:
+                    raise DriveNotConnectedError(
+                        "Google Drive for Desktop mount was not auto-detected; install/sign into Google Drive for Desktop or provide the G:\\My Drive path"
+                    )
+            flow2_root = resolve_flow2_sync_root(raw_path)
+
+            # Determine verified owner email from DriveFS metadata, explicit input, or server pinning
+            detected_email = next(
+                (str(m.get("account_email") or "").strip().lower() for m in detected if m.get("account_email")),
+                None,
+            )
+            requested_email = (account_email or "").strip().lower() or None
+            if required_email:
+                if detected_email and detected_email != required_email:
+                    raise DrivePermissionError(
+                        f"Google Drive for Desktop is signed in as {detected_email}, not required owner {required_email}",
+                        code="DRIVE_ACCOUNT_EMAIL_MISMATCH",
+                        http_status=403,
+                    )
+                if requested_email and requested_email != required_email:
+                    raise DrivePermissionError(
+                        f"Google Drive must be connected with required owner account ({required_email}), not {requested_email}",
+                        code="DRIVE_ACCOUNT_EMAIL_MISMATCH",
+                        http_status=403,
+                    )
+            effective_email = detected_email or requested_email or required_email
+
+            store = GoogleDriveDesktopStore(root_dir=flow2_root, account_email=effective_email)
+
+            def _bootstrap_desktop() -> tuple[str, dict[str, str], StorageQuotaStatus]:
+                root_id, subs = store.ensure_directory_tree()
+                health = store.health_check()
+                if not health.healthy:
+                    raise TrainingStorageError(
+                        health.detail or "Google Drive for Desktop folder is not writable",
+                        code=health.error_code or "DRIVE_DESKTOP_IO_ERROR",
+                        http_status=503,
+                    )
+                quota = health.quota or store.quota_check(incoming_bytes=0)
+                return root_id, subs, quota
+
+            root_id, subfolders, quota = await asyncio.to_thread(_bootstrap_desktop)
+        except (DriveAuthError, DrivePermissionError, DriveQuotaExceededError, DriveNotConnectedError, TrainingStorageError) as exc:
+            raise _http_exception_from_storage_error(exc) from exc
+
+        cred_blob = json.dumps(
+            {
+                "kind": "drive_desktop_sync",
+                "root_dir": str(flow2_root),
+                "account_email": effective_email,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        encrypted_cred, fingerprint = encrypt_refresh_token(cred_blob, enc_key)
+        row = await self.repo.upsert_connected(
+            account_email=effective_email,
+            account_display_name=effective_email.split("@", 1)[0] if effective_email else "Google Drive Desktop",
+            oauth_scope=DRIVE_DESKTOP_SYNC_SCOPE,
+            encrypted_refresh_token=encrypted_cred,
+            token_key_fingerprint=fingerprint,
+            root_folder_id=root_id,
+            root_folder_path=f"{DRIVE_ROOT_DISPLAY_PATH} ({flow2_root})",
+            subfolder_ids=subfolders,
+            quota_limit_bytes=quota.limit_bytes,
+            quota_usage_bytes=quota.usage_bytes,
+            quota_usage_in_drive_bytes=quota.usage_in_drive_bytes,
+            quota_usage_in_trash_bytes=quota.usage_in_trash_bytes,
+            connected_by=actor_id,
+        )
+        _set_sync_google_drive_store_cache(store)
+        row_with_token = {**row, "encrypted_refresh_token": encrypted_cred}
         return _serialize_connection_status(row_with_token, migration_applied=True)
 
     async def check_health(self) -> dict[str, Any]:
@@ -576,7 +875,11 @@ class VireadDriveConnectionService:
         if not migration_applied:
             return _serialize_connection_status(None, migration_applied=False)
         revoked = False
-        if row and row.get("encrypted_refresh_token"):
+        if (
+            row
+            and row.get("encrypted_refresh_token")
+            and str(row.get("oauth_scope") or "").strip() not in {APPS_SCRIPT_BRIDGE_SCOPE, DRIVE_DESKTOP_SYNC_SCOPE}
+        ):
             enc_key = (os.getenv("VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY") or "").strip()
             if enc_key:
                 try:
@@ -589,3 +892,68 @@ class VireadDriveConnectionService:
         payload = _serialize_connection_status(updated, migration_applied=True)
         payload["google_token_revoked"] = revoked
         return payload
+
+    async def list_job_resume_files(self, job_id: UUID) -> dict[str, Any]:
+        try:
+            store = await self.get_connected_store()
+            files = await asyncio.to_thread(store.list_resume_files, str(job_id))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except TrainingStorageError as exc:
+            raise _http_exception_from_storage_error(exc) from exc
+        return {"job_id": str(job_id), "files": files}
+
+    async def put_job_resume_file(
+        self,
+        job_id: UUID,
+        relative_path: str,
+        payload: bytes,
+        *,
+        expected_sha256: str | None = None,
+    ) -> dict[str, Any]:
+        try:
+            store = await self.get_connected_store()
+            stored = await asyncio.to_thread(
+                store.put_resume_file,
+                str(job_id),
+                relative_path,
+                payload,
+                content_type="application/json" if relative_path.endswith(".json") else "application/octet-stream",
+                expected_sha256=expected_sha256,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except TrainingStorageError as exc:
+            raise _http_exception_from_storage_error(exc) from exc
+        return {
+            "job_id": str(job_id),
+            "name": relative_path.strip().strip("/"),
+            "drive_file_id": stored.drive_file_id,
+            "sha256": stored.sha256,
+            "size_bytes": stored.size_bytes,
+            "deduplicated": stored.deduplicated,
+        }
+
+    async def open_job_resume_stream(self, job_id: UUID, relative_path: str):
+        try:
+            store = await self.get_connected_store()
+            meta, stream = await asyncio.to_thread(
+                store.open_resume_file_stream,
+                str(job_id),
+                relative_path,
+            )
+            return meta, stream
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except TrainingStorageError as exc:
+            raise _http_exception_from_storage_error(exc) from exc
+
+    async def delete_job_resume_file(self, job_id: UUID, relative_path: str) -> dict[str, Any]:
+        try:
+            store = await self.get_connected_store()
+            deleted = await asyncio.to_thread(store.delete_resume_file, str(job_id), relative_path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except TrainingStorageError as exc:
+            raise _http_exception_from_storage_error(exc) from exc
+        return {"job_id": str(job_id), "name": relative_path.strip().strip("/"), "deleted": deleted}

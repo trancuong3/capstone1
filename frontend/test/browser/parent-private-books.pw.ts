@@ -152,6 +152,13 @@ async function openNewContext(
 }
 
 test.describe.serial("Parent Private Books Real Full-Stack E2E", () => {
+  test.beforeEach(() => {
+    test.skip(
+      !fs.existsSync(STACK_INFO_PATH),
+      `Requires live full-stack E2E harness (${STACK_INFO_PATH} not found)`,
+    );
+  });
+
   test("Scenario 1: Clean pass with real local Ollama, Child A reading, and full cross-family + live image isolation", async ({
     browser,
     page,

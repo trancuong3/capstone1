@@ -42,6 +42,7 @@ class GoogleDriveOAuthConfig:
     redirect_uri: str
     encryption_key: str
     scope: str = GOOGLE_DRIVE_REQUIRED_SCOPE
+    required_account_email: str | None = None
 
 
 @dataclass(frozen=True)
@@ -176,12 +177,14 @@ def load_oauth_config(*, redirect_uri_override: str | None = None) -> GoogleDriv
         selected_redirect = candidate_uri
     else:
         selected_redirect = validated_primary
+    required_account_email = (os.getenv("VIREAD_GDRIVE_REQUIRED_ACCOUNT_EMAIL") or "").strip().lower() or None
     return GoogleDriveOAuthConfig(
         client_id=client_id,
         client_secret=client_secret,
         redirect_uri=selected_redirect,
         encryption_key=encryption_key,
         scope=GOOGLE_DRIVE_REQUIRED_SCOPE,
+        required_account_email=required_account_email,
     )
 
 
@@ -191,6 +194,7 @@ def oauth_config_readiness() -> dict[str, Any]:
     client_secret = bool((os.getenv("VIREAD_GDRIVE_OAUTH_CLIENT_SECRET") or "").strip())
     redirect_uri = (os.getenv("VIREAD_GDRIVE_OAUTH_REDIRECT_URI") or "").strip()
     enc_key = (os.getenv("VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY") or "").strip()
+    required_account_email = (os.getenv("VIREAD_GDRIVE_REQUIRED_ACCOUNT_EMAIL") or "").strip().lower() or None
     redirect_valid = False
     if redirect_uri:
         try:
@@ -206,6 +210,7 @@ def oauth_config_readiness() -> dict[str, Any]:
         "redirect_uri_configured": redirect_valid,
         "encryption_key_configured": enc_key_valid,
         "required_scope": GOOGLE_DRIVE_REQUIRED_SCOPE,
+        "required_account_email": required_account_email,
     }
 
 
@@ -245,6 +250,8 @@ def create_oauth_authorization(
         "code_challenge_method": "S256",
         "state": state_token,
     }
+    if config.required_account_email:
+        params["login_hint"] = config.required_account_email
     return OAuthStartResult(
         authorization_url=f"{GOOGLE_OAUTH_AUTH_URL}?{urlencode(params)}",
         state=state_token,

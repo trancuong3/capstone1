@@ -42,6 +42,7 @@ function Switch({
   return (
     <div className="flex items-start gap-3">
       <input
+        aria-checked={checked}
         aria-describedby={`${id}-description`}
         checked={checked}
         className="mt-1 size-5 shrink-0 accent-primary"

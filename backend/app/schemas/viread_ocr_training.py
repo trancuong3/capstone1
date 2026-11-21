@@ -184,3 +184,13 @@ class GoogleDriveConnectStartRequest(BaseModel):
 class GoogleDriveConnectCallbackRequest(BaseModel):
     code: str = Field(min_length=4, max_length=4096)
     state: str = Field(min_length=16, max_length=4096)
+
+
+class GoogleDriveConnectAppsScriptRequest(BaseModel):
+    web_app_url: str = Field(min_length=32, max_length=512)
+    bridge_secret: str | None = Field(default=None, max_length=512)
+
+
+class GoogleDriveConnectDesktopRequest(BaseModel):
+    sync_root_path: str | None = Field(default=None, max_length=512)
+    account_email: str | None = Field(default=None, max_length=254)

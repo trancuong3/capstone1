@@ -19,7 +19,9 @@ from app.schemas.viread_ocr_training import (
     BenchmarkCreate,
     CandidateEvaluationRequest,
     DatasetImport,
+    GoogleDriveConnectAppsScriptRequest,
     GoogleDriveConnectCallbackRequest,
+    GoogleDriveConnectDesktopRequest,
     GoogleDriveConnectStartRequest,
     ModelDecisionRequest,
     TrainingRunComplete,
@@ -135,6 +137,34 @@ async def complete_viread_training_drive_connect(
         actor_id=actor_id,
         code=payload.code,
         state=payload.state,
+    )
+
+
+@router.post("/admin/viread-training/drive/connect/apps-script")
+async def connect_viread_training_drive_apps_script(
+    payload: GoogleDriveConnectAppsScriptRequest,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    await VireadOcrTrainingService(db)._admin(actor_id)
+    return await VireadDriveConnectionService(db).connect_apps_script(
+        actor_id=actor_id,
+        web_app_url=payload.web_app_url,
+        bridge_secret=payload.bridge_secret,
+    )
+
+
+@router.post("/admin/viread-training/drive/connect/desktop")
+async def connect_viread_training_drive_desktop(
+    payload: GoogleDriveConnectDesktopRequest | None = None,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    await VireadOcrTrainingService(db)._admin(actor_id)
+    return await VireadDriveConnectionService(db).connect_drive_desktop(
+        actor_id=actor_id,
+        sync_root_path=payload.sync_root_path if payload else None,
+        account_email=payload.account_email if payload else None,
     )
 
 
@@ -1358,3 +1388,85 @@ async def finish_viread_colab_training_job(
         })})
     await service.repo.commit()
     return {"job_id": job_id, "status": new_status, "run_id": payload.run_id or job["run_id"]}
+
+
+@router.get("/admin/viread-training/worker/jobs/{job_id}/resume-state")
+async def list_viread_colab_resume_state(
+    job_id: UUID,
+    worker_id: str,
+    _worker: None = Depends(_require_training_worker_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """List job-scoped resume objects stored in the server's connected owner Google Drive."""
+    service = VireadOcrTrainingService(db)
+    await _leased_colab_job(service, job_id, worker_id)
+    await db.commit()
+    return await VireadDriveConnectionService(db).list_job_resume_files(job_id)
+
+
+@router.get("/admin/viread-training/worker/jobs/{job_id}/resume-state/{object_path:path}")
+async def download_viread_colab_resume_object(
+    job_id: UUID,
+    object_path: str,
+    worker_id: str,
+    _worker: None = Depends(_require_training_worker_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stream a resume file from the owner's Google Drive to any authorized Colab worker account."""
+    service = VireadOcrTrainingService(db)
+    await _leased_colab_job(service, job_id, worker_id)
+    await db.commit()
+    meta, stream = await VireadDriveConnectionService(db).open_job_resume_stream(job_id, object_path)
+    headers = {
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if meta.sha256:
+        headers["X-ViRead-SHA256"] = meta.sha256
+    if meta.size_bytes is not None:
+        headers["Content-Length"] = str(meta.size_bytes)
+    return StreamingResponse(
+        stream,
+        media_type=meta.content_type or "application/octet-stream",
+        headers=headers,
+    )
+
+
+@router.put("/admin/viread-training/worker/jobs/{job_id}/resume-state/{object_path:path}")
+async def upload_viread_colab_resume_object(
+    job_id: UUID,
+    object_path: str,
+    worker_id: str = Form(...),
+    expected_sha256: str | None = Form(default=None),
+    file: UploadFile = File(...),
+    _worker: None = Depends(_require_training_worker_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a resume snapshot object strictly into the owner's Google Drive (no Colab Drive mount)."""
+    service = VireadOcrTrainingService(db)
+    await _leased_colab_job(service, job_id, worker_id)
+    await db.commit()
+    data = await file.read(MAX_SHARD_BYTES + 1)
+    if len(data) > MAX_SHARD_BYTES:
+        raise HTTPException(status_code=413, detail="Resume state object exceeds 40 MiB chunk limit")
+    return await VireadDriveConnectionService(db).put_job_resume_file(
+        job_id,
+        object_path,
+        data,
+        expected_sha256=(expected_sha256 or "").strip().lower() or None,
+    )
+
+
+@router.delete("/admin/viread-training/worker/jobs/{job_id}/resume-state/{object_path:path}")
+async def delete_viread_colab_resume_object(
+    job_id: UUID,
+    object_path: str,
+    worker_id: str,
+    _worker: None = Depends(_require_training_worker_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Prune an obsolete resume object from the owner's Google Drive after manifest commit."""
+    service = VireadOcrTrainingService(db)
+    await _leased_colab_job(service, job_id, worker_id)
+    await db.commit()
+    return await VireadDriveConnectionService(db).delete_job_resume_file(job_id, object_path)

@@ -18,6 +18,7 @@ import {
   Upload,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -35,10 +36,12 @@ import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useParentPrivateBookService } from "@/hooks/use-parent-private-book-service";
 import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
 import { isServiceError } from "@/lib/api/service-error";
+import { CHILD_GRADES } from "@/types/child";
 import {
   SOURCE_USAGE_OPTIONS,
   type ParentPageSubmissionDTO,
   type ParentPrivateBookDetailDTO,
+  type ParentPrivatePageDTO,
   type SourceUsageType,
   type SubmissionWorkflowStatus,
   type ToolCheckScopeDTO,
@@ -86,6 +89,29 @@ function errorText(error: unknown, fallback: string): string {
     return error.message;
   }
   return fallback;
+}
+
+const VALID_SOURCE_TYPES = new Set<string>(
+  SOURCE_USAGE_OPTIONS.map((opt) => opt.value),
+);
+
+function parseBookSourceDeclaration(raw: string | null): {
+  sourceType: SourceUsageType;
+  sourceNote: string;
+} {
+  const cleaned = (raw ?? "").trim();
+  if (!cleaned) {
+    return { sourceType: "OWNED_PHYSICAL_BOOK", sourceNote: "" };
+  }
+  if (cleaned.startsWith("[") && cleaned.includes("]")) {
+    const closeIdx = cleaned.indexOf("]");
+    const tag = cleaned.slice(1, closeIdx).trim();
+    const rest = cleaned.slice(closeIdx + 1).trim();
+    if (VALID_SOURCE_TYPES.has(tag)) {
+      return { sourceType: tag as SourceUsageType, sourceNote: rest };
+    }
+  }
+  return { sourceType: "OWNED_PHYSICAL_BOOK", sourceNote: cleaned };
 }
 
 function describeToolCheckScope(scope: ToolCheckScopeDTO): string {
@@ -167,6 +193,7 @@ function ParentPrivateBookManagerContent({
   currentUserId,
 }: ParentPrivateBookManagerProps & { currentUserId: string }) {
   const service = useParentPrivateBookService();
+  const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [detail, setDetail] = useState<ParentPrivateBookDetailDTO | null>(null);
@@ -202,6 +229,28 @@ function ParentPrivateBookManagerContent({
   );
   const [reviewSourceNote, setReviewSourceNote] = useState("");
   const [reviewRequestNote, setReviewRequestNote] = useState("");
+
+  // Book Edit & Delete state
+  const [showEditBookForm, setShowEditBookForm] = useState(false);
+  const [editBookTitle, setEditBookTitle] = useState("");
+  const [editBookAuthor, setEditBookAuthor] = useState("");
+  const [editBookMinGrade, setEditBookMinGrade] = useState<number>(1);
+  const [editBookMaxGrade, setEditBookMaxGrade] = useState<number>(3);
+  const [editBookSourceType, setEditBookSourceType] =
+    useState<SourceUsageType>("OWNED_PHYSICAL_BOOK");
+  const [editBookSourceNote, setEditBookSourceNote] = useState("");
+  const [confirmDeleteBook, setConfirmDeleteBook] = useState(false);
+
+  // Committed Page Edit & Delete state
+  const [editingPageId, setEditingPageId] = useState<string | null>(null);
+  const [editPageText, setEditPageText] = useState("");
+  const [editPageNumber, setEditPageNumber] = useState<number>(1);
+  const [editPageSourceType, setEditPageSourceType] =
+    useState<SourceUsageType>("OWNED_PHYSICAL_BOOK");
+  const [editPageSourceNote, setEditPageSourceNote] = useState("");
+  const [confirmDeletePageId, setConfirmDeletePageId] = useState<string | null>(
+    null,
+  );
 
   const loadDetail = useCallback(
     async (silent = false) => {
@@ -434,12 +483,171 @@ function ParentPrivateBookManagerContent({
       });
       setEditingSubId(null);
       setActionNotice(
-        "Đã tạo phiên bản mới từ chỉnh sửa của bạn và xếp hàng kiểm tra lại bước an toàn.",
+        "Đã tạo phiên bản mới từ chỉnh sửa của bạn và xếp hàng kiểm tra lại từ đầu (Rà chính tả → Tool Check an toàn).",
       );
       await loadDetail(true);
     } catch (error) {
       setActionError(
         errorText(error, "Không thể lưu chỉnh sửa trang. Vui lòng tải lại."),
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  function openEditBookForm() {
+    if (!detail) return;
+    const parsed = parseBookSourceDeclaration(detail.book.source_declaration);
+    setConfirmDeleteBook(false);
+    setEditBookTitle(detail.book.title);
+    setEditBookAuthor(detail.book.author ?? "");
+    setEditBookMinGrade(detail.book.min_grade);
+    setEditBookMaxGrade(detail.book.max_grade);
+    setEditBookSourceType(parsed.sourceType);
+    setEditBookSourceNote(parsed.sourceNote);
+    setShowEditBookForm(true);
+    setActionError(null);
+    setActionNotice(null);
+  }
+
+  async function handleSaveBookEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setActionError(null);
+    setActionNotice(null);
+    const trimmedTitle = editBookTitle.trim();
+    if (!trimmedTitle) {
+      setActionError("Tên sách riêng không được để trống.");
+      return;
+    }
+    if (editBookMinGrade > editBookMaxGrade) {
+      setActionError("Lớp tối thiểu không được lớn hơn lớp tối đa.");
+      return;
+    }
+    setBusyKey("book:edit");
+    try {
+      const updated = await service.update(bookId, {
+        title: trimmedTitle,
+        author: editBookAuthor.trim() || null,
+        min_grade: editBookMinGrade,
+        max_grade: editBookMaxGrade,
+        source_type: editBookSourceType,
+        source_note: editBookSourceNote.trim() || null,
+      });
+      setShowEditBookForm(false);
+      setActionNotice(
+        updated.pending_submission_count > 0
+          ? `Đã sửa sách "${updated.title}". Toàn bộ ${updated.pending_submission_count} trang đã được đưa về kiểm tra lại từ đầu (OCR → Rà chính tả → Tool Check an toàn).`
+          : `Đã cập nhật thông tin sách "${updated.title}".`,
+      );
+      await loadDetail(true);
+    } catch (error) {
+      setActionError(
+        errorText(error, "Không thể sửa thông tin sách. Vui lòng thử lại."),
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function handleDeleteBook() {
+    setBusyKey("book:delete");
+    setActionError(null);
+    setActionNotice(null);
+    try {
+      await service.delete(bookId);
+      router.push("/my-books");
+    } catch (error) {
+      setActionError(
+        errorText(error, "Không thể xóa sách riêng. Vui lòng thử lại."),
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  function startEditCommittedPage(page: ParentPrivatePageDTO) {
+    const parsed = parseBookSourceDeclaration(
+      detail?.book.source_declaration ?? null,
+    );
+    setConfirmDeletePageId(null);
+    setEditingPageId(page.page_id);
+    setEditPageText(page.verified_text || page.verified_text_preview);
+    setEditPageNumber(page.page_number);
+    setEditPageSourceType(parsed.sourceType);
+    setEditPageSourceNote(parsed.sourceNote);
+    setActionError(null);
+    setActionNotice(null);
+  }
+
+  async function handleSaveCommittedPageEdit(page: ParentPrivatePageDTO) {
+    setBusyKey(`page-edit:${page.page_id}`);
+    setActionError(null);
+    setActionNotice(null);
+    try {
+      await service.editCommittedPage(bookId, page.page_id, {
+        candidate_text: editPageText,
+        page_number: editPageNumber,
+        source_type: editPageSourceType,
+        source_note: editPageSourceNote.trim() || null,
+        auto_recheck: true,
+      });
+      setEditingPageId(null);
+      setActionNotice(
+        `Đã sửa trang ${page.page_number}. Trang đã được tạm gỡ khỏi sách đọc và xếp hàng kiểm tra lại từ đầu.`,
+      );
+      await loadDetail(true);
+    } catch (error) {
+      setActionError(
+        errorText(error, "Không thể sửa trang này. Vui lòng kiểm tra lại."),
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function handleReplaceCommittedPageFile(
+    page: ParentPrivatePageDTO,
+    file: File,
+  ) {
+    setBusyKey(`page-replace:${page.page_id}`);
+    setActionError(null);
+    setActionNotice(null);
+    try {
+      await service.replaceCommittedPageFile(bookId, page.page_id, file);
+      setEditingPageId(null);
+      setActionNotice(
+        `Đã thay ảnh trang ${page.page_number}. Trang đã được tạm gỡ khỏi sách đọc và đang chạy kiểm tra lại toàn bộ từ đầu (OCR → Rà chính tả → Tool Check an toàn).`,
+      );
+      await loadDetail(true);
+    } catch (error) {
+      setActionError(
+        errorText(
+          error,
+          "Không thể thay ảnh cho trang này. Hãy chọn đúng 1 ảnh hợp lệ.",
+        ),
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function handleDeleteCommittedPage(page: ParentPrivatePageDTO) {
+    setBusyKey(`page-delete:${page.page_id}`);
+    setActionError(null);
+    setActionNotice(null);
+    try {
+      await service.deleteCommittedPage(bookId, page.page_id);
+      setConfirmDeletePageId(null);
+      if (editingPageId === page.page_id) {
+        setEditingPageId(null);
+      }
+      setActionNotice(
+        `Đã xóa trang ${page.page_number} khỏi sách đọc (không cần kiểm tra lại các trang khác).`,
+      );
+      await loadDetail(true);
+    } catch (error) {
+      setActionError(
+        errorText(error, "Không thể xóa trang này. Vui lòng thử lại."),
       );
     } finally {
       setBusyKey(null);
@@ -584,28 +792,217 @@ function ParentPrivateBookManagerContent({
         </div>
       </div>
 
-      <header className="rounded-card border border-border bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-0.5 text-xs font-bold text-emerald-800">
-            <Lock aria-hidden="true" className="size-3" />
-            Sách riêng của gia đình
-          </span>
-          <span className="text-xs font-semibold text-muted">
-            Lớp {book.min_grade}
-            {book.min_grade !== book.max_grade ? `–${book.max_grade}` : ""}
-          </span>
-          <span className="text-xs text-muted">·</span>
-          <span className="text-xs font-semibold text-ink">
-            {book.committed_page_count} trang đã thêm vào sách đọc
-          </span>
+      <header className="flex flex-col gap-4 rounded-card border border-border bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-0.5 text-xs font-bold text-emerald-800">
+                <Lock aria-hidden="true" className="size-3" />
+                Sách riêng của gia đình
+              </span>
+              <span className="text-xs font-semibold text-muted">
+                Lớp {book.min_grade}
+                {book.min_grade !== book.max_grade ? `–${book.max_grade}` : ""}
+              </span>
+              <span className="text-xs text-muted">·</span>
+              <span className="text-xs font-semibold text-ink">
+                {book.committed_page_count} trang đã thêm vào sách đọc
+              </span>
+            </div>
+            <h1 className="book-title mt-2 text-3xl text-ink sm:text-4xl">
+              {book.title}
+            </h1>
+            {book.author ? (
+              <p className="mt-1 text-sm text-muted">Tác giả: {book.author}</p>
+            ) : null}
+            <p className="mt-2 text-xs text-muted">{book.privacy_notice}</p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              className="min-h-10 w-auto px-3 text-xs"
+              disabled={isSuspended || busyKey !== null}
+              onClick={() =>
+                showEditBookForm
+                  ? setShowEditBookForm(false)
+                  : openEditBookForm()
+              }
+              type="button"
+              variant="secondary"
+            >
+              <Pencil aria-hidden="true" className="size-3.5" />
+              Sửa sách
+            </Button>
+            <button
+              aria-label={`Xóa sách ${book.title}`}
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-control border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={busyKey !== null}
+              onClick={() => {
+                setShowEditBookForm(false);
+                setConfirmDeleteBook((open) => !open);
+              }}
+              type="button"
+            >
+              <Trash2 aria-hidden="true" className="size-3.5" />
+              Xóa sách
+            </button>
+          </div>
         </div>
-        <h1 className="book-title mt-2 text-3xl text-ink sm:text-4xl">
-          {book.title}
-        </h1>
-        {book.author ? (
-          <p className="mt-1 text-sm text-muted">Tác giả: {book.author}</p>
+
+        {showEditBookForm ? (
+          <form
+            aria-label="Chỉnh sửa thông tin sách riêng"
+            className="flex flex-col gap-3 rounded-control border border-amber-300 bg-amber-50/60 p-4 text-xs"
+            onSubmit={(event) => void handleSaveBookEdit(event)}
+          >
+            <p className="font-bold text-amber-950">
+              Lưu ý: Khi sửa thông tin sách, toàn bộ các trang của sách sẽ được
+              đưa về kiểm tra lại từ đầu (OCR → Rà chính tả → Tool Check an
+              toàn) và tạm khóa đọc cùng bé cho đến khi hoàn tất.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 font-semibold text-ink">
+                Tên sách *
+                <input
+                  aria-label="Tên sách chỉnh sửa"
+                  className="min-h-10 rounded-control border border-border bg-white px-3 text-sm text-ink"
+                  onChange={(event) => setEditBookTitle(event.target.value)}
+                  required
+                  type="text"
+                  value={editBookTitle}
+                />
+              </label>
+              <label className="flex flex-col gap-1 font-semibold text-ink">
+                Tác giả
+                <input
+                  aria-label="Tác giả chỉnh sửa"
+                  className="min-h-10 rounded-control border border-border bg-white px-3 text-sm text-ink"
+                  onChange={(event) => setEditBookAuthor(event.target.value)}
+                  type="text"
+                  value={editBookAuthor}
+                />
+              </label>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 font-semibold text-ink">
+                Từ lớp
+                <select
+                  aria-label="Từ lớp chỉnh sửa"
+                  className="min-h-10 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
+                  onChange={(event) =>
+                    setEditBookMinGrade(Number(event.target.value))
+                  }
+                  value={editBookMinGrade}
+                >
+                  {CHILD_GRADES.map((grade) => (
+                    <option key={grade} value={grade}>
+                      Lớp {grade}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 font-semibold text-ink">
+                Đến lớp
+                <select
+                  aria-label="Đến lớp chỉnh sửa"
+                  className="min-h-10 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
+                  onChange={(event) =>
+                    setEditBookMaxGrade(Number(event.target.value))
+                  }
+                  value={editBookMaxGrade}
+                >
+                  {CHILD_GRADES.map((grade) => (
+                    <option key={grade} value={grade}>
+                      Lớp {grade}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 font-semibold text-ink">
+                Nguồn nội dung sách
+                <select
+                  aria-label="Nguồn nội dung sách chỉnh sửa"
+                  className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
+                  onChange={(event) =>
+                    setEditBookSourceType(event.target.value as SourceUsageType)
+                  }
+                  value={editBookSourceType}
+                >
+                  {SOURCE_USAGE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 font-semibold text-ink">
+                Ghi chú nguồn
+                <input
+                  aria-label="Ghi chú nguồn sách chỉnh sửa"
+                  className="min-h-10 rounded-control border border-border bg-white px-3 text-xs text-ink"
+                  onChange={(event) =>
+                    setEditBookSourceNote(event.target.value)
+                  }
+                  type="text"
+                  value={editBookSourceNote}
+                />
+              </label>
+            </div>
+            <div className="flex flex-wrap gap-2 pt-1">
+              <Button
+                className="min-h-10 w-auto px-4 text-xs"
+                isLoading={busyKey === "book:edit"}
+                type="submit"
+              >
+                Lưu & kiểm tra lại toàn bộ
+              </Button>
+              <Button
+                className="min-h-10 w-auto px-3 text-xs"
+                onClick={() => setShowEditBookForm(false)}
+                type="button"
+                variant="secondary"
+              >
+                Hủy
+              </Button>
+            </div>
+          </form>
         ) : null}
-        <p className="mt-2 text-xs text-muted">{book.privacy_notice}</p>
+
+        {confirmDeleteBook ? (
+          <div
+            role="alertdialog"
+            aria-label={`Xác nhận xóa sách ${book.title}`}
+            className="flex flex-col gap-2.5 rounded-control border border-rose-300 bg-rose-50 p-4 text-xs text-rose-950"
+          >
+            <p className="font-bold">
+              Xác nhận xóa sách &ldquo;{book.title}&rdquo;?
+            </p>
+            <p>
+              Sách và các trang thuộc sách này sẽ bị xóa ngay khỏi Sách của tôi
+              và không cần kiểm tra lại.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                className="min-h-10 w-auto bg-rose-700 px-4 text-xs text-white hover:bg-rose-800"
+                isLoading={busyKey === "book:delete"}
+                onClick={() => void handleDeleteBook()}
+                type="button"
+              >
+                Xác nhận xóa sách
+              </Button>
+              <Button
+                className="min-h-10 w-auto px-3 text-xs"
+                onClick={() => setConfirmDeleteBook(false)}
+                type="button"
+                variant="secondary"
+              >
+                Hủy
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </header>
 
       {isSuspended ? (
@@ -1002,7 +1399,8 @@ function ParentPrivateBookManagerContent({
                           </p>
                           <p className="mt-0.5 text-xs text-amber-900">
                             Lưu ý: Chỉnh sửa sẽ tạo phiên bản mới, hủy kết quả
-                            Tool Check / phê duyệt cũ và yêu cầu kiểm tra lại.
+                            kiểm tra / phê duyệt cũ và kiểm tra lại từ đầu (Rà
+                            chính tả → Tool Check an toàn).
                           </p>
                           <textarea
                             aria-label="Chỉnh sửa văn bản trang"
@@ -1275,28 +1673,211 @@ function ParentPrivateBookManagerContent({
           </p>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {committedPages.map((page) => (
-              <article
-                key={page.page_id}
-                className="flex flex-col gap-2 rounded-card border border-border bg-white p-4"
-              >
-                <div className="h-40 w-full overflow-hidden rounded-control bg-cream">
-                  <AuthenticatedImage
-                    alt={`Ảnh trang ${page.page_number}`}
-                    className="h-full w-full object-contain p-2"
-                    src={page.image_url}
-                  />
-                </div>
-                <p className="text-sm font-bold text-ink">
-                  Trang {page.page_number}
-                </p>
-                {page.verified_text_preview ? (
-                  <p className="line-clamp-3 text-xs text-muted">
-                    {page.verified_text_preview}
-                  </p>
-                ) : null}
-              </article>
-            ))}
+            {committedPages.map((page) => {
+              const isEditingPage = editingPageId === page.page_id;
+              const isConfirmingDelete = confirmDeletePageId === page.page_id;
+              const isPageBusy =
+                busyKey !== null && busyKey.endsWith(`:${page.page_id}`);
+              return (
+                <article
+                  key={page.page_id}
+                  data-committed-page-id={page.page_id}
+                  className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 shadow-sm"
+                >
+                  <div className="h-40 w-full overflow-hidden rounded-control bg-cream">
+                    <AuthenticatedImage
+                      alt={`Ảnh trang ${page.page_number}`}
+                      className="h-full w-full object-contain p-2"
+                      src={page.image_url}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-bold text-ink">
+                      Trang {page.page_number}
+                    </p>
+                    <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-bold text-teal-800">
+                      Đang mở đọc
+                    </span>
+                  </div>
+                  {page.verified_text_preview ? (
+                    <p className="line-clamp-3 text-xs text-muted">
+                      {page.verified_text_preview}
+                    </p>
+                  ) : null}
+
+                  <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-border pt-2.5">
+                    {!isSuspended ? (
+                      <>
+                        <button
+                          aria-label={`Sửa nội dung trang ${page.page_number}`}
+                          className="inline-flex min-h-9 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas disabled:opacity-50"
+                          disabled={isPageBusy || busyKey !== null}
+                          onClick={() =>
+                            isEditingPage
+                              ? setEditingPageId(null)
+                              : startEditCommittedPage(page)
+                          }
+                          type="button"
+                        >
+                          <Pencil aria-hidden="true" className="size-3.5" />
+                          Sửa trang
+                        </button>
+                        <label className="inline-flex min-h-9 cursor-pointer items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas">
+                          <Upload aria-hidden="true" className="size-3.5" />
+                          Thay ảnh
+                          <input
+                            accept={ACCEPTED_UPLOAD_EXTENSIONS}
+                            aria-label={`Thay ảnh cho trang ${page.page_number}`}
+                            className="sr-only"
+                            disabled={isPageBusy || busyKey !== null}
+                            onChange={(event) => {
+                              const nextFile = event.target.files?.[0];
+                              if (nextFile) {
+                                void handleReplaceCommittedPageFile(
+                                  page,
+                                  nextFile,
+                                );
+                              }
+                              event.target.value = "";
+                            }}
+                            type="file"
+                          />
+                        </label>
+                      </>
+                    ) : null}
+                    <button
+                      aria-label={`Xóa trang ${page.page_number}`}
+                      className="inline-flex min-h-9 items-center gap-1 rounded-control border border-rose-200 bg-white px-2.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                      disabled={isPageBusy || busyKey !== null}
+                      onClick={() => {
+                        setEditingPageId(null);
+                        setConfirmDeletePageId((prev) =>
+                          prev === page.page_id ? null : page.page_id,
+                        );
+                      }}
+                      type="button"
+                    >
+                      <Trash2 aria-hidden="true" className="size-3.5" />
+                      Xóa trang
+                    </button>
+                  </div>
+
+                  {isEditingPage ? (
+                    <div className="flex flex-col gap-2.5 rounded-control border border-amber-300 bg-amber-50/70 p-3 text-xs">
+                      <p className="font-bold text-amber-950">
+                        Lưu ý: Khi sửa trang đã thêm, trang sẽ tạm gỡ khỏi sách
+                        đọc và kiểm tra lại từ đầu (Rà chính tả → Tool Check an
+                        toàn).
+                      </p>
+                      <label className="flex flex-col gap-1 font-semibold text-ink">
+                        Số trang
+                        <input
+                          aria-label={`Số trang chỉnh sửa trang ${page.page_number}`}
+                          className="min-h-9 w-28 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
+                          min={1}
+                          onChange={(event) =>
+                            setEditPageNumber(
+                              Math.max(1, Number(event.target.value) || 1),
+                            )
+                          }
+                          type="number"
+                          value={editPageNumber}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 font-semibold text-ink">
+                        Nội dung văn bản trang
+                        <textarea
+                          aria-label={`Chỉnh sửa văn bản trang ${page.page_number}`}
+                          className="min-h-24 w-full rounded-control border border-border bg-white p-2 text-xs text-ink"
+                          onChange={(event) =>
+                            setEditPageText(event.target.value)
+                          }
+                          value={editPageText}
+                        />
+                      </label>
+                      <select
+                        aria-label={`Nguồn nội dung trang ${page.page_number}`}
+                        className="min-h-9 rounded-control border border-border bg-white px-2 text-xs text-ink"
+                        onChange={(event) =>
+                          setEditPageSourceType(
+                            event.target.value as SourceUsageType,
+                          )
+                        }
+                        value={editPageSourceType}
+                      >
+                        {SOURCE_USAGE_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        aria-label={`Ghi chú nguồn trang ${page.page_number}`}
+                        className="min-h-9 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
+                        onChange={(event) =>
+                          setEditPageSourceNote(event.target.value)
+                        }
+                        placeholder="Ghi chú nguồn…"
+                        type="text"
+                        value={editPageSourceNote}
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          className="min-h-9 w-auto px-3 text-xs"
+                          isLoading={busyKey === `page-edit:${page.page_id}`}
+                          onClick={() => void handleSaveCommittedPageEdit(page)}
+                          type="button"
+                        >
+                          Lưu & kiểm tra lại
+                        </Button>
+                        <Button
+                          className="min-h-9 w-auto px-3 text-xs"
+                          onClick={() => setEditingPageId(null)}
+                          type="button"
+                          variant="secondary"
+                        >
+                          Hủy
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {isConfirmingDelete ? (
+                    <div
+                      role="alertdialog"
+                      aria-label={`Xác nhận xóa trang ${page.page_number}`}
+                      className="flex flex-col gap-2 rounded-control border border-rose-300 bg-rose-50 p-3 text-xs text-rose-950"
+                    >
+                      <p className="font-bold">
+                        Xóa trang {page.page_number} ngay?
+                      </p>
+                      <p>
+                        Trang sẽ bị xóa khỏi sách đọc ngay lập tức và không cần
+                        kiểm tra lại các trang khác.
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          className="min-h-9 w-auto bg-rose-700 px-3 text-xs text-white hover:bg-rose-800"
+                          isLoading={busyKey === `page-delete:${page.page_id}`}
+                          onClick={() => void handleDeleteCommittedPage(page)}
+                          type="button"
+                        >
+                          Xác nhận xóa
+                        </Button>
+                        <Button
+                          className="min-h-9 w-auto px-3 text-xs"
+                          onClick={() => setConfirmDeletePageId(null)}
+                          type="button"
+                          variant="secondary"
+                        >
+                          Hủy
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
           </div>
         )}
       </section>

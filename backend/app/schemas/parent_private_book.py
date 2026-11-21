@@ -109,6 +109,7 @@ class ParentPrivateBookUpdate(BaseModel):
     author: str | None = Field(default=None, max_length=150)
     min_grade: int | None = Field(default=None, ge=1, le=5)
     max_grade: int | None = Field(default=None, ge=1, le=5)
+    source_type: SourceUsageType | None = None
     source_note: str | None = Field(default=None, max_length=1000)
 
     @field_validator("title")
@@ -124,6 +125,24 @@ class ParentPrivateBookUpdate(BaseModel):
     @field_validator("author", "source_note")
     @classmethod
     def clean_optional(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class ParentPrivatePageEditRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_text: str | None = Field(default=None, max_length=30000)
+    page_number: int | None = Field(default=None, ge=1, le=32767)
+    source_type: SourceUsageType | None = None
+    source_note: str | None = Field(default=None, max_length=1000)
+    auto_recheck: bool = True
+
+    @field_validator("source_note")
+    @classmethod
+    def clean_source_note(cls, value: str | None) -> str | None:
         if value is None:
             return None
         cleaned = value.strip()
@@ -234,6 +253,7 @@ class ParentPrivatePageRead(BaseModel):
     page_id: UUID
     page_number: int
     current_verified_revision_id: UUID | None = None
+    verified_text: str = ""
     verified_text_preview: str = ""
     image_url: str
     created_at: datetime
@@ -343,6 +363,21 @@ class ParentAddPageResponse(BaseModel):
     revision_id: UUID
     submission: ParentPageSubmissionRead
     book_readable_for_children: bool
+
+
+class ParentDeletePrivateBookResponse(BaseModel):
+    status: Literal["deleted"] = "deleted"
+    book_id: UUID
+    retired_pages_count: int = 0
+    cancelled_submissions_count: int = 0
+
+
+class ParentDeletePrivatePageResponse(BaseModel):
+    status: Literal["deleted"] = "deleted"
+    book_id: UUID
+    page_id: UUID
+    committed_page_count: int = 0
+    readable_for_children: bool = False
 
 
 # ---------------------------------------------------------------------------

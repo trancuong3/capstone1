@@ -6,6 +6,8 @@ import {
   adminUserBookQueuePageSchema,
   adminUserBookSubmissionDetailSchema,
   parentAddPageResponseSchema,
+  parentDeletePrivateBookResponseSchema,
+  parentDeletePrivatePageResponseSchema,
   parentPageSubmissionSchema,
   parentPrivateBookDetailSchema,
   parentPrivateBookSummarySchema,
@@ -16,6 +18,8 @@ import {
   type AdminUserBookQueuePageDTO,
   type AdminUserBookSubmissionDetailDTO,
   type ParentAddPageResponseDTO,
+  type ParentDeletePrivateBookResponseDTO,
+  type ParentDeletePrivatePageResponseDTO,
   type ParentPageSubmissionDTO,
   type ParentPrivateBookDetailDTO,
   type ParentPrivateBookSummaryDTO,
@@ -30,6 +34,23 @@ export interface CreateParentPrivateBookInput {
   readonly max_grade: number;
   readonly source_type: SourceUsageType;
   readonly source_note?: string | null;
+}
+
+export interface UpdateParentPrivateBookInput {
+  readonly title?: string;
+  readonly author?: string | null;
+  readonly min_grade?: number;
+  readonly max_grade?: number;
+  readonly source_type?: SourceUsageType;
+  readonly source_note?: string | null;
+}
+
+export interface EditPrivatePageInput {
+  readonly candidate_text?: string;
+  readonly page_number?: number;
+  readonly source_type?: SourceUsageType;
+  readonly source_note?: string | null;
+  readonly auto_recheck?: boolean;
 }
 
 export interface SubmitPrivateBookPageInput {
@@ -69,6 +90,27 @@ export interface ParentPrivateBookService {
   create(
     input: CreateParentPrivateBookInput,
   ): Promise<ParentPrivateBookSummaryDTO>;
+  update(
+    bookId: string,
+    input: UpdateParentPrivateBookInput,
+  ): Promise<ParentPrivateBookSummaryDTO>;
+  delete(bookId: string): Promise<ParentDeletePrivateBookResponseDTO>;
+  editCommittedPage(
+    bookId: string,
+    pageId: string,
+    input: EditPrivatePageInput,
+  ): Promise<ParentPageSubmissionDTO>;
+  replaceCommittedPageFile(
+    bookId: string,
+    pageId: string,
+    file: File,
+    sourceType?: SourceUsageType,
+    sourceNote?: string | null,
+  ): Promise<ParentPageSubmissionDTO>;
+  deleteCommittedPage(
+    bookId: string,
+    pageId: string,
+  ): Promise<ParentDeletePrivatePageResponseDTO>;
   submitPages(
     bookId: string,
     input: SubmitPrivateBookPageInput,
@@ -150,6 +192,55 @@ export function createParentPrivateBookService(): ParentPrivateBookService {
           source_note: input.source_note?.trim() || null,
         },
       }),
+    update: (bookId, input) => {
+      const body: Record<string, unknown> = {};
+      if (input.title !== undefined) body.title = input.title.trim();
+      if (input.author !== undefined) body.author = input.author?.trim() || null;
+      if (input.min_grade !== undefined) body.min_grade = input.min_grade;
+      if (input.max_grade !== undefined) body.max_grade = input.max_grade;
+      if (input.source_type !== undefined) body.source_type = input.source_type;
+      if (input.source_note !== undefined)
+        body.source_note = input.source_note?.trim() || null;
+      return requestApi(
+        `/books/my-books/${encodeURIComponent(bookId)}`,
+        parentPrivateBookSummarySchema,
+        undefined,
+        { method: "PATCH", body },
+      );
+    },
+    delete: (bookId) =>
+      requestApi(
+        `/books/my-books/${encodeURIComponent(bookId)}`,
+        parentDeletePrivateBookResponseSchema,
+        undefined,
+        { method: "DELETE" },
+      ),
+    editCommittedPage: (bookId, pageId, input) =>
+      requestApi(
+        `/books/my-books/${encodeURIComponent(bookId)}/pages/${encodeURIComponent(pageId)}`,
+        parentPageSubmissionSchema,
+        undefined,
+        { method: "PATCH", body: input },
+      ),
+    replaceCommittedPageFile: (bookId, pageId, file, sourceType, sourceNote) => {
+      const form = new FormData();
+      form.append("file", file);
+      if (sourceType) form.append("source_type", sourceType);
+      if (sourceNote?.trim()) form.append("source_note", sourceNote.trim());
+      return requestApi(
+        `/books/my-books/${encodeURIComponent(bookId)}/pages/${encodeURIComponent(pageId)}/file`,
+        parentPageSubmissionSchema,
+        undefined,
+        { method: "PUT", body: form },
+      );
+    },
+    deleteCommittedPage: (bookId, pageId) =>
+      requestApi(
+        `/books/my-books/${encodeURIComponent(bookId)}/pages/${encodeURIComponent(pageId)}`,
+        parentDeletePrivatePageResponseSchema,
+        undefined,
+        { method: "DELETE" },
+      ),
     submitPages: (bookId, input) => {
       const form = new FormData();
       form.append("file", input.file);

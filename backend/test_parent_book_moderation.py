@@ -287,12 +287,15 @@ class ParentBookModerationTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(edit_v2.status_code, 200)
             self.assertEqual(edit_v2.json()["submission_version"], 2)
+            self.assertEqual(edit_v2.json()["proofread_status"], "PENDING")
+            self.assertEqual(edit_v2.json()["tool_check_status"], "PENDING")
 
         async with self.fixture.sessions() as db:
             v2_proc = await process_submission_stages(
                 db,
                 UUID(sub_id),
                 hooks=PipelineHooks(
+                    proofread_orchestrator_factory=lambda: type("P", (), {"correct": staticmethod(_identity_correct)})(),
                     safety_orchestrator_factory=_safety_stub(suitability="REVIEW_REQUIRED", severity="MEDIUM"),
                 ),
             )

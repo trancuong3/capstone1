@@ -64,6 +64,43 @@ _RATE_LIMIT_REASONS = frozenset(
     {"rateLimitExceeded", "userRateLimitExceeded", "sharingRateLimitExceeded", "backendError"}
 )
 _QUOTA_REASONS = frozenset({"storageQuotaExceeded", "quotaExceeded"})
+_RESUME_JOB_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
+_RESUME_BLOB_NAME_RE = re.compile(r"^[0-9a-f]{64}(?:\.part\d{4})?$")
+_RESUME_BEST_RE = re.compile(r"^best-[0-9a-f]{64}\.pth$")
+_RESUME_BENCHMARK_RE = re.compile(r"^(pilot|production)-[0-9a-f]{64}(?:-[0-9a-f]{64})?(?:-benchmark)?\.json$")
+_RESUME_FIXED_FILES = frozenset(
+    {
+        "resume-manifest.json",
+        "latest.pt",
+        "candidate.pth",
+        "candidate.json",
+        "candidate.manifest.json",
+        "locked-test-report.json",
+    }
+)
+
+
+def validate_resume_object_path(job_id: str, relative_path: str) -> str:
+    """Validate and resolve a safe Drive logical path strictly inside resume/jobs/<job_id>/."""
+    clean_job = str(job_id or "").strip().lower()
+    if not _RESUME_JOB_UUID_RE.fullmatch(clean_job):
+        raise ValueError("Resume job_id must be a canonical UUID")
+    rel = (relative_path or "").strip().strip("/")
+    if not rel or "\\" in rel or ".." in rel or "\x00" in rel:
+        raise ValueError("Invalid resume object path")
+    parts = rel.split("/")
+    if len(parts) == 1:
+        name = parts[0]
+        if not (
+            name in _RESUME_FIXED_FILES
+            or _RESUME_BEST_RE.fullmatch(name)
+            or _RESUME_BENCHMARK_RE.fullmatch(name)
+        ):
+            raise ValueError("Unsupported top-level resume filename")
+        return validate_logical_path(f"resume/jobs/{clean_job}/{name}", require_known_category=True)
+    if len(parts) == 2 and parts[0] == "blobs" and _RESUME_BLOB_NAME_RE.fullmatch(parts[1]):
+        return validate_logical_path(f"resume/jobs/{clean_job}/blobs/{parts[1]}", require_known_category=True)
+    raise ValueError("Unsupported resume object path")
 
 
 def _int_env(name: str, default: int, *, minimum: int = 0) -> int:
@@ -1179,3 +1216,163 @@ class GoogleDriveTrainingStore(TrainingArtifactStore):
             quota=quota,
             detail="Upload, SHA-256 verification, private permission check, read-back, and cleanup succeeded",
         )
+
+    def _list_folder_files(self, parent_id: str) -> list[dict[str, Any]]:
+        escaped_parent = _escape_drive_query_literal(parent_id)
+        query = (
+            f"'{escaped_parent}' in parents "
+            f"and mimeType != '{DRIVE_FOLDER_MIME}' "
+            f"and trashed = false"
+        )
+        items: list[dict[str, Any]] = []
+        page_token: str | None = None
+        while True:
+            params: dict[str, Any] = {
+                "q": query,
+                "spaces": "drive",
+                "fields": "nextPageToken,files(id,name,mimeType,size,sha256Checksum,appProperties,permissions,modifiedTime)",
+                "orderBy": "modifiedTime desc",
+                "pageSize": 100,
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            response = self._request("GET", f"{DRIVE_API_BASE}/files", params=params)
+            try:
+                payload = response.json()
+            finally:
+                response.close()
+            for entry in payload.get("files") or []:
+                if isinstance(entry, dict) and entry.get("id") and entry.get("name"):
+                    items.append(entry)
+            page_token = payload.get("nextPageToken")
+            if not page_token:
+                break
+        return items
+
+    def list_resume_files(self, job_id: str) -> list[dict[str, Any]]:
+        """List non-trashed resume files under resume/jobs/<job_id>/ and blobs/ in Drive."""
+        clean_job = str(job_id or "").strip().lower()
+        if not _RESUME_JOB_UUID_RE.fullmatch(clean_job):
+            raise ValueError("Resume job_id must be a canonical UUID")
+        _, subfolders = self.ensure_directory_tree()
+        resume_id = subfolders["resume"]
+        jobs_id = self._find_child_folder(resume_id, "jobs")
+        if not jobs_id:
+            return []
+        job_folder_id = self._find_child_folder(jobs_id, clean_job)
+        if not job_folder_id:
+            return []
+
+        results: list[dict[str, Any]] = []
+        seen_names: set[str] = set()
+        for prefix, folder_id in (("", job_folder_id), ("blobs/", self._find_child_folder(job_folder_id, "blobs"))):
+            if not folder_id:
+                continue
+            for entry in self._list_folder_files(folder_id):
+                rel_name = f"{prefix}{entry['name']}"
+                if rel_name in seen_names:
+                    continue
+                seen_names.add(rel_name)
+                if _has_public_permission(entry.get("permissions")):
+                    raise DrivePermissionError(
+                        "Resume Drive object has public permissions; refusing read",
+                        code="DRIVE_PUBLIC_PERMISSION_DETECTED",
+                    )
+                props = entry.get("appProperties") if isinstance(entry.get("appProperties"), dict) else {}
+                sha = (
+                    str(entry.get("sha256Checksum") or "").strip().lower()
+                    or str(props.get("viread_sha256") or "").strip().lower()
+                    or None
+                )
+                results.append(
+                    {
+                        "name": rel_name,
+                        "drive_file_id": validate_drive_file_id(str(entry["id"])),
+                        "size_bytes": _parse_int_or_none(entry.get("size")) or 0,
+                        "sha256": sha,
+                    }
+                )
+        return results
+
+    def put_resume_file(
+        self,
+        job_id: str,
+        relative_path: str,
+        data: bytes | Path | BinaryIO,
+        *,
+        content_type: str = "application/octet-stream",
+        expected_sha256: str | None = None,
+    ) -> StoredArtifact:
+        """Store or atomically replace a resume file strictly inside resume/jobs/<job_id>/."""
+        logical_path = validate_resume_object_path(job_id, relative_path)
+        parent_id, filename = self._resolve_parent_folder(logical_path)
+        prior_ids = [
+            validate_drive_file_id(str(entry["id"]))
+            for entry in self._list_folder_files(parent_id)
+            if str(entry.get("name") or "") == filename
+        ]
+        stored = self.put(
+            logical_path,
+            data,
+            content_type=content_type,
+            expected_sha256=expected_sha256,
+            metadata={"purpose": "colab_resume", "job_id": str(job_id).strip().lower()},
+        )
+        # Manifest-last atomic cleanup: delete superseded copies only AFTER new upload succeeded.
+        for old_id in prior_ids:
+            if old_id != stored.drive_file_id:
+                try:
+                    del_resp = self._request(
+                        "DELETE",
+                        f"{DRIVE_API_BASE}/files/{old_id}",
+                        accepted_statuses=frozenset({200, 204}),
+                    )
+                    del_resp.close()
+                except Exception:
+                    pass
+        return stored
+
+    def open_resume_file_stream(
+        self,
+        job_id: str,
+        relative_path: str,
+        *,
+        expected_sha256: str | None = None,
+    ) -> tuple[ArtifactMetadata, Iterator[bytes]]:
+        """Stream a verified resume file from resume/jobs/<job_id>/ in the connected Drive."""
+        logical_path = validate_resume_object_path(job_id, relative_path)
+        parent_id, filename = self._resolve_parent_folder(logical_path)
+        matches = [
+            entry
+            for entry in self._list_folder_files(parent_id)
+            if str(entry.get("name") or "") == filename
+        ]
+        if not matches:
+            raise DriveNotFoundError(f"Resume file not found on Drive: {relative_path}")
+        file_id = validate_drive_file_id(str(matches[0]["id"]))
+        ref = format_gdrive_ref(file_id)
+        meta = self.get_metadata(ref)
+        return meta, self.open_stream(ref, expected_sha256=expected_sha256)
+
+    def delete_resume_file(self, job_id: str, relative_path: str) -> bool:
+        """Delete obsolete resume file(s) strictly inside resume/jobs/<job_id>/."""
+        logical_path = validate_resume_object_path(job_id, relative_path)
+        parent_id, filename = self._resolve_parent_folder(logical_path)
+        matches = [
+            validate_drive_file_id(str(entry["id"]))
+            for entry in self._list_folder_files(parent_id)
+            if str(entry.get("name") or "") == filename
+        ]
+        deleted_any = False
+        for file_id in matches:
+            try:
+                del_resp = self._request(
+                    "DELETE",
+                    f"{DRIVE_API_BASE}/files/{file_id}",
+                    accepted_statuses=frozenset({200, 204}),
+                )
+                del_resp.close()
+                deleted_any = True
+            except DriveNotFoundError:
+                continue
+        return deleted_any

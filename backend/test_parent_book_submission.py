@@ -666,6 +666,206 @@ class ParentBookSubmissionPipelineTests(unittest.IsolatedAsyncioTestCase):
             else:
                 os.environ["PRIVATE_BOOK_ALLOW_CLOUD_AI"] = prev_allow
 
+    async def test_edit_book_and_committed_page_rechecks_from_scratch_while_delete_skips_recheck(
+        self,
+    ) -> None:
+        book_id = await self._create_book("Sách Sửa Xóa Kiểm Thử")
+        png1 = make_synthetic_png("Trang mot meo con")
+        png2 = make_synthetic_png("Trang hai cho con")
+
+        def _clean_hooks(text_val: str) -> PipelineHooks:
+            tokens = text_val.split()
+            words = [
+                {
+                    "text": tok,
+                    "line_index": 0,
+                    "bounding_box": [round(0.05 + i * 0.14, 4), 0.1, 0.12, 0.06],
+                    "ocr_confidence": 0.95,
+                }
+                for i, tok in enumerate(tokens)
+            ]
+            return PipelineHooks(
+                ocr_fn=lambda _b: (text_val, words, {}),
+                proofread_orchestrator_factory=lambda: type(
+                    "P", (), {"correct": lambda self, t, *a, **kw: _async_return(t)}
+                )(),
+                safety_orchestrator_factory=_CleanSafety,
+            )
+
+        # 1. Upload & commit 2 clean pages so book is readable for children
+        async with self.fixture.client(self.app, "token-parent-a") as client_a:
+            up1 = await client_a.post(
+                f"/books/my-books/{book_id}/submissions",
+                files={"file": ("trang1.png", png1, "image/png")},
+                data={"idempotency_key": f"ed-1-{uuid4().hex}", "source_type": "SELF_AUTHORED"},
+            )
+            up2 = await client_a.post(
+                f"/books/my-books/{book_id}/submissions",
+                files={"file": ("trang2.png", png2, "image/png")},
+                data={"idempotency_key": f"ed-2-{uuid4().hex}", "source_type": "SELF_AUTHORED"},
+            )
+            self.assertEqual(up1.status_code, 202)
+            self.assertEqual(up2.status_code, 202)
+            sub1_id = up1.json()["submissions"][0]["id"]
+            sub2_id = up2.json()["submissions"][0]["id"]
+
+        async with self.fixture.sessions() as db:
+            p1 = await process_submission_stages(db, UUID(sub1_id), hooks=_clean_hooks("Mèo con đi học vui vẻ."))
+            assert p1 is not None
+            hash1 = p1.CandidateHash
+            p2 = await process_submission_stages(db, UUID(sub2_id), hooks=_clean_hooks("Chó con chạy ra sân chơi."))
+            assert p2 is not None
+            hash2 = p2.CandidateHash
+
+        async with self.fixture.client(self.app, "token-parent-a") as client_a:
+            add1 = await client_a.post(
+                f"/books/my-books/{book_id}/submissions/{sub1_id}/add-page",
+                json={"expected_submission_version": 1, "expected_candidate_hash": hash1},
+            )
+            add2 = await client_a.post(
+                f"/books/my-books/{book_id}/submissions/{sub2_id}/add-page",
+                json={"expected_submission_version": 1, "expected_candidate_hash": hash2},
+            )
+            self.assertEqual(add1.status_code, 201, add1.text)
+            self.assertEqual(add2.status_code, 201, add2.text)
+            page1_id = add1.json()["page_id"]
+            page2_id = add2.json()["page_id"]
+            self.assertTrue(add2.json()["book_readable_for_children"])
+
+        # 2. Cross-family isolation: Parent B MUST get 404 on edit/delete book & committed pages
+        async with self.fixture.client(self.app, "token-parent-b") as client_b:
+            self.assertEqual(
+                (await client_b.patch(f"/books/my-books/{book_id}", json={"title": "Cướp sách"})).status_code,
+                404,
+            )
+            self.assertEqual((await client_b.delete(f"/books/my-books/{book_id}")).status_code, 404)
+            self.assertEqual(
+                (await client_b.patch(
+                    f"/books/my-books/{book_id}/pages/{page1_id}",
+                    json={"candidate_text": "Sửa trộm"},
+                )).status_code,
+                404,
+            )
+            self.assertEqual(
+                (await client_b.delete(f"/books/my-books/{book_id}/pages/{page1_id}")).status_code,
+                404,
+            )
+
+        # 3. DELETE committed page 2 -> IMMEDIATE deletion, ZERO re-check triggered on page 1!
+        async with self.fixture.client(self.app, "token-parent-a") as client_a:
+            del_p2 = await client_a.delete(f"/books/my-books/{book_id}/pages/{page2_id}")
+            self.assertEqual(del_p2.status_code, 200, del_p2.text)
+            del_p2_body = del_p2.json()
+            self.assertEqual(del_p2_body["status"], "deleted")
+            self.assertEqual(del_p2_body["committed_page_count"], 1)
+            self.assertTrue(del_p2_body["readable_for_children"])
+
+            detail_after_del = (await client_a.get(f"/books/my-books/{book_id}")).json()
+            self.assertEqual(detail_after_del["book"]["pending_submission_count"], 0)
+            self.assertEqual(len(detail_after_del["pages"]), 1)
+            self.assertEqual(detail_after_del["pages"][0]["page_id"], page1_id)
+
+            # 4. EDIT committed page 1 text -> retires page 1, locks reading, resets Proofreading & Tool Check!
+            edit_p1 = await client_a.patch(
+                f"/books/my-books/{book_id}/pages/{page1_id}",
+                json={"candidate_text": "Mèo con đi học cùng bạn thỏ trắng.", "auto_recheck": True},
+            )
+            self.assertEqual(edit_p1.status_code, 200, edit_p1.text)
+            sub_after_p1_edit = edit_p1.json()
+            self.assertEqual(sub_after_p1_edit["workflow_status"], "CHECKING")
+            self.assertEqual(sub_after_p1_edit["proofread_status"], "PENDING")
+            self.assertEqual(sub_after_p1_edit["tool_check_status"], "PENDING")
+            self.assertFalse(sub_after_p1_edit["can_add_to_book"])
+
+            detail_locked = (await client_a.get(f"/books/my-books/{book_id}")).json()
+            self.assertEqual(detail_locked["book"]["committed_page_count"], 0)
+            self.assertFalse(detail_locked["book"]["readable_for_children"])
+
+        # Re-run full check (Stage 2 Proofread + Stage 3 Tool Check) & re-add page 1
+        async with self.fixture.sessions() as db:
+            rechecked_p1 = await process_submission_stages(
+                db,
+                UUID(sub_after_p1_edit["id"]),
+                hooks=_clean_hooks("Mèo con đi học cùng bạn thỏ trắng."),
+            )
+            assert rechecked_p1 is not None
+            self.assertEqual(rechecked_p1.WorkflowStatus, "PASSED_READY_TO_ADD")
+            v_after_edit = rechecked_p1.SubmissionVersion
+            h_after_edit = rechecked_p1.CandidateHash
+
+        async with self.fixture.client(self.app, "token-parent-a") as client_a:
+            readd1 = await client_a.post(
+                f"/books/my-books/{book_id}/submissions/{sub_after_p1_edit['id']}/add-page",
+                json={"expected_submission_version": v_after_edit, "expected_candidate_hash": h_after_edit},
+            )
+            self.assertEqual(readd1.status_code, 201, readd1.text)
+            self.assertTrue(readd1.json()["book_readable_for_children"])
+            readded_page_id = readd1.json()["page_id"]
+
+            # 4b. REPLACE IMAGE on committed page -> retires page & resets ALL 3 stages (OCR + Proofread + Tool Check)!
+            rep_img = await client_a.put(
+                f"/books/my-books/{book_id}/pages/{readded_page_id}/file",
+                files={"file": ("trang1-moi.png", make_synthetic_png("Trang mot anh moi"), "image/png")},
+            )
+            self.assertEqual(rep_img.status_code, 200, rep_img.text)
+            rep_sub = rep_img.json()
+            self.assertEqual(rep_sub["workflow_status"], "CHECKING")
+            self.assertEqual(rep_sub["ocr_status"], "PENDING")
+            self.assertEqual(rep_sub["proofread_status"], "PENDING")
+            self.assertEqual(rep_sub["tool_check_status"], "PENDING")
+            self.assertFalse(rep_sub["can_add_to_book"])
+
+        # Re-run full 3-stage pipeline and re-commit page before testing book edit
+        async with self.fixture.sessions() as db:
+            rechecked_img = await process_submission_stages(
+                db,
+                UUID(rep_sub["id"]),
+                hooks=_clean_hooks("Trang một ảnh mới rất đẹp."),
+            )
+            assert rechecked_img is not None
+            self.assertEqual(rechecked_img.WorkflowStatus, "PASSED_READY_TO_ADD")
+            v_after_img = rechecked_img.SubmissionVersion
+            h_after_img = rechecked_img.CandidateHash
+
+        async with self.fixture.client(self.app, "token-parent-a") as client_a:
+            readd2 = await client_a.post(
+                f"/books/my-books/{book_id}/submissions/{rep_sub['id']}/add-page",
+                json={"expected_submission_version": v_after_img, "expected_candidate_hash": h_after_img},
+            )
+            self.assertEqual(readd2.status_code, 201, readd2.text)
+            self.assertTrue(readd2.json()["book_readable_for_children"])
+
+            # 5. EDIT BOOK metadata -> retires ALL committed pages & resets ALL stages from OCR -> Proofread -> Tool Check!
+            upd_book = await client_a.patch(
+                f"/books/my-books/{book_id}",
+                json={"title": "Sách Đã Sửa Tên Mới", "min_grade": 2, "max_grade": 4},
+            )
+            self.assertEqual(upd_book.status_code, 200, upd_book.text)
+            upd_body = upd_book.json()
+            self.assertEqual(upd_body["title"], "Sách Đã Sửa Tên Mới")
+            self.assertEqual(upd_body["committed_page_count"], 0)
+            self.assertEqual(upd_body["pending_submission_count"], 1)
+            self.assertFalse(upd_body["readable_for_children"])
+
+            detail_after_book_edit = (await client_a.get(f"/books/my-books/{book_id}")).json()
+            self.assertEqual(len(detail_after_book_edit["pages"]), 0)
+            self.assertEqual(len(detail_after_book_edit["submissions"]), 1)
+            reset_sub = detail_after_book_edit["submissions"][0]
+            self.assertEqual(reset_sub["workflow_status"], "CHECKING")
+            self.assertEqual(reset_sub["ocr_status"], "PENDING")
+            self.assertEqual(reset_sub["proofread_status"], "PENDING")
+            self.assertEqual(reset_sub["tool_check_status"], "PENDING")
+            self.assertFalse(reset_sub["can_add_to_book"])
+
+            # 6. DELETE BOOK -> IMMEDIATE deletion, ZERO re-check, vanishes from list & 404 on detail!
+            del_book = await client_a.delete(f"/books/my-books/{book_id}")
+            self.assertEqual(del_book.status_code, 200, del_book.text)
+            self.assertEqual(del_book.json()["status"], "deleted")
+
+            my_list = (await client_a.get("/books/my-books")).json()
+            self.assertFalse(any(b["id"] == book_id for b in my_list))
+            self.assertEqual((await client_a.get(f"/books/my-books/{book_id}")).status_code, 404)
+
 
 async def _async_return(value):
     return value

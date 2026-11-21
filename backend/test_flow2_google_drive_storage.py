@@ -822,6 +822,490 @@ class GoogleDriveStoreResilienceTests(unittest.TestCase):
         import asyncio
         asyncio.run(_run())
 
+    def test_required_account_email_pinning_adds_login_hint_and_rejects_wrong_gmail(self):
+        import asyncio
+        from app.services.training_storage.google_drive_oauth import load_oauth_config
+        from app.services.viread_drive_connection_service import VireadDriveConnectionService
+
+        server = InMemoryGoogleDriveServer()
+        server.account_email = "wrong.colab.account@gmail.com"
+        env = {
+            "VIREAD_GDRIVE_OAUTH_CLIENT_ID": "test-client-id.apps.googleusercontent.com",
+            "VIREAD_GDRIVE_OAUTH_CLIENT_SECRET": "test-client-secret",
+            "VIREAD_GDRIVE_OAUTH_REDIRECT_URI": "http://localhost:3000/admin/viread-training",
+            "VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY": "e" * 48,
+            "VIREAD_GDRIVE_REQUIRED_ACCOUNT_EMAIL": "cuongtran290605@gmail.com",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            cfg = load_oauth_config()
+            self.assertEqual(cfg.required_account_email, "cuongtran290605@gmail.com")
+            started = create_oauth_authorization(cfg, actor_id=str(uuid4()))
+            self.assertIn("login_hint=cuongtran290605%40gmail.com", started.authorization_url)
+
+            async def _run_wrong_email():
+                from app.services.training_storage.google_drive_oauth import OAuthTokenBundle
+                fake_db = MagicMock()
+                svc = VireadDriveConnectionService(fake_db, session=server.make_session())
+                svc.repo = MagicMock()
+                svc.repo.get_primary = AsyncMock(return_value=(None, True))
+                svc.repo.upsert_connected = AsyncMock()
+                actor_id = uuid4()
+                start_res = await svc.start_connect(actor_id=actor_id)
+                from urllib.parse import parse_qs, urlsplit
+                state_val = parse_qs(urlsplit(start_res["authorization_url"]).query)["state"][0]
+                fake_tokens = OAuthTokenBundle(
+                    access_token=server.valid_access_token,
+                    refresh_token="wrong-account-refresh-token",
+                    expires_in=3600,
+                    scope=GOOGLE_DRIVE_REQUIRED_SCOPE,
+                    token_type="Bearer",
+                )
+                with (
+                    patch(
+                        "app.services.viread_drive_connection_service.exchange_authorization_code",
+                        return_value=fake_tokens,
+                    ),
+                    patch(
+                        "app.services.viread_drive_connection_service.revoke_token",
+                        return_value=True,
+                    ) as mock_revoke,
+                ):
+                    with self.assertRaises(HTTPException) as mismatch_err:
+                        await svc.complete_callback(actor_id=actor_id, code="valid-auth-code", state=state_val)
+                    self.assertEqual(mismatch_err.exception.status_code, 403)
+                    self.assertIn("DRIVE_ACCOUNT_EMAIL_MISMATCH", str(mismatch_err.exception.detail))
+                    mock_revoke.assert_called_once()
+                    svc.repo.upsert_connected.assert_not_called()
+
+            asyncio.run(_run_wrong_email())
+
+    def test_drive_resume_files_list_put_atomic_replace_stream_and_delete(self):
+        server = InMemoryGoogleDriveServer()
+        store, _ = self._build_store(server)
+        job_id = str(uuid4())
+        blob_payload = b"epoch-1-weights-payload"
+        blob_sha = hashlib.sha256(blob_payload).hexdigest()
+        stored_blob = store.put_resume_file(job_id, f"blobs/{blob_sha}", blob_payload, expected_sha256=blob_sha)
+        self.assertEqual(stored_blob.sha256, blob_sha)
+
+        manifest_v1 = b'{"schema":"viread-colab-resume-v1","v":1}'
+        m1 = store.put_resume_file(job_id, "resume-manifest.json", manifest_v1, content_type="application/json")
+        manifest_v2 = b'{"schema":"viread-colab-resume-v1","v":2}'
+        m2 = store.put_resume_file(job_id, "resume-manifest.json", manifest_v2, content_type="application/json")
+        self.assertNotEqual(m1.drive_file_id, m2.drive_file_id)
+        # Superseded manifest copy was pruned after new manifest committed
+        self.assertNotIn(m1.drive_file_id, server.files)
+
+        listed = {item["name"]: item for item in store.list_resume_files(job_id)}
+        self.assertIn("resume-manifest.json", listed)
+        self.assertIn(f"blobs/{blob_sha}", listed)
+
+        meta, stream = store.open_resume_file_stream(job_id, f"blobs/{blob_sha}", expected_sha256=blob_sha)
+        self.assertEqual(meta.size_bytes, len(blob_payload))
+        self.assertEqual(b"".join(stream), blob_payload)
+
+        self.assertTrue(store.delete_resume_file(job_id, f"blobs/{blob_sha}"))
+        listed_after = {item["name"] for item in store.list_resume_files(job_id)}
+        self.assertNotIn(f"blobs/{blob_sha}", listed_after)
+
+
+class InMemoryAppsScriptBridgeServer:
+    """In-memory emulator of scripts/google-apps-script/viread_flow2_drive_bridge.gs."""
+
+    def __init__(self, *, secret: str, account_email: str = "cuongtran290605@gmail.com") -> None:
+        self.secret = secret
+        self.account_email = account_email
+        self.limit_bytes = 15 * 1024 * 1024 * 1024
+        self.usage_bytes = 2 * 1024 * 1024 * 1024
+        self.root_folder_id = "drv_gas_root_000001"
+        self.subfolder_ids = {
+            "verified-samples": "drv_gas_sub_samples_01",
+            "datasets": "drv_gas_sub_datasets_01",
+            "locked-tests": "drv_gas_sub_locked_01",
+            "checkpoints": "drv_gas_sub_ckpts_01",
+            "resume": "drv_gas_sub_resume_01",
+            "benchmarks": "drv_gas_sub_bench_01",
+            "audit": "drv_gas_sub_audit_01",
+            "_selftest": "drv_gas_sub_self_01",
+        }
+        self.files: dict[str, dict] = {}
+        self.force_html_login = False
+        self._seq = 0
+
+    def _next_id(self) -> str:
+        self._seq += 1
+        return f"drv_gas_file_{self._seq:06d}"
+
+    def make_session(self) -> MagicMock:
+        import base64 as _b64
+        import hmac as _hmac
+
+        sess = MagicMock()
+
+        def _post(_url, json=None, **_kwargs):
+            if self.force_html_login:
+                resp = MagicMock()
+                resp.status_code = 200
+                resp.headers = {"Content-Type": "text/html; charset=utf-8"}
+                resp.text = "<html><title>Sign in - Google Accounts</title>accounts.google.com/ServiceLogin</html>"
+                resp.close = MagicMock()
+                return resp
+
+            env = json or {}
+            action = str(env.get("action") or "")
+            ts = int(env.get("ts") or 0)
+            sig = str(env.get("sig") or "")
+            payload_json = str(env.get("payload_json") or "{}")
+            expected_sig = _hmac.new(
+                self.secret.encode("utf-8"),
+                f"{ts}:{action}:{hashlib.sha256(payload_json.encode('utf-8')).hexdigest()}".encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+            if not _hmac.compare_digest(sig, expected_sig):
+                return self._json_resp({"ok": False, "error_code": "DRIVE_AUTH_FAILED", "message": "Invalid signature"})
+
+            import json as _json
+
+            payload = _json.loads(payload_json)
+            if action == "health":
+                return self._json_resp(
+                    {
+                        "ok": True,
+                        "account_email": self.account_email,
+                        "account_display_name": self.account_email.split("@")[0],
+                        "root_folder_id": self.root_folder_id,
+                        "subfolder_ids": dict(self.subfolder_ids),
+                        "quota": {"limit_bytes": self.limit_bytes, "usage_bytes": self.usage_bytes, "usage_in_drive_bytes": self.usage_bytes, "usage_in_trash_bytes": None},
+                    }
+                )
+            if action == "quota":
+                return self._json_resp(
+                    {
+                        "ok": True,
+                        "quota": {"limit_bytes": self.limit_bytes, "usage_bytes": self.usage_bytes, "usage_in_drive_bytes": self.usage_bytes, "usage_in_trash_bytes": None},
+                    }
+                )
+            if action in {"put_file", "put_resume_file"}:
+                raw = _b64.b64decode(payload.get("content_b64") or "")
+                sha = hashlib.sha256(raw).hexdigest()
+                lpath = payload["logical_path"]
+                meta = payload.get("metadata") or {}
+                is_chunked = bool(meta.get("viread_chunked_v1"))
+                if action == "put_resume_file":
+                    for fid, fobj in list(self.files.items()):
+                        if not fobj["trashed"] and fobj["logical_path"] == lpath:
+                            fobj["trashed"] = True
+                fid = self._next_id()
+                self.files[fid] = {
+                    "file_id": fid,
+                    "name": lpath.rsplit("/", 1)[-1],
+                    "logical_path": lpath,
+                    "content": raw,
+                    "size_bytes": int(meta.get("viread_logical_size") or len(raw)) if is_chunked else len(raw),
+                    "sha256": str(meta.get("viread_logical_sha256") or sha),
+                    "content_type": str(meta.get("viread_logical_content_type") or payload.get("content_type") or "application/octet-stream"),
+                    "trashed": False,
+                    "is_public": False,
+                    "is_chunked": is_chunked,
+                    "extra": dict(meta),
+                }
+                self.usage_bytes += len(raw)
+                return self._json_resp({"ok": True, "deduplicated": False, "file": self._pub(self.files[fid])})
+            if action == "get_metadata":
+                fobj = self.files.get(payload["file_id"])
+                if not fobj or fobj["trashed"]:
+                    return self._json_resp({"ok": False, "error_code": "DRIVE_OBJECT_NOT_FOUND", "message": "Not found"})
+                return self._json_resp({"ok": True, "file": self._pub(fobj)})
+            if action == "get_file":
+                fobj = self.files.get(payload["file_id"])
+                if not fobj or fobj["trashed"]:
+                    return self._json_resp({"ok": False, "error_code": "DRIVE_OBJECT_NOT_FOUND", "message": "Not found"})
+                return self._json_resp({"ok": True, "file": self._pub(fobj), "content_b64": _b64.b64encode(fobj["content"]).decode("ascii")})
+            if action == "delete_file":
+                fobj = self.files.get(payload["file_id"])
+                if not fobj or fobj["trashed"]:
+                    return self._json_resp({"ok": True, "deleted": False})
+                if fobj["is_chunked"]:
+                    manifest = _json.loads(fobj["content"].decode("utf-8"))
+                    for part in manifest.get("parts") or []:
+                        p = self.files.get(part["file_id"])
+                        if p:
+                            p["trashed"] = True
+                fobj["trashed"] = True
+                return self._json_resp({"ok": True, "deleted": True})
+            if action == "list_resume_files":
+                prefix = f"resume/jobs/{payload['job_id']}/"
+                items = []
+                for fobj in self.files.values():
+                    if not fobj["trashed"] and fobj["logical_path"].startswith(prefix):
+                        items.append(
+                            {
+                                "name": fobj["logical_path"][len(prefix) :],
+                                "drive_file_id": fobj["file_id"],
+                                "size_bytes": fobj["size_bytes"],
+                                "sha256": fobj["sha256"],
+                            }
+                        )
+                return self._json_resp({"ok": True, "files": items})
+            if action == "get_resume_file_meta":
+                lpath = payload["logical_path"]
+                for fobj in self.files.values():
+                    if not fobj["trashed"] and fobj["logical_path"] == lpath:
+                        return self._json_resp({"ok": True, "file": self._pub(fobj)})
+                return self._json_resp({"ok": False, "error_code": "DRIVE_OBJECT_NOT_FOUND", "message": "Not found"})
+            if action == "delete_resume_file":
+                lpath = payload["logical_path"]
+                deleted = False
+                for fobj in self.files.values():
+                    if not fobj["trashed"] and fobj["logical_path"] == lpath:
+                        fobj["trashed"] = True
+                        deleted = True
+                return self._json_resp({"ok": True, "deleted": deleted})
+            return self._json_resp({"ok": False, "error_code": "UNKNOWN_ACTION", "message": action})
+
+        sess.post = MagicMock(side_effect=_post)
+        return sess
+
+    @staticmethod
+    def _pub(fobj: dict) -> dict:
+        return {k: v for k, v in fobj.items() if k != "content"}
+
+    @staticmethod
+    def _json_resp(payload: dict) -> MagicMock:
+        import json as _json
+
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.headers = {"Content-Type": "application/json"}
+        resp.text = _json.dumps(payload)
+        resp.close = MagicMock()
+        return resp
+
+
+class TestAppsScriptDriveBridge(unittest.TestCase):
+    VALID_URL = "https://script.google.com/macros/s/AKfycbzViReadFlow2BridgeDeployment0123456789/exec"
+    SECRET = "s" * 48
+
+    def test_small_large_chunked_self_test_resume_and_error_handling(self):
+        from app.services.training_storage.google_apps_script_store import GoogleAppsScriptDriveStore
+
+        server = InMemoryAppsScriptBridgeServer(secret=self.SECRET)
+        store = GoogleAppsScriptDriveStore(
+            web_app_url=self.VALID_URL,
+            bridge_secret=self.SECRET,
+            session=server.make_session(),
+            chunk_bytes=64 * 1024,
+            sleep_fn=lambda _s: None,
+        )
+
+        # 1. Health & self-test
+        health = store.health_check()
+        self.assertTrue(health.healthy)
+        self.assertEqual(health.account_email, "cuongtran290605@gmail.com")
+        self_test = store.self_test()
+        self.assertTrue(self_test.ok)
+        self.assertTrue(self_test.is_private)
+        self.assertTrue(self_test.deleted_after_test)
+
+        # 2. Large file (> 64 KiB chunk size) transparently chunks and streams back with SHA-256 verification
+        large_payload = os.urandom(150 * 1024)
+        large_sha = hashlib.sha256(large_payload).hexdigest()
+        stored = store.put(
+            "checkpoints/runs/run-1/candidate.pth",
+            large_payload,
+            content_type="application/octet-stream",
+            expected_sha256=large_sha,
+        )
+        self.assertTrue(stored.reference.startswith("gdrive://"))
+        self.assertEqual(stored.metadata.get("chunked_parts"), 3)
+        meta = store.get_metadata(stored.reference)
+        self.assertEqual(meta.size_bytes, len(large_payload))
+        self.assertEqual(meta.sha256, large_sha)
+        downloaded = b"".join(store.open_stream(stored.reference, expected_sha256=large_sha))
+        self.assertEqual(downloaded, large_payload)
+        self.assertTrue(store.delete_if_unreferenced(stored.reference, is_referenced_check=lambda _r: False))
+        self.assertFalse(store.exists(stored.reference))
+
+        # 3. Cross-account Colab resume state over Apps Script Bridge
+        job_id = str(uuid4())
+        resume_blob = b"resume-checkpoint-part-0"
+        resume_sha = hashlib.sha256(resume_blob).hexdigest()
+        store.put_resume_file(job_id, f"blobs/{resume_sha}.part0000", resume_blob, expected_sha256=resume_sha)
+        store.put_resume_file(job_id, "resume-manifest.json", b'{"v":1}', content_type="application/json")
+        store.put_resume_file(job_id, "resume-manifest.json", b'{"v":2}', content_type="application/json")
+        listed = {f["name"]: f for f in store.list_resume_files(job_id)}
+        self.assertIn("resume-manifest.json", listed)
+        self.assertIn(f"blobs/{resume_sha}.part0000", listed)
+        rmeta, rstream = store.open_resume_file_stream(job_id, "resume-manifest.json")
+        self.assertEqual(b"".join(rstream), b'{"v":2}')
+        self.assertEqual(rmeta.size_bytes, 7)
+        self.assertTrue(store.delete_resume_file(job_id, f"blobs/{resume_sha}.part0000"))
+
+        # 4. HTML Google Sign-In response raises clear DRIVE_BRIDGE_ACCESS_DENIED
+        server.force_html_login = True
+        with self.assertRaises(DrivePermissionError) as html_err:
+            store.quota_check()
+        self.assertEqual(html_err.exception.code, "DRIVE_BRIDGE_ACCESS_DENIED")
+
+    def test_connect_apps_script_enforces_owner_email_and_hydrates_without_oauth_env(self):
+        import asyncio
+        from app.services.training_storage.google_apps_script_store import (
+            APPS_SCRIPT_BRIDGE_SCOPE,
+            GoogleAppsScriptDriveStore,
+        )
+        from app.services.viread_drive_connection_service import (
+            VireadDriveConnectionService,
+            build_google_drive_store_from_row,
+            invalidate_sync_google_drive_store_cache,
+        )
+
+        invalidate_sync_google_drive_store_cache()
+        env = {
+            "VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY": "e" * 48,
+            "VIREAD_GDRIVE_APPS_SCRIPT_SECRET": self.SECRET,
+            "VIREAD_GDRIVE_REQUIRED_ACCOUNT_EMAIL": "cuongtran290605@gmail.com",
+            "VIREAD_GDRIVE_OAUTH_CLIENT_ID": "",
+            "VIREAD_GDRIVE_OAUTH_CLIENT_SECRET": "",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            # Wrong owner Gmail MUST be rejected with 403 DRIVE_ACCOUNT_EMAIL_MISMATCH
+            wrong_server = InMemoryAppsScriptBridgeServer(secret=self.SECRET, account_email="other.acc@gmail.com")
+            svc_wrong = VireadDriveConnectionService(MagicMock(), session=wrong_server.make_session())
+            svc_wrong.repo = MagicMock()
+            svc_wrong.repo.get_primary = AsyncMock(return_value=(None, True))
+            svc_wrong.repo.upsert_connected = AsyncMock()
+            with self.assertRaises(HTTPException) as mismatch:
+                asyncio.run(
+                    svc_wrong.connect_apps_script(actor_id=uuid4(), web_app_url=self.VALID_URL)
+                )
+            self.assertEqual(mismatch.exception.status_code, 403)
+            self.assertIn("DRIVE_ACCOUNT_EMAIL_MISMATCH", str(mismatch.exception.detail))
+            svc_wrong.repo.upsert_connected.assert_not_called()
+
+            # Correct owner Gmail succeeds and DB row hydrates GoogleAppsScriptDriveStore with zero OAuth vars!
+            ok_server = InMemoryAppsScriptBridgeServer(secret=self.SECRET, account_email="cuongtran290605@gmail.com")
+            saved_rows: list[dict] = []
+
+            async def _fake_upsert(**kwargs):
+                row = {"status": "CONNECTED", **kwargs}
+                saved_rows.append(row)
+                return row
+
+            svc_ok = VireadDriveConnectionService(MagicMock(), session=ok_server.make_session())
+            svc_ok.repo = MagicMock()
+            svc_ok.repo.get_primary = AsyncMock(return_value=(None, True))
+            svc_ok.repo.upsert_connected = AsyncMock(side_effect=_fake_upsert)
+            status = asyncio.run(svc_ok.connect_apps_script(actor_id=uuid4(), web_app_url=self.VALID_URL))
+            self.assertTrue(status["connected"])
+            self.assertEqual(status["connection_mode"], "apps_script_bridge")
+            self.assertEqual(status["account_email"], "cuongtran290605@gmail.com")
+            self.assertTrue(status["scope_valid"])
+            self.assertEqual(saved_rows[0]["oauth_scope"], APPS_SCRIPT_BRIDGE_SCOPE)
+
+            rebuilt = build_google_drive_store_from_row(
+                saved_rows[0],
+                session=ok_server.make_session(),
+                use_warm_cache=False,
+            )
+            self.assertIsInstance(rebuilt, GoogleAppsScriptDriveStore)
+            self.assertTrue(rebuilt.health_check().healthy)
+
+
+class TestGoogleDriveDesktopStore(unittest.TestCase):
+    def test_put_dedup_stream_selftest_resume_and_connect_with_owner_pinning(self):
+        import asyncio
+        import tempfile
+        from app.services.training_storage.google_drive_desktop_store import (
+            DRIVE_DESKTOP_SYNC_SCOPE,
+            GoogleDriveDesktopStore,
+        )
+        from app.services.viread_drive_connection_service import (
+            VireadDriveConnectionService,
+            build_google_drive_store_from_row,
+            invalidate_sync_google_drive_store_cache,
+        )
+
+        invalidate_sync_google_drive_store_cache()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            my_drive = Path(tmpdir) / "My Drive"
+            my_drive.mkdir()
+            env = {
+                "VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY": "e" * 48,
+                "VIREAD_GDRIVE_REQUIRED_ACCOUNT_EMAIL": "cuongtran290605@gmail.com",
+                "VIREAD_GDRIVE_OAUTH_CLIENT_ID": "",
+                "VIREAD_GDRIVE_OAUTH_CLIENT_SECRET": "",
+            }
+            with patch.dict(os.environ, env, clear=False):
+                # Wrong owner email rejected with 403
+                svc_bad = VireadDriveConnectionService(MagicMock())
+                svc_bad.repo = MagicMock()
+                svc_bad.repo.get_primary = AsyncMock(return_value=(None, True))
+                svc_bad.repo.upsert_connected = AsyncMock()
+                with self.assertRaises(HTTPException) as bad_err:
+                    asyncio.run(
+                        svc_bad.connect_drive_desktop(
+                            actor_id=uuid4(),
+                            sync_root_path=str(my_drive),
+                            account_email="wrong@gmail.com",
+                        )
+                    )
+                self.assertEqual(bad_err.exception.status_code, 403)
+                self.assertIn("DRIVE_ACCOUNT_EMAIL_MISMATCH", str(bad_err.exception.detail))
+
+                # Valid owner connects, creates Flow2 folders, and hydrates cleanly
+                saved_rows: list[dict] = []
+
+                async def _fake_upsert(**kwargs):
+                    row = {"status": "CONNECTED", **kwargs}
+                    saved_rows.append(row)
+                    return row
+
+                svc_ok = VireadDriveConnectionService(MagicMock())
+                svc_ok.repo = MagicMock()
+                svc_ok.repo.get_primary = AsyncMock(return_value=(None, True))
+                svc_ok.repo.upsert_connected = AsyncMock(side_effect=_fake_upsert)
+                status = asyncio.run(
+                    svc_ok.connect_drive_desktop(
+                        actor_id=uuid4(),
+                        sync_root_path=str(my_drive),
+                        account_email="cuongtran290605@gmail.com",
+                    )
+                )
+                self.assertTrue(status["connected"])
+                self.assertEqual(status["connection_mode"], "drive_desktop_sync")
+                self.assertEqual(status["account_email"], "cuongtran290605@gmail.com")
+                self.assertEqual(saved_rows[0]["oauth_scope"], DRIVE_DESKTOP_SYNC_SCOPE)
+
+                store = build_google_drive_store_from_row(saved_rows[0], use_warm_cache=False)
+                self.assertIsInstance(store, GoogleDriveDesktopStore)
+                self.assertTrue(store.self_test().ok)
+
+                # Put + dedup + stream + delete_if_unreferenced
+                data = b"vietnamese-ocr-crop-bytes-001"
+                sha = hashlib.sha256(data).hexdigest()
+                s1 = store.put("verified-samples/rev-1/line-0001.png", data, content_type="image/png", expected_sha256=sha)
+                s2 = store.put("verified-samples/rev-1/line-0001.png", data, content_type="image/png", expected_sha256=sha)
+                self.assertTrue(s2.deduplicated)
+                self.assertEqual(s1.reference, s2.reference)
+                self.assertEqual(b"".join(store.open_stream(s1.reference, expected_sha256=sha)), data)
+                self.assertFalse(store.delete_if_unreferenced(s1.reference, is_referenced_check=lambda _r: True))
+                self.assertTrue(store.delete_if_unreferenced(s1.reference, is_referenced_check=lambda _r: False))
+                self.assertFalse(store.exists(s1.reference))
+
+                # Cross-account Colab resume state round-trip
+                job_id = str(uuid4())
+                blob = b"colab-checkpoint-part-0000"
+                bsha = hashlib.sha256(blob).hexdigest()
+                store.put_resume_file(job_id, f"blobs/{bsha}.part0000", blob, expected_sha256=bsha)
+                store.put_resume_file(job_id, "resume-manifest.json", b'{"step":5}', content_type="application/json")
+                listed = {f["name"]: f for f in store.list_resume_files(job_id)}
+                self.assertIn("resume-manifest.json", listed)
+                self.assertIn(f"blobs/{bsha}.part0000", listed)
+                rmeta, rstream = store.open_resume_file_stream(job_id, f"blobs/{bsha}.part0000", expected_sha256=bsha)
+                self.assertEqual(rmeta.size_bytes, len(blob))
+                self.assertEqual(b"".join(rstream), blob)
+                self.assertTrue(store.delete_resume_file(job_id, f"blobs/{bsha}.part0000"))
+
 
 if __name__ == "__main__":
     unittest.main()

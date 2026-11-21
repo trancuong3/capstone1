@@ -416,7 +416,7 @@ export function ReadingLayout({
           </div>
         ) : latestTranscript ? (
           <p className="mx-auto w-full max-w-[1008px] px-1 text-body text-muted">
-            Bé vừa đọc: “{latestTranscript}”
+            Bé vừa đọc: <span>“{latestTranscript}”</span>
           </p>
         ) : null
       ) : latestTranscript ? (

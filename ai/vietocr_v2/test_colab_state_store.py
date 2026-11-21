@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from .colab_state_store import GCSJobStateStore
+from .colab_state_store import GCSJobStateStore, RemoteBackendJobStateStore
 
 
 JOB_ID = "a5fd82cb-490a-4e59-bad3-64e8a6f88d70"
@@ -139,6 +139,97 @@ class ColabStateStoreTests(unittest.TestCase):
             names = set(client.store.objects)
             self.assertFalse(any(name.endswith(old_best.name) for name in names))
             self.assertTrue(any(name.endswith(new_best.name) for name in names))
+
+    def test_remote_backend_resume_store_works_across_different_colab_accounts_with_chunking(self):
+        """Worker A (Account A) syncs chunked checkpoint via backend -> Worker B (Account B) restores intact."""
+        import hashlib
+
+        remote_objects: dict[str, bytes] = {}
+
+        class _FakeResp:
+            def __init__(self, data: bytes):
+                self._data = data
+            def raise_for_status(self):
+                return None
+            def iter_content(self, chunk_size=1024):
+                for i in range(0, len(self._data), chunk_size):
+                    yield self._data[i : i + chunk_size]
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+
+        class _FakeSession:
+            def get(self, url, params=None, stream=True, timeout=300):
+                rel = url.split("/resume-state/", 1)[1]
+                return _FakeResp(remote_objects[rel])
+
+        class _FakeWorker:
+            def __init__(self, wid: str):
+                self.worker_id = wid
+                self.api_base = "https://viread.example.test"
+                self.session = _FakeSession()
+
+            def call(self, method: str, path: str, **kwargs):
+                if method == "GET" and path.endswith("/resume-state"):
+                    return {
+                        "files": [
+                            {
+                                "name": name,
+                                "size_bytes": len(raw),
+                                "sha256": hashlib.sha256(raw).hexdigest(),
+                            }
+                            for name, raw in remote_objects.items()
+                        ]
+                    }
+                if method == "PUT":
+                    rel = path.split("/resume-state/", 1)[1]
+                    raw = kwargs["files"]["file"][1]
+                    expected = kwargs["data"]["expected_sha256"]
+                    assert hashlib.sha256(raw).hexdigest() == expected
+                    remote_objects[rel] = raw
+                    return {"name": rel, "sha256": expected, "size_bytes": len(raw)}
+                if method == "DELETE":
+                    rel = path.split("/resume-state/", 1)[1]
+                    remote_objects.pop(rel, None)
+                    return {"name": rel, "deleted": True}
+                raise AssertionError(f"Unexpected call {method} {path}")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Account A runs epoch 1 with a checkpoint larger than chunk_bytes -> splits into multi-part blobs
+            dir_a = Path(temp_dir) / "colab-acc-a"
+            dir_a.mkdir()
+            ckpt_bytes = b"V2-CHECKPOINT-" * 12000  # ~168 KiB (> 64 KiB test chunk size)
+            (dir_a / "latest.pt").write_bytes(ckpt_bytes)
+            old_best = dir_a / ("best-" + "a" * 64 + ".pth")
+            old_best.write_bytes(b"best-epoch-1")
+            store_a = RemoteBackendJobStateStore(
+                _FakeWorker("colab-account-a"), IDENTITY, dir_a, chunk_bytes=64 * 1024
+            )
+            store_a.sync()
+            self.assertIn("resume-manifest.json", remote_objects)
+            self.assertTrue(any(".part0000" in k for k in remote_objects))
+            self.assertTrue(any(".part0001" in k for k in remote_objects))
+
+            # Account B (completely fresh Colab runtime, NO drive.mount!) resumes exact state
+            dir_b = Path(temp_dir) / "colab-acc-b"
+            store_b = RemoteBackendJobStateStore(
+                _FakeWorker("colab-account-b"), IDENTITY, dir_b, chunk_bytes=64 * 1024
+            )
+            restored = store_b.restore()
+            self.assertIn("latest.pt", restored)
+            self.assertEqual((dir_b / "latest.pt").read_bytes(), ckpt_bytes)
+            self.assertEqual((dir_b / old_best.name).read_bytes(), b"best-epoch-1")
+
+            # Account B updates best checkpoint -> obsolete Account A blob is pruned cleanly
+            (dir_b / old_best.name).unlink()
+            new_best = dir_b / ("best-" + "b" * 64 + ".pth")
+            new_best.write_bytes(b"best-epoch-2")
+            store_b.sync()
+            old_sha = hashlib.sha256(b"best-epoch-1").hexdigest()
+            new_sha = hashlib.sha256(b"best-epoch-2").hexdigest()
+            self.assertNotIn(f"blobs/{old_sha}", remote_objects)
+            self.assertIn(f"blobs/{new_sha}", remote_objects)
 
 
 if __name__ == "__main__":

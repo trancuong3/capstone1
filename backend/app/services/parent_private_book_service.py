@@ -45,11 +45,14 @@ from app.schemas.parent_private_book import (
     ParentAcceptSpellingRequest,
     ParentAddPageRequest,
     ParentAddPageResponse,
+    ParentDeletePrivateBookResponse,
+    ParentDeletePrivatePageResponse,
     ParentPageSubmissionRead,
     ParentPrivateBookCreate,
     ParentPrivateBookDetailRead,
     ParentPrivateBookSummaryRead,
     ParentPrivateBookUpdate,
+    ParentPrivatePageEditRequest,
     ParentPrivatePageRead,
     ParentRequestAdminReviewRequest,
     ParentRetrySubmissionRequest,
@@ -64,6 +67,7 @@ from app.services.document_rasterizer_service import (
     MAX_DOCUMENT_BYTES,
     rasterize_uploaded_document,
 )
+from app.services.ocr_ai.child_safety import content_hash as safety_content_hash
 from app.services.ocr_engine import normalize_word
 from app.services.parent_private_book_pipeline import (
     align_edited_text_to_words,
@@ -85,6 +89,98 @@ def _safe_media_type(path: str) -> str:
     if lower.endswith(".webp"):
         return "image/webp"
     return "image/png"
+
+
+def _ext_from_path(path: str) -> str:
+    lower = (path or "").lower()
+    if lower.endswith(".jpg") or lower.endswith(".jpeg"):
+        return "jpg"
+    if lower.endswith(".webp"):
+        return "webp"
+    return "png"
+
+
+def _parse_source_declaration(raw: str | None) -> tuple[str, str | None]:
+    cleaned = (raw or "").strip()
+    if not cleaned:
+        return "OWNED_PHYSICAL_BOOK", None
+    if cleaned.startswith("[") and "]" in cleaned:
+        tag, rest = cleaned[1:].split("]", 1)
+        tag = tag.strip()
+        if tag in VALID_SOURCE_TYPES:
+            return tag, (rest.strip() or None)
+    return "OWNED_PHYSICAL_BOOK", cleaned
+
+
+def _format_source_declaration(source_type: str, source_note: str | None) -> str:
+    note = (source_note or "").strip()
+    declaration = f"[{source_type}] {note}" if note else f"[{source_type}]"
+    return declaration[:1000]
+
+
+def _reset_submission_for_full_recheck(
+    sub: ParentBookPageSubmission,
+    *,
+    now: datetime,
+    reset_ocr: bool,
+    auto_recheck: bool = True,
+) -> None:
+    """Reset check stages & invalidate any prior approval/commit so the submission re-runs cleanly."""
+    sub.SubmissionVersion = int(sub.SubmissionVersion) + 1
+    sub.OptimisticLockVersion = int(sub.OptimisticLockVersion) + 1
+    sub.CommittedPageId = None
+    sub.CommittedRevisionId = None
+    sub.CommittedAt = None
+
+    if reset_ocr:
+        sub.OcrStatus = "PENDING"
+        sub.OcrText = None
+        sub.OcrWordsJson = []
+        sub.OcrMetaJson = {}
+        sub.OcrHash = None
+        sub.OcrErrorCode = None
+        sub.IsImageOnly = False
+        sub.CandidateText = None
+        sub.CandidateHash = None
+        sub.CandidateWordsJson = []
+
+    # Always reset Stage 2 (Proofreading / Spelling)
+    sub.ProofreadStatus = "PENDING"
+    sub.ProofreadText = None
+    sub.ProofreadHash = None
+    sub.ProofreadSuggestionsJson = []
+    sub.UncertainWordIndicesJson = []
+    sub.ProofreadProviderEventsJson = []
+    sub.ProofreadErrorCode = None
+    sub.SpellingAcceptedAt = None
+
+    # Always reset Stage 3 (Tool Check / Child Safety / Rules)
+    sub.ToolCheckStatus = "PENDING"
+    sub.ToolCheckInputHash = None
+    sub.ToolCheckSuitability = None
+    sub.ToolCheckScopeJson = {}
+    sub.ToolCheckFindingsJson = []
+    sub.ToolCheckProviderEventsJson = []
+    sub.ToolCheckErrorCode = None
+    sub.ToolCheckPolicyBlocked = False
+    sub.ToolCheckWorkflowId = None
+    sub.ToolCheckCompletedAt = None
+
+    # Always invalidate prior Admin approvals
+    sub.ApprovedSnapshotHash = None
+    sub.ApprovedSubmissionVersion = None
+    sub.ApprovedBy = None
+    sub.ApprovedAt = None
+    sub.AdminDecision = None
+    sub.AdminDecisionReason = None
+
+    # Release any worker lease & enqueue for full recheck
+    sub.WorkerId = None
+    sub.LeaseExpiresAt = None
+    sub.RetryAfter = None
+    sub.WorkflowStatus = "CHECKING" if auto_recheck else "NEEDS_RECHECK"
+    sub.TempExpiresAt = now + timedelta(days=STAGING_TTL_DAYS)
+    sub.UpdatedAt = now
 
 
 def _parent_safe_notice(sub: ParentBookPageSubmission) -> str | None:
@@ -407,6 +503,7 @@ class ParentPrivateBookService:
                 page_id=page.Id,
                 page_number=int(page.PageNumber),
                 current_verified_revision_id=page.CurrentVerifiedRevisionId,
+                verified_text=((rev.VerifiedText or "") if rev else ""),
                 verified_text_preview=((rev.VerifiedText or "")[:240] if rev else ""),
                 image_url=private_page_image_url(
                     book.Id,
@@ -436,32 +533,664 @@ class ParentPrivateBookService:
     async def update_book(
         self, actor_id: UUID, book_id: UUID, payload: ParentPrivateBookUpdate
     ) -> ParentPrivateBookSummaryRead:
+        """Edit private book metadata -> if anything changed, retire committed pages and re-check ALL pages from scratch."""
         await self._require_parent(actor_id)
-        book = await self.repo.get_owned_private_book(book_id, actor_id, lock=True)
+        book = await self.repo.get_owned_private_book(book_id, actor_id)
         if book is None:
             raise HTTPException(status_code=404, detail="Resource not found")
-        if payload.title is not None:
-            book.Title = payload.title
-            book.Name = payload.title[:250]
-        if payload.author is not None:
-            book.Author = payload.author
+        if book.ModerationStatus != MODERATION_ACTIVE or book.LifecycleStatus != "ACTIVE":
+            raise HTTPException(
+                status_code=409,
+                detail="Sách riêng đang bị đình chỉ hoặc ngừng hoạt động nên không thể chỉnh sửa.",
+            )
+
+        cur_source_type, cur_source_note = _parse_source_declaration(book.SourceDeclaration)
+        fields_set = payload.model_fields_set
+        new_title = payload.title if "title" in fields_set and payload.title is not None else book.Title
+        new_author = payload.author if "author" in fields_set else book.Author
         new_min = payload.min_grade if payload.min_grade is not None else int(book.MinGrade)
         new_max = payload.max_grade if payload.max_grade is not None else int(book.MaxGrade)
         if new_min > new_max:
             raise HTTPException(status_code=422, detail="Lớp tối thiểu không được lớn hơn lớp tối đa.")
-        book.MinGrade = new_min
-        book.MaxGrade = new_max
-        if payload.source_note is not None:
-            book.SourceDeclaration = payload.source_note[:1000]
-        await self.repo.commit()
-        await self.db.refresh(book)
-        committed_map = await self.repo.committed_page_counts([book.Id])
-        submissions = await self.repo.list_submissions_for_book(book.Id)
-        readable = await self.repo.is_private_book_readable(book.Id, actor_id)
+        new_source_type = payload.source_type if payload.source_type is not None else cur_source_type
+        new_source_note = payload.source_note if "source_note" in fields_set else cur_source_note
+        new_declaration = (
+            _format_source_declaration(new_source_type, new_source_note)
+            if ("source_type" in fields_set or "source_note" in fields_set)
+            else book.SourceDeclaration
+        )
+
+        changed = (
+            new_title != book.Title
+            or new_author != book.Author
+            or new_min != int(book.MinGrade)
+            or new_max != int(book.MaxGrade)
+            or new_declaration != book.SourceDeclaration
+        )
+        if not changed:
+            committed_map = await self.repo.committed_page_counts([book.Id])
+            submissions = await self.repo.list_submissions_for_book(book.Id)
+            readable = await self.repo.is_private_book_readable(book.Id, actor_id)
+            return self._serialize_book_summary(
+                book,
+                committed_count=committed_map.get(book.Id, 0),
+                submissions=submissions,
+                readable_for_children=readable,
+            )
+
+        # Snapshot committed pages into plain tuples BEFORE rollback so Storage I/O runs outside DB write locks
+        committed_snapshot = await self.repo.list_committed_pages(book_id)
+        existing_subs_snapshot = await self.repo.list_submissions_for_book(book_id)
+        linked_sub_id_by_page: dict[UUID, UUID] = {
+            sub.CommittedPageId: sub.Id
+            for sub in existing_subs_snapshot
+            if sub.CommittedPageId is not None
+        }
+        page_copies_todo: list[tuple[UUID, str, int, int, int]] = [
+            (page.Id, str(page.ImagePath), int(page.Width), int(page.Height), int(page.PageNumber))
+            for page, _rev in committed_snapshot
+        ]
+        await self.repo.rollback()
+
+        staged_copies: dict[UUID, tuple[str, str, int, int, str]] = {}
+        uploaded_paths: list[str] = []
+        try:
+            for page_id, image_path, page_width, page_height, page_number in page_copies_todo:
+                ext = _ext_from_path(image_path)
+                img_bytes = await asyncio.to_thread(
+                    download_object,
+                    image_path,
+                    bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
+                )
+                img_sha = hashlib.sha256(img_bytes).hexdigest()
+                target_sub_id = linked_sub_id_by_page.get(page_id) or uuid4()
+                fresh_path = (
+                    f"private-books/{actor_id}/{book_id}/staging/{target_sub_id}/"
+                    f"recheck-{uuid4().hex[:8]}.{ext}"
+                )
+                await asyncio.to_thread(
+                    upload_object,
+                    fresh_path,
+                    img_bytes,
+                    _safe_media_type(fresh_path),
+                    bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
+                    upsert=False,
+                )
+                uploaded_paths.append(fresh_path)
+                staged_copies[page_id] = (
+                    fresh_path,
+                    img_sha,
+                    page_width,
+                    page_height,
+                    f"trang-{page_number}.{ext}",
+                )
+
+            locked_book = await self.repo.get_owned_private_book(book_id, actor_id, lock=True)
+            if locked_book is None:
+                raise HTTPException(status_code=404, detail="Resource not found")
+            if locked_book.ModerationStatus != MODERATION_ACTIVE or locked_book.LifecycleStatus != "ACTIVE":
+                raise HTTPException(status_code=409, detail="Sách riêng đang bị đình chỉ hoặc ngừng hoạt động.")
+
+            locked_book.Title = new_title
+            locked_book.Name = new_title[:250]
+            locked_book.Author = new_author
+            locked_book.MinGrade = new_min
+            locked_book.MaxGrade = new_max
+            locked_book.SourceDeclaration = new_declaration
+
+            now = datetime.now(timezone.utc)
+            locked_pages = await self.repo.list_committed_pages(book_id, lock=True)
+            locked_subs = await self.repo.list_submissions_for_book(book_id, lock=True)
+            sub_by_committed_page: dict[UUID, ParentBookPageSubmission] = {
+                sub.CommittedPageId: sub
+                for sub in locked_subs
+                if sub.CommittedPageId is not None
+            }
+
+            reset_sub_ids: set[UUID] = set()
+            requeued_committed = 0
+            recheck_batch_id = uuid4()
+            new_submissions: list[ParentBookPageSubmission] = []
+            for idx, (page, _rev) in enumerate(locked_pages, start=1):
+                page.LifecycleStatus = "RETIRED"
+                requeued_committed += 1
+                copied = staged_copies.get(page.Id)
+                linked_sub = sub_by_committed_page.get(page.Id)
+                if linked_sub is not None:
+                    if copied is not None:
+                        linked_sub.SourceStoragePath = copied[0]
+                        linked_sub.SourceSha256 = copied[1]
+                    linked_sub.TargetPageNumber = int(page.PageNumber)
+                    if "source_type" in fields_set and payload.source_type is not None:
+                        linked_sub.SourceType = new_source_type
+                    if "source_note" in fields_set:
+                        linked_sub.SourceNote = new_source_note
+                    _reset_submission_for_full_recheck(
+                        linked_sub, now=now, reset_ocr=True, auto_recheck=True
+                    )
+                    reset_sub_ids.add(linked_sub.Id)
+                elif copied is not None:
+                    fresh_path, img_sha, width, height, fname = copied
+                    new_sub = ParentBookPageSubmission(
+                        Id=uuid4(),
+                        BookId=locked_book.Id,
+                        OwnerParentId=actor_id,
+                        BatchId=recheck_batch_id,
+                        BatchTotalPages=max(1, len(locked_pages)),
+                        SourcePageNumber=idx,
+                        TargetPageNumber=int(page.PageNumber),
+                        IdempotencyKey=f"book-edit-{recheck_batch_id.hex[:16]}-{idx}",
+                        SourceFileName=fname,
+                        SourceFormat="IMAGE",
+                        SourceStoragePath=fresh_path,
+                        SourceSha256=img_sha,
+                        ImageWidth=width,
+                        ImageHeight=height,
+                        SourceType=new_source_type,
+                        SourceNote=new_source_note,
+                        SubmissionVersion=1,
+                        OptimisticLockVersion=1,
+                        WorkflowStatus="CHECKING",
+                        OcrStatus="PENDING",
+                        ProofreadStatus="PENDING",
+                        ToolCheckStatus="PENDING",
+                        TempExpiresAt=now + timedelta(days=STAGING_TTL_DAYS),
+                        CreatedAt=now,
+                        UpdatedAt=now,
+                    )
+                    new_submissions.append(new_sub)
+                    reset_sub_ids.add(new_sub.Id)
+
+            if new_submissions:
+                await self.repo.add_submissions(new_submissions)
+
+            reset_staged = 0
+            for sub in locked_subs:
+                if sub.Id in reset_sub_ids:
+                    continue
+                if "source_type" in fields_set and payload.source_type is not None:
+                    sub.SourceType = new_source_type
+                if "source_note" in fields_set:
+                    sub.SourceNote = new_source_note
+                _reset_submission_for_full_recheck(
+                    sub, now=now, reset_ocr=True, auto_recheck=True
+                )
+                reset_staged += 1
+
+            await self.repo.supersede_open_moderation_requests_for_book(locked_book.Id, now)
+            await self.repo.add_audit_log(
+                actor_id=actor_id,
+                action="parent_private_book.updated_full_recheck",
+                resource_type="book",
+                resource_id=locked_book.Id,
+                metadata={
+                    "requeued_committed_pages": requeued_committed,
+                    "reset_staged_submissions": reset_staged,
+                },
+            )
+            await self.repo.commit()
+            await self.db.refresh(locked_book)
+        except Exception:
+            await self.repo.rollback()
+            for p in uploaded_paths:
+                await asyncio.to_thread(delete_object, p, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET)
+            raise
+
+        committed_map = await self.repo.committed_page_counts([locked_book.Id])
+        submissions = await self.repo.list_submissions_for_book(locked_book.Id)
+        readable = await self.repo.is_private_book_readable(locked_book.Id, actor_id)
         return self._serialize_book_summary(
-            book,
-            committed_count=committed_map.get(book.Id, 0),
+            locked_book,
+            committed_count=committed_map.get(locked_book.Id, 0),
             submissions=submissions,
+            readable_for_children=readable,
+        )
+
+    async def delete_book(
+        self, actor_id: UUID, book_id: UUID
+    ) -> ParentDeletePrivateBookResponse:
+        """Delete an owned private book immediately (soft-retire to preserve FK history; NO re-check)."""
+        await self._require_parent(actor_id)
+        book = await self.repo.get_owned_private_book(book_id, actor_id, lock=True)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+
+        now = datetime.now(timezone.utc)
+        locked_pages = await self.repo.list_committed_pages(book_id, lock=True)
+        locked_subs = await self.repo.list_submissions_for_book(book_id, lock=True)
+
+        book.LifecycleStatus = "RETIRED"
+        retired_pages_count = 0
+        for page, _rev in locked_pages:
+            page.LifecycleStatus = "RETIRED"
+            retired_pages_count += 1
+
+        staging_paths: list[str] = []
+        cancelled_submissions_count = 0
+        for sub in locked_subs:
+            if sub.SourceStoragePath:
+                staging_paths.append(sub.SourceStoragePath)
+            sub.WorkflowStatus = "CANCELLED"
+            sub.WorkerId = None
+            sub.LeaseExpiresAt = None
+            sub.RetryAfter = None
+            sub.UpdatedAt = now
+            cancelled_submissions_count += 1
+
+        await self.repo.supersede_open_moderation_requests_for_book(book.Id, now)
+        await self.repo.add_audit_log(
+            actor_id=actor_id,
+            action="parent_private_book.deleted",
+            resource_type="book",
+            resource_id=book.Id,
+            metadata={
+                "retired_pages_count": retired_pages_count,
+                "cancelled_submissions_count": cancelled_submissions_count,
+            },
+        )
+        await self.repo.commit()
+
+        # Best-effort cleanup of staging objects not referenced by moderation history
+        preserved_paths = await self.repo.list_moderation_storage_paths_for_book(book_id)
+        for path in set(staging_paths):
+            if path and path not in preserved_paths:
+                try:
+                    await asyncio.to_thread(
+                        delete_object, path, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET
+                    )
+                except Exception:
+                    pass
+
+        return ParentDeletePrivateBookResponse(
+            status="deleted",
+            book_id=book_id,
+            retired_pages_count=retired_pages_count,
+            cancelled_submissions_count=cancelled_submissions_count,
+        )
+
+    async def edit_committed_page(
+        self,
+        actor_id: UUID,
+        book_id: UUID,
+        page_id: UUID,
+        payload: ParentPrivatePageEditRequest,
+        *,
+        base_url: str | None = None,
+    ) -> ParentPageSubmissionRead:
+        """Edit an already-committed page -> retire it from readable book and re-check from scratch."""
+        await self._require_parent(actor_id)
+        book = await self.repo.get_owned_private_book(book_id, actor_id)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        if book.ModerationStatus != MODERATION_ACTIVE or book.LifecycleStatus != "ACTIVE":
+            raise HTTPException(
+                status_code=409,
+                detail="Sách riêng đang bị đình chỉ hoặc ngừng hoạt động nên không thể sửa trang.",
+            )
+        page_row = await self.repo.get_committed_page(book_id, page_id)
+        if page_row is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        page_snap, rev_snap = page_row
+        linked_sub_snap = await self.repo.get_submission_by_committed_page_id(book_id, page_id)
+        base_words_raw: list[dict[str, Any]] = []
+        if rev_snap is not None:
+            rev_words = await self.repo.list_revision_words(rev_snap.Id)
+            base_words_raw = [
+                {
+                    "word_index": int(w.WordIndex),
+                    "line_index": int(w.LineIndex),
+                    "text": w.Text,
+                    "normalized_text": w.NormalizedText,
+                    "bounding_box": list(w.BoundingBox or []),
+                    "ocr_confidence": w.OCRConfidence,
+                }
+                for w in rev_words
+            ]
+        elif linked_sub_snap is not None:
+            base_words_raw = list(linked_sub_snap.OcrWordsJson or [])
+
+        existing_text = (rev_snap.VerifiedText or "").strip() if rev_snap is not None else ""
+        fields_set = payload.model_fields_set
+        text_changed = (
+            "candidate_text" in fields_set
+            and payload.candidate_text is not None
+            and payload.candidate_text.strip() != existing_text
+        )
+        page_num_changed = (
+            payload.page_number is not None and payload.page_number != int(page_snap.PageNumber)
+        )
+        cur_source_type, cur_source_note = (
+            (linked_sub_snap.SourceType, linked_sub_snap.SourceNote)
+            if linked_sub_snap is not None
+            else _parse_source_declaration(book.SourceDeclaration)
+        )
+        source_type_changed = (
+            payload.source_type is not None and payload.source_type != cur_source_type
+        )
+        source_note_changed = (
+            "source_note" in fields_set and payload.source_note != cur_source_note
+        )
+        if not (text_changed or page_num_changed or source_type_changed or source_note_changed):
+            raise HTTPException(
+                status_code=422,
+                detail="Không có thay đổi nào để cập nhật cho trang này.",
+            )
+
+        page_image_path = page_snap.ImagePath
+        page_width = int(page_snap.Width)
+        page_height = int(page_snap.Height)
+        target_sub_id = linked_sub_snap.Id if linked_sub_snap is not None else uuid4()
+        await self.repo.rollback()
+
+        ext = _ext_from_path(page_image_path)
+        img_bytes = await asyncio.to_thread(
+            download_object, page_image_path, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET
+        )
+        img_sha = hashlib.sha256(img_bytes).hexdigest()
+        fresh_staging_path = (
+            f"private-books/{actor_id}/{book_id}/staging/{target_sub_id}/"
+            f"edit-{uuid4().hex[:8]}.{ext}"
+        )
+        await asyncio.to_thread(
+            upload_object,
+            fresh_staging_path,
+            img_bytes,
+            _safe_media_type(fresh_staging_path),
+            bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
+            upsert=False,
+        )
+
+        try:
+            locked_book = await self.repo.get_owned_private_book(book_id, actor_id, lock=True)
+            if locked_book is None:
+                raise HTTPException(status_code=404, detail="Resource not found")
+            if locked_book.ModerationStatus != MODERATION_ACTIVE or locked_book.LifecycleStatus != "ACTIVE":
+                raise HTTPException(status_code=409, detail="Sách riêng đang bị đình chỉ hoặc ngừng hoạt động.")
+            locked_pair = await self.repo.get_committed_page(book_id, page_id, lock=True)
+            if locked_pair is None:
+                raise HTTPException(status_code=404, detail="Resource not found")
+            locked_page, _locked_rev = locked_pair
+            now = datetime.now(timezone.utc)
+            locked_page.LifecycleStatus = "RETIRED"
+
+            target_page_num = payload.page_number or int(locked_page.PageNumber)
+            eff_source_type = payload.source_type or cur_source_type
+            eff_source_note = payload.source_note if "source_note" in fields_set else cur_source_note
+
+            sub = await self.repo.get_submission_by_committed_page_id(book_id, page_id, lock=True)
+            if sub is None:
+                sub = ParentBookPageSubmission(
+                    Id=target_sub_id,
+                    BookId=locked_book.Id,
+                    OwnerParentId=actor_id,
+                    BatchId=uuid4(),
+                    BatchTotalPages=1,
+                    SourcePageNumber=int(locked_page.PageNumber),
+                    TargetPageNumber=target_page_num,
+                    IdempotencyKey=f"page-edit-{uuid4().hex[:16]}",
+                    SourceFileName=f"trang-{int(locked_page.PageNumber)}.{ext}",
+                    SourceFormat="IMAGE",
+                    SourceStoragePath=fresh_staging_path,
+                    SourceSha256=img_sha,
+                    ImageWidth=page_width,
+                    ImageHeight=page_height,
+                    SourceType=eff_source_type,
+                    SourceNote=eff_source_note,
+                    SubmissionVersion=1,
+                    OptimisticLockVersion=1,
+                    WorkflowStatus="CHECKING" if payload.auto_recheck else "NEEDS_RECHECK",
+                    OcrStatus="PENDING",
+                    ProofreadStatus="PENDING",
+                    ToolCheckStatus="PENDING",
+                    TempExpiresAt=now + timedelta(days=STAGING_TTL_DAYS),
+                    CreatedAt=now,
+                    UpdatedAt=now,
+                )
+                await self.repo.add_submissions([sub])
+            else:
+                sub.SourceStoragePath = fresh_staging_path
+                sub.SourceSha256 = img_sha
+                sub.TargetPageNumber = target_page_num
+                sub.SourceType = eff_source_type
+                sub.SourceNote = eff_source_note
+                _reset_submission_for_full_recheck(
+                    sub, now=now, reset_ocr=True, auto_recheck=payload.auto_recheck
+                )
+
+            if text_changed and payload.candidate_text is not None:
+                new_text = payload.candidate_text.strip()
+                if new_text:
+                    aligned_words = align_edited_text_to_words(new_text, base_words_raw)
+                    sub.OcrStatus = "COMPLETED"
+                    sub.OcrText = new_text
+                    sub.OcrWordsJson = aligned_words
+                    sub.OcrHash = safety_content_hash(new_text)
+                    sub.OcrErrorCode = None
+                    sub.IsImageOnly = False
+                    sub.CandidateText = new_text
+                    sub.CandidateWordsJson = aligned_words
+                    sub.CandidateHash = compute_candidate_hash(
+                        new_text, source_sha256=img_sha, is_image_only=False
+                    )
+                    # Proofreading (Stage 2) and Tool Check (Stage 3) stay PENDING to re-check from scratch!
+
+            await self.repo.supersede_open_moderation_requests(sub.Id, now)
+            await self.repo.add_audit_log(
+                actor_id=actor_id,
+                action="parent_private_book.page.edited_recheck",
+                resource_type="book_page",
+                resource_id=locked_page.Id,
+                metadata={
+                    "book_id": str(locked_book.Id),
+                    "submission_id": str(sub.Id),
+                    "submission_version": int(sub.SubmissionVersion),
+                    "target_page_number": target_page_num,
+                },
+            )
+            await self.repo.commit()
+            await self.db.refresh(sub)
+        except Exception:
+            await self.repo.rollback()
+            await asyncio.to_thread(
+                delete_object, fresh_staging_path, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET
+            )
+            raise
+
+        return self._serialize_submission(locked_book, sub, base_url=base_url)
+
+    async def replace_committed_page_file(
+        self,
+        actor_id: UUID,
+        book_id: UUID,
+        page_id: UUID,
+        upload: UploadFile,
+        *,
+        source_type: str | None = None,
+        source_note: str | None = None,
+        base_url: str | None = None,
+    ) -> ParentPageSubmissionRead:
+        """Replace image of a committed page -> retire old page and run full OCR -> Proofread -> Tool Check."""
+        await self._require_parent(actor_id)
+        book = await self.repo.get_owned_private_book(book_id, actor_id)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        if book.ModerationStatus != MODERATION_ACTIVE or book.LifecycleStatus != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Sách riêng đang bị đình chỉ hoặc ngừng hoạt động.")
+        page_row = await self.repo.get_committed_page(book_id, page_id)
+        if page_row is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        linked_sub_snap = await self.repo.get_submission_by_committed_page_id(book_id, page_id)
+        target_sub_id = linked_sub_snap.Id if linked_sub_snap is not None else uuid4()
+        cur_source_type, cur_source_note = (
+            (linked_sub_snap.SourceType, linked_sub_snap.SourceNote)
+            if linked_sub_snap is not None
+            else _parse_source_declaration(book.SourceDeclaration)
+        )
+        await self.repo.rollback()
+
+        if source_type is not None and source_type not in VALID_SOURCE_TYPES:
+            raise HTTPException(status_code=422, detail="Loại nguồn sử dụng không hợp lệ.")
+
+        raw_bytes = await upload.read(MAX_DOCUMENT_BYTES + 1)
+        if not raw_bytes:
+            raise HTTPException(status_code=422, detail="The uploaded document is empty or corrupted")
+        if len(raw_bytes) > MAX_DOCUMENT_BYTES:
+            raise HTTPException(status_code=413, detail="Document exceeds the 50 MB limit")
+
+        bundle = await asyncio.to_thread(
+            rasterize_uploaded_document,
+            filename=upload.filename or "page.png",
+            content_type=upload.content_type or "",
+            data=raw_bytes,
+        )
+        if len(bundle.pages) != 1:
+            raise HTTPException(
+                status_code=422,
+                detail="Khi thay ảnh cho một trang cụ thể, hãy chọn đúng 1 ảnh hoặc tài liệu 1 trang.",
+            )
+        page_img = bundle.pages[0]
+        new_sha = hashlib.sha256(page_img.image_bytes).hexdigest()
+        new_storage_path = (
+            f"private-books/{actor_id}/{book_id}/staging/{target_sub_id}/"
+            f"replace-{uuid4().hex[:8]}.{page_img.extension}"
+        )
+        await asyncio.to_thread(
+            upload_object,
+            new_storage_path,
+            page_img.image_bytes,
+            page_img.content_type,
+            bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
+            upsert=False,
+        )
+
+        try:
+            locked_book = await self.repo.get_owned_private_book(book_id, actor_id, lock=True)
+            if locked_book is None:
+                raise HTTPException(status_code=404, detail="Resource not found")
+            if locked_book.ModerationStatus != MODERATION_ACTIVE or locked_book.LifecycleStatus != "ACTIVE":
+                raise HTTPException(status_code=409, detail="Sách riêng đang bị đình chỉ hoặc ngừng hoạt động.")
+            locked_pair = await self.repo.get_committed_page(book_id, page_id, lock=True)
+            if locked_pair is None:
+                raise HTTPException(status_code=404, detail="Resource not found")
+            locked_page, _locked_rev = locked_pair
+            now = datetime.now(timezone.utc)
+            locked_page.LifecycleStatus = "RETIRED"
+
+            eff_source_type = source_type or cur_source_type
+            eff_source_note = (
+                (source_note.strip()[:1000] or None) if source_note is not None else cur_source_note
+            )
+
+            sub = await self.repo.get_submission_by_committed_page_id(book_id, page_id, lock=True)
+            if sub is None:
+                sub = ParentBookPageSubmission(
+                    Id=target_sub_id,
+                    BookId=locked_book.Id,
+                    OwnerParentId=actor_id,
+                    BatchId=uuid4(),
+                    BatchTotalPages=1,
+                    SourcePageNumber=int(locked_page.PageNumber),
+                    TargetPageNumber=int(locked_page.PageNumber),
+                    IdempotencyKey=f"page-replace-{uuid4().hex[:16]}",
+                    SourceFileName=bundle.file_name,
+                    SourceFormat=bundle.source_format,
+                    SourceStoragePath=new_storage_path,
+                    SourceSha256=new_sha,
+                    ImageWidth=page_img.width,
+                    ImageHeight=page_img.height,
+                    SourceType=eff_source_type,
+                    SourceNote=eff_source_note,
+                    SubmissionVersion=1,
+                    OptimisticLockVersion=1,
+                    WorkflowStatus="CHECKING",
+                    OcrStatus="PENDING",
+                    ProofreadStatus="PENDING",
+                    ToolCheckStatus="PENDING",
+                    TempExpiresAt=now + timedelta(days=STAGING_TTL_DAYS),
+                    CreatedAt=now,
+                    UpdatedAt=now,
+                )
+                await self.repo.add_submissions([sub])
+            else:
+                sub.SourceFileName = bundle.file_name
+                sub.SourceFormat = bundle.source_format
+                sub.SourceStoragePath = new_storage_path
+                sub.SourceSha256 = new_sha
+                sub.ImageWidth = page_img.width
+                sub.ImageHeight = page_img.height
+                sub.TargetPageNumber = int(locked_page.PageNumber)
+                sub.SourceType = eff_source_type
+                sub.SourceNote = eff_source_note
+                _reset_submission_for_full_recheck(
+                    sub, now=now, reset_ocr=True, auto_recheck=True
+                )
+
+            await self.repo.supersede_open_moderation_requests(sub.Id, now)
+            await self.repo.add_audit_log(
+                actor_id=actor_id,
+                action="parent_private_book.page.replaced_recheck",
+                resource_type="book_page",
+                resource_id=locked_page.Id,
+                metadata={
+                    "book_id": str(locked_book.Id),
+                    "submission_id": str(sub.Id),
+                    "submission_version": int(sub.SubmissionVersion),
+                    "target_page_number": int(locked_page.PageNumber),
+                },
+            )
+            await self.repo.commit()
+            await self.db.refresh(sub)
+        except Exception:
+            await self.repo.rollback()
+            await asyncio.to_thread(
+                delete_object, new_storage_path, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET
+            )
+            raise
+
+        return self._serialize_submission(locked_book, sub, base_url=base_url)
+
+    async def delete_committed_page(
+        self, actor_id: UUID, book_id: UUID, page_id: UUID
+    ) -> ParentDeletePrivatePageResponse:
+        """Delete a committed page immediately (soft-retire to preserve FK history; NO re-check)."""
+        await self._require_parent(actor_id)
+        book = await self.repo.get_owned_private_book(book_id, actor_id, lock=True)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        locked_pair = await self.repo.get_committed_page(book_id, page_id, lock=True)
+        if locked_pair is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        locked_page, _locked_rev = locked_pair
+
+        now = datetime.now(timezone.utc)
+        locked_page.LifecycleStatus = "RETIRED"
+        linked_sub = await self.repo.get_submission_by_committed_page_id(book_id, page_id, lock=True)
+        if linked_sub is not None and linked_sub.WorkflowStatus != "CANCELLED":
+            linked_sub.WorkflowStatus = "CANCELLED"
+            linked_sub.WorkerId = None
+            linked_sub.LeaseExpiresAt = None
+            linked_sub.RetryAfter = None
+            linked_sub.UpdatedAt = now
+
+        await self.repo.add_audit_log(
+            actor_id=actor_id,
+            action="parent_private_book.page.deleted",
+            resource_type="book_page",
+            resource_id=locked_page.Id,
+            metadata={
+                "book_id": str(book.Id),
+                "page_number": int(locked_page.PageNumber),
+            },
+        )
+        await self.repo.commit()
+
+        committed_map = await self.repo.committed_page_counts([book.Id])
+        readable = await self.repo.is_private_book_readable(book.Id, actor_id)
+        return ParentDeletePrivatePageResponse(
+            status="deleted",
+            book_id=book.Id,
+            page_id=page_id,
+            committed_page_count=committed_map.get(book.Id, 0),
             readable_for_children=readable,
         )
 
@@ -720,19 +1449,14 @@ class ParentPrivateBookService:
 
         now = datetime.now(timezone.utc)
         changed = False
+        text_changed = False
+        new_text_value: str | None = None
         if payload.candidate_text is not None:
             new_text = payload.candidate_text.strip()
             if new_text != (sub.CandidateText or "").strip():
                 changed = True
-                sub.CandidateText = new_text
-                sub.CandidateWordsJson = align_edited_text_to_words(
-                    new_text, list(sub.OcrWordsJson or [])
-                )
-                sub.IsImageOnly = not bool(new_text)
-                if new_text and sub.OcrStatus == "NO_TEXT_DETECTED":
-                    sub.OcrStatus = "COMPLETED"
-                    sub.ProofreadStatus = "SKIPPED"
-                sub.SpellingAcceptedAt = now
+                text_changed = True
+                new_text_value = new_text
 
         if payload.source_type is not None and payload.source_type != sub.SourceType:
             sub.SourceType = payload.source_type
@@ -746,33 +1470,32 @@ class ParentPrivateBookService:
             await self.repo.rollback()
             return dto
 
-        # Invalidate previous Tool Check AND any prior Admin approval!
-        sub.SubmissionVersion = int(sub.SubmissionVersion) + 1
-        sub.OptimisticLockVersion = int(sub.OptimisticLockVersion) + 1
-        sub.CandidateHash = compute_candidate_hash(
-            sub.CandidateText,
-            source_sha256=sub.SourceSha256,
-            is_image_only=bool(sub.IsImageOnly),
-        )
-        sub.ToolCheckStatus = "PENDING"
-        sub.ToolCheckInputHash = None
-        sub.ToolCheckSuitability = None
-        sub.ToolCheckFindingsJson = []
-        sub.ToolCheckErrorCode = None
-        sub.ToolCheckPolicyBlocked = False
-        sub.ToolCheckCompletedAt = None
-        sub.ApprovedSnapshotHash = None
-        sub.ApprovedSubmissionVersion = None
-        sub.ApprovedBy = None
-        sub.ApprovedAt = None
-        sub.AdminDecision = None
-        sub.AdminDecisionReason = None
-        sub.WorkerId = None
-        sub.LeaseExpiresAt = None
-        sub.RetryAfter = None
-        sub.WorkflowStatus = "CHECKING" if payload.auto_recheck else "NEEDS_RECHECK"
-        sub.TempExpiresAt = now + timedelta(days=STAGING_TTL_DAYS)
-        sub.UpdatedAt = now
+        # Full re-check from scratch on any edit:
+        # - If text was cleared to empty OR only source metadata changed -> reset all 3 stages (OCR -> Proofread -> Tool Check).
+        # - If parent typed non-empty text -> preserve their text as OCR input and reset Stage 2 Proofreading + Stage 3 Tool Check + Admin approvals.
+        base_words = list(sub.OcrWordsJson or [])
+        if text_changed and new_text_value:
+            aligned_words = align_edited_text_to_words(new_text_value, base_words)
+            _reset_submission_for_full_recheck(
+                sub, now=now, reset_ocr=False, auto_recheck=payload.auto_recheck
+            )
+            sub.OcrStatus = "COMPLETED"
+            sub.OcrText = new_text_value
+            sub.OcrWordsJson = aligned_words
+            sub.OcrHash = safety_content_hash(new_text_value)
+            sub.OcrErrorCode = None
+            sub.IsImageOnly = False
+            sub.CandidateText = new_text_value
+            sub.CandidateWordsJson = aligned_words
+            sub.CandidateHash = compute_candidate_hash(
+                new_text_value,
+                source_sha256=sub.SourceSha256,
+                is_image_only=False,
+            )
+        else:
+            _reset_submission_for_full_recheck(
+                sub, now=now, reset_ocr=True, auto_recheck=payload.auto_recheck
+            )
 
         await self.repo.supersede_open_moderation_requests(sub.Id, now)
         await self.repo.commit()

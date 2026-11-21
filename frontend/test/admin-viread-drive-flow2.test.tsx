@@ -172,6 +172,18 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
       }),
       startDriveConnect: vi.fn(),
       completeDriveCallback: vi.fn(),
+      connectDriveAppsScript: vi.fn().mockResolvedValue({
+        ...connectedDriveStatus,
+        connection_mode: "apps_script_bridge",
+        oauth_scope: "apps_script_bridge",
+        account_email: "cuongtran290605@gmail.com",
+      }),
+      connectDriveDesktop: vi.fn().mockResolvedValue({
+        ...connectedDriveStatus,
+        connection_mode: "drive_desktop_sync",
+        oauth_scope: "drive_desktop_sync",
+        account_email: "cuongtran290605@gmail.com",
+      }),
       decide: vi.fn(),
       retry: vi.fn(),
       deleteJob: vi.fn(),
@@ -324,6 +336,126 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
       expect(
         screen.getByRole("button", { name: /Phê duyệt model/i }),
       ).not.toBeDisabled();
+    });
+  });
+
+  it("connects via zero-card Apps Script Bridge from the Admin UI", async () => {
+    mockService.overview = vi.fn().mockResolvedValue(
+      makeOverview({
+        google_drive: {
+          ...connectedDriveStatus,
+          status: "DISCONNECTED",
+          connected: false,
+          connection_mode: null,
+          oauth_configured: false,
+          apps_script_readiness: {
+            bridge_ready: true,
+            encryption_key_configured: true,
+            server_secret_configured: true,
+            web_app_url_configured: false,
+            required_account_email: "cuongtran290605@gmail.com",
+          },
+          required_account_email: "cuongtran290605@gmail.com",
+          account_email: null,
+          oauth_scope: null,
+          scope_valid: false,
+        },
+      }),
+    );
+
+    renderScreen();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", {
+          name: /Kết nối không cần thẻ \(Apps Script\)/i,
+        }),
+      ).toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole("button", {
+        name: /Kết nối không cần thẻ \(Apps Script\)/i,
+      }),
+    );
+
+    const urlInput = screen.getByPlaceholderText(
+      /https:\/\/script\.google\.com\/macros\/s\/\.\.\.\/exec/i,
+    );
+    await user.type(
+      urlInput,
+      "https://script.google.com/macros/s/AKfycbzViReadBridgeTestDeployment0123456789/exec",
+    );
+    await user.click(
+      screen.getByRole("button", { name: /Xác minh & Lưu kết nối Bridge/i }),
+    );
+
+    await waitFor(() => {
+      expect(mockService.connectDriveAppsScript).toHaveBeenCalledWith({
+        web_app_url:
+          "https://script.google.com/macros/s/AKfycbzViReadBridgeTestDeployment0123456789/exec",
+      });
+    });
+  });
+
+  it("connects via official Google Drive for Desktop mount from the Admin UI", async () => {
+    mockService.overview = vi.fn().mockResolvedValue(
+      makeOverview({
+        google_drive: {
+          ...connectedDriveStatus,
+          status: "DISCONNECTED",
+          connected: false,
+          connection_mode: null,
+          oauth_configured: false,
+          drive_desktop_readiness: {
+            desktop_ready: true,
+            encryption_key_configured: true,
+            detected_mounts: [
+              {
+                drive_root: "G:\\My Drive",
+                flow2_root:
+                  "G:\\My Drive\\ViRead\\OCR-Training\\Flow2-Admin-Verified",
+                account_email: "cuongtran290605@gmail.com",
+              },
+            ],
+            default_mount_path: "G:\\My Drive",
+            required_account_email: "cuongtran290605@gmail.com",
+          },
+          required_account_email: "cuongtran290605@gmail.com",
+          account_email: null,
+          oauth_scope: null,
+          scope_valid: false,
+        },
+      }),
+    );
+
+    renderScreen();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", {
+          name: /Kết nối Google Drive for Desktop \(0 thẻ\)/i,
+        }),
+      ).toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole("button", {
+        name: /Kết nối Google Drive for Desktop \(0 thẻ\)/i,
+      }),
+    );
+    await user.click(
+      screen.getByRole("button", {
+        name: /Xác minh & Lưu kết nối Drive Desktop/i,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(mockService.connectDriveDesktop).toHaveBeenCalledWith({
+        sync_root_path: "G:\\My Drive",
+      });
     });
   });
 });

@@ -102,8 +102,10 @@ class ParentPrivateBookRepository:
         )
         return found is not None
 
-    async def list_committed_pages(self, book_id: UUID) -> list[tuple[BookPage, PageRevision | None]]:
-        result = await self.db.execute(
+    async def list_committed_pages(
+        self, book_id: UUID, *, lock: bool = False
+    ) -> list[tuple[BookPage, PageRevision | None]]:
+        query = (
             select(BookPage, PageRevision)
             .outerjoin(
                 PageRevision,
@@ -118,12 +120,15 @@ class ParentPrivateBookRepository:
             )
             .order_by(BookPage.PageNumber.asc(), BookPage.Id.asc())
         )
+        if lock:
+            query = query.with_for_update(of=BookPage)
+        result = await self.db.execute(query)
         return [(row[0], row[1]) for row in result.all()]
 
     async def get_committed_page(
-        self, book_id: UUID, page_id: UUID
+        self, book_id: UUID, page_id: UUID, *, lock: bool = False
     ) -> tuple[BookPage, PageRevision | None] | None:
-        result = await self.db.execute(
+        query = (
             select(BookPage, PageRevision)
             .outerjoin(
                 PageRevision,
@@ -138,8 +143,19 @@ class ParentPrivateBookRepository:
                 BookPage.LifecycleStatus == "ACTIVE",
             )
         )
+        if lock:
+            query = query.with_for_update(of=BookPage)
+        result = await self.db.execute(query)
         row = result.one_or_none()
         return (row[0], row[1]) if row is not None else None
+
+    async def list_revision_words(self, revision_id: UUID) -> list[PageRevisionWord]:
+        result = await self.db.execute(
+            select(PageRevisionWord)
+            .where(PageRevisionWord.PageRevisionId == revision_id)
+            .order_by(PageRevisionWord.WordIndex.asc())
+        )
+        return list(result.scalars().all())
 
     async def get_page_revision(self, page_id: UUID, revision_id: UUID) -> PageRevision | None:
         return await self.db.scalar(
@@ -185,21 +201,38 @@ class ParentPrivateBookRepository:
     # Staged Page Submissions
     # ------------------------------------------------------------------
     async def list_submissions_for_book(
-        self, book_id: UUID, *, include_cancelled: bool = False
+        self, book_id: UUID, *, include_cancelled: bool = False, lock: bool = False
     ) -> list[ParentBookPageSubmission]:
         query = select(ParentBookPageSubmission).where(
             ParentBookPageSubmission.BookId == book_id
         )
         if not include_cancelled:
             query = query.where(ParentBookPageSubmission.WorkflowStatus != "CANCELLED")
-        result = await self.db.execute(
-            query.order_by(
-                ParentBookPageSubmission.CreatedAt.desc(),
-                ParentBookPageSubmission.SourcePageNumber.asc(),
-                ParentBookPageSubmission.Id.asc(),
-            )
+        query = query.order_by(
+            ParentBookPageSubmission.CreatedAt.desc(),
+            ParentBookPageSubmission.SourcePageNumber.asc(),
+            ParentBookPageSubmission.Id.asc(),
         )
+        if lock:
+            query = query.with_for_update()
+        result = await self.db.execute(query)
         return list(result.scalars().all())
+
+    async def get_submission_by_committed_page_id(
+        self, book_id: UUID, page_id: UUID, *, lock: bool = False
+    ) -> ParentBookPageSubmission | None:
+        query = (
+            select(ParentBookPageSubmission)
+            .where(
+                ParentBookPageSubmission.BookId == book_id,
+                ParentBookPageSubmission.CommittedPageId == page_id,
+            )
+            .order_by(ParentBookPageSubmission.UpdatedAt.desc())
+            .limit(1)
+        )
+        if lock:
+            query = query.with_for_update()
+        return await self.db.scalar(query)
 
     async def list_submissions_for_books(
         self, book_ids: list[UUID]
@@ -358,6 +391,30 @@ class ParentPrivateBookRepository:
             )
         )
 
+    async def supersede_open_moderation_requests_for_book(
+        self, book_id: UUID, now: datetime
+    ) -> None:
+        await self.db.execute(
+            update(ParentBookModerationRequest)
+            .where(
+                ParentBookModerationRequest.BookId == book_id,
+                ParentBookModerationRequest.Status == "PENDING_ADMIN",
+            )
+            .values(
+                PreviousStatus="PENDING_ADMIN",
+                Status="SUPERSEDED",
+                UpdatedAt=now,
+            )
+        )
+
+    async def list_moderation_storage_paths_for_book(self, book_id: UUID) -> set[str]:
+        result = await self.db.execute(
+            select(ParentBookModerationRequest.SourceStoragePath).where(
+                ParentBookModerationRequest.BookId == book_id
+            )
+        )
+        return {str(row[0]) for row in result.all() if row[0]}
+
     async def list_moderation_history(
         self, submission_id: UUID
     ) -> list[ParentBookModerationRequest]:
@@ -374,7 +431,10 @@ class ParentPrivateBookRepository:
     async def list_all_private_books_for_admin(
         self, *, search: str | None = None
     ) -> list[Book]:
-        query = select(Book).where(Book.VisibilityScope == VISIBILITY_PARENT_PRIVATE)
+        query = select(Book).where(
+            Book.VisibilityScope == VISIBILITY_PARENT_PRIVATE,
+            Book.LifecycleStatus == "ACTIVE",
+        )
         if search and search.strip():
             escaped = (
                 search.strip()
