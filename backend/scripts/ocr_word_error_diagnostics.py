@@ -10,6 +10,24 @@ import unicodedata
 MAX_ALIGNMENT_TOKENS = 512  # Bounds O(n*m) memory for malformed/unexpected text.
 
 
+def edge_punctuation_neutral_tokens(text: str) -> list[str]:
+    """Ignore only boundary punctuation/symbols; preserve Vietnamese letters.
+
+    This is an additional, diagnostic scoring view, NOT an OCR correction.
+    Embedded punctuation (for example hyphens inside words) is preserved.
+    """
+    tokens: list[str] = []
+    for raw in text.split():
+        start, end = 0, len(raw)
+        while start < end and unicodedata.category(raw[start]).startswith(("P", "S")):
+            start += 1
+        while end > start and unicodedata.category(raw[end - 1]).startswith(("P", "S")):
+            end -= 1
+        if token := raw[start:end]:
+            tokens.append(token)
+    return tokens
+
+
 def _without_diacritics(text: str) -> str:
     decomposed = unicodedata.normalize("NFD", text.casefold().replace("đ", "d"))
     return "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
