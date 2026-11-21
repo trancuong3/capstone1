@@ -17,7 +17,6 @@ import httpx
 import psycopg2
 from fastapi import FastAPI
 from PIL import Image, ImageDraw
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -225,7 +224,7 @@ CREATE TABLE public.adminaiworkflows (
   inputtext text NOT NULL,
   inputwords jsonb NOT NULL DEFAULT '[]'::jsonb,
   imagepath text NOT NULL,
-  imagehash varchar(64),
+  sourceimagesha256 varchar(64),
   originalocrhash varchar(64) NOT NULL,
   admininputhash varchar(64) NOT NULL,
   proofreadtext text,
@@ -256,7 +255,7 @@ CREATE TABLE public.adminaiworkflows (
   retryafter timestamptz,
   safetyconfirmedat timestamptz,
   safetyconfirmedby uuid,
-  imagesafetystatus varchar(32) NOT NULL DEFAULT 'NOT_REVIEWED',
+  imagesafetystatus varchar(40) NOT NULL DEFAULT 'UNASSESSED_NO_VISION_MODEL',
   imagesafetyreviewedby uuid,
   imagesafetyreviewedat timestamptz,
   imagesafetyreviewnote varchar(1000),
@@ -563,6 +562,46 @@ CREATE TABLE public.bookqualityreportfindings (
   reportid uuid NOT NULL REFERENCES public.bookcontentreports(id) ON DELETE CASCADE,
   findingid uuid NOT NULL REFERENCES public.bookqualityfindings(id) ON DELETE CASCADE,
   PRIMARY KEY (reportid, findingid)
+);
+
+CREATE TABLE public.bookrightsevidences (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  bookid uuid NOT NULL REFERENCES public.books(id) ON DELETE CASCADE,
+  pageid uuid REFERENCES public.bookpages(id) ON DELETE CASCADE,
+  scope varchar(8) NOT NULL DEFAULT 'BOOK',
+  status varchar(32) NOT NULL DEFAULT 'UNASSESSED',
+  sourcedescription varchar(500),
+  authororrightsholder varchar(300),
+  usagebasis varchar(120),
+  evidenceurlorref varchar(1000),
+  notes varchar(2000),
+  version integer NOT NULL DEFAULT 1,
+  contentfingerprint varchar(64),
+  reviewedby uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  reviewedbynamesnapshot varchar(160),
+  reviewedat timestamptz,
+  createdat timestamptz NOT NULL DEFAULT now(),
+  updatedat timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE public.bookrightsevidencehistory (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  evidenceid uuid NOT NULL REFERENCES public.bookrightsevidences(id) ON DELETE CASCADE,
+  bookid uuid NOT NULL REFERENCES public.books(id) ON DELETE CASCADE,
+  pageid uuid REFERENCES public.bookpages(id) ON DELETE SET NULL,
+  scope varchar(8) NOT NULL,
+  version integer NOT NULL,
+  fromstatus varchar(32),
+  tostatus varchar(32) NOT NULL,
+  sourcedescription varchar(500),
+  authororrightsholder varchar(300),
+  usagebasis varchar(120),
+  evidenceurlorref varchar(1000),
+  notes varchar(2000),
+  contentfingerprint varchar(64),
+  actorid uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  actornamesnapshot varchar(160),
+  createdat timestamptz NOT NULL DEFAULT now()
 );
 
 -- Grant permissive catalog-style SELECT privileges to anon/authenticated so our

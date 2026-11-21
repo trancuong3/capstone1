@@ -3,6 +3,7 @@
 import os
 import unittest
 import asyncio
+from datetime import datetime, timezone
 import json
 from uuid import UUID, uuid4
 from unittest.mock import patch
@@ -23,12 +24,14 @@ from app.models import (
     AdminAiWorkflow,
     AuditLog,
     BookPage,
+    BookRightsEvidence,
     PageRevision,
     PageRevisionWord,
 )
 from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.repositories.reading_content_repository import ReadingContentRepository
 from app.services.admin_ocr_service import AdminOcrService
+from app.services.ocr_ai.child_safety import content_hash as safety_content_hash
 from app.services.reading_content_service import ReadingContentService
 
 
@@ -167,6 +170,9 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
             await connection.run_sync(
                 lambda sync_connection: AdminAiWorkflow.__table__.create(sync_connection)
+            )
+            await connection.run_sync(
+                lambda sync_connection: BookRightsEvidence.__table__.create(sync_connection)
             )
             await connection.execute(
                 text("INSERT INTO profiles (id, role) VALUES (:id, 'admin')"),
@@ -444,12 +450,55 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             verified_revision_id = UUID(r2["page_revision_id"])
             await self._seed_public_revision_reference(verified_revision_id)
 
+            workflow_id = uuid4()
+            candidate_hash = safety_content_hash("Ngày xưa có em.")
+            now_utc = datetime.now(timezone.utc)
+            async with self.sessions() as session:
+                session.add(
+                    AdminAiWorkflow(
+                        Id=workflow_id,
+                        PageId=PAGE_ID,
+                        BookId=BOOK_ID,
+                        PageRevisionId=verified_revision_id,
+                        ActorId=ACTOR,
+                        IdempotencyKey=uuid4(),
+                        OriginalText="Ngày xưa có bé.",
+                        InputText="Ngày xưa có em.",
+                        InputWords=[],
+                        ImagePath="source/page.png",
+                        OriginalOcrHash=safety_content_hash("Ngày xưa có bé."),
+                        AdminInputHash=candidate_hash,
+                        ProofreadText="Ngày xưa có em.",
+                        ProofreadOutputHash=candidate_hash,
+                        CandidateText="Ngày xưa có em.",
+                        CandidateHash=candidate_hash,
+                        SafetyInputHash=candidate_hash,
+                        Suitability="SUITABLE",
+                        SafetyStatus="CONFIRMED",
+                        Findings=[],
+                        SafetyMetadata={
+                            "chunks_total": 1,
+                            "chunks_completed": 1,
+                            "all_chunks_completed": True,
+                        },
+                        Status="READY_FOR_ADMIN_REVIEW",
+                        Stage="COMPLETED",
+                        SafetyConfirmedAt=now_utc,
+                        SafetyConfirmedBy=ACTOR,
+                        ImageSafetyStatus="ADMIN_CONFIRMED_SAFE",
+                        ImageSafetyReviewedAt=now_utc,
+                        ImageSafetyReviewedBy=ACTOR,
+                    )
+                )
+                await session.commit()
+
             verified = await client.post(
                 f"/books/admin/pages/{PAGE_ID}/verify",
                 json={
                     "page_revision_id": r2["page_revision_id"],
                     "corrected_text": "Ngày xưa có em.",
                     "words": saved.json()["words"],
+                    "workflow_id": str(workflow_id),
                     "proofread_audit": {
                         "mode": "AI_CHECKED",
                         "checked_text": "Ngày xưa có em.",
@@ -500,10 +549,13 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 reading_repository = ReadingContentRepository(session)
                 reading = ReadingContentService(reading_repository)
                 reading_page = await reading.repository.verified_page(PAGE_ID, BOOK_ID)
-                # OCR verification is not book-level child approval. This
-                # fixture has no current book.children.approved audit decision,
-                # so the public reading path must continue to block the book.
-                self.assertIsNone(reading_page)
+                # Every active page in this single-page book has completed the full
+                # Kho sách verification gate (OCR + Proofreading + Text/Image Child
+                # Safety confirmed with zero findings) and the book is not rejected,
+                # so the verified page is immediately readable.
+                self.assertIsNotNone(reading_page)
+                self.assertEqual(reading_page.Id, PAGE_ID)
+                self.assertEqual(reading_page.CurrentVerifiedRevisionId, verified_revision_id)
 
             second_draft = await client.post(
                 f"/books/admin/pages/{PAGE_ID}/revisions/draft",
