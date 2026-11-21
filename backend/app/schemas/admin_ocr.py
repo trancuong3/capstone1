@@ -109,6 +109,8 @@ class AdminOcrProofreadAuditInput(BaseModel):
 class AdminOcrVerifyRequest(BaseModel):
     page_revision_id: UUID
     workflow_id: UUID | None = None
+    expected_image_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+    expected_rights_version: int | None = Field(default=None, ge=1)
     corrected_text: str = Field(min_length=1, max_length=500_000)
     words: list[AdminOcrWordInput] = Field(min_length=1, max_length=30_000)
     proofread_audit: AdminOcrProofreadAuditInput

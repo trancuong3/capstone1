@@ -15,11 +15,30 @@ BookContentIssueType = Literal[
     "IMAGE_QUALITY_ERROR",
     "DUPLICATE_PAGE",
     "PAGE_ORDER_ERROR",
+    "CHILD_SAFETY_CONCERN",
+    "COPYRIGHT_CONCERN",
     "OTHER",
 ]
 BookContentReportStatus = Literal["OPEN", "UNDER_REVIEW", "RESOLVED", "REJECTED"]
 BookQualityScanStatus = Literal["QUEUED", "RUNNING", "COMPLETED", "PARTIAL", "FAILED"]
 BookQualityFindingStatus = Literal["NEEDS_REVIEW", "CONFIRMED", "DISMISSED", "RESOLVED", "STALE"]
+BookRightsStatus = Literal[
+    "UNASSESSED",
+    "INSUFFICIENT_EVIDENCE",
+    "CONCERN_FLAGGED",
+    "RIGHTS_REVIEWED",
+]
+BookRightsScope = Literal["BOOK", "PAGE"]
+BookPageDiagnosticCode = Literal[
+    "OK",
+    "MISSING_IMAGE",
+    "EMPTY_OCR",
+    "OCR_ERROR",
+    "DUPLICATE_PAGE",
+    "SUSPECTED_MISSING_PAGE",
+    "UNVERIFIED_PAGE",
+    "IMAGE_ONLY_PAGE",
+]
 
 
 class BookContentReportCreate(BaseModel):
@@ -253,6 +272,81 @@ class BookQualityBookPage(BaseModel):
     alert_summary: dict[str, int] = Field(default_factory=dict)
 
 
+class BookRightsEvidenceUpsert(BaseModel):
+    scope: BookRightsScope = "BOOK"
+    page_id: UUID | None = None
+    status: BookRightsStatus
+    source_description: str | None = Field(default=None, max_length=500)
+    author_or_rights_holder: str | None = Field(default=None, max_length=300)
+    usage_basis: str | None = Field(default=None, max_length=120)
+    evidence_url_or_ref: str | None = Field(default=None, max_length=1000)
+    notes: str | None = Field(default=None, max_length=2000)
+
+    @field_validator(
+        "source_description",
+        "author_or_rights_holder",
+        "usage_basis",
+        "evidence_url_or_ref",
+        "notes",
+    )
+    @classmethod
+    def trim_optional(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class BookRightsEvidenceHistoryRead(BaseModel):
+    id: UUID
+    version: int
+    from_status: str | None
+    to_status: BookRightsStatus
+    source_description: str | None = None
+    author_or_rights_holder: str | None = None
+    usage_basis: str | None = None
+    evidence_url_or_ref: str | None = None
+    notes: str | None = None
+    content_fingerprint: str | None = None
+    actor_id: UUID | None = None
+    actor_name: str | None = None
+    created_at: datetime
+
+
+class BookRightsEvidenceRead(BaseModel):
+    id: UUID | None = None
+    book_id: UUID
+    page_id: UUID | None = None
+    scope: BookRightsScope = "BOOK"
+    status: BookRightsStatus = "UNASSESSED"
+    effective_status: str = "UNASSESSED"
+    is_stale: bool = False
+    source_description: str | None = None
+    author_or_rights_holder: str | None = None
+    usage_basis: str | None = None
+    evidence_url_or_ref: str | None = None
+    notes: str | None = None
+    version: int = 0
+    content_fingerprint: str | None = None
+    current_content_fingerprint: str | None = None
+    reviewed_by: UUID | None = None
+    reviewed_by_name: str | None = None
+    reviewed_at: datetime | None = None
+    updated_at: datetime | None = None
+    history: list[BookRightsEvidenceHistoryRead] = Field(default_factory=list)
+
+
+class BookPageDiagnosticRead(BaseModel):
+    page_id: UUID | None = None
+    page_number: int
+    lifecycle_status: str | None = None
+    verification_status: str | None = None
+    codes: list[BookPageDiagnosticCode] = Field(default_factory=list)
+    image_safety_status: str | None = None
+    text_safety_status: str | None = None
+    summary: str
+
+
 class BookQualityBookDetail(BaseModel):
     book_id: UUID
     book_title: str
@@ -262,6 +356,11 @@ class BookQualityBookDetail(BaseModel):
     ai_workflows: list[AdminAiWorkflowRead] = Field(default_factory=list)
     ai_workflow_summary: dict[str, int] = Field(default_factory=dict)
     assessment: BookApprovalAssessment
+    rights_evidence: BookRightsEvidenceRead | None = None
+    page_diagnostics: list[BookPageDiagnosticRead] = Field(default_factory=list)
+    completeness_disclaimer: str = (
+        "Hệ thống chỉ kiểm tra các trang đã tải lên; chưa thể khẳng định đủ số trang so với bản in gốc nếu chưa khai báo tổng số trang gốc."
+    )
     decision_history: list[dict] = Field(default_factory=list)
 
 

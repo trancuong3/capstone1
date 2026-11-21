@@ -18,6 +18,8 @@ from app.models.book_content_quality import (
     BookQualityPageScan,
     BookQualityReportFinding,
     BookQualityScanRun,
+    BookRightsEvidence,
+    BookRightsEvidenceHistory,
 )
 
 
@@ -1018,3 +1020,71 @@ class BookContentQualityRepository:
         )
         await self.db.commit()
         return bool(result.rowcount)
+
+    async def get_rights_evidence(
+        self,
+        book_id: UUID,
+        *,
+        page_id: UUID | None = None,
+        lock: bool = False,
+    ) -> BookRightsEvidence | None:
+        query = select(BookRightsEvidence).where(BookRightsEvidence.BookId == book_id)
+        if page_id is None:
+            query = query.where(
+                BookRightsEvidence.Scope == "BOOK",
+                BookRightsEvidence.PageId.is_(None),
+            )
+        else:
+            query = query.where(
+                BookRightsEvidence.Scope == "PAGE",
+                BookRightsEvidence.PageId == page_id,
+            )
+        if lock:
+            query = query.with_for_update()
+        return await self.db.scalar(query)
+
+    async def list_rights_evidences_for_books(
+        self, book_ids: list[UUID]
+    ) -> list[BookRightsEvidence]:
+        if not book_ids:
+            return []
+        result = await self.db.scalars(
+            select(BookRightsEvidence).where(
+                BookRightsEvidence.BookId.in_(book_ids),
+                BookRightsEvidence.Scope == "BOOK",
+                BookRightsEvidence.PageId.is_(None),
+            )
+        )
+        return list(result.all())
+
+    async def list_rights_history(
+        self, book_id: UUID, *, page_id: UUID | None = None
+    ) -> list[BookRightsEvidenceHistory]:
+        query = select(BookRightsEvidenceHistory).where(
+            BookRightsEvidenceHistory.BookId == book_id
+        )
+        if page_id is None:
+            query = query.where(
+                BookRightsEvidenceHistory.Scope == "BOOK",
+                BookRightsEvidenceHistory.PageId.is_(None),
+            )
+        else:
+            query = query.where(
+                BookRightsEvidenceHistory.Scope == "PAGE",
+                BookRightsEvidenceHistory.PageId == page_id,
+            )
+        result = await self.db.scalars(
+            query.order_by(
+                BookRightsEvidenceHistory.Version.desc(),
+                BookRightsEvidenceHistory.CreatedAt.desc(),
+            ).limit(50)
+        )
+        return list(result.all())
+
+    async def add_rights_evidence(self, row: BookRightsEvidence) -> None:
+        self.db.add(row)
+        await self.db.flush([row])
+
+    async def add_rights_history(self, row: BookRightsEvidenceHistory) -> None:
+        self.db.add(row)
+        await self.db.flush([row])

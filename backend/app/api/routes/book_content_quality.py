@@ -23,6 +23,8 @@ from app.schemas.book_content_quality import (
     BookQualityFindingUpdate,
     BookQualityScanDetail,
     BookQualityScanRead,
+    BookRightsEvidenceRead,
+    BookRightsEvidenceUpsert,
 )
 from app.services.book_content_quality_service import BookContentQualityService
 
@@ -74,7 +76,8 @@ async def list_admin_book_reports(
     report_status: Literal["OPEN", "UNDER_REVIEW", "RESOLVED", "REJECTED"] | None = Query(default=None, alias="status"),
     issue_type: Literal[
         "BOOK_METADATA_ERROR", "SPELLING_ERROR", "MISSING_CONTENT", "OCR_MISMATCH",
-        "IMAGE_QUALITY_ERROR", "DUPLICATE_PAGE", "PAGE_ORDER_ERROR", "OTHER",
+        "IMAGE_QUALITY_ERROR", "DUPLICATE_PAGE", "PAGE_ORDER_ERROR",
+        "CHILD_SAFETY_CONCERN", "COPYRIGHT_CONCERN", "OTHER",
     ] | None = Query(default=None),
     book_id: UUID | None = Query(default=None),
     search: str | None = Query(default=None, max_length=120),
@@ -150,6 +153,26 @@ async def get_admin_quality_book(
     db: AsyncSession = Depends(get_db),
 ):
     return await _service(db).get_book_detail(actor_id, book_id)
+
+
+@router.get("/admin/quality/books/{book_id}/rights", response_model=BookRightsEvidenceRead)
+async def get_admin_book_rights(
+    book_id: UUID,
+    page_id: UUID | None = Query(default=None),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _service(db).get_book_rights(actor_id, book_id, page_id=page_id)
+
+
+@router.put("/admin/quality/books/{book_id}/rights", response_model=BookRightsEvidenceRead)
+async def upsert_admin_book_rights(
+    book_id: UUID,
+    payload: BookRightsEvidenceUpsert,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _service(db).upsert_book_rights(actor_id, book_id, payload)
 
 
 @router.post(

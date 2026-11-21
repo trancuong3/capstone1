@@ -124,13 +124,33 @@ class AdminOcrVerifyAsyncResponseTests(unittest.IsolatedAsyncioTestCase):
             PageRevisionId=REVISION_ID,
             SafetyStatus="CONFIRMED",
             SafetyInputHash=safety_content_hash("Bé"),
+            ImageSafetyStatus="ADMIN_CONFIRMED_SAFE",
+            SourceImageSha256=None,
             OcrApprovedAt=None,
             OcrApprovedBy=None,
             FinalApprovedTextHash=None,
             ReviewEvents=[],
             UpdatedAt=None,
         )
-        db.scalar.return_value = workflow
+        rights = SimpleNamespace(
+            Id=UUID("66666666-6666-4666-8666-666666666666"),
+            Scope="BOOK",
+            Status="RIGHTS_REVIEWED",
+            SourceDescription="Nguồn mở mẫu",
+            UsageBasis="OPEN_LICENSE",
+            EvidenceUrlOrRef="https://example.org/license",
+            Version=1,
+        )
+
+        async def scalar_side_effect(query):
+            sql = str(query).lower()
+            if "adminaiworkflows" in sql:
+                return workflow
+            if "bookrightsevidences" in sql and "pageid is null" in sql:
+                return rights
+            return None
+
+        db.scalar.side_effect = scalar_side_effect
 
         async def serialize(page, revision, *, word_rows=None):
             rows = await service.repo.words(revision.Id)
@@ -157,15 +177,8 @@ class AdminOcrVerifyAsyncResponseTests(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-        async def rollback_after_commit(_service, _book_id):
-            await db.rollback()
-            return False
-
-        with patch(
-            "app.services.book_content_quality_service.BookContentQualityService.auto_publish_if_eligible",
-            new=rollback_after_commit,
-        ):
-            result = await service.verify(ACTOR_ID, PAGE_ID, payload)
+        db.commit = AsyncMock(side_effect=expire_loaded_rows)
+        result = await service.verify(ACTOR_ID, PAGE_ID, payload)
 
         self.assertEqual(result, (PAGE_ID, REVISION_ID, "VERIFIED", []))
         retry_result = await service.verify(ACTOR_ID, PAGE_ID, payload)
@@ -184,5 +197,4 @@ class AdminOcrVerifyAsyncResponseTests(unittest.IsolatedAsyncioTestCase):
         service.repo.update_revision_verification.assert_called_once()
         db.execute.assert_awaited_once()
         db.commit.assert_awaited_once()
-        db.rollback.assert_awaited_once()
 

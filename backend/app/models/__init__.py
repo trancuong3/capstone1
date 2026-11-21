@@ -15,6 +15,8 @@ from app.models.book_content_quality import (
     BookQualityPageScan,
     BookQualityReportFinding,
     BookQualityScanRun,
+    BookRightsEvidence,
+    BookRightsEvidenceHistory,
 )
 
 from .game_session import GameAttempt, GameRound, GameSession

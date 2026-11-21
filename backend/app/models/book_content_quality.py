@@ -23,7 +23,7 @@ class BookContentReport(Base):
         CheckConstraint(
             "issuetype IN ('BOOK_METADATA_ERROR', 'SPELLING_ERROR', 'MISSING_CONTENT', "
             "'OCR_MISMATCH', 'IMAGE_QUALITY_ERROR', 'DUPLICATE_PAGE', "
-            "'PAGE_ORDER_ERROR', 'OTHER')",
+            "'PAGE_ORDER_ERROR', 'CHILD_SAFETY_CONCERN', 'COPYRIGHT_CONCERN', 'OTHER')",
             name="ck_bookcontentreports_issue_type",
         ),
         CheckConstraint(
@@ -249,4 +249,74 @@ class BookContentReportHistory(Base):
     FromStatus = Column("fromstatus", String(20))
     ToStatus = Column("tostatus", String(20), nullable=False)
     Note = Column("note", String(2000))
+    CreatedAt = Column("createdat", DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class BookRightsEvidence(Base):
+    __tablename__ = "bookrightsevidences"
+    __table_args__ = (
+        CheckConstraint(
+            "scope IN ('BOOK', 'PAGE')",
+            name="ck_bookrightsevidences_scope",
+        ),
+        CheckConstraint(
+            "status IN ('UNASSESSED', 'INSUFFICIENT_EVIDENCE', 'CONCERN_FLAGGED', 'RIGHTS_REVIEWED')",
+            name="ck_bookrightsevidences_status",
+        ),
+        CheckConstraint(
+            "(scope = 'BOOK' AND pageid IS NULL) OR (scope = 'PAGE' AND pageid IS NOT NULL)",
+            name="ck_bookrightsevidences_scope_page",
+        ),
+        CheckConstraint("version >= 1", name="ck_bookrightsevidences_version"),
+        Index("ix_bookrightsevidences_book_status", "bookid", "status"),
+    )
+
+    Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    BookId = Column("bookid", UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    PageId = Column("pageid", UUID(as_uuid=True), ForeignKey("bookpages.id", ondelete="CASCADE"))
+    Scope = Column("scope", String(8), nullable=False, server_default=text("'BOOK'"))
+    Status = Column("status", String(32), nullable=False, server_default=text("'UNASSESSED'"))
+    SourceDescription = Column("sourcedescription", String(500))
+    AuthorOrRightsHolder = Column("authororrightsholder", String(300))
+    UsageBasis = Column("usagebasis", String(120))
+    EvidenceUrlOrRef = Column("evidenceurlorref", String(1000))
+    Notes = Column("notes", String(2000))
+    Version = Column("version", Integer, nullable=False, server_default=text("1"))
+    ContentFingerprint = Column("contentfingerprint", String(64))
+    ReviewedBy = Column("reviewedby", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"))
+    ReviewedByNameSnapshot = Column("reviewedbynamesnapshot", String(160))
+    ReviewedAt = Column("reviewedat", DateTime(timezone=True))
+    CreatedAt = Column("createdat", DateTime(timezone=True), nullable=False, server_default=func.now())
+    UpdatedAt = Column("updatedat", DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class BookRightsEvidenceHistory(Base):
+    __tablename__ = "bookrightsevidencehistory"
+    __table_args__ = (
+        CheckConstraint("scope IN ('BOOK', 'PAGE')", name="ck_bookrightsevidencehistory_scope"),
+        CheckConstraint(
+            "tostatus IN ('UNASSESSED', 'INSUFFICIENT_EVIDENCE', 'CONCERN_FLAGGED', 'RIGHTS_REVIEWED')",
+            name="ck_bookrightsevidencehistory_tostatus",
+        ),
+        CheckConstraint("version >= 1", name="ck_bookrightsevidencehistory_version"),
+        Index("ix_bookrightsevidencehistory_book_created", "bookid", "createdat"),
+        Index("ix_bookrightsevidencehistory_evidence_version", "evidenceid", "version"),
+    )
+
+    Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    EvidenceId = Column("evidenceid", UUID(as_uuid=True), ForeignKey("bookrightsevidences.id", ondelete="CASCADE"), nullable=False)
+    BookId = Column("bookid", UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    PageId = Column("pageid", UUID(as_uuid=True), ForeignKey("bookpages.id", ondelete="SET NULL"))
+    Scope = Column("scope", String(8), nullable=False)
+    Version = Column("version", Integer, nullable=False)
+    FromStatus = Column("fromstatus", String(32))
+    ToStatus = Column("tostatus", String(32), nullable=False)
+    SourceDescription = Column("sourcedescription", String(500))
+    AuthorOrRightsHolder = Column("authororrightsholder", String(300))
+    UsageBasis = Column("usagebasis", String(120))
+    EvidenceUrlOrRef = Column("evidenceurlorref", String(1000))
+    Notes = Column("notes", String(2000))
+    ContentFingerprint = Column("contentfingerprint", String(64))
+    ActorId = Column("actorid", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"))
+    ActorNameSnapshot = Column("actornamesnapshot", String(160))
     CreatedAt = Column("createdat", DateTime(timezone=True), nullable=False, server_default=func.now())

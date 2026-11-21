@@ -546,6 +546,8 @@ class WorkflowVerificationGuardTests(unittest.TestCase):
             "Status": "READY_FOR_ADMIN_REVIEW",
             "Suitability": "SUITABLE",
             "Findings": [],
+            "ImageSafetyStatus": "ADMIN_CONFIRMED_SAFE",
+            "ImageSafetyImageSha256": None,
         }
         return type("Workflow", (), fields | overrides)()
 
@@ -563,13 +565,18 @@ class WorkflowVerificationGuardTests(unittest.TestCase):
                     self.workflow(SafetyStatus=state), content_hash(candidate)
                 )
 
-    def test_clean_provisional_and_auto_confirmed_safety_allow_verification(self):
+    def test_clean_provisional_allows_admin_verification_while_auto_confirmed_is_blocked(self):
         candidate = "Câu chuyện phù hợp với trẻ em."
-        for state in ("PROVISIONAL", "AUTO_CONFIRMED"):
-            with self.subTest(state=state):
-                AdminOcrService._validate_ai_workflow_for_verification(
-                    self.workflow(SafetyStatus=state), content_hash(candidate)
-                )
+        AdminOcrService._validate_ai_workflow_for_verification(
+            self.workflow(SafetyStatus="PROVISIONAL", SafetyConfirmedBy=None),
+            content_hash(candidate),
+        )
+        with self.assertRaises(HTTPException) as auto_err:
+            AdminOcrService._validate_ai_workflow_for_verification(
+                self.workflow(SafetyStatus="AUTO_CONFIRMED", SafetyConfirmedBy=None),
+                content_hash(candidate),
+            )
+        self.assertEqual(auto_err.exception.detail["code"], "TEXT_SAFETY_NOT_READY")
 
     def test_provisional_safety_with_findings_or_review_required_is_blocked(self):
         candidate = "Câu chuyện phù hợp với trẻ em."

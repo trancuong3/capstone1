@@ -32,3 +32,5 @@
 - **M3 (Workflow & Child Safety + Image Safety Separation):**
   - Backend `unittest test_admin_ocr_child_safety.(Orchestration/Evidence/SafetyDecision/ImageSafety) test_admin_ai_workflow_parallel` -> **36 passed, 0 failed** (1.34s).
   - Frontend `vitest run tests/admin/admin-ocr-review-screen.test.tsx tests/admin/ocr-review-service.test.ts` -> **28 passed, 0 failed** (34.49s).
+- **M4 (Rights Evidence, Additive Migration & Server-Side Verification Gate):**
+  - Backend 13 modules (`test_book_rights_and_verification_gate`, `test_admin_ocr_*`, `test_book_quality_*`, `test_parent_reports`, `test_admin_page_management`) -> **186 passed, 0 failed, 0 errors** (3.90s).

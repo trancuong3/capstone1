@@ -1,5 +1,19 @@
 # Execution Progress & Checkpoints
 
+## Checkpoint — M4 Rights Evidence & Strict Verification Gate Complete (2026-11-21)
+
+- **Done:**
+  - Created strictly additive PostgreSQL migration `supabase/migrations/20261121120000_book_rights_and_verification_gate.sql` (image safety columns on `adminaiworkflows`, `bookrightsevidences`, `bookrightsevidencehistory` with service_role RLS, expanded `bookcontentreports` CHECK constraint with `CHILD_SAFETY_CONCERN` and `COPYRIGHT_CONCERN`).
+  - Implemented full Rights Evidence layer (`BookRightsEvidence`, `BookRightsEvidenceHistory`, repository, `get_book_rights`/`upsert_book_rights`, routes `GET/PUT /books/admin/quality/books/{book_id}/rights`) with required-field enforcement, immutable versioned history, content-fingerprint staleness detection, and RBAC.
+  - Hardened server-side `AdminOcrService.verify`: disabled `AI_AUTO_VERIFIED` (`409 AI_AUTO_VERIFY_DISABLED`), required `workflow_id` (`409 WORKFLOW_REQUIRED`), enforced `source_image_sha256` binding, candidate hash, chunk completeness, text safety, Admin manual image safety on current SHA, and persisted `RIGHTS_REVIEWED` evidence version; removed automatic `auto_publish_if_eligible`.
+  - Updated `save_draft` to invalidate stale workflow safety inside the same transaction.
+  - Disabled `auto_publish_if_eligible` across worker/verify/quality while preserving legacy v2 `AUTO_APPROVAL` published books without mass re-approval.
+  - Removed all `AI_AUTO_VERIFIED` auto-verification bypasses from `frontend/components/admin/admin-book-ai-batch-review.tsx`.
+  - Added per-page quality diagnostics (`MISSING_IMAGE`, `EMPTY_OCR`, `OCR_ERROR`, `DUPLICATE_PAGE`, `SUSPECTED_MISSING_PAGE`, `UNVERIFIED_PAGE`, `IMAGE_ONLY_PAGE`) with explicit unknown-physical-page-count disclaimer.
+  - Verified **186/186** backend tests across 13 modules PASS (3.90s).
+- **In Progress:** Starting M5 (Book Quality UI, Rights Evidence Panel, Parent Reports `CHILD_SAFETY_CONCERN`/`COPYRIGHT_CONCERN` & Isolation, Frontend Component Tests).
+- **Bugs Closed:** BUG-01, BUG-02, BUG-03, BUG-04 (backend).
+
 ## Checkpoint — M3 Workflow Persistence & Child Safety Complete (2026-11-21)
 
 - **Done:**

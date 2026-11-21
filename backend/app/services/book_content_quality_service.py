@@ -15,11 +15,14 @@ from app.models.book_content_quality import (
     BookContentReportHistory,
     BookQualityFinding,
     BookQualityScanRun,
+    BookRightsEvidence,
+    BookRightsEvidenceHistory,
 )
 from app.models.admin_ai_workflow import AdminAiWorkflow
 from app.policies.book_approval import (
     BOOK_APPROVAL_POLICY_VERSION,
     COPYRIGHT_BLOCKS_BOOK_APPROVAL,
+    LEGACY_BOOK_APPROVAL_POLICY_VERSION,
 )
 from app.repositories.book_content_quality_repository import BookContentQualityRepository
 from app.repositories.admin_ai_workflow_repository import AdminAiWorkflowRepository
@@ -34,6 +37,7 @@ from app.schemas.book_content_quality import (
     BookContentReportPage,
     BookContentReportRead,
     BookContentReportStatusUpdate,
+    BookPageDiagnosticRead,
     BookQualityBookDetail,
     BookQualityBookPage,
     BookQualityBookSummary,
@@ -46,6 +50,9 @@ from app.schemas.book_content_quality import (
     BookQualityReportAdminPage,
     BookQualityScanDetail,
     BookQualityScanRead,
+    BookRightsEvidenceHistoryRead,
+    BookRightsEvidenceRead,
+    BookRightsEvidenceUpsert,
 )
 
 
@@ -149,11 +156,270 @@ class BookContentQualityService:
             )
         return snapshot
 
+    @staticmethod
+    def _rights_content_fingerprint(book, rows: list[tuple]) -> str:
+        pages_meta: list[dict[str, object]] = []
+        for row in rows:
+            if len(row) == 7:
+                _, page, revision = row[:3]
+            else:
+                page, revision = row[:2]
+            if page.LifecycleStatus not in {"ACTIVE", "PROCESSING"}:
+                continue
+            rev_meta = (
+                revision.ProcessingMeta
+                if revision is not None and isinstance(revision.ProcessingMeta, dict)
+                else {}
+            )
+            pages_meta.append(
+                {
+                    "page_id": str(page.Id),
+                    "page_number": int(page.PageNumber),
+                    "image_path": getattr(page, "ImagePath", None),
+                    "revision_id": str(revision.Id) if revision is not None else None,
+                    "content_hash": getattr(revision, "ContentHash", None) if revision is not None else None,
+                    "source_image_sha256": rev_meta.get("source_image_sha256"),
+                }
+            )
+        payload = {
+            "title": getattr(book, "Title", None),
+            "author": getattr(book, "Author", None),
+            "pages": pages_meta,
+        }
+        return hashlib.sha256(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
+    def _evaluate_rights_status(
+        rights_evidence: BookRightsEvidence | None,
+        current_fingerprint: str | None = None,
+    ) -> tuple[str, bool, bool]:
+        """Return (effective_status, is_stale, is_valid_reviewed)."""
+        if rights_evidence is None:
+            return "UNASSESSED", False, False
+        raw_status = str(getattr(rights_evidence, "Status", "UNASSESSED") or "UNASSESSED")
+        has_required_fields = bool(
+            getattr(rights_evidence, "SourceDescription", None)
+            and getattr(rights_evidence, "UsageBasis", None)
+            and getattr(rights_evidence, "EvidenceUrlOrRef", None)
+        )
+        stored_fp = getattr(rights_evidence, "ContentFingerprint", None)
+        is_stale = bool(
+            raw_status == "RIGHTS_REVIEWED"
+            and current_fingerprint
+            and stored_fp
+            and stored_fp != current_fingerprint
+        )
+        if raw_status == "RIGHTS_REVIEWED" and not has_required_fields:
+            return "INSUFFICIENT_EVIDENCE", False, False
+        if is_stale:
+            return "STALE_RIGHTS_REVIEW", True, False
+        return raw_status, False, (raw_status == "RIGHTS_REVIEWED" and has_required_fields)
+
+    @classmethod
+    def _rights_read(
+        cls,
+        book_id: UUID,
+        row: BookRightsEvidence | None,
+        history: list[BookRightsEvidenceHistory],
+        *,
+        page_id: UUID | None = None,
+        current_fingerprint: str | None = None,
+    ) -> BookRightsEvidenceRead:
+        effective_status, is_stale, _ = cls._evaluate_rights_status(
+            row, current_fingerprint
+        )
+        scope = "PAGE" if page_id is not None else "BOOK"
+        if row is None:
+            return BookRightsEvidenceRead(
+                book_id=book_id,
+                page_id=page_id,
+                scope=scope,
+                status="UNASSESSED",
+                effective_status=effective_status,
+                is_stale=False,
+                version=0,
+                current_content_fingerprint=current_fingerprint,
+                history=[],
+            )
+        return BookRightsEvidenceRead(
+            id=row.Id,
+            book_id=row.BookId,
+            page_id=row.PageId,
+            scope=row.Scope,
+            status=row.Status,
+            effective_status=effective_status,
+            is_stale=is_stale,
+            source_description=row.SourceDescription,
+            author_or_rights_holder=row.AuthorOrRightsHolder,
+            usage_basis=row.UsageBasis,
+            evidence_url_or_ref=row.EvidenceUrlOrRef,
+            notes=row.Notes,
+            version=int(row.Version or 1),
+            content_fingerprint=row.ContentFingerprint,
+            current_content_fingerprint=current_fingerprint,
+            reviewed_by=row.ReviewedBy,
+            reviewed_by_name=row.ReviewedByNameSnapshot,
+            reviewed_at=row.ReviewedAt,
+            updated_at=row.UpdatedAt,
+            history=[
+                BookRightsEvidenceHistoryRead(
+                    id=item.Id,
+                    version=int(item.Version or 1),
+                    from_status=item.FromStatus,
+                    to_status=item.ToStatus,
+                    source_description=item.SourceDescription,
+                    author_or_rights_holder=item.AuthorOrRightsHolder,
+                    usage_basis=item.UsageBasis,
+                    evidence_url_or_ref=item.EvidenceUrlOrRef,
+                    notes=item.Notes,
+                    content_fingerprint=item.ContentFingerprint,
+                    actor_id=item.ActorId,
+                    actor_name=item.ActorNameSnapshot,
+                    created_at=item.CreatedAt,
+                )
+                for item in history
+            ],
+        )
+
+    @staticmethod
+    def _build_page_diagnostics(rows: list[tuple]) -> list[BookPageDiagnosticRead]:
+        active_entries: list[tuple[object, object | None, object | None]] = []
+        for row in rows:
+            if len(row) == 7:
+                _, page, revision, workflow = row[:4]
+            else:
+                page, revision, workflow = row[:3]
+            if page.LifecycleStatus not in {"ACTIVE", "PROCESSING"}:
+                continue
+            active_entries.append((page, revision, workflow))
+
+        page_number_counts: dict[int, int] = {}
+        content_hash_counts: dict[str, int] = {}
+        for page, revision, _ in active_entries:
+            num = int(page.PageNumber)
+            page_number_counts[num] = page_number_counts.get(num, 0) + 1
+            text_val = (
+                getattr(revision, "VerifiedText", None)
+                or getattr(revision, "DraftText", None)
+                or getattr(revision, "OriginalOcrText", None)
+                or ""
+            ).strip()
+            if text_val and getattr(revision, "ContentHash", None):
+                digest = str(revision.ContentHash)
+                content_hash_counts[digest] = content_hash_counts.get(digest, 0) + 1
+
+        diagnostics: list[BookPageDiagnosticRead] = []
+        seen_numbers: set[int] = set()
+        for page, revision, workflow in active_entries:
+            page_num = int(page.PageNumber)
+            seen_numbers.add(page_num)
+            codes: list[str] = []
+            image_path = getattr(page, "ImagePath", None)
+            has_image = isinstance(image_path, str) and bool(image_path.strip())
+            if not has_image:
+                codes.append("MISSING_IMAGE")
+
+            rev_meta = (
+                revision.ProcessingMeta
+                if revision is not None and isinstance(revision.ProcessingMeta, dict)
+                else {}
+            )
+            ocr_text = (
+                (
+                    getattr(revision, "VerifiedText", None)
+                    or getattr(revision, "DraftText", None)
+                    or getattr(revision, "OriginalOcrText", None)
+                    or ""
+                ).strip()
+                if revision is not None
+                else ""
+            )
+            ocr_error = bool(
+                rev_meta.get("ocr_error")
+                or rev_meta.get("error_code")
+                or (workflow is not None and workflow.Status == "FAILED" and workflow.Stage == "PROOFREADING")
+            )
+            if ocr_error:
+                codes.append("OCR_ERROR")
+            if revision is None or not ocr_text:
+                if has_image and rev_meta.get("image_only") is True:
+                    codes.append("IMAGE_ONLY_PAGE")
+                else:
+                    codes.append("EMPTY_OCR")
+                    if has_image and revision is not None and not ocr_error:
+                        codes.append("IMAGE_ONLY_PAGE")
+
+            if page_number_counts.get(page_num, 0) > 1 or (
+                revision is not None
+                and getattr(revision, "ContentHash", None)
+                and content_hash_counts.get(str(revision.ContentHash), 0) > 1
+            ):
+                codes.append("DUPLICATE_PAGE")
+
+            if revision is None or revision.VerificationStatus != "VERIFIED":
+                codes.append("UNVERIFIED_PAGE")
+
+            if not codes:
+                codes.append("OK")
+
+            labels = {
+                "OK": "Trang đã xác minh và có đầy đủ ảnh + OCR.",
+                "MISSING_IMAGE": "Thiếu ảnh nguồn của trang.",
+                "EMPTY_OCR": "Chưa có văn bản OCR.",
+                "OCR_ERROR": "OCR hoặc Proofreading gặp lỗi.",
+                "DUPLICATE_PAGE": "Nghi ngờ trùng số trang hoặc trùng nội dung trang.",
+                "SUSPECTED_MISSING_PAGE": "Nghi ngờ thiếu số trang trong dãy đánh số.",
+                "UNVERIFIED_PAGE": "Trang chưa được Admin xác minh.",
+                "IMAGE_ONLY_PAGE": "Trang chỉ có ảnh (không có chữ hoặc OCR rỗng).",
+            }
+            diagnostics.append(
+                BookPageDiagnosticRead(
+                    page_id=page.Id,
+                    page_number=page_num,
+                    lifecycle_status=page.LifecycleStatus,
+                    verification_status=revision.VerificationStatus if revision is not None else None,
+                    codes=codes,
+                    image_safety_status=(
+                        getattr(workflow, "ImageSafetyStatus", "UNASSESSED_NO_VISION_MODEL")
+                        if workflow is not None
+                        else "UNASSESSED_NO_VISION_MODEL"
+                    ),
+                    text_safety_status=workflow.SafetyStatus if workflow is not None else "PENDING",
+                    summary=" ".join(labels[code] for code in codes),
+                )
+            )
+
+        if seen_numbers:
+            max_num = max(seen_numbers)
+            if max_num <= 2000:
+                for missing_num in range(1, max_num + 1):
+                    if missing_num not in seen_numbers:
+                        diagnostics.append(
+                            BookPageDiagnosticRead(
+                                page_id=None,
+                                page_number=missing_num,
+                                lifecycle_status=None,
+                                verification_status=None,
+                                codes=["SUSPECTED_MISSING_PAGE"],
+                                summary=(
+                                    f"Nghi ngờ thiếu trang số {missing_num} trong dãy trang đã tải lên "
+                                    "(không khẳng định tổng số trang bản in gốc)."
+                                ),
+                            )
+                        )
+        diagnostics.sort(key=lambda item: (item.page_number, str(item.page_id or "")))
+        return diagnostics
+
     @classmethod
     def _assessment(
         cls,
         rows: list[tuple],
         decisions: list,
+        *,
+        rights_evidence: BookRightsEvidence | None = None,
+        current_rights_fingerprint: str | None = None,
     ) -> BookApprovalAssessment:
         now = datetime.now(timezone.utc)
         active_rows = []
@@ -162,9 +428,28 @@ class BookContentQualityService:
             if page.LifecycleStatus in {"ACTIVE", "PROCESSING"}:
                 active_rows.append(row)
         snapshot = cls._page_snapshot(active_rows)
+        legacy_snapshot_payload = {
+            "policy": LEGACY_BOOK_APPROVAL_POLICY_VERSION,
+            "copyright_scanner": "not-configured",
+            "pages": snapshot,
+        }
+        legacy_assessment_hash = hashlib.sha256(
+            json.dumps(
+                legacy_snapshot_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+
+        rights_effective_status, rights_is_stale, rights_valid = (
+            cls._evaluate_rights_status(rights_evidence, current_rights_fingerprint)
+        )
+        rights_version = int(getattr(rights_evidence, "Version", 0) or 0) if rights_evidence else 0
         snapshot_payload = {
             "policy": BOOK_APPROVAL_POLICY_VERSION,
-            "copyright_scanner": "not-configured",
+            "rights_status": rights_effective_status,
+            "rights_version": rights_version,
             "pages": snapshot,
         }
         assessment_hash = hashlib.sha256(
@@ -372,7 +657,7 @@ class BookContentQualityService:
             if active_workflows or pending_pages
             else "INCOMPLETE"
         )
-        copyright_status = "NOT_CONFIGURED"
+        copyright_status = rights_effective_status
         blockers: list[str] = []
         if not page_count:
             blockers.append("NO_ACTIVE_PAGES")
@@ -387,8 +672,15 @@ class BookContentQualityService:
         if review_required:
             blockers.append("SUITABILITY_REVIEW_REQUIRED")
         blockers.extend(page_blockers)
-        if COPYRIGHT_BLOCKS_BOOK_APPROVAL and copyright_status == "NOT_CONFIGURED":
-            blockers.append("COPYRIGHT_SCANNER_NOT_CONFIGURED")
+        if COPYRIGHT_BLOCKS_BOOK_APPROVAL and not rights_valid:
+            if copyright_status == "CONCERN_FLAGGED":
+                blockers.append("RIGHTS_CONCERN_FLAGGED")
+            elif copyright_status == "INSUFFICIENT_EVIDENCE":
+                blockers.append("RIGHTS_INSUFFICIENT_EVIDENCE")
+            elif copyright_status == "STALE_RIGHTS_REVIEW":
+                blockers.append("RIGHTS_EVIDENCE_STALE")
+            else:
+                blockers.append("RIGHTS_UNASSESSED")
 
         ordered_decisions = sorted(
             decisions,
@@ -400,9 +692,17 @@ class BookContentQualityService:
             if latest_decision is not None and isinstance(latest_decision.Metadata, dict)
             else {}
         )
-        current_decision = bool(
-            latest_decision and metadata.get("assessment_hash") == assessment_hash
+        decision_matches_hash = bool(
+            latest_decision
+            and (
+                metadata.get("assessment_hash") == assessment_hash
+                or (
+                    metadata.get("policy") in {None, LEGACY_BOOK_APPROVAL_POLICY_VERSION}
+                    and metadata.get("assessment_hash") == legacy_assessment_hash
+                )
+            )
         )
+        current_decision = decision_matches_hash
         approved = bool(
             current_decision
             and latest_decision.Action == "book.children.approved"
@@ -419,7 +719,7 @@ class BookContentQualityService:
         prior_book_approval_stale = any(
             row.Action in {"book.children.approved", "book.children.rejected"}
             and isinstance(row.Metadata, dict)
-            and row.Metadata.get("assessment_hash") != assessment_hash
+            and row.Metadata.get("assessment_hash") not in {assessment_hash, legacy_assessment_hash}
             and not (
                 row.Action == "book.children.approved"
                 and row.Metadata.get("decision_source") == "AUTO_APPROVAL"
@@ -439,7 +739,7 @@ class BookContentQualityService:
             and not finding_count
             and not review_required
             and not page_blockers
-            and (not COPYRIGHT_BLOCKS_BOOK_APPROVAL or copyright_status != "NOT_CONFIGURED")
+            and (not COPYRIGHT_BLOCKS_BOOK_APPROVAL or rights_valid)
         )
         if auto_published:
             status_value = "PUBLISHED"
@@ -473,12 +773,8 @@ class BookContentQualityService:
             processing_pages=active_workflows,
             failed_pages=failed_pages,
             stale_pages=stale_pages,
-            copyright_status=(
-                "ADMIN_CONFIRMED"
-                if approved and metadata.get("rights_confirmed") is True
-                else copyright_status
-            ),
-            copyright_finding_count=None,
+            copyright_status=copyright_status,
+            copyright_finding_count=1 if copyright_status == "CONCERN_FLAGGED" else 0,
             finding_count=finding_count,
             high_finding_count=high_count,
             medium_finding_count=medium_count,
@@ -506,130 +802,18 @@ class BookContentQualityService:
                 if approved
                 else None
             ),
-            rights_confirmed=bool(approved and metadata.get("rights_confirmed") is True),
+            rights_confirmed=bool(rights_valid or (approved and metadata.get("rights_confirmed") is True)),
             blockers=blockers,
         )
 
     async def auto_publish_if_eligible(self, book_id: UUID) -> bool:
-        """Publish only a fully verified book with clean, exact-match AI results."""
-        book = await self.repository.book(book_id, lock=True)
-        if book is None or book.LifecycleStatus == "RETIRED":
-            await self.repository.rollback()
-            return False
-        rows = await self.repository.book_assessment_rows(book_id, lock=True)
-        decisions = await self.repository.book_decisions(book_id)
-        assessment = self._assessment(rows, decisions)
-        if (
-            assessment.status != "READY_FOR_CHILDREN"
-            or not assessment.page_count
-            or any(blocker != "BOOK_APPROVAL_STALE" for blocker in assessment.blockers)
-        ):
-            await self.repository.rollback()
-            return False
+        """Disabled by policy: books require explicit Admin approval after rights & safety review.
 
-        approval_rows = [
-            row
-            for row in rows
-            if (row[1] if len(row) == 7 else row[0]).LifecycleStatus == "ACTIVE"
-        ]
-        if len(approval_rows) != assessment.page_count:
+        Historical AUTO_APPROVAL records remain readable without mass re-approval.
+        """
+        if callable(getattr(self.repository, "rollback", None)):
             await self.repository.rollback()
-            return False
-
-        now = datetime.now(timezone.utc)
-        for row in approval_rows:
-            page, revision, workflow = row[:3]
-            if page.LifecycleStatus != "ACTIVE" or revision is None or workflow is None:
-                await self.repository.rollback()
-                return False
-            if (
-                revision.VerificationStatus != "VERIFIED"
-                or revision.VerifiedBy is None
-                or revision.VerifiedAt is None
-            ):
-                await self.repository.rollback()
-                return False
-            if (
-                workflow.PageRevisionId != revision.Id
-                or workflow.Status != "READY_FOR_ADMIN_REVIEW"
-                or workflow.SafetyStatus not in {"PROVISIONAL", "CONFIRMED", "AUTO_CONFIRMED"}
-                or workflow.SafetyInputHash != workflow.CandidateHash
-                or not isinstance(workflow.CandidateText, str)
-                or not workflow.CandidateHash
-                or AdminAiWorkflowService._hash(workflow.CandidateText) != workflow.CandidateHash
-                or workflow.ProofreadText != workflow.CandidateText
-                or not revision.VerifiedText
-                or AdminAiWorkflowService._hash(revision.VerifiedText) != workflow.CandidateHash
-                or workflow.Suitability != "SUITABLE"
-                or workflow.Findings
-            ):
-                await self.repository.rollback()
-                return False
-            if workflow.SafetyStatus == "CONFIRMED" and workflow.SafetyConfirmedBy is None:
-                await self.repository.rollback()
-                return False
-
-        for row in approval_rows:
-            page, revision, workflow = row[:3]
-            if workflow.SafetyStatus == "PROVISIONAL":
-                workflow.SafetyStatus = "AUTO_CONFIRMED"
-                workflow.SafetyConfirmedAt = now
-                workflow.SafetyConfirmedBy = None
-            elif workflow.SafetyStatus == "AUTO_CONFIRMED":
-                workflow.SafetyConfirmedAt = workflow.SafetyConfirmedAt or now
-                workflow.SafetyConfirmedBy = None
-            workflow.OcrApprovedAt = workflow.OcrApprovedAt or revision.VerifiedAt
-            workflow.OcrApprovedBy = workflow.OcrApprovedBy or revision.VerifiedBy
-            workflow.FinalApprovedTextHash = workflow.CandidateHash
-            revision_metadata = dict(revision.ProcessingMeta or {})
-            revision_metadata["admin_ai_workflow"] = {
-                "workflow_id": str(workflow.Id),
-                "candidate_hash": workflow.CandidateHash,
-                "safety_status": workflow.SafetyStatus,
-                "safety_input_hash": workflow.SafetyInputHash,
-                "approval_scope": "AUTO_BOOK_APPROVAL_EXACT_VERIFIED_TEXT",
-                "assessment_policy": BOOK_APPROVAL_POLICY_VERSION,
-            }
-            revision.ProcessingMeta = revision_metadata
-            workflow.ReviewEvents = list(workflow.ReviewEvents or []) + [{
-                "event": "AUTO_BOOK_APPROVAL",
-                "actor_id": "SYSTEM",
-                "assessment_policy": BOOK_APPROVAL_POLICY_VERSION,
-                "created_at": now.isoformat(),
-            }]
-            workflow.UpdatedAt = now
-
-        # Bind the audit to the exact post-confirmation snapshot that catalog
-        # access checks use for Parent and Child reads.
-        approved_assessment = self._assessment(rows, decisions)
-        if (
-            approved_assessment.status != "READY_FOR_CHILDREN"
-            or any(
-                blocker != "BOOK_APPROVAL_STALE"
-                for blocker in approved_assessment.blockers
-            )
-        ):
-            await self.repository.rollback()
-            return False
-        page_snapshot = self._page_snapshot(rows)
-        book.LifecycleStatus = "ACTIVE"
-        await self.repository.add_book_decision(
-            actor_id=None,
-            book_id=book_id,
-            action="book.children.approved",
-            metadata={
-                "decision": "AUTO_APPROVE",
-                "decision_source": "AUTO_APPROVAL",
-                "reason": "All active pages passed OCR verification, proofreading, and Child Safety checks.",
-                "assessment_hash": approved_assessment.assessment_hash,
-                "page_snapshot": page_snapshot,
-                "page_count": approved_assessment.page_count,
-                "policy": BOOK_APPROVAL_POLICY_VERSION,
-            },
-            request_id=str(uuid4()),
-        )
-        await self.repository.commit()
-        return True
+        return False
 
     @staticmethod
     def _finding_read(
@@ -1183,11 +1367,7 @@ class BookContentQualityService:
         if callable(getattr(self.repository.db, "commit", None)) and callable(
             getattr(self.repository, "book", None)
         ):
-            # Release page/workflow locks before the publisher reacquires them
-            # in book → page → workflow order, including when all AI results
-            # were already cached and no worker event will follow.
             await self.repository.db.commit()
-            await self.auto_publish_if_eligible(book_id)
 
     async def list_book_scans(
         self, actor_id: UUID, book_id: UUID
@@ -1267,14 +1447,22 @@ class BookContentQualityService:
         for decision in await self.repository.book_decisions_for_books(book_ids):
             if decision.ResourceId is not None:
                 decisions_by_book.setdefault(decision.ResourceId, []).append(decision)
+        rights_by_book: dict[UUID, BookRightsEvidence] = {}
+        if callable(getattr(self.repository, "list_rights_evidences_for_books", None)):
+            for rights in await self.repository.list_rights_evidences_for_books(book_ids):
+                rights_by_book[rights.BookId] = rights
         assessed_rows = []
         status_counts: dict[str, int] = {}
         alert_counts = {"CHILD_SAFETY": 0, "COPYRIGHT": 0, "BOTH": 0}
         for row in rows:
             book = row[0]
+            book_rows = page_rows_by_book.get(book.Id, [])
+            rights_fp = self._rights_content_fingerprint(book, book_rows)
             assessment = self._assessment(
-                page_rows_by_book.get(book.Id, []),
+                book_rows,
                 decisions_by_book.get(book.Id, []),
+                rights_evidence=rights_by_book.get(book.Id),
+                current_rights_fingerprint=rights_fp,
             )
             status_counts[assessment.status] = status_counts.get(assessment.status, 0) + 1
             has_safety = assessment.finding_count > 0
@@ -1352,6 +1540,17 @@ class BookContentQualityService:
         workflow_summary = await self.repository.ai_workflow_summary_for_book(book_id)
         assessment_rows = await self.repository.book_assessment_rows(book_id)
         decisions = await self.repository.book_decisions(book_id)
+        rights_row = (
+            await self.repository.get_rights_evidence(book_id)
+            if callable(getattr(self.repository, "get_rights_evidence", None))
+            else None
+        )
+        rights_history = (
+            await self.repository.list_rights_history(book_id)
+            if callable(getattr(self.repository, "list_rights_history", None))
+            else []
+        )
+        current_rights_fp = self._rights_content_fingerprint(book, assessment_rows)
         return BookQualityBookDetail(
             book_id=book.Id,
             book_title=str(book.Title),
@@ -1360,8 +1559,181 @@ class BookContentQualityService:
             latest_scan_detail=latest_detail,
             ai_workflows=[AdminAiWorkflowService._read(row) for row in workflows],
             ai_workflow_summary=workflow_summary,
-            assessment=self._assessment(assessment_rows, decisions),
+            assessment=self._assessment(
+                assessment_rows,
+                decisions,
+                rights_evidence=rights_row,
+                current_rights_fingerprint=current_rights_fp,
+            ),
+            rights_evidence=self._rights_read(
+                book_id,
+                rights_row,
+                rights_history,
+                current_fingerprint=current_rights_fp,
+            ),
+            page_diagnostics=self._build_page_diagnostics(assessment_rows),
             decision_history=[self._decision_read(row) for row in decisions],
+        )
+
+    async def get_book_rights(
+        self,
+        actor_id: UUID,
+        book_id: UUID,
+        *,
+        page_id: UUID | None = None,
+    ) -> BookRightsEvidenceRead:
+        await self._require_role(actor_id, "admin")
+        book = await self.repository.book(book_id)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        if page_id is not None:
+            page = await self.repository.page(page_id)
+            if page is None or page.BookId != book_id:
+                raise HTTPException(status_code=404, detail="Resource not found")
+        rows = await self.repository.book_assessment_rows(book_id)
+        current_fp = self._rights_content_fingerprint(book, rows)
+        row = await self.repository.get_rights_evidence(book_id, page_id=page_id)
+        history = await self.repository.list_rights_history(book_id, page_id=page_id)
+        return self._rights_read(
+            book_id,
+            row,
+            history,
+            page_id=page_id,
+            current_fingerprint=current_fp,
+        )
+
+    async def upsert_book_rights(
+        self,
+        actor_id: UUID,
+        book_id: UUID,
+        payload: BookRightsEvidenceUpsert,
+    ) -> BookRightsEvidenceRead:
+        await self._require_role(actor_id, "admin")
+        book = await self.repository.book(book_id, lock=True)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        if payload.scope == "PAGE":
+            if payload.page_id is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "RIGHTS_PAGE_ID_REQUIRED",
+                        "message": "Cần chỉ định trang khi lưu bằng chứng quyền ở phạm vi trang.",
+                    },
+                )
+            page = await self.repository.page(payload.page_id)
+            if page is None or page.BookId != book_id:
+                raise HTTPException(status_code=404, detail="Resource not found")
+        elif payload.page_id is not None:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "RIGHTS_BOOK_SCOPE_PAGE_FORBIDDEN",
+                    "message": "Hồ sơ quyền phạm vi sách không được gắn page_id.",
+                },
+            )
+
+        if payload.status == "RIGHTS_REVIEWED":
+            if not (
+                payload.source_description
+                and payload.usage_basis
+                and payload.evidence_url_or_ref
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "RIGHTS_EVIDENCE_INCOMPLETE",
+                        "message": "Cần nhập đầy đủ nguồn tài liệu, cơ sở sử dụng và đường dẫn/mã bằng chứng trước khi đánh dấu Đã rà soát quyền sử dụng.",
+                    },
+                )
+        if payload.status == "CONCERN_FLAGGED" and not payload.notes:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "RIGHTS_CONCERN_NOTE_REQUIRED",
+                    "message": "Cần ghi rõ lý do/mô tả nghi ngại bản quyền khi gắn cờ CONCERN_FLAGGED.",
+                },
+            )
+
+        rows = await self.repository.book_assessment_rows(book_id)
+        current_fp = self._rights_content_fingerprint(book, rows)
+        actor_name = (await self.repository.profile_name(actor_id) or "Admin")[:160]
+        now = datetime.now(timezone.utc)
+        existing = await self.repository.get_rights_evidence(
+            book_id, page_id=payload.page_id, lock=True
+        )
+        from_status = existing.Status if existing is not None else None
+        if existing is None:
+            row = BookRightsEvidence(
+                Id=uuid4(),
+                BookId=book_id,
+                PageId=payload.page_id,
+                Scope=payload.scope,
+                Status=payload.status,
+                SourceDescription=payload.source_description,
+                AuthorOrRightsHolder=payload.author_or_rights_holder,
+                UsageBasis=payload.usage_basis,
+                EvidenceUrlOrRef=payload.evidence_url_or_ref,
+                Notes=payload.notes,
+                Version=1,
+                ContentFingerprint=current_fp,
+                ReviewedBy=actor_id,
+                ReviewedByNameSnapshot=actor_name,
+                ReviewedAt=now,
+                CreatedAt=now,
+                UpdatedAt=now,
+            )
+            await self.repository.add_rights_evidence(row)
+        else:
+            row = existing
+            row.Status = payload.status
+            row.SourceDescription = payload.source_description
+            row.AuthorOrRightsHolder = payload.author_or_rights_holder
+            row.UsageBasis = payload.usage_basis
+            row.EvidenceUrlOrRef = payload.evidence_url_or_ref
+            row.Notes = payload.notes
+            row.Version = int(row.Version or 0) + 1
+            row.ContentFingerprint = current_fp
+            row.ReviewedBy = actor_id
+            row.ReviewedByNameSnapshot = actor_name
+            row.ReviewedAt = now
+            row.UpdatedAt = now
+
+        history_row = BookRightsEvidenceHistory(
+            Id=uuid4(),
+            EvidenceId=row.Id,
+            BookId=book_id,
+            PageId=payload.page_id,
+            Scope=payload.scope,
+            Version=int(row.Version),
+            FromStatus=from_status,
+            ToStatus=payload.status,
+            SourceDescription=payload.source_description,
+            AuthorOrRightsHolder=payload.author_or_rights_holder,
+            UsageBasis=payload.usage_basis,
+            EvidenceUrlOrRef=payload.evidence_url_or_ref,
+            Notes=payload.notes,
+            ContentFingerprint=current_fp,
+            ActorId=actor_id,
+            ActorNameSnapshot=actor_name,
+            CreatedAt=now,
+        )
+        await self.repository.add_rights_history(history_row)
+        try:
+            await self.repository.commit()
+            await self.repository.refresh(row)
+        except Exception:
+            await self.repository.rollback()
+            raise
+        history = await self.repository.list_rights_history(
+            book_id, page_id=payload.page_id
+        )
+        return self._rights_read(
+            book_id,
+            row,
+            history,
+            page_id=payload.page_id,
+            current_fingerprint=current_fp,
         )
 
     @staticmethod
@@ -1390,7 +1762,18 @@ class BookContentQualityService:
             raise HTTPException(status_code=404, detail="Resource not found")
         rows = await self.repository.book_assessment_rows(book_id, lock=True)
         decisions = await self.repository.book_decisions(book_id)
-        current = self._assessment(rows, decisions)
+        rights_row = (
+            await self.repository.get_rights_evidence(book_id, lock=True)
+            if callable(getattr(self.repository, "get_rights_evidence", None))
+            else None
+        )
+        current_rights_fp = self._rights_content_fingerprint(book, rows)
+        current = self._assessment(
+            rows,
+            decisions,
+            rights_evidence=rights_row,
+            current_rights_fingerprint=current_rights_fp,
+        )
         now = datetime.now(timezone.utc)
         actor_name = (await self.repository.profile_name(actor_id) or "Admin")[:160]
         action_by_decision = {
@@ -1412,13 +1795,17 @@ class BookContentQualityService:
             if latest_decision is not None and isinstance(latest_decision.Metadata, dict)
             else {}
         )
+        effective_rights_confirmed = bool(
+            payload.rights_confirmed
+            or (rights_row is not None and rights_row.Status == "RIGHTS_REVIEWED")
+        )
         if (
             latest_decision is not None
             and latest_decision.Action == action_by_decision[payload.decision]
             and latest_metadata.get("assessment_hash") == current.assessment_hash
             and latest_metadata.get("reason") == payload.reason
             and latest_metadata.get("category") == payload.category
-            and latest_metadata.get("rights_confirmed", False) == payload.rights_confirmed
+            and latest_metadata.get("rights_confirmed", False) == effective_rights_confirmed
         ):
             return BookQualityBookDecisionRead(
                 book_id=book_id,
@@ -1514,6 +1901,30 @@ class BookContentQualityService:
                     status_code=409,
                     detail="Resolve Child Safety findings and REVIEW_REQUIRED pages before approving this book.",
                 )
+            rights_status, rights_stale, rights_valid = self._evaluate_rights_status(
+                rights_row, current_rights_fp
+            )
+            if COPYRIGHT_BLOCKS_BOOK_APPROVAL and not rights_valid:
+                code = (
+                    "RIGHTS_CONCERN_BLOCKED"
+                    if rights_status == "CONCERN_FLAGGED"
+                    else "RIGHTS_EVIDENCE_STALE"
+                    if rights_stale
+                    else "RIGHTS_EVIDENCE_REQUIRED"
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": code,
+                        "message": (
+                            "Sách đang có cờ nghi ngại quyền sử dụng; không thể phê duyệt."
+                            if code == "RIGHTS_CONCERN_BLOCKED"
+                            else "Nội dung sách đã thay đổi sau lần rà soát quyền sử dụng trước đó; cần cập nhật hồ sơ quyền."
+                            if code == "RIGHTS_EVIDENCE_STALE"
+                            else "Cần hoàn tất hồ sơ bằng chứng quyền sử dụng (RIGHTS_REVIEWED) trước khi phê duyệt sách."
+                        ),
+                    },
+                )
             # A book-level decision confirms current Safety results in one
             # auditable transaction. OCR verification and word alignment remain
             # governed by the existing per-page verification path.
@@ -1583,7 +1994,12 @@ class BookContentQualityService:
         # now record the confirmed state), and persist both the decision and the
         # page-level work in the same PostgreSQL transaction.
         decision_snapshot = self._page_snapshot(rows)
-        decision_assessment = self._assessment(rows, decisions)
+        decision_assessment = self._assessment(
+            rows,
+            decisions,
+            rights_evidence=rights_row,
+            current_rights_fingerprint=current_rights_fp,
+        )
         await self.repository.add_book_decision(
             actor_id=actor_id,
             book_id=book_id,
@@ -1592,7 +2008,11 @@ class BookContentQualityService:
                 "decision": payload.decision,
                 "reason": payload.reason,
                 "category": payload.category,
-                "rights_confirmed": payload.rights_confirmed,
+                "rights_confirmed": bool(
+                    payload.rights_confirmed or (rights_row is not None and rights_row.Status == "RIGHTS_REVIEWED")
+                ),
+                "rights_evidence_id": str(rights_row.Id) if rights_row is not None else None,
+                "rights_evidence_version": int(rights_row.Version) if rights_row is not None else None,
                 "assessment_hash": decision_assessment.assessment_hash,
                 "page_snapshot": decision_snapshot,
                 "page_count": decision_assessment.page_count,
@@ -1604,9 +2024,20 @@ class BookContentQualityService:
         await self.repository.commit()
         refreshed_rows = await self.repository.book_assessment_rows(book_id)
         refreshed_decisions = await self.repository.book_decisions(book_id)
+        refreshed_rights = (
+            await self.repository.get_rights_evidence(book_id)
+            if callable(getattr(self.repository, "get_rights_evidence", None))
+            else rights_row
+        )
+        refreshed_fp = self._rights_content_fingerprint(book, refreshed_rows)
         return BookQualityBookDecisionRead(
             book_id=book_id,
-            assessment=self._assessment(refreshed_rows, refreshed_decisions),
+            assessment=self._assessment(
+                refreshed_rows,
+                refreshed_decisions,
+                rights_evidence=refreshed_rights,
+                current_rights_fingerprint=refreshed_fp,
+            ),
             decision_history=[self._decision_read(row) for row in refreshed_decisions],
         )
 

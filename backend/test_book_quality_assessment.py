@@ -70,13 +70,39 @@ def _row(page_number: int, *, finding: dict | None = None, suitability: str = "S
 
 
 class _DecisionRepository:
-    def __init__(self, row):
+    def __init__(self, row, *, include_rights: bool = True):
         self.row = row
         self.rows = [row]
         self.decisions = []
-        self.book_row = SimpleNamespace(Id=uuid4(), LifecycleStatus="DRAFT")
+        self.book_row = SimpleNamespace(
+            Id=uuid4(), Title="Sách Mẫu", Author="Tác giả Mẫu", LifecycleStatus="DRAFT"
+        )
+        self.rights_row = (
+            SimpleNamespace(
+                Id=uuid4(),
+                BookId=self.book_row.Id,
+                PageId=None,
+                Scope="BOOK",
+                Status="RIGHTS_REVIEWED",
+                SourceDescription="Nguồn thư viện giáo dục mở",
+                AuthorOrRightsHolder="Tác giả Mẫu",
+                UsageBasis="OPEN_LICENSE",
+                EvidenceUrlOrRef="https://open.example.org/license",
+                Notes="Đã rà soát hồ sơ quyền sử dụng.",
+                Version=1,
+                ContentFingerprint=None,
+                ReviewedBy=uuid4(),
+                ReviewedByNameSnapshot="Admin test",
+                ReviewedAt=datetime.now(timezone.utc),
+            )
+            if include_rights
+            else None
+        )
         self.committed = False
         self.commit_count = 0
+
+    async def get_rights_evidence(self, _book_id, *, page_id=None, lock=False):
+        return self.rights_row if page_id is None else None
 
     async def role(self, _actor_id):
         return "admin"
@@ -193,8 +219,25 @@ class BookQualityAssessmentTests(unittest.TestCase):
 
     def test_assessment_aggregates_all_pages_without_history_page_limit(self):
         rows = [_row(number) for number in range(1, 251)]
+        rights = SimpleNamespace(
+            Id=uuid4(),
+            Scope="BOOK",
+            Status="RIGHTS_REVIEWED",
+            SourceDescription="Nguồn mở",
+            UsageBasis="OPEN_LICENSE",
+            EvidenceUrlOrRef="https://example.org/rights",
+            Version=1,
+            ContentFingerprint=None,
+        )
 
-        assessment = BookContentQualityService._assessment(rows, [])
+        assessment_without_rights = BookContentQualityService._assessment(rows, [])
+        self.assertEqual(assessment_without_rights.status, "PENDING_ADMIN_REVIEW")
+        self.assertEqual(assessment_without_rights.copyright_status, "UNASSESSED")
+        self.assertIn("RIGHTS_UNASSESSED", assessment_without_rights.blockers)
+
+        assessment = BookContentQualityService._assessment(
+            rows, [], rights_evidence=rights
+        )
 
         self.assertEqual(assessment.page_count, 250)
         self.assertEqual(assessment.ocr_completed_pages, 250)
@@ -206,8 +249,8 @@ class BookQualityAssessmentTests(unittest.TestCase):
         self.assertEqual(assessment.proofreading_status, "COMPLETED")
         self.assertEqual(assessment.child_safety_status, "COMPLETED")
         self.assertEqual(assessment.status, "READY_FOR_CHILDREN")
-        self.assertEqual(assessment.copyright_status, "NOT_CONFIGURED")
-        self.assertNotIn("COPYRIGHT_SCANNER_NOT_CONFIGURED", assessment.blockers)
+        self.assertEqual(assessment.copyright_status, "RIGHTS_REVIEWED")
+        self.assertNotIn("RIGHTS_UNASSESSED", assessment.blockers)
 
     def test_safety_findings_are_grouped_and_high_blocks_child_approval(self):
         evidence = {
@@ -228,39 +271,22 @@ class BookQualityAssessmentTests(unittest.TestCase):
         self.assertEqual(assessment.finding_groups[0]["page_count"], 2)
         self.assertEqual(len(assessment.finding_groups[0]["examples"]), 2)
 
-    def test_auto_publication_confirms_clean_pages_and_records_current_snapshot(self):
+    def test_auto_publication_is_disabled_and_never_publishes_without_admin_decision(self):
         row = _row(1)
         repository = _DecisionRepository(row)
-        retired_row = _row(2)
-        retired_row[0].LifecycleStatus = "RETIRED"
-        repository.rows.append(retired_row)
         service = BookContentQualityService(repository)
 
         published = _run_async(
             service.auto_publish_if_eligible(repository.book_row.Id)
         )
 
-        self.assertTrue(published)
-        self.assertTrue(repository.committed)
-        self.assertEqual(repository.book_row.LifecycleStatus, "ACTIVE")
-        self.assertEqual(row[2].SafetyStatus, "AUTO_CONFIRMED")
-        self.assertIsNotNone(row[2].SafetyConfirmedAt)
-        self.assertIsNone(row[2].SafetyConfirmedBy)
-        self.assertEqual(row[2].OcrApprovedBy, row[1].VerifiedBy)
-        self.assertEqual(row[1].ProcessingMeta["admin_ai_workflow"]["safety_status"], "AUTO_CONFIRMED")
-        decision = repository.decisions[0]
-        self.assertIsNone(decision.ActorId)
-        self.assertEqual(decision.Action, "book.children.approved")
-        self.assertEqual(decision.Metadata["decision_source"], "AUTO_APPROVAL")
-        self.assertEqual(
-            decision.Metadata["page_snapshot"],
-            BookContentQualityService._page_snapshot(repository.rows),
-        )
-        assessment = BookContentQualityService._assessment(repository.rows, repository.decisions)
-        self.assertEqual(assessment.status, "PUBLISHED")
-        self.assertEqual(assessment.publication_source, "AUTO_APPROVAL")
+        self.assertFalse(published)
+        self.assertFalse(repository.committed)
+        self.assertEqual(repository.book_row.LifecycleStatus, "DRAFT")
+        self.assertEqual(row[2].SafetyStatus, "PROVISIONAL")
+        self.assertEqual(repository.decisions, [])
 
-    def test_auto_publication_accepts_proofread_corrections_after_verified_revision(self):
+    def test_auto_publication_stays_disabled_even_when_proofread_matches_verified(self):
         row = _row(1)
         row[2].CorrectionSuggestions = [
             {"original": "ocr", "proposed": "candidate", "decision": "PENDING_ADMIN"}
@@ -273,9 +299,9 @@ class BookQualityAssessmentTests(unittest.TestCase):
             )
         )
 
-        self.assertTrue(published)
-        self.assertEqual(row[2].CandidateText, row[1].VerifiedText)
-        self.assertEqual(row[2].ProofreadText, row[1].VerifiedText)
+        self.assertFalse(published)
+        self.assertFalse(repository.committed)
+        self.assertEqual(repository.book_row.LifecycleStatus, "DRAFT")
 
     def test_auto_publication_fails_closed_for_findings_review_and_pending_proofread(self):
         finding = {"category": "VIOLENCE", "severity": "LOW", "evidence_text": "evidence"}
@@ -489,8 +515,9 @@ class BookQualityAssessmentTests(unittest.TestCase):
         self.assertEqual(repository.book_row.LifecycleStatus, "ACTIVE")
         self.assertEqual(workflow.SafetyStatus, "CONFIRMED")
         self.assertEqual(result.assessment.status, "APPROVED_BY_ADMIN")
-        self.assertFalse(result.assessment.rights_confirmed)
-        self.assertFalse(repository.decisions[0].Metadata["rights_confirmed"])
+        self.assertTrue(result.assessment.rights_confirmed)
+        self.assertTrue(repository.decisions[0].Metadata["rights_confirmed"])
+        self.assertEqual(repository.decisions[0].Metadata["rights_evidence_version"], 1)
         self.assertEqual(repository.decisions[0].Action, "book.children.approved")
         self.assertTrue(repository.decisions[0].Metadata["page_snapshot"])
         self.assertEqual(result.assessment.admin_approved_by_name, "Admin test")

@@ -23,7 +23,7 @@ from sqlalchemy import select, text
 from starlette.concurrency import run_in_threadpool
 
 from app.diagnostic_logging import log_diagnostic
-from app.models import AdminAiWorkflow, Book, BookPage, PageRevision
+from app.models import AdminAiWorkflow, Book, BookPage, BookRightsEvidence, PageRevision
 from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.schemas.admin_ocr import (
     AdminOcrDraftRequest,
@@ -2543,6 +2543,9 @@ class AdminOcrService:
                 draft_text=draft_text,
                 content_hash=content_hash,
             )
+            await self._invalidate_workflows_for_draft_change(
+                page.Id, revision.Id, draft_text, actor_id
+            )
             await self.db.commit()
         except Exception:
             await self.db.rollback()
@@ -2576,25 +2579,54 @@ class AdminOcrService:
         if text_tokens != word_tokens:
             raise HTTPException(status_code=422, detail="Corrected text must match the ordered word list; edit the word entries before verifying")
         proofread = payload.proofread_audit
+        if proofread.mode == "AI_AUTO_VERIFIED":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "AI_AUTO_VERIFY_DISABLED",
+                    "message": "Hệ thống đã tắt chế độ tự động xác minh AI (AI_AUTO_VERIFIED). Admin phải rà soát và xác minh thủ công.",
+                },
+            )
         checked_text = unicodedata.normalize("NFC", proofread.checked_text.strip())
         decisions = self._validate_proofread_final(proofread, corrected_text)
         response_page_id = page.Id
         response_revision_id = revision.Id
-        response_book_id = page.BookId
-        workflow = None
         workflow_text_hash = safety_content_hash(corrected_text)
-        if payload.workflow_id is not None:
-            workflow = await self.db.scalar(
-                select(AdminAiWorkflow)
-                .where(
-                    AdminAiWorkflow.Id == payload.workflow_id,
-                    AdminAiWorkflow.PageId == page.Id,
-                )
-                .with_for_update()
+        if payload.workflow_id is None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "WORKFLOW_REQUIRED",
+                    "message": "Cần hoàn tất quy trình AI Proofreading và kiểm tra an toàn (workflow_id) trước khi xác minh trang.",
+                },
             )
-            if workflow is None or workflow.PageRevisionId != revision.Id:
-                raise HTTPException(status_code=404, detail="AI workflow does not belong to this revision")
-            self._validate_ai_workflow_for_verification(workflow, workflow_text_hash)
+        workflow = await self.db.scalar(
+            select(AdminAiWorkflow)
+            .where(
+                AdminAiWorkflow.Id == payload.workflow_id,
+                AdminAiWorkflow.PageId == page.Id,
+            )
+            .with_for_update()
+        )
+        if workflow is None or workflow.PageRevisionId != revision.Id:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "WORKFLOW_REVISION_MISMATCH",
+                    "message": "Workflow AI không thuộc về revision hiện tại của trang.",
+                },
+            )
+        self._validate_ai_workflow_for_verification(
+            workflow,
+            workflow_text_hash,
+            revision=revision,
+            expected_image_sha256=payload.expected_image_sha256,
+        )
+        rights_evidence = await self._validate_rights_for_verification(
+            page.BookId,
+            page.Id,
+            expected_rights_version=payload.expected_rights_version,
+        )
         content_hash = hashlib.sha256(
             json.dumps({"text": corrected_text, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
@@ -2666,27 +2698,40 @@ class AdminOcrService:
                 # approval marker from this revision's JSON metadata.
                 verification_metadata.pop("admin_ai_workflow", None)
             if workflow is not None:
+                now = datetime.now(timezone.utc)
+                if workflow.SafetyStatus == "PROVISIONAL":
+                    workflow.SafetyStatus = "CONFIRMED"
+                    workflow.SafetyConfirmedAt = now
+                    workflow.SafetyConfirmedBy = actor_id
+                revision_meta = revision.ProcessingMeta if isinstance(revision.ProcessingMeta, dict) else {}
                 verification_metadata["admin_ai_workflow"] = {
                     "workflow_id": str(workflow.Id),
                     "candidate_hash": workflow_text_hash,
-                    "safety_status": (
-                        workflow.SafetyStatus
-                        if workflow.SafetyStatus in {"CONFIRMED", "AUTO_CONFIRMED"}
-                        and workflow.SafetyInputHash == workflow_text_hash
-                        else "PENDING"
-                    ),
+                    "safety_status": workflow.SafetyStatus,
                     "safety_input_hash": workflow.SafetyInputHash,
+                    "image_safety_status": getattr(
+                        workflow, "ImageSafetyStatus", "ADMIN_CONFIRMED_SAFE"
+                    ),
+                    "source_image_sha256": revision_meta.get("source_image_sha256")
+                    or getattr(workflow, "SourceImageSha256", None),
+                    "rights_evidence_id": str(rights_evidence.Id),
+                    "rights_evidence_version": int(rights_evidence.Version),
+                    "rights_evidence_scope": rights_evidence.Scope,
                 }
-                workflow.OcrApprovedAt = datetime.now(timezone.utc)
+                workflow.OcrApprovedAt = now
                 workflow.OcrApprovedBy = actor_id
                 workflow.FinalApprovedTextHash = workflow_text_hash
                 workflow.ReviewEvents = list(workflow.ReviewEvents or []) + [{
                     "event": "OCR_FINAL_APPROVED",
                     "actor_id": str(actor_id),
                     "content_hash": workflow_text_hash,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "rights_evidence_version": int(rights_evidence.Version),
+                    "image_safety_status": getattr(
+                        workflow, "ImageSafetyStatus", "ADMIN_CONFIRMED_SAFE"
+                    ),
+                    "created_at": now.isoformat(),
                 }]
-                workflow.UpdatedAt = datetime.now(timezone.utc)
+                workflow.UpdatedAt = now
             revision.ProcessingMeta = verification_metadata
             await self.repo.sync_words(revision.Id, words)
             self.repo.update_revision_verification(
@@ -2736,31 +2781,8 @@ class AdminOcrService:
         except Exception:
             await self.db.rollback()
             raise
-        if workflow is not None:
-            try:
-                from app.repositories.book_content_quality_repository import (
-                    BookContentQualityRepository,
-                )
-                from app.services.book_content_quality_service import (
-                    BookContentQualityService,
-                )
-
-                await BookContentQualityService(
-                    BookContentQualityRepository(self.db)
-                ).auto_publish_if_eligible(response_book_id)
-            except Exception as exc:
-                await self.db.rollback()
-                log_diagnostic(
-                    logger,
-                    logging.ERROR,
-                    event="book_auto_publish_attempt_failed",
-                    book_id=str(response_book_id),
-                    page_id=str(response_page_id),
-                    error_code=type(exc).__name__.upper(),
-                )
-        # The post-commit workflow helper can commit or roll back its own
-        # transaction, expiring every ORM instance in this AsyncSession.
-        # Reload both rows asynchronously before building the response.
+        # Page verification and book publication are strictly independent:
+        # verifying a page never triggers automatic book publication.
         response_page = await self.repo.page(response_page_id)
         response_revision = await self.repo.revision(
             response_page_id, response_revision_id
@@ -2846,10 +2868,163 @@ class AdminOcrService:
 
         return await self.revision_detail(page, revision)
 
+    async def _invalidate_workflows_for_draft_change(
+        self,
+        page_id: UUID,
+        revision_id: UUID,
+        draft_text: str,
+        actor_id: UUID,
+    ) -> None:
+        """Mark existing workflow safety results stale whenever draft text changes."""
+        if not callable(getattr(self.db, "scalars", None)):
+            return
+        draft_hash = safety_content_hash(draft_text)
+        result = await self.db.scalars(
+            select(AdminAiWorkflow)
+            .where(
+                AdminAiWorkflow.PageId == page_id,
+                AdminAiWorkflow.PageRevisionId == revision_id,
+            )
+            .with_for_update()
+        )
+        workflows = list(result.all()) if result is not None and hasattr(result, "all") else []
+        now = datetime.now(timezone.utc)
+        for workflow in workflows:
+            if (
+                workflow.CandidateHash == draft_hash
+                and workflow.SafetyInputHash == draft_hash
+            ):
+                continue
+            if workflow.SafetyInputHash or workflow.Findings:
+                history = list(workflow.SafetyHistory or [])
+                history.append({
+                    "scan_id": (workflow.SafetyMetadata or {}).get("scan_id"),
+                    "content_hash": workflow.SafetyInputHash,
+                    "status": workflow.SafetyStatus,
+                    "suitability": workflow.Suitability,
+                    "findings": list(workflow.Findings or []),
+                    "metadata": dict(workflow.SafetyMetadata or {}),
+                    "archived_at": now.isoformat(),
+                    "reason": "DRAFT_EDITED_OUTSIDE_WORKFLOW",
+                })
+                workflow.SafetyHistory = history
+            workflow.SafetyStatus = "STALE"
+            workflow.SafetyInputHash = None
+            workflow.Suitability = None
+            workflow.Findings = []
+            workflow.SafetyConfirmedAt = None
+            workflow.SafetyConfirmedBy = None
+            workflow.ReviewEvents = list(workflow.ReviewEvents or []) + [{
+                "event": "WORKFLOW_INVALIDATED_BY_DRAFT_EDIT",
+                "actor_id": str(actor_id),
+                "draft_hash": draft_hash,
+                "created_at": now.isoformat(),
+            }]
+            workflow.UpdatedAt = now
+
+    async def _validate_rights_for_verification(
+        self,
+        book_id: UUID,
+        page_id: UUID,
+        *,
+        expected_rights_version: int | None = None,
+    ) -> BookRightsEvidence:
+        """Require persisted RIGHTS_REVIEWED evidence at page or book scope."""
+        page_rights = await self.db.scalar(
+            select(BookRightsEvidence).where(
+                BookRightsEvidence.BookId == book_id,
+                BookRightsEvidence.Scope == "PAGE",
+                BookRightsEvidence.PageId == page_id,
+            )
+        )
+        rights = page_rights
+        if rights is None:
+            rights = await self.db.scalar(
+                select(BookRightsEvidence).where(
+                    BookRightsEvidence.BookId == book_id,
+                    BookRightsEvidence.Scope == "BOOK",
+                    BookRightsEvidence.PageId.is_(None),
+                )
+            )
+        if rights is None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "RIGHTS_EVIDENCE_REQUIRED",
+                    "message": "Chưa có hồ sơ bằng chứng quyền sử dụng cho sách hoặc trang này. Hãy hoàn tất rà soát quyền sử dụng trước khi xác minh.",
+                },
+            )
+        if rights.Status == "CONCERN_FLAGGED":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "RIGHTS_CONCERN_BLOCKED",
+                    "message": "Sách hoặc trang đang bị gắn cờ nghi ngại bản quyền / quyền sử dụng nên không thể xác minh.",
+                },
+            )
+        if rights.Status != "RIGHTS_REVIEWED" or not (
+            rights.SourceDescription and rights.UsageBasis and rights.EvidenceUrlOrRef
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "RIGHTS_EVIDENCE_REQUIRED",
+                    "message": "Hồ sơ quyền sử dụng chưa đầy đủ bằng chứng (nguồn, cơ sở sử dụng, đường dẫn/mã lưu trữ) nên chưa thể xác minh.",
+                },
+            )
+        if (
+            expected_rights_version is not None
+            and int(rights.Version or 0) != expected_rights_version
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "RIGHTS_VERSION_MISMATCH",
+                    "message": "Phiên bản hồ sơ quyền sử dụng đã thay đổi; hãy tải lại trang trước khi xác minh.",
+                },
+            )
+        return rights
+
     @staticmethod
     def _validate_ai_workflow_for_verification(
-        workflow: AdminAiWorkflow, candidate_hash: str
+        workflow: AdminAiWorkflow,
+        candidate_hash: str,
+        *,
+        revision: PageRevision | None = None,
+        expected_image_sha256: str | None = None,
     ) -> None:
+        revision_meta = (
+            revision.ProcessingMeta
+            if revision is not None and isinstance(revision.ProcessingMeta, dict)
+            else {}
+        )
+        revision_sha = (
+            str(revision_meta["source_image_sha256"])
+            if isinstance(revision_meta.get("source_image_sha256"), str)
+            and len(str(revision_meta.get("source_image_sha256"))) == 64
+            else None
+        )
+        revision_path = (
+            str(revision_meta["source_image_path"])
+            if isinstance(revision_meta.get("source_image_path"), str)
+            and revision_meta.get("source_image_path")
+            else None
+        )
+        workflow_sha = getattr(workflow, "SourceImageSha256", None)
+        workflow_path = getattr(workflow, "ImagePath", None)
+        if (
+            (revision_sha and workflow_sha and revision_sha != workflow_sha)
+            or (revision_path and workflow_path and revision_path != workflow_path)
+            or (expected_image_sha256 and revision_sha and expected_image_sha256 != revision_sha)
+            or (expected_image_sha256 and workflow_sha and expected_image_sha256 != workflow_sha)
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "IMAGE_REVISION_MISMATCH",
+                    "message": "Ảnh nguồn của trang đã thay đổi so với lúc chạy AI; cần chạy lại quy trình cho ảnh hiện tại.",
+                },
+            )
         stored_candidate_hash = (
             safety_content_hash(workflow.CandidateText)
             if isinstance(workflow.CandidateText, str)
@@ -2861,41 +3036,100 @@ class AdminOcrService:
         ):
             raise HTTPException(
                 status_code=409,
-                detail="Candidate changed; save and wait for the matching review before approval",
+                detail={
+                    "code": "CANDIDATE_HASH_MISMATCH",
+                    "message": "Nội dung đã thay đổi sau lần chạy AI; hãy lưu Candidate và đợi kiểm tra an toàn khớp hash mới.",
+                },
             )
         if workflow.Status != "READY_FOR_ADMIN_REVIEW":
             raise HTTPException(
                 status_code=409,
-                detail="AI workflow is not ready for final approval",
+                detail={
+                    "code": "WORKFLOW_NOT_READY",
+                    "message": "Workflow AI chưa ở trạng thái sẵn sàng cho Admin xác minh.",
+                },
             )
+        safety_meta = getattr(workflow, "SafetyMetadata", None)
+        if isinstance(safety_meta, dict):
+            if safety_meta.get("all_chunks_completed") is False:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "TEXT_SAFETY_INCOMPLETE_CHUNKS",
+                        "message": "Kiểm tra an toàn văn bản chưa hoàn tất đủ mọi đoạn (chunks); chưa thể xác minh.",
+                    },
+                )
+            chunks_total = safety_meta.get("chunks_total")
+            chunks_completed = safety_meta.get("chunks_completed")
+            if (
+                isinstance(chunks_total, int)
+                and isinstance(chunks_completed, int)
+                and (chunks_total <= 0 or chunks_completed < chunks_total)
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "TEXT_SAFETY_INCOMPLETE_CHUNKS",
+                        "message": "Kiểm tra an toàn văn bản chưa hoàn tất đủ mọi đoạn (chunks); chưa thể xác minh.",
+                    },
+                )
         manually_confirmed = (
             workflow.SafetyStatus == "CONFIRMED"
             and workflow.SafetyInputHash == candidate_hash
+            and getattr(workflow, "SafetyConfirmedBy", None) is not None
         )
-        eligible_for_clean_auto_confirmation = (
-            workflow.SafetyStatus in {"PROVISIONAL", "AUTO_CONFIRMED"}
+        clean_provisional_for_admin_verify = (
+            workflow.SafetyStatus == "PROVISIONAL"
             and workflow.SafetyInputHash == candidate_hash
             and workflow.Suitability == "SUITABLE"
             and not workflow.Findings
-            and (
-                workflow.SafetyStatus != "AUTO_CONFIRMED"
-                or workflow.SafetyConfirmedBy is None
-            )
         )
-        if not (manually_confirmed or eligible_for_clean_auto_confirmation):
+        if not (manually_confirmed or clean_provisional_for_admin_verify):
             raise HTTPException(
                 status_code=409,
-                detail="Child Safety must be complete for the current Candidate; only clean SUITABLE results can be confirmed automatically",
+                detail={
+                    "code": "TEXT_SAFETY_NOT_READY",
+                    "message": "Kết quả kiểm tra an toàn văn bản chưa hoàn tất, đã cũ (stale) hoặc cần Admin xác nhận trước khi xác minh.",
+                },
             )
         if workflow.Suitability == "NOT_RECOMMENDED" or any(
             isinstance(finding, dict) and finding.get("severity") == "HIGH"
             for finding in workflow.Findings or []
         ):
-            # The existing workflow has no explicit high-risk override policy.
-            # Fail closed until one is implemented and audited.
             raise HTTPException(
                 status_code=409,
-                detail="High-risk Safety results require a separate Admin content decision before verification",
+                detail={
+                    "code": "TEXT_SAFETY_HIGH_RISK_BLOCKED",
+                    "message": "Nội dung có cảnh báo mức HIGH hoặc NOT_RECOMMENDED cho trẻ em; hệ thống chặn xác minh.",
+                },
+            )
+        image_safety_status = getattr(
+            workflow, "ImageSafetyStatus", "UNASSESSED_NO_VISION_MODEL"
+        )
+        if image_safety_status == "ADMIN_FLAGGED_UNSAFE":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "IMAGE_SAFETY_FLAGGED_UNSAFE",
+                    "message": "Hình ảnh trang đã bị Admin gắn cờ không phù hợp cho trẻ em; không thể xác minh.",
+                },
+            )
+        if image_safety_status != "ADMIN_CONFIRMED_SAFE":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "IMAGE_SAFETY_UNASSESSED",
+                    "message": "Chưa có AI kiểm tra hình ảnh; Admin bắt buộc xem ảnh và xác nhận an toàn hình ảnh trước khi xác minh.",
+                },
+            )
+        reviewed_sha = getattr(workflow, "ImageSafetyImageSha256", None)
+        if revision_sha and reviewed_sha != revision_sha:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "IMAGE_SAFETY_STALE",
+                    "message": "Xác nhận an toàn hình ảnh thuộc về ảnh cũ; hãy kiểm tra lại ảnh hiện tại trước khi xác minh.",
+                },
             )
 
     async def reprocess(self, actor_id: UUID, page_id: UUID) -> AdminRevisionDetailRead:

@@ -168,64 +168,6 @@ function preparePage(
   };
 }
 
-function prepareSourceOcrFallback(
-  detail: AdminPageRevisionDetailDTO,
-  sourceText: string,
-): AdminRevisionVerifyRequestDTO {
-  const normalizedText = sourceText.normalize("NFC").trim();
-  const tokens = tokenizePageText(normalizedText);
-  if (
-    tokens.length === 0 ||
-    detail.words.length !== tokens.length ||
-    detail.words.some((word, index) => {
-      const [x, y, width, height] = word.bbox;
-      return (
-        word.word_index !== index ||
-        tokenizePageText(word.text).length !== 1 ||
-        normalizeVietnameseWord(word.text) !== word.normalized_text ||
-        normalizeVietnameseWord(tokens[index] ?? "") !== word.normalized_text ||
-        ![x, y, width, height].every(Number.isFinite) ||
-        x < 0 ||
-        y < 0 ||
-        width <= 0 ||
-        height <= 0 ||
-        x + width > 1 ||
-        y + height > 1
-      );
-    })
-  ) {
-    throw new Error(
-      "OCR gốc không khớp an toàn với từ và vùng ảnh; cần Admin xác minh thủ công.",
-    );
-  }
-  return {
-    page_revision_id: detail.page_revision_id,
-    corrected_text: normalizedText,
-    words: detail.words.map(
-      ({
-        word_index,
-        line_index,
-        text,
-        normalized_text,
-        bbox,
-        ocr_confidence,
-      }) => ({
-        word_index,
-        line_index,
-        text,
-        normalized_text,
-        bbox,
-        ocr_confidence,
-      }),
-    ),
-    proofread_audit: {
-      mode: "AI_AUTO_VERIFIED",
-      checked_text: normalizedText,
-      suggestions: [],
-    },
-  };
-}
-
 export function AdminBookAiBatchReview({
   bookId,
   items,
@@ -235,7 +177,7 @@ export function AdminBookAiBatchReview({
   items: readonly AdminPageListItemUI[];
   onCompleted: () => void;
 }) {
-  const { ocr, revisions } = useAdminServices();
+  const { ocr } = useAdminServices();
   const session = useSyncExternalStore(
     (onChange) => subscribeBatchSession(bookId, onChange),
     () => getBatchSession(bookId),
@@ -329,61 +271,34 @@ export function AdminBookAiBatchReview({
         if (!originalText)
           throw new Error("Trang chưa có văn bản OCR để rà soát.");
 
-        let aiText: string;
-        try {
-          aiText = await ocr.aiCorrectText(
-            pageId,
-            originalText,
-            detail.words,
-            (chunk) => {
-              if (controller.signal.aborted) return;
-              updateBatchSession(bookId, (current) => ({
-                ...current,
-                progress: {
-                  current: index + 1,
-                  total: waitingPages.length,
-                  pageNumber: item.page_number,
-                  completedChunks: chunk.completed_chunks,
-                  totalChunks: chunk.total_chunks,
-                },
-              }));
-            },
-            controller.signal,
-          );
-        } catch (aiCause) {
-          if (controller.signal.aborted) break;
-          const sourceOnly = prepareSourceOcrFallback(detail, originalText);
-          const verified = await revisions.verify(pageId, sourceOnly);
-          if (
-            verified.page_revision_id !== revisionId ||
-            verified.verification_status !== "VERIFIED"
-          ) {
-            throw new Error("Backend chưa xác nhận revision OCR gốc.");
-          }
-          markAiPageRevisionSkipped(bookId, revisionId);
-          completed = [
-            ...completed,
-            {
-              pageId,
-              pageNumber: item.page_number,
-              revisionId,
-              status: "verified",
-              changes: 0,
-              adminReviewRequired: true,
-              message: `AI không sửa được; đã tự VERIFIED bằng OCR gốc. Cần Admin rà soát: ${pageErrorMessage(aiCause)}`,
-            },
-          ];
-          updateBatchSession(bookId, (current) => ({
-            ...current,
-            results: [...completed],
-          }));
-          if (mountedRef.current) onCompleted();
-          continue;
-        }
-        const correctedText = aiText.normalize("NFC");
+        const workflow = await ocr.runCombinedWorkflow(
+          pageId,
+          revisionId,
+          originalText,
+          detail.words,
+          (workflowProgress) => {
+            if (controller.signal.aborted) return;
+            updateBatchSession(bookId, (current) => ({
+              ...current,
+              progress: {
+                current: index + 1,
+                total: waitingPages.length,
+                pageNumber: item.page_number,
+                completedChunks: workflowProgress.progress.completed_chunks,
+                totalChunks: workflowProgress.progress.total_chunks,
+              },
+            }));
+          },
+          controller.signal,
+        );
         if (controller.signal.aborted) break;
+        if (workflow.status === "FAILED" || !workflow.proofread_text) {
+          throw new Error(
+            `Workflow AI chưa hoàn tất (${workflow.error_code ?? "FAILED"}). Nội dung OCR gốc được giữ nguyên để Admin kiểm tra.`,
+          );
+        }
 
-        const prepared = preparePage(detail, correctedText);
+        const prepared = preparePage(detail, workflow.proofread_text.normalize("NFC"));
         const saved = await ocr.saveDraft(
           pageId,
           revisionId,
@@ -391,9 +306,6 @@ export function AdminBookAiBatchReview({
           prepared.request.words,
         );
         draftSaved = true;
-        // The OCR correction is now durable. If the user leaves before the
-        // verification step finishes, do not run the same revision through AI
-        // again when the book is reopened.
         markAiPageRevisionSkipped(bookId, revisionId);
         if (
           saved.page_revision_id !== revisionId ||
@@ -408,7 +320,11 @@ export function AdminBookAiBatchReview({
           revisionId,
           status: "saved",
           changes: prepared.changes,
-          message: "Đã tự lưu bản sửa vào database; đang xác minh trang này.",
+          adminReviewRequired: true,
+          message:
+            prepared.changes > 0
+              ? `AI đã đề xuất ${prepared.changes} sửa đổi & quét an toàn văn bản. Đã lưu bản nháp — chờ Admin kiểm tra ảnh, quyền sử dụng và xác minh thủ công.`
+              : "AI không đề xuất sửa đổi & đã quét an toàn văn bản. Chờ Admin kiểm tra ảnh, quyền sử dụng và xác minh thủ công.",
           request: prepared.request,
         };
         completed = [...completed, savedResult];
@@ -416,97 +332,8 @@ export function AdminBookAiBatchReview({
           ...current,
           results: [...completed],
         }));
-
-        // The draft is durable now. If the user stops, leave it NEEDS_REVIEW
-        // rather than starting verification after the stop request.
-        if (controller.signal.aborted) {
-          completed = completed.map((result) =>
-            result.pageId === pageId
-              ? {
-                  ...savedResult,
-                  message: "Bản nháp đã lưu; đã dừng trước bước xác minh.",
-                }
-              : result,
-          );
-          updateBatchSession(bookId, (current) => ({
-            ...current,
-            results: [...completed],
-          }));
-          break;
-        }
-
-        const verified = await revisions.verify(pageId, {
-          ...prepared.request,
-          proofread_audit: {
-            ...prepared.request.proofread_audit,
-            mode: "AI_AUTO_VERIFIED",
-          },
-        });
-        if (
-          verified.page_revision_id !== revisionId ||
-          verified.verification_status !== "VERIFIED"
-        ) {
-          throw new Error("Backend chưa xác nhận đúng revision của trang.");
-        }
-        completed = completed.map((result) =>
-          result.pageId === pageId
-            ? {
-                ...savedResult,
-                status: "verified" as const,
-                adminReviewRequired: true,
-                message:
-                  prepared.changes > 0
-                    ? `Đã tự lưu ${prepared.changes} sửa đổi và xác minh trang.`
-                    : "AI không đề xuất sửa đổi; trang đã tự lưu và xác minh.",
-              }
-            : result,
-        );
-        updateBatchSession(bookId, (current) => ({
-          ...current,
-          results: [...completed],
-        }));
         if (mountedRef.current) onCompleted();
       } catch (cause) {
-        if (draftSaved) {
-          try {
-            const history = await revisions.list(pageId);
-            if (
-              history.some(
-                (revision) =>
-                  revision.page_revision_id === revisionId &&
-                  revision.verification_status === "VERIFIED",
-              )
-            ) {
-              const recovered = completed.find(
-                (result) => result.pageId === pageId,
-              );
-              const recoveredResult: BatchPageResult = {
-                ...recovered,
-                pageId,
-                pageNumber: item.page_number,
-                revisionId,
-                status: "verified",
-                changes: recovered?.changes ?? 0,
-                adminReviewRequired: true,
-                message:
-                  "Backend đã xác nhận trang VERIFIED sau khi kết nối bị gián đoạn.",
-              };
-              completed = recovered
-                ? completed.map((result) =>
-                    result.pageId === pageId ? recoveredResult : result,
-                  )
-                : [...completed, recoveredResult];
-              updateBatchSession(bookId, (current) => ({
-                ...current,
-                results: [...completed],
-              }));
-              if (mountedRef.current) onCompleted();
-              continue;
-            }
-          } catch {
-            // Keep the durable-draft notice when verification status is unknown.
-          }
-        }
         if (controller.signal.aborted) break;
         const previousResult = completed.find(
           (result) => result.pageId === pageId,
@@ -519,10 +346,10 @@ export function AdminBookAiBatchReview({
               revisionId,
               status: "saved",
               changes: previousResult?.changes ?? 0,
+              adminReviewRequired: true,
               message:
-                "Bản sửa đã được lưu, nhưng chưa xác minh được. Cần Admin kiểm tra: " +
-                pageErrorMessage(cause) +
-                " AI sẽ bỏ qua revision này để không quét lại.",
+                "Bản nháp AI đã được lưu và chờ Admin xác minh thủ công: " +
+                pageErrorMessage(cause),
             }
           : {
               pageId,
@@ -530,7 +357,8 @@ export function AdminBookAiBatchReview({
               revisionId,
               status: "failed",
               changes: 0,
-              message: `AI không xử lý được; nội dung OCR được giữ nguyên và chuyển sang Admin xác minh. ${pageErrorMessage(cause)} AI sẽ không quét lại revision này.`,
+              adminReviewRequired: true,
+              message: `AI không xử lý được; trang giữ nguyên trạng thái NEEDS_REVIEW (không tự động VERIFIED). ${pageErrorMessage(cause)}`,
             };
         markAiPageRevisionSkipped(bookId, revisionId);
         const existingIndex = completed.findIndex(
@@ -608,19 +436,15 @@ export function AdminBookAiBatchReview({
         <div>
           <h2 className="flex items-center gap-2 text-xl font-black">
             <Sparkles aria-hidden className="size-5 text-primary" />
-            AI rà soát và tự xác minh từng trang
+            AI rà soát chính tả &amp; an toàn từng trang (chờ Admin xác minh)
           </h2>
           <p className="mt-2 text-sm leading-6 text-muted">
-            AI xử lý lần lượt các trang NEEDS_REVIEW. Mỗi trang được lưu ngay
-            sau khi kiểm tra, rồi tự xác minh trước khi chuyển sang trang kế
-            tiếp; không cần xác nhận từng trang. Nếu ghép từ với vùng OCR không
-            chắc chắn hoặc AI gặp lỗi, nội dung OCR được giữ và tự VERIFIED với
-            nhãn đỏ cần Admin rà soát. Nếu OCR không khớp an toàn với vùng ảnh,
-            trang vẫn chờ Admin xác minh. Trang tự VERIFIED chỉ vào Train, không
-            vào Validation hoặc Locked Test trước khi Admin duyệt. AI không quét
-            lại revision đã xử lý. Backend thử Ollama khi nhà cung cấp AI bên
-            ngoài gặp lỗi. Bạn có thể chuyển màn hình; tiến trình và kết quả vẫn
-            được giữ khi quay lại trong cùng tab.
+            AI xử lý lần lượt các trang NEEDS_REVIEW để đề xuất sửa chính tả OCR
+            và quét an toàn nội dung văn bản (hỗ trợ fallback sang Ollama cục bộ
+            khi cloud gặp lỗi). Hệ thống tuyệt đối không tự động VERIFIED trang
+            hoặc tự động xuất bản sách: Admin cần mở từng trang để đối chiếu ảnh,
+            xác nhận an toàn hình ảnh, kiểm tra hồ sơ quyền sử dụng và bấm xác
+            minh thủ công.
           </p>
         </div>
 
@@ -746,7 +570,7 @@ export function AdminBookAiBatchReview({
             >
               <Sparkles aria-hidden className="size-4" />
               {waitingPages.length > 0
-                ? `${results.length ? "Tiếp tục rà soát" : "AI kiểm tra & xác minh"} ${waitingPages.length} trang`
+                ? `${results.length ? "Tiếp tục rà soát" : "Chạy AI đề xuất sửa"} ${waitingPages.length} trang`
                 : skippedPageIds.size > 0
                   ? `${skippedPageIds.size} revision đã xử lý; không quét lại`
                   : "Không có trang cần AI rà soát"}
