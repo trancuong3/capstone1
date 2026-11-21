@@ -26,22 +26,25 @@ The first Android implementation is an **isolated native WebView shell** serving
 Local build on Windows with JDK 17, Android SDK platform 35, Gradle 8.11.1:
 
 ~~~powershell
+# Option A: Public HTTPS Next.js origin
 $env:VIREAD_FRONTEND_URL = "https://YOUR-REAL-NEXTJS-FRONTEND.example"
-python .\android\scripts\verify_frontend.py  # read-only HTTPS /login and root preflight
 .\android\scripts\build-android.ps1
-# APK: android\app\build\outputs\apk\debug\app-debug.apk
+
+# Option B: Local Wi-Fi LAN HTTPS Debug build (scoped Test CA, never enabled in Release)
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\New-ViReadLanCert.ps1 -LanHost 192.168.1.4
+.\android\scripts\build-android.ps1 -FrontendUrl "https://192.168.1.4:8443" -LanMode -CaCert "F:\c1\viread-host-runtime\certs\viread-lan-ca.pem"
+# APK: android\app\build\outputs\apk\debug\app-debug.apk (automatically verified via apksigner + verify_apk_quality.py)
 ~~~
 
-The validation job uses https://example.org only for Java compilation/lint/unit tests, **not** APK packaging. Offline Python unit tests verify the HTTPS-origin preflight and safe `/` → `/login` redirects. A successful compile is NOT evidence of a working app.
+The validation job uses https://viread.example.org only for Java compilation/lint/unit tests, **not** APK packaging. `verify_apk_quality.py` scans every entry in the packaged APK to enforce Adaptive/PNG launcher icons across `mdpi..xxxhdpi`, `minSdk >= 26`, `targetSdk == 35`, `usesCleartextTraffic == false`, `allowBackup == false`, valid signature, and zero secret/placeholder strings.
 
-## WebView permissions and security
+## Branding, Error Recovery, File Picker & Security
 
-- Only navigation and WebRTC permissions from the configured exact HTTPS origin are trusted. Foreign HTTPS links open the system browser, not inside the authenticated WebView; http/file/intent/javascript top-level navigation is blocked.
-- Camera/microphone require both Android runtime permission and a same-origin WebChromeClient permission request. Unknown resources are denied; no JavaScript bridge is exposed.
-- Document/image selection uses Android ACTION_OPEN_DOCUMENT and returns content URIs to the HTML input. The current in-page scanner uses getUserMedia, not the file picker.
-- JS/DOM storage/cookies are needed for Next + Supabase; mixed content and cleartext traffic are forbidden. SSL errors are canceled. Third-party cookies are disabled.
-- Android onPause dispatches a background event; ViRead reading camera and speech-recorder hooks release active media. On return, camera may need reopening/restarting. No guarantee of continuous background recording.
-- Browser playback (TTS, karaoke), MediaRecorder MIME support, page scanner framing, WebRTC capture, file upload, Android back handling, screen rotation, offline/errors MUST be checked on a real device.
+- **Branding & Splash:** Adaptive Launcher Icons (`ic_launcher`, `ic_launcher_round`, foreground/background/monochrome vectors within the 66/108dp safe zone + `mdpi..xxxhdpi` PNGs), `Theme.ViRead.Splash` (Android 8–15), and Edge-to-Edge `WindowInsets` (`systemBars | displayCutout | ime`).
+- **Zero Raw Chromium Error Page:** `WebView` stays `INVISIBLE` until a clean main-frame page finishes and immediately hides on any main-frame error (`onReceivedError`, 5xx `onReceivedHttpError`, `onReceivedSslError`, cold-start timeout), displaying a branded Vietnamese diagnostic card (**Thử lại**, **Về trang đăng nhập**, **Kiểm tra lại kết nối**). In `BuildConfig.DEBUG && BuildConfig.LAN_ACCEPTANCE_MODE` builds ONLY, testers can update the validated RFC1918 HTTPS LAN IP directly from the diagnostic card when DHCP Wi-Fi IP changes (completely absent in Release builds).
+- **Exact-Origin Navigation & WebRTC:** Only navigation and WebRTC permissions from the configured exact HTTPS origin are trusted. Foreign HTTPS links open the system browser; `http:`, `file:`, `intent:`, and `javascript:` top-level navigation is blocked. SSL errors always call `handler.cancel()`.
+- **Multi-Format Picker & Direct Camera Capture:** `TrustedNavigation.normalizeAcceptMimeTypes()` maps `.jpg`, `.jpeg`, `.png`, `.webp`, `.bmp`, `.tif`, `.tiff`, `.pdf`, and `.docx`. `onShowFileChooser` combines `ACTION_OPEN_DOCUMENT` (`EXTRA_MIME_TYPES` + `ClipData` multi-select) with direct native `MediaStore.ACTION_IMAGE_CAPTURE` via an unexported `androidx.core.content.FileProvider` (`cacheDir/camera_captures`, auto-cleaned).
+- **Lifecycle & Android 13–15 Back Navigation:** Registers `OnBackInvokedCallback` (API 33–35) with `<33` fallback and root double-back exit confirmation. Transient permission/chooser overlays preserve pending grants; real backgrounding dispatches `viread:android-background` to release active camera/microphone streams.
 
 ## Known authentication limitations requiring an explicit second phase
 

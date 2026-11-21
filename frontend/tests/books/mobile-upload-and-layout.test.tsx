@@ -9,6 +9,7 @@ import {
 import { ParentMyBooksScreen } from "@/components/books/parent-my-books-screen";
 import { ParentPrivateBookManager } from "@/components/books/parent-private-book-manager";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
+import { resolvePrivateApiMediaUrl } from "@/lib/api/api-client";
 import {
   apiFetchFixture,
   installApiFetchFixture,
@@ -181,6 +182,17 @@ afterEach(() => {
 });
 
 describe("Mobile My Books Multi-Format Upload (Image/PDF/DOCX) & Responsive Controls", () => {
+  it("rewrites absolute backend private image URLs onto getApiBaseUrl() so Android LAN HTTPS proxies never mixed-content fail", () => {
+    expect(
+      resolvePrivateApiMediaUrl(
+        "http://192.168.1.4:8443/books/my-books/abc/pages/p1/image",
+      ),
+    ).toBe("http://127.0.0.1:8000/books/my-books/abc/pages/p1/image");
+    expect(
+      resolvePrivateApiMediaUrl("/books/my-books/abc/submissions/s1/image"),
+    ).toBe("http://127.0.0.1:8000/books/my-books/abc/submissions/s1/image");
+  });
+
   it("renders My Books list cleanly on mobile and navigates after creating a book", async () => {
     const user = userEvent.setup();
     const summary = makeBookSummary();

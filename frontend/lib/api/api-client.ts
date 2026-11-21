@@ -598,6 +598,25 @@ export function revokePrivateBlobUrl(blobUrl: string | null | undefined): void {
   }
 }
 
+export function resolvePrivateApiMediaUrl(url: string): string {
+  const apiBase = getApiBaseUrl();
+  if (url.startsWith("/")) {
+    return `${apiBase}${url}`;
+  }
+  try {
+    const parsed = new URL(url);
+    const baseParsed = new URL(apiBase);
+    const basePrefix = baseParsed.pathname.replace(/\/+$/, "");
+    const pathAndQuery = `${parsed.pathname}${parsed.search}`;
+    if (basePrefix && pathAndQuery.startsWith(`${basePrefix}/`)) {
+      return `${baseParsed.origin}${pathAndQuery}`;
+    }
+    return `${apiBase}${pathAndQuery}`;
+  } catch {
+    return url;
+  }
+}
+
 /**
  * Fetch an authenticated private image through the FastAPI media proxy using
  * the active Bearer session token and `cache: "no-store"`. Never persists to
@@ -620,7 +639,7 @@ export async function fetchAuthenticatedBlobUrl(
     throw failure(401);
   }
 
-  const resolvedUrl = url.startsWith("/") ? `${getApiBaseUrl()}${url}` : url;
+  const resolvedUrl = resolvePrivateApiMediaUrl(url);
   const response = await fetch(resolvedUrl, {
     method: "GET",
     headers: {

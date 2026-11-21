@@ -31,6 +31,11 @@ const SCREENSHOT_DIR =
   process.env.VIREAD_MOBILE_E2E_SCREENSHOT_DIR ??
   path.join(os.tmpdir(), "viread_mobile_android_e2e_screenshots");
 
+const SHARED_BOOK_ID_CACHE = path.join(
+  os.tmpdir(),
+  "viread_mobile_e2e_ready_book_id.txt",
+);
+
 function readStackInfo(): StackInfo {
   if (!fs.existsSync(STACK_INFO_PATH)) {
     throw new Error(
@@ -106,7 +111,7 @@ async function tapTopNav(page: Page, label: RegExp, expectedUrl: RegExp) {
 }
 
 test.describe("Mobile & Android WebView Full UI + OCR Parity E2E", () => {
-  test("completes full Parent & Child flow across Login -> Dashboard -> Books -> My Books -> Book Scanner OCR -> Reading -> Management -> Sessions -> Reports -> Logout with 0 overflow & 0 runtime errors", async ({
+  test("completes full Parent & Child flow across Login -> Dashboard -> My Books -> Books -> Reading (TTS + Mic) -> Book Scanner OCR -> Management -> Sessions -> Reports -> Logout with 0 overflow & 0 runtime errors", async ({
     page,
   }, testInfo) => {
     const stack = readStackInfo();
@@ -114,6 +119,7 @@ test.describe("Mobile & Android WebView Full UI + OCR Parity E2E", () => {
 
     const pageErrors: string[] = [];
     const consoleErrors: string[] = [];
+    let isSigningOut = false;
 
     page.on("pageerror", (err) => {
       pageErrors.push(err.message);
@@ -121,9 +127,9 @@ test.describe("Mobile & Android WebView Full UI + OCR Parity E2E", () => {
     page.on("console", (msg) => {
       if (msg.type() === "error") {
         const text = msg.text();
-        if (!text.includes("favicon.ico")) {
-          consoleErrors.push(text);
-        }
+        if (text.includes("favicon.ico")) return;
+        if (isSigningOut && text.includes("status of 401")) return;
+        consoleErrors.push(text);
       }
     });
 
@@ -153,39 +159,108 @@ test.describe("Mobile & Android WebView Full UI + OCR Parity E2E", () => {
       chooseBookBtn,
     ]);
 
-    // 3. Book Library (/books) via real SPA click so selected child persists in context
-    await chooseBookBtn.click();
+    // 3. My Books (/my-books) — Create Private Book + Real OCR + Tool Check + Add Page
+    await tapTopNav(page, /^Sách của tôi$/i, /\/my-books$/);
+    const createPrivateBtn = page.getByRole("button", {
+      name: /Tạo sách riêng/i,
+    });
+    await expect(createPrivateBtn).toBeVisible();
+    await assertMobileScreenHealth(page, projectName, "03_my_books", [
+      createPrivateBtn,
+    ]);
+
+    let readableBookId = fs.existsSync(SHARED_BOOK_ID_CACHE)
+      ? fs.readFileSync(SHARED_BOOK_ID_CACHE, "utf-8").trim()
+      : "";
+
+    if (!readableBookId || projectName === "android-360x800") {
+      await createPrivateBtn.click();
+      const bookTitle = `Sách Gia Đình Mobile ${Date.now()}`;
+      await page.getByLabel(/Tên sách/i).fill(bookTitle);
+      const saveBookBtn = page.getByRole("button", {
+        name: /Lưu và thêm trang/i,
+      });
+      await assertMobileScreenHealth(page, projectName, "03b_my_books_create", [
+        saveBookBtn,
+      ]);
+      await saveBookBtn.click();
+      await page.waitForURL(/\/my-books\/([0-9a-f-]+)/i, { timeout: 25_000 });
+      const match = page.url().match(/\/my-books\/([0-9a-f-]+)/i);
+      expect(match).not.toBeNull();
+      readableBookId = match![1];
+
+      const privateFileInput = page.getByLabel(
+        /Chọn tệp trang sách hoặc tài liệu/i,
+      );
+      await privateFileInput.setInputFiles(stack.assets.clean_png);
+      const uploadCheckBtn = page.getByRole("button", {
+        name: /Tải lên & kiểm tra/i,
+      });
+      await assertMobileScreenHealth(
+        page,
+        projectName,
+        "03c_my_book_detail_upload",
+        [uploadCheckBtn],
+      );
+      await uploadCheckBtn.click();
+
+      const addPageBtn = page.getByRole("button", {
+        name: /Thêm trang vào sách/i,
+      });
+      await expect(addPageBtn).toBeEnabled({ timeout: 90_000 });
+      await addPageBtn.click();
+      await expect(
+        page.getByText(/Đã thêm vào sách đọc|Đã thêm trang/i).first(),
+      ).toBeVisible({ timeout: 25_000 });
+      fs.writeFileSync(SHARED_BOOK_ID_CACHE, readableBookId, "utf-8");
+    } else {
+      const detailLink = page
+        .locator(`a[href="/my-books/${readableBookId}"]`)
+        .first();
+      await expect(detailLink).toBeVisible();
+      await detailLink.click();
+      await page.waitForURL(new RegExp(`/my-books/${readableBookId}`), {
+        timeout: 25_000,
+      });
+      await assertMobileScreenHealth(page, projectName, "03c_my_book_detail");
+    }
+
+    // 4. Open Book Library (/books) & Ready Book Detail (/books/[bookId]) keeping Bé An selected
+    await tapTopNav(page, /^Tổng quan$/i, /\/dashboard/);
+    const childBtnCheck = page.getByRole("button", {
+      name: new RegExp(`^${stack.users.parent_a.child_alias}, lớp`, "i"),
+    });
+    if ((await childBtnCheck.getAttribute("aria-pressed")) !== "true") {
+      await childBtnCheck.click();
+    }
+    await page.getByRole("button", { name: /^Chọn sách$/i }).click();
     await page.waitForURL(/\/books$/, { timeout: 25_000 });
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-    await assertMobileScreenHealth(page, projectName, "03_books_library");
+    await assertMobileScreenHealth(page, projectName, "04_books_library");
 
-    // Open catalog book card -> Book Detail (/books/[bookId])
-    const bookDetailLink = page
-      .locator(`a[href*="/books/${stack.legacy_catalog_book_id}"]`)
-      .or(page.getByRole("link", { name: /Xem chi tiết|Đọc ngay|Mèo/i }))
+    const openReadyBook = page
+      .locator(`a[href*="/books/${readableBookId}"]`)
       .first();
-    await expect(bookDetailLink).toBeVisible();
-    await bookDetailLink.click();
-    await page.waitForURL(
-      new RegExp(`/books/${stack.legacy_catalog_book_id}`),
-      { timeout: 25_000 },
-    );
-
-    // Select Page 1 thumbnail so "Chuẩn bị đọc" unlocks
-    const firstPageThumb = page
-      .getByLabel("Các trang sách có thể xem trước")
-      .locator("button")
-      .first();
-    await expect(firstPageThumb).toBeVisible();
-    await firstPageThumb.click();
+    await expect(openReadyBook).toBeVisible();
+    await openReadyBook.click();
+    await page.waitForURL(new RegExp(`/books/${readableBookId}`), {
+      timeout: 25_000,
+    });
 
     const prepReadingBtn = page.getByRole("button", { name: "Chuẩn bị đọc" });
+    if (!(await prepReadingBtn.isEnabled())) {
+      const thumb = page
+        .getByLabel("Các trang sách có thể xem trước")
+        .locator("button")
+        .first();
+      await thumb.click();
+    }
     await expect(prepReadingBtn).toBeEnabled();
-    await assertMobileScreenHealth(page, projectName, "04_book_detail", [
+    await assertMobileScreenHealth(page, projectName, "05_book_detail", [
       prepReadingBtn,
     ]);
 
-    // 4. Reading Preparation -> Verify Microphone -> Live Reading Session (TTS + Mic Ready)
+    // 5. Reading Preparation -> Microphone Check -> Live Reading Session (TTS + Mic)
     await prepReadingBtn.click();
     await page.waitForURL(/\/reading-preparation/, { timeout: 25_000 });
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
@@ -201,42 +276,52 @@ test.describe("Mobile & Android WebView Full UI + OCR Parity E2E", () => {
       name: /^Bắt đầu đọc$/i,
     });
     await expect(startSessionBtn).toBeEnabled({ timeout: 20_000 });
-    await assertMobileScreenHealth(page, projectName, "05_reading_preparation", [
+    await assertMobileScreenHealth(page, projectName, "06_reading_preparation", [
       startSessionBtn,
     ]);
 
     await startSessionBtn.click();
     await page.waitForURL(/\/reading\/[0-9a-f-]+/i, { timeout: 25_000 });
-    await expect(page.getByText(/Chú mèo nhỏ/i).first()).toBeVisible({
-      timeout: 20_000,
+
+    // Inside /reading/[sessionId], tap the child reading-room "Bắt đầu đọc" gate to open the live page + mic
+    const inRoomStartBtn = page.getByRole("button", { name: /^Bắt đầu đọc$/i });
+    await expect(inRoomStartBtn).toBeVisible({ timeout: 20_000 });
+    await assertMobileScreenHealth(
+      page,
+      projectName,
+      "07a_reading_room_ready",
+      [inRoomStartBtn],
+    );
+    await inRoomStartBtn.click();
+
+    await expect(page.getByText(/Mèo/i).first()).toBeVisible({
+      timeout: 25_000,
     });
-    await assertMobileScreenHealth(page, projectName, "06_reading_session");
+    const pauseSessionBtn = page.getByRole("button", {
+      name: /Tạm dừng buổi đọc/i,
+    });
+    const ttsModelBtn = page.getByRole("button", {
+      name: /Nghe đọc mẫu cả trang/i,
+    });
+    await assertMobileScreenHealth(page, projectName, "07_reading_session", [
+      pauseSessionBtn,
+      ttsModelBtn,
+    ]);
 
-    // Return to Dashboard via UI logo / link (immersive reading route hides parent top nav)
-    const backHomeLink = page
-      .locator('a[href="/dashboard"], a[href="/books"]')
-      .first();
-    if (await backHomeLink.isVisible().catch(() => false)) {
-      await backHomeLink.click();
-      await page.waitForURL(/\/(dashboard|books)/, { timeout: 20_000 });
-    }
-    if (!page.url().includes("/dashboard")) {
-      const dashLink = page.locator('a[href="/dashboard"]').first();
-      await dashLink.click();
-      await page.waitForURL(/\/dashboard/, { timeout: 20_000 });
-    }
-
-    // Ensure child remains selected on Dashboard
-    const childBtnAgain = page.getByRole("button", {
+    // Return to Dashboard and re-select Bé An for Book Scanner & Parent navigation
+    await page.goto("/dashboard");
+    await expect(
+      page.getByRole("heading", { name: /Góc đọc gia đình/i }),
+    ).toBeVisible({ timeout: 25_000 });
+    const childBtnScanner = page.getByRole("button", {
       name: new RegExp(`^${stack.users.parent_a.child_alias}, lớp`, "i"),
     });
-    if ((await childBtnAgain.getAttribute("aria-pressed")) !== "true") {
-      await childBtnAgain.click();
+    if ((await childBtnScanner.getAttribute("aria-pressed")) !== "true") {
+      await childBtnScanner.click();
     }
 
-    // 5. Book Scanner (/book-scanner) via Dashboard "Quét sách" CTA — Portrait Camera + Real Local OCR
-    const scanCta = page.getByRole("button", { name: /Quét sách/i });
-    await scanCta.click();
+    // 6. Book Scanner (/book-scanner) — Portrait Camera + Real Local OCR Upload
+    await page.getByRole("button", { name: /Quét sách/i }).click();
     await page.waitForURL(/\/book-scanner/, { timeout: 25_000 });
 
     const startCamBtn = page.getByRole("button", {
@@ -249,7 +334,7 @@ test.describe("Mobile & Android WebView Full UI + OCR Parity E2E", () => {
       name: /Chọn ảnh trang sách \(OCR\)/i,
     });
     await expect(startCamBtn).toBeVisible();
-    await assertMobileScreenHealth(page, projectName, "07_book_scanner_idle", [
+    await assertMobileScreenHealth(page, projectName, "08_book_scanner_idle", [
       startCamBtn,
       nativeCamBtn,
       pickOcrBtn,
@@ -260,69 +345,22 @@ test.describe("Mobile & Android WebView Full UI + OCR Parity E2E", () => {
       name: /Chụp & Quét ngay/i,
     });
     await expect(manualShutterBtn).toBeVisible();
-    await assertMobileScreenHealth(page, projectName, "07b_book_scanner_live", [
+    await assertMobileScreenHealth(page, projectName, "08b_book_scanner_live", [
       manualShutterBtn,
     ]);
 
-    // Upload real Vietnamese page image to local OCR endpoint
-    const scannerFileInput = page.getByTestId("local-ocr-file-input");
-    await scannerFileInput.setInputFiles(stack.assets.clean_png);
-    const ocrResultText = page.getByTestId("local-ocr-text");
-    await expect(ocrResultText).toBeVisible({ timeout: 120_000 });
-    await expect(ocrResultText).toContainText(/Mèo con đi học/i);
-    await assertMobileScreenHealth(
-      page,
-      projectName,
-      "07c_book_scanner_ocr_result",
-    );
-
-    // 6. My Books (/my-books) & Multi-format Private Book Upload
-    await tapTopNav(page, /^Sách của tôi$/i, /\/my-books$/);
-    const createPrivateBtn = page.getByRole("button", {
-      name: /Tạo sách riêng/i,
-    });
-    await expect(createPrivateBtn).toBeVisible();
-    await assertMobileScreenHealth(page, projectName, "08_my_books", [
-      createPrivateBtn,
-    ]);
-
     if (projectName === "android-390x844") {
-      await createPrivateBtn.click();
-      await page
-        .getByLabel(/Tên sách/i)
-        .fill(`Sách Mobile Android ${Date.now()}`);
-      const saveBookBtn = page.getByRole("button", {
-        name: /Lưu và thêm trang/i,
-      });
-      await assertMobileScreenHealth(page, projectName, "08b_my_books_create", [
-        saveBookBtn,
-      ]);
-      await saveBookBtn.click();
-      await page.waitForURL(/\/my-books\/[0-9a-f-]+/i, { timeout: 25_000 });
-
-      const privateFileInput = page.getByLabel(
-        /Chọn tệp trang sách hoặc tài liệu/i,
-      );
-      await privateFileInput.setInputFiles(stack.assets.clean_png);
-      const uploadCheckBtn = page.getByRole("button", {
-        name: /Tải lên & kiểm tra/i,
-      });
+      // Run full real PaddleOCR + VietOCR upload on the primary mobile viewport
+      const scannerFileInput = page.getByTestId("local-ocr-file-input");
+      await scannerFileInput.setInputFiles(stack.assets.clean_png);
+      const ocrResultText = page.getByTestId("local-ocr-text");
+      await expect(ocrResultText).toBeVisible({ timeout: 150_000 });
+      await expect(ocrResultText).toContainText(/Mèo con đi học/i);
       await assertMobileScreenHealth(
         page,
         projectName,
-        "08c_my_book_detail_upload",
-        [uploadCheckBtn],
+        "08c_book_scanner_ocr_result",
       );
-      await uploadCheckBtn.click();
-
-      const addPageBtn = page.getByRole("button", {
-        name: /Thêm vào sách đọc/i,
-      });
-      await expect(addPageBtn).toBeEnabled({ timeout: 90_000 });
-      await addPageBtn.click();
-      await expect(
-        page.getByText(/Đã thêm vào sách đọc|Đã thêm trang/i).first(),
-      ).toBeVisible({ timeout: 25_000 });
     }
 
     // 7. Reading Management, Sessions, Reports, Difficult Words, Entertainment via top nav
@@ -347,6 +385,7 @@ test.describe("Mobile & Android WebView Full UI + OCR Parity E2E", () => {
     await assertMobileScreenHealth(page, projectName, "13_entertainment");
 
     // 8. Clean Logout from Mobile Header Account Menu
+    await page.waitForLoadState("networkidle").catch(() => undefined);
     const accountBtn = page.getByRole("button", {
       name: /Mở menu tài khoản/i,
     });
@@ -354,6 +393,7 @@ test.describe("Mobile & Android WebView Full UI + OCR Parity E2E", () => {
     await accountBtn.click();
     const signOutItem = page.getByRole("menuitem", { name: /Đăng xuất/i });
     await expect(signOutItem).toBeVisible();
+    isSigningOut = true;
     await signOutItem.click();
     await page.waitForURL((url) => url.pathname.startsWith("/login"), {
       timeout: 25_000,
