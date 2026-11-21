@@ -1,4 +1,4 @@
-# TASK 14 — Verify NEW, independently labeled, disjoint photos with frozen OCR.
+# TASK 14 - Verify NEW, independently labeled, disjoint photos with frozen OCR.
 # This NEVER creates data or treats the previous 10-page set as held-out.
 # Output contains counts only. Do not commit private manifests or images.
 [CmdletBinding()]
@@ -45,7 +45,7 @@ if (-not (Test-Path -LiteralPath $development) -or
     Write-Host "No independent held-out dataset is configured yet." -ForegroundColor Yellow
     Write-Host "Provide at least $MinHeldoutPages NEW manually labeled photos in a separate PRIVATE heldout/pages.jsonl." -ForegroundColor Yellow
     Write-Host "Never reuse the original 10 photos or copy their reference sentences." -ForegroundColor Yellow
-    Write-Host "TASK 14 HELD-OUT BENCHMARK NOT RUN — NOT ACCEPTED" -ForegroundColor Yellow
+    Write-Host "TASK 14 HELD-OUT BENCHMARK NOT RUN - NOT ACCEPTED" -ForegroundColor Yellow
     throw "TASK 14 requires an independently collected held-out dataset"
 }
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss-fffffff"
