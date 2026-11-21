@@ -617,4 +617,77 @@ describe("automatic reading flow on the reading screen", () => {
       screen.getByRole("button", { name: "Trang tiếp theo" }),
     ).toBeEnabled();
   });
+
+  it("accepts Grade-1 phonics spelling-out ('ô i ôi' ... 'tờ ôi tôi') without interrupting (G19)", async () => {
+    const phonicsPage: ReadingPageDTO = {
+      ...pageFour,
+      text: "Tôi ăn cơm.",
+      words: ["Tôi", "ăn", "cơm."].map((text, index) => ({
+        word_id: `50000000-0000-4000-8000-00000000060${index}`,
+        word_index: index,
+        text,
+        bbox: [0.1 + index * 0.2, 0.2, 0.14, 0.05] as const,
+      })),
+    };
+    (
+      services.readingService.getCurrentPage as ReturnType<typeof vi.fn>
+    ).mockResolvedValue(phonicsPage);
+
+    const recognition = await startWithFakeClock();
+    // Child starts spelling out "Tôi" slowly ("ô i ôi") then pauses 10s
+    act(() => recognition.say("ô i ôi"));
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+    // Must NOT interrupt or offer automatic help while spelling is in progress!
+    expect(speechPlayerMock.play).not.toHaveBeenCalled();
+
+    // Child finishes spelling "tờ ôi tôi" and continues "ăn cơm"
+    act(() => recognition.say("tờ ôi tôi ăn cơm"));
+    expect(word("Tôi")).toHaveClass(SUCCESS);
+    expect(word("ăn")).toHaveClass(SUCCESS);
+    expect(word("cơm.")).toHaveClass(SUCCESS);
+  });
+
+  it("invites full-sentence re-reading ('Tôi ăn cơm.') after practicing a difficult word without overwriting first-pass assessment (G20)", async () => {
+    const sentencePage: ReadingPageDTO = {
+      ...pageFour,
+      text: "Tôi ăn cơm. Mẹ nấu canh.",
+      words: ["Tôi", "ăn", "cơm.", "Mẹ", "nấu", "canh."].map((text, index) => ({
+        word_id: `50000000-0000-4000-8000-00000000070${index}`,
+        word_index: index,
+        text,
+        bbox: [0.05 + index * 0.14, 0.2, 0.12, 0.05] as const,
+      })),
+    };
+    (
+      services.readingService.getCurrentPage as ReturnType<typeof vi.fn>
+    ).mockResolvedValue(sentencePage);
+
+    const recognition = await startWithFakeClock();
+    // Child gets stuck on "Tôi" and asks for help -> receives sample
+    act(() => recognition.say("đọc mẫu giúp con"));
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+    expect(speechPlayerMock.play).toHaveBeenCalledWith("Tôi", {
+      wordSample: true,
+    });
+
+    // Wait past echo tail guard -> child pronounces "Tôi" -> triggers sentence reinforcement!
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    act(() => lastRecognition().say("Tôi"));
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+
+    expect(
+      screen.getByText(/Đọc lại cả câu: “Tôi ăn cơm\.”/),
+    ).toBeInTheDocument();
+    // First-pass rule preserved: "Tôi" was helped so it is assisted, never plain green
+    expect(word("Tôi")).not.toHaveClass(SUCCESS);
+
+    // Child reads back the full sentence "Tôi ăn cơm" after echo tail guard
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    act(() => lastRecognition().say("Tôi ăn cơm"));
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+
+    // Reinforcement banner clears cleanly and "Tôi" still never turns plain green
+    expect(screen.queryByText(/Đọc lại cả câu:/)).not.toBeInTheDocument();
+    expect(word("Tôi")).not.toHaveClass(SUCCESS);
+  });
 });

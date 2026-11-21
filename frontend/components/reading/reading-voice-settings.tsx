@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils/cn";
 
 const PREVIEW_TEXT = "Chào bé, mình cùng đọc sách nhé.";
 const SPEED_PRESETS = [
+  { label: "Chậm rõ (Lớp 1)", value: 0.75 },
   { label: "Chậm", value: 0.8 },
   { label: "Vừa", value: 0.9 },
   { label: "Nhanh", value: 1.1 },
@@ -160,11 +161,15 @@ export function ReadingVoiceSettings({
     ["young", "young_adult", "youthful"].includes(
       voice.age?.toLowerCase() ?? "",
     );
+  const isChildVoice = (voice: VoiceOption) =>
+    voice.age?.toLowerCase() === "child";
   const matchesFilter = (voice: VoiceOption) =>
     filter === "all" ||
     (filter === "young"
       ? isYouthful(voice)
-      : voice.gender?.toLowerCase() === filter);
+      : filter === "child"
+        ? isChildVoice(voice)
+        : voice.gender?.toLowerCase() === filter);
 
   const selectedVoice =
     loadState.status === "ready"
@@ -284,6 +289,9 @@ export function ReadingVoiceSettings({
                 ) : null}
                 {loadState.data.voices.some(isYouthful) ? (
                   <option value="young">Giọng trẻ trung</option>
+                ) : null}
+                {loadState.data.voices.some(isChildVoice) ? (
+                  <option value="child">Giọng trẻ em</option>
                 ) : null}
               </select>
             ) : null}

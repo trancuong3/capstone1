@@ -20,7 +20,7 @@ export interface AudioQualitySnapshot {
   isSpeaking: boolean;
 }
 
-export type AudioQualityMode = "passage" | "short-word";
+export type AudioQualityMode = "passage" | "child-passage" | "short-word";
 
 export interface AudioQualityMonitorOptions {
   readonly mode?: AudioQualityMode;
@@ -51,6 +51,21 @@ const AUDIO_QUALITY_PROFILES: Record<AudioQualityMode, AudioQualityProfile> = {
     onsetMultiplier: 2.8,
     offsetFloor: 0.0015,
     offsetMultiplier: 1.6,
+  },
+  // Grade-1 child reading profile: captures softer child voices (RMS 0.005+)
+  // and holds speaking activity across brief mid-syllable spelling pauses (~450ms)
+  // while still rejecting silence, constant fan noise, and brief clicks.
+  "child-passage": {
+    calibrationWindowMs: 180,
+    minDurationMs: 220,
+    minSpeechDurationMs: 80,
+    minPeakRms: 0.0045,
+    candidateOnsetMs: 80,
+    hangoverMs: 480,
+    onsetFloor: 0.0024,
+    onsetMultiplier: 2.3,
+    offsetFloor: 0.0012,
+    offsetMultiplier: 1.4,
   },
   // Short-word mode captures single Grade-1 syllables ("có", "lo", "dậy")
   // cleanly within ~160–400ms without early-speech floor poisoning.

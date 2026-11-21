@@ -73,18 +73,26 @@ function percentile(values: readonly number[], p: number): number {
 }
 
 describe("highlight latency benchmark (120-word page, 30 streaming interim updates)", () => {
-  it("measures p50/p95 DOM update latency from interim snapshot to highlighted word", () => {
+  it("meets G21: p95 <= 50ms and only changed word tokens re-render per interim update", () => {
     const page = makePage(120);
+    let stepRenders = 0;
+    const onWordTokenRender = () => {
+      stepRenders += 1;
+    };
     const { container, rerender } = render(
       <BookPageContent
         page={page}
         currentWordId={page.words[0].word_id}
         previewSnapshot={null}
+        onWordTokenRender={onWordTokenRender}
       />,
     );
+    expect(stepRenders).toBe(120); // initial mount renders all 120 words once
 
     const latenciesMs: number[] = [];
+    const rendersPerStep: number[] = [];
     for (let step = 1; step <= 30; step += 1) {
+      stepRenders = 0;
       const snapshot = previewAt(page, step);
       const t0 = performance.now();
       act(() => {
@@ -93,6 +101,7 @@ describe("highlight latency benchmark (120-word page, 30 streaming interim updat
             page={page}
             currentWordId={page.words[0].word_id}
             previewSnapshot={snapshot}
+            onWordTokenRender={onWordTokenRender}
           />,
         );
       });
@@ -102,10 +111,12 @@ describe("highlight latency benchmark (120-word page, 30 streaming interim updat
       const prev = container.querySelector(`[data-word-id="w-${step - 1}"]`);
       expect(prev?.getAttribute("data-reading-state")).toBe("preview-correct");
       latenciesMs.push(elapsed);
+      rendersPerStep.push(stepRenders);
     }
 
     const p50 = Number(percentile(latenciesMs, 50).toFixed(2));
     const p95 = Number(percentile(latenciesMs, 95).toFixed(2));
+    const maxRendersPerStep = Math.max(...rendersPerStep);
     console.log(
       JSON.stringify({
         benchmark: "highlight-latency",
@@ -113,8 +124,10 @@ describe("highlight latency benchmark (120-word page, 30 streaming interim updat
         steps: 30,
         p50Ms: p50,
         p95Ms: p95,
+        maxRendersPerStep,
       }),
     );
-    expect(p95).toBeLessThan(200);
+    expect(p95).toBeLessThanOrEqual(50);
+    expect(maxRendersPerStep).toBeLessThanOrEqual(3);
   });
 });

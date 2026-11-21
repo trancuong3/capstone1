@@ -48,6 +48,7 @@ interface AutopilotHarness {
   completeCalls: string[];
   presenceSettingsUpdates: boolean[];
   ttsRequests: string[];
+  quizSubmissions: Array<{ questionId: string; answer: string }>;
   currentPageIndex: () => number;
 }
 
@@ -55,7 +56,7 @@ async function installAutopilotSession(
   page: Page,
   options: {
     failFirstComplete?: boolean;
-    initialState?: "ready" | "reading";
+    initialState?: "ready" | "reading" | "question";
   } = {},
 ): Promise<AutopilotHarness> {
   await installApiFixture(page);
@@ -69,6 +70,40 @@ async function installAutopilotSession(
   const completeCalls: string[] = [];
   const presenceSettingsUpdates: boolean[] = [];
   const ttsRequests: string[] = [];
+  const quizSubmissions: Array<{ questionId: string; answer: string }> = [];
+  let quizIndex = 0;
+  const quizQuestions = [
+    {
+      id: "81000000-0000-4000-8000-000000000001",
+      prompt: "Bạn nào thích ăn cá?",
+      correct: "Con mèo",
+      choices: [
+        { id: "A", label: "Con mèo", value: "Con mèo" },
+        { id: "B", label: "Con vịt", value: "Con vịt" },
+        { id: "C", label: "Con gà", value: "Con gà" },
+      ],
+    },
+    {
+      id: "81000000-0000-4000-8000-000000000002",
+      prompt: "Bé đi đâu buổi sáng?",
+      correct: "Đi học",
+      choices: [
+        { id: "A", label: "Đi ngủ", value: "Đi ngủ" },
+        { id: "B", label: "Đi học", value: "Đi học" },
+        { id: "C", label: "Đi bơi", value: "Đi bơi" },
+      ],
+    },
+    {
+      id: "81000000-0000-4000-8000-000000000003",
+      prompt: "Ai nấu cơm cho bé?",
+      correct: "Mẹ của bé",
+      choices: [
+        { id: "A", label: "Bác gấu", value: "Bác gấu" },
+        { id: "B", label: "Chú thỏ", value: "Chú thỏ" },
+        { id: "C", label: "Mẹ của bé", value: "Mẹ của bé" },
+      ],
+    },
+  ];
 
   const corsHeaders = {
     "access-control-allow-origin": "http://127.0.0.1:3106",
@@ -292,6 +327,62 @@ async function installAutopilotSession(
     return json(route, {}, 404);
   });
 
+  await page.route("http://127.0.0.1:8000/tutor/**", (route) => {
+    if (route.request().method() === "OPTIONS")
+      return route.fulfill({ status: 204, headers: corsHeaders });
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/questions/next")) {
+      const q = quizQuestions[quizIndex];
+      if (!q) {
+        return json(route, {
+          question: null,
+          choices: [],
+          progress_label: "Hoàn thành",
+          position: quizQuestions.length,
+          total: quizQuestions.length,
+          completed: true,
+        });
+      }
+      return json(route, {
+        question: {
+          id: q.id,
+          type: "FACTUAL",
+          prompt: q.prompt,
+          page_revision_id: PAGE_1_REV,
+          source_span: {
+            start_word_index: 0,
+            end_word_index_exclusive: 3,
+            sentence_index: 0,
+          },
+          difficulty: 1,
+          answered: false,
+        },
+        choices: q.choices,
+        progress_label: `Câu ${quizIndex + 1}/${quizQuestions.length}`,
+        position: quizIndex + 1,
+        total: quizQuestions.length,
+        completed: false,
+      });
+    }
+    if (path.includes("/questions/") && path.endsWith("/answer")) {
+      const body = route.request().postDataJSON() as { answer?: string };
+      const answer = body?.answer ?? "";
+      const q = quizQuestions[quizIndex] ?? quizQuestions[0];
+      const isCorrect = answer === q.correct;
+      quizSubmissions.push({ questionId: q.id, answer });
+      if (isCorrect) quizIndex += 1;
+      return json(route, {
+        answer_id: "82000000-0000-4000-8000-000000000001",
+        question_id: q.id,
+        submitted_answer: answer,
+        is_correct: isCorrect,
+        score: isCorrect ? 1 : 0,
+        feedback_code: isCorrect ? "CORRECT" : "TRY_AGAIN",
+      });
+    }
+    return route.fallback();
+  });
+
   await page.addInitScript(() => {
     type RecInstance = {
       onresult: ((event: unknown) => void) | null;
@@ -437,6 +528,7 @@ async function installAutopilotSession(
     completeCalls,
     presenceSettingsUpdates,
     ttsRequests,
+    quizSubmissions,
     currentPageIndex: () => currentIndex,
   };
 }
@@ -755,5 +847,125 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
     await emailSwitch.click();
     await expect(emailSwitch).not.toBeChecked();
     expect(harness.presenceSettingsUpdates).toEqual([true, false]);
+  });
+
+  test("G24: Voice-interactive 3-question comprehension quiz completes with 0 clicks (reads question & A/B/C, blocks echo, accepts voice)", async ({
+    page,
+  }, testInfo) => {
+    mkdirSync(EVIDENCE_DIR, { recursive: true });
+    const harness = await installAutopilotSession(page, {
+      initialState: "question",
+    });
+
+    await expect(page.getByText("Bạn nào thích ăn cá?")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Wait for Q1 TTS to finish and recognition #1 to open with 0 clicks
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (
+            window as unknown as {
+              __autopilotSpeech: { count: () => number };
+            }
+          ).__autopilotSpeech.count(),
+        ),
+      )
+      .toBeGreaterThanOrEqual(1);
+
+    await assertNoHorizontalOverflow(page);
+    await page.screenshot({
+      path: resolve(
+        EVIDENCE_DIR,
+        `e2e-autopilot-quiz-voice-${testInfo.project.name}.png`,
+      ),
+      fullPage: false,
+    });
+
+    // Immediate echo of an option right after TTS ends is blocked
+    await page.evaluate(() =>
+      (
+        window as unknown as {
+          __autopilotSpeech: { say: (t: string) => void };
+        }
+      ).__autopilotSpeech.say("Đáp án B: Con vịt"),
+    );
+    expect(harness.quizSubmissions).toHaveLength(0);
+
+    // Wait past 1.5s echo tail guard -> answer Q1 by letter "đáp án A"
+    await page.waitForTimeout(1700);
+    await page.evaluate(() =>
+      (
+        window as unknown as {
+          __autopilotSpeech: { say: (t: string) => void };
+        }
+      ).__autopilotSpeech.say("đáp án A"),
+    );
+
+    // Automatically advances to Q2 with 0 clicks
+    await expect(page.getByText("Bé đi đâu buổi sáng?")).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (
+            window as unknown as {
+              __autopilotSpeech: { count: () => number };
+            }
+          ).__autopilotSpeech.count(),
+        ),
+      )
+      .toBeGreaterThanOrEqual(2);
+
+    // Wait past echo guard -> answer Q2 using Vietnamese letter name "con chọn bê"
+    await page.waitForTimeout(1700);
+    await page.evaluate(() =>
+      (
+        window as unknown as {
+          __autopilotSpeech: { say: (t: string) => void };
+        }
+      ).__autopilotSpeech.say("con chọn bê"),
+    );
+
+    // Automatically advances to Q3 with 0 clicks
+    await expect(page.getByText("Ai nấu cơm cho bé?")).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (
+            window as unknown as {
+              __autopilotSpeech: { count: () => number };
+            }
+          ).__autopilotSpeech.count(),
+        ),
+      )
+      .toBeGreaterThanOrEqual(3);
+
+    // Wait past echo guard -> answer Q3 by speaking option content "Mẹ của bé"
+    await page.waitForTimeout(1700);
+    await page.evaluate(() =>
+      (
+        window as unknown as {
+          __autopilotSpeech: { say: (t: string) => void };
+        }
+      ).__autopilotSpeech.say("Mẹ của bé"),
+    );
+
+    // Automatically finishes the quiz and transitions to completion view with 0 clicks!
+    await expect
+      .poll(() => harness.quizSubmissions.length, { timeout: 15_000 })
+      .toBe(3);
+    expect(harness.quizSubmissions.map((s) => s.answer)).toEqual([
+      "Con mèo",
+      "Đi học",
+      "Mẹ của bé",
+    ]);
+    await expect(page.getByText("Ai nấu cơm cho bé?")).not.toBeVisible({
+      timeout: 15_000,
+    });
   });
 });

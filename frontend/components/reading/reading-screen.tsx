@@ -83,6 +83,11 @@ import type {
   WordTimedPlayOptions,
 } from "@/hooks/use-speech-player";
 import { EchoGuard } from "@/lib/reading/echo-guard";
+import { InteractivePromptSelector } from "@/lib/reading/interactive-prompts";
+import {
+  SentenceReinforcementTracker,
+  type ActiveSentenceReinforcement,
+} from "@/lib/reading/sentence-reinforcement";
 import { parseVoiceIntent } from "@/lib/reading/voice-intent";
 import type { SessionPhase } from "@/lib/reading/presence-monitor";
 import type { BookDetailDTO } from "@/types/book";
@@ -421,6 +426,11 @@ function ReadingSessionScreen({
   const browserTranscriptCollectorRef = useRef(
     new BrowserTranscriptCollector(),
   );
+  const sentenceReinforcementRef = useRef(new SentenceReinforcementTracker());
+  const promptSelectorRef = useRef(new InteractivePromptSelector());
+  const [activeSentenceReinforcement, setActiveSentenceReinforcement] =
+    useState<ActiveSentenceReinforcement | null>(null);
+  const lastPreviewTranscriptRef = useRef<string | null>(null);
   const browserStopResolveRef = useRef<(() => void) | null>(null);
   const wordTextByIdRef = useRef<Map<string, string>>(new Map());
   const retryWordsByIdRef = useRef<Map<string, RetryWordItem>>(new Map());
@@ -1057,6 +1067,9 @@ function ReadingSessionScreen({
 
   function resetPagePresentation() {
     pageHelpWordRef.current = null;
+    sentenceReinforcementRef.current.reset();
+    setActiveSentenceReinforcement(null);
+    lastPreviewTranscriptRef.current = null;
     setPreviewSnapshot(null);
     lastPreviewWordIndexRef.current = -1;
     // Word IDs are revision-scoped. Keep earlier pages' first-pass evidence
@@ -1206,6 +1219,108 @@ function ReadingSessionScreen({
     }
   }
 
+  function maybeArmSentenceReinforcement(
+    capturePage: ReadingPageDTO,
+    wordId: string,
+    outcome: "fixed" | "helped",
+  ): ActiveSentenceReinforcement | null {
+    if (!automationRef.current.assist) return null;
+    const active = sentenceReinforcementRef.current.beginForWord(
+      capturePage.words,
+      wordId,
+      outcome,
+      { pageRevisionId: capturePage.page_revision_id },
+    );
+    if (!active) return null;
+    // Only reinforce complete punctuated sentences (e.g. "Tôi ăn cơm.") so
+    // short unpunctuated fragments never unexpectedly pause fluent flow.
+    if (!/[.!?…]["”’')\]]*$/u.test(active.span.text)) {
+      sentenceReinforcementRef.current.finishCurrent();
+      return null;
+    }
+    setActiveSentenceReinforcement(active);
+    return active;
+  }
+
+  async function announceSentenceReinforcement(
+    active: ActiveSentenceReinforcement,
+    engine: RealtimeAlignmentEngine,
+  ): Promise<void> {
+    if (assistantAudioPendingRef.current || !mountedRef.current) return;
+    const generation = assistantAudioGenerationRef.current + 1;
+    const isCurrent = () =>
+      mountedRef.current &&
+      !retryModeRef.current &&
+      generation === assistantAudioGenerationRef.current &&
+      alignmentEngineRef.current === engine;
+    const promptText = promptSelectorRef.current.next(
+      active.outcome === "fixed"
+        ? "sentenceReinforceAfterSuccess"
+        : "sentenceReinforceAfterHelp",
+      { sentence: active.span.text },
+    );
+    try {
+      await playAssistantAudio(
+        async () => {
+          if (!isCurrent()) return;
+          setLatestTranscript(promptText);
+          await speakGuarded(promptText);
+        },
+        true,
+        false,
+        false,
+      );
+      if (!isCurrent()) return;
+      const started = await startListeningRef.current();
+      if (isCurrent()) setIsMicRecording(started);
+    } catch {
+      // Keep reading flow moving cleanly if TTS fails.
+    }
+  }
+
+  async function finishSentenceReinforcement(
+    engine: RealtimeAlignmentEngine | null,
+    praise: boolean,
+  ): Promise<void> {
+    sentenceReinforcementRef.current.finishCurrent();
+    setActiveSentenceReinforcement(null);
+    if (!mountedRef.current) return;
+    if (praise && engine) {
+      const doneText = promptSelectorRef.current.next("sentenceReinforceDone");
+      const generation = assistantAudioGenerationRef.current + 1;
+      const isCurrent = () =>
+        mountedRef.current &&
+        !retryModeRef.current &&
+        generation === assistantAudioGenerationRef.current &&
+        alignmentEngineRef.current === engine;
+      try {
+        await playAssistantAudio(
+          async () => {
+            if (!isCurrent()) return;
+            setLatestTranscript(doneText);
+            await speakGuarded(doneText);
+          },
+          true,
+          false,
+          false,
+        );
+        if (!isCurrent()) return;
+        if (!engine.getSnapshot().currentWordId) {
+          await autoCompletePageAfterFinalWordRef.current(engine.getSnapshot());
+          return;
+        }
+        const started = await startListeningRef.current();
+        if (isCurrent()) setIsMicRecording(started);
+      } catch {
+        // Keep reading usable
+      }
+      return;
+    }
+    if (engine && !engine.getSnapshot().currentWordId) {
+      await autoCompletePageAfterFinalWordRef.current(engine.getSnapshot());
+    }
+  }
+
   /**
    * Help ladder for a word the child is stuck on (silence or a spoken request):
    * model the word → say it slower → read the phrase → encourage and move on,
@@ -1253,6 +1368,23 @@ function ReadingSessionScreen({
             helpedWordIdsRef.current.add(word.word_id);
             pageHelpWordRef.current = null;
             applyRealtimeSnapshot(engine.giveUpWord(word.word_id));
+            // If this word belongs to a punctuated sentence (e.g. "Tôi ăn cơm."),
+            // invite the child to read back the full sentence once for fluency (G20).
+            const reinforced = maybeArmSentenceReinforcement(
+              capturePage,
+              word.word_id,
+              "helped",
+            );
+            if (reinforced && isCurrent()) {
+              const promptText = promptSelectorRef.current.next(
+                "sentenceReinforceAfterHelp",
+                { sentence: reinforced.span.text },
+              );
+              setLatestTranscript(promptText);
+              await speakGuarded(promptText);
+              resume = isCurrent();
+              return;
+            }
             resume = engine.getSnapshot().currentWordId !== null;
             return;
           }
@@ -1331,10 +1463,13 @@ function ReadingSessionScreen({
         )
           return;
         // Parent turned automatic help off, or the child asked us to wait
-        // ("đợi con"): keep listening without intervening.
+        // ("đợi con"), or is mid-way through Grade-1 phonics spelling-out
+        // ("ô i ôi ... tờ ôi tôi"): keep listening without interrupting.
         if (
           !automationRef.current.assist ||
-          performance.now() < waitUntilRef.current
+          performance.now() < waitUntilRef.current ||
+          captureEngine.getSnapshot().spellingInProgress ||
+          sentenceReinforcementRef.current.getActive() !== null
         ) {
           quietWindows = 0;
           armSilenceTimer();
@@ -1356,7 +1491,7 @@ function ReadingSessionScreen({
 
     let recorderStarted = false;
     try {
-      await speechRecorder.start();
+      await speechRecorder.start({ mode: "child-passage" });
       if (!isCurrent()) {
         speechRecorder.cancel();
         return false;
@@ -1460,14 +1595,55 @@ function ReadingSessionScreen({
                 }
                 if (command.type === "RESUME") {
                   waitUntilRef.current = 0;
+                  if (sentenceReinforcementRef.current.getActive()) {
+                    void finishSentenceReinforcement(engine, false);
+                  }
                   return false;
                 }
+                // Sentence-level fluency reinforcement (G20): speech read back
+                // for the full sentence (e.g. "Tôi ăn cơm") is evaluated here
+                // without overwriting first-pass assessment or duplicating reports.
+                if (sentenceReinforcementRef.current.getActive()) {
+                  const outcome =
+                    sentenceReinforcementRef.current.consumeSpeech(part);
+                  setActiveSentenceReinforcement(
+                    sentenceReinforcementRef.current.getActive(),
+                  );
+                  if (outcome === "completed") {
+                    void finishSentenceReinforcement(engine, true);
+                  }
+                  return false;
+                }
+                const helpedWordBefore =
+                  pageHelpWordRef.current?.wordId ?? null;
                 if (pageHelpWordRef.current)
                   pageHelpWordRef.current.awaitingAttempt = false;
-                const rejectedBefore =
-                  engine.getSnapshot().rejectedSegmentCount ?? 0;
+                const prevSnapshot = engine.getSnapshot();
+                const rejectedBefore = prevSnapshot.rejectedSegmentCount ?? 0;
+                const correctedBeforeSize =
+                  prevSnapshot.correctedWordIds?.size ?? 0;
                 const scored = engine.addFinalTranscript(part);
                 applyRealtimeSnapshot(scored);
+                // After fixing a helped or self-corrected word, invite the child
+                // to read back the full enclosing sentence once for fluency (G20).
+                const resolvedWordId =
+                  helpedWordBefore &&
+                  scored.statusByWordId.get(helpedWordBefore)?.status ===
+                    "MATCH"
+                    ? helpedWordBefore
+                    : (scored.correctedWordIds?.size ?? 0) > correctedBeforeSize
+                      ? ([...(scored.correctedWordIds ?? [])].at(-1) ?? null)
+                      : null;
+                if (resolvedWordId && page) {
+                  const reinforced = maybeArmSentenceReinforcement(
+                    page,
+                    resolvedWordId,
+                    "fixed",
+                  );
+                  if (reinforced && isCurrent()) {
+                    void announceSentenceReinforcement(reinforced, engine);
+                  }
+                }
                 // Speech that does not follow the book (TV, another speaker)
                 // is neither scored nor kept in the page transcript.
                 return (scored.rejectedSegmentCount ?? 0) === rejectedBefore;
@@ -1514,18 +1690,27 @@ function ReadingSessionScreen({
               setPreviewSnapshot(null);
             }
 
-            // 4. Cập nhật nội dung transcript.
+            // 4. Cập nhật nội dung transcript (tránh setState lặp khi interim giống hệt).
             if (!mountedRef.current) return;
 
-            if (interimText.trim()) {
-              setLatestTranscript(interimText.trim());
+            const trimmedInterim = interimText.trim();
+            if (trimmedInterim) {
+              if (lastPreviewTranscriptRef.current !== trimmedInterim) {
+                lastPreviewTranscriptRef.current = trimmedInterim;
+                setLatestTranscript(trimmedInterim);
+              }
             } else if (latestFinalText.trim()) {
+              lastPreviewTranscriptRef.current = null;
               setLatestTranscript((previous) =>
                 [previous, latestFinalText.trim()].filter(Boolean).join(" "),
               );
             }
 
-            if (latestFinalText.trim() && !interimText.trim()) {
+            if (
+              latestFinalText.trim() &&
+              !trimmedInterim &&
+              !sentenceReinforcementRef.current.getActive()
+            ) {
               void autoCompletePageAfterFinalWordRef.current(
                 engine.getSnapshot(),
               );
@@ -1595,7 +1780,7 @@ function ReadingSessionScreen({
                     // Previously collected final speech remains available.
                   }
                 }
-              }, 200);
+              }, 80);
               return;
             }
 
@@ -1683,8 +1868,19 @@ function ReadingSessionScreen({
     transcriptionAbortRef.current = controller;
 
     try {
+      // Supply safe contextual keyterms from the current page to improve
+      // recognition of short Grade-1 Vietnamese syllables & tone marks (G22),
+      // while keeping all off-topic / wrong-language / low-confidence guards.
+      const pageKeyterms = Array.from(
+        new Set(
+          (page?.words ?? [])
+            .map((word) => word.text.normalize("NFC").trim())
+            .filter(Boolean),
+        ),
+      ).slice(0, 40);
       const transcript = await speechService.transcribe(recording, {
         languageCode: "vi",
+        ...(pageKeyterms.length ? { keyterms: pageKeyterms } : {}),
         signal: controller.signal,
         timeoutMs,
       });
@@ -4964,6 +5160,29 @@ function ReadingSessionScreen({
         assistedWordIds={assistedWordIds}
         comparisonResult={comparisonResult}
       >
+        {activeSentenceReinforcement ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className="fixed bottom-24 left-1/2 z-40 flex w-[calc(100%-32px)] max-w-[560px] -translate-x-1/2 flex-wrap items-center justify-between gap-3 rounded-card border-2 border-primary bg-cream px-4 py-3 shadow-md"
+          >
+            <p className="min-w-0 flex-1 text-base font-bold text-ink">
+              Đọc lại cả câu: “{activeSentenceReinforcement.span.text}”
+            </p>
+            <Button
+              variant="secondary"
+              className="h-10! min-h-10! w-auto! px-3! py-1! text-sm!"
+              onClick={() =>
+                void finishSentenceReinforcement(
+                  alignmentEngineRef.current,
+                  false,
+                )
+              }
+            >
+              Bỏ qua đọc lại câu
+            </Button>
+          </div>
+        ) : null}
         {uiState === "page-turn" ? (
           <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
             Đang chuyển trang và liên kết lại từ đang đọc…
