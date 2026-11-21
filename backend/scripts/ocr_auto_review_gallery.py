@@ -187,6 +187,8 @@ def _html_card(
 
 def _render_html(cards: list[str], report: dict[str, object]) -> str:
     summary = report["aggregate"]
+    cer_display = f"{summary['micro_cer']:.2%}" if summary["micro_cer"] is not None else "Chưa đo"
+    wer_display = f"{summary['micro_wer']:.2%}" if summary["micro_wer"] is not None else "Chưa đo"
     return f"""<!doctype html>
 <html lang="vi"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -219,8 +221,8 @@ thu trên ảnh thật. Bản tham chiếu văn bản lấy từ pages.jsonl; ng
 và độ chính xác của bản đó chưa được công cụ kiểm toán.</div>
 <div class="stats">
 <div>Trang thành công: <b>{summary['successful_cases']}/{summary['dataset_case_count']}</b></div>
-<div>Micro CER: <b>{summary['micro_cer']:.2%}</b></div>
-<div>Micro WER: <b>{summary['micro_wer']:.2%}</b></div>
+<div>Micro CER: <b>{cer_display}</b></div>
+<div>Micro WER: <b>{wer_display}</b></div>
 <div>Trang cần xem kỹ: <b>{summary['flagged_cases']}</b></div>
 <div>Hộp từ khả dụng: <b>{summary['proposed_word_boxes']}</b></div>
 </div>
