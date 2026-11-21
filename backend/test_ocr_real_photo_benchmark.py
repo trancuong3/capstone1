@@ -156,6 +156,12 @@ class PhotoBenchmarkTests(unittest.TestCase):
             self.assertEqual(report["successful_cases"], 1)
             self.assertEqual(report["recognition"]["word_edits"], 1)
             self.assertEqual(
+                report["recognition"]["edge_punctuation_neutral_word_edits"], 1,
+            )
+            self.assertEqual(
+                report["recognition"]["edge_punctuation_neutral_wer"], 0.333333,
+            )
+            self.assertEqual(
                 report["private_diagnostic_summary"]["word_error_kind_counts"],
                 {"diacritic_or_d_stroke": 1},
             )
@@ -172,6 +178,46 @@ class PhotoBenchmarkTests(unittest.TestCase):
             self.assertNotIn("đọc", encoded)
             self.assertNotIn("doc", encoded)
             self.assertNotIn(str(image), encoded)
+
+    def test_punctuation_neutral_metric_is_separate_from_strict_wer(self):
+        import sys
+        import types
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as dirname:
+            image = Path(dirname) / "page.png"
+            image.write_bytes(b"fixture")
+            fake_engine = types.ModuleType("app.services.ocr_engine")
+            fake_engine.extract_text_and_boxes = lambda _data: {
+                "text": "Bé đọc sách",
+                "metadata": {
+                    "engine_statuses": {
+                        "paddleocr": "success", "vietocr": "success", "tesseract": "success",
+                    },
+                    "vietocr_runtime_provenance": {
+                        "model_load_status": "loaded", "model_inference_status": "success",
+                        "fallback_reason": None, "model_profile": "FLOW1_EXTERNAL_TRDG",
+                        "checkpoint_sha256": "a" * 64,
+                    },
+                },
+            }
+            fake_torch = types.ModuleType("torch")
+            fake_torch.cuda = types.SimpleNamespace(is_available=lambda: False)
+            with mock.patch.dict(sys.modules, {
+                "torch": fake_torch, "app.services.ocr_engine": fake_engine,
+            }):
+                report = module.evaluate(
+                    [module.Case(image, "Bé đọc sách.", "clean")],
+                    expected_profile="FLOW1_EXTERNAL_TRDG",
+                    expected_sha="a" * 64,
+                )
+            self.assertEqual(report["recognition"]["word_edits"], 1)
+            self.assertEqual(report["recognition"]["micro_wer"], 0.333333)
+            self.assertEqual(report["recognition"]["edge_punctuation_neutral_word_edits"], 0)
+            self.assertEqual(report["recognition"]["edge_punctuation_neutral_wer"], 0)
+            self.assertEqual(
+                report["quality_by_condition"]["clean"]["edge_punctuation_neutral_wer"], 0,
+            )
 
     def test_private_error_output_is_opt_in_and_not_printed(self):
         import contextlib
