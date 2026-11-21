@@ -13,12 +13,12 @@ The first Android implementation is an **isolated native WebView shell** serving
 - Camera: frontend/components/reading/camera-preview.tsx and device-permission-service.ts.
 - Recording: frontend/hooks/use-speech-recorder.ts (MediaRecorder), karaoke microphone capture; audio uses HTMLAudioElement.
 - FastAPI deploy found in Render workspace: https://capstone1-ssd8.onrender.com. This is **NOT** a Next.js frontend origin.
-- No deployed HTTPS Next.js frontend was verified during this task. The application cannot provide real end-to-end service without it.
+- A fresh check on 21/11/2026 of the connected Render workspace found one Python/FastAPI service (`capstone1-ssd8.onrender.com`) and **no verified Next.js frontend service**. No other production frontend origin was established from the repository. This does not rule out an unconnected external host. The app is **not ready for an end-to-end APK** until a real frontend URL is supplied and independently verified.
 
 ## Requirements before a real APK can be built and used
 
 1. Deploy the actual Next.js server (not static export) to a publicly reachable HTTPS origin; set NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY and NEXT_PUBLIC_API_URL **during frontend deployment** to proper public HTTPS services. The backend URL above is not a substitute for NEXT_PUBLIC_FRONTEND_URL. Check API CORS and live backend reachability separately.
-2. Verify at the frontend origin: GET /login returns the Next.js page, email/password sign-in, SSR cookie refresh, /dashboard authorization, API requests, and book reading actually work. Make sure your Supabase site URL / redirect allowlist permits the HTTPS origin.
+2. Verify the frontend origin: `GET /` normally returns HTTP **307** redirecting to **same-origin `/login`** (see `frontend/app/page.tsx`). `GET /login` must return **HTTP 200** `text/html` for the actual ViRead Next.js page containing `/_next/`. A 307 at `/` is *not* evidence of an outage. The Android preflight now validates both routes, rejects cross-origin redirects, HTTP, SSL errors, placeholder HTML and backend-only hosts. Then independently test email/password sign-in, SSR cookies, `/dashboard` authorization, API requests and book reading. Static HTML checks alone do **not** prove session/auth/media readiness. Make sure the Supabase site URL / redirect allowlist permits the HTTPS origin.
 3. Set repository **Actions variable** VIREAD_FRONTEND_URL to that origin (repository Settings > Secrets and variables > Actions > Variables). This is a public URL, **never** a secret. Or run workflow_dispatch supplying frontend_url when dispatch is available. The CI uses the configured URL only for debug APK.
 4. Push/PR triggers a JVM unit test + Android compilation/lint job. If no valid HTTPS Next.js deployment is configured, the **APK job is skipped**, and no misleading artifact is produced. If configured, CI requests the real HTTPS Next.js page, builds :app:assembleDebug, and uploads **viread-android-debug-apk** as an Actions artifact (14-day retention).
 5. Download the artifact ZIP, unzip app-debug.apk and install locally. Android may require allowing installation from the app used to open the APK. Never upload release-signing credentials to public CI artifacts.
@@ -27,11 +27,12 @@ Local build on Windows with JDK 17, Android SDK platform 35, Gradle 8.11.1:
 
 ~~~powershell
 $env:VIREAD_FRONTEND_URL = "https://YOUR-REAL-NEXTJS-FRONTEND.example"
+python .\android\scripts\verify_frontend.py  # read-only HTTPS /login and root preflight
 .\android\scripts\build-android.ps1
 # APK: android\app\build\outputs\apk\debug\app-debug.apk
 ~~~
 
-The validation job uses https://example.org only to compile/test Java, never to package or upload an APK. A successful compile is NOT evidence of a working app.
+The validation job uses https://example.org only for Java compilation/lint/unit tests, **not** APK packaging. Offline Python unit tests verify the HTTPS-origin preflight and safe `/` → `/login` redirects. A successful compile is NOT evidence of a working app.
 
 ## WebView permissions and security
 
@@ -62,3 +63,10 @@ Email/password in the embedded origin is the primary supported login candidate, 
 ## Cost and rollout
 
 Android SDK, Gradle and GitHub Actions may be used within their free quotas; hosting a persistent Next.js server and FastAPI is an independent operational prerequisite and might carry costs or sleep/cold-start limits. No Google Play publishing, production configuration changes or release-signing keys are part of this branch. Debug builds use the SDK's standard debug signing only.
+
+## P0 blocker tracking — Issue #152 (21/11/2026)
+
+- **Proved in source:** `frontend/app/page.tsx` explicitly redirects `/` to `/login` using Next.js `redirect()`. The previous Android `verifyLiveFrontend` incorrectly required HTTP 200 at `/`; this fails on an otherwise valid 307 redirect. The Python/Gradle checks now accept a *strict same-origin* root-to-login redirect and require real ViRead HTML at `/login`.
+- **Proved in connected Render:** `capstone1-ssd8.onrender.com` is a Python FastAPI web service, **not** a Next.js frontend. Project Hub at `trancuong3.github.io/capstone1/` is a static status dashboard, **not** a Next.js SSR host.
+- **Unverified:** any other public Next.js frontend deployment, working auth/session, real device, or Android APK packaging. The `VIREAD_FRONTEND_URL` repository Actions variable must contain an independently verified origin; do not guess, use localhost, set the backend URL, or treat compilation with `example.org` as a live test.
+- **Production readiness:** obtain a real, approved Next.js server deployment and confirm required browser-safe environment values, Supabase redirect settings and backend CORS separately before configuring the Android CI variable and running debug APK packaging. No production configuration is changed by this PR.
