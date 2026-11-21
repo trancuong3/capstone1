@@ -6,6 +6,7 @@ import json
 import unittest
 
 from scripts.ocr_tone_blind_policy import (
+    audit_evidence_sources, audit_tone_error_sources,
     choose_word, evaluate_case, propose_text, summarize_cases,
 )
 
@@ -144,6 +145,93 @@ class ToneBlindPolicyTests(unittest.TestCase):
         self.assertEqual(values["flips_without_positional_truth"], 1)
         self.assertEqual(values["corrected_words"], 0)
         self.assertEqual(values["regressed_words"], 0)
+
+    def test_diagnose_crop_only_alternative_despite_zero_policy_flips(self):
+        target = word("mìm", {
+            "paddleocr": "mìm", "vietocr": "mìm", "tesseract": "mìm",
+        })
+        target["ocr_evidence"]["crop_evidence"] = {
+            "vietocr_candidate": "mỉm",
+        }
+        output = {"text": "mìm", "words": [target]}
+        source = audit_evidence_sources(output)
+        self.assertEqual(source["word_positions"], 1)
+        self.assertEqual(source["positions_with_any_alternative"], 1)
+        self.assertEqual(source["positions_with_crop_alternative"], 1)
+        self.assertEqual(source["positions_with_crop_only_alternative"], 1)
+        self.assertEqual(source["positions_with_raw_line_alternative"], 0)
+        self.assertEqual(source["positions_with_vietocr_line_alternative"], 0)
+        errors = audit_tone_error_sources("mỉm", output)
+        self.assertEqual(errors["audited_tone_errors"], 1)
+        self.assertEqual(errors["errors_with_correct_crop_only_reading"], 1)
+        self.assertEqual(errors["errors_with_correct_raw_line_reading"], 0)
+        self.assertEqual(propose_text(output, "line_majority_2")["flip_indices"], [])
+        self.assertEqual(propose_text(output, "vietocr_line_priority")["flip_indices"], [])
+
+    def test_diagnose_raw_line_alternative_with_unverified_status(self):
+        target = word("mìm", {
+            "paddleocr": "mỉm", "vietocr": "mìm", "tesseract": "mìm",
+        }, statuses={
+            "paddleocr": "error", "vietocr": "success", "tesseract": "success",
+        })
+        output = {"text": "mìm", "words": [target]}
+        source = audit_evidence_sources(output)
+        self.assertEqual(source["positions_with_raw_line_alternative"], 1)
+        self.assertEqual(source["positions_with_verified_line_alternative"], 0)
+        self.assertEqual(
+            source["positions_with_raw_line_but_no_verified_line_alternative"], 1,
+        )
+        errors = audit_tone_error_sources("mỉm", output)
+        self.assertEqual(errors["errors_with_correct_raw_line_reading"], 1)
+        self.assertEqual(errors["errors_with_correct_verified_line_reading"], 0)
+        self.assertEqual(errors["errors_with_correct_crop_reading"], 0)
+
+    def test_diagnose_verified_line_alternative_without_policy_proposal(self):
+        target = word("mìm", {
+            "paddleocr": "mỉm", "vietocr": "mìm", "tesseract": "mìm",
+        })
+        output = {"text": "mìm", "words": [target]}
+        source = audit_evidence_sources(output)
+        self.assertEqual(source["positions_with_raw_line_alternative"], 1)
+        self.assertEqual(source["positions_with_verified_line_alternative"], 1)
+        self.assertEqual(
+            audit_tone_error_sources("mỉm", output)[
+                "errors_with_correct_verified_line_reading"
+            ], 1,
+        )
+        # A single alternative is not a majority; VietOCR backs the
+        # current value. No candidate is ever switched just for an oracle gain.
+        self.assertEqual(propose_text(output, "line_majority_2")["flip_indices"], [])
+        self.assertEqual(propose_text(output, "vietocr_line_priority")["flip_indices"], [])
+
+    def test_diagnostic_totals_are_numeric_private_and_nonselective(self):
+        targets = [
+            word("mìm", {"paddleocr": "mìm", "vietocr": "mìm", "tesseract": "mìm"}),
+            word("mìm", {"paddleocr": "mỉm", "vietocr": "mìm", "tesseract": "mìm"}),
+        ]
+        targets[0]["ocr_evidence"]["crop_evidence"] = {"vietocr_candidate": "mỉm"}
+        rows = [
+            evaluate_case("mỉm", {"text": "mìm", "words": [targets[0]]}),
+            evaluate_case("mỉm", {"text": "mìm", "words": [targets[1]]}),
+        ]
+        summary = summarize_cases(rows)
+        self.assertEqual(summary["evidence_source_audit"]["positions_with_any_alternative"], 2)
+        self.assertEqual(summary["tone_error_source_audit"]["audited_tone_errors"], 2)
+        self.assertEqual(summary["tone_error_source_audit"]["errors_with_correct_crop_only_reading"], 1)
+        self.assertEqual(summary["tone_error_source_audit"]["errors_with_correct_verified_line_reading"], 1)
+        self.assertEqual(summary["ground_truth_blind_rules"]["line_majority_2"]["flipped_words"], 0)
+        for private in ("mìm", "mỉm", "vietocr_candidate"):
+            self.assertNotIn(private, json.dumps(summary, ensure_ascii=False))
+
+    def test_unaligned_source_audit_has_no_unverified_oracle_claim(self):
+        output = {
+            "text": "mìm ...",
+            "words": [word("mìm")],
+        }
+        self.assertEqual(audit_evidence_sources(output)["unaligned_pages"], 1)
+        errors = audit_tone_error_sources("mỉm", output)
+        self.assertEqual(errors["uncertain_alignment_pages"], 1)
+        self.assertEqual(errors["audited_tone_errors"], 0)
 
     def test_unknown_rule_is_rejected(self):
         with self.assertRaises(ValueError):
