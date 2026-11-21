@@ -1,5 +1,16 @@
 # Execution Progress & Checkpoints
 
+## Checkpoint — M3 Workflow Persistence & Child Safety Complete (2026-11-21)
+
+- **Done:**
+  - Hardened `child_safety.py`: explicit JSON schema/enum contract for Groq & Ollama fallback, shared `disabled_families` across chunks, contradiction/prompt-injection escalation (`HIGH->NOT_RECOMMENDED`, `MEDIUM->REVIEW_REQUIRED`, `LOW->SUITABLE_WITH_GUIDANCE`), explicit chunk completeness proof (`chunks_total`, `chunks_completed`, `all_chunks_completed`), explicit separation of `text_safety_status` vs `image_safety_status = UNASSESSED_NO_VISION_MODEL`.
+  - Hardened `admin_ai_workflow_worker.py`: eliminated `KeyError: 'book_id'` & disabled automatic book publication (`_try_auto_publish` no longer auto-publishes), persisted chunk completeness & `image_safety_status` into `SafetyMetadata`.
+  - Added Admin manual Image Safety review bound to `source_image_sha256`: model fields, schemas, `AdminAiWorkflowService.decide_image_safety`, route `POST /books/admin/pages/{page_id}/ai-workflows/{workflow_id}/image-safety-decision`, and Frontend UI panel in `admin-ocr-review-screen.tsx`.
+  - Fixed Dutch text at `admin-ocr-review-screen.tsx:1820` -> clean Vietnamese.
+  - Verified **36/36** backend M3 tests + **28/28** frontend OCR review tests PASS.
+- **In Progress:** Starting M4 (Additive SQL Migration, Rights Evidence Persistence & History, Strict Server-Side Verification Gate, Eliminating `AI_AUTO_VERIFIED` & `auto_publish_if_eligible`).
+- **Bugs Closed:** BUG-05, BUG-07, BUG-09.
+
 ## Checkpoint — M2 AI Correction & Ollama Hardening Complete (2026-11-21)
 
 - **Done:**

@@ -20,6 +20,7 @@ from app.schemas.admin_ocr import (
 )
 from app.schemas.admin_ai_workflow import (
     AdminAiCandidateUpdate,
+    AdminAiImageSafetyDecision,
     AdminAiSafetyDecision,
     AdminAiWorkflowCreate,
     AdminAiWorkflowRead,
@@ -403,5 +404,21 @@ async def decide_admin_ai_safety(
     db: AsyncSession = Depends(get_db),
 ):
     return await AdminAiWorkflowService(db).decide_safety(
+        actor_id, page_id, workflow_id, payload
+    )
+
+
+@router.post(
+    "/admin/pages/{page_id}/ai-workflows/{workflow_id}/image-safety-decision",
+    response_model=AdminAiWorkflowRead,
+)
+async def decide_admin_ai_image_safety(
+    page_id: UUID,
+    workflow_id: UUID,
+    payload: AdminAiImageSafetyDecision,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminAiWorkflowService(db).decide_image_safety(
         actor_id, page_id, workflow_id, payload
     )

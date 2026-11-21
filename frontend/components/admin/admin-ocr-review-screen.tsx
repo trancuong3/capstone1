@@ -863,6 +863,7 @@ export function AdminOcrReviewScreen({
   );
   const [aiWorkflow, setAiWorkflow] = useState<AdminAiWorkflowDTO | null>(null);
   const [safetyDecisionReason, setSafetyDecisionReason] = useState("");
+  const [imageSafetyReason, setImageSafetyReason] = useState("");
   const [candidateEditPending, setCandidateEditPending] = useState(false);
   const [busy, setBusy] = useState<
     | "edit"
@@ -1525,6 +1526,45 @@ export function AdminOcrReviewScreen({
     }
   }
 
+  async function decideImageSafety(
+    status: "ADMIN_CONFIRMED_SAFE" | "ADMIN_FLAGGED_UNSAFE",
+  ) {
+    if (!aiWorkflow || busy !== null || !ocr.decideWorkflowImageSafety) return;
+    const reason = imageSafetyReason.trim();
+    if (status === "ADMIN_FLAGGED_UNSAFE" && !reason) {
+      setNotice(
+        "Hãy ghi rõ lý do trước khi đánh dấu hình ảnh không phù hợp với trẻ em.",
+      );
+      return;
+    }
+    setBusy("workflow");
+    setNotice(null);
+    try {
+      setAiWorkflow(
+        await ocr.decideWorkflowImageSafety(
+          pageId,
+          aiWorkflow.workflow_id,
+          status,
+          aiWorkflow.source_image_sha256 ?? undefined,
+          reason || undefined,
+        ),
+      );
+      setNotice(
+        status === "ADMIN_CONFIRMED_SAFE"
+          ? "Đã ghi nhận Admin xác nhận hình ảnh trang phù hợp với trẻ em."
+          : "Đã gắn cờ hình ảnh không phù hợp; trang này sẽ bị chặn xác minh.",
+      );
+    } catch (cause) {
+      setNotice(
+        isServiceError(cause)
+          ? "Không thể lưu quyết định an toàn hình ảnh: " + cause.message
+          : "Không thể lưu quyết định an toàn hình ảnh. Hãy tải lại trang rồi thử lại.",
+      );
+    } finally {
+      if (mountedRef.current) setBusy(null);
+    }
+  }
+
   async function retryWorkflow() {
     if (!aiWorkflow || busy !== null) return;
     const retryingSafety =
@@ -1817,7 +1857,7 @@ export function AdminOcrReviewScreen({
     }
     if (candidateEditPending && aiWorkflow?.proofread_text) {
       setNotice(
-        "Candidate wordt opgeslagen en Child Safety wordt opnieuw gestart. Wacht tot de hash is bijgewerkt.",
+        "Candidate đang được lưu và Child Safety sẽ tự chạy lại. Vui lòng đợi hash được cập nhật.",
       );
       return;
     }
@@ -1985,11 +2025,20 @@ export function AdminOcrReviewScreen({
     aiWorkflow?.safety_status === "CONFIRMED" ||
     aiWorkflow?.safety_status === "AUTO_CONFIRMED",
   );
+  const workflowImageSafetyStatus =
+    aiWorkflow?.image_safety_status ?? "UNASSESSED_NO_VISION_MODEL";
+  const workflowImageFlaggedUnsafe =
+    workflowImageSafetyStatus === "ADMIN_FLAGGED_UNSAFE";
+  const workflowImageUnassessed =
+    Boolean(aiWorkflow?.image_safety_status) &&
+    workflowImageSafetyStatus !== "ADMIN_CONFIRMED_SAFE";
   const workflowFinalApprovalBlocked = Boolean(
     aiWorkflow?.proofread_text &&
     (!(workflowSafetyConfirmed || workflowCanAutoConfirmSafety) ||
       !aiWorkflow.hash_match ||
-      workflowHasHighRisk),
+      workflowHasHighRisk ||
+      workflowImageFlaggedUnsafe ||
+      workflowImageUnassessed),
   );
 
   const draftTokens = useMemo(() => tokenizePageText(draftText), [draftText]);
@@ -2802,10 +2851,14 @@ export function AdminOcrReviewScreen({
                     >
                       {workflowHasHighRisk
                         ? "Safety có cảnh báo mức HIGH hoặc NOT_RECOMMENDED. Luồng hiện tại chưa có chính sách Admin override cho trường hợp này nên chưa thể lưu VERIFIED."
-                        : aiWorkflow.safety_status !== "CONFIRMED" &&
-                            !workflowCanAutoConfirmSafety
-                          ? "Cần Child Safety hoàn tất cho Candidate hiện tại; tự xác nhận chỉ áp dụng khi kết quả SUITABLE và không có finding."
-                          : "Safety hash chưa khớp Candidate hiện tại; hãy chờ quét lại trước khi lưu VERIFIED."}
+                        : workflowImageFlaggedUnsafe
+                          ? "Hình ảnh trang đã bị Admin đánh dấu không phù hợp nên không thể xác minh."
+                          : workflowImageUnassessed
+                            ? "Chưa có AI kiểm tra an toàn hình ảnh. Admin cần kiểm tra trực tiếp ảnh trang và xác nhận an toàn hình ảnh trước khi xác minh."
+                            : aiWorkflow.safety_status !== "CONFIRMED" &&
+                                !workflowCanAutoConfirmSafety
+                              ? "Cần Child Safety hoàn tất cho Candidate hiện tại; tự xác nhận chỉ áp dụng khi kết quả SUITABLE và không có finding."
+                              : "Safety hash chưa khớp Candidate hiện tại; hãy chờ quét lại trước khi lưu VERIFIED."}
                     </p>
                   ) : null}
                   {aiCheckUnavailable && proofreadAudit === null ? (
@@ -2849,7 +2902,7 @@ export function AdminOcrReviewScreen({
                 </span>
               </div>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                 <div className="rounded-control bg-canvas p-3">
                   <p className="text-xs text-muted">Overall suitability</p>
                   <p className="mt-1 font-extrabold text-ink">
@@ -2857,9 +2910,22 @@ export function AdminOcrReviewScreen({
                   </p>
                 </div>
                 <div className="rounded-control bg-canvas p-3">
-                  <p className="text-xs text-muted">Safety scan</p>
+                  <p className="text-xs text-muted">An toàn văn bản (Text Safety)</p>
                   <p className="mt-1 font-extrabold text-ink">
-                    {aiWorkflow.safety_status}
+                    {aiWorkflow.text_safety_status ?? aiWorkflow.safety_status}
+                  </p>
+                </div>
+                <div className="rounded-control bg-canvas p-3">
+                  <p className="text-xs text-muted">An toàn hình ảnh (Image Safety)</p>
+                  <p
+                    className="mt-1 font-extrabold text-ink"
+                    data-testid="image-safety-status"
+                  >
+                    {workflowImageSafetyStatus === "ADMIN_CONFIRMED_SAFE"
+                      ? "Admin đã xác nhận ảnh an toàn"
+                      : workflowImageSafetyStatus === "ADMIN_FLAGGED_UNSAFE"
+                        ? "Admin gắn cờ ảnh không phù hợp"
+                        : "Chưa đánh giá ảnh (chưa có model vision)"}
                   </p>
                 </div>
                 <div className="rounded-control bg-canvas p-3">
@@ -2877,6 +2943,64 @@ export function AdminOcrReviewScreen({
                         ? "Khớp Candidate hiện tại"
                         : "Chưa khớp / cần quét lại"}
                   </p>
+                </div>
+              </div>
+
+              <div
+                className="mt-4 rounded-control border border-border bg-canvas/60 p-3"
+                data-testid="image-safety-review-panel"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-extrabold text-ink">
+                      Kiểm tra an toàn hình ảnh (Admin kiểm tra thủ công)
+                    </p>
+                    <p className="mt-1 text-xs text-muted">
+                      AI Child Safety hiện chỉ đánh giá văn bản (không kiểm tra nội dung trực quan trong ảnh). Admin cần đối chiếu ảnh trang sách trước khi xác nhận.
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+                  <label className="flex-1 text-xs font-bold text-ink">
+                    Ghi chú kiểm tra ảnh (bắt buộc nếu gắn cờ không phù hợp)
+                    <input
+                      className="mt-1 h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal"
+                      maxLength={500}
+                      onChange={(event) =>
+                        setImageSafetyReason(event.target.value)
+                      }
+                      placeholder="Ví dụ: Ảnh minh họa rõ nét, phù hợp học sinh tiểu học"
+                      type="text"
+                      value={imageSafetyReason}
+                    />
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      className="h-10 w-auto px-3"
+                      disabled={busy !== null}
+                      isLoading={busy === "workflow"}
+                      onClick={() =>
+                        void decideImageSafety("ADMIN_CONFIRMED_SAFE")
+                      }
+                      type="button"
+                      variant="secondary"
+                    >
+                      <CheckCircle2 aria-hidden className="size-4" /> Xác nhận
+                      ảnh an toàn
+                    </Button>
+                    <Button
+                      className="h-10 w-auto px-3"
+                      disabled={busy !== null || !imageSafetyReason.trim()}
+                      isLoading={busy === "workflow"}
+                      onClick={() =>
+                        void decideImageSafety("ADMIN_FLAGGED_UNSAFE")
+                      }
+                      type="button"
+                      variant="secondary"
+                    >
+                      Gắn cờ ảnh không phù hợp
+                    </Button>
+                  </div>
                 </div>
               </div>
 

@@ -111,22 +111,9 @@ async def _load(workflow_id: UUID) -> dict[str, object] | None:
         }
 
 
-async def _try_auto_publish(book_id: UUID) -> None:
-    if not isinstance(book_id, UUID):
-        return
-    try:
-        async with AsyncSessionLocal() as session:
-            await BookContentQualityService(
-                BookContentQualityRepository(session)
-            ).auto_publish_if_eligible(book_id)
-    except Exception as exc:
-        log_diagnostic(
-            logger,
-            logging.ERROR,
-            event="book_auto_publish_attempt_failed",
-            book_id=str(book_id),
-            error_code=type(exc).__name__.upper(),
-        )
+async def _try_auto_publish(book_id: UUID | None) -> None:
+    """Deprecated no-op: books are never auto-published without explicit Admin approval."""
+    return None
 
 
 async def _progress_loop(
@@ -291,6 +278,11 @@ async def _run_proofreading(snapshot: dict[str, object], worker_id: str) -> None
                 "changed_by": "AI_PROOFREADING",
             }]
         if safety_result is not None:
+            chunks_total = int(safety_result.get("chunks_total") or 1)
+            chunks_completed = int(safety_result.get("chunks_completed") or chunks_total)
+            all_chunks_completed = bool(
+                safety_result.get("all_chunks_completed", chunks_completed == chunks_total)
+            )
             row.SafetyInputHash = input_hash
             row.Suitability = str(safety_result["suitability"])
             row.Findings = list(safety_result["findings"])
@@ -303,6 +295,13 @@ async def _run_proofreading(snapshot: dict[str, object], worker_id: str) -> None
                 "processing_time_ms": safety_result.get("_processing_time_ms"),
                 "status": "PROVISIONAL",
                 "input_version": "ORIGINAL_OCR",
+                "chunks_total": chunks_total,
+                "chunks_completed": chunks_completed,
+                "all_chunks_completed": all_chunks_completed,
+                "text_safety_status": str(safety_result.get("text_safety_status") or "PROVISIONAL"),
+                "image_safety_status": str(
+                    safety_result.get("image_safety_status") or "UNASSESSED_NO_VISION_MODEL"
+                ),
             }
             row.ProviderEvents = list(row.ProviderEvents or []) + list(safety_result["provider_events"])
         elif safety_error is not None:
@@ -396,8 +395,6 @@ async def _run_proofreading(snapshot: dict[str, object], worker_id: str) -> None
             str(error_code),
             list(getattr(safety_error, "provider_events", []) or []),
         )
-    elif corrected_hash == input_hash:
-        await _try_auto_publish(snapshot["book_id"])
 
 
 async def _run_safety(snapshot: dict[str, object], worker_id: str) -> None:
@@ -435,6 +432,11 @@ async def _run_safety(snapshot: dict[str, object], worker_id: str) -> None:
             await session.commit()
             return
         now = datetime.now(timezone.utc)
+        chunks_total = int(result.get("chunks_total") or 1)
+        chunks_completed = int(result.get("chunks_completed") or chunks_total)
+        all_chunks_completed = bool(
+            result.get("all_chunks_completed", chunks_completed == chunks_total)
+        )
         row.SafetyInputHash = expected_hash
         row.Suitability = result["suitability"]
         row.Findings = result["findings"]
@@ -447,12 +449,19 @@ async def _run_safety(snapshot: dict[str, object], worker_id: str) -> None:
             "processing_time_ms": max(0, int((now - started).total_seconds() * 1000)),
             "status": "PROVISIONAL",
             "input_version": "PROOFREAD_CANDIDATE",
+            "chunks_total": chunks_total,
+            "chunks_completed": chunks_completed,
+            "all_chunks_completed": all_chunks_completed,
+            "text_safety_status": str(result.get("text_safety_status") or "PROVISIONAL"),
+            "image_safety_status": str(
+                result.get("image_safety_status") or "UNASSESSED_NO_VISION_MODEL"
+            ),
         }
         row.ProviderEvents = list(row.ProviderEvents or []) + list(result["provider_events"])
         row.Status = "READY_FOR_ADMIN_REVIEW"
         row.Stage = "READY_FOR_ADMIN_REVIEW"
-        row.CompletedChunks = 1
-        row.TotalChunks = 1
+        row.CompletedChunks = chunks_completed
+        row.TotalChunks = chunks_total
         row.Attempts = 0
         row.ErrorCode = None
         row.WorkerId = None
@@ -460,7 +469,6 @@ async def _run_safety(snapshot: dict[str, object], worker_id: str) -> None:
         row.RetryAfter = None
         row.UpdatedAt = now
         await session.commit()
-    await _try_auto_publish(snapshot["book_id"])
 
 
 async def _fail(

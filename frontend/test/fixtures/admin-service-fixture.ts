@@ -323,6 +323,16 @@ export function createAdminServiceFixture() {
           ...workflowFixture,
           safety_status: confirmed ? "CONFIRMED" : "PROVISIONAL",
         })),
+      decideWorkflowImageSafety: vi
+        .fn<NonNullable<AdminServices["ocr"]["decideWorkflowImageSafety"]>>()
+        .mockImplementation(
+          async (_pageId, _workflowId, status, expectedSha, reason) => ({
+            ...workflowFixture,
+            image_safety_status: status,
+            image_safety_image_sha256: expectedSha ?? null,
+            image_safety_reason: reason ?? null,
+          }),
+        ),
       retryWorkflow: vi
         .fn<AdminServices["ocr"]["retryWorkflow"]>()
         .mockResolvedValue({

@@ -385,6 +385,126 @@ class ParallelWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row.CandidateText, candidate)
         self.assertEqual(row.Status, "READY_FOR_ADMIN_REVIEW")
         self.assertEqual(row.SafetyStatus, "PROVISIONAL")
+        self.assertEqual(row.SafetyMetadata.get("image_safety_status"), "UNASSESSED_NO_VISION_MODEL")
+        self.assertTrue(row.SafetyMetadata.get("all_chunks_completed"))
+
+    async def test_stale_worker_after_lease_expiry_cannot_overwrite_workflow(self):
+        workflow_id = uuid4()
+        candidate = "Nội dung đang chờ quét"
+        row = SimpleNamespace(
+            Id=workflow_id,
+            PageRevisionId=uuid4(),
+            WorkerId="worker-new",
+            LeaseExpiresAt=datetime.now(timezone.utc) + timedelta(minutes=20),
+            ProviderEvents=[],
+            ReviewEvents=[],
+            SafetyHistory=[],
+            SafetyMetadata={},
+            Findings=[],
+            CandidateText=candidate,
+            CandidateHash=worker.content_hash(candidate),
+            SafetyInputHash=None,
+            SafetyStatus="STALE",
+            Suitability=None,
+            Status="CHILD_SAFETY_SCANNING",
+            Stage="CHILD_SAFETY_SCANNING",
+            CompletedChunks=0,
+            TotalChunks=1,
+            Attempts=2,
+            ErrorCode=None,
+        )
+        _Repository.row = row
+
+        class _Safety:
+            async def analyze(self, _value):
+                return {
+                    "suitability": "SUITABLE",
+                    "findings": [],
+                    "provider_events": [],
+                    "chunks_total": 1,
+                    "chunks_completed": 1,
+                    "all_chunks_completed": True,
+                    "text_safety_status": "PROVISIONAL",
+                    "image_safety_status": "UNASSESSED_NO_VISION_MODEL",
+                }
+
+        snapshot = {
+            "id": workflow_id,
+            "candidate_text": candidate,
+        }
+        with (
+            patch.object(worker, "AsyncSessionLocal", _Session),
+            patch.object(worker, "AdminAiWorkflowRepository", _Repository),
+            patch.object(worker, "_progress_loop", new=AsyncMockProgress()),
+            patch.object(worker, "build_child_safety_orchestrator", return_value=_Safety()),
+        ):
+            await worker._run_safety(snapshot, "worker-stale")
+
+        self.assertEqual(row.SafetyStatus, "STALE")
+        self.assertIsNone(row.SafetyInputHash)
+        self.assertEqual(row.WorkerId, "worker-new")
+
+    async def test_worker_never_auto_publishes_books(self):
+        workflow_id = uuid4()
+        candidate = "Nội dung sạch đã kiểm tra"
+        row = SimpleNamespace(
+            Id=workflow_id,
+            PageRevisionId=uuid4(),
+            WorkerId="worker-clean",
+            LeaseExpiresAt=datetime.now(timezone.utc) + timedelta(minutes=20),
+            ProviderEvents=[],
+            ReviewEvents=[],
+            SafetyHistory=[],
+            SafetyMetadata={},
+            Findings=[],
+            CandidateText=candidate,
+            CandidateHash=worker.content_hash(candidate),
+            SafetyInputHash=None,
+            SafetyStatus="STALE",
+            Suitability=None,
+            Status="CHILD_SAFETY_SCANNING",
+            Stage="CHILD_SAFETY_SCANNING",
+            CompletedChunks=0,
+            TotalChunks=1,
+            Attempts=1,
+            ErrorCode=None,
+        )
+        _Repository.row = row
+
+        class _Safety:
+            async def analyze(self, _value):
+                return {
+                    "suitability": "SUITABLE",
+                    "findings": [],
+                    "provider_events": [],
+                    "chunks_total": 1,
+                    "chunks_completed": 1,
+                    "all_chunks_completed": True,
+                    "text_safety_status": "PROVISIONAL",
+                    "image_safety_status": "UNASSESSED_NO_VISION_MODEL",
+                }
+
+        snapshot = {
+            "id": workflow_id,
+            "book_id": uuid4(),
+            "candidate_text": candidate,
+        }
+        with (
+            patch.object(worker, "AsyncSessionLocal", _Session),
+            patch.object(worker, "AdminAiWorkflowRepository", _Repository),
+            patch.object(worker, "_progress_loop", new=AsyncMockProgress()),
+            patch.object(worker, "build_child_safety_orchestrator", return_value=_Safety()),
+            patch.object(
+                worker.BookContentQualityService,
+                "auto_publish_if_eligible",
+                new=AsyncMock(),
+            ) as auto_pub,
+        ):
+            await worker._run_safety(snapshot, "worker-clean")
+
+        auto_pub.assert_not_called()
+        self.assertEqual(row.Status, "READY_FOR_ADMIN_REVIEW")
+        self.assertEqual(row.SafetyStatus, "PROVISIONAL")
 
 
 class AsyncMockProgress:

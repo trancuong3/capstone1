@@ -100,6 +100,37 @@ export const adminAiWorkflowSchema = z.object({
     "AUTO_CONFIRMED",
     "FAILED",
   ]),
+  text_safety_status: z
+    .enum([
+      "PENDING",
+      "STALE",
+      "PROVISIONAL",
+      "CONFIRMED",
+      "AUTO_CONFIRMED",
+      "FAILED",
+    ])
+    .optional(),
+  image_safety_status: z
+    .enum([
+      "UNASSESSED_NO_VISION_MODEL",
+      "ADMIN_CONFIRMED_SAFE",
+      "ADMIN_FLAGGED_UNSAFE",
+    ])
+    .optional(),
+  image_safety_reviewed_at: z.iso.datetime({ offset: true }).nullable().optional(),
+  image_safety_reviewed_by: z.uuid().nullable().optional(),
+  image_safety_image_sha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/u)
+    .nullable()
+    .optional(),
+  image_safety_reason: z.string().nullable().optional(),
+  source_image_sha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/u)
+    .nullable()
+    .optional(),
+  all_chunks_completed: z.boolean().optional(),
   findings: z.array(z.record(z.string(), z.unknown())),
   provider_events: z.array(z.record(z.string(), z.unknown())),
   ocr_approved_at: z.iso.datetime({ offset: true }).nullable(),
@@ -174,6 +205,13 @@ export interface OcrReviewService {
     workflowId: string,
     candidateHash: string,
     confirmed: boolean,
+    reason?: string,
+  ): Promise<AdminAiWorkflowDTO>;
+  decideWorkflowImageSafety?(
+    pageId: string,
+    workflowId: string,
+    status: "ADMIN_CONFIRMED_SAFE" | "ADMIN_FLAGGED_UNSAFE",
+    expectedImageSha256?: string | null,
     reason?: string,
   ): Promise<AdminAiWorkflowDTO>;
   retryWorkflow(
@@ -523,6 +561,26 @@ export function createOcrReviewService(): OcrReviewService {
         {
           method: "POST",
           body: { expected_candidate_hash: candidateHash, confirmed, reason },
+        },
+      ),
+    decideWorkflowImageSafety: (
+      pageId,
+      workflowId,
+      status,
+      expectedImageSha256,
+      reason,
+    ) =>
+      requestApi(
+        workflowPath(pageId, workflowId) + "/image-safety-decision",
+        adminAiWorkflowSchema,
+        undefined,
+        {
+          method: "POST",
+          body: {
+            status,
+            expected_image_sha256: expectedImageSha256 ?? undefined,
+            reason,
+          },
         },
       ),
     retryWorkflow: (pageId, workflowId) =>

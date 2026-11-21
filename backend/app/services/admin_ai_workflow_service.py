@@ -15,6 +15,7 @@ from app.repositories.admin_ai_workflow_repository import AdminAiWorkflowReposit
 from app.repositories.admin_ocr_repository import AdminOcrRepository
 from app.schemas.admin_ai_workflow import (
     AdminAiCandidateUpdate,
+    AdminAiImageSafetyDecision,
     AdminAiSafetyDecision,
     AdminAiWorkflowCreate,
     AdminAiWorkflowRead,
@@ -102,6 +103,23 @@ class AdminAiWorkflowService:
                 compact.get("findings")
             )
             safety_history.append(compact)
+        safety_metadata = dict(row.SafetyMetadata or {})
+        raw_image_status = getattr(row, "ImageSafetyStatus", None)
+        image_safety_status = (
+            raw_image_status
+            if raw_image_status
+            in {"UNASSESSED_NO_VISION_MODEL", "ADMIN_CONFIRMED_SAFE", "ADMIN_FLAGGED_UNSAFE"}
+            else "UNASSESSED_NO_VISION_MODEL"
+        )
+        if "all_chunks_completed" in safety_metadata:
+            all_chunks_completed = bool(safety_metadata["all_chunks_completed"])
+        else:
+            all_chunks_completed = bool(
+                row.SafetyStatus in {"PROVISIONAL", "CONFIRMED", "AUTO_CONFIRMED"}
+                and candidate_hash
+                and safety_hash
+                and candidate_hash == safety_hash
+            )
         return AdminAiWorkflowRead(
             workflow_id=row.Id,
             page_id=row.PageId,
@@ -119,7 +137,7 @@ class AdminAiWorkflowService:
             corrections=list(row.CorrectionSuggestions or []),
             uncertain_word_indices=[int(value) for value in row.UncertainWordIndices or []],
             proofread_metadata=dict(row.ProofreadMetadata or {}),
-            safety_metadata=dict(row.SafetyMetadata or {}),
+            safety_metadata=safety_metadata,
             candidate_history=list(row.CandidateHistory or []),
             safety_history=safety_history,
             review_history=list(row.ReviewEvents or []),
@@ -130,6 +148,14 @@ class AdminAiWorkflowService:
             hash_match=bool(candidate_hash and safety_hash and candidate_hash == safety_hash),
             suitability=row.Suitability,
             safety_status=row.SafetyStatus,
+            text_safety_status=row.SafetyStatus,
+            image_safety_status=image_safety_status,
+            image_safety_reviewed_at=getattr(row, "ImageSafetyReviewedAt", None),
+            image_safety_reviewed_by=getattr(row, "ImageSafetyReviewedBy", None),
+            image_safety_image_sha256=getattr(row, "ImageSafetyImageSha256", None),
+            image_safety_reason=getattr(row, "ImageSafetyReason", None),
+            source_image_sha256=getattr(row, "SourceImageSha256", None),
+            all_chunks_completed=all_chunks_completed,
             findings=findings,
             provider_events=list(row.ProviderEvents or []),
             ocr_approved_at=row.OcrApprovedAt,
@@ -180,6 +206,15 @@ class AdminAiWorkflowService:
             response = self._read(existing_snapshot)
             await self.db.rollback()
             return response
+        revision_meta = (
+            revision.ProcessingMeta if isinstance(revision.ProcessingMeta, dict) else {}
+        )
+        source_image_sha256 = (
+            str(revision_meta.get("source_image_sha256"))
+            if isinstance(revision_meta.get("source_image_sha256"), str)
+            and len(str(revision_meta.get("source_image_sha256"))) == 64
+            else None
+        )
         words = [word.model_dump(mode="json") for word in payload.words]
         now = datetime.now(timezone.utc)
         row = AdminAiWorkflow(
@@ -193,6 +228,7 @@ class AdminAiWorkflowService:
             InputText=input_text,
             InputWords=words,
             ImagePath=prepared.image_path,
+            SourceImageSha256=source_image_sha256,
             OriginalOcrHash=self._hash(revision_text),
             AdminInputHash=input_hash,
             Status="QUEUED",
@@ -200,6 +236,7 @@ class AdminAiWorkflowService:
             TotalChunks=prepared.total_chunks,
             CompletedChunks=0,
             SafetyStatus="PENDING",
+            ImageSafetyStatus="UNASSESSED_NO_VISION_MODEL",
             CreatedAt=now,
             UpdatedAt=now,
         )
@@ -435,6 +472,91 @@ class AdminAiWorkflowService:
             "event": event_name,
             "actor_id": str(actor_id),
             "candidate_hash": row.CandidateHash,
+            "reason": payload.reason,
+            "created_at": now.isoformat(),
+        }]
+        row.UpdatedAt = now
+        await self.db.commit()
+        await self.db.refresh(row)
+        return self._read(row)
+
+    async def decide_image_safety(
+        self,
+        actor_id: UUID,
+        page_id: UUID,
+        workflow_id: UUID,
+        payload: AdminAiImageSafetyDecision,
+    ) -> AdminAiWorkflowRead:
+        """Record explicit Admin visual review of the page image bound to its SHA-256."""
+        await AdminOcrService(self.db).require_admin(actor_id)
+        row = await self.repo.get(workflow_id, page_id=page_id, lock=True)
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "WORKFLOW_NOT_FOUND",
+                    "message": "Không tìm thấy workflow AI cho trang này.",
+                },
+            )
+        revision = await AdminOcrRepository(self.db).revision(
+            page_id, row.PageRevisionId
+        )
+        revision_meta = (
+            revision.ProcessingMeta
+            if revision is not None and isinstance(revision.ProcessingMeta, dict)
+            else {}
+        )
+        revision_sha = (
+            str(revision_meta["source_image_sha256"])
+            if isinstance(revision_meta.get("source_image_sha256"), str)
+            and len(str(revision_meta.get("source_image_sha256"))) == 64
+            else None
+        )
+        effective_sha = revision_sha or getattr(row, "SourceImageSha256", None)
+        if (
+            revision_sha is not None
+            and getattr(row, "SourceImageSha256", None) is not None
+            and row.SourceImageSha256 != revision_sha
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "IMAGE_REVISION_MISMATCH",
+                    "message": "Ảnh trang đã thay đổi so với lúc chạy AI; hãy chạy lại quy trình cho ảnh mới.",
+                },
+            )
+        if (
+            payload.expected_image_sha256 is not None
+            and effective_sha is not None
+            and payload.expected_image_sha256 != effective_sha
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "IMAGE_REVISION_MISMATCH",
+                    "message": "Ảnh trang đã thay đổi; hãy tải lại trang trước khi xác nhận an toàn ảnh.",
+                },
+            )
+        if payload.status == "ADMIN_FLAGGED_UNSAFE" and not payload.reason:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "IMAGE_SAFETY_REASON_REQUIRED",
+                    "message": "Hãy ghi rõ lý do khi đánh dấu ảnh trang không phù hợp với trẻ em.",
+                },
+            )
+        now = datetime.now(timezone.utc)
+        row.SourceImageSha256 = effective_sha
+        row.ImageSafetyStatus = payload.status
+        row.ImageSafetyReviewedAt = now
+        row.ImageSafetyReviewedBy = actor_id
+        row.ImageSafetyImageSha256 = effective_sha
+        row.ImageSafetyReason = payload.reason
+        row.ReviewEvents = list(row.ReviewEvents or []) + [{
+            "event": "IMAGE_SAFETY_REVIEWED",
+            "actor_id": str(actor_id),
+            "image_safety_status": payload.status,
+            "image_sha256": effective_sha,
             "reason": payload.reason,
             "created_at": now.isoformat(),
         }]
