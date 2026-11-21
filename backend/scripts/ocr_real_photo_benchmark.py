@@ -208,12 +208,23 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dataset", type=Path, help="Private JSONL manifest outside repository")
     parser.add_argument("--output", type=Path, help="Optional aggregate-only JSON file outside repository")
+    parser.add_argument("--env-file", type=Path, help="Existing local backend .env to load without printing credentials")
     parser.add_argument("--min-pages", type=int, default=10, help="Minimum distinct photographed pages (default: 10)")
     parser.add_argument("--expected-profile", type=str, help="Fail if loaded VietOCR model profile differs")
     parser.add_argument("--expected-sha", type=str, help="Fail if loaded checkpoint SHA256 differs")
     parser.add_argument("--max-cer", type=float, help="Optional prespecified micro CER threshold")
     parser.add_argument("--max-wer", type=float, help="Optional prespecified micro WER threshold")
     args = parser.parse_args(argv)
+    # Worktrees do not inherit the developer's original checkout .env.  Load
+    # an explicitly selected local environment file before the OCR engine
+    # imports app.database.config.  Never print secrets or copy them into Git.
+    if args.env_file is not None:
+        from dotenv import load_dotenv
+
+        if not args.env_file.expanduser().is_file():
+            parser.error("--env-file does not exist")
+        if not load_dotenv(dotenv_path=args.env_file.expanduser(), override=False):
+            parser.error("--env-file did not provide any values")
     if args.min_pages < 1 or args.min_pages > MAX_CASES:
         parser.error("--min-pages must be between 1 and 1000")
     if args.expected_sha and not re.fullmatch(r"[a-f0-9]{64}", args.expected_sha):
