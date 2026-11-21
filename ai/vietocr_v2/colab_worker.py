@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import threading
 import time
 import uuid
@@ -20,6 +21,7 @@ from typing import Any, Callable
 import requests
 
 from .artifact_store import assemble_shards, shard_file
+from .colab_state_store import LocalDriveJobStateStore
 from .contracts import DatasetRow, ORIGINAL_CHECKPOINT_SHA256, canonical_sha256, sha256_file, write_jsonl
 
 logger = logging.getLogger("viread.vietocr.colab_worker")
@@ -40,9 +42,58 @@ def verify_worker_source_lock(config: dict[str, Any]) -> None:
         raise ValueError("WORKER_CODE_OR_DEPENDENCY_LOCK_MISMATCH")
 
 
+def _current_repo_commit() -> str:
+    try:
+        output = subprocess.check_output(
+            ["git", "-C", str(Path(__file__).resolve().parents[2]), "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=5,
+        ).strip().lower()
+        if len(output) == 40 and all(ch in "0123456789abcdef" for ch in output):
+            return output
+    except Exception:
+        pass
+    return "local-unpinned"
+
+
+def build_local_drive_state_store_factory(
+    resume_root: str | Path,
+    *,
+    repository_commit: str | None = None,
+) -> Callable[[dict[str, Any], Path], LocalDriveJobStateStore]:
+    """Create a zero-cost mounted Google Drive state store factory for Colab Free."""
+    root = Path(resume_root)
+    commit_sha = repository_commit or _current_repo_commit()
+
+    def _factory(job: dict[str, Any], run_dir: Path) -> LocalDriveJobStateStore:
+        identity = {
+            "training_job_id": str(job["id"]),
+            "profile": str(job["profile"]),
+            "dataset_manifest_sha256": str(job["manifest_sha256"]),
+            "parent_checkpoint_sha256": str(job["parent_checkpoint_sha256"]),
+            "config_sha256": str(job["config_sha256"]),
+            "repository_commit": commit_sha,
+            "locked_test_manifest_sha256": str(job.get("locked_test_manifest_sha256") or "unregistered"),
+            "locked_test_version_id": str(job.get("locked_test_version_id") or "unregistered"),
+        }
+        return LocalDriveJobStateStore(root, identity, run_dir)
+
+    return _factory
+
+
 class ColabWorker:
-    def __init__(self, api_base: str, token: str, work_root: str | Path, *, poll_seconds: int = 30,
-                 state_store_factory: Callable[[dict[str, Any], Path], Any] | None = None):
+    def __init__(
+        self,
+        api_base: str,
+        token: str,
+        work_root: str | Path,
+        *,
+        poll_seconds: int = 30,
+        state_store_factory: Callable[[dict[str, Any], Path], Any] | None = None,
+        drive_root: str | Path | None = None,
+        resume_root: str | Path | None = None,
+    ):
         if not api_base.startswith(("https://", "http://localhost", "http://127.0.0.1")):
             raise ValueError("VIREAD_API_BASE must use HTTPS outside localhost")
         if len(token) < 32:
@@ -51,7 +102,12 @@ class ColabWorker:
         self.token = token
         self.work_root = Path(work_root)
         self.work_root.mkdir(parents=True, exist_ok=True)
+        self.drive_root = Path(drive_root) if (drive_root is not None and str(drive_root).strip()) else None
         self.poll_seconds = max(5, poll_seconds)
+        has_resume_root = resume_root is not None and str(resume_root).strip() != ""
+        if state_store_factory is None and (has_resume_root or self.drive_root is not None):
+            effective_resume_root = Path(resume_root) if has_resume_root else (self.drive_root / "resume")
+            state_store_factory = build_local_drive_state_store_factory(effective_resume_root)
         self.state_store_factory = state_store_factory
         self.worker_id = f"colab-{uuid.uuid4()}"
         self.runtime_data: dict[str, Any] = {}
@@ -78,6 +134,27 @@ class ColabWorker:
 
     @staticmethod
     def available_ram_bytes() -> int:
+        if os.name == "nt":
+            import ctypes
+
+            class _MemoryStatusEx(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            memory = _MemoryStatusEx()
+            memory.dwLength = ctypes.sizeof(memory)
+            if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory)):
+                raise OSError("GlobalMemoryStatusEx failed")
+            return int(memory.ullAvailPhys)
         available = int(os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
         for maximum_path, current_path in (
             (Path("/sys/fs/cgroup/memory.max"), Path("/sys/fs/cgroup/memory.current")),
@@ -159,12 +236,14 @@ class ColabWorker:
 
     @staticmethod
     def download(url: str, destination: Path, expected_sha256: str | None = None) -> None:
+        expected = expected_sha256.lower() if expected_sha256 else None
         if destination.exists():
-            if expected_sha256 is None or sha256_file(destination) == expected_sha256:
+            if expected is None or sha256_file(destination) == expected:
                 return
             raise ValueError("CACHED_OBJECT_HASH_MISMATCH")
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_suffix(destination.suffix + ".download")
+        temporary.unlink(missing_ok=True)
         digest = hashlib.sha256()
         try:
             with requests.get(url, stream=True, timeout=300) as response:
@@ -174,7 +253,66 @@ class ColabWorker:
                         if block:
                             output.write(block)
                             digest.update(block)
-            if expected_sha256 and digest.hexdigest() != expected_sha256:
+            if expected and digest.hexdigest() != expected:
+                raise ValueError("DOWNLOADED_OBJECT_HASH_MISMATCH")
+            temporary.replace(destination)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def _fetch_artifact(
+        self,
+        url: str | None,
+        destination: Path,
+        expected_sha256: str | None = None,
+        *,
+        local_drive_candidates: list[Path] | None = None,
+    ) -> None:
+        """Download via authenticated backend proxy, external signed URL, or verified mounted Drive fast-path."""
+        expected = expected_sha256.lower() if expected_sha256 else None
+        if destination.exists():
+            if expected is None or sha256_file(destination) == expected:
+                return
+            raise ValueError("CACHED_OBJECT_HASH_MISMATCH")
+
+        if self.drive_root and local_drive_candidates and expected:
+            for candidate in local_drive_candidates:
+                try:
+                    if candidate.is_file() and sha256_file(candidate) == expected:
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        temporary = destination.with_suffix(destination.suffix + ".download")
+                        temporary.unlink(missing_ok=True)
+                        try:
+                            shutil.copyfile(candidate, temporary)
+                            if sha256_file(temporary) != expected:
+                                raise ValueError("DOWNLOADED_OBJECT_HASH_MISMATCH")
+                            temporary.replace(destination)
+                        finally:
+                            temporary.unlink(missing_ok=True)
+                        return
+                except OSError:
+                    continue
+
+        if not url:
+            raise ValueError("ARTIFACT_DOWNLOAD_URL_MISSING")
+        is_backend_proxy = url.startswith("/") or url.startswith(self.api_base + "/")
+        if not is_backend_proxy:
+            self.download(url, destination, expected)
+            return
+
+        resolved_url = self.api_base + url if url.startswith("/") else url
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_suffix(destination.suffix + ".download")
+        temporary.unlink(missing_ok=True)
+        digest = hashlib.sha256()
+        try:
+            with self.session.get(resolved_url, stream=True, timeout=300) as response:
+                response.raise_for_status()
+                with temporary.open("xb") as output:
+                    for block in response.iter_content(1024 * 1024):
+                        if block:
+                            output.write(block)
+                            digest.update(block)
+            if expected and digest.hexdigest() != expected:
                 raise ValueError("DOWNLOADED_OBJECT_HASH_MISMATCH")
             temporary.replace(destination)
         finally:
@@ -185,12 +323,38 @@ class ColabWorker:
         prefix = "locked-test" if locked_test else "training"
         receipt_path = run_dir / f"{prefix}-receipt.json"
         receipt_url = dataset["manifest_url"]
-        self.download(receipt_url, receipt_path, dataset["version_sha256"])
+        manifest_candidates: list[Path] = []
+        if self.drive_root:
+            v_sha = dataset["version_sha256"]
+            if locked_test:
+                manifest_candidates.append(self.drive_root / "locked-tests" / "manifests" / f"{v_sha}.json")
+            else:
+                manifest_candidates.append(self.drive_root / "datasets" / v_sha / "manifest.json")
+        self._fetch_artifact(
+            receipt_url,
+            receipt_path,
+            dataset["version_sha256"],
+            local_drive_candidates=manifest_candidates,
+        )
         image_root = run_dir / f"{prefix}-images"
         rows = []
         for item in items:
             image_path = image_root / item["image_sha256"]
-            self.download(item["image_url"], image_path, item["image_sha256"])
+            img_candidates: list[Path] = []
+            if self.drive_root:
+                img_sha = str(item["image_sha256"]).lower()
+                if locked_test:
+                    for cohort_sub in ("production", "pilot"):
+                        for ext in ("png", "jpg", "webp"):
+                            img_candidates.append(
+                                self.drive_root / "locked-tests" / cohort_sub / img_sha[:2] / f"{img_sha}.{ext}"
+                            )
+            self._fetch_artifact(
+                item.get("image_url"),
+                image_path,
+                item["image_sha256"],
+                local_drive_candidates=img_candidates,
+            )
             if locked_test:
                 rows.append({"sample_id": item.get("source_annotation_id") or item["sample_id"],
                              "group_id": item["group_id"], "reference": item["label"],
@@ -223,14 +387,14 @@ class ColabWorker:
                 raise ValueError("CACHED_PARENT_HASH_MISMATCH")
             return parent
         if artifact["profile"] == "ORIGINAL":
-            self.download(artifact["source_url"], parent, artifact["checkpoint_sha256"])
+            self._fetch_artifact(artifact["source_url"], parent, artifact["checkpoint_sha256"])
         else:
             shard_root = run_dir / "parent-shards"
             shard_root.mkdir(parents=True, exist_ok=True)
             chunks = []
             for chunk in artifact["chunks"]:
                 local = shard_root / f"part-{int(chunk['index']):04d}.bin"
-                self.download(chunk["url"], local, chunk["sha256"])
+                self._fetch_artifact(chunk["url"], local, chunk["sha256"])
                 chunks.append({"index": int(chunk["index"]), "name": local.name,
                                "bytes": int(chunk["bytes"]), "sha256": chunk["sha256"]})
             assemble_shards({"schema": "viread-checkpoint-shards-v1", "filename": parent.name,
@@ -320,7 +484,18 @@ class ColabWorker:
             if int(chunk.get("index", -1)) != index:
                 raise ValueError("CANDIDATE_ARTIFACT_CHUNK_ORDER_INVALID")
             local = shard_root / f"part-{index:04d}.bin"
-            self.download(str(chunk["url"]), local, str(chunk["sha256"]))
+            shard_sha = str(chunk["sha256"]).lower()
+            shard_candidates = (
+                [self.drive_root / "checkpoints" / run_id / f"chunk-{index:04d}-{shard_sha[:12]}.part"]
+                if self.drive_root
+                else None
+            )
+            self._fetch_artifact(
+                chunk.get("url"),
+                local,
+                shard_sha,
+                local_drive_candidates=shard_candidates,
+            )
             if local.stat().st_size != int(chunk.get("bytes", -1)):
                 raise ValueError("CANDIDATE_ARTIFACT_CHUNK_SIZE_MISMATCH")
             local_chunks.append({"index": index, "name": local.name,
@@ -390,7 +565,7 @@ class ColabWorker:
             raise ValueError("BENCHMARK_ONLY_REPORT_LINEAGE_MISMATCH")
         progress.update({"stage": "registering_benchmark", "completed_steps": len(report["outputs"]),
                          "total_steps": len(report["outputs"])})
-        self.call("POST", f"{API_PREFIX}/jobs/{job['id']}/benchmarks",
+        registered_benchmark = self.call("POST", f"{API_PREFIX}/jobs/{job['id']}/benchmarks",
                   params={"worker_id": self.worker_id}, json={
                       "run_id": run_id,
                       "locked_test_version_id": job["locked_test_version_id"],
@@ -401,9 +576,13 @@ class ColabWorker:
                           "sample_id", "group_id", "original", "candidate", "parent", "active"
                       ) if row.get(key) is not None} for row in report["outputs"]],
                   })
+        resolved_gate = (
+            (registered_benchmark or {}).get("gate_status")
+            or (report.get("quality_gate") or {}).get("status")
+        )
         self.call("POST", f"{API_PREFIX}/jobs/{job['id']}/finish", json={
             "worker_id": self.worker_id, "run_id": run_id,
-            "status": "BENCHMARKED" if report.get("quality_gate", {}).get("status") == "V2_WIN"
+            "status": "BENCHMARKED" if resolved_gate == "V2_WIN"
                       and evaluation_type == "PRODUCTION" else "QUALITY_GATE_REJECTED",
             "runtime": self.runtime_data,
         })
@@ -412,7 +591,16 @@ class ColabWorker:
         job_id = str(job["id"])
         run_dir = self.work_root / job_id
         run_dir.mkdir(parents=True, exist_ok=True)
-        state_store = self.state_store_factory(job, run_dir) if self.state_store_factory else None
+        metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
+        is_benchmark_only = metadata.get("operation") == "BENCHMARK_ONLY"
+        # BENCHMARK_ONLY evaluations reuse the training job_id with newly pinned
+        # locked_test_version_id/manifest_sha256; never load or overwrite the
+        # training job's resume manifest during a standalone evaluation pass.
+        state_store = (
+            self.state_store_factory(job, run_dir)
+            if (self.state_store_factory and not is_benchmark_only)
+            else None
+        )
         if state_store is not None:
             state_store.restore()
         stop = threading.Event()
@@ -422,8 +610,7 @@ class ColabWorker:
         try:
             runtime = self.assert_runtime_capacity(run_dir)
             self.runtime_data = runtime
-            metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
-            if metadata.get("operation") == "BENCHMARK_ONLY":
+            if is_benchmark_only:
                 progress.update(stage="downloading_candidate_artifact", runtime=runtime)
                 self.process_benchmark_only_job(job, run_dir, progress)
                 return
@@ -561,7 +748,7 @@ class ColabWorker:
                 raise ValueError("BENCHMARK_REPORT_HASH_MISMATCH")
             if state_store is not None:
                 state_store.sync()
-            self.call("POST", f"{API_PREFIX}/jobs/{job_id}/benchmarks",
+            registered_benchmark = self.call("POST", f"{API_PREFIX}/jobs/{job_id}/benchmarks",
                       params={"worker_id": self.worker_id}, json={
                           "run_id": run_id,
                           "locked_test_version_id": test_job["locked_test_version_id"],
@@ -573,16 +760,24 @@ class ColabWorker:
                           ) if row.get(key) is not None}
                                       for row in report["outputs"]],
                       })
+            resolved_gate = (
+                (registered_benchmark or {}).get("gate_status")
+                or (report.get("quality_gate") or {}).get("status")
+                or report.get("gate_status")
+            )
             self.call("POST", f"{API_PREFIX}/jobs/{job_id}/finish", json={
                 "worker_id": self.worker_id, "run_id": run_id,
-                "status": "BENCHMARKED" if report.get("gate_status") == "V2_WIN" else "QUALITY_GATE_REJECTED",
+                "status": "BENCHMARKED" if resolved_gate == "V2_WIN" else "QUALITY_GATE_REJECTED",
                 "runtime": self.runtime_data,
             })
         finally:
             stop.set()
             heartbeat.join(timeout=2)
             if state_store is not None:
-                state_store.sync()
+                try:
+                    state_store.sync()
+                except Exception as sync_exc:
+                    logger.warning("Final resume state sync failed (%s)", type(sync_exc).__name__)
 
     def run_forever(self) -> None:
         logger.info("ViRead Colab worker started; worker id=%s", self.worker_id)
@@ -692,10 +887,38 @@ class ColabWorker:
         return True
 
 
-def run_worker(api_base: str, token: str, work_root: str | Path, *, poll_seconds: int = 30) -> None:
-    ColabWorker(api_base, token, work_root, poll_seconds=poll_seconds).run_forever()
+def run_worker(
+    api_base: str,
+    token: str,
+    work_root: str | Path,
+    *,
+    poll_seconds: int = 30,
+    drive_root: str | Path | None = None,
+    resume_root: str | Path | None = None,
+) -> None:
+    ColabWorker(
+        api_base,
+        token,
+        work_root,
+        poll_seconds=poll_seconds,
+        drive_root=drive_root,
+        resume_root=resume_root,
+    ).run_forever()
 
 
-def run_next_job_once(api_base: str, token: str, work_root: str | Path) -> bool:
+def run_next_job_once(
+    api_base: str,
+    token: str,
+    work_root: str | Path,
+    *,
+    drive_root: str | Path | None = None,
+    resume_root: str | Path | None = None,
+) -> bool:
     """Process no more than one ready job; intended for a user-started Colab cell."""
-    return ColabWorker(api_base, token, work_root).run_next_job_once()
+    return ColabWorker(
+        api_base,
+        token,
+        work_root,
+        drive_root=drive_root,
+        resume_root=resume_root,
+    ).run_next_job_once()

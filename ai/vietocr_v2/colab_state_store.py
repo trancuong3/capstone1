@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import threading
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from urllib.parse import urlsplit
 SCHEMA = "viread-colab-resume-v1"
 MANIFEST_NAME = "resume-manifest.json"
 BEST_RE = re.compile(r"^best-[a-f0-9]{64}\.pth$")
+BENCHMARK_REPORT_RE = re.compile(r"^(pilot|production)-[a-f0-9]{64}(?:-[a-f0-9]{64})?(?:-benchmark)?\.json$")
 JOB_ID_RE = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$", re.I)
 IDENTITY_FIELDS = (
     "training_job_id", "profile", "dataset_manifest_sha256", "parent_checkpoint_sha256",
@@ -25,6 +27,7 @@ FIXED_FILES = {
     "latest.pt", "candidate.pth", "candidate.json", "candidate.manifest.json",
     "locked-test-report.json",
 }
+_IGNORED_OS_FILES = frozenset({".DS_Store", "desktop.ini", "Thumbs.db"})
 
 
 def _sha256(path: Path) -> str:
@@ -36,7 +39,12 @@ def _sha256(path: Path) -> str:
 
 
 def _safe_name(name: str) -> bool:
-    return name == MANIFEST_NAME or name in FIXED_FILES or bool(BEST_RE.fullmatch(name))
+    return (
+        name == MANIFEST_NAME
+        or name in FIXED_FILES
+        or bool(BEST_RE.fullmatch(name))
+        or bool(BENCHMARK_REPORT_RE.fullmatch(name))
+    )
 
 
 def _gcs_location(uri: str) -> tuple[str, str]:
@@ -203,4 +211,209 @@ class GCSJobStateStore:
             for blob in remote_blobs:
                 if blob.name not in keep_names:
                     blob.delete()
+            return {name: record["sha256"] for name, record in records.items()}
+
+
+class LocalDriveJobStateStore:
+    """Zero-cost integrity-checked resume store on mounted Google Drive for Colab Free.
+
+    Persists resumable state under ``<resume_root>/jobs/<training_job_id>/`` using
+    atomic write-and-replace, manifest-last commits, strict lineage identity checks,
+    SHA-256 verification on restore, and automatic pruning of obsolete best weights.
+    """
+
+    def __init__(
+        self,
+        resume_root: str | Path,
+        identity: dict[str, str],
+        run_dir: str | Path,
+    ) -> None:
+        missing = [field for field in REQUIRED_IDENTITY_FIELDS if not identity.get(field)]
+        if missing:
+            raise ValueError("resume identity is incomplete: " + ", ".join(missing))
+        if not JOB_ID_RE.fullmatch(identity["training_job_id"]):
+            raise ValueError("resume state requires a canonical training job UUID")
+        for field in ("dataset_manifest_sha256", "parent_checkpoint_sha256", "config_sha256"):
+            if not re.fullmatch(r"[a-f0-9]{64}", identity[field].lower()):
+                raise ValueError(f"resume identity {field} must be a SHA-256 digest")
+        commit_val = str(identity["repository_commit"]).lower()
+        if commit_val != "local-unpinned" and not re.fullmatch(r"[a-f0-9]{40}", commit_val):
+            raise ValueError("resume identity repository_commit must be a pinned Git SHA")
+        if identity["profile"] not in {"FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED"}:
+            raise ValueError("resume state has an unsupported training profile")
+
+        self.resume_root = Path(resume_root)
+        self.job_dir = self.resume_root / "jobs" / identity["training_job_id"]
+        self.blobs_dir = self.job_dir / "blobs"
+        self.job_dir.mkdir(parents=True, exist_ok=True)
+        self.blobs_dir.mkdir(parents=True, exist_ok=True)
+        self.identity = {key: str(identity.get(key) or "unregistered") for key in IDENTITY_FIELDS}
+        self.run_dir = Path(run_dir)
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+        self._uploaded: dict[str, tuple[int, int, str]] = {}
+
+    def _remote_files(self) -> dict[str, Path]:
+        if not self.job_dir.is_dir():
+            return {}
+        return {
+            path.name: path
+            for path in self.job_dir.iterdir()
+            if path.is_file()
+            and not path.name.endswith(".tmp")
+            and path.name not in _IGNORED_OS_FILES
+        }
+
+    def _read_manifest(self) -> tuple[dict[str, Any] | None, dict[str, Path]]:
+        remote = self._remote_files()
+        manifest_path = remote.get(MANIFEST_NAME)
+        if manifest_path is None:
+            if remote:
+                raise ValueError(
+                    "uncommitted Drive resume files exist without a manifest; refusing a fresh run"
+                )
+            return None, remote
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise ValueError("Drive resume manifest cannot be read") from exc
+        if manifest.get("schema") != SCHEMA or manifest.get("identity") != self.identity:
+            raise ValueError(
+                "Drive resume manifest identity mismatch; refusing to mix training lineage"
+            )
+        files = manifest.get("files")
+        if not isinstance(files, dict):
+            raise ValueError("Drive resume manifest files are invalid")
+        for filename, record in files.items():
+            if filename == MANIFEST_NAME or not _safe_name(filename) or not isinstance(record, dict):
+                raise ValueError("Drive resume manifest contains an unsafe file record")
+            if (
+                not isinstance(record.get("bytes"), int)
+                or record["bytes"] < 0
+                or not re.fullmatch(r"[a-f0-9]{64}", str(record.get("sha256", "")))
+            ):
+                raise ValueError("Drive resume manifest contains invalid size or checksum")
+        return manifest, remote
+
+    def _resolve_blob_path(self, filename: str, record: dict[str, Any], remote: dict[str, Path]) -> Path | None:
+        blob_sha = str(record.get("sha256", "")).lower()
+        blob_ref = record.get("blob")
+        if isinstance(blob_ref, str) and blob_ref == f"blobs/{blob_sha}":
+            candidate = self.blobs_dir / blob_sha
+            if candidate.is_file():
+                return candidate
+        return remote.get(filename)
+
+    def restore(self) -> dict[str, str]:
+        """Restore committed resume files from mounted Drive after verifying identity, size, and SHA-256."""
+        with self._lock:
+            manifest, remote = self._read_manifest()
+            if manifest is None:
+                return {}
+            restored: dict[str, str] = {}
+            for filename, record in manifest["files"].items():
+                source = self._resolve_blob_path(filename, record, remote)
+                if source is None or not source.is_file():
+                    raise ValueError(f"Drive resume object is missing: {filename}")
+                destination = self.run_dir / filename
+                temporary = destination.with_name(destination.name + ".drive-restore")
+                temporary.unlink(missing_ok=True)
+                try:
+                    shutil.copyfile(source, temporary)
+                    if temporary.stat().st_size != record["bytes"] or _sha256(temporary) != record["sha256"]:
+                        raise ValueError(f"Drive resume object integrity check failed: {filename}")
+                    temporary.replace(destination)
+                finally:
+                    temporary.unlink(missing_ok=True)
+                if filename.endswith(".json"):
+                    try:
+                        json.loads(destination.read_text(encoding="utf-8"))
+                    except Exception as exc:
+                        destination.unlink(missing_ok=True)
+                        raise ValueError(f"Drive resume JSON is invalid: {filename}") from exc
+                self._uploaded[filename] = (
+                    destination.stat().st_mtime_ns,
+                    destination.stat().st_size,
+                    record["sha256"],
+                )
+                restored[filename] = record["sha256"]
+            return restored
+
+    def _local_files(self) -> dict[str, Path]:
+        selected: dict[str, Path] = {}
+        for path in self.run_dir.iterdir():
+            if path.is_file() and path.name != MANIFEST_NAME and _safe_name(path.name):
+                if path.name.endswith(".json"):
+                    try:
+                        json.loads(path.read_text(encoding="utf-8"))
+                    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                        continue
+                selected[path.name] = path
+        return selected
+
+    def sync(self) -> dict[str, str]:
+        """Persist immutable content-addressed blobs, atomically commit manifest last, then prune old blobs.
+
+        Because each version is written under ``blobs/<sha256>`` instead of overwriting
+        the previous committed file in place, a mid-sync Colab disconnect leaves the
+        prior committed snapshot 100% intact and restorable.
+        """
+        with self._lock:
+            old_manifest, remote_files = self._read_manifest()
+            local_files = self._local_files()
+            if not local_files:
+                return (
+                    {k: v["sha256"] for k, v in old_manifest.get("files", {}).items()}
+                    if old_manifest
+                    else {}
+                )
+
+            records: dict[str, dict[str, Any]] = {}
+            keep_blobs: set[str] = set()
+            for filename, path in sorted(local_files.items()):
+                stat = path.stat()
+                digest = _sha256(path)
+                signature = (stat.st_mtime_ns, stat.st_size, digest)
+                blob_target = self.blobs_dir / digest
+                keep_blobs.add(digest)
+                if not (blob_target.is_file() and blob_target.stat().st_size == stat.st_size):
+                    tmp_target = self.blobs_dir / f"{digest}.{os.getpid()}.tmp"
+                    try:
+                        with path.open("rb") as src_fh, tmp_target.open("wb") as dst_fh:
+                            shutil.copyfileobj(src_fh, dst_fh, length=1024 * 1024)
+                            dst_fh.flush()
+                            os.fsync(dst_fh.fileno())
+                        if tmp_target.stat().st_size != stat.st_size or _sha256(tmp_target) != digest:
+                            raise ValueError(f"Drive resume write verification failed: {filename}")
+                        tmp_target.replace(blob_target)
+                    finally:
+                        tmp_target.unlink(missing_ok=True)
+                records[filename] = {
+                    "bytes": stat.st_size,
+                    "sha256": digest,
+                    "blob": f"blobs/{digest}",
+                }
+                self._uploaded[filename] = signature
+
+            manifest = {"schema": SCHEMA, "identity": self.identity, "files": records}
+            manifest_tmp = self.job_dir / f"{MANIFEST_NAME}.{os.getpid()}.tmp"
+            manifest_dest = self.job_dir / MANIFEST_NAME
+            try:
+                encoded = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                with manifest_tmp.open("wb") as fh:
+                    fh.write(encoded)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                manifest_tmp.replace(manifest_dest)
+            finally:
+                manifest_tmp.unlink(missing_ok=True)
+
+            # Prune unreferenced blobs and legacy top-level files only AFTER manifest commit.
+            if self.blobs_dir.is_dir():
+                for blob_path in self.blobs_dir.iterdir():
+                    if blob_path.is_file() and blob_path.name not in keep_blobs:
+                        blob_path.unlink(missing_ok=True)
+            for filename, remote_path in remote_files.items():
+                if filename != MANIFEST_NAME:
+                    remote_path.unlink(missing_ok=True)
             return {name: record["sha256"] for name, record in records.items()}

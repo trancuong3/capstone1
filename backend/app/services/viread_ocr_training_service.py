@@ -13,9 +13,8 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 from PIL import Image, UnidentifiedImageError
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 import yaml
 
@@ -23,6 +22,16 @@ from app.repositories.viread_ocr_training_repository import VireadOcrTrainingRep
 from app.schemas.viread_ocr_training import BenchmarkCreate, DatasetImport, DatasetSampleInput, ModelDecisionRequest, TrainingRunComplete, TrainingRunCreate
 from app.services.admin_ocr_service import AdminOcrService
 from app.services.storage_service import create_signed_image_url, delete_object, download_object, hash_storage_object, upload_object
+from app.services.training_storage import (
+    StorageProvider,
+    TrainingArtifactStoreRouter,
+    TrainingStorageError,
+    drive_file_id_from_reference,
+    flow2_storage_provider_setting,
+    is_gdrive_ref,
+    sign_worker_artifact_token,
+)
+from app.services.viread_drive_connection_service import VireadDriveConnectionService
 from app.services.viread_training_storage_quota import ensure_database_capacity, ensure_storage_capacity
 
 logger = logging.getLogger(__name__)
@@ -59,6 +68,29 @@ TRAINING_PROFILES = {
 
 def _canonical(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _jsonl_bytes(rows: list[dict[str, Any]]) -> bytes:
+    if not rows:
+        return b""
+    lines = [
+        json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        for row in rows
+    ]
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def _is_flow2_profile(profile: str | None) -> bool:
+    return str(profile or "") in {"FLOW2_ADMIN_VERIFIED", "FLOW1_VERIFIED"}
+
+
+def _storage_http_error(exc: TrainingStorageError) -> HTTPException:
+    return HTTPException(status_code=exc.http_status or 503, detail=f"{exc.code}: {exc}")
+
+
+def _is_missing_column_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return ("column" in msg and "does not exist" in msg) or "undefinedcolumn" in msg
 
 
 def _sha(value: str) -> bool:
@@ -292,6 +324,100 @@ class VireadOcrTrainingService:
     async def _admin(self, actor_id: UUID) -> None:
         await AdminOcrService(self.db).require_admin(actor_id)
 
+    async def _artifact_router(
+        self,
+        *,
+        write_provider: StorageProvider | None = None,
+    ) -> TrainingArtifactStoreRouter:
+        target = write_provider or flow2_storage_provider_setting()
+        if not hasattr(self.db, "execute"):
+            return TrainingArtifactStoreRouter(write_provider=target)
+        return await VireadDriveConnectionService(self.db).build_artifact_router(
+            write_provider=target,
+        )
+
+    async def _exec_optional_column_update(self, sql: str, params: Any) -> None:
+        """Execute an additive-column UPDATE inside a SAVEPOINT so pre-migration DBs never abort."""
+        if not hasattr(self.db, "execute"):
+            return
+        try:
+            if hasattr(self.db, "begin_nested"):
+                async with self.db.begin_nested():
+                    await self.repo.execute(sql, params)
+            else:
+                await self.repo.execute(sql, params)
+        except Exception as exc:
+            if not _is_missing_column_error(exc):
+                raise
+
+    async def _read_artifact_bytes(
+        self,
+        reference: str,
+        *,
+        expected_sha256: str | None = None,
+        max_bytes: int | None = None,
+        router: TrainingArtifactStoreRouter | None = None,
+    ) -> bytes:
+        if is_gdrive_ref(reference):
+            active_router = router if router is not None else await self._artifact_router()
+            try:
+                return await asyncio.to_thread(
+                    active_router.get,
+                    reference,
+                    expected_sha256=expected_sha256,
+                    max_bytes=max_bytes,
+                )
+            except TrainingStorageError as exc:
+                raise _storage_http_error(exc) from exc
+        return await asyncio.to_thread(download_object, reference)
+
+    async def _hash_artifact_stream(
+        self,
+        reference: str,
+        aggregate: Any | None = None,
+    ) -> tuple[str, int]:
+        if is_gdrive_ref(reference):
+            router = await self._artifact_router()
+
+            def _stream_hash() -> tuple[str, int]:
+                chunk_digest = hashlib.sha256()
+                byte_count = 0
+                for block in router.open_stream(reference):
+                    chunk_digest.update(block)
+                    if aggregate is not None:
+                        aggregate.update(block)
+                    byte_count += len(block)
+                return chunk_digest.hexdigest(), byte_count
+
+            try:
+                return await asyncio.to_thread(_stream_hash)
+            except TrainingStorageError as exc:
+                raise _storage_http_error(exc) from exc
+        return await asyncio.to_thread(hash_storage_object, reference, aggregate)
+
+    def _artifact_download_url(
+        self,
+        reference: str,
+        *,
+        expected_sha256: str | None = None,
+        job_id: UUID | None = None,
+        worker_id: str | None = None,
+    ) -> str | None:
+        if is_gdrive_ref(reference):
+            if job_id is not None and worker_id:
+                token = sign_worker_artifact_token(
+                    job_id=str(job_id),
+                    worker_id=worker_id,
+                    reference=reference,
+                    expected_sha256=expected_sha256,
+                )
+                return (
+                    f"/books/admin/viread-training/worker/jobs/{job_id}/artifact-stream"
+                    f"?worker_id={worker_id}&token={token}"
+                )
+            return None
+        return create_signed_image_url(reference)
+
     async def overview(self, actor_id: UUID) -> dict[str, Any]:
         await self._admin(actor_id)
         outbox = await self.repo.all("SELECT status, count(*)::integer AS count FROM public.viread_ocr_outbox GROUP BY status ORDER BY status")
@@ -325,6 +451,12 @@ class VireadOcrTrainingService:
         """)
         active = await self.repo.one("SELECT model_family, checkpoint_sha256, storage_path, profile, decision_id, updated_at FROM public.viread_ocr_active_model WHERE singleton = TRUE")
         if active:
+            active["storage_provider"] = (
+                StorageProvider.GOOGLE_DRIVE.value
+                if is_gdrive_ref(active.get("storage_path"))
+                else StorageProvider.SUPABASE_LEGACY.value
+            )
+            active["drive_file_id"] = drive_file_id_from_reference(active.get("storage_path"))
             if not active.get("storage_path") or active.get("profile") == "ORIGINAL":
                 active["version_label"] = None
                 active["weights_filename"] = None
@@ -337,7 +469,7 @@ class VireadOcrTrainingService:
                 cached_meta = _OVERVIEW_MANIFEST_CACHE.get(cache_key)
                 if cached_meta is None:
                     try:
-                        m_bytes = await asyncio.to_thread(download_object, active["storage_path"])
+                        m_bytes = await self._read_artifact_bytes(active["storage_path"])
                         m_json = json.loads(m_bytes.decode("utf-8"))
                         m_info = m_json.get("model_info", {})
                         cached_meta = {
@@ -361,8 +493,102 @@ class VireadOcrTrainingService:
                         }
                 active.update(cached_meta)
         locked_test = await self._locked_test_readiness()
-        return {"outbox": outbox, "samples": samples, "jobs": jobs, "runs": runs,
-                "benchmarks": benchmarks, "active_model": active, "locked_test": locked_test}
+        google_drive = (
+            await VireadDriveConnectionService(self.db).get_status()
+            if hasattr(self.db, "execute")
+            else None
+        )
+        from app.services.ocr_engine import get_loaded_vietocr_runtime_status
+
+        loaded_runtime = get_loaded_vietocr_runtime_status()
+        desired_sha = active.get("checkpoint_sha256") if active else ORIGINAL_SHA256
+        desired_profile = active.get("profile") if active else "ORIGINAL"
+        loaded_sha = loaded_runtime.get("loaded_checkpoint_sha256")
+        loaded_profile = loaded_runtime.get("loaded_profile")
+        initialized = bool(loaded_runtime.get("initialized"))
+        if not initialized:
+            runtime_state = "NOT_INITIALIZED_YET"
+            matches_desired = True
+        elif loaded_sha == desired_sha and loaded_profile == desired_profile:
+            runtime_state = "MATCHED"
+            matches_desired = True
+        elif loaded_profile == "ORIGINAL" and desired_profile != "ORIGINAL":
+            runtime_state = "FALLBACK_TO_ORIGINAL"
+            matches_desired = False
+        else:
+            runtime_state = "MISMATCH_STALE_MODEL"
+            matches_desired = False
+        runtime_model = {
+            **loaded_runtime,
+            "desired_profile": desired_profile,
+            "desired_checkpoint_sha256": desired_sha,
+            "matches_desired": matches_desired,
+            "status_label": runtime_state,
+        }
+
+        flow2_drive_count = 0
+        flow2_legacy_count = 0
+        flow2_total_count = 0
+        flow2_train_count = 0
+        flow2_validation_count = 0
+        flow2_holdout_count = 0
+        try:
+            flow2_stats = await self.repo.one("""
+                SELECT count(DISTINCT image_sha256)::integer AS total_verified_count,
+                       count(DISTINCT image_sha256) FILTER (
+                           WHERE image_storage_path LIKE 'gdrive://%'
+                       )::integer AS drive_synced_count,
+                       count(DISTINCT image_sha256) FILTER (
+                           WHERE image_storage_path NOT LIKE 'gdrive://%'
+                       )::integer AS legacy_count,
+                       count(DISTINCT image_sha256) FILTER (WHERE split = 'train')::integer AS train_count,
+                       count(DISTINCT image_sha256) FILTER (WHERE split = 'validation')::integer AS validation_count,
+                       count(DISTINCT image_sha256) FILTER (WHERE split = 'holdout')::integer AS holdout_count
+                FROM public.viread_ocr_samples
+                WHERE source_flow = 'FLOW1_VERIFIED'
+                  AND dataset_version_id IS NULL
+                  AND provenance->>'verified_by_admin' = 'true'
+                  AND COALESCE(provenance->>'ai_review_required', 'false') <> 'true'
+                  AND COALESCE(provenance->>'verification_source', 'admin') = 'admin'
+            """)
+            if flow2_stats:
+                flow2_total_count = int(flow2_stats.get("total_verified_count") or 0)
+                flow2_drive_count = int(flow2_stats.get("drive_synced_count") or 0)
+                flow2_legacy_count = int(flow2_stats.get("legacy_count") or 0)
+                flow2_train_count = int(flow2_stats.get("train_count") or 0)
+                flow2_validation_count = int(flow2_stats.get("validation_count") or 0)
+                flow2_holdout_count = int(flow2_stats.get("holdout_count") or 0)
+        except Exception as exc:
+            logger.debug("Flow 2 storage summary query skipped: %s", type(exc).__name__)
+        outbox_map = {str(item["status"]): int(item["count"]) for item in outbox}
+        storage_summary = {
+            "flow2_write_provider": flow2_storage_provider_setting().value,
+            "flow2_drive_synced_samples": flow2_drive_count,
+            "flow2_legacy_samples": flow2_legacy_count,
+            "flow2_verified_total_samples": flow2_total_count,
+            "flow2_train_samples": flow2_train_count,
+            "flow2_validation_samples": flow2_validation_count,
+            "flow2_holdout_samples": flow2_holdout_count,
+            "dataset_ready_for_training": flow2_train_count > 0 and flow2_validation_count > 0,
+            "outbox_pending": outbox_map.get("PENDING", 0) + outbox_map.get("PROCESSING", 0),
+            "outbox_retry": outbox_map.get("RETRY", 0),
+            "outbox_dead": outbox_map.get("DEAD", 0),
+            "outbox_blocked": outbox_map.get("BLOCKED", 0),
+            "outbox_skipped": outbox_map.get("SKIPPED", 0),
+            "outbox_done": outbox_map.get("DONE", 0),
+        }
+        return {
+            "outbox": outbox,
+            "samples": samples,
+            "jobs": jobs,
+            "runs": runs,
+            "benchmarks": benchmarks,
+            "active_model": active,
+            "locked_test": locked_test,
+            "google_drive": google_drive,
+            "runtime_model": runtime_model,
+            "storage_summary": storage_summary,
+        }
 
     async def register_dataset(self, actor_id: UUID, payload: DatasetImport) -> dict[str, Any]:
         await self._admin(actor_id)
@@ -383,7 +609,12 @@ class VireadOcrTrainingService:
                 valid = path.startswith(("ocr-training/flow1/trdg/", "ocr-training/flow2/trdg/")) and not item["verified"] and item["provenance"].get("generator") == "trdg"
                 valid_split = item["split"] in {"train", "validation", "holdout"}
             else:
-                valid = payload.source_flow == "LOCKED_TEST" and path.startswith("ocr-training/locked-test/") and item["verified"] and bool(item["annotation_id"])
+                valid = (
+                    payload.source_flow == "LOCKED_TEST"
+                    and (path.startswith("ocr-training/locked-test/") or is_gdrive_ref(path))
+                    and item["verified"]
+                    and bool(item["annotation_id"])
+                )
                 valid_split = item["split"] == "locked_test"
             if not valid or not valid_split:
                 raise HTTPException(status_code=422, detail="Dataset source, provenance, path, verification, or split contract is invalid")
@@ -400,10 +631,17 @@ class VireadOcrTrainingService:
             if previous != item["split"]:
                 raise HTTPException(status_code=422, detail="Samples from the same document must share one split")
 
+        has_drive_samples = any(is_gdrive_ref(item["image_storage_path"]) for item in samples)
+        verify_router = await self._artifact_router() if has_drive_samples else None
         semaphore = asyncio.Semaphore(8)
+
         async def verify_object(item: dict[str, Any]) -> None:
             async with semaphore:
-                data = await asyncio.to_thread(download_object, item["image_storage_path"])
+                data = await self._read_artifact_bytes(
+                    item["image_storage_path"],
+                    expected_sha256=item["image_sha256"],
+                    router=verify_router,
+                )
                 if hashlib.sha256(data).hexdigest() != item["image_sha256"]:
                     raise HTTPException(status_code=422, detail="Dataset image hash does not match its registered object")
         # Bound task creation for the 20k-50k synthetic corpus target.
@@ -422,7 +660,6 @@ class VireadOcrTrainingService:
             "FLOW1_VERIFIED": "flow2_admin_verified",
             "LOCKED_TEST": "locked_test",
         }[payload.source_flow]
-        storage_path = f"ocr-training/manifests/{manifest_folder}/{version_sha}.json"
         existing = await self.repo.one("""
             SELECT id, source_flow, version_sha256, manifest_storage_path, sample_count, is_locked_test
             FROM public.viread_ocr_dataset_versions WHERE source_flow=:source_flow AND version_sha256=:version_sha
@@ -431,9 +668,35 @@ class VireadOcrTrainingService:
             return existing
         estimated_db_bytes = len(encoded) + sum(len(item["label"].encode("utf-8")) + 2048 for item in samples)
         await ensure_database_capacity(self.db, estimated_db_bytes)
-        await ensure_storage_capacity(self.db, len(encoded), existing_object_path=storage_path)
+
+        use_drive_manifest = (
+            payload.source_flow == "LOCKED_TEST"
+            and any(is_gdrive_ref(item["image_storage_path"]) for item in samples)
+        )
+        manifest_provider = StorageProvider.SUPABASE_LEGACY.value
+        manifest_drive_id: str | None = None
+        if use_drive_manifest:
+            router = await self._artifact_router(write_provider=StorageProvider.GOOGLE_DRIVE)
+            try:
+                stored_manifest = await asyncio.to_thread(
+                    router.put,
+                    f"locked-tests/manifests/{version_sha}.json",
+                    encoded,
+                    content_type="application/json",
+                    expected_sha256=version_sha,
+                    metadata={"source_flow": "LOCKED_TEST", "version_sha256": version_sha},
+                )
+            except TrainingStorageError as exc:
+                raise _storage_http_error(exc) from exc
+            storage_path = stored_manifest.reference
+            manifest_provider = stored_manifest.provider.value
+            manifest_drive_id = stored_manifest.drive_file_id
+        else:
+            storage_path = f"ocr-training/manifests/{manifest_folder}/{version_sha}.json"
+            await ensure_storage_capacity(self.db, len(encoded), existing_object_path=storage_path)
         try:
-            await asyncio.to_thread(upload_object, storage_path, encoded, "application/json", upsert=True)
+            if not use_drive_manifest:
+                await asyncio.to_thread(upload_object, storage_path, encoded, "application/json", upsert=True)
             result = await self.repo.one("""
                 INSERT INTO public.viread_ocr_dataset_versions
                     (source_flow, version_sha256, manifest_storage_path, sample_count, is_locked_test,
@@ -444,7 +707,16 @@ class VireadOcrTrainingService:
                 RETURNING id, source_flow, version_sha256, manifest_storage_path, sample_count, is_locked_test
             """, {"source_flow": payload.source_flow, "version_sha": version_sha, "storage_path": storage_path,
                   "sample_count": len(samples), "locked_test": payload.source_flow == "LOCKED_TEST",
-                  "split_seed": payload.split_seed, "provenance": json.dumps(payload.provenance), "actor_id": actor_id})
+                  "split_seed": payload.split_seed,
+                  "provenance": json.dumps({**payload.provenance, "storage_provider": manifest_provider,
+                                            "drive_file_id": manifest_drive_id}),
+                  "actor_id": actor_id})
+            if use_drive_manifest and result:
+                await self._exec_optional_column_update("""
+                    UPDATE public.viread_ocr_dataset_versions
+                    SET storage_provider = :provider, drive_file_id = :drive_id
+                    WHERE id = :id
+                """, {"provider": manifest_provider, "drive_id": manifest_drive_id, "id": result["id"]})
             sample_rows = [{"dataset_id": result["id"], "source_flow": item["source_flow"],
                             "group_id": item["group_id"], "split": item["split"], "path": item["image_storage_path"],
                             "image_sha": item["image_sha256"], "label": item["label"], "sample_id": item["sample_id"],
@@ -463,6 +735,14 @@ class VireadOcrTrainingService:
                         :label, :source_page_id, :source_revision_id, :sample_id, CAST(:provenance AS jsonb))
                 ON CONFLICT DO NOTHING
                 """, sample_rows[start:start + 1000])
+            if has_drive_samples and result:
+                await self._exec_optional_column_update("""
+                    UPDATE public.viread_ocr_samples
+                    SET storage_provider = 'google_drive',
+                        drive_file_id = substring(image_storage_path FROM '^gdrive://(.+)$')
+                    WHERE dataset_version_id = :dataset_id
+                      AND image_storage_path LIKE 'gdrive://%'
+                """, {"dataset_id": result["id"]})
             await self.repo.commit()
             return result
         except HTTPException:
@@ -546,6 +826,8 @@ class VireadOcrTrainingService:
                   AND sample.source_page_id IS NOT NULL
                   AND sample.source_revision_id IS NOT NULL
                   AND sample.provenance->>'verified_by_admin'='true'
+                  AND COALESCE(sample.provenance->>'ai_review_required', 'false') <> 'true'
+                  AND COALESCE(sample.provenance->>'verification_source', 'admin') = 'admin'
                   AND EXISTS (
                       SELECT 1 FROM public.viread_ocr_outbox outbox
                       WHERE outbox.page_id=sample.source_page_id
@@ -675,6 +957,8 @@ class VireadOcrTrainingService:
                   AND sample.dataset_version_id IS NULL AND sample.source_page_id IS NOT NULL
                   AND sample.source_revision_id IS NOT NULL
                   AND sample.provenance->>'verified_by_admin'='true'
+                  AND COALESCE(sample.provenance->>'ai_review_required', 'false') <> 'true'
+                  AND COALESCE(sample.provenance->>'verification_source', 'admin') = 'admin'
                   AND EXISTS (
                       SELECT 1 FROM public.viread_ocr_outbox outbox
                       WHERE outbox.page_id=sample.source_page_id
@@ -752,10 +1036,14 @@ class VireadOcrTrainingService:
                     "minimum_samples": MIN_PILOT_PAIRS, "minimum_groups": MIN_PILOT_GROUPS}
 
         from io import BytesIO
+        router = await self._artifact_router()
+        use_drive = router.write_provider == StorageProvider.GOOGLE_DRIVE
         pilot_samples: list[DatasetSampleInput] = []
         for row in selected:
-            image_bytes = await asyncio.to_thread(download_object, row["image_storage_path"])
             digest = str(row["image_sha256"]).lower()
+            image_bytes = await self._read_artifact_bytes(
+                row["image_storage_path"], expected_sha256=digest, router=router
+            )
             if hashlib.sha256(image_bytes).hexdigest() != digest:
                 await self.repo.rollback()
                 raise HTTPException(status_code=409, detail="Verified holdout image hash changed")
@@ -771,9 +1059,24 @@ class VireadOcrTrainingService:
             if not extension:
                 await self.repo.rollback()
                 raise HTTPException(status_code=422, detail="Verified Pilot holdout image format is unsupported")
-            object_path = f"ocr-training/locked-test/pilot/{digest[:2]}/{digest}.{extension}"
-            await ensure_storage_capacity(self.db, len(image_bytes), existing_object_path=object_path)
-            await asyncio.to_thread(upload_object, object_path, image_bytes, content_type, upsert=True)
+            if use_drive:
+                try:
+                    stored = await asyncio.to_thread(
+                        router.put,
+                        f"locked-tests/pilot/{digest[:2]}/{digest}.{extension}",
+                        image_bytes,
+                        content_type=content_type,
+                        expected_sha256=digest,
+                        metadata={"evaluation_type": "PILOT", "sample_id": str(row["sample_id"])},
+                    )
+                except TrainingStorageError as exc:
+                    await self.repo.rollback()
+                    raise _storage_http_error(exc) from exc
+                object_path = stored.reference
+            else:
+                object_path = f"ocr-training/locked-test/pilot/{digest[:2]}/{digest}.{extension}"
+                await ensure_storage_capacity(self.db, len(image_bytes), existing_object_path=object_path)
+                await asyncio.to_thread(upload_object, object_path, image_bytes, content_type, upsert=True)
             pilot_samples.append(DatasetSampleInput(
                 source_flow="LOCKED_TEST", sample_id=str(row["sample_id"]),
                 group_id=str(row["group_id"]), split="locked_test", image_storage_path=object_path,
@@ -782,6 +1085,7 @@ class VireadOcrTrainingService:
                 source_page_id=row.get("source_page_id"), source_revision_id=row.get("source_revision_id"),
                 provenance={"evaluation_type": "PILOT", "source_flow": row["source_flow"],
                             "source_sample_id": str(row["sample_id"]), "source_group_id": str(row["group_id"]),
+                            "storage_provider": StorageProvider.GOOGLE_DRIVE.value if use_drive else StorageProvider.SUPABASE_LEGACY.value,
                             "verified_by_admin": row["source_flow"] == "FLOW1_VERIFIED"},
             ))
         imported = await self.register_dataset(actor_id, DatasetImport(
@@ -830,6 +1134,8 @@ class VireadOcrTrainingService:
                   AND sample.source_page_id IS NOT NULL
                   AND sample.source_revision_id IS NOT NULL
                   AND sample.provenance->>'verified_by_admin'='true'
+                  AND COALESCE(sample.provenance->>'ai_review_required', 'false') <> 'true'
+                  AND COALESCE(sample.provenance->>'verification_source', 'admin') = 'admin'
                   AND EXISTS (
                       SELECT 1 FROM public.viread_ocr_outbox outbox
                       WHERE outbox.page_id=sample.source_page_id
@@ -894,10 +1200,15 @@ class VireadOcrTrainingService:
 
         from io import BytesIO
 
+        router = await self._artifact_router()
+        use_drive = router.write_provider == StorageProvider.GOOGLE_DRIVE
         locked_samples = []
         for row in selected:
-            image_bytes = await asyncio.to_thread(download_object, row["image_storage_path"])
-            if hashlib.sha256(image_bytes).hexdigest() != str(row["image_sha256"]).lower():
+            digest = str(row["image_sha256"]).lower()
+            image_bytes = await self._read_artifact_bytes(
+                row["image_storage_path"], expected_sha256=digest, router=router
+            )
+            if hashlib.sha256(image_bytes).hexdigest() != digest:
                 await self.repo.rollback()
                 raise HTTPException(status_code=409, detail="Verified holdout image hash changed; Locked Test was not created")
             try:
@@ -914,9 +1225,24 @@ class VireadOcrTrainingService:
             if not extension:
                 await self.repo.rollback()
                 raise HTTPException(status_code=422, detail="Verified holdout image format is unsupported for Locked Test")
-            object_path = f"ocr-training/locked-test/auto-admin-verified/{digest[:2]}/{digest}.{extension}"
-            await ensure_storage_capacity(self.db, len(image_bytes), existing_object_path=object_path)
-            await asyncio.to_thread(upload_object, object_path, image_bytes, content_type, upsert=True)
+            if use_drive:
+                try:
+                    stored = await asyncio.to_thread(
+                        router.put,
+                        f"locked-tests/production/{digest[:2]}/{digest}.{extension}",
+                        image_bytes,
+                        content_type=content_type,
+                        expected_sha256=digest,
+                        metadata={"evaluation_type": "PRODUCTION", "sample_id": str(row["sample_id"])},
+                    )
+                except TrainingStorageError as exc:
+                    await self.repo.rollback()
+                    raise _storage_http_error(exc) from exc
+                object_path = stored.reference
+            else:
+                object_path = f"ocr-training/locked-test/auto-admin-verified/{digest[:2]}/{digest}.{extension}"
+                await ensure_storage_capacity(self.db, len(image_bytes), existing_object_path=object_path)
+                await asyncio.to_thread(upload_object, object_path, image_bytes, content_type, upsert=True)
             locked_samples.append(DatasetSampleInput(
                 source_flow="LOCKED_TEST", sample_id=str(row["sample_id"]),
                 group_id=str(row["group_id"]), split="locked_test",
@@ -930,6 +1256,7 @@ class VireadOcrTrainingService:
                             "source_sample_id": str(row["sample_id"]),
                             "source_page_id": str(row["source_page_id"]) if row.get("source_page_id") else None,
                             "source_revision_id": str(row["source_revision_id"]) if row.get("source_revision_id") else None,
+                            "storage_provider": StorageProvider.GOOGLE_DRIVE.value if use_drive else StorageProvider.SUPABASE_LEGACY.value,
                             "verified_by_admin": row["source_flow"] == "FLOW1_VERIFIED"},
             ))
         imported = await self.register_dataset(actor_id, DatasetImport(
@@ -967,6 +1294,9 @@ class VireadOcrTrainingService:
             LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
             WHERE sample.source_flow='FLOW1_VERIFIED'
               AND sample.split IN ('train','validation') AND sample.dataset_version_id IS NULL
+              AND sample.provenance->>'verified_by_admin' = 'true'
+              AND COALESCE(sample.provenance->>'ai_review_required', 'false') <> 'true'
+              AND COALESCE(sample.provenance->>'verification_source', 'admin') = 'admin'
               AND NOT EXISTS (
                   SELECT 1 FROM public.viread_ocr_samples held
                   LEFT JOIN public.bookpages held_page ON held_page.id=held.source_page_id
@@ -975,8 +1305,26 @@ class VireadOcrTrainingService:
                     AND COALESCE(held_page.bookid::text, held.source_group_id)
                         = COALESCE(page.bookid::text, sample.source_group_id)
               )
+              AND NOT EXISTS (
+                  SELECT 1 FROM public.viread_ocr_samples locked
+                  LEFT JOIN public.bookpages locked_page ON locked_page.id=locked.source_page_id
+                  WHERE locked.source_flow='LOCKED_TEST'
+                    AND (
+                        locked.image_sha256 = sample.image_sha256
+                        OR COALESCE(locked_page.bookid::text, locked.source_group_id)
+                           = COALESCE(page.bookid::text, sample.source_group_id)
+                    )
+              )
             ORDER BY group_id, sample.created_at, sample.id
         """)
+        # Defense-in-depth Python filter: never admit AI-only auto-verified rows into Flow 2 datasets.
+        source_rows = [
+            row for row in source_rows
+            if isinstance(row.get("provenance"), dict)
+            and row["provenance"].get("verified_by_admin") is True
+            and not row["provenance"].get("ai_review_required")
+            and str(row["provenance"].get("verification_source") or "admin") == "admin"
+        ]
         # Historical rows were split by page. The new immutable snapshot reassigns
         # only clean non-holdout documents as a whole; source rows stay untouched.
         for sample in source_rows:
@@ -1043,13 +1391,78 @@ class VireadOcrTrainingService:
                     status_code=409,
                     detail="Verified dataset snapshot does not match its canonical manifest; refusing to schedule training",
                 )
+        if not dataset and not source_rows:
+            await self.repo.commit()
+            return {
+                "dataset_version_id": None,
+                "manifest_sha256": None,
+                "manifest_storage_path": None,
+                "storage_provider": flow2_storage_provider_setting().value,
+                "source_flow": "FLOW1_VERIFIED",
+                "training_profile": "FLOW2_ADMIN_VERIFIED",
+                "items": [],
+                "total": 0,
+                "limit": limit,
+                "offset": offset,
+                "next_offset": None,
+            }
         if not dataset:
-            manifest_path = f"ocr-training/manifests/flow2_admin_verified/{version_sha}.json"
             manifest_bytes = _canonical(manifest)
             estimated_db_bytes = len(manifest_bytes) + sum(len(item["label"].encode("utf-8")) + 2048 for item in source_rows)
             await ensure_database_capacity(self.db, estimated_db_bytes)
-            await ensure_storage_capacity(self.db, len(manifest_bytes), existing_object_path=manifest_path)
-            await asyncio.to_thread(upload_object, manifest_path, manifest_bytes, "application/json", upsert=True)
+            router = await self._artifact_router()
+            manifest_provider = router.write_provider.value
+            manifest_drive_id: str | None = None
+            split_manifests: dict[str, Any] = {}
+            if router.write_provider == StorageProvider.GOOGLE_DRIVE:
+                train_bytes = _jsonl_bytes([row for row in manifest["samples"] if row["split"] == "train"])
+                val_bytes = _jsonl_bytes([row for row in manifest["samples"] if row["split"] == "validation"])
+                holdout_bytes = _jsonl_bytes([row for row in manifest["samples"] if row["split"] == "holdout"])
+                total_upload_bytes = len(manifest_bytes) + len(train_bytes) + len(val_bytes) + len(holdout_bytes)
+                try:
+                    quota = await asyncio.to_thread(router.quota_check, incoming_bytes=total_upload_bytes)
+                    if not quota.can_accept_upload:
+                        raise HTTPException(
+                            status_code=507,
+                            detail=f"DRIVE_QUOTA_EXCEEDED: {quota.detail or 'Google Drive free quota insufficient for Flow 2 dataset snapshot'}",
+                        )
+                    stored_manifest = await asyncio.to_thread(
+                        router.put,
+                        f"datasets/{version_sha}/manifest.json",
+                        manifest_bytes,
+                        content_type="application/json",
+                        expected_sha256=version_sha,
+                        metadata={"dataset_version_sha256": version_sha, "source_flow": "FLOW1_VERIFIED"},
+                    )
+                    for split_name, split_data in (
+                        ("train", train_bytes),
+                        ("validation", val_bytes),
+                        ("holdout", holdout_bytes),
+                    ):
+                        split_sha = hashlib.sha256(split_data).hexdigest()
+                        stored_split = await asyncio.to_thread(
+                            router.put,
+                            f"datasets/{version_sha}/{split_name}.jsonl",
+                            split_data,
+                            content_type="application/x-ndjson",
+                            expected_sha256=split_sha,
+                            metadata={"dataset_version_sha256": version_sha, "split": split_name},
+                        )
+                        split_manifests[split_name] = {
+                            "storage_path": stored_split.reference,
+                            "drive_file_id": stored_split.drive_file_id,
+                            "sha256": split_sha,
+                            "bytes": len(split_data),
+                        }
+                except TrainingStorageError as exc:
+                    raise _storage_http_error(exc) from exc
+                manifest_path = stored_manifest.reference
+                manifest_drive_id = stored_manifest.drive_file_id
+            else:
+                manifest_path = f"ocr-training/manifests/flow2_admin_verified/{version_sha}.json"
+                await ensure_storage_capacity(self.db, len(manifest_bytes), existing_object_path=manifest_path)
+                await asyncio.to_thread(upload_object, manifest_path, manifest_bytes, "application/json", upsert=True)
+
             dataset = await self.repo.one("""
                 INSERT INTO public.viread_ocr_dataset_versions
                     (source_flow, version_sha256, manifest_storage_path, sample_count, is_locked_test,
@@ -1059,7 +1472,26 @@ class VireadOcrTrainingService:
                 ON CONFLICT (source_flow, version_sha256) DO UPDATE SET version_sha256=EXCLUDED.version_sha256
                 RETURNING id, manifest_storage_path
             """, {"version_sha": version_sha, "manifest_path": manifest_path,
-                  "sample_count": len(source_rows), "provenance": json.dumps({"snapshot": "admin_verified_outbox"})})
+                  "sample_count": len(source_rows),
+                  "provenance": json.dumps({
+                      "snapshot": "admin_verified_outbox",
+                      "storage_provider": manifest_provider,
+                      "drive_file_id": manifest_drive_id,
+                      "split_manifests": split_manifests,
+                  })})
+            if manifest_provider == StorageProvider.GOOGLE_DRIVE.value and dataset:
+                await self._exec_optional_column_update("""
+                    UPDATE public.viread_ocr_dataset_versions
+                    SET storage_provider = :provider,
+                        drive_file_id = :drive_id,
+                        split_manifests = CAST(:split_manifests AS jsonb)
+                    WHERE id = :id
+                """, {
+                    "provider": manifest_provider,
+                    "drive_id": manifest_drive_id,
+                    "split_manifests": json.dumps(split_manifests),
+                    "id": dataset["id"],
+                })
             if source_rows:
                 snapshot_rows = _verified_snapshot_db_rows(dataset["id"], source_rows)
                 await self.repo.execute("""
@@ -1071,6 +1503,13 @@ class VireadOcrTrainingService:
                             :source_annotation_id, CAST(:provenance AS jsonb))
                     ON CONFLICT DO NOTHING
                 """, snapshot_rows)
+                await self._exec_optional_column_update("""
+                    UPDATE public.viread_ocr_samples
+                    SET storage_provider = 'google_drive',
+                        drive_file_id = substring(image_storage_path FROM '^gdrive://(.+)$')
+                    WHERE dataset_version_id = :dataset_id
+                      AND image_storage_path LIKE 'gdrive://%'
+                """, {"dataset_id": dataset["id"]})
                 actual_count = await self.repo.one("""
                     SELECT count(*)::integer AS total
                     FROM public.viread_ocr_samples WHERE dataset_version_id=:dataset_id
@@ -1090,22 +1529,43 @@ class VireadOcrTrainingService:
             ORDER BY created_at, id LIMIT :limit OFFSET :offset
         """, {"dataset_id": dataset_id, "limit": limit, "offset": offset})
         for item in items:
-            item["image"] = create_signed_image_url(item["image_storage_path"])
+            item["image"] = self._artifact_download_url(
+                item["image_storage_path"],
+                expected_sha256=item["image_sha256"],
+            )
+            item["storage_provider"] = (
+                StorageProvider.GOOGLE_DRIVE.value
+                if is_gdrive_ref(item["image_storage_path"])
+                else StorageProvider.SUPABASE_LEGACY.value
+            )
+            item["drive_file_id"] = drive_file_id_from_reference(item["image_storage_path"])
             item["source_flow"] = "FLOW1_VERIFIED"
             item["verified"] = True
         return {"dataset_version_id": dataset_id, "manifest_sha256": version_sha,
+                "manifest_storage_path": dataset.get("manifest_storage_path"),
+                "storage_provider": (
+                    StorageProvider.GOOGLE_DRIVE.value
+                    if is_gdrive_ref(dataset.get("manifest_storage_path"))
+                    else StorageProvider.SUPABASE_LEGACY.value
+                ),
                 "source_flow": "FLOW1_VERIFIED", "training_profile": "FLOW2_ADMIN_VERIFIED",
                 "items": items, "total": int(total_row["total"] if total_row else 0),
                 "limit": limit, "offset": offset, "next_offset": offset + len(items) if offset + len(items) < int(total_row["total"] if total_row else 0) else None}
 
-    async def active_model_artifact(self, actor_id: UUID) -> dict[str, Any]:
+    async def active_model_artifact(
+        self,
+        actor_id: UUID,
+        *,
+        job_id: UUID | None = None,
+        worker_id: str | None = None,
+    ) -> dict[str, Any]:
         await self._admin(actor_id)
         active = await self.repo.one("SELECT checkpoint_sha256, storage_path, profile FROM public.viread_ocr_active_model WHERE singleton=TRUE")
         if not active:
             raise HTTPException(status_code=503, detail="Active model registry is not initialized")
         if active["storage_path"] is None:
             return {**active, "source_url": "https://vocr.vn/data/vietocr/vgg_transformer.pth", "chunks": []}
-        raw = await asyncio.to_thread(download_object, active["storage_path"])
+        raw = await self._read_artifact_bytes(active["storage_path"])
         try:
             manifest = json.loads(raw)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -1114,10 +1574,43 @@ class VireadOcrTrainingService:
             raise HTTPException(status_code=503, detail="Active model manifest does not match the registered checkpoint")
         chunks = []
         for item in manifest["chunks"]:
-            chunks.append({**item, "url": create_signed_image_url(item["path"])})
-        return {**active, "manifest_sha256": hashlib.sha256(raw).hexdigest(), "chunks": chunks}
+            chunks.append({
+                **item,
+                "url": self._artifact_download_url(
+                    item["path"],
+                    expected_sha256=item.get("sha256"),
+                    job_id=job_id,
+                    worker_id=worker_id,
+                ),
+                "storage_provider": (
+                    StorageProvider.GOOGLE_DRIVE.value
+                    if is_gdrive_ref(item["path"])
+                    else StorageProvider.SUPABASE_LEGACY.value
+                ),
+                "drive_file_id": drive_file_id_from_reference(item["path"]),
+            })
+        return {
+            **active,
+            "storage_provider": (
+                StorageProvider.GOOGLE_DRIVE.value
+                if is_gdrive_ref(active["storage_path"])
+                else StorageProvider.SUPABASE_LEGACY.value
+            ),
+            "drive_file_id": drive_file_id_from_reference(active["storage_path"]),
+            "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+            "chunks": chunks,
+        }
 
-    async def dataset_samples(self, actor_id: UUID, dataset_id: UUID, *, limit: int, offset: int) -> dict[str, Any]:
+    async def dataset_samples(
+        self,
+        actor_id: UUID,
+        dataset_id: UUID,
+        *,
+        limit: int,
+        offset: int,
+        job_id: UUID | None = None,
+        worker_id: str | None = None,
+    ) -> dict[str, Any]:
         await self._admin(actor_id)
         dataset = await self.repo.one("""
             SELECT id, source_flow, version_sha256, sample_count, is_locked_test, manifest_storage_path
@@ -1138,9 +1631,31 @@ class VireadOcrTrainingService:
             WHERE sample.dataset_version_id=:dataset_id
             ORDER BY group_id, sample.source_annotation_id, sample.id LIMIT :limit OFFSET :offset
         """, {"dataset_id": dataset_id, "limit": limit, "offset": offset})
-        dataset["manifest_url"] = create_signed_image_url(dataset["manifest_storage_path"])
+        dataset["manifest_url"] = self._artifact_download_url(
+            dataset["manifest_storage_path"],
+            expected_sha256=dataset["version_sha256"],
+            job_id=job_id,
+            worker_id=worker_id,
+        )
+        dataset["storage_provider"] = (
+            StorageProvider.GOOGLE_DRIVE.value
+            if is_gdrive_ref(dataset["manifest_storage_path"])
+            else StorageProvider.SUPABASE_LEGACY.value
+        )
+        dataset["drive_file_id"] = drive_file_id_from_reference(dataset["manifest_storage_path"])
         for item in items:
-            item["image_url"] = create_signed_image_url(item["image_storage_path"])
+            item["image_url"] = self._artifact_download_url(
+                item["image_storage_path"],
+                expected_sha256=item["image_sha256"],
+                job_id=job_id,
+                worker_id=worker_id,
+            )
+            item["storage_provider"] = (
+                StorageProvider.GOOGLE_DRIVE.value
+                if is_gdrive_ref(item["image_storage_path"])
+                else StorageProvider.SUPABASE_LEGACY.value
+            )
+            item["drive_file_id"] = drive_file_id_from_reference(item["image_storage_path"])
         return {"dataset": dataset, "items": items, "limit": limit, "offset": offset,
                 "next_offset": offset + len(items) if offset + len(items) < int(dataset["sample_count"]) else None}
 
@@ -1270,29 +1785,70 @@ class VireadOcrTrainingService:
         await self._admin(actor_id)
         if not data or len(data) > MAX_SHARD_BYTES:
             raise HTTPException(status_code=413, detail="Checkpoint shard must be between 1 byte and 40 MiB")
-        run = await self.repo.one("SELECT id, status FROM public.viread_ocr_training_runs WHERE id=:id", {"id": run_id})
+        run = await self.repo.one("SELECT id, status, profile FROM public.viread_ocr_training_runs WHERE id=:id", {"id": run_id})
         if not run or run["status"] not in {"CREATED", "RUNNING"}:
             raise HTTPException(status_code=409, detail="Training run is not accepting checkpoint shards")
         digest = hashlib.sha256(data).hexdigest()
         existing = await self.repo.one("SELECT chunk_sha256, storage_path, byte_count FROM public.viread_ocr_checkpoint_chunks WHERE run_id=:run_id AND chunk_index=:chunk_index", {"run_id": run_id, "chunk_index": chunk_index})
         if existing:
             if existing["chunk_sha256"] == digest and existing["byte_count"] == len(data):
-                return {"run_id": run_id, "chunk_index": chunk_index, "sha256": digest, "bytes": len(data), "idempotent": True}
+                return {
+                    "run_id": run_id,
+                    "chunk_index": chunk_index,
+                    "sha256": digest,
+                    "bytes": len(data),
+                    "storage_provider": (
+                        StorageProvider.GOOGLE_DRIVE.value
+                        if is_gdrive_ref(existing.get("storage_path"))
+                        else StorageProvider.SUPABASE_LEGACY.value
+                    ),
+                    "drive_file_id": drive_file_id_from_reference(existing.get("storage_path")),
+                    "idempotent": True,
+                }
             raise HTTPException(status_code=409, detail="Checkpoint shard index already contains different bytes")
-        path = f"ocr-training/checkpoints/{run_id}/{chunk_index:04d}-{digest}.part"
-        await ensure_storage_capacity(self.db, len(data), existing_object_path=path)
-        await asyncio.to_thread(upload_object, path, data, "application/octet-stream", upsert=True)
+
+        router = await self._artifact_router()
+        use_drive = _is_flow2_profile(run.get("profile")) and router.write_provider == StorageProvider.GOOGLE_DRIVE
+        storage_provider = StorageProvider.SUPABASE_LEGACY.value
+        drive_file_id: str | None = None
+        if use_drive:
+            logical_path = f"checkpoints/{run_id}/chunk-{chunk_index:04d}-{digest[:12]}.part"
+            try:
+                stored = await asyncio.to_thread(
+                    router.put,
+                    logical_path,
+                    data,
+                    content_type="application/octet-stream",
+                    expected_sha256=digest,
+                    metadata={"run_id": str(run_id), "chunk_index": str(chunk_index)},
+                )
+            except TrainingStorageError as exc:
+                raise _storage_http_error(exc) from exc
+            path = stored.reference
+            storage_provider = stored.provider.value
+            drive_file_id = stored.drive_file_id
+        else:
+            path = f"ocr-training/checkpoints/{run_id}/{chunk_index:04d}-{digest}.part"
+            await ensure_storage_capacity(self.db, len(data), existing_object_path=path)
+            await asyncio.to_thread(upload_object, path, data, "application/octet-stream", upsert=True)
         try:
             await self.repo.execute("""
                 INSERT INTO public.viread_ocr_checkpoint_chunks (run_id, chunk_index, chunk_sha256, storage_path, byte_count)
                 VALUES (:run_id, :chunk_index, :digest, :path, :byte_count)
             """, {"run_id": run_id, "chunk_index": chunk_index, "digest": digest, "path": path, "byte_count": len(data)})
+            if use_drive:
+                await self._exec_optional_column_update("""
+                    UPDATE public.viread_ocr_checkpoint_chunks
+                    SET storage_provider = :provider, drive_file_id = :drive_id
+                    WHERE run_id = :run_id AND chunk_index = :chunk_index
+                """, {"provider": storage_provider, "drive_id": drive_file_id, "run_id": run_id, "chunk_index": chunk_index})
             await self.repo.execute("UPDATE public.viread_ocr_training_runs SET status='RUNNING', updated_at=now() WHERE id=:id", {"id": run_id})
             await self.repo.commit()
         except Exception:
             await self.repo.rollback()
             raise
-        return {"run_id": run_id, "chunk_index": chunk_index, "sha256": digest, "bytes": len(data), "idempotent": False}
+        return {"run_id": run_id, "chunk_index": chunk_index, "sha256": digest, "bytes": len(data),
+                "storage_provider": storage_provider, "drive_file_id": drive_file_id, "idempotent": False}
 
     async def _lock_colab_job_for_finalize(self, actor_id: UUID, job_id: UUID, run_id: UUID, worker_id: str, profile: str) -> None:
         job = await self.repo.one("""
@@ -1361,21 +1917,48 @@ class VireadOcrTrainingService:
         digest = hashlib.sha256()
         total = 0
         for chunk in chunks:
-            chunk_digest, chunk_bytes = await asyncio.to_thread(hash_storage_object, chunk["storage_path"], digest)
+            chunk_digest, chunk_bytes = await self._hash_artifact_stream(chunk["storage_path"], digest)
             if chunk_bytes != int(chunk["byte_count"]) or chunk_digest != chunk["chunk_sha256"]:
                 raise HTTPException(status_code=422, detail="Stored checkpoint shard failed integrity verification")
             total += chunk_bytes
         if digest.hexdigest() != payload.checkpoint_sha256 or total != payload.checkpoint_bytes:
             raise HTTPException(status_code=422, detail="Reassembled candidate checkpoint does not match the registered hash or size")
+        chunks_on_drive = any(is_gdrive_ref(chunk["storage_path"]) for chunk in chunks)
+        manifest_provider = (
+            StorageProvider.GOOGLE_DRIVE.value if chunks_on_drive else StorageProvider.SUPABASE_LEGACY.value
+        )
         manifest = {"schema": "viread-checkpoint-shards-v1", "run_id": str(run_id),
+                    "profile": payload.profile,
+                    "parent_checkpoint_sha256": payload.parent_checkpoint_sha256,
+                    "manifest_sha256": payload.manifest_sha256,
+                    "config_sha256": payload.config_sha256,
+                    "step": payload.step,
+                    "storage_provider": manifest_provider,
                     "checkpoint_sha256": payload.checkpoint_sha256, "checkpoint_bytes": total,
                     "chunks": [{"index": int(chunk["chunk_index"]), "path": chunk["storage_path"],
                                 "sha256": chunk["chunk_sha256"], "bytes": int(chunk["byte_count"])} for chunk in chunks]}
-        manifest_path = f"ocr-training/checkpoints/{run_id}/checkpoint.manifest.json"
         manifest_bytes = _canonical(manifest)
-        await ensure_storage_capacity(self.db, len(manifest_bytes), existing_object_path=manifest_path)
-        await self.repo.commit()
-        await asyncio.to_thread(upload_object, manifest_path, manifest_bytes, "application/json", upsert=True)
+        manifest_drive_id: str | None = None
+        if chunks_on_drive:
+            router = await self._artifact_router(write_provider=StorageProvider.GOOGLE_DRIVE)
+            try:
+                stored_manifest = await asyncio.to_thread(
+                    router.put,
+                    f"checkpoints/{run_id}/checkpoint.manifest.json",
+                    manifest_bytes,
+                    content_type="application/json",
+                    expected_sha256=hashlib.sha256(manifest_bytes).hexdigest(),
+                    metadata={"run_id": str(run_id), "checkpoint_sha256": payload.checkpoint_sha256},
+                )
+            except TrainingStorageError as exc:
+                raise _storage_http_error(exc) from exc
+            manifest_path = stored_manifest.reference
+            manifest_drive_id = stored_manifest.drive_file_id
+        else:
+            manifest_path = f"ocr-training/checkpoints/{run_id}/checkpoint.manifest.json"
+            await ensure_storage_capacity(self.db, len(manifest_bytes), existing_object_path=manifest_path)
+            await self.repo.commit()
+            await asyncio.to_thread(upload_object, manifest_path, manifest_bytes, "application/json", upsert=True)
         if job_id is not None and worker_id is not None:
             await self._lock_colab_job_for_finalize(actor_id, job_id, run_id, worker_id, payload.profile)
         latest = await self.repo.one("""
@@ -1394,27 +1977,43 @@ class VireadOcrTrainingService:
         if not already_completed and latest["status"] not in {"CREATED", "RUNNING"}:
             await self.repo.rollback()
             raise HTTPException(status_code=409, detail="Training run cannot be completed")
-        if not already_completed:
-            await self.repo.execute("""
-                UPDATE public.viread_ocr_training_runs SET status='CANDIDATE', checkpoint_sha256=:sha,
-                    checkpoint_bytes=:bytes, checkpoint_storage_path=:path, step=:step,
-                    metadata = metadata || CAST(:metadata AS jsonb), updated_at=now()
-                WHERE id=:run_id
-            """, {"sha": payload.checkpoint_sha256, "bytes": total, "path": manifest_path,
-                  "step": payload.step, "metadata": json.dumps({"checkpoint_chunks": len(chunks)}), "run_id": run_id})
-        if job_id is not None and worker_id is not None:
-            await self.repo.execute("""
-                UPDATE public.viread_ocr_training_runs SET metadata=metadata || CAST(:metadata AS jsonb)
-                WHERE id=:run_id
-            """, {"run_id": run_id, "metadata": json.dumps({
-                "execution_target": "COLAB", "training_job_id": str(job_id), "worker_id": worker_id,
-            })})
-            await self.repo.execute("""
-                UPDATE public.viread_ocr_training_jobs
-                SET progress='{"stage":"benchmark"}'::jsonb, updated_at=now()
-                WHERE id=:id
-            """, {"id": job_id})
-        await self.repo.commit()
+        try:
+            if not already_completed:
+                await self.repo.execute("""
+                    UPDATE public.viread_ocr_training_runs SET status='CANDIDATE', checkpoint_sha256=:sha,
+                        checkpoint_bytes=:bytes, checkpoint_storage_path=:path, step=:step,
+                        metadata = metadata || CAST(:metadata AS jsonb), updated_at=now()
+                    WHERE id=:run_id
+                """, {"sha": payload.checkpoint_sha256, "bytes": total, "path": manifest_path,
+                      "step": payload.step,
+                      "metadata": json.dumps({
+                          "checkpoint_chunks": len(chunks),
+                          "storage_provider": manifest_provider,
+                          "checkpoint_drive_file_id": manifest_drive_id,
+                      }),
+                      "run_id": run_id})
+                if chunks_on_drive:
+                    await self._exec_optional_column_update("""
+                        UPDATE public.viread_ocr_training_runs
+                        SET storage_provider = :provider, checkpoint_drive_file_id = :drive_id
+                        WHERE id = :run_id
+                    """, {"provider": manifest_provider, "drive_id": manifest_drive_id, "run_id": run_id})
+            if job_id is not None and worker_id is not None:
+                await self.repo.execute("""
+                    UPDATE public.viread_ocr_training_runs SET metadata=metadata || CAST(:metadata AS jsonb)
+                    WHERE id=:run_id
+                """, {"run_id": run_id, "metadata": json.dumps({
+                    "execution_target": "COLAB", "training_job_id": str(job_id), "worker_id": worker_id,
+                })})
+                await self.repo.execute("""
+                    UPDATE public.viread_ocr_training_jobs
+                    SET progress='{"stage":"benchmark"}'::jsonb, updated_at=now()
+                    WHERE id=:id
+                """, {"id": job_id})
+            await self.repo.commit()
+        except Exception:
+            await self.repo.rollback()
+            raise
         return {"run_id": run_id, "status": "CANDIDATE", "checkpoint_sha256": payload.checkpoint_sha256,
                 "checkpoint_bytes": total, "manifest_storage_path": manifest_path, "chunk_count": len(chunks),
                 "idempotent": already_completed}
@@ -1626,7 +2225,7 @@ class VireadOcrTrainingService:
                 old_cfg_sha = None
                 if active.get("storage_path"):
                     try:
-                        old_m_bytes = await asyncio.to_thread(download_object, active["storage_path"])
+                        old_m_bytes = await self._read_artifact_bytes(active["storage_path"])
                         old_m_data = json.loads(old_m_bytes.decode("utf-8"))
                         old_cfg_sha = old_m_data.get("config", {}).get("sha256") if isinstance(old_m_data.get("config"), dict) else None
                     except Exception:
@@ -1637,7 +2236,7 @@ class VireadOcrTrainingService:
             old_storage_path = active.get("storage_path") if active else None
             old_checkpoint_sha256 = active.get("checkpoint_sha256") if active else None
             old_object_paths: list[str] = []
-            if old_storage_path:
+            if old_storage_path and not is_gdrive_ref(old_storage_path):
                 try:
                     old_manifest_bytes = await asyncio.to_thread(download_object, old_storage_path)
                     old_manifest = json.loads(old_manifest_bytes.decode("utf-8"))
@@ -1702,6 +2301,22 @@ class VireadOcrTrainingService:
                 profile="FLOW1_EXTERNAL_TRDG",
                 decision_id=decision_id,
             )
+            prev_provider = (
+                StorageProvider.GOOGLE_DRIVE.value
+                if is_gdrive_ref(old_storage_path)
+                else StorageProvider.SUPABASE_LEGACY.value
+            )
+            await self._exec_optional_column_update("""
+                UPDATE public.viread_ocr_active_model
+                SET storage_provider = 'supabase_legacy', drive_file_id = NULL
+                WHERE singleton = TRUE
+            """, {})
+            await self._exec_optional_column_update("""
+                UPDATE public.viread_ocr_model_decisions
+                SET candidate_storage_provider = 'supabase_legacy',
+                    previous_storage_provider = :prev_provider
+                WHERE id = :id
+            """, {"prev_provider": prev_provider, "id": decision_id})
             await self.repo.commit()
         except Exception:
             await self.repo.rollback()
@@ -1727,10 +2342,12 @@ class VireadOcrTrainingService:
             "local_cache_deleted": False,
             "warning": None,
         }
-        if old_storage_path and old_storage_path != manifest_path:
+        if old_storage_path and old_storage_path != manifest_path and not is_gdrive_ref(old_storage_path):
             deleted_count = 0
             try:
                 for obj_path in set(old_object_paths):
+                    if is_gdrive_ref(obj_path):
+                        continue
                     try:
                         await asyncio.to_thread(delete_object, obj_path)
                         deleted_count += 1
@@ -1861,6 +2478,29 @@ class VireadOcrTrainingService:
             if output.get("active") is not None:
                 row["active"] = unicodedata.normalize("NFC", output["active"])
             paired.append(row)
+        report_hash = hashlib.sha256(_canonical(paired)).hexdigest()
+        if prior_benchmark:
+            if prior_benchmark["run_id"] != payload.run_id or prior_benchmark["report_sha256"] != report_hash:
+                raise HTTPException(status_code=409, detail="This sealed evaluation cohort has already been consumed")
+            stored_metrics = prior_benchmark.get("metrics") or {}
+            return {
+                "benchmark_id": prior_benchmark["id"],
+                "run_id": payload.run_id,
+                "gate_status": prior_benchmark["gate_status"],
+                "promotion_allowed": (
+                    prior_benchmark["gate_status"] == "V2_WIN" and evaluation_type == "PRODUCTION"
+                ),
+                "sample_count": prior_benchmark["sample_count"],
+                "group_count": prior_benchmark["group_count"],
+                "report_sha256": report_hash,
+                "report_storage_path": stored_metrics.get("report_storage_path"),
+                "storage_provider": stored_metrics.get("storage_provider", StorageProvider.SUPABASE_LEGACY.value),
+                "evaluation_type": evaluation_type,
+                "metrics": {key: value for key, value in stored_metrics.items()
+                            if key in {"cer", "wer"} or key.endswith(("_cer", "_wer"))},
+                "quality_gate": stored_metrics.get("quality_gate"),
+                "idempotent": True,
+            }
         metrics = {"sample_count": len(paired), "group_count": len({item["group_id"] for item in paired}),
                    "cer": _paired_metric(paired, "cer"), "wer": _paired_metric(paired, "wer", seed=20261113),
                    "outputs": paired, "original_checkpoint_sha256": ORIGINAL_SHA256,
@@ -1877,22 +2517,49 @@ class VireadOcrTrainingService:
             metrics["active_wer"] = _paired_metric(paired, "wer", baseline="active", seed=20261113)
         gate = _gate(metrics, manifest_sha=locked["version_sha256"], evaluation_type=evaluation_type,
                      require_model_baselines=require_baselines)
-        report_hash = hashlib.sha256(_canonical(paired)).hexdigest()
-        if prior_benchmark:
-            if prior_benchmark["run_id"] != payload.run_id or prior_benchmark["report_sha256"] != report_hash:
-                raise HTTPException(status_code=409, detail="This sealed evaluation cohort has already been consumed")
-            stored_metrics = prior_benchmark.get("metrics") or {}
-            return {"benchmark_id": prior_benchmark["id"], "run_id": payload.run_id,
-                    "gate_status": prior_benchmark["gate_status"],
-                    "promotion_allowed": prior_benchmark["gate_status"] == "V2_WIN",
-                    "sample_count": prior_benchmark["sample_count"],
-                    "group_count": prior_benchmark["group_count"], "report_sha256": report_hash,
-                    "evaluation_type": evaluation_type,
-                    "metrics": {key: value for key, value in stored_metrics.items()
-                                if key in {"cer", "wer"} or key.endswith(("_cer", "_wer"))},
-                    "quality_gate": stored_metrics.get("quality_gate", gate), "idempotent": True}
-        await ensure_database_capacity(self.db, len(_canonical({**metrics, "quality_gate": gate})) + 4096)
         benchmark_id = uuid4()
+        full_report_payload = {
+            **metrics,
+            "benchmark_id": str(benchmark_id),
+            "run_id": str(payload.run_id),
+            "report_sha256": report_hash,
+            "quality_gate": gate,
+        }
+        full_report_bytes = _canonical(full_report_payload)
+        report_provider = StorageProvider.SUPABASE_LEGACY.value
+        report_storage_path: str | None = None
+        report_drive_file_id: str | None = None
+        router = await self._artifact_router()
+        use_drive_report = (
+            _is_flow2_profile(run.get("profile"))
+            and router.write_provider == StorageProvider.GOOGLE_DRIVE
+        )
+        if use_drive_report:
+            db_metrics_payload = {
+                key: value for key, value in full_report_payload.items()
+                if key != "outputs"
+            }
+            await ensure_database_capacity(self.db, len(_canonical(db_metrics_payload)) + 4096)
+            try:
+                stored_report = await asyncio.to_thread(
+                    router.put,
+                    f"benchmarks/{payload.run_id}/benchmark-{report_hash[:16]}.json",
+                    full_report_bytes,
+                    content_type="application/json",
+                    expected_sha256=hashlib.sha256(full_report_bytes).hexdigest(),
+                    metadata={"run_id": str(payload.run_id), "report_sha256": report_hash},
+                )
+            except TrainingStorageError as exc:
+                raise _storage_http_error(exc) from exc
+            report_provider = stored_report.provider.value
+            report_storage_path = stored_report.reference
+            report_drive_file_id = stored_report.drive_file_id
+            db_metrics_payload["report_storage_path"] = report_storage_path
+            db_metrics_payload["report_drive_file_id"] = report_drive_file_id
+            db_metrics_payload["storage_provider"] = report_provider
+        else:
+            db_metrics_payload = {**metrics, "quality_gate": gate}
+            await ensure_database_capacity(self.db, len(_canonical(db_metrics_payload)) + 4096)
         try:
             await self.repo.execute("""
                 INSERT INTO public.viread_ocr_benchmarks
@@ -1907,10 +2574,23 @@ class VireadOcrTrainingService:
                   "candidate_sha": run["checkpoint_sha256"], "test_id": payload.locked_test_version_id,
                   "test_sha": locked["version_sha256"], "report_sha": report_hash, "gate": gate["status"],
                   "samples": len(paired), "groups": len({item["group_id"] for item in paired}),
-                  "metrics": json.dumps({**metrics, "quality_gate": gate}, ensure_ascii=False), "actor_id": actor_id,
+                  "metrics": json.dumps(db_metrics_payload, ensure_ascii=False), "actor_id": actor_id,
                   "cohort_id": cohort["id"] if cohort else None, "evaluation_type": evaluation_type,
                   "parent_sha": payload.parent_checkpoint_sha256 or run["parent_checkpoint_sha256"],
                   "active_sha": payload.active_checkpoint_sha256 or active_sha})
+            if report_storage_path:
+                await self._exec_optional_column_update("""
+                    UPDATE public.viread_ocr_benchmarks
+                    SET storage_provider = :provider,
+                        report_storage_path = :report_path,
+                        report_drive_file_id = :drive_id
+                    WHERE id = :id
+                """, {
+                    "provider": report_provider,
+                    "report_path": report_storage_path,
+                    "drive_id": report_drive_file_id,
+                    "id": benchmark_id,
+                })
             await self.repo.execute("UPDATE public.viread_ocr_training_runs SET status='BENCHMARKED', updated_at=now() WHERE id=:id", {"id": payload.run_id})
             await self.repo.commit()
         except Exception:
@@ -1919,6 +2599,7 @@ class VireadOcrTrainingService:
         return {"benchmark_id": benchmark_id, "run_id": payload.run_id, "gate_status": gate["status"],
                 "promotion_allowed": gate["promotion_allowed"], "sample_count": len(paired),
                 "group_count": len({item["group_id"] for item in paired}), "report_sha256": report_hash,
+                "report_storage_path": report_storage_path, "storage_provider": report_provider,
                 "evaluation_type": evaluation_type,
                 "metrics": {key: value for key, value in metrics.items()
                             if key in {"cer", "wer"} or key.endswith(("_cer", "_wer"))},
@@ -1996,7 +2677,14 @@ class VireadOcrTrainingService:
                 "cohort_id": cohort["id"], "sample_count": cohort["sample_count"],
                 "group_count": cohort["group_count"], "trainer_will_run": False}
 
-    async def candidate_artifact(self, actor_id: UUID, run_id: UUID) -> dict[str, Any]:
+    async def candidate_artifact(
+        self,
+        actor_id: UUID,
+        run_id: UUID,
+        *,
+        job_id: UUID | None = None,
+        worker_id: str | None = None,
+    ) -> dict[str, Any]:
         """Return a hash-checked checkpoint shard manifest with short-lived private URLs."""
         await self._admin(actor_id)
         run = await self.repo.one("""
@@ -2006,7 +2694,7 @@ class VireadOcrTrainingService:
         """, {"run_id": run_id})
         if not run or run["status"] not in {"CANDIDATE", "BENCHMARKED"} or not run["checkpoint_storage_path"]:
             raise HTTPException(status_code=404, detail="Retained candidate checkpoint is unavailable")
-        raw = await asyncio.to_thread(download_object, run["checkpoint_storage_path"])
+        raw = await self._read_artifact_bytes(run["checkpoint_storage_path"])
         try:
             manifest = json.loads(raw)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -2021,8 +2709,32 @@ class VireadOcrTrainingService:
         for index, item in enumerate(manifest["chunks"]):
             if int(item.get("index", -1)) != index or not _sha(str(item.get("sha256", ""))):
                 raise HTTPException(status_code=503, detail="Candidate checkpoint shard manifest is malformed")
-            chunks.append({**item, "url": create_signed_image_url(item["path"])})
-        return {**run, "manifest_sha256": hashlib.sha256(raw).hexdigest(), "chunks": chunks}
+            chunks.append({
+                **item,
+                "url": self._artifact_download_url(
+                    item["path"],
+                    expected_sha256=item.get("sha256"),
+                    job_id=job_id,
+                    worker_id=worker_id,
+                ),
+                "storage_provider": (
+                    StorageProvider.GOOGLE_DRIVE.value
+                    if is_gdrive_ref(item["path"])
+                    else StorageProvider.SUPABASE_LEGACY.value
+                ),
+                "drive_file_id": drive_file_id_from_reference(item["path"]),
+            })
+        return {
+            **run,
+            "storage_provider": (
+                StorageProvider.GOOGLE_DRIVE.value
+                if is_gdrive_ref(run["checkpoint_storage_path"])
+                else StorageProvider.SUPABASE_LEGACY.value
+            ),
+            "drive_file_id": drive_file_id_from_reference(run["checkpoint_storage_path"]),
+            "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+            "chunks": chunks,
+        }
 
     async def decide(self, actor_id: UUID, payload: ModelDecisionRequest) -> dict[str, Any]:
         await self._admin(actor_id)
@@ -2055,6 +2767,19 @@ class VireadOcrTrainingService:
             if active["checkpoint_sha256"] == run["checkpoint_sha256"]:
                 raise HTTPException(status_code=409, detail="Candidate is already the active model")
             next_sha, next_path, next_profile = run["checkpoint_sha256"], run["checkpoint_storage_path"], run["profile"]
+            if next_path and is_gdrive_ref(next_path):
+                router = await self._artifact_router()
+                try:
+                    artifact_ok = await asyncio.to_thread(router.exists, next_path)
+                except TrainingStorageError as exc:
+                    await self.repo.rollback()
+                    raise _storage_http_error(exc) from exc
+                if not artifact_ok:
+                    await self.repo.rollback()
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Candidate checkpoint manifest is missing or trashed on Google Drive; refusing activation",
+                    )
             action_benchmark = payload.benchmark_id
         else:
             if active["profile"] == "ORIGINAL" or active["decision_id"] is None:
@@ -2065,6 +2790,17 @@ class VireadOcrTrainingService:
             next_sha, next_path, next_profile = prior["previous_checkpoint_sha256"], prior["previous_storage_path"], prior["previous_profile"]
             action_benchmark = None
         decision_id = uuid4()
+        next_provider = (
+            StorageProvider.GOOGLE_DRIVE.value
+            if is_gdrive_ref(next_path)
+            else StorageProvider.SUPABASE_LEGACY.value
+        )
+        previous_provider = (
+            StorageProvider.GOOGLE_DRIVE.value
+            if is_gdrive_ref(active.get("storage_path"))
+            else StorageProvider.SUPABASE_LEGACY.value
+        )
+        next_drive_id = drive_file_id_from_reference(next_path)
         try:
             await self.repo.execute("""
                 INSERT INTO public.viread_ocr_model_decisions
@@ -2085,7 +2821,18 @@ class VireadOcrTrainingService:
                     decision_id=:decision_id, updated_at=now()
                 WHERE singleton=TRUE
             """, {"sha": next_sha, "path": next_path, "profile": next_profile, "decision_id": decision_id})
+            await self._exec_optional_column_update("""
+                UPDATE public.viread_ocr_model_decisions
+                SET candidate_storage_provider=:cand_provider, previous_storage_provider=:prev_provider
+                WHERE id=:id
+            """, {"cand_provider": next_provider, "prev_provider": previous_provider, "id": decision_id})
+            await self._exec_optional_column_update("""
+                UPDATE public.viread_ocr_active_model
+                SET storage_provider=:provider, drive_file_id=:drive_id
+                WHERE singleton=TRUE
+            """, {"provider": next_provider, "drive_id": next_drive_id})
             await self.repo.commit()
+            invalidate_overview_manifest_cache()
             from app.services.ocr_engine import set_active_viread_model_cache
             set_active_viread_model_cache({
                 "checkpoint_sha256": next_sha,
@@ -2097,4 +2844,5 @@ class VireadOcrTrainingService:
             raise
         return {"decision_id": decision_id, "action": payload.action,
                 "active_model": {"checkpoint_sha256": next_sha, "storage_path": next_path,
+                                 "storage_provider": next_provider, "drive_file_id": next_drive_id,
                                  "profile": next_profile, "updated_at": datetime.now(timezone.utc)}}

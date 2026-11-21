@@ -1,9 +1,10 @@
 "use client";
 
-import { RefreshCw, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, CheckCircle2, RefreshCw, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
+import { AdminVireadDrivePanel } from "@/components/admin/admin-viread-drive-panel";
 import {
   AdminVireadFlow1Replacement,
   AdminVireadReliabilityPanel,
@@ -38,6 +39,7 @@ export function AdminVireadTrainingScreen() {
   const [reason, setReason] = useState(
     "Đã rà soát báo cáo Locked Test và chấp thuận bản VietOCR V2.",
   );
+  const oauthCallbackHandled = useRef(false);
 
   const load = useCallback(async () => {
     setError(false);
@@ -51,6 +53,58 @@ export function AdminVireadTrainingScreen() {
       setError(true);
     }
   }, [vireadTraining]);
+
+  useEffect(() => {
+    if (
+      oauthCallbackHandled.current ||
+      !vireadTraining?.completeDriveCallback ||
+      typeof window === "undefined"
+    ) {
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    const state = params.get("state");
+    const oauthError = params.get("error");
+    if (!code && !oauthError) return;
+    oauthCallbackHandled.current = true;
+    const cleanUrl = `${window.location.pathname}${window.location.hash || ""}`;
+    window.history.replaceState({}, document.title, cleanUrl);
+    // Use an uncancelled async task so React StrictMode double-mount cleanup
+    // does not drop an OAuth callback whose query parameters were already consumed.
+    void (async () => {
+      await Promise.resolve();
+      if (oauthError) {
+        setMessage(
+          `Google OAuth đã bị hủy hoặc từ chối (${oauthError}). Chưa có token nào được lưu.`,
+        );
+        return;
+      }
+      if (!code || !state) {
+        setMessage(
+          "Thiếu tham số state từ Google OAuth. Vui lòng bấm Kết nối Google Drive để thử lại.",
+        );
+        return;
+      }
+      setBusy(true);
+      try {
+        const connected = await vireadTraining.completeDriveCallback({
+          code,
+          state,
+        });
+        setMessage(
+          `Đã kết nối Google Drive Luồng 2 thành công (${connected.account_email ?? "tài khoản đã xác thực"}) với phạm vi tối thiểu drive.file.`,
+        );
+        await load();
+      } catch {
+        setMessage(
+          "Không thể hoàn tất xác thực OAuth Google Drive (state hết hạn, không khớp phiên Admin hoặc thiếu phạm vi drive.file). Vui lòng thử kết nối lại.",
+        );
+      } finally {
+        setBusy(false);
+      }
+    })();
+  }, [load, vireadTraining]);
 
   useEffect(() => {
     const timeout = globalThis.setTimeout(() => void load(), 0);
@@ -68,7 +122,8 @@ export function AdminVireadTrainingScreen() {
         (item) =>
           item.run_id === run.run_id &&
           item.candidate_checkpoint_sha256 === run.checkpoint_sha256 &&
-          item.gate_status === "V2_WIN",
+          item.gate_status === "V2_WIN" &&
+          (item.evaluation_type ?? "PRODUCTION") === "PRODUCTION",
       );
       return benchmark ? [{ run, benchmark }] : [];
     });
@@ -221,10 +276,20 @@ export function AdminVireadTrainingScreen() {
 
   const totalSamples =
     data?.samples.reduce((sum, item) => sum + item.count, 0) ?? 0;
-  const outboxPending =
+  const outboxCount = (statuses: string[]) =>
     data?.outbox
-      .filter((item) => item.status === "PENDING" || item.status === "RETRY")
+      .filter((item) => statuses.includes(item.status))
       .reduce((sum, item) => sum + item.count, 0) ?? 0;
+  const outboxPending =
+    data?.storage_summary?.outbox_pending !== undefined
+      ? data.storage_summary.outbox_pending + data.storage_summary.outbox_retry
+      : outboxCount(["PENDING", "PROCESSING", "RETRY"]);
+  const outboxErrors =
+    data?.storage_summary !== undefined && data.storage_summary !== null
+      ? data.storage_summary.outbox_dead + data.storage_summary.outbox_blocked
+      : outboxCount(["DEAD", "BLOCKED"]);
+  const outboxSkipped =
+    data?.storage_summary?.outbox_skipped ?? outboxCount(["SKIPPED"]);
   const sourceCount = (flows: string[], split?: string) =>
     data?.samples
       .filter(
@@ -232,14 +297,22 @@ export function AdminVireadTrainingScreen() {
           flows.includes(item.source_flow) && (!split || item.split === split),
       )
       .reduce((sum, item) => sum + item.count, 0) ?? 0;
-  const flow2Train = sourceCount(["FLOW1_VERIFIED"], "train");
-  const flow2Validation = sourceCount(["FLOW1_VERIFIED"], "validation");
+  const flow2Train =
+    data?.storage_summary?.flow2_train_samples ??
+    sourceCount(["FLOW1_VERIFIED"], "train");
+  const flow2Validation =
+    data?.storage_summary?.flow2_validation_samples ??
+    sourceCount(["FLOW1_VERIFIED"], "validation");
+  const flow2Holdout =
+    data?.storage_summary?.flow2_holdout_samples ??
+    sourceCount(["FLOW1_VERIFIED"], "holdout");
+  const runtimeModel = data?.runtime_model ?? null;
   return (
     <>
       <AdminPageHeader
         eyebrow="OCR model lifecycle"
         title="Huấn luyện VietOCR V2"
-        description="Theo dõi hai luồng dữ liệu, checkpoint, benchmark ghép cặp và quyết định model."
+        description="Theo dõi hai luồng dữ liệu, lưu trữ Google Drive 0 VNĐ, checkpoint, benchmark ghép cặp và quyết định model."
         actions={
           <Button
             className="sm:w-auto"
@@ -272,7 +345,9 @@ export function AdminVireadTrainingScreen() {
         <>
           <div className="mb-6 grid gap-4 md:grid-cols-3">
             <Card className="bg-white">
-              <p className="font-bold text-muted">Model đang hoạt động</p>
+              <p className="font-bold text-muted">
+                Model đang hoạt động (Desired)
+              </p>
               <h2 className="mt-2 text-xl font-black">
                 {data.active_model
                   ? trainingProfileName(data.active_model.profile)
@@ -283,6 +358,16 @@ export function AdminVireadTrainingScreen() {
                   ? hash(data.active_model.checkpoint_sha256)
                   : "—"}
               </p>
+              <p className="mt-1 text-xs text-muted">
+                Lưu trữ:{" "}
+                <strong>
+                  {data.active_model?.profile === "ORIGINAL"
+                    ? "Original mặc định"
+                    : data.active_model?.storage_provider === "google_drive"
+                      ? "Google Drive (Private)"
+                      : "Supabase Legacy"}
+                </strong>
+              </p>
             </Card>
             <Card className="bg-white">
               <p className="font-bold text-muted">Mẫu dữ liệu đã đăng ký</p>
@@ -290,19 +375,106 @@ export function AdminVireadTrainingScreen() {
                 {totalSamples.toLocaleString("vi-VN")}
               </h2>
               <p className="mt-2 text-sm text-muted">
-                Các luồng được lưu tách riêng.
+                {data.storage_summary
+                  ? `Luồng 2 trên Drive: ${data.storage_summary.flow2_drive_synced_samples.toLocaleString("vi-VN")} · Legacy: ${data.storage_summary.flow2_legacy_samples.toLocaleString("vi-VN")}`
+                  : "Các luồng được lưu tách riêng."}
               </p>
             </Card>
             <Card className="bg-white">
-              <p className="font-bold text-muted">Outbox VERIFIED đang chờ</p>
+              <p className="font-bold text-muted">
+                Outbox VERIFIED đang chờ / lỗi
+              </p>
               <h2 className="mt-2 text-3xl font-black">
                 {outboxPending.toLocaleString("vi-VN")}
+                {outboxErrors > 0 ? (
+                  <span className="ml-2 text-base font-extrabold text-danger">
+                    ({outboxErrors.toLocaleString("vi-VN")} lỗi/chặn)
+                  </span>
+                ) : null}
               </h2>
               <p className="mt-2 text-sm text-muted">
-                Tác vụ bền vững, tự retry khi lỗi.
+                {outboxSkipped > 0
+                  ? `Tác vụ bền vững · ${outboxSkipped.toLocaleString("vi-VN")} sự kiện AI-only đã bỏ qua an toàn.`
+                  : "Tác vụ bền vững, tự retry khi lỗi."}
               </p>
             </Card>
           </div>
+
+          {runtimeModel ? (
+            <Card
+              className={`mb-6 border ${
+                runtimeModel.matches_desired
+                  ? "border-emerald-200 bg-white"
+                  : "border-rose-300 bg-rose-50"
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  {runtimeModel.matches_desired ? (
+                    <CheckCircle2
+                      aria-hidden
+                      className="size-5 text-emerald-600"
+                    />
+                  ) : (
+                    <AlertTriangle
+                      aria-hidden
+                      className="size-5 text-rose-600"
+                    />
+                  )}
+                  <h2 className="text-lg font-black">
+                    Trạng thái Runtime OCR: Desired vs Loaded Model
+                  </h2>
+                </div>
+                <span className="font-mono text-xs font-bold">
+                  {runtimeModel.status_label}
+                </span>
+              </div>
+              <div className="mt-3 grid gap-3 text-xs md:grid-cols-2">
+                <div className="rounded-control border border-border bg-white p-3">
+                  <p className="font-bold text-muted">
+                    Desired Active Model (Database Pointer)
+                  </p>
+                  <p className="mt-1 font-extrabold">
+                    {trainingProfileName(runtimeModel.desired_profile)}
+                  </p>
+                  <p className="mt-1 break-all font-mono text-muted">
+                    SHA-256: {hash(runtimeModel.desired_checkpoint_sha256)}
+                  </p>
+                </div>
+                <div className="rounded-control border border-border bg-white p-3">
+                  <p className="font-bold text-muted">
+                    Loaded Runtime Model (Trong tiến trình OCR)
+                  </p>
+                  <p className="mt-1 font-extrabold">
+                    {runtimeModel.initialized && runtimeModel.loaded_profile
+                      ? trainingProfileName(runtimeModel.loaded_profile)
+                      : "Chưa nạp vào RAM (lazy-load ở lượt OCR đầu tiên)"}
+                  </p>
+                  <p className="mt-1 break-all font-mono text-muted">
+                    SHA-256:{" "}
+                    {runtimeModel.loaded_checkpoint_sha256
+                      ? hash(runtimeModel.loaded_checkpoint_sha256)
+                      : "—"}
+                  </p>
+                </div>
+              </div>
+              {!runtimeModel.matches_desired ? (
+                <p className="mt-3 text-sm font-bold text-rose-900">
+                  Cảnh báo lệch model: Runtime OCR hiện đang nạp bản khác với
+                  con trỏ active trong database (có thể do fallback khi Google
+                  Drive gặp lỗi hoặc worker chưa tải lại checkpoint mới). Kiểm
+                  tra kết nối Google Drive bên dưới.
+                </p>
+              ) : null}
+            </Card>
+          ) : null}
+
+          {data.google_drive ? (
+            <AdminVireadDrivePanel
+              onUpdated={load}
+              status={data.google_drive}
+            />
+          ) : null}
 
           {data.active_model?.comparison_summary ? (
             <AdminVireadReliabilityPanel activeModel={data.active_model} />
@@ -325,18 +497,35 @@ export function AdminVireadTrainingScreen() {
                 </p>
                 <p className="mt-2 text-sm">
                   Crop dòng từ revision VERIFIED:{" "}
-                  {sourceCount(["FLOW1_VERIFIED"]).toLocaleString("vi-VN")} mẫu
+                  {(
+                    data.storage_summary?.flow2_verified_total_samples ??
+                    sourceCount(["FLOW1_VERIFIED"])
+                  ).toLocaleString("vi-VN")}{" "}
+                  mẫu
                 </p>
                 <p className="mt-1 text-sm text-muted">
                   Train {flow2Train.toLocaleString("vi-VN")} · Validation{" "}
                   {flow2Validation.toLocaleString("vi-VN")} · Holdout{" "}
-                  {sourceCount(["FLOW1_VERIFIED"], "holdout").toLocaleString(
-                    "vi-VN",
-                  )}
+                  {flow2Holdout.toLocaleString("vi-VN")}
                 </p>
+                {data.storage_summary ? (
+                  <p className="mt-1 text-xs text-muted">
+                    Đồng bộ Google Drive:{" "}
+                    <strong>
+                      {data.storage_summary.flow2_drive_synced_samples.toLocaleString(
+                        "vi-VN",
+                      )}
+                    </strong>{" "}
+                    · Legacy Supabase:{" "}
+                    {data.storage_summary.flow2_legacy_samples.toLocaleString(
+                      "vi-VN",
+                    )}
+                  </p>
+                ) : null}
                 <p className="mt-1 text-xs text-muted">
-                  Mỗi mẫu là một ảnh dòng chữ; nhiều từ trong cùng dòng được
-                  ghép thành một nhãn.
+                  Chỉ nhận revision được Admin xác minh thủ công (chặn tuyệt đối
+                  AI_AUTO_VERIFIED); nhiều từ trong cùng dòng được ghép theo
+                  reading order thành một nhãn NFC.
                 </p>
                 <p className="mt-2 text-sm font-bold text-muted">
                   {flow2Train > 0 && flow2Validation > 0
@@ -706,9 +895,15 @@ export function AdminVireadTrainingScreen() {
             </p>
             <div className="mt-4 space-y-3">
               {data.runs.map((run) => {
-                const benchmark = data.benchmarks.find(
+                const runBenchmarks = data.benchmarks.filter(
                   (item) => item.run_id === run.run_id,
                 );
+                const benchmark =
+                  runBenchmarks.find(
+                    (item) =>
+                      item.gate_status === "V2_WIN" &&
+                      (item.evaluation_type ?? "PRODUCTION") === "PRODUCTION",
+                  ) ?? runBenchmarks[0];
                 return (
                   <article
                     className="rounded-control border border-border p-4"
@@ -737,14 +932,19 @@ export function AdminVireadTrainingScreen() {
                         ? `${benchmark.gate_status} · ${benchmark.sample_count} cặp / ${benchmark.group_count} nhóm`
                         : "chưa có"}
                     </p>
-                    {benchmark?.gate_status === "V2_WIN" ? (
+                    {benchmark?.gate_status === "V2_WIN" &&
+                    (benchmark.evaluation_type ?? "PRODUCTION") ===
+                      "PRODUCTION" ? (
                       <Button
                         className="mt-3 h-12 w-auto"
                         disabled={
                           busy ||
+                          reason.trim().length < 8 ||
                           !run.checkpoint_sha256 ||
                           data.active_model?.checkpoint_sha256 ===
-                            run.checkpoint_sha256
+                            run.checkpoint_sha256 ||
+                          data.active_model?.checkpoint_sha256 !==
+                            run.parent_checkpoint_sha256
                         }
                         onClick={() =>
                           void decide({

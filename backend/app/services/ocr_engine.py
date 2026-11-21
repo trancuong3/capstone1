@@ -134,6 +134,7 @@ _vietocr_initialization_error: str | None = None
 _vietocr_active_checkpoint_sha: str | None = None
 _vietocr_active_profile = "ORIGINAL"
 _vietocr_active_config_sha: str | None = None
+_vietocr_active_storage_path: str | None = None
 # This is actual loaded Predictor identity -> verified local checkpoint, NOT
 # merely the current database active-model pointer. Weak refs do not hold old
 # 150 MB models alive after another worker swaps the active Predictor.
@@ -362,9 +363,16 @@ def _v2_artifact_from_storage(active: dict[str, Any]) -> tuple[str, dict[str, An
     manifest_path = active.get("storage_path")
     if len(expected_sha) != 64 or not isinstance(manifest_path, str) or not manifest_path:
         raise ValueError("active VietOCR V2 checkpoint pointer is invalid")
-    from app.services.storage_service import download_object
+    from app.services import storage_service
+    from app.services.training_storage.references import is_gdrive_ref
+    from app.services.training_storage.router import get_runtime_artifact_router
 
-    manifest_bytes = download_object(manifest_path)
+    def _download_artifact(ref: str, *, expected_hash: str | None = None) -> bytes:
+        if is_gdrive_ref(ref):
+            return get_runtime_artifact_router().get(ref, expected_sha256=expected_hash)
+        return storage_service.download_object(ref)
+
+    manifest_bytes = _download_artifact(manifest_path)
     manifest = json.loads(manifest_bytes.decode("utf-8"))
     if manifest.get("checkpoint_sha256") != expected_sha or not isinstance(manifest.get("chunks"), list):
         raise ValueError("active VietOCR V2 shard manifest does not match its database pointer")
@@ -388,11 +396,28 @@ def _v2_artifact_from_storage(active: dict[str, Any]) -> tuple[str, dict[str, An
                 if [int(item["index"]) for item in chunks] != list(range(len(chunks))):
                     raise ValueError("VietOCR V2 checkpoint shards are incomplete")
                 for item in chunks:
-                    data = download_object(str(item["path"]))
-                    if len(data) != int(item["bytes"]) or hashlib.sha256(data).hexdigest() != item["sha256"]:
-                        raise ValueError("VietOCR V2 checkpoint shard failed integrity verification")
-                    output.write(data)
-                    digest.update(data)
+                    shard_ref = str(item["path"])
+                    expected_bytes = int(item["bytes"])
+                    expected_chunk_sha = str(item["sha256"]).lower()
+                    if is_gdrive_ref(shard_ref):
+                        shard_digest = hashlib.sha256()
+                        shard_len = 0
+                        for block in get_runtime_artifact_router().open_stream(
+                            shard_ref,
+                            expected_sha256=expected_chunk_sha,
+                        ):
+                            output.write(block)
+                            shard_digest.update(block)
+                            digest.update(block)
+                            shard_len += len(block)
+                        if shard_len != expected_bytes or shard_digest.hexdigest() != expected_chunk_sha:
+                            raise ValueError("VietOCR V2 checkpoint shard failed integrity verification")
+                    else:
+                        data = storage_service.download_object(shard_ref)
+                        if len(data) != expected_bytes or hashlib.sha256(data).hexdigest() != expected_chunk_sha:
+                            raise ValueError("VietOCR V2 checkpoint shard failed integrity verification")
+                        output.write(data)
+                        digest.update(data)
             if digest.hexdigest() != expected_sha:
                 raise ValueError("assembled VietOCR V2 checkpoint hash mismatch")
             os.replace(temporary, local_path)
@@ -406,7 +431,7 @@ def _v2_artifact_from_storage(active: dict[str, Any]) -> tuple[str, dict[str, An
     if isinstance(config_meta, dict) and config_meta.get("storage_path"):
         cfg_path = config_meta["storage_path"]
         cfg_expected_sha = config_meta.get("sha256")
-        cfg_bytes = download_object(cfg_path)
+        cfg_bytes = _download_artifact(cfg_path, expected_hash=cfg_expected_sha)
         cfg_actual_sha = hashlib.sha256(cfg_bytes).hexdigest()
         if cfg_expected_sha and cfg_actual_sha != cfg_expected_sha:
             raise ValueError("active VietOCR V2 config hash mismatch")
@@ -423,6 +448,29 @@ def _v2_artifact_from_storage(active: dict[str, Any]) -> tuple[str, dict[str, An
             pass
 
     return local_path, custom_config, config_sha
+
+
+def get_loaded_vietocr_runtime_status() -> dict[str, Any]:
+    """Read-only snapshot of the actually loaded VietOCR model (never triggers model init)."""
+    predictor = _vietocr_engine
+    proof: dict[str, Any] | None = None
+    if predictor is not None:
+        try:
+            proof = _vietocr_verified_runtime.get(predictor)
+        except TypeError:
+            proof = None
+    loaded_profile = proof["model_profile"] if proof else (_vietocr_active_profile if predictor is not None else None)
+    loaded_sha = proof["checkpoint_sha256"] if proof else _vietocr_active_checkpoint_sha
+    loaded_cfg = proof["config_sha256"] if proof else _vietocr_active_config_sha
+    return {
+        "initialized": predictor is not None,
+        "initialization_status": _vietocr_initialization_status,
+        "initialization_error": _vietocr_initialization_error,
+        "loaded_profile": loaded_profile,
+        "loaded_checkpoint_sha256": loaded_sha,
+        "loaded_config_sha256": loaded_cfg,
+        "verified_runtime_proof": proof is not None,
+    }
 
 
 def _v2_checkpoint_from_storage(active: dict[str, Any]) -> str:
@@ -477,6 +525,7 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
     global _paddle_initialization_status, _vietocr_initialization_status
     global _paddle_initialization_error, _vietocr_initialization_error
     global _vietocr_active_checkpoint_sha, _vietocr_active_profile, _vietocr_active_config_sha
+    global _vietocr_active_storage_path
     global _ocr_dependencies_loaded, torch, PaddleOCR, Cfg, Predictor
     global _paddle_import_status, _paddle_import_error
     global _vietocr_import_status, _vietocr_import_error
@@ -572,19 +621,30 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
         candidate_weights_path: str | None = None
         custom_config_dict: dict[str, Any] | None = None
         active_config_sha: str | None = None
+        desired_storage_path = (active_model or {}).get("storage_path")
+        already_loaded_matching = (
+            _vietocr_engine is not None
+            and active_sha == _vietocr_active_checkpoint_sha
+            and active_profile == _vietocr_active_profile
+            and desired_storage_path == _vietocr_active_storage_path
+        )
 
         if active_model and active_profile != "ORIGINAL":
-            try:
-                candidate_weights_path, custom_config_dict, active_config_sha = _v2_artifact_from_storage(active_model)
-            except Exception as exc:
-                logger.warning("Could not load fine-tuned VietOCR artifact: %s", type(exc).__name__)
-                load_fallback_reason = "checkpoint_unavailable_or_invalid"
-                active_model = None
-                active_profile = "ORIGINAL"
-                active_sha = _ORIGINAL_VIETOCR_SHA256
-                candidate_weights_path = None
-                custom_config_dict = None
-                active_config_sha = None
+            if already_loaded_matching:
+                active_config_sha = _vietocr_active_config_sha
+            else:
+                try:
+                    candidate_weights_path, custom_config_dict, active_config_sha = _v2_artifact_from_storage(active_model)
+                except Exception as exc:
+                    logger.warning("Could not load fine-tuned VietOCR artifact: %s", type(exc).__name__)
+                    load_fallback_reason = "checkpoint_unavailable_or_invalid"
+                    active_model = None
+                    active_profile = "ORIGINAL"
+                    active_sha = _ORIGINAL_VIETOCR_SHA256
+                    desired_storage_path = None
+                    candidate_weights_path = None
+                    custom_config_dict = None
+                    active_config_sha = None
 
         if (_vietocr_engine is None or active_sha != _vietocr_active_checkpoint_sha
                 or active_profile != _vietocr_active_profile
@@ -656,6 +716,9 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
                     _vietocr_active_checkpoint_sha = active_sha
                     _vietocr_active_profile = active_profile
                     _vietocr_active_config_sha = active_config_sha
+                    _vietocr_active_storage_path = (
+                        desired_storage_path if (active_model and active_profile != "ORIGINAL") else None
+                    )
                     _vietocr_initialization_status = "success"
                     _vietocr_initialization_error = None
                 except Exception as exc:

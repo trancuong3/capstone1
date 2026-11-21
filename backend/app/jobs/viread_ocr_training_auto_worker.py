@@ -17,6 +17,8 @@ from sqlalchemy import text
 from app.database.session import AsyncSessionLocal
 from app.diagnostic_logging import log_diagnostic
 from app.services.storage_service import download_object
+from app.services.training_storage import is_gdrive_ref
+from app.services.viread_drive_connection_service import VireadDriveConnectionService
 from app.services.viread_ocr_training_service import (
     MAX_SHARD_BYTES,
     ORIGINAL_ARCHITECTURE_SHA256,
@@ -29,6 +31,53 @@ logger = logging.getLogger(__name__)
 POLL_SECONDS = 20
 LEASE_SECONDS = 900
 MAX_ATTEMPTS = 3
+
+
+async def _download_training_object(
+    reference: str,
+    *,
+    expected_sha256: str | None = None,
+) -> bytes:
+    """Read a training artifact from Google Drive (gdrive://) or legacy Supabase Storage."""
+    if is_gdrive_ref(reference):
+        async with AsyncSessionLocal() as db:
+            router = await VireadDriveConnectionService(db).build_artifact_router()
+        return await asyncio.to_thread(router.get, reference, expected_sha256=expected_sha256)
+    return await asyncio.to_thread(download_object, reference)
+
+
+async def _stream_training_object_to_file(
+    reference: str,
+    handle,
+    aggregate_digest,
+    *,
+    expected_bytes: int,
+    expected_sha256: str,
+) -> None:
+    if is_gdrive_ref(reference):
+        async with AsyncSessionLocal() as db:
+            router = await VireadDriveConnectionService(db).build_artifact_router()
+
+        def _copy() -> tuple[int, str]:
+            shard_digest = hashlib.sha256()
+            count = 0
+            for block in router.open_stream(reference, expected_sha256=expected_sha256):
+                handle.write(block)
+                shard_digest.update(block)
+                aggregate_digest.update(block)
+                count += len(block)
+            return count, shard_digest.hexdigest()
+
+        count, actual_sha = await asyncio.to_thread(_copy)
+        if count != expected_bytes or actual_sha != expected_sha256:
+            raise ValueError("ACTIVE_CHECKPOINT_SHARD_MISMATCH")
+        return
+
+    data = await asyncio.to_thread(download_object, reference)
+    if len(data) != expected_bytes or hashlib.sha256(data).hexdigest() != expected_sha256:
+        raise ValueError("ACTIVE_CHECKPOINT_SHARD_MISMATCH")
+    handle.write(data)
+    aggregate_digest.update(data)
 
 
 def _work_root() -> Path:
@@ -582,7 +631,10 @@ async def _materialize_dataset(job: dict[str, Any], run_dir: Path) -> tuple[Path
         raise ValueError("DATASET_MANIFEST_MISMATCH")
     if {row["split"] for row in samples} < {"train", "validation"}:
         raise ValueError("TRAIN_VALIDATION_REQUIRED")
-    receipt_bytes = await asyncio.to_thread(download_object, dataset["manifest_storage_path"])
+    receipt_bytes = await _download_training_object(
+        dataset["manifest_storage_path"],
+        expected_sha256=job["manifest_sha256"],
+    )
     if hashlib.sha256(receipt_bytes).hexdigest() != job["manifest_sha256"]:
         raise ValueError("DATASET_RECEIPT_HASH_MISMATCH")
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -595,7 +647,10 @@ async def _materialize_dataset(job: dict[str, Any], run_dir: Path) -> tuple[Path
     for index, sample in enumerate(samples):
         image_path = image_dir / f"{sample['image_sha256']}.png"
         if not image_path.is_file():
-            image_bytes = await asyncio.to_thread(download_object, sample["image_storage_path"])
+            image_bytes = await _download_training_object(
+                sample["image_storage_path"],
+                expected_sha256=sample["image_sha256"],
+            )
             if hashlib.sha256(image_bytes).hexdigest() != sample["image_sha256"]:
                 raise ValueError("DATASET_IMAGE_HASH_MISMATCH")
             image_path.write_bytes(image_bytes)
@@ -622,7 +677,7 @@ async def _active_parent(job: dict[str, Any], run_dir: Path) -> str:
         return "original"
     if not active["storage_path"]:
         raise ValueError("ACTIVE_CHECKPOINT_STORAGE_MISSING")
-    raw = await asyncio.to_thread(download_object, active["storage_path"])
+    raw = await _download_training_object(active["storage_path"])
     artifact = json.loads(raw)
     if artifact.get("checkpoint_sha256") != active["checkpoint_sha256"]:
         raise ValueError("ACTIVE_CHECKPOINT_MANIFEST_MISMATCH")
@@ -630,11 +685,13 @@ async def _active_parent(job: dict[str, Any], run_dir: Path) -> str:
     digest = hashlib.sha256()
     with output.open("wb") as stream:
         for chunk in artifact.get("chunks", []):
-            data = await asyncio.to_thread(download_object, chunk["path"])
-            if len(data) != int(chunk["bytes"]) or hashlib.sha256(data).hexdigest() != chunk["sha256"]:
-                raise ValueError("ACTIVE_CHECKPOINT_SHARD_MISMATCH")
-            stream.write(data)
-            digest.update(data)
+            await _stream_training_object_to_file(
+                chunk["path"],
+                stream,
+                digest,
+                expected_bytes=int(chunk["bytes"]),
+                expected_sha256=str(chunk["sha256"]).lower(),
+            )
     if digest.hexdigest() != active["checkpoint_sha256"]:
         raise ValueError("ACTIVE_CHECKPOINT_HASH_MISMATCH")
     return str(output)
@@ -722,7 +779,10 @@ async def _benchmark_candidate(job: dict[str, Any], run_id: UUID, candidate_path
               AND split='locked_test' ORDER BY source_group_id, source_annotation_id, id
         """), {"dataset_id": locked["id"]})
         locked_rows = [dict(row) for row in rows_result.mappings().all()]
-    receipt_bytes = await asyncio.to_thread(download_object, locked["manifest_storage_path"])
+    receipt_bytes = await _download_training_object(
+        locked["manifest_storage_path"],
+        expected_sha256=locked["version_sha256"],
+    )
     if hashlib.sha256(receipt_bytes).hexdigest() != locked["version_sha256"]:
         raise ValueError("LOCKED_TEST_RECEIPT_HASH_MISMATCH")
     receipt_path = run_dir / "locked-test-receipt.json"
@@ -733,7 +793,10 @@ async def _benchmark_candidate(job: dict[str, Any], run_id: UUID, candidate_path
     for row in locked_rows:
         image_path = cache / row["image_sha256"]
         if not image_path.is_file():
-            data = await asyncio.to_thread(download_object, row["image_storage_path"])
+            data = await _download_training_object(
+                row["image_storage_path"],
+                expected_sha256=row["image_sha256"],
+            )
             if hashlib.sha256(data).hexdigest() != row["image_sha256"]:
                 raise ValueError("LOCKED_TEST_IMAGE_HASH_MISMATCH")
             image_path.write_bytes(data)

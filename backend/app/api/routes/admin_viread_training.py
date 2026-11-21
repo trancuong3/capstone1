@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
+import inspect
 import json
 import os
 from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
@@ -16,6 +19,8 @@ from app.schemas.viread_ocr_training import (
     BenchmarkCreate,
     CandidateEvaluationRequest,
     DatasetImport,
+    GoogleDriveConnectCallbackRequest,
+    GoogleDriveConnectStartRequest,
     ModelDecisionRequest,
     TrainingRunComplete,
     TrainingRunCreate,
@@ -24,6 +29,13 @@ from app.schemas.viread_ocr_training import (
     TrainingWorkerHeartbeat,
     TrainingWorkerStatus,
 )
+from app.services.training_storage import (
+    TrainingStorageError,
+    is_gdrive_ref,
+    sign_worker_artifact_token,
+    verify_worker_artifact_token,
+)
+from app.services.viread_drive_connection_service import VireadDriveConnectionService
 from app.services.viread_ocr_training_service import (
     MAX_SHARD_BYTES,
     VireadOcrTrainingService,
@@ -88,6 +100,69 @@ async def get_viread_training_overview(
     actor_id: UUID = Depends(get_current_parent_id), db: AsyncSession = Depends(get_db),
 ):
     return await VireadOcrTrainingService(db).overview(actor_id)
+
+
+@router.get("/admin/viread-training/drive/status")
+async def get_viread_training_drive_status(
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    await VireadOcrTrainingService(db)._admin(actor_id)
+    return await VireadDriveConnectionService(db).get_status()
+
+
+@router.post("/admin/viread-training/drive/connect/start")
+async def start_viread_training_drive_connect(
+    payload: GoogleDriveConnectStartRequest | None = None,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    await VireadOcrTrainingService(db)._admin(actor_id)
+    return await VireadDriveConnectionService(db).start_connect(
+        actor_id=actor_id,
+        redirect_uri=payload.redirect_uri if payload else None,
+    )
+
+
+@router.post("/admin/viread-training/drive/connect/callback")
+async def complete_viread_training_drive_connect(
+    payload: GoogleDriveConnectCallbackRequest,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    await VireadOcrTrainingService(db)._admin(actor_id)
+    return await VireadDriveConnectionService(db).complete_callback(
+        actor_id=actor_id,
+        code=payload.code,
+        state=payload.state,
+    )
+
+
+@router.post("/admin/viread-training/drive/health-check")
+async def check_viread_training_drive_health(
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    await VireadOcrTrainingService(db)._admin(actor_id)
+    return await VireadDriveConnectionService(db).check_health()
+
+
+@router.post("/admin/viread-training/drive/self-test")
+async def run_viread_training_drive_self_test(
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    await VireadOcrTrainingService(db)._admin(actor_id)
+    return await VireadDriveConnectionService(db).run_self_test()
+
+
+@router.post("/admin/viread-training/drive/disconnect")
+async def disconnect_viread_training_drive(
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    await VireadOcrTrainingService(db)._admin(actor_id)
+    return await VireadDriveConnectionService(db).disconnect()
 
 
 @router.delete("/admin/viread-training/jobs/{job_id}")
@@ -740,11 +815,30 @@ async def claim_viread_colab_training_job(
         await db.rollback()
         raise HTTPException(status_code=409, detail="Training job no longer has an Admin owner")
     await service._admin(UUID(str(job["created_by"])))
-    manifest_url = create_signed_image_url(dataset_row["manifest_storage_path"])
+    if is_gdrive_ref(dataset_row["manifest_storage_path"]):
+        manifest_token = sign_worker_artifact_token(
+            job_id=str(job["id"]),
+            worker_id=payload.worker_id,
+            reference=dataset_row["manifest_storage_path"],
+            expected_sha256=dataset_row["version_sha256"],
+        )
+        manifest_url = (
+            f"/books/admin/viread-training/worker/jobs/{job['id']}/artifact-stream"
+            f"?worker_id={payload.worker_id}&token={manifest_token}"
+        )
+    else:
+        manifest_url = create_signed_image_url(dataset_row["manifest_storage_path"])
     if (job["locked_test_version_id"] or job["locked_test_manifest_sha256"]) and not locked_row:
         await db.rollback()
         raise HTTPException(status_code=409, detail="Pinned evaluation dataset is missing or its hash changed")
-    active = await service.active_model_artifact(UUID(str(job["created_by"])))
+    if "job_id" in inspect.signature(service.active_model_artifact).parameters:
+        active = await service.active_model_artifact(
+            UUID(str(job["created_by"])),
+            job_id=job["id"],
+            worker_id=payload.worker_id,
+        )
+    else:
+        active = await service.active_model_artifact(UUID(str(job["created_by"])))
     metadata = job.get("metadata") or {}
     benchmark_only_pilot = (metadata.get("operation") == "BENCHMARK_ONLY"
                             and metadata.get("evaluation_type") == "PILOT")
@@ -797,8 +891,22 @@ async def get_viread_colab_job_dataset(
     service = VireadOcrTrainingService(db)
     job = await _leased_colab_job(service, job_id, worker_id)
     await service._admin(UUID(str(job["created_by"])))
-    result = await service.dataset_samples(UUID(str(job["created_by"])), job["dataset_version_id"],
-                                           limit=limit, offset=offset)
+    if "job_id" in inspect.signature(service.dataset_samples).parameters:
+        result = await service.dataset_samples(
+            UUID(str(job["created_by"])),
+            job["dataset_version_id"],
+            limit=limit,
+            offset=offset,
+            job_id=job_id,
+            worker_id=worker_id,
+        )
+    else:
+        result = await service.dataset_samples(
+            UUID(str(job["created_by"])),
+            job["dataset_version_id"],
+            limit=limit,
+            offset=offset,
+        )
     if result["dataset"]["version_sha256"] != job["manifest_sha256"]:
         raise HTTPException(status_code=409, detail="Job dataset hash does not match the claimed manifest")
     await db.commit()
@@ -832,10 +940,151 @@ async def get_viread_colab_job_locked_test(
     if not locked:
         await db.rollback()
         raise HTTPException(status_code=409, detail="Pinned Locked Test is missing or its manifest hash changed")
-    result = await service.dataset_samples(UUID(str(job["created_by"])), locked["id"],
-                                           limit=limit, offset=offset)
+    if "job_id" in inspect.signature(service.dataset_samples).parameters:
+        result = await service.dataset_samples(
+            UUID(str(job["created_by"])),
+            locked["id"],
+            limit=limit,
+            offset=offset,
+            job_id=job_id,
+            worker_id=worker_id,
+        )
+    else:
+        result = await service.dataset_samples(
+            UUID(str(job["created_by"])),
+            locked["id"],
+            limit=limit,
+            offset=offset,
+        )
     await db.commit()
     return result
+
+
+@router.get("/admin/viread-training/worker/jobs/{job_id}/artifact-stream")
+async def stream_viread_colab_job_artifact(
+    job_id: UUID,
+    worker_id: str,
+    token: str,
+    _worker: None = Depends(_require_training_worker_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Stream one DB-authorized private Google Drive artifact to the actively leased worker.
+
+    Enforces four independent controls:
+    1. Valid X-ViRead-Training-Worker credential.
+    2. Server-only HMAC token bound to (job_id, worker_id, gdrive:// ref, sha256, exp).
+    3. Active COLAB_RUNNING lease owned by worker_id.
+    4. Server-side DB authorization proving claims.reference belongs to this job's
+       dataset, pinned Locked Test, active parent model, or attached candidate run.
+    """
+    try:
+        claims = verify_worker_artifact_token(
+            token,
+            expected_job_id=str(job_id),
+            expected_worker_id=worker_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    if not is_gdrive_ref(claims.reference):
+        raise HTTPException(
+            status_code=403,
+            detail="Worker artifact stream only serves private Google Drive references",
+        )
+
+    service = VireadOcrTrainingService(db)
+    job = await service.repo.one("""
+        SELECT id, target, status, worker_id, lease_expires_at,
+               dataset_version_id, locked_test_version_id,
+               parent_checkpoint_sha256, run_id
+        FROM public.viread_ocr_training_jobs
+        WHERE id = :id
+    """, {"id": job_id})
+    if (
+        not job
+        or job["target"] != "COLAB"
+        or job["status"] != "COLAB_RUNNING"
+        or job["worker_id"] != worker_id
+        or job["lease_expires_at"] is None
+        or job["lease_expires_at"] <= datetime.now(timezone.utc)
+    ):
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Training job lease is no longer active for artifact streaming")
+
+    authorized = await service.repo.one("""
+        SELECT (
+            EXISTS (
+                SELECT 1 FROM public.viread_ocr_dataset_versions dv
+                WHERE dv.id IN (CAST(:dataset_id AS uuid), CAST(:locked_id AS uuid))
+                  AND dv.manifest_storage_path = :ref
+            )
+            OR EXISTS (
+                SELECT 1 FROM public.viread_ocr_samples s
+                WHERE s.dataset_version_id IN (CAST(:dataset_id AS uuid), CAST(:locked_id AS uuid))
+                  AND s.image_storage_path = :ref
+            )
+            OR EXISTS (
+                SELECT 1 FROM public.viread_ocr_checkpoint_chunks c
+                WHERE c.run_id = CAST(:run_id AS uuid)
+                  AND c.storage_path = :ref
+            )
+            OR EXISTS (
+                SELECT 1 FROM public.viread_ocr_training_runs r
+                WHERE r.id = CAST(:run_id AS uuid)
+                  AND r.checkpoint_storage_path = :ref
+            )
+            OR EXISTS (
+                SELECT 1 FROM public.viread_ocr_active_model am
+                WHERE am.singleton = TRUE
+                  AND am.checkpoint_sha256 = :parent_sha
+                  AND am.storage_path = :ref
+            )
+            OR EXISTS (
+                SELECT 1 FROM public.viread_ocr_checkpoint_chunks pc
+                JOIN public.viread_ocr_training_runs pr ON pr.id = pc.run_id
+                WHERE pr.checkpoint_sha256 = :parent_sha
+                  AND pc.storage_path = :ref
+            )
+        ) AS is_authorized
+    """, {
+        "dataset_id": job["dataset_version_id"],
+        "locked_id": job["locked_test_version_id"],
+        "run_id": job["run_id"],
+        "parent_sha": job["parent_checkpoint_sha256"],
+        "ref": claims.reference,
+    })
+    if not authorized or not authorized.get("is_authorized"):
+        await db.rollback()
+        raise HTTPException(
+            status_code=403,
+            detail="Requested artifact is not authorized for this leased training job",
+        )
+
+    router_store = await VireadDriveConnectionService(db).build_artifact_router()
+    # Release DB transaction before streaming potentially large files over HTTP.
+    await db.commit()
+    try:
+        meta = await asyncio.to_thread(router_store.get_metadata, claims.reference)
+    except TrainingStorageError as exc:
+        raise HTTPException(status_code=exc.http_status or 503, detail=f"{exc.code}: {exc}") from exc
+    if meta.trashed:
+        raise HTTPException(status_code=404, detail="Requested training artifact is unavailable")
+
+    def _chunk_iterator():
+        yield from router_store.open_stream(
+            claims.reference,
+            expected_sha256=claims.expected_sha256,
+            preloaded_meta=meta,
+        )
+
+    return StreamingResponse(
+        _chunk_iterator(),
+        media_type=meta.content_type or "application/octet-stream",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.post("/admin/viread-training/worker/jobs/{job_id}/runs")
@@ -927,7 +1176,15 @@ async def get_viread_colab_candidate_artifact(
     if str(job["run_id"]) != str(run_id):
         await db.rollback()
         raise HTTPException(status_code=409, detail="Candidate run is not attached to this evaluation job")
-    artifact = await service.candidate_artifact(UUID(str(job["created_by"])), run_id)
+    if "job_id" in inspect.signature(service.candidate_artifact).parameters:
+        artifact = await service.candidate_artifact(
+            UUID(str(job["created_by"])),
+            run_id,
+            job_id=job_id,
+            worker_id=worker_id,
+        )
+    else:
+        artifact = await service.candidate_artifact(UUID(str(job["created_by"])), run_id)
     await db.commit()
     return artifact
 

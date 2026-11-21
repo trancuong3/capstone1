@@ -176,3 +176,11 @@ class Flow1ModelActivationResponse(BaseModel):
     active_model: dict[str, Any]
     cleanup: dict[str, Any]
 
+
+class GoogleDriveConnectStartRequest(BaseModel):
+    redirect_uri: str | None = Field(default=None, max_length=512)
+
+
+class GoogleDriveConnectCallbackRequest(BaseModel):
+    code: str = Field(min_length=4, max_length=4096)
+    state: str = Field(min_length=16, max_length=4096)

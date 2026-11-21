@@ -1,6 +1,103 @@
 import { requestApi } from "@/lib/api/api-client";
 import { z } from "zod";
 
+const driveQuotaSchema = z.object({
+  limit_bytes: z.number().nullable(),
+  usage_bytes: z.number().nullable(),
+  usage_in_drive_bytes: z.number().nullable(),
+  usage_in_trash_bytes: z.number().nullable(),
+  available_bytes: z.number().nullable(),
+  min_free_buffer_bytes: z.number(),
+  max_training_budget_bytes: z.number().nullable(),
+  warning_level: z.string(),
+  can_accept_upload: z.boolean(),
+  checked_at: z.string().nullable().optional(),
+  detail: z.string().nullable().optional(),
+});
+
+const driveStatusSchema = z.object({
+  provider: z.string(),
+  migration_applied: z.boolean(),
+  status: z.string(),
+  connected: z.boolean(),
+  oauth_configured: z.boolean(),
+  oauth_readiness: z
+    .object({
+      oauth_configured: z.boolean(),
+      client_id_configured: z.boolean(),
+      client_secret_configured: z.boolean(),
+      redirect_uri_configured: z.boolean(),
+      encryption_key_configured: z.boolean(),
+      required_scope: z.string(),
+    })
+    .optional(),
+  account_email: z.string().nullable(),
+  account_display_name: z.string().nullable(),
+  oauth_scope: z.string().nullable(),
+  scope_valid: z.boolean(),
+  root_folder_id: z.string().nullable(),
+  root_folder_path: z.string(),
+  subfolder_ids: z.record(z.string(), z.string()).default({}),
+  quota: driveQuotaSchema,
+  last_health_check_at: z.string().nullable(),
+  last_health_status: z.string().nullable(),
+  last_error_code: z.string().nullable(),
+  connected_at: z.string().nullable(),
+  disconnected_at: z.string().nullable(),
+  health_detail: z.string().nullable().optional(),
+  google_token_revoked: z.boolean().optional(),
+});
+
+const driveConnectStartSchema = z.object({
+  authorization_url: z.string().url(),
+  scope: z.string(),
+  redirect_uri: z.string(),
+  expires_in_seconds: z.number().int(),
+});
+
+const driveSelfTestSchema = z.object({
+  ok: z.boolean(),
+  logical_path: z.string(),
+  drive_file_id: z.string().nullable(),
+  sha256: z.string().nullable(),
+  size_bytes: z.number().int(),
+  deleted_after_test: z.boolean(),
+  is_private: z.boolean(),
+  quota: driveQuotaSchema.nullable(),
+  detail: z.string(),
+});
+
+const runtimeModelSchema = z.object({
+  initialized: z.boolean(),
+  initialization_status: z.string(),
+  initialization_error: z.string().nullable(),
+  loaded_profile: z.string().nullable(),
+  loaded_checkpoint_sha256: z.string().nullable(),
+  loaded_config_sha256: z.string().nullable(),
+  verified_runtime_proof: z.boolean(),
+  desired_profile: z.string(),
+  desired_checkpoint_sha256: z.string(),
+  matches_desired: z.boolean(),
+  status_label: z.string(),
+});
+
+const storageSummarySchema = z.object({
+  flow2_write_provider: z.string(),
+  flow2_drive_synced_samples: z.number().int(),
+  flow2_legacy_samples: z.number().int(),
+  flow2_verified_total_samples: z.number().int(),
+  flow2_train_samples: z.number().int(),
+  flow2_validation_samples: z.number().int(),
+  flow2_holdout_samples: z.number().int(),
+  dataset_ready_for_training: z.boolean(),
+  outbox_pending: z.number().int(),
+  outbox_retry: z.number().int(),
+  outbox_dead: z.number().int(),
+  outbox_blocked: z.number().int(),
+  outbox_skipped: z.number().int(),
+  outbox_done: z.number().int(),
+});
+
 const overviewSchema = z.object({
   outbox: z.array(z.object({ status: z.string(), count: z.number().int() })),
   samples: z.array(
@@ -78,6 +175,8 @@ const overviewSchema = z.object({
       model_family: z.string(),
       checkpoint_sha256: z.string(),
       storage_path: z.string().nullable(),
+      storage_provider: z.string().nullable().optional(),
+      drive_file_id: z.string().nullable().optional(),
       profile: z.string(),
       decision_id: z.uuid().nullable(),
       updated_at: z.iso.datetime({ offset: true }),
@@ -107,9 +206,19 @@ const overviewSchema = z.object({
       minimum_groups: z.number().int(),
     })
     .optional(),
+  google_drive: driveStatusSchema.nullable().optional(),
+  runtime_model: runtimeModelSchema.nullable().optional(),
+  storage_summary: storageSummarySchema.nullable().optional(),
 });
 
 export type VireadTrainingOverview = z.infer<typeof overviewSchema>;
+export type GoogleDriveTrainingStatus = z.infer<typeof driveStatusSchema>;
+export type GoogleDriveConnectStartResult = z.infer<
+  typeof driveConnectStartSchema
+>;
+export type GoogleDriveSelfTestResult = z.infer<typeof driveSelfTestSchema>;
+export type RuntimeModelStatus = z.infer<typeof runtimeModelSchema>;
+export type Flow2StorageSummary = z.infer<typeof storageSummarySchema>;
 
 const flow1ChunkResponseSchema = z.object({
   upload_id: z.string(),
@@ -144,6 +253,17 @@ export type Flow1ModelActivationResult = z.infer<
 
 export interface VireadTrainingService {
   overview(): Promise<VireadTrainingOverview>;
+  driveStatus(): Promise<GoogleDriveTrainingStatus>;
+  startDriveConnect(
+    redirectUri?: string,
+  ): Promise<GoogleDriveConnectStartResult>;
+  completeDriveCallback(input: {
+    code: string;
+    state: string;
+  }): Promise<GoogleDriveTrainingStatus>;
+  checkDriveHealth(): Promise<GoogleDriveTrainingStatus>;
+  runDriveSelfTest(): Promise<GoogleDriveSelfTestResult>;
+  disconnectDrive(): Promise<GoogleDriveTrainingStatus>;
   deleteJob(jobId: string): Promise<unknown>;
   requestEvaluation(
     jobId: string,
@@ -205,6 +325,49 @@ export function createVireadTrainingService(): VireadTrainingService {
   return {
     overview: () =>
       requestApi("/books/admin/viread-training/overview", overviewSchema),
+    driveStatus: () =>
+      requestApi(
+        "/books/admin/viread-training/drive/status",
+        driveStatusSchema,
+      ),
+    startDriveConnect: (redirectUri) =>
+      requestApi(
+        "/books/admin/viread-training/drive/connect/start",
+        driveConnectStartSchema,
+        undefined,
+        {
+          method: "POST",
+          body: redirectUri ? { redirect_uri: redirectUri } : {},
+        },
+      ),
+    completeDriveCallback: (input) =>
+      requestApi(
+        "/books/admin/viread-training/drive/connect/callback",
+        driveStatusSchema,
+        undefined,
+        { method: "POST", body: input },
+      ),
+    checkDriveHealth: () =>
+      requestApi(
+        "/books/admin/viread-training/drive/health-check",
+        driveStatusSchema,
+        undefined,
+        { method: "POST" },
+      ),
+    runDriveSelfTest: () =>
+      requestApi(
+        "/books/admin/viread-training/drive/self-test",
+        driveSelfTestSchema,
+        undefined,
+        { method: "POST" },
+      ),
+    disconnectDrive: () =>
+      requestApi(
+        "/books/admin/viread-training/drive/disconnect",
+        driveStatusSchema,
+        undefined,
+        { method: "POST" },
+      ),
     deleteJob: (jobId) =>
       requestApi(
         `/books/admin/viread-training/jobs/${encodeURIComponent(jobId)}`,
