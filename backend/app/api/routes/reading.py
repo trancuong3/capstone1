@@ -851,3 +851,32 @@ async def match_page_global_from_camera(
         matched_page=page_dto,
     )
 
+
+from fastapi import Form, Request
+from app.repositories.local_ocr_scan_repository import LocalOcrScanRepository
+from app.schemas.reading import LocalOcrPageScanRead
+from app.services.local_ocr_scan_service import LocalOcrScanService
+
+
+@router.post("/scan-page-ocr", response_model=LocalOcrPageScanRead)
+async def scan_page_with_local_ocr(
+    request: Request,
+    file: UploadFile = File(...),
+    book_id: UUID | None = Form(default=None),
+    child_id: UUID | None = Form(default=None),
+    idempotency_key: UUID | None = Form(default=None),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Run local Vietnamese OCR on an uploaded/photographed book page and match verified catalog pages."""
+    request_id = str(getattr(request.state, "request_id", ""))
+    return await LocalOcrScanService(LocalOcrScanRepository(db)).scan_page(
+        actor_id,
+        file,
+        request_id=request_id,
+        book_id=book_id,
+        child_id=child_id,
+        idempotency_key=idempotency_key,
+    )
+
+

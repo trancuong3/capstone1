@@ -77,6 +77,14 @@ const safeBackendMessages: Record<string, string> = {
     "OCR thất bại ở bước xử lý nội bộ. Hãy xem log Backend để xác định giai đoạn xảy ra lỗi.",
   "No usable text was detected; check the image quality":
     "Không phát hiện được chữ trong ảnh. Hãy thử ảnh rõ nét, đủ sáng và đúng chiều.",
+  "Local OCR engine is unavailable":
+    "Bộ xử lý OCR cục bộ trên máy chủ hiện chưa sẵn sàng. Hãy kiểm tra dịch vụ backend rồi thử lại.",
+  "Local OCR processing timed out; please retry":
+    "OCR cục bộ xử lý quá thời gian cho phép. Ba mẹ hãy bấm Thử lại nhé.",
+  "Unsupported upload format; use JPEG, PNG, or WebP":
+    "Định dạng ảnh chưa hỗ trợ. Hãy chọn ảnh JPG, PNG hoặc WebP.",
+  "Upload identity already belongs to a different image":
+    "Mã gửi ảnh đã dùng cho một ảnh khác. Hãy chọn lại ảnh để quét mới.",
   "Could not read the image from Supabase Storage":
     "Không đọc được ảnh từ Supabase Storage. Hãy kiểm tra object path và quyền truy cập.",
   "Could not create an image preview URL":

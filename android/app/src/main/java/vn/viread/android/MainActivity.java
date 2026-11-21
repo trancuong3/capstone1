@@ -7,13 +7,15 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.net.Uri;
+import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.PermissionRequest;
 import android.webkit.SslErrorHandler;
-import android.net.http.SslError;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
@@ -21,38 +23,63 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import android.widget.ProgressBar;
-import android.widget.Toast;
+import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+import android.widget.Toast;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Server-backed Android shell, not a static copy of the Next.js application.
- * No JS bridge, no service secrets, no permission grants to untrusted origins.
+ * No JS bridge, no service secrets, no permission grants to untrusted origins,
+ * and never bypasses TLS/SSL certificate verification.
  */
 public final class MainActivity extends Activity {
     private static final int WEB_PERMISSION_CODE = 151;
     private static final int FILE_CHOOSER_CODE = 152;
     private WebView webView;
     private ProgressBar progress;
+    private LinearLayout errorOverlay;
+    private TextView errorMessageView;
     private TrustedNavigation navigation;
     private PermissionRequest pendingPermission;
+    private boolean awaitingSystemPermission;
     private ValueCallback<Uri[]> pendingFiles;
+    private String lastFailedUrl;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        navigation = new TrustedNavigation(BuildConfig.FRONTEND_URL);
+        navigation = new TrustedNavigation(
+                BuildConfig.FRONTEND_URL, BuildConfig.LAN_ACCEPTANCE_MODE);
         getWindow().setStatusBarColor(0xFF153A53);
         getWindow().setNavigationBarColor(0xFF153A53);
 
         FrameLayout content = new FrameLayout(this);
+        content.setBackgroundColor(0xFF153A53);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            content.setOnApplyWindowInsetsListener((view, insets) -> {
+                android.graphics.Insets bars = insets.getInsets(
+                        android.view.WindowInsets.Type.systemBars()
+                                | android.view.WindowInsets.Type.ime()
+                                | android.view.WindowInsets.Type.displayCutout());
+                view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                return insets;
+            });
+        }
         webView = new WebView(this);
         content.addView(webView, new FrameLayout.LayoutParams(-1, -1));
+
+        errorOverlay = buildErrorOverlay();
+        errorOverlay.setVisibility(View.GONE);
+        content.addView(errorOverlay, new FrameLayout.LayoutParams(-1, -1));
+
         progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progress.setMax(100);
-        content.addView(progress, new FrameLayout.LayoutParams(-1, 5));
+        content.addView(progress, new FrameLayout.LayoutParams(-1, 6));
         setContentView(content);
 
         WebSettings settings = webView.getSettings();
@@ -90,25 +117,33 @@ public final class MainActivity extends Activity {
 
             @Override
             public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
-                handler.cancel(); // Never disable TLS verification.
-                Toast.makeText(MainActivity.this, R.string.offline_message, Toast.LENGTH_LONG).show();
+                handler.cancel(); // Never disable TLS verification (navigation.shouldProceedOnSslError() == false).
+                lastFailedUrl = error != null ? error.getUrl() : BuildConfig.FRONTEND_URL;
+                showErrorOverlay(getString(R.string.tls_error_message));
             }
 
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) {
-                    Toast.makeText(MainActivity.this, R.string.offline_message, Toast.LENGTH_LONG).show();
+                    lastFailedUrl = request.getUrl() != null
+                            ? request.getUrl().toString()
+                            : BuildConfig.FRONTEND_URL;
+                    showErrorOverlay(getString(R.string.offline_message));
                 }
             }
 
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 progress.setVisibility(View.VISIBLE);
+                if (url != null && !"about:blank".equals(url)) {
+                    errorOverlay.setVisibility(View.GONE);
+                }
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
                 progress.setVisibility(View.GONE);
+                CookieManager.getInstance().flush();
             }
         });
 
@@ -138,23 +173,19 @@ public final class MainActivity extends Activity {
                 pendingFiles = callback;
                 Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
                 intent.addCategory(Intent.CATEGORY_OPENABLE);
-                intent.setType("*/*");
-                String[] types = params.getAcceptTypes();
-                List<String> validTypes = new ArrayList<>();
-                for (String type : types) {
-                    if (type != null && !type.trim().isEmpty() && type.contains("/")) {
-                        validTypes.add(type);
-                    }
-                }
-                if (validTypes.size() == 1) intent.setType(validTypes.get(0));
-                else if (!validTypes.isEmpty()) {
+                List<String> validTypes = TrustedNavigation.normalizeAcceptMimeTypes(
+                        params.getAcceptTypes());
+                intent.setType(TrustedNavigation.resolveIntentBaseMimeType(validTypes));
+                if (validTypes.size() > 1) {
                     intent.putExtra(Intent.EXTRA_MIME_TYPES, validTypes.toArray(new String[0]));
                 }
                 intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,
                         params.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE);
                 intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 try {
-                    startActivityForResult(Intent.createChooser(intent, "Chọn ảnh hoặc tài liệu"), FILE_CHOOSER_CODE);
+                    startActivityForResult(
+                            Intent.createChooser(intent, "Chọn ảnh hoặc tài liệu"),
+                            FILE_CHOOSER_CODE);
                 } catch (ActivityNotFoundException ex) {
                     pendingFiles = null;
                     callback.onReceiveValue(null);
@@ -169,13 +200,78 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private LinearLayout buildErrorOverlay() {
+        int pad = dp(28);
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setGravity(Gravity.CENTER);
+        layout.setBackgroundColor(0xFFF6FAF8);
+        layout.setPadding(pad, pad, pad, pad);
+
+        TextView title = new TextView(this);
+        title.setText(R.string.app_name);
+        title.setTextColor(0xFF153A53);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
+        title.setGravity(Gravity.CENTER);
+        layout.addView(title);
+
+        errorMessageView = new TextView(this);
+        errorMessageView.setText(R.string.offline_message);
+        errorMessageView.setTextColor(0xFF334E58);
+        errorMessageView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        errorMessageView.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams msgParams = new LinearLayout.LayoutParams(-1, -2);
+        msgParams.topMargin = dp(12);
+        msgParams.bottomMargin = dp(24);
+        layout.addView(errorMessageView, msgParams);
+
+        Button retryBtn = new Button(this);
+        retryBtn.setText(R.string.retry_button);
+        retryBtn.setMinHeight(dp(48));
+        retryBtn.setOnClickListener(v -> {
+            errorOverlay.setVisibility(View.GONE);
+            if (webView != null) {
+                String target = (lastFailedUrl != null && navigation.isTrusted(lastFailedUrl))
+                        ? lastFailedUrl
+                        : BuildConfig.FRONTEND_URL;
+                webView.loadUrl(target);
+            }
+        });
+        layout.addView(retryBtn, new LinearLayout.LayoutParams(-1, -2));
+
+        Button homeBtn = new Button(this);
+        homeBtn.setText(R.string.open_home_button);
+        homeBtn.setMinHeight(dp(48));
+        homeBtn.setOnClickListener(v -> {
+            errorOverlay.setVisibility(View.GONE);
+            if (webView != null) {
+                webView.loadUrl(BuildConfig.FRONTEND_URL);
+            }
+        });
+        LinearLayout.LayoutParams homeParams = new LinearLayout.LayoutParams(-1, -2);
+        homeParams.topMargin = dp(12);
+        layout.addView(homeBtn, homeParams);
+
+        return layout;
+    }
+
+    private int dp(int value) {
+        return Math.round(TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, value, getResources().getDisplayMetrics()));
+    }
+
+    private void showErrorOverlay(String message) {
+        runOnUiThread(() -> {
+            if (errorMessageView != null) errorMessageView.setText(message);
+            if (errorOverlay != null) errorOverlay.setVisibility(View.VISIBLE);
+            if (progress != null) progress.setVisibility(View.GONE);
+        });
+    }
+
     private boolean handleNavigation(Uri uri) {
         String url = uri.toString();
         if (navigation.isTrusted(url)) return false;
-        String scheme = uri.getScheme();
-        if (scheme != null && (scheme.equalsIgnoreCase("https")
-                || scheme.equalsIgnoreCase("mailto")
-                || scheme.equalsIgnoreCase("tel"))) {
+        if (navigation.shouldOpenExternally(url)) {
             try {
                 startActivity(new Intent(Intent.ACTION_VIEW, uri));
             } catch (ActivityNotFoundException e) {
@@ -186,7 +282,8 @@ public final class MainActivity extends Activity {
     }
 
     private void requestWebPermission(PermissionRequest request) {
-        if (isFinishing() || !navigation.isTrusted(request.getOrigin().toString())) {
+        String origin = request.getOrigin() != null ? request.getOrigin().toString() : null;
+        if (isFinishing() || !navigation.isTrustedMediaOrigin(origin)) {
             request.deny();
             return;
         }
@@ -214,19 +311,27 @@ public final class MainActivity extends Activity {
         if (needed.isEmpty()) {
             grantPending();
         } else {
+            awaitingSystemPermission = true;
             requestPermissions(needed.toArray(new String[0]), WEB_PERMISSION_CODE);
         }
     }
 
     private void grantPending() {
+        awaitingSystemPermission = false;
         PermissionRequest request = pendingPermission;
         pendingPermission = null;
-        if (request != null && navigation.isTrusted(request.getOrigin().toString())) {
+        String origin = request != null && request.getOrigin() != null
+                ? request.getOrigin().toString()
+                : null;
+        if (request != null && navigation.isTrustedMediaOrigin(origin)) {
             request.grant(request.getResources());
+        } else if (request != null) {
+            request.deny();
         }
     }
 
     private void denyPending() {
+        awaitingSystemPermission = false;
         PermissionRequest request = pendingPermission;
         pendingPermission = null;
         if (request != null) request.deny();
@@ -236,6 +341,7 @@ public final class MainActivity extends Activity {
     public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(code, permissions, results);
         if (code != WEB_PERMISSION_CODE) return;
+        awaitingSystemPermission = false;
         boolean granted = results.length > 0;
         for (int result : results) granted &= result == PackageManager.PERMISSION_GRANTED;
         if (granted) grantPending();
@@ -254,13 +360,32 @@ public final class MainActivity extends Activity {
     @Override
     protected void onPause() {
         if (webView != null) {
-            // Frontend hooks listen for this event and release camera/recording tracks.
-            webView.evaluateJavascript("document.dispatchEvent(new Event('viread:android-background'))", null);
-            webView.onPause();
             CookieManager.getInstance().flush();
+            // Do NOT fire background release or cancel pendingPermission while an in-app
+            // system permission dialog or native file picker is transiently overlaid.
+            if (!awaitingSystemPermission && pendingFiles == null) {
+                webView.evaluateJavascript(
+                        "document.dispatchEvent(new Event('viread:android-background'))", null);
+                webView.onPause();
+            }
         }
-        denyPending();
+        if (!awaitingSystemPermission) {
+            denyPending();
+        }
         super.onPause();
+    }
+
+    @Override
+    protected void onStop() {
+        if (webView != null && !awaitingSystemPermission && pendingFiles == null) {
+            webView.evaluateJavascript(
+                    "document.dispatchEvent(new Event('viread:android-background'))", null);
+            webView.onPause();
+        }
+        if (!awaitingSystemPermission) {
+            denyPending();
+        }
+        super.onStop();
     }
 
     @Override
@@ -277,6 +402,10 @@ public final class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (errorOverlay != null && errorOverlay.getVisibility() == View.VISIBLE) {
+            errorOverlay.setVisibility(View.GONE);
+            return;
+        }
         if (webView != null && webView.canGoBack()) webView.goBack();
         else super.onBackPressed();
     }

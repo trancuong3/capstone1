@@ -1,0 +1,16 @@
+{
+  "lanHost": "192.168.1.4",
+  "httpsPort": 8443,
+  "frontendPort": 3001,
+  "backendPort": 8000,
+  "frontendMode": "production",
+  "apiProxyPrefix": "/_viread_api",
+  "runtimeDir": "F:\\c1\\viread-host-runtime",
+  "pythonExe": "F:\\c1\\capstone1\\.venv\\Scripts\\python.exe",
+  "backendEnvFile": "F:\\c1\\capstone1\\backend\\.env",
+  "frontendEnvFile": "F:\\c1\\capstone1\\frontend\\.env.local",
+  "ocrCloudCorrectionEnabled": false,
+  "ocrWarmupEnabled": false,
+  "ocrDevice": "cpu",
+  "logRetentionMb": 20
+}

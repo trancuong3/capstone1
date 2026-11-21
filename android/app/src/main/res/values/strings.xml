@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ViRead</string>
-    <string name="offline_message">Không kết nối được ViRead. Hãy kiểm tra mạng và thử lại.</string>
+    <string name="offline_message">Không kết nối được máy chủ ViRead. Kiểm tra cùng mạng Wi‑Fi và bấm Thử lại.</string>
+    <string name="tls_error_message">Chứng chỉ bảo mật HTTPS của máy chủ không hợp lệ nên ViRead đã chặn kết nối để bảo vệ tài khoản.</string>
+    <string name="retry_button">Thử lại</string>
+    <string name="open_home_button">Về trang đăng nhập</string>
 </resources>

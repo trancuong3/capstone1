@@ -43,6 +43,7 @@ from app.database.session import (
 from app.diagnostic_logging import log_diagnostic
 from app.request_context import request_id_context
 from app.services.ocr_engine import run_active_viread_model_worker, warmup_ocr_engines
+from app.services.runtime_diagnostics import collect_ocr_health
 from app.services.admin_ocr_jobs import admin_ocr_correction_jobs
 from app.jobs.book_quality_worker import run_worker as run_book_quality_worker
 from app.jobs.admin_ai_workflow_worker import run_worker as run_admin_ai_workflow_worker
@@ -129,6 +130,16 @@ async def _shutdown_subprocess(
 async def lifespan(_app: FastAPI):
     """Start lightweight durable workers; OCR models load only on OCR requests."""
     if APP_ENVIRONMENT != "test":
+        app_diag_logger = logging.getLogger("app")
+        if app_diag_logger.level == logging.NOTSET:
+            app_diag_logger.setLevel(logging.INFO)
+        if not app_diag_logger.handlers and not logging.getLogger().handlers:
+            diag_handler = logging.StreamHandler(sys.stderr)
+            diag_handler.setFormatter(
+                logging.Formatter("%(levelname)s: %(name)s %(message)s")
+            )
+            app_diag_logger.addHandler(diag_handler)
+
         db_probe = await probe_database_connection(
             timeout=min(5.0, DATABASE_CONNECT_TIMEOUT)
         )
@@ -569,6 +580,24 @@ async def get_health(request: Request) -> dict[str, object]:
             else ("running" if local_trainer.returncode is None else "stopped")
         ),
     }
+    try:
+        ocr_items = await asyncio.wait_for(asyncio.to_thread(collect_ocr_health), timeout=2.5)
+        ocr_engines = {
+            item["id"]: {
+                "status": item["status"],
+                "detail_status": item["detail_status"],
+            }
+            for item in ocr_items
+        }
+        ocr_ready = any(
+            item["detail_status"] in {"loaded", "installed", "healthy"}
+            for item in ocr_items
+            if item["id"] in {"paddleocr", "vietocr", "tesseract_vie"}
+        )
+    except Exception:
+        ocr_engines = {}
+        ocr_ready = False
+
     return {
         "status": "ok" if db_probe["ok"] else "degraded",
         "database": {
@@ -578,6 +607,10 @@ async def get_health(request: Request) -> dict[str, object]:
             "pool_class": db_probe["pool_class"],
             "pooler_mode": db_probe["pooler_mode"],
             "latency_ms": db_probe["latency_ms"],
+        },
+        "ocr": {
+            "ready": ocr_ready,
+            "engines": ocr_engines,
         },
         "workers": worker_states,
     }
