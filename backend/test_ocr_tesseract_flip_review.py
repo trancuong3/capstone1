@@ -80,6 +80,14 @@ class PrivateFlipReviewTests(unittest.TestCase):
                 )
             self.assertTrue(result["complete"])
             self.assertEqual(result["distinct_positions"], 1)
+            self.assertTrue(result["crop_artifacts_consistent"])
+            self.assertEqual(result["crop_artifact_count"], 1)
+            self.assertFalse(result["risk_assessment"]["production_deployment_allowed"])
+            self.assertEqual(
+                result["risk_assessment"]["per_policy"]["tesseract_line_priority"][
+                    "review_required"
+                ], 0,
+            )
             for rule in review.REVIEW_RULES:
                 self.assertEqual(
                     result["policy_flip_review_counts"][rule]["corrected"], 1
@@ -171,6 +179,67 @@ class PrivateFlipReviewTests(unittest.TestCase):
                         "--output-dir", str(output),
                     ])
             self.assertEqual(cm.exception.code, 2)
+
+    def test_dangerous_correct_to_wrong_flips_sort_ahead_of_corrections(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            image = root / "p.png"
+            Image.new("RGB", (400, 200), (240, 240, 240)).save(image)
+            crops = root / "crops"
+            crops.mkdir()
+            output = fake_output()
+            first = output["words"][0]
+            second = {
+                "text": "nằm",
+                "bbox": [0.55, 0.20, 0.2, 0.12],
+                "ocr_evidence": {
+                    "engine_statuses": {
+                        "paddleocr": "success", "vietocr": "success",
+                        "tesseract": "success",
+                    },
+                    "engine_outputs": {
+                        "paddleocr": "nằm", "vietocr": "nằm", "tesseract": "năm",
+                    },
+                    "crop_evidence": {
+                        "status": "completed", "vietocr_candidate": "năm",
+                        "vietocr_error": None,
+                    },
+                },
+            }
+            output["words"] = [first, second]
+            output["text"] = "mìm nằm"
+            body, stats = review._render_page(
+                Case(image, "mỉm nằm", "childrens_font"),
+                1, output, crops,
+            )
+            self.assertEqual(stats["distinct_positions"], 2)
+            self.assertEqual(stats["positions_to_check_first"], 1)
+            self.assertEqual(stats["tesseract_line_priority_corrected"], 1)
+            self.assertEqual(stats["tesseract_line_priority_regressed"], 1)
+            self.assertLess(body.index("Từ #2"), body.index("Từ #1"))
+
+    def test_report_detects_missing_cropped_image_before_claiming_complete(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            image = root / "p.png"
+            Image.new("RGB", (400, 200)).save(image)
+            destination = root / "private-review"
+            destination.mkdir()
+            engine = types.ModuleType("app.services.ocr_engine")
+            engine.extract_text_and_boxes = lambda _: fake_output()
+            with mock.patch.dict(sys.modules, {
+                "torch": types.ModuleType("torch"),
+                "app.services.ocr_engine": engine,
+            }):
+                with mock.patch.object(review, "_bbox_crop"):
+                    result = review.make_report(
+                        [Case(image, "mỉm", "clean")], destination,
+                        "FLOW1_EXTERNAL_TRDG", "a" * 64,
+                    )
+            self.assertEqual(result["successful_pages"], 1)
+            self.assertFalse(result["crop_artifacts_consistent"])
+            self.assertFalse(result["complete"])
+            self.assertFalse(result["risk_assessment"]["production_deployment_allowed"])
 
     def test_invalid_word_box_cannot_create_misaligned_crop(self):
         with tempfile.TemporaryDirectory() as temp:
