@@ -201,9 +201,8 @@
     try{
       let original=null;
       try{original=JSON.parse(localStorage.getItem(STORAGE_KEY)||"null");}catch(e){}
-      const bundle={format:"viread-local-export-v1",exportedAt:new Date().toISOString(),
-        legacy:original||{tasks:[],note:state.note},imports:state.imports,
-        sharedSnapshot:{syncedAt:state.sharedAt,tasks:state.tasks}};
+      const bundle=ViReadRoadmapCore.makeLocalExport(original,state.note,state.imports,
+        {syncedAt:state.sharedAt,tasks:state.tasks},new Date().toISOString());
       const blob=new Blob([JSON.stringify(bundle,null,2)],{type:"application/json"});
       const url=URL.createObjectURL(blob),a=document.createElement("a");
       a.href=url;a.download="viread-local-roadmap-backup.json";
@@ -215,9 +214,8 @@
     if(!file||file.size>1024*1024){showToast("Chỉ chấp nhận JSON tối đa 1 MB.");return;}
     try{
       const incoming=JSON.parse(await file.text());
-      const legacy=incoming&&incoming.legacy&&Array.isArray(incoming.legacy.tasks)?incoming.legacy:incoming;
-      if(!legacy||!Array.isArray(legacy.tasks))throw new Error("Thiếu tasks");
-      const record={importedAt:new Date().toISOString(),tasks:legacy.tasks,note:typeof legacy.note==="string"?legacy.note:""};
+      const legacy=ViReadRoadmapCore.parseLocalImport(incoming);
+      const record={importedAt:new Date().toISOString(),tasks:legacy.tasks,note:legacy.note};
       const next=state.imports.concat([record]).slice(-10);
       localStorage.setItem(IMPORTS_KEY,JSON.stringify(next));
       state.imports=next;renderLegacyNotice();
