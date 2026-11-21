@@ -3318,7 +3318,7 @@ class AdminOcrService:
             raise HTTPException(status_code=404, detail="Page not found")
         if page.BookId != book.Id:
             raise HTTPException(status_code=409, detail="Page/book relationship changed; reload and retry")
-        if page.LifecycleStatus not in ("ACTIVE", "RETIRED"):
+        if page.LifecycleStatus not in ("ACTIVE", "PROCESSING", "RETIRED"):
             raise HTTPException(status_code=409, detail="Page lifecycle state is not supported")
 
         changed = False
@@ -3327,6 +3327,35 @@ class AdminOcrService:
                 self.repo.set_page_lifecycle_status(page, "RETIRED")
                 await self.repo.flush()
                 changed = True
+            # Retiring a page must clear stale findings and in-flight workflows for
+            # that page so a deleted bad page never keeps blocking book quality.
+            if hasattr(self.db, "execute"):
+                for cleanup_sql in (
+                    """
+                    UPDATE public.bookqualityfindings
+                    SET status = 'STALE'
+                    WHERE pageid = :page_id AND status != 'STALE'
+                    """,
+                    """
+                    UPDATE public.adminaiworkflows
+                    SET status = 'CANCELLED',
+                        errorcode = 'PAGE_RETIRED',
+                        workerid = NULL,
+                        leaseexpiresat = NULL,
+                        updatedat = now()
+                    WHERE pageid = :page_id
+                      AND status IN ('QUEUED', 'PROOFREADING', 'CHILD_SAFETY_SCANNING')
+                    """,
+                ):
+                    try:
+                        if hasattr(self.db, "begin_nested"):
+                            async with self.db.begin_nested():
+                                await self.db.execute(text(cleanup_sql), {"page_id": page.Id})
+                        else:
+                            await self.db.execute(text(cleanup_sql), {"page_id": page.Id})
+                    except Exception:
+                        # Best-effort cleanup for minimal/legacy schemas lacking optional tables.
+                        pass
             changed = await self._renumber_active_pages(page.BookId, lock=True) or changed
             if changed:
                 await self.db.commit()

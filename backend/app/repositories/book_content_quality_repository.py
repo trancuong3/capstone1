@@ -194,15 +194,28 @@ class BookContentQualityRepository:
         )
         finding_count = (
             select(func.count(BookQualityFinding.Id))
-            .where(BookQualityFinding.BookId == Book.Id)
+            .outerjoin(BookPage, BookPage.Id == BookQualityFinding.PageId)
+            .where(
+                BookQualityFinding.BookId == Book.Id,
+                BookQualityFinding.Status != "STALE",
+                or_(
+                    BookQualityFinding.PageId.is_(None),
+                    BookPage.LifecycleStatus != "RETIRED",
+                ),
+            )
             .correlate(Book)
             .scalar_subquery()
         )
         needs_review_count = (
             select(func.count(BookQualityFinding.Id))
+            .outerjoin(BookPage, BookPage.Id == BookQualityFinding.PageId)
             .where(
                 BookQualityFinding.BookId == Book.Id,
                 BookQualityFinding.Status == "NEEDS_REVIEW",
+                or_(
+                    BookQualityFinding.PageId.is_(None),
+                    BookPage.LifecycleStatus != "RETIRED",
+                ),
             )
             .correlate(Book)
             .scalar_subquery()
@@ -296,15 +309,26 @@ class BookContentQualityRepository:
                     order_by=(AdminAiWorkflow.CreatedAt.desc(), AdminAiWorkflow.Id.desc()),
                 ).label("row_number"),
             )
-            .where(AdminAiWorkflow.BookId == book_id)
+            .join(BookPage, BookPage.Id == AdminAiWorkflow.PageId)
+            .where(
+                AdminAiWorkflow.BookId == book_id,
+                BookPage.LifecycleStatus.in_(("ACTIVE", "PROCESSING")),
+            )
             .subquery()
         )
         pages_total = int(await self.db.scalar(
-            select(func.count()).select_from(BookPage).where(BookPage.BookId == book_id)
+            select(func.count()).select_from(BookPage).where(
+                BookPage.BookId == book_id,
+                BookPage.LifecycleStatus.in_(("ACTIVE", "PROCESSING")),
+            )
         ) or 0)
         workflows_total = int(await self.db.scalar(
-            select(func.count()).select_from(AdminAiWorkflow).where(
-                AdminAiWorkflow.BookId == book_id
+            select(func.count())
+            .select_from(AdminAiWorkflow)
+            .join(BookPage, BookPage.Id == AdminAiWorkflow.PageId)
+            .where(
+                AdminAiWorkflow.BookId == book_id,
+                BookPage.LifecycleStatus.in_(("ACTIVE", "PROCESSING")),
             )
         ) or 0)
         counts = (await self.db.execute(
@@ -904,15 +928,28 @@ class BookContentQualityRepository:
         )
         finding_count = (
             select(func.count(BookQualityFinding.Id))
-            .where(BookQualityFinding.BookId == Book.Id)
+            .outerjoin(BookPage, BookPage.Id == BookQualityFinding.PageId)
+            .where(
+                BookQualityFinding.BookId == Book.Id,
+                BookQualityFinding.Status != "STALE",
+                or_(
+                    BookQualityFinding.PageId.is_(None),
+                    BookPage.LifecycleStatus != "RETIRED",
+                ),
+            )
             .correlate(Book)
             .scalar_subquery()
         )
         needs_review_count = (
             select(func.count(BookQualityFinding.Id))
+            .outerjoin(BookPage, BookPage.Id == BookQualityFinding.PageId)
             .where(
                 BookQualityFinding.BookId == Book.Id,
                 BookQualityFinding.Status == "NEEDS_REVIEW",
+                or_(
+                    BookQualityFinding.PageId.is_(None),
+                    BookPage.LifecycleStatus != "RETIRED",
+                ),
             )
             .correlate(Book)
             .scalar_subquery()

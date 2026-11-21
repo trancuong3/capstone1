@@ -545,6 +545,78 @@ class BookQualityAssessmentTests(unittest.TestCase):
         self.assertEqual(repository.commit_count, 1)
         self.assertEqual(len(repository.decisions), 1)
 
+    def test_retire_page_allows_stuck_processing_and_clears_stale_findings_and_workflows(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from app.services.admin_ocr_service import AdminOcrService
+
+        book_id = uuid4()
+        page_id = uuid4()
+        actor_id = uuid4()
+        executed_sql: list[str] = []
+
+        async def _fake_execute(stmt, _params=None):
+            executed_sql.append(str(stmt))
+            return MagicMock()
+
+        fake_db = MagicMock()
+        fake_db.execute = AsyncMock(side_effect=_fake_execute)
+        fake_db.commit = AsyncMock()
+        fake_db.rollback = AsyncMock()
+        fake_db.refresh = AsyncMock()
+        del fake_db.begin_nested  # exercise direct execute path
+
+        page_obj = SimpleNamespace(
+            Id=page_id,
+            BookId=book_id,
+            PageNumber=11,
+            LifecycleStatus="PROCESSING",
+        )
+        book_obj = SimpleNamespace(Id=book_id, LifecycleStatus="ACTIVE")
+
+        svc = AdminOcrService(fake_db)
+        svc.require_admin = AsyncMock()
+        svc.repo = MagicMock()
+        svc.repo.page = AsyncMock(return_value=page_obj)
+        svc.repo.book = AsyncMock(return_value=book_obj)
+        svc.repo.set_page_lifecycle_status = MagicMock(
+            side_effect=lambda p, st: setattr(p, "LifecycleStatus", st)
+        )
+        svc.repo.flush = AsyncMock()
+        svc._renumber_active_pages = AsyncMock(return_value=False)
+
+        result = _run_async(svc.retire_page(actor_id, page_id))
+
+        self.assertEqual(result.lifecycle_status, "RETIRED")
+        self.assertEqual(page_obj.LifecycleStatus, "RETIRED")
+        self.assertTrue(any("bookqualityfindings" in s and "STALE" in s for s in executed_sql))
+        self.assertTrue(any("adminaiworkflows" in s and "CANCELLED" in s for s in executed_sql))
+
+    def test_retired_bad_page_excluded_from_assessment_and_book_becomes_ready(self):
+        clean_page = _row(1)
+        retired_bad_page = _row(2)
+        retired_bad_page[0].LifecycleStatus = "RETIRED"
+        retired_bad_page[2].Suitability = "NOT_RECOMMENDED"
+        retired_bad_page[2].Findings = [{"severity": "HIGH", "category": "VIOLENCE"}]
+        rights = SimpleNamespace(
+            Id=uuid4(),
+            Scope="BOOK",
+            Status="RIGHTS_REVIEWED",
+            SourceDescription="Nguồn mở",
+            UsageBasis="OPEN_LICENSE",
+            EvidenceUrlOrRef="https://example.org/rights",
+            Version=1,
+            ContentFingerprint=None,
+        )
+        assessment = BookContentQualityService._assessment(
+            [clean_page, retired_bad_page],
+            [],
+            rights_evidence=rights,
+        )
+        self.assertEqual(assessment.page_count, 1)
+        self.assertEqual(assessment.finding_count, 0)
+        self.assertEqual(assessment.high_finding_count, 0)
+        self.assertEqual(assessment.status, "READY_FOR_CHILDREN")
+
 
 if __name__ == "__main__":
     unittest.main()

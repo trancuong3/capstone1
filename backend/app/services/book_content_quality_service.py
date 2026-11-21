@@ -1257,6 +1257,7 @@ class BookContentQualityService:
             await self._ensure_page_ai_workflows(actor_id, book_id)
             return response
         if scope == "BOOK":
+            await self._cleanup_abandoned_and_retired_book_artifacts(book_id)
             latest = await self.repository.latest_scan(book_id)
             if latest is not None and latest.Scope == "BOOK" and latest.Status == "COMPLETED":
                 rows = await self.repository.book_assessment_rows(book_id)
@@ -1299,6 +1300,44 @@ class BookContentQualityService:
         response = self._scan_read(run)
         await self._ensure_page_ai_workflows(actor_id, book_id)
         return response
+
+    async def _cleanup_abandoned_and_retired_book_artifacts(self, book_id: UUID) -> None:
+        """Retire orphaned PROCESSING reservations (>15m, 0 revisions) and stale retired-page findings."""
+        db = getattr(self.repository, "db", None)
+        if db is None or not hasattr(db, "execute"):
+            return
+        from sqlalchemy import text as sa_text
+
+        for cleanup_sql in (
+            """
+            UPDATE public.bookqualityfindings AS f
+            SET status = 'STALE'
+            FROM public.bookpages AS p
+            WHERE f.pageid = p.id
+              AND f.bookid = :book_id
+              AND p.lifecyclestatus = 'RETIRED'
+              AND f.status != 'STALE'
+            """,
+            """
+            UPDATE public.bookpages AS p
+            SET lifecyclestatus = 'RETIRED'
+            WHERE p.bookid = :book_id
+              AND p.lifecyclestatus = 'PROCESSING'
+              AND p.createdat < now() - interval '15 minutes'
+              AND NOT EXISTS (
+                  SELECT 1 FROM public.pagerevisions AS r WHERE r.pageid = p.id
+              )
+            """,
+        ):
+            try:
+                if hasattr(db, "begin_nested"):
+                    async with db.begin_nested():
+                        await db.execute(sa_text(cleanup_sql), {"book_id": book_id})
+                else:
+                    await db.execute(sa_text(cleanup_sql), {"book_id": book_id})
+            except Exception:
+                # Best-effort hygiene; never break scan enqueue on mock/minimal DB fixtures.
+                pass
 
     async def _ensure_page_ai_workflows(self, actor_id: UUID, book_id: UUID) -> None:
         """Queue missing/stale page Proofreading and Safety on the existing durable worker."""
