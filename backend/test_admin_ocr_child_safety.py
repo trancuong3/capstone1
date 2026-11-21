@@ -6,6 +6,7 @@ import os
 import unicodedata
 import unittest
 from unittest.mock import patch
+from uuid import uuid4
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:1/test")
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
