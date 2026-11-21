@@ -26,39 +26,40 @@ The first Android implementation is an **isolated native WebView shell** serving
 Local build on Windows with JDK 17, Android SDK platform 35, Gradle 8.11.1:
 
 ~~~powershell
+# Option A: Public HTTPS Next.js origin
 $env:VIREAD_FRONTEND_URL = "https://YOUR-REAL-NEXTJS-FRONTEND.example"
-python .\android\scripts\verify_frontend.py  # read-only HTTPS /login and root preflight
 .\android\scripts\build-android.ps1
-# APK: android\app\build\outputs\apk\debug\app-debug.apk
+
+# Option B: Local Wi-Fi LAN HTTPS Debug build (scoped Test CA, never enabled in Release)
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\New-ViReadLanCert.ps1 -LanHost 192.168.1.4
+.\android\scripts\build-android.ps1 -FrontendUrl "https://192.168.1.4:8443" -LanMode -CaCert "F:\c1\viread-host-runtime\certs\viread-lan-ca.pem"
+# APK: android\app\build\outputs\apk\debug\app-debug.apk (automatically verified via apksigner + verify_apk_quality.py)
 ~~~
 
-The validation job uses https://example.org only for Java compilation/lint/unit tests, **not** APK packaging. Offline Python unit tests verify the HTTPS-origin preflight and safe `/` → `/login` redirects. A successful compile is NOT evidence of a working app.
+The validation job uses https://viread.example.org only for Java compilation/lint/unit tests, **not** APK packaging. `verify_apk_quality.py` scans every entry in the packaged APK to enforce Adaptive/PNG launcher icons across `mdpi..xxxhdpi`, `minSdk >= 26`, `targetSdk == 35`, `usesCleartextTraffic == false`, `allowBackup == false`, valid signature, and zero secret/placeholder strings.
 
-## WebView permissions and security
+## Branding, Error Recovery, File Picker & Security
 
-- Only navigation and WebRTC permissions from the configured exact HTTPS origin are trusted. Foreign HTTPS links open the system browser, not inside the authenticated WebView; http/file/intent/javascript top-level navigation is blocked.
-- Camera/microphone require both Android runtime permission and a same-origin WebChromeClient permission request. Unknown resources are denied; no JavaScript bridge is exposed.
-- Document/image selection uses Android ACTION_OPEN_DOCUMENT and returns content URIs to the HTML input. The current in-page scanner uses getUserMedia, not the file picker.
-- JS/DOM storage/cookies are needed for Next + Supabase; mixed content and cleartext traffic are forbidden. SSL errors are canceled. Third-party cookies are disabled.
-- Android onPause dispatches a background event; ViRead reading camera and speech-recorder hooks release active media. On return, camera may need reopening/restarting. No guarantee of continuous background recording.
-- Browser playback (TTS, karaoke), MediaRecorder MIME support, page scanner framing, WebRTC capture, file upload, Android back handling, screen rotation, offline/errors MUST be checked on a real device.
+- **Branding & Splash:** Adaptive Launcher Icons (`ic_launcher`, `ic_launcher_round`, foreground/background/monochrome vectors within the 66/108dp safe zone + `mdpi..xxxhdpi` PNGs), `Theme.ViRead.Splash` (Android 8–15), and Edge-to-Edge `WindowInsets` (`systemBars | displayCutout | ime`).
+- **Zero Raw Chromium Error Page:** `WebView` stays `INVISIBLE` until a clean main-frame page finishes and immediately hides on any main-frame error (`onReceivedError`, 5xx `onReceivedHttpError`, `onReceivedSslError`, cold-start timeout), displaying a branded Vietnamese diagnostic card (**Thử lại**, **Về trang đăng nhập**, **Kiểm tra lại kết nối**). In `BuildConfig.DEBUG && BuildConfig.LAN_ACCEPTANCE_MODE` builds ONLY, testers can update the validated RFC1918 HTTPS LAN IP directly from the diagnostic card when DHCP Wi-Fi IP changes (completely absent in Release builds).
+- **Exact-Origin Navigation & WebRTC:** Only navigation and WebRTC permissions from the configured exact HTTPS origin are trusted. Foreign HTTPS links open the system browser; `http:`, `file:`, `intent:`, and `javascript:` top-level navigation is blocked. SSL errors always call `handler.cancel()`.
+- **Multi-Format Picker & Direct Camera Capture:** `TrustedNavigation.normalizeAcceptMimeTypes()` maps `.jpg`, `.jpeg`, `.png`, `.webp`, `.bmp`, `.tif`, `.tiff`, `.pdf`, and `.docx`. `onShowFileChooser` combines `ACTION_OPEN_DOCUMENT` (`EXTRA_MIME_TYPES` + `ClipData` multi-select) with direct native `MediaStore.ACTION_IMAGE_CAPTURE` via an unexported `androidx.core.content.FileProvider` (`cacheDir/camera_captures`, auto-cleaned).
+- **Lifecycle & Android 13–15 Back Navigation:** Registers `OnBackInvokedCallback` (API 33–35) with `<33` fallback and root double-back exit confirmation. Transient permission/chooser overlays preserve pending grants; real backgrounding dispatches `viread:android-background` to release active camera/microphone streams.
 
-## Known authentication limitations requiring an explicit second phase
+## OAuth (Google / Facebook) & Session Persistence on Android
 
-Email/password in the embedded origin is the primary supported login candidate, **not yet confirmed on-device**. Google and some other OAuth providers block embedded webviews. The external browser has a separate cookie jar. PKCE email confirmation and password-recovery links opened in an external email/browser app likewise do not automatically return to the WebView's session/PKCE verifier. Do NOT claim those workflows work: use verified Android App Links plus assetlinks.json and a reviewed auth handoff/native PKCE implementation before enabling them as supported Android features. No custom deep-link/JS bridge is added in this first phase because it would risk account/session leaks without a deployed verified domain.
+- **Chrome Custom Tabs + Ephemeral RFC 8252 Loopback PKCE Handoff (`OAuthLoopbackServer.java`):** Google and Facebook block embedded WebViews (`403 disallowed_useragent`). When running inside `ViReadAndroid/1.0`, `resolveDefaultOAuthRedirectUrl()` generates a per-click cryptographic `viread_nonce` and sets `redirectTo=http://127.0.0.1:3000/auth/callback?viread_nonce=<nonce>` (already allowlisted by Supabase Auth). `MainActivity` intercepts the external Supabase/Google/Facebook OAuth URL, starts an ephemeral loopback listener on `127.0.0.1:3000` (auto-expiring after 3 minutes), and opens a branded `#087467` Chrome Custom Tab (`androidx.browser:browser:1.8.0`). When Supabase redirects back to `127.0.0.1:3000/auth/callback`, `OAuthLoopbackServer` verifies `viread_nonce`, responds with `302 Location: viread://oauth-callback` (`launchMode="singleTask"` to close the Custom Tab cleanly on Android 8–16), and hands `https://<trusted-origin>/auth/callback?code=...` back to the `WebView` where the PKCE `code_verifier` cookie lives.
+- **Session Persistence & Android 16 Audio Routing:** `proxy.ts` redirects authenticated `GET /` requests directly to `/dashboard` while flushing `CookieManager` on every SPA history update (`doUpdateVisitedHistory`), preserving login sessions across force-stop/relaunch. `AndroidManifest.xml` declares `MODIFY_AUDIO_SETTINGS` alongside `RECORD_AUDIO` so Chromium `AudioManagerAndroid` starts hardware microphone capture cleanly on Android 16+.
 
-## Manual real-device acceptance matrix
+## Automated Real-Device USB (ADB) E2E Verification Suite
 
-- Install debug APK on Android 8+ and launch without SSL errors.
-- Sign in via email/password; force close/reopen; verify parent SSR pages and logout clear session.
-- Verify admin is not accepted as parent; test protected pages while logged out.
-- Open book scanner and approve/deny camera; verify frames and server page match.
-- Start/stop microphone recording, audio MIME, playback, Vietnamese TTS, karaoke and permission denial/retry.
-- Navigate home/background during camera capture and recording: media tracks release and resume only upon user action; rotate screen.
-- Choose image from Files/Photos, upload, handle canceled chooser.
-- Open external HTTPS link; ensure no embedded foreign-origin permission/session.
-- Test no network, expired session, backend cold starts, invalid TLS certificate.
-- Treat OAuth, email recovery/confirmation handoff as UNSUPPORTED until separately verified/fixed.
+With an Android phone connected via USB (`USB Debugging` authorized) and the Windows backend (`127.0.0.1:8000`), Next.js server (`127.0.0.1:3001`), and LAN HTTPS proxy (`scripts/windows/lan-https-proxy.mjs` on `8443`) running, execute the full 13-step real-device E2E verification suite at any time with:
+
+~~~powershell
+node .\scripts\windows\Run-ViReadUsbE2E.mjs --serial <ADB_SERIAL> --out-dir .\artifacts\usb-android-e2e
+~~~
+
+The runner captures redacted `screencap` PNGs, `uiautomator` XML hierarchies, WebView DOM overflow/broken-image telemetry, `logcat` crash checks, and 5xx/hydration checks across all 13 scenarios (Startup/Back, Wrong Password + Google/Facebook OAuth Custom Tabs, Login/Relaunch Persistence/Logout, Parent & Child CRUD + Cleanup, Book Library, Private Books + Real Vietnamese NFC OCR, Normal Reading Controls + Page Picker + Sample TTS + Silent Hardware Mic, Mid-Session Rotation & Background/Foreground, `retryMode` Balanced Grid + DB Completion, `/sessions`, `/reports/difficult-words` Grouping & Covers, Offline Branded Recovery Card, and Full Test-Data Cleanup).
 
 ## Cost and rollout
 

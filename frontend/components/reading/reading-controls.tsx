@@ -139,7 +139,11 @@ export function ReadingControls({
 
         <Button
           aria-label={retryMode ? "Hoàn thành đọc lại" : "Kết thúc buổi đọc"}
-          className="min-h-14 min-w-0"
+          className={cn(
+            "min-h-14 min-w-0",
+            (retryMode ? Boolean(voiceSettings) : !voiceSettings) &&
+              "col-span-2 sm:col-span-1",
+          )}
           disabled={finishDisabled}
           onClick={onFinish}
           variant="secondary"

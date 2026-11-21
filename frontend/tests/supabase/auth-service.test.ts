@@ -8,7 +8,11 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import { AuthServiceError } from "@/lib/api/auth-service";
-import { createSupabaseAuthService } from "@/lib/supabase/auth-service";
+import {
+  createSupabaseAuthService,
+  resolveDefaultOAuthRedirectUrl,
+  VIREAD_ANDROID_UA_MARKER,
+} from "@/lib/supabase/auth-service";
 
 const providerUser: User = {
   id: "10000000-0000-4000-8000-000000000001",
@@ -495,6 +499,25 @@ describe("SupabaseAuthService", () => {
       });
     },
   );
+
+  it("uses RFC 8252 loopback callback with nonce inside ViReadAndroid WebView and web origin on browsers", () => {
+    const webUrl = resolveDefaultOAuthRedirectUrl(
+      "https://192.168.1.4:8443",
+      "Mozilla/5.0 (Linux; Android 16) Chrome/131.0.0.0 Mobile Safari/537.36",
+    );
+    expect(webUrl).toBe("https://192.168.1.4:8443/auth/callback");
+
+    const androidUrl = resolveDefaultOAuthRedirectUrl(
+      "https://192.168.1.4:8443",
+      `Mozilla/5.0 (Linux; Android 16; wv) Mobile Safari/537.36 ${VIREAD_ANDROID_UA_MARKER}1.0`,
+    );
+    const parsed = new URL(androidUrl);
+    expect(parsed.origin).toBe("http://127.0.0.1:3000");
+    expect(parsed.pathname).toBe("/auth/callback");
+    expect(parsed.searchParams.get("viread_nonce") ?? "").toMatch(
+      /^[A-Za-z0-9_-]{16,128}$/,
+    );
+  });
 
   it("sanitizes provider OAuth errors", async () => {
     const harness = createHarness();

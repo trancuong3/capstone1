@@ -16,6 +16,7 @@ import {
   preserveSupabaseAuthResponse,
   refreshSupabaseAuth,
 } from "@/lib/supabase/proxy";
+import { proxy } from "@/proxy";
 
 interface TestedCookieAdapter {
   setAll(
@@ -113,5 +114,18 @@ describe("Supabase proxy auth refresh", () => {
     await expect(
       refreshSupabaseAuth(new NextRequest("https://app.example.com/dashboard")),
     ).resolves.toMatchObject({ userId: null });
+  });
+
+  it("redirects authenticated root / requests directly to /dashboard so app relaunches keep session", async () => {
+    getClaimsMock.mockResolvedValue({
+      data: { claims: { sub: "parent-user-1" } },
+      error: null,
+    });
+
+    const response = await proxy(new NextRequest("https://app.example.com/"));
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "https://app.example.com/dashboard",
+    );
   });
 });

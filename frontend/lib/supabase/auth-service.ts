@@ -179,12 +179,45 @@ function readParentRole(profile: unknown): ParentRole | null {
     : null;
 }
 
+export const VIREAD_ANDROID_UA_MARKER = "ViReadAndroid/";
+const ANDROID_OAUTH_LOOPBACK_CALLBACK = "http://127.0.0.1:3000/auth/callback";
+
+function generateOAuthLoopbackNonce(): string {
+  const randomUuid = globalThis.crypto?.randomUUID?.();
+  if (typeof randomUuid === "string" && randomUuid.length >= 16) {
+    return randomUuid.replace(/-/g, "");
+  }
+  const bytes = new Uint8Array(16);
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 14)}00000000`;
+}
+
+export function resolveDefaultOAuthRedirectUrl(
+  origin: string,
+  userAgent: string,
+  nonce?: string,
+): string {
+  if (userAgent.includes(VIREAD_ANDROID_UA_MARKER)) {
+    const safeNonce = (nonce ?? generateOAuthLoopbackNonce()).trim();
+    const url = new URL(ANDROID_OAUTH_LOOPBACK_CALLBACK);
+    url.searchParams.set("viread_nonce", safeNonce);
+    return url.toString();
+  }
+  return new URL("/auth/callback", origin).toString();
+}
+
 function defaultOAuthRedirectUrl() {
   if (typeof window === "undefined") {
     throw unexpectedAuthError();
   }
 
-  return new URL("/auth/callback", window.location.origin).toString();
+  return resolveDefaultOAuthRedirectUrl(
+    window.location.origin,
+    window.navigator?.userAgent ?? "",
+  );
 }
 
 function defaultPasswordResetRedirectUrl() {

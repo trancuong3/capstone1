@@ -2,11 +2,35 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
+const SAFE_HOST_HEADER_RE = /^[a-zA-Z0-9.-]+(?::\d{1,5})?$/;
+
+function resolvePublicOrigin(request: NextRequest): string {
+  const rawHost =
+    request.headers.get("x-forwarded-host")?.split(",")[0]?.trim() ??
+    request.headers.get("host")?.split(",")[0]?.trim() ??
+    "";
+  if (rawHost && SAFE_HOST_HEADER_RE.test(rawHost)) {
+    const rawProto = request.headers
+      .get("x-forwarded-proto")
+      ?.split(",")[0]
+      ?.trim()
+      .toLowerCase();
+    const proto =
+      rawProto === "https" || rawProto === "http"
+        ? rawProto
+        : request.nextUrl.protocol === "http:"
+          ? "http"
+          : "https";
+    return `${proto}://${rawHost}`;
+  }
+  return new URL(request.url).origin;
+}
+
 function redirectToLogin(
   request: NextRequest,
   oauthError: "email_required" | "oauth_failed",
 ) {
-  const url = new URL("/login", request.url);
+  const url = new URL("/login", resolvePublicOrigin(request));
   url.searchParams.set("oauth_error", oauthError);
   return NextResponse.redirect(url);
 }
@@ -77,5 +101,7 @@ export async function GET(request: NextRequest) {
         ? "/admin/books"
         : "/dashboard";
 
-  return NextResponse.redirect(new URL(destination, request.url));
+  return NextResponse.redirect(
+    new URL(destination, resolvePublicOrigin(request)),
+  );
 }

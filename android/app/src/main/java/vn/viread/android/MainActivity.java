@@ -49,6 +49,8 @@ import android.widget.TextView;
 import android.widget.Toast;
 import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
+import androidx.browser.customtabs.CustomTabColorSchemeParams;
+import androidx.browser.customtabs.CustomTabsIntent;
 import androidx.core.content.FileProvider;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -76,8 +78,10 @@ public final class MainActivity extends Activity {
     private static final long COLD_START_HINT_MS = 8_000L;
     private static final long LOAD_TIMEOUT_MS = 25_000L;
     private static final long BACK_EXIT_WINDOW_MS = 2_000L;
+    static final String VIREAD_ANDROID_UA_MARKER = "ViReadAndroid/1.0";
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final OAuthLoopbackServer oauthLoopbackServer = new OAuthLoopbackServer();
 
     private ServerEndpointStore endpointStore;
     private TrustedNavigation navigation;
@@ -210,6 +214,10 @@ public final class MainActivity extends Activity {
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
         settings.setTextZoom(100);
+        String defaultUa = settings.getUserAgentString();
+        if (defaultUa != null && !defaultUa.contains("ViReadAndroid/")) {
+            settings.setUserAgentString(defaultUa + " " + VIREAD_ANDROID_UA_MARKER);
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             settings.setSafeBrowsingEnabled(true);
         }
@@ -291,6 +299,14 @@ public final class MainActivity extends Activity {
                 if (!mainFrameHasError && progress != null) {
                     progress.setVisibility(View.VISIBLE);
                 }
+            }
+
+            @Override
+            public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
+                super.doUpdateVisitedHistory(view, url, isReload);
+                // Immediately persist SPA session cookies (e.g. signInWithPassword -> router.replace)
+                // to Android's SQLite CookieStore so force-stop / swipe-away never loses login state.
+                CookieManager.getInstance().flush();
             }
 
             @Override
@@ -692,10 +708,33 @@ public final class MainActivity extends Activity {
                 TypedValue.COMPLEX_UNIT_DIP, value, getResources().getDisplayMetrics()));
     }
 
-    private boolean handleNavigation(Uri uri) {
+    boolean handleNavigation(Uri uri) {
         if (uri == null) return true;
         String url = uri.toString();
         if (navigation.isTrusted(url)) return false;
+
+        String oauthNonce = TrustedNavigation.extractOAuthLoopbackNonce(url);
+        if (oauthNonce != null) {
+            if (webView != null) {
+                webView.stopLoading();
+            }
+            CookieManager.getInstance().flush();
+            try {
+                oauthLoopbackServer.start(
+                        OAuthLoopbackServer.DEFAULT_PORT,
+                        oauthNonce,
+                        this::onOAuthLoopbackCompleted);
+            } catch (IOException ex) {
+                Toast.makeText(
+                        this,
+                        "Không thể khởi tạo cổng xác thực cục bộ. Vui lòng thử lại.",
+                        Toast.LENGTH_LONG).show();
+                return true;
+            }
+            openExternalOAuthTab(uri);
+            return true;
+        }
+
         if (navigation.shouldOpenExternally(url)) {
             try {
                 startActivity(new Intent(Intent.ACTION_VIEW, uri));
@@ -707,6 +746,49 @@ public final class MainActivity extends Activity {
             }
         }
         return true; // Block HTTP, file:, intent:, javascript: and untrusted navigation.
+    }
+
+    private void openExternalOAuthTab(Uri uri) {
+        try {
+            CustomTabColorSchemeParams colors = new CustomTabColorSchemeParams.Builder()
+                    .setToolbarColor(0xFF087467)
+                    .build();
+            CustomTabsIntent customTabsIntent = new CustomTabsIntent.Builder()
+                    .setDefaultColorSchemeParams(colors)
+                    .setShowTitle(true)
+                    .setShareState(CustomTabsIntent.SHARE_STATE_OFF)
+                    .build();
+            customTabsIntent.launchUrl(this, uri);
+        } catch (ActivityNotFoundException ex) {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, uri));
+            } catch (ActivityNotFoundException inner) {
+                oauthLoopbackServer.stop();
+                Toast.makeText(
+                        this,
+                        "Không tìm thấy trình duyệt hệ thống để đăng nhập.",
+                        Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    private void onOAuthLoopbackCompleted(String sanitizedQuerySuffix) {
+        mainHandler.post(() -> {
+            if (isFinishing() || webView == null) {
+                return;
+            }
+            webView.onResume();
+            String suffix = sanitizedQuerySuffix != null ? sanitizedQuerySuffix : "";
+            loadTrustedUrl(navigation.getOrigin() + "/auth/callback" + suffix);
+            try {
+                Intent bringFront = new Intent(this, MainActivity.class);
+                bringFront.addFlags(
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                startActivity(bringFront);
+            } catch (Exception ignored) {
+                // Foreground return is also driven by HTTP 302 -> viread://oauth-callback
+            }
+        });
     }
 
     boolean launchFileAndCameraChooser(
@@ -1051,17 +1133,11 @@ public final class MainActivity extends Activity {
     @Override
     protected void onPause() {
         if (webView != null) {
+            // Flush session/PKCE cookies immediately, while keeping WebView JS timers active
+            // if a translucent OEM overlay (e.g. Honor Keychain / Google Autofill dialog)
+            // appears above the still-visible Activity. Full media release + webView.onPause()
+            // happens in onStop() when ViRead actually leaves the visible screen.
             CookieManager.getInstance().flush();
-            // Do NOT fire background release or cancel pendingPermission while an in-app
-            // system permission dialog or native file/camera chooser is transiently overlaid.
-            if (!awaitingSystemPermission && pendingFiles == null) {
-                webView.evaluateJavascript(
-                        "document.dispatchEvent(new Event('viread:android-background'))", null);
-                webView.onPause();
-            }
-        }
-        if (!awaitingSystemPermission) {
-            denyPending();
         }
         super.onPause();
     }
@@ -1077,6 +1153,15 @@ public final class MainActivity extends Activity {
             denyPending();
         }
         super.onStop();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (webView != null) {
+            webView.onResume();
+        }
     }
 
     @Override
@@ -1131,6 +1216,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         cancelLoadWatchdog();
+        oauthLoopbackServer.stop();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && backInvokedCallback != null) {
             getOnBackInvokedDispatcher().unregisterOnBackInvokedCallback(backInvokedCallback);
             backInvokedCallback = null;

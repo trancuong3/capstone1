@@ -87,6 +87,7 @@ public final class AppBrandingAndManifestTest {
         assertTrue(perms.contains(Manifest.permission.ACCESS_NETWORK_STATE));
         assertTrue(perms.contains(Manifest.permission.CAMERA));
         assertTrue(perms.contains(Manifest.permission.RECORD_AUDIO));
+        assertTrue(perms.contains(Manifest.permission.MODIFY_AUDIO_SETTINGS));
 
         ProviderInfo provider = pm.resolveContentProvider(
                 "vn.viread.android.fileprovider", PackageManager.GET_META_DATA);

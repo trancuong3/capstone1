@@ -36,6 +36,10 @@ export async function proxy(request: NextRequest) {
 
   const auth = await refreshSupabaseAuth(request);
 
+  if (pathname === "/" && auth.userId) {
+    return redirectWithAuthState(request, "/dashboard", auth.response);
+  }
+
   if (protectedArea && !auth.userId) {
     return redirectWithAuthState(
       request,
