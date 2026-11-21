@@ -223,7 +223,7 @@ describe("AdminBookContentQualityScreen rights evidence, diagnostics, and report
       within(diagnostics).getByText(/Nghi thiếu trang/i),
     ).toBeInTheDocument();
 
-    // Approve button stays disabled without rights_confirmed even when reason is entered
+    // Approve button is enabled once reason is entered (rights evidence is optional)
     await user.type(
       screen.getByLabelText(/Lý do \/ ghi chú quyết định/i),
       "Kiểm tra phê duyệt",
@@ -231,7 +231,7 @@ describe("AdminBookContentQualityScreen rights evidence, diagnostics, and report
     const approveBtn = screen.getByRole("button", {
       name: /Phê duyệt toàn bộ sách/i,
     });
-    expect(approveBtn).toBeDisabled();
+    expect(approveBtn).toBeEnabled();
 
     // Fill Rights Evidence as RIGHTS_REVIEWED
     await user.selectOptions(

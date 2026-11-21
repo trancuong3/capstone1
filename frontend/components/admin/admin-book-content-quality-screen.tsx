@@ -1525,7 +1525,8 @@ export function AdminBookContentQualityScreen() {
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
                       <h4 className="font-extrabold text-ink">
-                        Rà soát quyền sử dụng nội dung &amp; lưu bằng chứng
+                        Rà soát quyền sử dụng nội dung &amp; lưu bằng chứng (Tùy
+                        chọn)
                       </h4>
                       <p className="mt-1 text-xs text-muted">
                         Ghi nhận nguồn tài liệu, cơ sở sử dụng và đường dẫn/mã
@@ -1900,7 +1901,6 @@ export function AdminBookContentQualityScreen() {
                       className="h-10 w-auto px-3 text-sm"
                       disabled={
                         !bookDecisionReason.trim() ||
-                        !selectedBook.assessment.rights_confirmed ||
                         selectedBook.assessment.ocr_completed_pages !==
                           selectedBook.assessment.page_count ||
                         selectedBook.assessment.ocr_approval_valid_pages !==

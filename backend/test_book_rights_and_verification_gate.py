@@ -319,19 +319,18 @@ class RightsEvidenceServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(stale_read.is_stale)
         self.assertEqual(stale_read.effective_status, "STALE_RIGHTS_REVIEW")
 
-        # Approving a book with stale rights fails closed
-        with self.assertRaises(HTTPException) as stale_approve:
-            await service.decide_book(
-                ACTOR_ID,
-                BOOK_ID,
-                BookQualityBookDecisionRequest(
-                    decision="APPROVE",
-                    reason="Thử duyệt khi hồ sơ quyền đã cũ",
-                    rights_confirmed=True,
-                ),
-            )
-        self.assertEqual(stale_approve.exception.status_code, 409)
-        self.assertEqual(stale_approve.exception.detail["code"], "RIGHTS_EVIDENCE_STALE")
+        # Rights evidence is currently optional/advisory: stale rights does not block approval
+        # once OCR + Proofreading + Text/Image Child Safety are complete.
+        approved_res = await service.decide_book(
+            ACTOR_ID,
+            BOOK_ID,
+            BookQualityBookDecisionRequest(
+                decision="APPROVE",
+                reason="Duyệt sau khi hoàn tất OCR, chính tả và an toàn nội dung/hình ảnh",
+                rights_confirmed=False,
+            ),
+        )
+        self.assertEqual(approved_res.assessment.status, "APPROVED_BY_ADMIN")
 
     async def test_parent_cannot_read_or_write_rights_evidence(self):
         repo = _RightsRepoFake(role="parent")
@@ -513,13 +512,17 @@ class VerificationGateHardeningTests(unittest.IsolatedAsyncioTestCase):
             await s5.verify(ACTOR_ID, PAGE_ID, _verify_payload())
         self.assertEqual(e5.exception.detail["code"], "IMAGE_SAFETY_STALE")
 
-        # 6. Missing rights evidence
+        # 6. Missing rights evidence is allowed (optional) when OCR + Proofreading + Text/Image Safety are complete
         s6, _, _, _ = self._service(workflow=_valid_workflow(), rights=None)
-        with self.assertRaises(HTTPException) as e6:
-            await s6.verify(ACTOR_ID, PAGE_ID, _verify_payload())
-        self.assertEqual(e6.exception.detail["code"], "RIGHTS_EVIDENCE_REQUIRED")
+        with patch.object(
+            BookContentQualityService,
+            "auto_publish_if_eligible",
+            new=AsyncMock(),
+        ):
+            verified_without_rights = await s6.verify(ACTOR_ID, PAGE_ID, _verify_payload())
+        self.assertEqual(verified_without_rights, "VERIFIED_OK")
 
-        # 7. Flagged copyright concern
+        # 7. Explicitly flagged copyright concern still blocks verification
         s7, _, _, _ = self._service(
             workflow=_valid_workflow(),
             rights=_valid_rights(Status="CONCERN_FLAGGED"),

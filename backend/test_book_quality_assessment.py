@@ -231,9 +231,9 @@ class BookQualityAssessmentTests(unittest.TestCase):
         )
 
         assessment_without_rights = BookContentQualityService._assessment(rows, [])
-        self.assertEqual(assessment_without_rights.status, "PENDING_ADMIN_REVIEW")
+        self.assertEqual(assessment_without_rights.status, "READY_FOR_CHILDREN")
         self.assertEqual(assessment_without_rights.copyright_status, "UNASSESSED")
-        self.assertIn("RIGHTS_UNASSESSED", assessment_without_rights.blockers)
+        self.assertNotIn("RIGHTS_UNASSESSED", assessment_without_rights.blockers)
 
         assessment = BookContentQualityService._assessment(
             rows, [], rights_evidence=rights

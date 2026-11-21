@@ -2715,9 +2715,9 @@ class AdminOcrService:
                     ),
                     "source_image_sha256": revision_meta.get("source_image_sha256")
                     or getattr(workflow, "SourceImageSha256", None),
-                    "rights_evidence_id": str(rights_evidence.Id),
-                    "rights_evidence_version": int(rights_evidence.Version),
-                    "rights_evidence_scope": rights_evidence.Scope,
+                    "rights_evidence_id": str(rights_evidence.Id) if rights_evidence is not None else None,
+                    "rights_evidence_version": int(rights_evidence.Version) if rights_evidence is not None else None,
+                    "rights_evidence_scope": rights_evidence.Scope if rights_evidence is not None else None,
                 }
                 workflow.OcrApprovedAt = now
                 workflow.OcrApprovedBy = actor_id
@@ -2726,7 +2726,7 @@ class AdminOcrService:
                     "event": "OCR_FINAL_APPROVED",
                     "actor_id": str(actor_id),
                     "content_hash": workflow_text_hash,
-                    "rights_evidence_version": int(rights_evidence.Version),
+                    "rights_evidence_version": int(rights_evidence.Version) if rights_evidence is not None else None,
                     "image_safety_status": getattr(
                         workflow, "ImageSafetyStatus", "ADMIN_CONFIRMED_SAFE"
                     ),
@@ -2933,8 +2933,10 @@ class AdminOcrService:
         page_id: UUID,
         *,
         expected_rights_version: int | None = None,
-    ) -> BookRightsEvidence:
-        """Require persisted RIGHTS_REVIEWED evidence at page or book scope."""
+    ) -> BookRightsEvidence | None:
+        """Validate persisted rights evidence when policy requires it; otherwise optional."""
+        from app.policies.book_approval import COPYRIGHT_BLOCKS_BOOK_APPROVAL
+
         page_rights = await self.db.scalar(
             select(BookRightsEvidence).where(
                 BookRightsEvidence.BookId == book_id,
@@ -2952,6 +2954,8 @@ class AdminOcrService:
                 )
             )
         if rights is None:
+            if not COPYRIGHT_BLOCKS_BOOK_APPROVAL:
+                return None
             raise HTTPException(
                 status_code=409,
                 detail={
@@ -2967,8 +2971,11 @@ class AdminOcrService:
                     "message": "Sách hoặc trang đang bị gắn cờ nghi ngại bản quyền / quyền sử dụng nên không thể xác minh.",
                 },
             )
-        if rights.Status != "RIGHTS_REVIEWED" or not (
-            rights.SourceDescription and rights.UsageBasis and rights.EvidenceUrlOrRef
+        if COPYRIGHT_BLOCKS_BOOK_APPROVAL and (
+            rights.Status != "RIGHTS_REVIEWED"
+            or not (
+                rights.SourceDescription and rights.UsageBasis and rights.EvidenceUrlOrRef
+            )
         ):
             raise HTTPException(
                 status_code=409,

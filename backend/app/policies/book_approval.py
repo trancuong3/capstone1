@@ -7,6 +7,7 @@ SUPPORTED_BOOK_APPROVAL_POLICY_VERSIONS = (
     LEGACY_BOOK_APPROVAL_POLICY_VERSION,
 )
 
-# Rights/usage-permission evidence review is persisted per book/page and blocks
-# new book approvals when missing, insufficient, flagged, or stale.
-COPYRIGHT_BLOCKS_BOOK_APPROVAL = True
+# Rights/usage-permission evidence review is optional/advisory for now.
+# Page verification and book approval require OCR, Proofreading, Text Child
+# Safety, and Image Safety without blocking on missing rights evidence.
+COPYRIGHT_BLOCKS_BOOK_APPROVAL = False
