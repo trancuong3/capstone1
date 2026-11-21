@@ -8,7 +8,8 @@ param(
     [string]$PrivateRoot = "F:\c1\ocr-private-eval",
     [string]$EnvFile = "F:\c1\capstone1\backend\.env",
     [string]$ExpectedSha = "200edce460606275481dda19c50b7763620a112ddc66a8378982bddc013114a6",
-    [int]$MinHeldoutPages = 20
+    [int]$MinHeldoutPages = 20,
+    [switch]$TestsOnly
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -28,6 +29,12 @@ foreach ($test in @(
     if ($LASTEXITCODE -ne 0) { throw "TASK 14 UNIT TEST FAILED" }
 }
 Write-Host "TASK 14 PURE UNIT TESTS PASSED" -ForegroundColor Green
+if ($TestsOnly) {
+    Write-Host "TESTS-ONLY: no private held-out OCR benchmark was performed." -ForegroundColor Yellow
+    Write-Host "Independent held-out acceptance: NOT VERIFIED" -ForegroundColor Yellow
+    Write-Host "Production deployment: BLOCKED" -ForegroundColor Yellow
+    return
+}
 
 $development = Join-Path $PrivateRoot "pages.jsonl"
 $heldoutDir = Join-Path $PrivateRoot "heldout"
