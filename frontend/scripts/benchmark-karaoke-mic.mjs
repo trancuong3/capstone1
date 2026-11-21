@@ -46,6 +46,18 @@ const source = [
   "function Probe() {",
   "  const mic = useKaraokeScoring(window.benchInput.lyrics, time);",
   "  window.currentMic = mic;",
+  "  React.useEffect(() => {",
+  "    let frame; let previous = null;",
+  "    function tick() {",
+  "      const now = time();",
+  "      if (!player.paused && !player.ended && window.currentMic?.status === 'listening') {",
+  "        if (previous !== null && now > previous && now - previous <= 650) { window.currentMic.observePlayback(previous, now); window.playbackTicks = (window.playbackTicks || 0) + 1; }",
+  "        previous = now;",
+  "      } else previous = null;",
+  "      frame = requestAnimationFrame(tick);",
+  "    }",
+  "    frame = requestAnimationFrame(tick); return () => cancelAnimationFrame(frame);",
+  "  }, []);",
   '  if (window.endTime != null && window.finalizeMs == null && ["scored", "insufficient"].includes(mic.status))',
   "    window.finalizeMs = Math.round(performance.now() - window.endTime);",
   "  async function run() {",
@@ -129,12 +141,14 @@ try {
         defaultStarts: 0,
         finals: 0,
         errors: [],
+        transcripts: [],
       };
       if (!Native) return;
       Object.defineProperty(window, "SpeechRecognition", {
         value: new Proxy(Native, {
           construct(target, args) {
             const rec = Reflect.construct(target, args);
+            const seenFinals = new Set();
             const start = rec.start;
             rec.start = function (...args) {
               if (!args[0]) {
@@ -148,6 +162,12 @@ try {
               return value;
             };
             rec.addEventListener("result", (e) => {
+              for (let i = e.resultIndex; i < e.results.length; i++) {
+                if (e.results[i].isFinal && !seenFinals.has(i)) {
+                  seenFinals.add(i);
+                  window.events.transcripts.push(e.results[i][0].transcript);
+                }
+              }
               if (
                 Array.from(e.results)
                   .slice(e.resultIndex)
@@ -198,6 +218,10 @@ try {
       evaluated: report?.evaluatedWords,
       matched: report?.matchedWords,
       total: report?.totalWords,
+      playbackTicks: window.playbackTicks ?? 0,
+      words: report?.lineScores.flatMap((l) =>
+        l.words.map((w) => ({ id: w.id, text: w.text, state: w.state })),
+      ),
       matchedIds: report?.lineScores.flatMap((l) =>
         l.words.filter((w) => w.state === "matched").map((w) => w.id),
       ),

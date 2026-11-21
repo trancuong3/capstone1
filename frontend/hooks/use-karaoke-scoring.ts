@@ -3,14 +3,18 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { KaraokeLyrics } from "@/types/karaoke";
 import {
-  BrowserTranscriptCollector,
-  type BrowserRecognitionEventLike,
-} from "@/lib/reading/browser-transcript-collector";
+  browserSingingProvider,
+  type SingingRecognizer as Recognition,
+  type SingingRecognitionProvider,
+} from "@/lib/karaoke/recognition-provider";
+import { CaptureWindows } from "@/lib/karaoke/recognition-capture";
 import {
   LiveSingingAttempt,
   type LiveSingingScore,
   type LiveWordState,
+  type SingingActivity,
 } from "@/lib/karaoke/live-singing-score";
+import { monitorSingingTrack } from "@/lib/karaoke/microphone-signal";
 
 type Status =
   | "idle"
@@ -31,32 +35,8 @@ type Snapshot = {
   error: string | null;
   previewWords: ReadonlyMap<string, LiveWordState>;
   liveTranscript: string;
+  signal: SingingActivity | "unavailable";
 };
-
-interface Recognition {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  maxAlternatives: number;
-  onstart: (() => void) | null;
-  onspeechstart: (() => void) | null;
-  onspeechend: (() => void) | null;
-  onresult: ((event: BrowserRecognitionEventLike) => void) | null;
-  onerror: ((event: { error?: string }) => void) | null;
-  onend: (() => void) | null;
-  start(track?: MediaStreamTrack): void;
-  stop(): void;
-  abort(): void;
-}
-
-function recognitionConstructor() {
-  if (typeof window === "undefined") return null;
-  const browser = window as Window & {
-    SpeechRecognition?: new () => Recognition;
-    webkitSpeechRecognition?: new () => Recognition;
-  };
-  return browser.SpeechRecognition ?? browser.webkitSpeechRecognition ?? null;
-}
 
 function microphoneError(code?: string) {
   switch (code) {
@@ -97,174 +77,19 @@ const idle: Snapshot = {
   error: null,
   previewWords: emptyPreview,
   liveTranscript: "",
+  signal: "unavailable",
 };
-const supported = () => Boolean(recognitionConstructor());
+const supported = () => browserSingingProvider.supported();
 const serverSupported = () => false;
 const subscribeSupport = () => () => {};
 const startWaitMs = 15_000;
 const finalWaitMs = 2_000;
 const maxEmptyRestarts = 2;
 
-type SpeechWindow = { start: number; end: number };
-
-// SpeechRecognition provides final text without word timestamps. Prefer speech
-// activity measured on the native music clock; a result-only interval is usable
-// only while short enough to locate its utterance. Never invent earlier times.
-class CaptureWindows {
-  private readonly collector = new BrowserTranscriptCollector();
-  private windows: SpeechWindow[] = [];
-  private speakingFrom: number | null = null;
-  private interimFrom: number | null = null;
-  private hasSpeechEvents = false;
-  private startedAt: number;
-  private lastFinalMs: number;
-  private overflow = false;
-  private stoppedAt: number | null = null;
-
-  constructor(
-    private readonly clock: () => number,
-    private readonly sliced: boolean,
-  ) {
-    this.lastFinalMs = clock();
-    this.startedAt = this.lastFinalMs;
-  }
-
-  freeze = () => {
-    this.stoppedAt ??= this.clock();
-  };
-  started = () => {
-    this.startedAt = this.now();
-    this.lastFinalMs = this.startedAt;
-  };
-  private now() {
-    return this.stoppedAt ?? this.clock();
-  }
-
-  speechStart = () => {
-    this.hasSpeechEvents = true;
-    this.speakingFrom = this.now();
-  };
-  speechEnd = () => {
-    if (this.speakingFrom === null) return;
-    const end = this.now();
-    if (end > this.speakingFrom) {
-      if (this.windows.length === 8) this.overflow = true;
-      if (!this.overflow) this.windows.push({ start: this.speakingFrom, end });
-    }
-    this.speakingFrom = null;
-  };
-
-  consume(event: BrowserRecognitionEventLike, attempt: LiveSingingAttempt) {
-    let interimText = "";
-    const startIdx = Math.max(0, event.resultIndex ?? 0);
-    for (let i = startIdx; i < event.results.length; i++) {
-      const res = event.results[i];
-      if (res && !res.isFinal) {
-        const part = res[0]?.transcript?.trim() ?? "";
-        if (part) interimText += (interimText ? " " : "") + part;
-      }
-    }
-    const now = this.now();
-    if (interimText && this.interimFrom === null) {
-      this.interimFrom =
-        this.speakingFrom ?? Math.max(this.startedAt, now - 400);
-    }
-
-    const finals: { text: string; usable: boolean }[] = [];
-    this.collector.addResults(event, (text, usable) => {
-      finals.push({ text, usable });
-      return usable;
-    });
-    if (!finals.length) {
-      if (!interimText)
-        return { changed: false, preview: emptyPreview, transcript: "" };
-      const from = Math.max(this.interimFrom ?? this.startedAt, this.startedAt);
-      const preview = attempt.preview(
-        interimText,
-        from,
-        Math.max(now, from + 200),
-        this.startedAt,
-      );
-      return {
-        changed: true,
-        preview,
-        transcript: interimText,
-      };
-    }
-    const interimStart = this.interimFrom;
-    this.interimFrom = null;
-    const end = now;
-    const previous = this.lastFinalMs;
-    this.lastFinalMs = end;
-    if (this.overflow) {
-      this.overflow = false;
-      this.windows = [];
-      this.speakingFrom = null;
-      return { changed: false, preview: emptyPreview, transcript: "" };
-    }
-    const ranges = this.windows;
-    this.windows = [];
-    if (this.speakingFrom !== null && finals.length > ranges.length) {
-      ranges.push({ start: this.speakingFrom, end });
-      this.speakingFrom = end;
-    } else if (
-      !ranges.length &&
-      !this.hasSpeechEvents &&
-      end - previous <= (this.sliced ? 8000 : 4000)
-    ) {
-      ranges.push({ start: previous, end });
-    } else if (!ranges.length && interimStart !== null && end > interimStart) {
-      ranges.push({ start: interimStart, end });
-    }
-    const assign = (text: string, range: SpeechWindow) =>
-      range.end > range.start &&
-      range.end - range.start <= 12000 &&
-      attempt.accept(
-        text,
-        Math.max(range.start, this.startedAt),
-        range.end,
-        this.startedAt,
-      );
-    const finalTranscript = finals
-      .filter((slot) => slot.usable)
-      .map((slot) => slot.text.trim())
-      .filter(Boolean)
-      .join(" ");
-    if (ranges.length === 1 && finals.every((slot) => slot.usable)) {
-      const ok = assign(finals.map((slot) => slot.text).join(" "), ranges[0]);
-      return {
-        changed: ok,
-        preview: emptyPreview,
-        transcript: ok ? finalTranscript : "",
-      };
-    }
-    if (finals.length === 1 && finals[0].usable && ranges.length > 1) {
-      const merged: SpeechWindow = {
-        start: ranges[0].start,
-        end: Math.max(ranges.at(-1)!.end, end),
-      };
-      const ok = assign(finals[0].text, merged);
-      return {
-        changed: ok,
-        preview: emptyPreview,
-        transcript: ok ? finalTranscript : "",
-      };
-    }
-    if (ranges.length !== finals.length)
-      return { changed: false, preview: emptyPreview, transcript: "" };
-    let changed = false;
-    finals.forEach((slot, index) => {
-      if (slot.usable && assign(slot.text, ranges[index])) changed = true;
-    });
-    return {
-      changed,
-      preview: emptyPreview,
-      transcript: changed ? finalTranscript : "",
-    };
-  }
-}
-
 class KaraokeMicSession {
+  constructor(
+    private readonly provider: SingingRecognitionProvider = browserSingingProvider,
+  ) {}
   private snapshot = idle;
   private listeners = new Set<() => void>();
   private recognition: Recognition | null = null;
@@ -284,6 +109,7 @@ class KaraokeMicSession {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private resolveArm: ((started: boolean) => void) | null = null;
   private emptyRestarts = 0;
+  private stopSignal: (() => void) | null = null;
 
   getSnapshot = () => this.snapshot;
   subscribe = (listener: () => void) => {
@@ -306,6 +132,7 @@ class KaraokeMicSession {
       songScore: this.savedSong ? this.savedSong.snapshot.score : score,
       previewWords: this.snapshot.previewWords ?? emptyPreview,
       liveTranscript: this.snapshot.liveTranscript ?? "",
+      signal: this.snapshot.signal,
     };
     for (const listener of this.listeners) listener();
   }
@@ -320,6 +147,20 @@ class KaraokeMicSession {
   }
 
   private release(abort: boolean, keepStream = false) {
+    if (this.attempt?.flushPlayedOmissions(this.getTime())) {
+      this.snapshot = {
+        ...this.snapshot,
+        liveScore: this.attempt.result(!!this.savedSong),
+      };
+    }
+    this.attempt?.closeCapture();
+    this.stopSignal?.();
+    this.stopSignal = null;
+    this.snapshot = {
+      ...this.snapshot,
+      previewWords: emptyPreview,
+      signal: "unavailable",
+    };
     clearTimeout(this.timer);
     clearInterval(this.sliceClock);
     this.windows = null;
@@ -506,24 +347,20 @@ class KaraokeMicSession {
   }
 
   private open(probe: boolean) {
-    const Constructor = recognitionConstructor();
-    if (!Constructor) {
+    if (!this.provider.supported()) {
       this.fail(
         "Trình duyệt này chưa hỗ trợ nhận dạng để chấm điểm. Bé có thể hát tự do.",
       );
       return;
     }
     try {
-      const recognition = new Constructor();
+      const recognition = this.provider.create();
+      if (!recognition) throw new Error("Recognition unavailable");
       const windows = new CaptureWindows(this.getTime, this.trackInput);
       let capturing = false;
       let noSpeech = false;
       this.windows = windows;
       this.recognition = recognition;
-      recognition.lang = "vi-VN";
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.maxAlternatives = 1;
 
       recognition.onstart = () => {
         if (this.recognition !== recognition) return;
@@ -537,6 +374,26 @@ class KaraokeMicSession {
         } else {
           capturing = true;
           windows.started();
+          this.attempt?.beginCapture(windows.captureId);
+          if (this.trackInput && this.stream) {
+            this.stopSignal = monitorSingingTrack(
+              this.stream,
+              this.getTime,
+              (from, to, activity) => {
+                if (
+                  this.recognition !== recognition ||
+                  this.drainingSlice ||
+                  this.snapshot.status !== "listening"
+                )
+                  return;
+                this.attempt?.observeAudio(from, to, activity);
+                if (activity !== this.snapshot.signal) {
+                  this.snapshot = { ...this.snapshot, signal: activity };
+                  this.update(this.snapshot.status);
+                }
+              },
+            );
+          }
           this.update("listening");
           if (this.trackInput) this.scheduleSlice(recognition, windows);
         }
@@ -545,16 +402,14 @@ class KaraokeMicSession {
         if (this.recognition !== recognition || !capturing || !this.attempt)
           return;
         const outcome = windows.consume(event, this.attempt);
-        if (outcome.changed) {
-          this.emptyRestarts = 0;
-          this.snapshot = {
-            ...this.snapshot,
-            liveScore: this.attempt.result(!!this.savedSong),
-            previewWords: outcome.preview,
-            liveTranscript: outcome.transcript || this.snapshot.liveTranscript,
-          };
-          this.update(this.snapshot.status);
-        }
+        if (outcome.changed) this.emptyRestarts = 0;
+        this.snapshot = {
+          ...this.snapshot,
+          liveScore: this.attempt.result(!!this.savedSong),
+          previewWords: outcome.preview,
+          liveTranscript: outcome.transcript,
+        };
+        this.update(this.snapshot.status);
       };
       if (!probe) {
         recognition.onspeechstart = windows.speechStart;
@@ -572,6 +427,16 @@ class KaraokeMicSession {
         if (this.recognition !== recognition) return;
         const deliberate = this.drainingSlice;
         const finishing = this.snapshot.status === "finishing";
+        if (
+          !probe &&
+          capturing &&
+          this.attempt?.settleThrough(windows.freeze())
+        ) {
+          this.snapshot = {
+            ...this.snapshot,
+            liveScore: this.attempt.result(!!this.savedSong),
+          };
+        }
         this.release(false, !probe && !finishing);
         if (finishing) this.complete();
         else if (
@@ -634,7 +499,11 @@ class KaraokeMicSession {
   };
 
   observePlayback = (fromMs: number, toMs: number) => {
-    if (!this.attempt || !["listening", "armed"].includes(this.snapshot.status))
+    if (
+      !this.attempt ||
+      this.snapshot.status !== "listening" ||
+      this.drainingSlice
+    )
       return;
     if (this.attempt.observePlayback(fromMs, toMs)) {
       this.snapshot = {

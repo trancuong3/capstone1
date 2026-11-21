@@ -5,6 +5,7 @@ import type {
   LiveWordState,
 } from "@/lib/karaoke/live-singing-score";
 import { syllableProgress } from "@/lib/karaoke/syllable-timing";
+import { splitSingingText } from "@/lib/karaoke/singing-text";
 import styles from "./syllable-lyrics.module.css";
 
 export function SyllableLyrics({
@@ -25,104 +26,82 @@ export function SyllableLyrics({
   for (const word of evidence?.words ?? []) {
     if (word.state !== "unknown") stateById.set(word.id, word.state);
   }
-  const hasAnyEvidence = stateById.size > 0 || (previewWords?.size ?? 0) > 0;
+  const phaseById = new Map(
+    evidence?.words.map((word) => [word.id, word.phase]) ?? [],
+  );
+  const hasAnyEvidence = Boolean(evidence) || (previewWords?.size ?? 0) > 0;
 
   function mark(text: string, unitId: string) {
     if (!hasAnyEvidence) return text;
     let token = 0;
-    return text
-      .normalize("NFC")
-      .split(/([\p{L}\p{M}\p{N}]+)/gu)
-      .map((part, index) => {
-        if (!/[\p{L}\p{N}]/u.test(part)) return part;
-        const id = unitId + "/" + token++;
-        const committed = stateById.get(id);
-        if (committed === "matched") {
-          return (
-            <span
-              key={index}
-              className={styles.heard}
-              data-heard={id}
-              data-word-state="matched"
-            >
-              {part}
-              <span className="sr-only"> (đã nghe khớp)</span>
-            </span>
-          );
-        }
-        if (committed === "different") {
-          return (
-            <span
-              key={index}
-              className={styles.wrong}
-              data-word-state="different"
-            >
-              {part}
-              <span className="sr-only"> (chưa đúng lời)</span>
-            </span>
-          );
-        }
-        const preview = previewWords?.get(id);
-        if (preview === "matched") {
-          return (
-            <span
-              key={index}
-              className={styles.previewHeard}
-              data-word-state="preview-matched"
-            >
-              {part}
-            </span>
-          );
-        }
-        if (preview === "different") {
-          return (
-            <span
-              key={index}
-              className={styles.wrong}
-              data-word-state="preview-different"
-            >
-              {part}
-            </span>
-          );
-        }
-        if (committed === "omitted") {
-          return (
-            <span
-              key={index}
-              className={styles.omitted}
-              data-word-state="omitted"
-            >
-              {part}
-              <span className="sr-only"> (bỏ qua)</span>
-            </span>
-          );
-        }
-        if (preview === "omitted") {
-          return (
-            <span
-              key={index}
-              className={styles.omitted}
-              data-word-state="preview-omitted"
-            >
-              {part}
-            </span>
-          );
-        }
-        return part;
-      });
+    return splitSingingText(text).map((part, index) => {
+      if (!/[\p{L}\p{N}]/u.test(part)) return part;
+      const id = unitId + "/" + token++;
+      const committed = stateById.get(id);
+      if (committed === "matched") {
+        return (
+          <span
+            key={index}
+            className={styles.heard}
+            data-heard={id}
+            data-word-state="matched"
+          >
+            {part}
+            <span className="sr-only"> (đã nghe khớp)</span>
+          </span>
+        );
+      }
+      if (committed === "different") {
+        return (
+          <span
+            key={index}
+            className={styles.wrong}
+            data-word-state="different"
+          >
+            {part}
+            <span className="sr-only"> (chưa đúng lời)</span>
+          </span>
+        );
+      }
+      if (committed === "omitted") {
+        return (
+          <span
+            key={index}
+            className={styles.omitted}
+            data-word-state="omitted"
+          >
+            {part}
+            <span className="sr-only"> (bỏ qua)</span>
+          </span>
+        );
+      }
+      if (previewWords?.has(id) || phaseById.get(id) === "processing") {
+        return (
+          <span
+            key={index}
+            className={styles.processing}
+            data-word-state="processing"
+          >
+            {part}
+            <span className="sr-only"> (đang xử lý)</span>
+          </span>
+        );
+      }
+      return part;
+    });
   }
 
   function unitRecognition(unitId: string, text: string): string | undefined {
     if (!hasAnyEvidence) return undefined;
     let token = 0;
     let found: string | undefined;
-    for (const part of text.normalize("NFC").split(/([\p{L}\p{M}\p{N}]+)/gu)) {
+    for (const part of splitSingingText(text)) {
       if (!/[\p{L}\p{N}]/u.test(part)) continue;
       const id = unitId + "/" + token++;
       const committed = stateById.get(id);
       if (committed) return committed;
       const preview = previewWords?.get(id);
-      if (preview) found ??= `preview-${preview}`;
+      if (preview || phaseById.get(id) === "processing") found ??= "processing";
     }
     return found;
   }

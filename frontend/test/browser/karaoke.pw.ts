@@ -433,12 +433,13 @@ type ScoringBrowserFixture = {
   liveTracks: number;
   tracksStarted: number;
   sing: (startSeconds: number, endSeconds: number, text: string) => void;
+  preview: (text: string) => void;
 };
 type ScoringPage = Window & { __singingFixture: ScoringBrowserFixture };
 
 test("child live scoring confirms actual syllables and preserves song results after practice", async ({
   page,
-}) => {
+}, info) => {
   await page.addInitScript(() => {
     // A disconnected Web Audio destination provides silent, real audio tracks.
     // This test cannot prompt for the device mic or call a speech service.
@@ -499,6 +500,16 @@ test("child live scoring confirms actual syllables and preserves song results af
       },
       get tracksStarted() {
         return tracksStarted;
+      },
+      preview(text: string) {
+        if (!this.audio || !Recognizer.active)
+          throw new Error("No active capture");
+        Recognizer.active.onresult?.({
+          resultIndex: 0,
+          results: [
+            { isFinal: false, 0: { transcript: text, confidence: 0.99 } },
+          ],
+        });
       },
       sing(startSeconds: number, endSeconds: number, text: string) {
         const current = Recognizer.active;
@@ -570,6 +581,23 @@ test("child live scoring confirms actual syllables and preserves song results af
   ).toBe(0);
   await action("Hát tiếp").click();
   await listening();
+  // Let the native clock advance: seeking here triggers buffering and restarts
+  // capture, which would make this an unintended seek-boundary test.
+  await page.waitForFunction(
+    () =>
+      (window as unknown as ScoringPage).__singingFixture.audio.currentTime >=
+      1.1,
+  );
+  await page.evaluate(() =>
+    (window as unknown as ScoringPage).__singingFixture.preview("bé nói"),
+  );
+  await expect(stage.locator('[data-word-state="processing"]')).not.toHaveCount(
+    0,
+  );
+  await expect(stage.locator('[data-word-state="different"]')).toHaveCount(0);
+  await expect(stage.getByTestId("karaoke-live-feedback")).toContainText(
+    "Chưa đúng: 0",
+  );
   await page.evaluate(() =>
     (window as unknown as ScoringPage).__singingFixture.sing(1, 3.1, "bé vui"),
   );
@@ -582,6 +610,19 @@ test("child live scoring confirms actual syllables and preserves song results af
       els.map((el) => el.getAttribute("data-heard")),
     ),
   ).toEqual([line.syllables![0].id + "/0", line.syllables![2].id + "/0"]);
+  expect(
+    await stage
+      .locator('[data-recognition] > [aria-hidden="true"]')
+      .evaluateAll((elements) =>
+        elements.every(
+          (element) => getComputedStyle(element).visibility === "hidden",
+        ),
+      ),
+  ).toBe(true);
+  await page.screenshot({
+    path: info.outputPath("karaoke-v2-confirmed.png"),
+    fullPage: true,
+  });
 
   await page.evaluate(() => {
     const audio = (window as unknown as ScoringPage).__singingFixture.audio;
@@ -639,7 +680,14 @@ test("child live scoring confirms actual syllables and preserves song results af
     audio.currentTime = audio.duration - 0.1;
   });
   await expect(result).toContainText("Mình chưa nghe rõ");
+  await expect(result).toContainText(
+    "Chưa đánh giá: 3 tiếng. Phần này không tính là sai.",
+  );
   await expect(result.getByText(/^\d+\/100$/)).toHaveCount(0);
+  await page.screenshot({
+    path: info.outputPath("karaoke-v2-unassessed.png"),
+    fullPage: true,
+  });
   await noOverflow(page);
   expect(state.unexpected).toEqual([]);
   expect(base.unexpected).toEqual([]);

@@ -377,21 +377,13 @@ export function KaraokeStage({
     scoring.score ??
     (scoring.status === "insufficient" ? scoring.liveScore : null);
   const liveWords = scoring.liveScore?.lineScores.flatMap((l) => l.words) ?? [];
-  const effectiveState = (w: (typeof liveWords)[number]) => {
-    if (w.state === "matched" || w.state === "different") return w.state;
-    const preview = scoring.previewWords.get(w.id);
-    if (preview === "matched" || preview === "different") return preview;
-    if (w.state === "omitted" || preview === "omitted") return "omitted";
-    return "unknown";
-  };
-  const liveMatched = liveWords.filter(
-    (w) => effectiveState(w) === "matched",
-  ).length;
-  const liveWrong = liveWords.filter(
-    (w) => effectiveState(w) === "different",
-  ).length;
-  const liveOmitted = liveWords.filter(
-    (w) => effectiveState(w) === "omitted",
+  const liveMatched = liveWords.filter((w) => w.state === "matched").length;
+  const liveWrong = liveWords.filter((w) => w.state === "different").length;
+  const liveOmitted = liveWords.filter((w) => w.state === "omitted").length;
+  const pendingWords = liveWords.filter(
+    (w) =>
+      w.state === "unknown" &&
+      (w.phase === "processing" || scoring.previewWords.has(w.id)),
   ).length;
   const liveEvaluated = liveMatched + liveWrong + liveOmitted;
   const livePercent =
@@ -603,12 +595,26 @@ export function KaraokeStage({
                     <span className="rounded-full border border-orange-400 bg-orange-100 px-3 py-1 text-orange-900">
                       Bỏ qua: {liveOmitted}
                     </span>
+                    {pendingWords > 0 && (
+                      <span className="rounded-full border border-slate-300 bg-slate-50 px-3 py-1 text-slate-700">
+                        Đang xử lý: {pendingWords}
+                      </span>
+                    )}
                     {livePercent !== null && (
                       <span className="rounded-full border border-primary bg-sky px-3 py-1 text-primary">
                         Tỉ lệ đúng: {livePercent}%
                       </span>
                     )}
                   </div>
+                )}
+                {scoredMode && scoring.listening && (
+                  <p className="text-xs text-muted">
+                    {scoring.signal === "uncertain" &&
+                    liveEvaluated === 0 &&
+                    pendingWords === 0
+                      ? "Mình chưa nghe rõ. Bé đưa micro gần hơn một chút nhé."
+                      : "Nét chấm: đang nghe và đối chiếu, chưa tính điểm."}
+                  </p>
                 )}
                 {activeLine && next && (
                   <p className={styles.next}>Tiếp theo: {next.text}</p>

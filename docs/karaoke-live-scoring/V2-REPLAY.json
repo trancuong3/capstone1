@@ -1,0 +1,600 @@
+{
+  "kind": "synthetic-evidence-replay-not-asr-accuracy",
+  "baselineRef": "8ca22412",
+  "baseline": {
+    "cases": 16,
+    "passed": 11,
+    "expectedAssessed": 26,
+    "assessed": 39,
+    "matrix": {
+      "matched": {
+        "matched": 20,
+        "different": 0,
+        "omitted": 0,
+        "unknown": 0
+      },
+      "different": {
+        "matched": 0,
+        "different": 4,
+        "omitted": 0,
+        "unknown": 0
+      },
+      "omitted": {
+        "matched": 0,
+        "different": 0,
+        "omitted": 2,
+        "unknown": 0
+      },
+      "unknown": {
+        "matched": 4,
+        "different": 0,
+        "omitted": 9,
+        "unknown": 13
+      }
+    },
+    "results": [
+      {
+        "id": "correct",
+        "split": "calibration",
+        "preview": false,
+        "expected": [
+          "matched",
+          "matched",
+          "matched"
+        ],
+        "actual": [
+          "matched",
+          "matched",
+          "matched"
+        ],
+        "passed": true
+      },
+      {
+        "id": "substitution",
+        "split": "calibration",
+        "preview": false,
+        "expected": [
+          "matched",
+          "different",
+          "matched"
+        ],
+        "actual": [
+          "matched",
+          "different",
+          "matched"
+        ],
+        "passed": true
+      },
+      {
+        "id": "interior-missing",
+        "split": "calibration",
+        "preview": false,
+        "expected": [
+          "matched",
+          "omitted",
+          "matched"
+        ],
+        "actual": [
+          "matched",
+          "omitted",
+          "matched"
+        ],
+        "passed": true
+      },
+      {
+        "id": "unknown-leading-edge",
+        "split": "calibration",
+        "preview": false,
+        "expected": [
+          "unknown",
+          "matched",
+          "matched"
+        ],
+        "actual": [
+          "unknown",
+          "matched",
+          "matched"
+        ],
+        "passed": true
+      },
+      {
+        "id": "no-recognition",
+        "split": "calibration",
+        "preview": false,
+        "expected": [
+          "unknown",
+          "unknown",
+          "unknown"
+        ],
+        "actual": [
+          "omitted",
+          "omitted",
+          "omitted"
+        ],
+        "passed": false
+      },
+      {
+        "id": "ambiguous-preview",
+        "split": "calibration",
+        "preview": true,
+        "expected": [
+          "unknown",
+          "unknown",
+          "matched"
+        ],
+        "actual": [
+          "matched",
+          "omitted",
+          "matched"
+        ],
+        "passed": false
+      },
+      {
+        "id": "future-preview",
+        "split": "calibration",
+        "preview": true,
+        "expected": [
+          "matched",
+          "unknown",
+          "unknown"
+        ],
+        "actual": [
+          "matched",
+          "matched",
+          "matched"
+        ],
+        "passed": false
+      },
+      {
+        "id": "longer-omission",
+        "split": "held-out",
+        "preview": false,
+        "expected": [
+          "matched",
+          "matched",
+          "omitted",
+          "matched",
+          "matched"
+        ],
+        "actual": [
+          "matched",
+          "matched",
+          "omitted",
+          "matched",
+          "matched"
+        ],
+        "passed": true
+      },
+      {
+        "id": "all-different",
+        "split": "held-out",
+        "preview": false,
+        "expected": [
+          "different",
+          "different",
+          "different"
+        ],
+        "actual": [
+          "different",
+          "different",
+          "different"
+        ],
+        "passed": true
+      },
+      {
+        "id": "extra-word",
+        "split": "held-out",
+        "preview": false,
+        "expected": [
+          "matched",
+          "matched",
+          "matched"
+        ],
+        "actual": [
+          "matched",
+          "matched",
+          "matched"
+        ],
+        "passed": true
+      },
+      {
+        "id": "all-repeated-preview",
+        "split": "held-out",
+        "preview": true,
+        "expected": [
+          "unknown",
+          "unknown",
+          "unknown"
+        ],
+        "actual": [
+          "matched",
+          "unknown",
+          "unknown"
+        ],
+        "passed": false
+      },
+      {
+        "id": "timed-repeat",
+        "split": "held-out",
+        "preview": false,
+        "expected": [
+          "matched",
+          "unknown",
+          "unknown"
+        ],
+        "actual": [
+          "matched",
+          "unknown",
+          "unknown"
+        ],
+        "passed": true
+      },
+      {
+        "id": "seek-boundary",
+        "split": "held-out",
+        "preview": false,
+        "expected": [
+          "unknown",
+          "unknown",
+          "unknown"
+        ],
+        "actual": [
+          "unknown",
+          "unknown",
+          "unknown"
+        ],
+        "passed": true
+      },
+      {
+        "id": "delayed-final",
+        "split": "held-out",
+        "preview": false,
+        "expected": [
+          "matched",
+          "unknown",
+          "unknown"
+        ],
+        "actual": [
+          "matched",
+          "unknown",
+          "unknown"
+        ],
+        "passed": true
+      },
+      {
+        "id": "late-missing-asr",
+        "split": "held-out",
+        "preview": false,
+        "expected": [
+          "unknown",
+          "unknown",
+          "unknown",
+          "unknown",
+          "unknown"
+        ],
+        "actual": [
+          "omitted",
+          "omitted",
+          "omitted",
+          "omitted",
+          "omitted"
+        ],
+        "passed": false
+      },
+      {
+        "id": "too-short-to-prove-wrong",
+        "split": "held-out",
+        "preview": false,
+        "expected": [
+          "unknown",
+          "unknown",
+          "unknown"
+        ],
+        "actual": [
+          "unknown",
+          "unknown",
+          "unknown"
+        ],
+        "passed": true
+      }
+    ]
+  },
+  "current": {
+    "cases": 16,
+    "passed": 16,
+    "expectedAssessed": 26,
+    "assessed": 26,
+    "matrix": {
+      "matched": {
+        "matched": 20,
+        "different": 0,
+        "omitted": 0,
+        "unknown": 0
+      },
+      "different": {
+        "matched": 0,
+        "different": 4,
+        "omitted": 0,
+        "unknown": 0
+      },
+      "omitted": {
+        "matched": 0,
+        "different": 0,
+        "omitted": 2,
+        "unknown": 0
+      },
+      "unknown": {
+        "matched": 0,
+        "different": 0,
+        "omitted": 0,
+        "unknown": 26
+      }
+    },
+    "results": [
+      {
+        "id": "correct",
+        "split": "calibration",
+        "preview": false,
+        "expected": [
+          "matched",
+          "matched",
+          "matched"
+        ],
+        "actual": [
+          "matched",
+          "matched",
+          "matched"
+        ],
+        "passed": true
+      },
+      {
+        "id": "substitution",
+        "split": "calibration",
+        "preview": false,
+        "expected": [
+          "matched",
+          "different",
+          "matched"
+        ],
+        "actual": [
+          "matched",
+          "different",
+          "matched"
+        ],
+        "passed": true
+      },
+      {
+        "id": "interior-missing",
+        "split": "calibration",
+        "preview": false,
+        "expected": [
+          "matched",
+          "omitted",
+          "matched"
+        ],
+        "actual": [
+          "matched",
+          "omitted",
+          "matched"
+        ],
+        "passed": true
+      },
+      {
+        "id": "unknown-leading-edge",
+        "split": "calibration",
+        "preview": false,
+        "expected": [
+          "unknown",
+          "matched",
+          "matched"
+        ],
+        "actual": [
+          "unknown",
+          "matched",
+          "matched"
+        ],
+        "passed": true
+      },
+      {
+        "id": "no-recognition",
+        "split": "calibration",
+        "preview": false,
+        "expected": [
+          "unknown",
+          "unknown",
+          "unknown"
+        ],
+        "actual": [
+          "unknown",
+          "unknown",
+          "unknown"
+        ],
+        "passed": true
+      },
+      {
+        "id": "ambiguous-preview",
+        "split": "calibration",
+        "preview": true,
+        "expected": [
+          "unknown",
+          "unknown",
+          "matched"
+        ],
+        "actual": [
+          "unknown",
+          "unknown",
+          "matched"
+        ],
+        "passed": true
+      },
+      {
+        "id": "future-preview",
+        "split": "calibration",
+        "preview": true,
+        "expected": [
+          "matched",
+          "unknown",
+          "unknown"
+        ],
+        "actual": [
+          "matched",
+          "unknown",
+          "unknown"
+        ],
+        "passed": true
+      },
+      {
+        "id": "longer-omission",
+        "split": "held-out",
+        "preview": false,
+        "expected": [
+          "matched",
+          "matched",
+          "omitted",
+          "matched",
+          "matched"
+        ],
+        "actual": [
+          "matched",
+          "matched",
+          "omitted",
+          "matched",
+          "matched"
+        ],
+        "passed": true
+      },
+      {
+        "id": "all-different",
+        "split": "held-out",
+        "preview": false,
+        "expected": [
+          "different",
+          "different",
+          "different"
+        ],
+        "actual": [
+          "different",
+          "different",
+          "different"
+        ],
+        "passed": true
+      },
+      {
+        "id": "extra-word",
+        "split": "held-out",
+        "preview": false,
+        "expected": [
+          "matched",
+          "matched",
+          "matched"
+        ],
+        "actual": [
+          "matched",
+          "matched",
+          "matched"
+        ],
+        "passed": true
+      },
+      {
+        "id": "all-repeated-preview",
+        "split": "held-out",
+        "preview": true,
+        "expected": [
+          "unknown",
+          "unknown",
+          "unknown"
+        ],
+        "actual": [
+          "unknown",
+          "unknown",
+          "unknown"
+        ],
+        "passed": true
+      },
+      {
+        "id": "timed-repeat",
+        "split": "held-out",
+        "preview": false,
+        "expected": [
+          "matched",
+          "unknown",
+          "unknown"
+        ],
+        "actual": [
+          "matched",
+          "unknown",
+          "unknown"
+        ],
+        "passed": true
+      },
+      {
+        "id": "seek-boundary",
+        "split": "held-out",
+        "preview": false,
+        "expected": [
+          "unknown",
+          "unknown",
+          "unknown"
+        ],
+        "actual": [
+          "unknown",
+          "unknown",
+          "unknown"
+        ],
+        "passed": true
+      },
+      {
+        "id": "delayed-final",
+        "split": "held-out",
+        "preview": false,
+        "expected": [
+          "matched",
+          "unknown",
+          "unknown"
+        ],
+        "actual": [
+          "matched",
+          "unknown",
+          "unknown"
+        ],
+        "passed": true
+      },
+      {
+        "id": "late-missing-asr",
+        "split": "held-out",
+        "preview": false,
+        "expected": [
+          "unknown",
+          "unknown",
+          "unknown",
+          "unknown",
+          "unknown"
+        ],
+        "actual": [
+          "unknown",
+          "unknown",
+          "unknown",
+          "unknown",
+          "unknown"
+        ],
+        "passed": true
+      },
+      {
+        "id": "too-short-to-prove-wrong",
+        "split": "held-out",
+        "preview": false,
+        "expected": [
+          "unknown",
+          "unknown",
+          "unknown"
+        ],
+        "actual": [
+          "unknown",
+          "unknown",
+          "unknown"
+        ],
+        "passed": true
+      }
+    ]
+  }
+}
