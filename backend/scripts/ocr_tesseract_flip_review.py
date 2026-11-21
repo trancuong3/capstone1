@@ -24,6 +24,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from scripts.ocr_box_tightness_probe import verify_ocr_output
 from scripts.ocr_real_photo_benchmark import MAX_CASES, Case, load_cases, normalize
 from scripts.ocr_tone_blind_policy import propose_text
+from scripts.ocr_tesseract_review_risk import assess_review_risk
 from scripts.ocr_vietnamese_artifact_ab import _word_surface_sequence, score_pair
 from scripts.ocr_word_error_diagnostics import analyze_word_errors
 
@@ -127,18 +128,23 @@ def _render_page(
         return "", dict(stats)
     if len(index_to_policies) > MAX_CROPS_PER_PAGE:
         raise ValueError("Too many proposed flips to display safely")
-    cards: list[str] = []
+    # View suspected damage FIRST; the 18 original flips included 3
+    # positional regressions concentrated on a single page.
+    severity = {"regressed": 0, "ambiguous": 1, "changed_other": 2, "corrected": 3}
+    cards: list[tuple[int, int, str]] = []
     for position, choices in sorted(index_to_policies.items()):
         filename = f"crop_{index:04d}_{position + 1:04d}.png"
         _bbox_crop(case.image, words[position]["bbox"], private_dir / filename)
         predicted = base_tokens[position]
         comparisons: list[str] = []
+        candidate_categories: list[str] = []
         for rule, new_text in choices.items():
             category = _flip_category(
                 reference_tokens, base_tokens, position, new_text,
                 positional_alignment_safe=positional_safe,
             )
             stats[f"{rule}_{category}"] += 1
+            candidate_categories.append(category)
             comparisons.append(
                 f"<li><b>{_safe(rule)}</b>: {_safe(predicted)} → "
                 f"<strong>{_safe(new_text)}</strong> "
@@ -148,13 +154,19 @@ def _render_page(
             reference_tokens[position] if positional_safe else
             "Không tự suy luận từ tham chiếu khi lệch vị trí"
         )
-        cards.append(
+        risk_rank = min(severity[label] for label in candidate_categories)
+        stats[f"positions_{candidate_categories[0]}"] += 1 if len(
+            set(candidate_categories)
+        ) == 1 else 0
+        stats["positions_to_check_first"] += risk_rank < severity["corrected"]
+        cards.append((
+            risk_rank, position,
             f'<article class="flip"><img src="crops/{_safe(filename)}" '
             f'alt="Cắt ảnh từ OCR số {position + 1}" loading="lazy">'
             f'<div><p><b>Từ #{position + 1}</b> · '
             f'<span>Đối chứng theo vị trí: {_safe(ref_word)}</span></p>'
-            f'<ul>{"".join(comparisons)}</ul></div></article>'
-        )
+            f'<ul>{"".join(comparisons)}</ul></div></article>',
+        ))
     stats["distinct_positions"] = len(index_to_policies)
     before = score_pair(reference, baseline)
     original = (
@@ -164,7 +176,10 @@ def _render_page(
     body = f"""
     <section class="page"><h2>Trang {index:02d} — {_safe(case.condition)}</h2>
     <p>{_safe(original)} · {len(index_to_policies)} vị trí cần đối chứng</p>
-    {''.join(cards)}
+    <p><b>Ưu tiên kiểm tra:</b> {stats['positions_to_check_first']}
+    vị trí có sửa sai, chưa căn chỉnh được, hoặc vẫn sai theo tham chiếu.
+    Các vị trí nghi ngờ được xếp đầu trang.</p>
+    {''.join(markup for _priority, _position, markup in sorted(cards))}
     <details><summary>Nội dung tham chiếu trang (riêng tư)</summary>
     <p><b>Văn bản tham chiếu:</b> {_safe(reference)}</p>
     <p><b>OCR gốc:</b> {_safe(baseline)}</p>
@@ -190,7 +205,9 @@ li {{ margin:7px 0; }} small {{ color:#6b6670; }}
 @media(max-width:700px){{.flip{{grid-template-columns:1fr}}}}
 </style></head><body><main>
 <h1>ViRead — So sánh những từ OCR định thay đổi</h1>
-<div class="notice"><b>Chỉ dùng để đối chứng riêng tư.</b> Ảnh, chữ,
+<div class="notice"><b>Chỉ dùng để đối chứng riêng tư.</b> Đưa các vị trí
+có khả năng gây sai hoặc chưa xác định lên đầu danh sách.
+Ảnh, chữ,
 văn bản tham chiếu KHÔNG được gửi lên GitHub, chat hay cloud.
 Nhãn corrected/regressed dựa trên token ở cùng vị trí và có thể
 không phản ánh căn chỉnh thực; hãy kiểm tra lại trên ảnh gốc.
@@ -212,7 +229,7 @@ def make_report(
     crops.mkdir(mode=0o700)
     summaries: Counter[str] = Counter()
     failures: Counter[str] = Counter()
-    sections: list[str] = []
+    sections: list[tuple[int, int, str]] = []
     for index, case in enumerate(cases, 1):
         try:
             output = extract_text_and_boxes(case.image.read_bytes())
@@ -223,16 +240,32 @@ def make_report(
             summaries.update(counts)
             summaries["successful_pages"] += 1
             if section:
-                sections.append(section)
+                # Risk-first across pages as well, but keep source page
+                # numbers and deterministic order among equal risks.
+                if counts.get("tesseract_line_priority_regressed", 0):
+                    priority = 0
+                elif counts.get("positions_to_check_first", 0):
+                    priority = 1
+                else:
+                    priority = 2
+                sections.append((priority, index, section))
         except Exception as exc:
             # Critical: NEVER print exception messages (may contain image text).
             failures[type(exc).__name__] += 1
+    generated_crops = list(crops.glob("crop_*.png"))
+    crop_files_consistent = (
+        len(generated_crops) == summaries["distinct_positions"]
+        and all(file.is_file() and file.stat().st_size > 0 for file in generated_crops)
+    )
     stats = {
         "dataset_pages": len(cases),
         "successful_pages": summaries["successful_pages"],
         "failed_pages": len(cases) - summaries["successful_pages"],
         "failure_exception_types": dict(sorted(failures.items())),
         "distinct_positions": summaries["distinct_positions"],
+        "positions_to_check_first": summaries["positions_to_check_first"],
+        "crop_artifact_count": len(generated_crops),
+        "crop_artifacts_consistent": crop_files_consistent,
         "policy_flip_review_counts": {
             rule: {
                 name: summaries[f"{rule}_{name}"]
@@ -243,14 +276,16 @@ def make_report(
         "review_is_private": True,
         "human_verified_independent_box_truth": False,
         "ocr_production_modified": False,
-        "complete": summaries["successful_pages"] == len(cases),
+        "complete": summaries["successful_pages"] == len(cases) and crop_files_consistent,
     }
+    stats["risk_assessment"] = assess_review_risk(stats)
     (target / "aggregate.json").write_text(
         json.dumps(stats, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
     (target / "index.html").write_text(
-        _render_html(sections, stats), encoding="utf-8",
+        _render_html([section for _, _, section in sorted(sections)], stats),
+        encoding="utf-8",
     )
     return stats
 
