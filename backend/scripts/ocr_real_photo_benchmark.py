@@ -104,6 +104,7 @@ def percentile(data: list[float], quantile: float) -> float | None:
 
 def evaluate(
     cases: list[Case], *, expected_profile: str | None, expected_sha: str | None,
+    private_error_records: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     # Torch FIRST: avoids Windows shm.dll dependency-loading conflicts observed
     # with Paddle 2.6.2 imported first in the ViRead CUDA 12.6 environment.
@@ -112,14 +113,20 @@ def evaluate(
 
     latencies: list[float] = []
     chars_wrong = chars_total = words_wrong = words_total = exact = 0
+    neutral_words_wrong = neutral_words_total = 0
     gpu_allocated: list[float] = []
     gpu_reserved: list[float] = []
     failures: Counter[str] = Counter()
     profiles: Counter[str] = Counter()
     checkpoints: Counter[str] = Counter()
     conditions: Counter[str] = Counter()
+    condition_quality: dict[str, dict[str, int]] = {}
+    bbox_statuses: Counter[str] = Counter()
+    bbox_invalid_reasons: Counter[str] = Counter()
+    bbox_valid_total = bbox_invalid_total = bbox_word_total = 0
+    bbox_by_condition: dict[str, dict[str, int]] = {}
 
-    for case in cases:
+    for case_index, case in enumerate(cases, 1):
         try:
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
@@ -150,6 +157,20 @@ def evaluate(
                 raise ValueError("unexpected_checkpoint")
             predicted = normalize(output["text"])
             gt = case.truth
+            private_record = None
+            if private_error_records is not None:
+                from scripts.ocr_word_error_diagnostics import analyze_word_errors
+                private_record = {
+                    "case_number": case_index,
+                    "condition": case.condition,
+                    **analyze_word_errors(gt, predicted),
+                }
+            from scripts.ocr_word_error_diagnostics import edge_punctuation_neutral_tokens
+            neutral_gt = edge_punctuation_neutral_tokens(gt)
+            neutral_predicted = edge_punctuation_neutral_tokens(predicted)
+            neutral_edits = edit_distance(neutral_predicted, neutral_gt)
+            neutral_words_wrong += neutral_edits
+            neutral_words_total += len(neutral_gt)
             chars_wrong += edit_distance(list(predicted), list(gt))
             chars_total += len(gt)
             words_wrong += edit_distance(predicted.split(), gt.split())
@@ -159,15 +180,55 @@ def evaluate(
             profiles[profile] += 1
             checkpoints[sha] += 1
             conditions[case.condition] += 1
+            from scripts.ocr_bbox_integrity import inspect_word_boxes
+
+            bbox_check = inspect_word_boxes(output.get("words"))
+            bbox_statuses[str(bbox_check["status"])] += 1
+            bbox_word_total += int(bbox_check["reported_words"])
+            bbox_valid_total += int(bbox_check["valid_boxes"])
+            bbox_invalid_total += int(bbox_check["invalid_boxes"])
+            bbox_invalid_reasons.update(bbox_check["invalid_reasons"])
+            bbox_condition = bbox_by_condition.setdefault(case.condition, {
+                "scanned_cases": 0,
+                "reported_words": 0,
+                "valid_boxes": 0,
+                "invalid_boxes": 0,
+                "cases_without_box_assessment": 0,
+            })
+            bbox_condition["scanned_cases"] += 1
+            bbox_condition["reported_words"] += int(bbox_check["reported_words"])
+            bbox_condition["valid_boxes"] += int(bbox_check["valid_boxes"])
+            bbox_condition["invalid_boxes"] += int(bbox_check["invalid_boxes"])
+            bbox_condition["cases_without_box_assessment"] += int(
+                bbox_check["status"] != "complete"
+            )
+            # Only aggregated statistics; never emit OCR text or source paths.
+            bucket = condition_quality.setdefault(case.condition, {
+                "successful_cases": 0, "exact_page_matches": 0,
+                "character_edits": 0, "reference_characters": 0,
+                "word_edits": 0, "reference_words": 0,
+                "edge_punctuation_neutral_word_edits": 0,
+                "edge_punctuation_neutral_reference_words": 0,
+            })
+            bucket["successful_cases"] += 1
+            bucket["exact_page_matches"] += int(predicted == gt)
+            bucket["character_edits"] += edit_distance(list(predicted), list(gt))
+            bucket["reference_characters"] += len(gt)
+            bucket["word_edits"] += edit_distance(predicted.split(), gt.split())
+            bucket["reference_words"] += len(gt.split())
+            bucket["edge_punctuation_neutral_word_edits"] += neutral_edits
+            bucket["edge_punctuation_neutral_reference_words"] += len(neutral_gt)
             if torch.cuda.is_available():
                 gpu_allocated.append(torch.cuda.max_memory_allocated() / 1024**2)
                 gpu_reserved.append(torch.cuda.max_memory_reserved() / 1024**2)
+            if private_record is not None and private_error_records is not None:
+                private_error_records.append(private_record)
         except Exception as exc:
             # Do not print exception messages: some include source paths or OCR text.
             failures[type(exc).__name__] += 1
 
     n = len(latencies)
-    return {
+    report = {
         "dataset_case_count": len(cases),
         "successful_cases": n,
         "failed_cases": len(cases) - n,
@@ -180,6 +241,16 @@ def evaluate(
             "reference_characters": chars_total,
             "word_edits": words_wrong,
             "reference_words": words_total,
+            "edge_punctuation_neutral_wer": round(
+                neutral_words_wrong / neutral_words_total, 6
+            ) if neutral_words_total else None,
+            "edge_punctuation_neutral_word_edits": neutral_words_wrong,
+            "edge_punctuation_neutral_reference_words": neutral_words_total,
+            "edge_punctuation_neutral_note": (
+                "Diagnostic only: removes punctuation/symbols at token edges, "
+                "preserves Vietnamese diacritics, case and internal punctuation; "
+                "not interchangeable with strict micro_wer"
+            ),
         },
         "timing_ms": {
             "mean": round(statistics.mean(latencies), 2) if n else None,
@@ -199,21 +270,98 @@ def evaluate(
             "engine_contract": list(REQUIRED_ENGINES),
         },
         "conditions_case_counts": dict(conditions),
+        "quality_by_condition": {
+            condition: {
+                "successful_cases": bucket["successful_cases"],
+                "exact_page_match_rate": round(
+                    bucket["exact_page_matches"] / bucket["successful_cases"], 6
+                ),
+                "micro_cer": round(
+                    bucket["character_edits"] / bucket["reference_characters"], 6
+                ) if bucket["reference_characters"] else None,
+                "micro_wer": round(
+                    bucket["word_edits"] / bucket["reference_words"], 6
+                ) if bucket["reference_words"] else None,
+                "character_edits": bucket["character_edits"],
+                "reference_characters": bucket["reference_characters"],
+                "word_edits": bucket["word_edits"],
+                "reference_words": bucket["reference_words"],
+                "edge_punctuation_neutral_wer": round(
+                    bucket["edge_punctuation_neutral_word_edits"]
+                    / bucket["edge_punctuation_neutral_reference_words"], 6
+                ) if bucket["edge_punctuation_neutral_reference_words"] else None,
+                "edge_punctuation_neutral_word_edits": bucket["edge_punctuation_neutral_word_edits"],
+                "edge_punctuation_neutral_reference_words": bucket["edge_punctuation_neutral_reference_words"],
+            }
+            for condition, bucket in sorted(condition_quality.items())
+        },
         "real_photo_origin_and_ground_truth_manual_review_required": True,
         "bbox_and_color_acceptance_not_measured": True,
+        "bbox_integrity_diagnostics": {
+            "status_counts": dict(sorted(bbox_statuses.items())),
+            "reported_words": bbox_word_total,
+            "valid_boxes": bbox_valid_total,
+            "invalid_boxes": bbox_invalid_total,
+            "invalid_reasons": dict(sorted(bbox_invalid_reasons.items())),
+            "by_condition": dict(sorted(bbox_by_condition.items())),
+            "scope_note": (
+                "Only validates normalized word-box structure and image bounds; "
+                "does NOT measure bbox IoU, word matching, color/scoring accuracy "
+                "or human-verified photo provenance"
+            ),
+        },
     }
+    if private_error_records is not None:
+        # Only safe aggregate counts go in the standard report, never tokens.
+        classes: Counter[str] = Counter()
+        complete = 0
+        skipped = 0
+        for row in private_error_records:
+            if row["status"] != "complete":
+                skipped += 1
+                continue
+            complete += 1
+            classes.update(error["kind"] for error in row["errors"])
+        report["private_diagnostic_summary"] = {
+            "analyzed_cases": complete,
+            "skipped_cases": skipped,
+            "word_error_kind_counts": dict(sorted(classes.items())),
+            "alignment_note": "One of potentially multiple optimal token alignments; diagnostic only",
+        }
+    return report
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dataset", type=Path, help="Private JSONL manifest outside repository")
     parser.add_argument("--output", type=Path, help="Optional aggregate-only JSON file outside repository")
+    parser.add_argument("--env-file", type=Path, help="Existing local backend .env to load without printing credentials")
     parser.add_argument("--min-pages", type=int, default=10, help="Minimum distinct photographed pages (default: 10)")
     parser.add_argument("--expected-profile", type=str, help="Fail if loaded VietOCR model profile differs")
     parser.add_argument("--expected-sha", type=str, help="Fail if loaded checkpoint SHA256 differs")
     parser.add_argument("--max-cer", type=float, help="Optional prespecified micro CER threshold")
     parser.add_argument("--max-wer", type=float, help="Optional prespecified micro WER threshold")
+    parser.add_argument(
+        "--private-error-output", type=Path,
+        help="OPT-IN sensitive JSONL with mismatched words; store only beside private dataset, never commit/share",
+    )
     args = parser.parse_args(argv)
+    # Worktrees do not inherit the developer's original checkout .env.  Load
+    # an explicitly selected local environment file before the OCR engine
+    # imports app.database.config.  Never print secrets or copy them into Git.
+    if args.env_file is not None:
+        import os
+        from dotenv import dotenv_values
+
+        if not args.env_file.expanduser().is_file():
+            parser.error("--env-file does not exist")
+        env_values = dotenv_values(args.env_file.expanduser())
+        if not env_values:
+            parser.error("--env-file is empty")
+        # Match app.database.config's handling of *empty* process values.
+        for key, value in env_values.items():
+            if value is not None and not (os.getenv(key) or "").strip():
+                os.environ[key] = value
     if args.min_pages < 1 or args.min_pages > MAX_CASES:
         parser.error("--min-pages must be between 1 and 1000")
     if args.expected_sha and not re.fullmatch(r"[a-f0-9]{64}", args.expected_sha):
@@ -232,7 +380,30 @@ def main(argv: list[str] | None = None) -> int:
     if len(cases) < args.min_pages:
         print(f"FAIL: {len(cases)} distinct cases, requires {args.min_pages}", file=sys.stderr)
         return 2
-    report = evaluate(cases, expected_profile=args.expected_profile, expected_sha=args.expected_sha)
+    private_path = args.private_error_output.expanduser().resolve() if args.private_error_output else None
+    if private_path is not None:
+        # Diagnostics contain OCR and ground-truth words, unlike the aggregate.
+        # Explicitly restrict storage to the private dataset's own directory tree.
+        if private_path.suffix.lower() != ".jsonl":
+            parser.error("--private-error-output must end with .jsonl")
+        if not private_path.is_relative_to(args.dataset.resolve().parent):
+            parser.error("--private-error-output must be within the private dataset directory")
+        if private_path == args.dataset.resolve():
+            parser.error("--private-error-output cannot replace the dataset manifest")
+        if args.output and private_path == args.output.resolve():
+            parser.error("--private-error-output cannot replace the aggregate report")
+        if args.env_file and private_path == args.env_file.resolve():
+            parser.error("--private-error-output cannot replace the environment file")
+        if private_path.exists():
+            parser.error("--private-error-output already exists; choose a new filename")
+    private_errors: list[dict[str, object]] | None = [] if private_path else None
+    if private_errors is None:
+        report = evaluate(cases, expected_profile=args.expected_profile, expected_sha=args.expected_sha)
+    else:
+        report = evaluate(
+            cases, expected_profile=args.expected_profile, expected_sha=args.expected_sha,
+            private_error_records=private_errors,
+        )
     metrics = report["recognition"]
     thresholds = {}
     if args.max_cer is not None:
@@ -243,6 +414,18 @@ def main(argv: list[str] | None = None) -> int:
     report["all_runtime_checks_passed"] = report["failed_cases"] == 0
     report["quality_thresholds_predeclared"] = bool(thresholds)
     encoded = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
+    if private_path is not None and private_errors is not None:
+        import os
+        try:
+            private_path.parent.mkdir(parents=True, exist_ok=True)
+            # Exclusive create avoids overwriting any existing user file.
+            fd = os.open(private_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as diagnostics_file:
+                for row in private_errors:
+                    diagnostics_file.write(json.dumps(row, ensure_ascii=False) + "\n")
+        except OSError as exc:
+            print(f"Could not write private diagnostics: {type(exc).__name__}", file=sys.stderr)
+            return 2
     print(encoded)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

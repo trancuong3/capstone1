@@ -19,11 +19,11 @@
 3. Example PowerShell, from F:\c1\capstone1\backend:
 
     $py = "F:\c1\capstone1\.venv\Scripts\python.exe"
-    & $py scripts\ocr_real_photo_benchmark.py "F:\c1\ocr-private-eval\pages.jsonl" --min-pages 10 --expected-profile FLOW1_EXTERNAL_TRDG --expected-sha 200edce460606275481dda19c50b7763620a112ddc66a8378982bddc013114a6 --output "F:\c1\ocr-private-eval\aggregate-result.json"
+    & $py scripts\ocr_real_photo_benchmark.py "F:\c1\ocr-private-eval\pages.jsonl" --env-file "F:\c1\capstone1\backend\.env" --min-pages 10 --expected-profile FLOW1_EXTERNAL_TRDG --expected-sha 200edce460606275481dda19c50b7763620a112ddc66a8378982bddc013114a6 --output "F:\c1\ocr-private-eval\aggregate-result.json"
 
-4. If objective CER/WER acceptance limits have been set **before** looking at this dataset, additionally pass --max-cer and --max-wer. Otherwise the script reports measured values but explicitly leaves the quality gate unset. It will still fail if images/ground truth are invalid, any OCR engine reports failure, the model provenance falls back or differs, or some pages fail.
-5. Reports contain **aggregated measurements only**: normalized NFC micro CER/WER without accent folding, exact page matches, timings, and PyTorch GPU allocator peaks, plus engine/model provenance counts. Reports do **not** include OCR text, ground truth, images, or file paths. Local model initialization may download/cache authorized weights and may contact configured model registry; it does not call the upload endpoint or write book revisions.
-6. Human verification of photograph provenance, ground truth, word bounding boxes, RED/GREEN/YELLOW accuracy and per-condition behavior remains **separate and required**. An aggregate CER/WER report cannot on its own certify those gates.
+4. The --env-file flag is optional but useful for Git worktrees because a separate checkout does not inherit the original local backend .env. If backend/.env does not exist, check F:\c1\capstone1\.env or F:\c1\.env; use an existing file containing your own valid development credentials. Do not print keys, place secrets in commands, copy .env into the repository, or use fabricated credentials when testing the active FLOW1 model. The script performs local OCR and may read model registry/weights; it does not upload pages or write revisions.\n5. If objective CER/WER acceptance limits have been set **before** looking at this dataset, additionally pass --max-cer and --max-wer. Otherwise the script reports measured values but explicitly leaves the quality gate unset. It will still fail if images/ground truth are invalid, any OCR engine reports failure, the model provenance falls back or differs, or some pages fail.
+6. Reports contain **aggregated measurements only**: normalized NFC micro CER/WER without accent folding, exact page matches, timings, and PyTorch GPU allocator peaks, plus engine/model provenance counts. Reports do **not** include OCR text, ground truth, images, or file paths. Local model initialization may download/cache authorized weights and may contact configured model registry; it does not call the upload endpoint or write book revisions.
+7. Human verification of photograph provenance, ground truth, word bounding boxes, RED/GREEN/YELLOW accuracy and per-condition behavior remains **separate and required**. An aggregate CER/WER report cannot on its own certify those gates.
 
 Run helper tests (do not require a GPU):
 
@@ -41,3 +41,7 @@ Run helper tests (do not require a GPU):
 - **Security/correctness gates:** RLS and role separation, scoped authentication, private image access, 401/403/404 tests, replay/lease expiry, duplicate upload and retries, no plaintext or tokens in logs, safe worker shutdown, preserve previously verified revisions and never overwrite an Admin's edits.
 - **Offline behavior:** with laptop off, new uploads remain QUEUED, old book reading continues, and work resumes after worker reconnects. If worker never returns, jobs remain visibly pending or end in an actionable timed-out state. No silent CPU fallback onto Render Free's 512 MiB instance.
 - **Deployment:** release behind OCR_REMOTE_WORKER_ENABLED=false by default. Implement DB migration, backend, worker CLI, frontend polling and tests in separate reviewed PR(s). **No Supabase production DDL, Render deploy, or merge** is authorized by this document.
+
+## Synthetic image dataset caution
+
+Computer-generated pages (including the ten illustrated/modified examples supplied for initial testing) may be run through this command as a **synthetic smoke/performance set only**. A passing result **must not** be interpreted as photographed-book acceptance. Use an independently reviewed set of actual photos for Gate E.

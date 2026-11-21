@@ -52,6 +52,314 @@ class PhotoBenchmarkTests(unittest.TestCase):
         self.assertEqual(module.percentile([10, 20, 30, 40], 0.95), 40)
         self.assertIsNone(module.percentile([], 0.50))
 
+    def test_quality_by_condition_is_aggregate_only(self):
+        import sys
+        import types
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            pages = [
+                ("clean.png", "Bé đọc sách.", "clean"),
+                ("shadow.png", "Trời hôm nay đẹp.", "shadow"),
+            ]
+            for name, _, _ in pages:
+                (root / name).write_bytes(b"test-only-image-data")
+            cases = [
+                module.Case(root / name, truth, condition)
+                for name, truth, condition in pages
+            ]
+            predictions = iter(["Bé đọc sách.", "Trời hôm nay dep."])
+            fake_engine = types.ModuleType("app.services.ocr_engine")
+            fake_engine.extract_text_and_boxes = lambda _data: {
+                "text": next(predictions),
+                "metadata": {
+                    "engine_statuses": {
+                        "paddleocr": "success",
+                        "vietocr": "success",
+                        "tesseract": "success",
+                    },
+                    "vietocr_runtime_provenance": {
+                        "model_load_status": "loaded",
+                        "model_inference_status": "success",
+                        "fallback_reason": None,
+                        "model_profile": "FLOW1_EXTERNAL_TRDG",
+                        "checkpoint_sha256": "a" * 64,
+                    },
+                },
+            }
+            fake_torch = types.ModuleType("torch")
+            fake_torch.cuda = types.SimpleNamespace(is_available=lambda: False)
+            with mock.patch.dict(sys.modules, {
+                "torch": fake_torch,
+                "app.services.ocr_engine": fake_engine,
+            }):
+                report = module.evaluate(
+                    cases, expected_profile="FLOW1_EXTERNAL_TRDG",
+                    expected_sha="a" * 64,
+                )
+            self.assertEqual(report["successful_cases"], 2)
+            self.assertEqual(report["failed_cases"], 0)
+            clean = report["quality_by_condition"]["clean"]
+            shadow = report["quality_by_condition"]["shadow"]
+            self.assertEqual(clean["micro_cer"], 0)
+            self.assertEqual(clean["micro_wer"], 0)
+            self.assertEqual(clean["exact_page_match_rate"], 1)
+            self.assertGreater(shadow["micro_cer"], 0)
+            self.assertGreater(shadow["micro_wer"], 0)
+            self.assertEqual(shadow["exact_page_match_rate"], 0)
+            self.assertEqual(
+                sum(item["character_edits"] for item in report["quality_by_condition"].values()),
+                report["recognition"]["character_edits"],
+            )
+            encoded = json.dumps(report, ensure_ascii=False)
+            self.assertNotIn("Trời hôm nay", encoded)
+            self.assertNotIn(str(root), encoded)
+
+    def test_bbox_integrity_is_aggregate_only_not_accuracy(self):
+        import sys
+        import types
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            (root / "page.png").write_bytes(b"fixture")
+            fake_engine = types.ModuleType("app.services.ocr_engine")
+            fake_engine.extract_text_and_boxes = lambda _data: {
+                "text": "Bé đọc",
+                "words": [
+                    {"text": "Bé", "bbox": [0.1, 0.1, 0.2, 0.1]},
+                    {"text": "đọc", "bbox": [0.8, 0.8, 0.3, 0.3]},
+                ],
+                "metadata": {
+                    "engine_statuses": {
+                        "paddleocr": "success",
+                        "vietocr": "success",
+                        "tesseract": "success",
+                    },
+                    "vietocr_runtime_provenance": {
+                        "model_load_status": "loaded",
+                        "model_inference_status": "success",
+                        "fallback_reason": None,
+                        "model_profile": "FLOW1_EXTERNAL_TRDG",
+                        "checkpoint_sha256": "a" * 64,
+                    },
+                },
+            }
+            fake_torch = types.ModuleType("torch")
+            fake_torch.cuda = types.SimpleNamespace(is_available=lambda: False)
+            with mock.patch.dict(sys.modules, {
+                "torch": fake_torch, "app.services.ocr_engine": fake_engine,
+            }):
+                report = module.evaluate(
+                    [module.Case(root / "page.png", "Bé đọc", "clean")],
+                    expected_profile="FLOW1_EXTERNAL_TRDG",
+                    expected_sha="a" * 64,
+                )
+            bbox = report["bbox_integrity_diagnostics"]
+            self.assertEqual(report["successful_cases"], 1)
+            self.assertEqual(bbox["reported_words"], 2)
+            self.assertEqual(bbox["valid_boxes"], 1)
+            self.assertEqual(bbox["invalid_boxes"], 1)
+            self.assertEqual(bbox["invalid_reasons"]["out_of_image_bounds"], 1)
+            self.assertEqual(bbox["by_condition"]["clean"]["scanned_cases"], 1)
+            self.assertTrue(report["bbox_and_color_acceptance_not_measured"])
+            self.assertNotIn("Bé", json.dumps(bbox, ensure_ascii=False))
+            self.assertNotIn(str(root), json.dumps(bbox))
+
+    def test_private_word_diagnostics_do_not_leak_into_aggregate(self):
+        import sys
+        import types
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as dirname:
+            image = Path(dirname) / "page.png"
+            image.write_bytes(b"fixture")
+            fake_engine = types.ModuleType("app.services.ocr_engine")
+            fake_engine.extract_text_and_boxes = lambda _data: {
+                "text": "Bé doc sách.",
+                "metadata": {
+                    "engine_statuses": {
+                        "paddleocr": "success", "vietocr": "success", "tesseract": "success",
+                    },
+                    "vietocr_runtime_provenance": {
+                        "model_load_status": "loaded",
+                        "model_inference_status": "success",
+                        "fallback_reason": None,
+                        "model_profile": "FLOW1_EXTERNAL_TRDG",
+                        "checkpoint_sha256": "a" * 64,
+                    },
+                },
+            }
+            fake_torch = types.ModuleType("torch")
+            fake_torch.cuda = types.SimpleNamespace(is_available=lambda: False)
+            sensitive_rows = []
+            with mock.patch.dict(sys.modules, {
+                "torch": fake_torch,
+                "app.services.ocr_engine": fake_engine,
+            }):
+                report = module.evaluate(
+                    [module.Case(image, "Bé đọc sách.", "childrens_font")],
+                    expected_profile="FLOW1_EXTERNAL_TRDG",
+                    expected_sha="a" * 64,
+                    private_error_records=sensitive_rows,
+                )
+            self.assertEqual(report["successful_cases"], 1)
+            self.assertEqual(report["recognition"]["word_edits"], 1)
+            self.assertEqual(
+                report["recognition"]["edge_punctuation_neutral_word_edits"], 1,
+            )
+            self.assertEqual(
+                report["recognition"]["edge_punctuation_neutral_wer"], 0.333333,
+            )
+            self.assertEqual(
+                report["private_diagnostic_summary"]["word_error_kind_counts"],
+                {"diacritic_or_d_stroke": 1},
+            )
+            self.assertEqual(report["private_diagnostic_summary"]["analyzed_cases"], 1)
+            self.assertEqual(len(sensitive_rows), 1)
+            self.assertEqual(sensitive_rows[0]["status"], "complete")
+            self.assertEqual(sensitive_rows[0]["error_count"], 1)
+            self.assertEqual(
+                sensitive_rows[0]["errors"][0]["kind"], "diacritic_or_d_stroke"
+            )
+            self.assertEqual(sensitive_rows[0]["errors"][0]["expected"], "đọc")
+            self.assertEqual(sensitive_rows[0]["errors"][0]["observed"], "doc")
+            encoded = json.dumps(report, ensure_ascii=False)
+            self.assertNotIn("đọc", encoded)
+            self.assertNotIn("doc", encoded)
+            self.assertNotIn(str(image), encoded)
+
+    def test_punctuation_neutral_metric_is_separate_from_strict_wer(self):
+        import sys
+        import types
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as dirname:
+            image = Path(dirname) / "page.png"
+            image.write_bytes(b"fixture")
+            fake_engine = types.ModuleType("app.services.ocr_engine")
+            fake_engine.extract_text_and_boxes = lambda _data: {
+                "text": "Bé đọc sách",
+                "metadata": {
+                    "engine_statuses": {
+                        "paddleocr": "success", "vietocr": "success", "tesseract": "success",
+                    },
+                    "vietocr_runtime_provenance": {
+                        "model_load_status": "loaded", "model_inference_status": "success",
+                        "fallback_reason": None, "model_profile": "FLOW1_EXTERNAL_TRDG",
+                        "checkpoint_sha256": "a" * 64,
+                    },
+                },
+            }
+            fake_torch = types.ModuleType("torch")
+            fake_torch.cuda = types.SimpleNamespace(is_available=lambda: False)
+            with mock.patch.dict(sys.modules, {
+                "torch": fake_torch, "app.services.ocr_engine": fake_engine,
+            }):
+                report = module.evaluate(
+                    [module.Case(image, "Bé đọc sách.", "clean")],
+                    expected_profile="FLOW1_EXTERNAL_TRDG",
+                    expected_sha="a" * 64,
+                )
+            self.assertEqual(report["recognition"]["word_edits"], 1)
+            self.assertEqual(report["recognition"]["micro_wer"], 0.333333)
+            self.assertEqual(report["recognition"]["edge_punctuation_neutral_word_edits"], 0)
+            self.assertEqual(report["recognition"]["edge_punctuation_neutral_wer"], 0)
+            self.assertEqual(
+                report["quality_by_condition"]["clean"]["edge_punctuation_neutral_wer"], 0,
+            )
+
+    def test_private_error_output_is_opt_in_and_not_printed(self):
+        import contextlib
+        import io
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            (root / "page.png").write_bytes(b"fixture")
+            manifest = root / "pages.jsonl"
+            manifest.write_text(
+                json.dumps({"image": "page.png", "ground_truth": "đọc"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            private_path = root / "private-word-errors.jsonl"
+
+            def fake_evaluate(cases, *, expected_profile, expected_sha, private_error_records):
+                self.assertEqual(len(cases), 1)
+                private_error_records.append({
+                    "case_number": 1, "condition": "clean", "status": "complete",
+                    "errors": [{"expected": "đọc", "observed": "doc"}],
+                })
+                return {"failed_cases": 0, "recognition": {"micro_cer": 0.0, "micro_wer": 0.0}}
+
+            stdout = io.StringIO()
+            with mock.patch.object(module, "evaluate", side_effect=fake_evaluate):
+                with contextlib.redirect_stdout(stdout):
+                    code = module.main([
+                        str(manifest), "--min-pages", "1",
+                        "--private-error-output", str(private_path),
+                    ])
+            self.assertEqual(code, 0)
+            self.assertTrue(private_path.is_file())
+            self.assertIn('"expected": "đọc"', private_path.read_text(encoding="utf-8"))
+            self.assertNotIn("đọc", stdout.getvalue())
+            self.assertNotIn("doc", stdout.getvalue())
+
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as caught:
+                    module.main([
+                        str(manifest), "--min-pages", "1",
+                        "--private-error-output", str(manifest),
+                    ])
+            self.assertEqual(caught.exception.code, 2)
+            self.assertIn("ground_truth", manifest.read_text(encoding="utf-8"))
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as caught:
+                    module.main([
+                        str(manifest), "--min-pages", "1",
+                        "--private-error-output", str(private_path),
+                    ])
+            self.assertEqual(caught.exception.code, 2)
+
+    def test_cli_loads_private_env_without_printing_credentials(self):
+        import contextlib
+        import io
+        import os
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as dirname:
+            root = Path(dirname)
+            (root / "page.png").write_bytes(b"placeholder")
+            manifest = root / "pages.jsonl"
+            manifest.write_text(
+                json.dumps({"image": "page.png", "ground_truth": "Xin chào"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            env_file = root / "local.env"
+            env_file.write_text(
+                "DATABASE_URL=postgresql+asyncpg://testing:testing@127.0.0.1:1/test\n"
+                "SUPABASE_URL=https://example.invalid\n"
+                "SUPABASE_KEY=private-test-key-not-for-output\n",
+                encoding="utf-8",
+            )
+
+            def fake_evaluate(cases, *, expected_profile, expected_sha):
+                self.assertEqual(len(cases), 1)
+                self.assertEqual(os.environ["SUPABASE_KEY"], "private-test-key-not-for-output")
+                self.assertEqual(os.environ["DATABASE_URL"].split("@")[0], "postgresql+asyncpg://testing:testing")
+                return {"failed_cases": 0, "recognition": {"micro_cer": 0.0, "micro_wer": 0.0}}
+
+            stdout = io.StringIO()
+            with mock.patch.dict(os.environ, {"DATABASE_URL": "", "SUPABASE_URL": "", "SUPABASE_KEY": ""}):
+                with mock.patch.object(module, "evaluate", side_effect=fake_evaluate):
+                    with contextlib.redirect_stdout(stdout):
+                        exit_code = module.main([
+                            str(manifest), "--min-pages", "1", "--env-file", str(env_file),
+                        ])
+            self.assertEqual(exit_code, 0)
+            self.assertNotIn("private-test-key-not-for-output", stdout.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
