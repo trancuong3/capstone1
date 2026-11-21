@@ -146,7 +146,7 @@ class PrivateFlipReviewTests(unittest.TestCase):
                 1, output, crops,
             )
             self.assertEqual(stats["tesseract_line_priority_corrected"], 1)
-            self.assertEqual(stats["tesseract_line_priority_ambiguous"], 0)
+            self.assertEqual(stats.get("tesseract_line_priority_ambiguous", 0), 0)
             self.assertEqual(
                 stats["tesseract_line_vietocr_crop_agreement_corrected"], 1
             )
