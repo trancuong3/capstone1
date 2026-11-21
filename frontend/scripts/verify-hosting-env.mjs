@@ -84,16 +84,16 @@ export function verifyHostingEnvironment(env = process.env) {
   );
   if (
     publicNames.some((name) =>
-      /(?:SECRET|SERVICE_ROLE|PRIVATE|PASSWORD|ACCESS_TOKEN|ROOT_KEY)/i.test(name),
+      /(?:SECRET|SERVICE_ROLE|PRIVATE|PASSWORD|ACCESS_TOKEN|ROOT_KEY)/i.test(
+        name,
+      ),
     )
   ) {
     throw new Error(
       "Hosting environment contains a forbidden browser-public secret variable name",
     );
   }
-  if (
-    /^(?:1|true|yes|on)$/i.test(env.PLAYWRIGHT_AUTH_FIXTURES?.trim() ?? "")
-  ) {
+  if (/^(?:1|true|yes|on)$/i.test(env.PLAYWRIGHT_AUTH_FIXTURES?.trim() ?? "")) {
     throw new Error(
       "PLAYWRIGHT_AUTH_FIXTURES must not be enabled in hosted deployments",
     );
@@ -124,7 +124,10 @@ export function verifyHostingEnvironment(env = process.env) {
   return { supabaseUrl, apiUrl };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   try {
     verifyHostingEnvironment();
     console.log(
