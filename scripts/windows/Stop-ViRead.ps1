@@ -47,7 +47,13 @@ function Stop-OwnedProcess([string]$label, [int]$pidVal, [string]$expectedStartI
         return
     }
     # Verify process identity using exact StartTime so reused PIDs are NEVER killed!
-    $actualIso = $proc.StartTime.ToUniversalTime().ToString("o")
+    $actualIso = $null
+    try {
+        if ($proc.HasExited) { return }
+        $actualIso = $proc.StartTime.ToUniversalTime().ToString("o")
+    } catch {
+        return
+    }
     if ($expectedStartIso -and ([Math]::Abs(([DateTime]::Parse($actualIso) - [DateTime]::Parse($expectedStartIso)).TotalSeconds) -gt 2.0)) {
         Write-Warning "  $label (PID=$pidVal): StartTime mismatch ($actualIso != $expectedStartIso); refusing to kill unrelated process!"
         return
