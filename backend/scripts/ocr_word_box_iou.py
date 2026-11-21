@@ -108,7 +108,11 @@ def score_page(predicted: object, reference: object) -> dict[str, dict[str, int]
         raise ValueError("Empty or excessive word-box records")
     if any(not isinstance(row, dict) for row in reference):
         raise ValueError("Invalid reference word record")
-    if any(not valid_box(row.get("bbox")) or not _exact_word(row.get("text")) for row in reference):
+    if any(
+        not valid_box(row.get("bbox"))
+        or len(_exact_word(row.get("text")).split()) != 1
+        for row in reference
+    ):
         raise ValueError("Reference box or text is invalid")
 
     results: dict[str, dict[str, int]] = {}
@@ -203,7 +207,7 @@ def load_manual_annotations(path: Path, image_keys: set[str]) -> dict[str, list[
                 if any(
                     not isinstance(word, dict)
                     or not valid_box(word.get("bbox"))
-                    or not _exact_word(word.get("text"))
+                    or len(_exact_word(word.get("text")).split()) != 1
                     for word in words
                 ):
                     raise ValueError("Manual word box annotation invalid")
