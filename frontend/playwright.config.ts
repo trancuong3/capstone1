@@ -6,6 +6,8 @@ import { createPlaywrightAuthFixtureHeaders } from "./lib/auth/playwright-auth-f
 const authFixtureToken =
   process.env.PLAYWRIGHT_AUTH_FIXTURE_TOKEN ?? randomBytes(32).toString("hex");
 process.env.PLAYWRIGHT_AUTH_FIXTURE_TOKEN = authFixtureToken;
+const port = process.env.PLAYWRIGHT_PORT ?? "3000";
+const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -17,7 +19,7 @@ export default defineConfig({
     ["json", { outputFile: "test-results/e2e-report.json" }],
   ],
   use: {
-    baseURL: "http://127.0.0.1:3000",
+    baseURL,
     extraHTTPHeaders: createPlaywrightAuthFixtureHeaders(
       "parent",
       authFixtureToken,
@@ -25,14 +27,16 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: "npm run dev -- --hostname 127.0.0.1",
+    command: `npm run dev -- --hostname 127.0.0.1 --port ${port}`,
     env: {
+      NEXT_PUBLIC_API_URL:
+        process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000",
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test",
       NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co",
       PLAYWRIGHT_AUTH_FIXTURES: "1",
       PLAYWRIGHT_AUTH_FIXTURE_TOKEN: authFixtureToken,
     },
-    url: "http://127.0.0.1:3000",
+    url: baseURL,
     reuseExistingServer: false,
     timeout: 120_000,
   },

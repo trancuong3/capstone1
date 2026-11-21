@@ -2902,27 +2902,27 @@ export function AdminOcrReviewScreen({
                 </span>
               </div>
 
-              <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                <div className="rounded-control bg-canvas p-3">
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <div className="min-w-0 rounded-control bg-canvas p-3">
                   <p className="text-xs text-muted">Overall suitability</p>
-                  <p className="mt-1 font-extrabold text-ink">
+                  <p className="mt-1 break-words font-extrabold text-ink">
                     {aiWorkflow.suitability ?? "CHƯA CÓ KẾT QUẢ"}
                   </p>
                 </div>
-                <div className="rounded-control bg-canvas p-3">
+                <div className="min-w-0 rounded-control bg-canvas p-3">
                   <p className="text-xs text-muted">
                     An toàn văn bản (Text Safety)
                   </p>
-                  <p className="mt-1 font-extrabold text-ink">
+                  <p className="mt-1 break-words font-extrabold text-ink">
                     {aiWorkflow.text_safety_status ?? aiWorkflow.safety_status}
                   </p>
                 </div>
-                <div className="rounded-control bg-canvas p-3">
+                <div className="min-w-0 rounded-control bg-canvas p-3 sm:col-span-2">
                   <p className="text-xs text-muted">
                     An toàn hình ảnh (Image Safety)
                   </p>
                   <p
-                    className="mt-1 font-extrabold text-ink"
+                    className="mt-1 break-words font-extrabold text-ink"
                     data-testid="image-safety-status"
                   >
                     {workflowImageSafetyStatus === "ADMIN_CONFIRMED_SAFE"
@@ -2932,15 +2932,15 @@ export function AdminOcrReviewScreen({
                         : "Chưa đánh giá ảnh (chưa có model vision)"}
                   </p>
                 </div>
-                <div className="rounded-control bg-canvas p-3">
+                <div className="min-w-0 rounded-control bg-canvas p-3">
                   <p className="text-xs text-muted">Candidate version</p>
-                  <p className="mt-1 font-extrabold text-ink">
+                  <p className="mt-1 break-words font-extrabold text-ink">
                     {aiWorkflow.candidate_version}
                   </p>
                 </div>
-                <div className="rounded-control bg-canvas p-3">
+                <div className="min-w-0 rounded-control bg-canvas p-3">
                   <p className="text-xs text-muted">Safety hash match</p>
-                  <p className="mt-1 font-extrabold text-ink">
+                  <p className="mt-1 break-words font-extrabold text-ink">
                     {candidateEditPending
                       ? "Đang lưu Candidate…"
                       : aiWorkflow.hash_match
@@ -2966,8 +2966,8 @@ export function AdminOcrReviewScreen({
                     </p>
                   </div>
                 </div>
-                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
-                  <label className="flex-1 text-xs font-bold text-ink">
+                <div className="mt-3 flex flex-col gap-3">
+                  <label className="block w-full text-xs font-bold text-ink">
                     Ghi chú kiểm tra ảnh (bắt buộc nếu gắn cờ không phù hợp)
                     <input
                       className="mt-1 h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal"

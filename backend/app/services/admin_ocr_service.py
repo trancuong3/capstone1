@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import math
@@ -2876,10 +2877,11 @@ class AdminOcrService:
         actor_id: UUID,
     ) -> None:
         """Mark existing workflow safety results stale whenever draft text changes."""
-        if not callable(getattr(self.db, "scalars", None)):
+        scalars_fn = getattr(self.db, "scalars", None)
+        if not callable(scalars_fn):
             return
         draft_hash = safety_content_hash(draft_text)
-        result = await self.db.scalars(
+        pending = scalars_fn(
             select(AdminAiWorkflow)
             .where(
                 AdminAiWorkflow.PageId == page_id,
@@ -2887,6 +2889,9 @@ class AdminOcrService:
             )
             .with_for_update()
         )
+        if not inspect.isawaitable(pending):
+            return
+        result = await pending
         workflows = list(result.all()) if result is not None and hasattr(result, "all") else []
         now = datetime.now(timezone.utc)
         for workflow in workflows:
