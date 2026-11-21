@@ -137,9 +137,29 @@ class HeldoutAggregateTests(unittest.TestCase):
         report["successful_cases"] = 19
         report["failed_cases"] = 1
         report["runtime_all_cases_verified"] = False
+        # Page directions count only successful OCR comparisons, not failed photos.
+        for policy in (
+            "tesseract_line_priority",
+            "tesseract_line_vietocr_crop_agreement",
+        ):
+            directions = report["quality"]["ground_truth_blind_rules"][policy][
+                "wer_page_directions"
+            ]
+            directions["unchanged"] -= 1  # 4 improved + 15 unchanged = 19 successful
         result = summarize_holdout_report(report, _audit(), 20)
         self.assertFalse(result["runtime_all_cases_verified"])
         self.assertIn("incomplete_heldout_evaluation", result["reason_codes"])
+
+    def test_missing_one_photo_rejects_stale_page_comparison_totals(self):
+        report = _report()
+        report["successful_cases"] = 19
+        report["failed_cases"] = 1
+        report["runtime_all_cases_verified"] = False
+        # This deliberately retains 20 directions for 19 successes.
+        with self.assertRaisesRegex(
+            ValueError, "Candidate page comparison counts do not reconcile"
+        ):
+            summarize_holdout_report(report, _audit(), 20)
 
     def test_fail_closed_for_missing_audit_or_too_few_photos(self):
         with self.assertRaises(ValueError):
