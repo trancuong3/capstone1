@@ -100,7 +100,7 @@ Với phiên bản mới nhất, có thể chạy tất cả 4 bộ unit tests c
 mà **không yêu cầu** bộ ảnh mới:
 
 ```powershell
-& "F:\\c1\\capstone1-ocr-acceptance\\backend\\scripts\\run_ocr_task14_holdout.ps1" -TestsOnly
+& "F:\c1\capstone1-ocr-acceptance\backend\scripts\run_ocr_task14_holdout.ps1" -TestsOnly
 ```
 
 Chế độ `-TestsOnly` kết thúc sau unit tests và ghi rõ
