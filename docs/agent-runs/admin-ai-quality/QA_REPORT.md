@@ -38,3 +38,6 @@
   - Frontend `vitest run tests/admin/admin-book-content-quality-screen.test.tsx tests/books/parent-book-reports.test.tsx tests/admin/admin-book-approval-dashboard.test.tsx` -> **4 passed, 0 failed** (10.18s).
   - Frontend `npm run typecheck` (`tsc --noEmit`) -> **0 errors**.
   - Frontend `npm run lint` (`eslint .`) -> **0 errors, 0 warnings**.
+- **M6 (Adversarial QA, Property-Based, Security, Concurrency & Mutation Checks):**
+  - `unittest -v test_admin_ai_property_based test_admin_ai_adversarial_qa` -> **15 passed, 0 failed** (2.25s; 350+ Hypothesis generated examples).
+  - Controlled mutation checks (`scratch/run_mutation_checks.py`) -> **5/5 mutations KILLED (100%)**.

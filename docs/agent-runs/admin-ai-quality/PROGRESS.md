@@ -1,5 +1,13 @@
 # Execution Progress & Checkpoints
 
+## Checkpoint — M6 Adversarial QA Complete (2026-11-21)
+
+- **Done:**
+  - Added Hypothesis property-based suite (`backend/test_admin_ai_property_based.py`, 6 properties × 50–60 generated examples = 350+ invariants): chunk/reconstruct identity, boundary punctuation preservation, token-split/count rejection, UTF-8 combining-mark safety chunking, NFC/NFD/CRLF content hash invariance, rights evidence validity invariant.
+  - Added Adversarial QA suite (`backend/test_admin_ai_adversarial_qa.py`): Frontend-Backend Zod/Pydantic contract parity, 8-endpoint Parent->Admin RBAC 403 matrix, Parent A/B IDOR 404 + hidden internal findings check, 5 prompt injection vectors, Vietnamese complex diacritics/proper nouns/malformed JSON robustness, concurrent verify double-commit protection, late worker result discard after candidate edit, exponential retry backoff & terminal failure, 250-page diagnostics performance & memory bounds (<2s, <64MB).
+  - Executed 5 controlled in-memory mutations (safety escalation, rights verify gate, workflow/image safety gate, rights book approval gate, auto-publish re-enable) -> **5/5 KILLED (caught by tests)**.
+- **In Progress:** M7 Full Regression, Real Browser Playwright E2E (Flows 1–8 desktop + mobile screenshots), 3-Perspective Final Review (Architect/Security/QA), Push branch & PR.
+
 ## Checkpoint — M5 Book Quality UI, Rights Panel & Parent Reports Complete (2026-11-21)
 
 - **Done:**
