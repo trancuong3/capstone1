@@ -44,6 +44,9 @@ class BoundingBoxIntegrityTests(unittest.TestCase):
         report = inspect_word_boxes(None)
         self.assertEqual(report["status"], "not_reported")
         self.assertEqual(report["valid_boxes"], 0)
+        empty = inspect_word_boxes([])
+        self.assertEqual(empty["status"], "empty_word_list")
+        self.assertEqual(empty["valid_boxes"], 0)
 
 
 if __name__ == "__main__":
