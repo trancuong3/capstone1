@@ -94,6 +94,35 @@ Có thể chạy riêng module test không cần ảnh:
 & "F:\c1\capstone1\.venv\Scripts\python.exe" -m unittest discover -s "F:\c1\capstone1-ocr-acceptance\backend" -p "test_ocr_tesseract_holdout_audit.py" -v
 ```
 
+### Chạy kiểm thử code mà chưa có ảnh held-out
+
+Với phiên bản mới nhất, có thể chạy tất cả 4 bộ unit tests của TASK 14
+mà **không yêu cầu** bộ ảnh mới:
+
+```powershell
+& "F:\\c1\\capstone1-ocr-acceptance\\backend\\scripts\\run_ocr_task14_holdout.ps1" -TestsOnly
+```
+
+Chế độ `-TestsOnly` kết thúc sau unit tests và ghi rõ
+`TESTS-ONLY`, `Independent held-out acceptance: NOT VERIFIED`,
+`Production deployment: BLOCKED`. Nó **không** tính CER/WER mới,
+không đọc ảnh hoặc manifest held-out, và không báo đạt nghiệm thu.
+Lệnh mặc định (không có `-TestsOnly`) vẫn dừng có lỗi nếu thiếu
+manifest ảnh mới, đúng theo yêu cầu an toàn.
+
+Bộ kiểm tra số liệu cũng đối chiếu lại CER = `character_edits /
+reference_characters` và WER = `word_edits / reference_words` đúng
+quy tắc làm tròn 6 chữ số của benchmark gốc; đồng thời từ chối nếu
+mẫu số của chính sách không khớp mẫu số baseline. Vì vậy một báo cáo
+tổng hợp có số đếm hoặc tỉ lệ không nhất quán sẽ bị từ chối, thay vì
+được công bố như chất lượng OCR đã đo.
+
+**Báo cáo `index(5).html` vẫn là TASK 13** trên cùng 10 ảnh:
+18 vị trí đề xuất, 13 sửa đúng / 3 hồi quy / 2 còn sai của Tesseract
+trực tiếp; 4 sửa đúng / 1 hồi quy của chính sách đồng thuận, tất cả
+theo căn chỉnh token tự động. Nó không cung cấp 20 ảnh mới và không
+thể được dùng làm kết quả TASK 14.
+
 TASK 14 là **khuôn kiểm thử nghiên cứu**, không yêu cầu đóng/mở
 PR mới. Tất cả thay đổi được cập nhật trên PR #187. Không merge,
 không tự deploy và không bật chính sách sửa dấu ở production khi
