@@ -22,8 +22,8 @@ const assessment = {
   processing_pages: 0,
   failed_pages: 0,
   stale_pages: 0,
-  copyright_status: "NOT_CONFIGURED",
-  copyright_finding_count: null,
+  copyright_status: "RIGHTS_REVIEWED",
+  copyright_finding_count: 0,
   finding_count: 0,
   high_finding_count: 0,
   medium_finding_count: 0,
@@ -37,12 +37,12 @@ const assessment = {
   admin_approved_by_name: null,
   admin_reason: null,
   publication_source: null,
-  rights_confirmed: false,
+  rights_confirmed: true,
   blockers: [],
 };
 
 describe("book-level approval dashboard", () => {
-  it("allows approval without Copyright confirmation and does not start another scan", async () => {
+  it("allows approval when rights evidence is RIGHTS_REVIEWED and does not start another scan", async () => {
     const services = createAdminServiceFixture();
     vi.mocked(services.bookContentQuality.listReports).mockResolvedValue({
       items: [],
@@ -79,6 +79,7 @@ describe("book-level approval dashboard", () => {
       ai_workflows: [],
       ai_workflow_summary: {},
       assessment,
+      page_diagnostics: [],
       decision_history: [],
     });
     vi.mocked(services.bookContentQuality.decideBook).mockResolvedValue({
@@ -86,8 +87,8 @@ describe("book-level approval dashboard", () => {
       assessment: {
         ...assessment,
         status: "APPROVED_BY_ADMIN",
-        copyright_status: "NOT_CONFIGURED",
-        rights_confirmed: false,
+        copyright_status: "RIGHTS_REVIEWED",
+        rights_confirmed: true,
       },
       decision_history: [],
     });
@@ -103,14 +104,12 @@ describe("book-level approval dashboard", () => {
     ).toBeInTheDocument();
     expect(
       await screen.findByText(
-        /0 Child Safety findings.*Copyright chưa có scanner tự động/,
+        /0 Child Safety findings.*Đã rà soát quyền sử dụng/,
       ),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Xem kết quả" }));
     expect(
-      await screen.findByText(
-        /Copyright hiện tạm thời chưa tham gia quyết định/,
-      ),
+      await screen.findByText(/Hệ thống không tự động xác minh trang/),
     ).toBeInTheDocument();
 
     await user.type(
@@ -127,7 +126,7 @@ describe("book-level approval dashboard", () => {
         {
           decision: "APPROVE",
           reason: "Đã kiểm tra hồ sơ quyền sử dụng.",
-          rights_confirmed: false,
+          rights_confirmed: true,
           category: undefined,
         },
       );

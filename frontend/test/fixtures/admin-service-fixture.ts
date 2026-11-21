@@ -174,6 +174,14 @@ function createBookContentQualityServiceFixture() {
     retryPage: vi
       .fn<AdminServices["bookContentQuality"]["retryPage"]>()
       .mockRejectedValue(unavailable()),
+    getBookRights: vi
+      .fn<NonNullable<AdminServices["bookContentQuality"]["getBookRights"]>>()
+      .mockRejectedValue(unavailable()),
+    upsertBookRights: vi
+      .fn<
+        NonNullable<AdminServices["bookContentQuality"]["upsertBookRights"]>
+      >()
+      .mockRejectedValue(unavailable()),
   } satisfies AdminServices["bookContentQuality"];
 }
 

@@ -2910,13 +2910,17 @@ export function AdminOcrReviewScreen({
                   </p>
                 </div>
                 <div className="rounded-control bg-canvas p-3">
-                  <p className="text-xs text-muted">An toàn văn bản (Text Safety)</p>
+                  <p className="text-xs text-muted">
+                    An toàn văn bản (Text Safety)
+                  </p>
                   <p className="mt-1 font-extrabold text-ink">
                     {aiWorkflow.text_safety_status ?? aiWorkflow.safety_status}
                   </p>
                 </div>
                 <div className="rounded-control bg-canvas p-3">
-                  <p className="text-xs text-muted">An toàn hình ảnh (Image Safety)</p>
+                  <p className="text-xs text-muted">
+                    An toàn hình ảnh (Image Safety)
+                  </p>
                   <p
                     className="mt-1 font-extrabold text-ink"
                     data-testid="image-safety-status"
@@ -2956,7 +2960,9 @@ export function AdminOcrReviewScreen({
                       Kiểm tra an toàn hình ảnh (Admin kiểm tra thủ công)
                     </p>
                     <p className="mt-1 text-xs text-muted">
-                      AI Child Safety hiện chỉ đánh giá văn bản (không kiểm tra nội dung trực quan trong ảnh). Admin cần đối chiếu ảnh trang sách trước khi xác nhận.
+                      AI Child Safety hiện chỉ đánh giá văn bản (không kiểm tra
+                      nội dung trực quan trong ảnh). Admin cần đối chiếu ảnh
+                      trang sách trước khi xác nhận.
                     </p>
                   </div>
                 </div>

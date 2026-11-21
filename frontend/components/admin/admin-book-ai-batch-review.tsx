@@ -298,7 +298,10 @@ export function AdminBookAiBatchReview({
           );
         }
 
-        const prepared = preparePage(detail, workflow.proofread_text.normalize("NFC"));
+        const prepared = preparePage(
+          detail,
+          workflow.proofread_text.normalize("NFC"),
+        );
         const saved = await ocr.saveDraft(
           pageId,
           revisionId,
@@ -442,9 +445,9 @@ export function AdminBookAiBatchReview({
             AI xử lý lần lượt các trang NEEDS_REVIEW để đề xuất sửa chính tả OCR
             và quét an toàn nội dung văn bản (hỗ trợ fallback sang Ollama cục bộ
             khi cloud gặp lỗi). Hệ thống tuyệt đối không tự động VERIFIED trang
-            hoặc tự động xuất bản sách: Admin cần mở từng trang để đối chiếu ảnh,
-            xác nhận an toàn hình ảnh, kiểm tra hồ sơ quyền sử dụng và bấm xác
-            minh thủ công.
+            hoặc tự động xuất bản sách: Admin cần mở từng trang để đối chiếu
+            ảnh, xác nhận an toàn hình ảnh, kiểm tra hồ sơ quyền sử dụng và bấm
+            xác minh thủ công.
           </p>
         </div>
 

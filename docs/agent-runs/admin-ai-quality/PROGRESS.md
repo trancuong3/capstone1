@@ -1,5 +1,17 @@
 # Execution Progress & Checkpoints
 
+## Checkpoint — M5 Book Quality UI, Rights Panel & Parent Reports Complete (2026-11-21)
+
+- **Done:**
+  - Hardened `get_parent_report` (`include_internal_findings=False`) so internal Admin scan findings never leak to Parents.
+  - Added `CHILD_SAFETY_CONCERN` and `COPYRIGHT_CONCERN` across Zod schemas, `BookContentReportDialog`, `ParentBookReportsScreen`, and `AdminBookContentQualityScreen`.
+  - Built Rights Evidence review & history panel in `AdminBookContentQualityScreen` (no hardcoded `rights_confirmed: false`, no "không vi phạm bản quyền" claim; locks Approve until `RIGHTS_REVIEWED`).
+  - Built Per-Page Quality Diagnostics panel with filter chips (`Tất cả`, `Trang có vấn đề`, `Chưa xác minh`, `Lỗi ảnh / OCR`) and unknown physical page count disclaimer.
+  - Added expandable Admin resolution response view in `ParentBookReportsScreen` via `getMine`.
+  - Verified Frontend `vitest` (M5 suite 4/4 PASS), `tsc --noEmit` (0 errors), `eslint .` (0 errors), `prettier` clean.
+- **In Progress:** M6 Adversarial QA (Hypothesis property-based tests, Contract parity, Concurrency/Race, RBAC/IDOR/Prompt-Injection, Recovery, Controlled Mutation Checks, Performance/Memory).
+- **Bugs Closed:** BUG-04, BUG-08 (ALL 10 discovered bugs BUG-01..BUG-10 now FIXED).
+
 ## Checkpoint — M4 Rights Evidence & Strict Verification Gate Complete (2026-11-21)
 
 - **Done:**

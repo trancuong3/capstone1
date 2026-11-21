@@ -10,6 +10,7 @@ import {
   bookQualityReportAdminPageSchema,
   bookQualityScanDetailSchema,
   bookQualityScanSchema,
+  bookRightsEvidenceSchema,
   type BookContentReportDetailDTO,
   type BookContentReportStatus,
   type BookQualityBookDetailDTO,
@@ -22,6 +23,8 @@ import {
   type BookQualityReportAdminPageDTO,
   type BookQualityScanDTO,
   type BookQualityScanDetailDTO,
+  type BookRightsEvidenceDTO,
+  type BookRightsEvidenceUpsertRequest,
 } from "@/types/book-content-quality";
 
 export interface AdminBookContentQualityService {
@@ -49,6 +52,14 @@ export interface AdminBookContentQualityService {
     offset?: number;
   }): Promise<BookQualityBookPageDTO>;
   getBook(bookId: string): Promise<BookQualityBookDetailDTO>;
+  getBookRights?(
+    bookId: string,
+    pageId?: string,
+  ): Promise<BookRightsEvidenceDTO>;
+  upsertBookRights?(
+    bookId: string,
+    payload: BookRightsEvidenceUpsertRequest,
+  ): Promise<BookRightsEvidenceDTO>;
   decideBook(
     bookId: string,
     decision: BookQualityBookDecisionRequest,
@@ -113,6 +124,18 @@ export function createAdminBookContentQualityService(): AdminBookContentQualityS
       requestApi(
         `/books/admin/quality/books/${encodeURIComponent(bookId)}`,
         bookQualityBookDetailSchema,
+      ),
+    getBookRights: (bookId, pageId) =>
+      requestApi(
+        `/books/admin/quality/books/${encodeURIComponent(bookId)}/rights${apiQuery({ page_id: pageId })}`,
+        bookRightsEvidenceSchema,
+      ),
+    upsertBookRights: (bookId, payload) =>
+      requestApi(
+        `/books/admin/quality/books/${encodeURIComponent(bookId)}/rights`,
+        bookRightsEvidenceSchema,
+        undefined,
+        { method: "PUT", body: payload },
       ),
     decideBook: (bookId, decision) =>
       requestApi(

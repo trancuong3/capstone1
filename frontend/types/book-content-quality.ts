@@ -9,7 +9,29 @@ export const bookContentIssueTypeSchema = z.enum([
   "IMAGE_QUALITY_ERROR",
   "DUPLICATE_PAGE",
   "PAGE_ORDER_ERROR",
+  "CHILD_SAFETY_CONCERN",
+  "COPYRIGHT_CONCERN",
   "OTHER",
+]);
+
+export const bookRightsStatusSchema = z.enum([
+  "UNASSESSED",
+  "INSUFFICIENT_EVIDENCE",
+  "CONCERN_FLAGGED",
+  "RIGHTS_REVIEWED",
+]);
+
+export const bookRightsScopeSchema = z.enum(["BOOK", "PAGE"]);
+
+export const bookPageDiagnosticCodeSchema = z.enum([
+  "OK",
+  "MISSING_IMAGE",
+  "EMPTY_OCR",
+  "OCR_ERROR",
+  "DUPLICATE_PAGE",
+  "SUSPECTED_MISSING_PAGE",
+  "UNVERIFIED_PAGE",
+  "IMAGE_ONLY_PAGE",
 ]);
 
 export const bookContentReportStatusSchema = z.enum([
@@ -252,6 +274,67 @@ export const bookQualityBookDecisionReadSchema = z.object({
   ),
 });
 
+export const bookRightsEvidenceHistorySchema = z.object({
+  id: z.guid(),
+  version: z.number().int().positive(),
+  from_status: z.string().nullable(),
+  to_status: bookRightsStatusSchema,
+  source_description: z.string().nullable().optional(),
+  author_or_rights_holder: z.string().nullable().optional(),
+  usage_basis: z.string().nullable().optional(),
+  evidence_url_or_ref: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  content_fingerprint: z.string().nullable().optional(),
+  actor_id: z.guid().nullable().optional(),
+  actor_name: z.string().nullable().optional(),
+  created_at: z.iso.datetime({ offset: true }),
+});
+
+export const bookRightsEvidenceSchema = z.object({
+  id: z.guid().nullable().optional(),
+  book_id: z.guid(),
+  page_id: z.guid().nullable().optional(),
+  scope: bookRightsScopeSchema.default("BOOK"),
+  status: bookRightsStatusSchema.default("UNASSESSED"),
+  effective_status: z.string().default("UNASSESSED"),
+  is_stale: z.boolean().default(false),
+  source_description: z.string().nullable().optional(),
+  author_or_rights_holder: z.string().nullable().optional(),
+  usage_basis: z.string().nullable().optional(),
+  evidence_url_or_ref: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  version: z.number().int().nonnegative().default(0),
+  content_fingerprint: z.string().nullable().optional(),
+  current_content_fingerprint: z.string().nullable().optional(),
+  reviewed_by: z.guid().nullable().optional(),
+  reviewed_by_name: z.string().nullable().optional(),
+  reviewed_at: z.iso.datetime({ offset: true }).nullable().optional(),
+  updated_at: z.iso.datetime({ offset: true }).nullable().optional(),
+  history: z.array(bookRightsEvidenceHistorySchema).default([]),
+});
+
+export const bookRightsEvidenceUpsertSchema = z.object({
+  scope: bookRightsScopeSchema.default("BOOK"),
+  page_id: z.guid().nullable().optional(),
+  status: bookRightsStatusSchema,
+  source_description: z.string().max(500).nullable().optional(),
+  author_or_rights_holder: z.string().max(300).nullable().optional(),
+  usage_basis: z.string().max(120).nullable().optional(),
+  evidence_url_or_ref: z.string().max(1000).nullable().optional(),
+  notes: z.string().max(2000).nullable().optional(),
+});
+
+export const bookPageDiagnosticSchema = z.object({
+  page_id: z.guid().nullable().optional(),
+  page_number: z.number().int(),
+  lifecycle_status: z.string().nullable().optional(),
+  verification_status: z.string().nullable().optional(),
+  codes: z.array(bookPageDiagnosticCodeSchema).default([]),
+  image_safety_status: z.string().nullable().optional(),
+  text_safety_status: z.string().nullable().optional(),
+  summary: z.string(),
+});
+
 export const bookQualityBookDetailSchema = z.object({
   book_id: z.guid(),
   book_title: z.string(),
@@ -263,6 +346,9 @@ export const bookQualityBookDetailSchema = z.object({
     .record(z.string(), z.number().int().nonnegative())
     .default({}),
   assessment: bookApprovalAssessmentSchema,
+  rights_evidence: bookRightsEvidenceSchema.nullable().optional(),
+  page_diagnostics: z.array(bookPageDiagnosticSchema).optional().default([]),
+  completeness_disclaimer: z.string().optional(),
   decision_history: bookQualityBookDecisionReadSchema.shape.decision_history,
 });
 
@@ -312,3 +398,13 @@ export type BookQualityBookDecisionRequest = z.infer<
 export type BookQualityReportAdminPageDTO = z.infer<
   typeof bookQualityReportAdminPageSchema
 >;
+export type BookRightsStatus = z.infer<typeof bookRightsStatusSchema>;
+export type BookRightsScope = z.infer<typeof bookRightsScopeSchema>;
+export type BookRightsEvidenceDTO = z.infer<typeof bookRightsEvidenceSchema>;
+export type BookRightsEvidenceUpsertRequest = z.input<
+  typeof bookRightsEvidenceUpsertSchema
+>;
+export type BookPageDiagnosticCode = z.infer<
+  typeof bookPageDiagnosticCodeSchema
+>;
+export type BookPageDiagnosticDTO = z.infer<typeof bookPageDiagnosticSchema>;

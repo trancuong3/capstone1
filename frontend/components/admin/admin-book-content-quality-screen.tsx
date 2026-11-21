@@ -14,6 +14,7 @@ import type {
   BookContentIssueType,
   BookContentReportDetailDTO,
   BookContentReportStatus,
+  BookPageDiagnosticCode,
   BookQualityBookDetailDTO,
   BookQualityBookPageDTO,
   BookApprovalStatus,
@@ -21,6 +22,7 @@ import type {
   BookQualityFindingStatus,
   BookQualityReportAdminPageDTO,
   BookQualityScanDetailDTO,
+  BookRightsStatus,
 } from "@/types/book-content-quality";
 
 const issueLabels: Record<BookContentIssueType, string> = {
@@ -31,7 +33,28 @@ const issueLabels: Record<BookContentIssueType, string> = {
   IMAGE_QUALITY_ERROR: "Ảnh trang sách bị lỗi",
   DUPLICATE_PAGE: "Trang có dấu hiệu bị trùng",
   PAGE_ORDER_ERROR: "Trang sai thứ tự",
+  CHILD_SAFETY_CONCERN: "Nội dung có dấu hiệu không phù hợp cho trẻ em",
+  COPYRIGHT_CONCERN: "Nghi ngại bản quyền / quyền sử dụng",
   OTHER: "Lỗi khác",
+};
+
+const rightsStatusLabels: Record<string, string> = {
+  UNASSESSED: "Chưa rà soát quyền sử dụng",
+  INSUFFICIENT_EVIDENCE: "Thiếu bằng chứng quyền sử dụng",
+  CONCERN_FLAGGED: "Có nghi ngại bản quyền / quyền sử dụng",
+  RIGHTS_REVIEWED: "Đã rà soát quyền sử dụng",
+  STALE_RIGHTS_REVIEW: "Hồ sơ quyền cần rà soát lại (nội dung đã đổi)",
+};
+
+const pageDiagnosticLabels: Record<BookPageDiagnosticCode, string> = {
+  OK: "Đạt",
+  MISSING_IMAGE: "Thiếu ảnh",
+  EMPTY_OCR: "OCR rỗng",
+  OCR_ERROR: "Lỗi OCR / AI",
+  DUPLICATE_PAGE: "Nghi trùng trang",
+  SUSPECTED_MISSING_PAGE: "Nghi thiếu trang",
+  UNVERIFIED_PAGE: "Chưa xác minh",
+  IMAGE_ONLY_PAGE: "Chỉ có ảnh",
 };
 
 const reportStatusLabels: Record<BookContentReportStatus, string> = {
@@ -272,6 +295,19 @@ export function AdminBookContentQualityScreen() {
   const [resolutionNote, setResolutionNote] = useState("");
   const [bookDecisionReason, setBookDecisionReason] = useState("");
   const [falsePositiveCategory, setFalsePositiveCategory] = useState("");
+  const [rightsStatus, setRightsStatus] =
+    useState<BookRightsStatus>("UNASSESSED");
+  const [rightsSource, setRightsSource] = useState("");
+  const [rightsAuthor, setRightsAuthor] = useState("");
+  const [rightsUsageBasis, setRightsUsageBasis] = useState("");
+  const [rightsEvidenceRef, setRightsEvidenceRef] = useState("");
+  const [rightsNotes, setRightsNotes] = useState("");
+  const [rightsSavedNotice, setRightsSavedNotice] = useState<string | null>(
+    null,
+  );
+  const [pageDiagnosticFilter, setPageDiagnosticFilter] = useState<
+    "ALL" | "ISSUES" | "UNVERIFIED" | "MEDIA_OCR"
+  >("ALL");
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const reportRequestId = useRef(0);
   const bookRequestId = useRef(0);
@@ -425,15 +461,57 @@ export function AdminBookContentQualityScreen() {
     }
   }
 
+  const syncRightsForm = useCallback((detail: BookQualityBookDetailDTO) => {
+    const r = detail.rights_evidence;
+    setRightsStatus(r?.status ?? "UNASSESSED");
+    setRightsSource(r?.source_description ?? "");
+    setRightsAuthor(r?.author_or_rights_holder ?? "");
+    setRightsUsageBasis(r?.usage_basis ?? "");
+    setRightsEvidenceRef(r?.evidence_url_or_ref ?? "");
+    setRightsNotes(r?.notes ?? "");
+  }, []);
+
   async function openBook(bookId: string) {
     setBusyKey(`book:${bookId}`);
     setActionError(null);
+    setRightsSavedNotice(null);
     try {
       const detail = await bookContentQuality.getBook(bookId);
       setSelectedBook(detail);
       setSelectedScan(detail.latest_scan_detail);
+      syncRightsForm(detail);
       setBookDecisionReason("");
       setFalsePositiveCategory("");
+    } catch (error) {
+      setActionError(errorMessage(error));
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function saveBookRights() {
+    if (!selectedBook || !bookContentQuality.upsertBookRights) return;
+    setBusyKey(`book-rights:${selectedBook.book_id}`);
+    setActionError(null);
+    setRightsSavedNotice(null);
+    try {
+      const saved = await bookContentQuality.upsertBookRights(
+        selectedBook.book_id,
+        {
+          scope: "BOOK",
+          status: rightsStatus,
+          source_description: rightsSource.trim() || null,
+          author_or_rights_holder: rightsAuthor.trim() || null,
+          usage_basis: rightsUsageBasis.trim() || null,
+          evidence_url_or_ref: rightsEvidenceRef.trim() || null,
+          notes: rightsNotes.trim() || null,
+        },
+      );
+      await refreshSelectedBook(selectedBook.book_id);
+      await loadBooks();
+      setRightsSavedNotice(
+        `Đã lưu hồ sơ quyền sử dụng (phiên bản v${saved.version} · ${rightsStatusLabels[saved.effective_status] ?? saved.effective_status}).`,
+      );
     } catch (error) {
       setActionError(errorMessage(error));
     } finally {
@@ -451,7 +529,7 @@ export function AdminBookContentQualityScreen() {
       const result = await bookContentQuality.decideBook(selectedBook.book_id, {
         decision,
         reason: bookDecisionReason.trim(),
-        rights_confirmed: false,
+        rights_confirmed: selectedBook.assessment.rights_confirmed,
         category:
           decision === "FALSE_POSITIVE"
             ? falsePositiveCategory.trim()
@@ -1162,15 +1240,15 @@ export function AdminBookContentQualityScreen() {
                     <p className="mt-2 text-sm text-muted">
                       Proofreading: {book.assessment.proofreading_status} ·
                       Child Safety: {book.assessment.child_safety_status} ·
-                      Copyright: {book.assessment.copyright_status}
+                      Quyền sử dụng:{" "}
+                      {rightsStatusLabels[book.assessment.copyright_status] ??
+                        book.assessment.copyright_status}
                     </p>
                     <p className="mt-1 text-xs font-semibold text-amber-900">
                       {book.assessment.finding_count} Child Safety findings
                       {` · HIGH ${book.assessment.high_finding_count}`}
                       {` · MEDIUM ${book.assessment.medium_finding_count}`}
-                      {book.assessment.copyright_status === "NOT_CONFIGURED"
-                        ? " · Copyright chưa có scanner tự động"
-                        : ""}
+                      {` · ${rightsStatusLabels[book.assessment.copyright_status] ?? book.assessment.copyright_status}`}
                     </p>
                     <p className="mt-1 text-sm text-muted">
                       {book.report_count} báo cáo · {book.finding_count}{" "}
@@ -1323,7 +1401,12 @@ export function AdminBookContentQualityScreen() {
                   "Đang xử lý",
                   `${selectedBook.assessment.processing_pages} trang`,
                 ],
-                ["Copyright", selectedBook.assessment.copyright_status],
+                [
+                  "Quyền sử dụng nội dung",
+                  rightsStatusLabels[
+                    selectedBook.assessment.copyright_status
+                  ] ?? selectedBook.assessment.copyright_status,
+                ],
                 [
                   "Findings",
                   `${selectedBook.assessment.finding_count} · HIGH ${selectedBook.assessment.high_finding_count} · MEDIUM ${selectedBook.assessment.medium_finding_count}`,
@@ -1353,12 +1436,297 @@ export function AdminBookContentQualityScreen() {
                 </div>
               ))}
             </div>
-            <div className="mt-4 rounded-control border border-border bg-canvas p-3 text-sm text-muted">
-              Tự động xuất bản chỉ áp dụng khi OCR đã xác minh khớp Candidate,
-              Proofreading đã hoàn tất và Admin xác minh Candidate, Child Safety
-              đạt SUITABLE không có finding. Copyright hiện tạm thời chưa tham
-              gia quyết định.
+            <div className="mt-4 rounded-control border border-border bg-white p-3 text-sm text-muted">
+              Hệ thống không tự động xác minh trang và không tự động xuất bản
+              sách. Admin chỉ có thể phê duyệt sách sau khi mọi trang đã có OCR
+              VERIFIED khớp Candidate, Proofreading và Child Safety (văn bản +
+              hình ảnh) đạt yêu cầu, và hồ sơ bằng chứng quyền sử dụng ở trạng
+              thái <strong>Đã rà soát quyền sử dụng</strong>.
             </div>
+
+            <section
+              aria-label="Hồ sơ bằng chứng quyền sử dụng nội dung"
+              className="mt-4 rounded-control border border-border bg-white p-4"
+              data-testid="book-rights-panel"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <h4 className="font-extrabold text-ink">
+                    Rà soát quyền sử dụng nội dung &amp; lưu bằng chứng
+                  </h4>
+                  <p className="mt-1 text-xs text-muted">
+                    Ghi nhận nguồn tài liệu, cơ sở sử dụng và đường dẫn/mã bằng
+                    chứng. Lưu ý: trạng thái &ldquo;Đã rà soát quyền sử
+                    dụng&rdquo; là hồ sơ kiểm duyệt nội bộ có bằng chứng, không
+                    phải xác nhận pháp lý tự động từ AI.
+                  </p>
+                </div>
+                <span
+                  className="rounded-full bg-canvas px-3 py-1 text-xs font-extrabold text-ink"
+                  data-testid="book-rights-status"
+                >
+                  {rightsStatusLabels[
+                    selectedBook.rights_evidence?.effective_status ??
+                      selectedBook.assessment.copyright_status
+                  ] ?? selectedBook.assessment.copyright_status}
+                  {selectedBook.rights_evidence?.version
+                    ? ` · v${selectedBook.rights_evidence.version}`
+                    : ""}
+                </span>
+              </div>
+              {selectedBook.rights_evidence?.is_stale ? (
+                <p className="mt-2 rounded-control border border-amber-400 bg-amber-50 p-2.5 text-xs font-semibold text-amber-950">
+                  Nội dung hoặc nguồn trang sách đã thay đổi sau lần rà soát
+                  quyền gần nhất. Cần rà soát và lưu lại hồ sơ quyền trước khi
+                  phê duyệt.
+                </p>
+              ) : null}
+              {rightsSavedNotice ? (
+                <p
+                  className="mt-2 rounded-control border border-emerald-300 bg-emerald-50 p-2.5 text-xs font-semibold text-emerald-900"
+                  role="status"
+                >
+                  {rightsSavedNotice}
+                </p>
+              ) : null}
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <label className="text-xs font-bold text-ink">
+                  Trạng thái quyền sử dụng
+                  <select
+                    className="mt-1 min-h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal"
+                    onChange={(event) =>
+                      setRightsStatus(event.target.value as BookRightsStatus)
+                    }
+                    value={rightsStatus}
+                  >
+                    <option value="UNASSESSED">
+                      Chưa rà soát quyền sử dụng (UNASSESSED)
+                    </option>
+                    <option value="INSUFFICIENT_EVIDENCE">
+                      Thiếu bằng chứng (INSUFFICIENT_EVIDENCE)
+                    </option>
+                    <option value="CONCERN_FLAGGED">
+                      Có nghi ngại bản quyền (CONCERN_FLAGGED)
+                    </option>
+                    <option value="RIGHTS_REVIEWED">
+                      Đã rà soát quyền sử dụng (RIGHTS_REVIEWED)
+                    </option>
+                  </select>
+                </label>
+                <label className="text-xs font-bold text-ink">
+                  Cơ sở sử dụng (bắt buộc khi Đã rà soát)
+                  <input
+                    className="mt-1 min-h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal"
+                    maxLength={120}
+                    onChange={(event) =>
+                      setRightsUsageBasis(event.target.value)
+                    }
+                    placeholder="Ví dụ: OPEN_LICENSE / PUBLIC_DOMAIN / PUBLISHER_PERMISSION"
+                    type="text"
+                    value={rightsUsageBasis}
+                  />
+                </label>
+                <label className="text-xs font-bold text-ink">
+                  Nguồn tài liệu (bắt buộc khi Đã rà soát)
+                  <input
+                    className="mt-1 min-h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal"
+                    maxLength={500}
+                    onChange={(event) => setRightsSource(event.target.value)}
+                    placeholder="Ví dụ: Thư viện số giáo dục mở / NXB đã cấp phép"
+                    type="text"
+                    value={rightsSource}
+                  />
+                </label>
+                <label className="text-xs font-bold text-ink">
+                  Tác giả / Chủ sở hữu quyền
+                  <input
+                    className="mt-1 min-h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal"
+                    maxLength={300}
+                    onChange={(event) => setRightsAuthor(event.target.value)}
+                    placeholder="Tên tác giả hoặc đơn vị giữ quyền"
+                    type="text"
+                    value={rightsAuthor}
+                  />
+                </label>
+                <label className="sm:col-span-2 text-xs font-bold text-ink">
+                  Đường dẫn / Mã hồ sơ bằng chứng (bắt buộc khi Đã rà soát)
+                  <input
+                    className="mt-1 min-h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal"
+                    maxLength={1000}
+                    onChange={(event) =>
+                      setRightsEvidenceRef(event.target.value)
+                    }
+                    placeholder="URL giấy phép hoặc mã văn bản lưu trữ nội bộ"
+                    type="text"
+                    value={rightsEvidenceRef}
+                  />
+                </label>
+                <label className="sm:col-span-2 text-xs font-bold text-ink">
+                  Ghi chú rà soát (bắt buộc khi gắn cờ nghi ngại)
+                  <textarea
+                    className="mt-1 min-h-16 w-full rounded-control border border-border bg-white p-2.5 text-sm font-normal"
+                    maxLength={2000}
+                    onChange={(event) => setRightsNotes(event.target.value)}
+                    placeholder="Ghi rõ bằng chứng đối chiếu hoặc lý do nghi ngại bản quyền…"
+                    value={rightsNotes}
+                  />
+                </label>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                <Button
+                  className="h-10 w-auto px-4 text-sm"
+                  disabled={
+                    busyKey === `book-rights:${selectedBook.book_id}` ||
+                    (rightsStatus === "RIGHTS_REVIEWED" &&
+                      (!rightsSource.trim() ||
+                        !rightsUsageBasis.trim() ||
+                        !rightsEvidenceRef.trim())) ||
+                    (rightsStatus === "CONCERN_FLAGGED" && !rightsNotes.trim())
+                  }
+                  onClick={() => void saveBookRights()}
+                  type="button"
+                >
+                  Lưu hồ sơ quyền sử dụng
+                </Button>
+                {selectedBook.rights_evidence?.reviewed_at ? (
+                  <span className="text-xs text-muted">
+                    Cập nhật gần nhất:{" "}
+                    {formatDate(selectedBook.rights_evidence.reviewed_at)}
+                    {selectedBook.rights_evidence.reviewed_by_name
+                      ? ` · ${selectedBook.rights_evidence.reviewed_by_name}`
+                      : ""}
+                  </span>
+                ) : null}
+              </div>
+              {selectedBook.rights_evidence?.history?.length ? (
+                <details className="mt-3 rounded-control border border-border bg-canvas/50 p-2.5">
+                  <summary className="cursor-pointer text-xs font-bold text-ink">
+                    Lịch sử thay đổi quyền sử dụng (
+                    {selectedBook.rights_evidence.history.length})
+                  </summary>
+                  <ul className="mt-2 grid gap-2 text-xs">
+                    {selectedBook.rights_evidence.history.map((entry) => (
+                      <li
+                        className="rounded-control bg-white p-2"
+                        key={entry.id}
+                      >
+                        <span className="font-bold">
+                          v{entry.version} ·{" "}
+                          {rightsStatusLabels[entry.to_status] ??
+                            entry.to_status}
+                        </span>{" "}
+                        · {formatDate(entry.created_at)}
+                        {entry.actor_name ? ` · ${entry.actor_name}` : ""}
+                        {entry.notes ? (
+                          <p className="mt-1 text-muted">{entry.notes}</p>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              ) : null}
+            </section>
+
+            {selectedBook.page_diagnostics?.length ? (
+              <section
+                aria-label="Chẩn đoán chất lượng từng trang"
+                className="mt-4 rounded-control border border-border bg-white p-4"
+                data-testid="book-page-diagnostics"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <h4 className="font-extrabold text-ink">
+                      Chẩn đoán chất lượng từng trang (
+                      {selectedBook.page_diagnostics.length})
+                    </h4>
+                    <p className="mt-1 text-xs text-muted">
+                      {selectedBook.completeness_disclaimer ??
+                        "Hệ thống chỉ kiểm tra các trang đã tải lên; chưa thể khẳng định đủ số trang so với bản in gốc nếu chưa khai báo tổng số trang gốc."}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(
+                      [
+                        ["ALL", "Tất cả"],
+                        ["ISSUES", "Trang có vấn đề"],
+                        ["UNVERIFIED", "Chưa xác minh"],
+                        ["MEDIA_OCR", "Lỗi ảnh / OCR"],
+                      ] as const
+                    ).map(([value, label]) => (
+                      <button
+                        className={
+                          "min-h-8 rounded-full border px-3 text-xs font-bold " +
+                          (pageDiagnosticFilter === value
+                            ? "border-primary bg-primary text-white"
+                            : "border-border bg-canvas text-ink")
+                        }
+                        key={value}
+                        onClick={() => setPageDiagnosticFilter(value)}
+                        type="button"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <ul className="mt-3 grid max-h-72 gap-2 overflow-y-auto">
+                  {selectedBook.page_diagnostics
+                    .filter((item) => {
+                      if (pageDiagnosticFilter === "ALL") return true;
+                      if (pageDiagnosticFilter === "ISSUES") {
+                        return item.codes.some((code) => code !== "OK");
+                      }
+                      if (pageDiagnosticFilter === "UNVERIFIED") {
+                        return item.codes.includes("UNVERIFIED_PAGE");
+                      }
+                      return item.codes.some((code) =>
+                        [
+                          "MISSING_IMAGE",
+                          "EMPTY_OCR",
+                          "OCR_ERROR",
+                          "IMAGE_ONLY_PAGE",
+                        ].includes(code),
+                      );
+                    })
+                    .map((item, idx) => (
+                      <li
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-border bg-canvas/50 p-2.5 text-xs"
+                        key={`${item.page_number}:${item.page_id ?? idx}`}
+                      >
+                        <div className="min-w-0">
+                          <span className="font-extrabold text-ink">
+                            Trang {item.page_number}
+                          </span>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {item.codes.map((code) => (
+                              <span
+                                className={
+                                  "rounded-full px-2 py-0.5 font-bold " +
+                                  (code === "OK"
+                                    ? "bg-emerald-100 text-emerald-900"
+                                    : "bg-amber-100 text-amber-950")
+                                }
+                                key={code}
+                              >
+                                {pageDiagnosticLabels[code] ?? code}
+                              </span>
+                            ))}
+                          </div>
+                          <p className="mt-1 text-muted">{item.summary}</p>
+                        </div>
+                        {item.page_id ? (
+                          <Link
+                            className="inline-flex min-h-8 items-center rounded-control border border-border bg-white px-2.5 font-bold text-primary hover:bg-canvas"
+                            href={`/admin/books/${encodeURIComponent(selectedBook.book_id)}/pages/${encodeURIComponent(item.page_id)}`}
+                          >
+                            Mở trang OCR
+                          </Link>
+                        ) : null}
+                      </li>
+                    ))}
+                </ul>
+              </section>
+            ) : null}
             {selectedBook.assessment.finding_groups.length ? (
               <div className="mt-4 grid gap-3">
                 <h4 className="font-bold text-ink">
@@ -1450,6 +1818,7 @@ export function AdminBookContentQualityScreen() {
                   className="h-10 w-auto px-3 text-sm"
                   disabled={
                     !bookDecisionReason.trim() ||
+                    !selectedBook.assessment.rights_confirmed ||
                     selectedBook.assessment.ocr_completed_pages !==
                       selectedBook.assessment.page_count ||
                     selectedBook.assessment.ocr_approval_valid_pages !==

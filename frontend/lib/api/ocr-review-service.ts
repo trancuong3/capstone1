@@ -117,7 +117,10 @@ export const adminAiWorkflowSchema = z.object({
       "ADMIN_FLAGGED_UNSAFE",
     ])
     .optional(),
-  image_safety_reviewed_at: z.iso.datetime({ offset: true }).nullable().optional(),
+  image_safety_reviewed_at: z.iso
+    .datetime({ offset: true })
+    .nullable()
+    .optional(),
   image_safety_reviewed_by: z.uuid().nullable().optional(),
   image_safety_image_sha256: z
     .string()

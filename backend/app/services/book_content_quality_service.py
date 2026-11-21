@@ -846,8 +846,14 @@ class BookContentQualityService:
         report: BookContentReport,
         reporter_name: str | None,
         history: list[BookContentReportHistory],
+        *,
+        include_internal_findings: bool = True,
     ) -> BookContentReportDetail:
-        related_rows = await self.repository.findings_for_report(report.Id)
+        related_rows = (
+            await self.repository.findings_for_report(report.Id)
+            if include_internal_findings
+            else []
+        )
         report_data = self._report_read(report).model_dump()
         report_data["reporter_name"] = (
             reporter_name or report.ReporterNameSnapshot
@@ -1066,7 +1072,9 @@ class BookContentQualityService:
         if row is None or row[0].ReporterId != actor_id:
             raise HTTPException(status_code=404, detail="Resource not found")
         history = await self.repository.report_history(report_id)
-        return await self._report_detail_response(row[0], row[1], history)
+        return await self._report_detail_response(
+            row[0], row[1], history, include_internal_findings=False
+        )
 
     async def list_admin_reports(
         self,

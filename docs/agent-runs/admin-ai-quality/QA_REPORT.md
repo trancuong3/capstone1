@@ -34,3 +34,7 @@
   - Frontend `vitest run tests/admin/admin-ocr-review-screen.test.tsx tests/admin/ocr-review-service.test.ts` -> **28 passed, 0 failed** (34.49s).
 - **M4 (Rights Evidence, Additive Migration & Server-Side Verification Gate):**
   - Backend 13 modules (`test_book_rights_and_verification_gate`, `test_admin_ocr_*`, `test_book_quality_*`, `test_parent_reports`, `test_admin_page_management`) -> **186 passed, 0 failed, 0 errors** (3.90s).
+- **M5 (Book Quality UI, Rights Evidence Panel & Parent Reports Inbox):**
+  - Frontend `vitest run tests/admin/admin-book-content-quality-screen.test.tsx tests/books/parent-book-reports.test.tsx tests/admin/admin-book-approval-dashboard.test.tsx` -> **4 passed, 0 failed** (10.18s).
+  - Frontend `npm run typecheck` (`tsc --noEmit`) -> **0 errors**.
+  - Frontend `npm run lint` (`eslint .`) -> **0 errors, 0 warnings**.
