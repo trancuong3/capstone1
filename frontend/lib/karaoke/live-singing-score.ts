@@ -45,51 +45,6 @@ interface Anchor {
 // only; a final cannot be evidence of a lyric that has not started playing.
 const finalLagMs = 750;
 
-/**
- * Strips Vietnamese tone marks (sắc, huyền, hỏi, ngã, nặng) while preserving
- * base vowel quality (ă, â, ê, ô, ơ, ư) and đ. When singing softly, melody
- * pitch often overrides lexical tone in speech recognition.
- */
-export function stripVietnameseTones(word: string): string {
-  return word
-    .normalize("NFD")
-    .replace(/[\u0300\u0301\u0303\u0309\u0323]/g, "")
-    .normalize("NFC");
-}
-
-/**
- * Phonetic key for soft singing ("hát bé"): normalizes tone marks and
- * common soft-consonant/coda confusions in quiet Vietnamese singing
- * while keeping distinct words separate (e.g. "nói" !== "hát", "mèo" !== "bé").
- */
-export function softSingingKey(word: string): string {
-  let s = stripVietnameseTones(word.toLowerCase().trim());
-  if (!s) return s;
-  s = s
-    .replace(/^ngh/, "ng")
-    .replace(/^gh/, "g")
-    .replace(/^(gi|r)/, "d")
-    .replace(/^x/, "s")
-    .replace(/^tr/, "ch")
-    .replace(/^(k|q)/, "c");
-  if (s.length >= 3) {
-    s = s.replace(/(nh|ng)$/, "n");
-  }
-  return s;
-}
-
-export function wordsMatchForSinging(
-  expected: string,
-  heard: string,
-  softVoice = false,
-): boolean {
-  if (expected === heard) return true;
-  if (!softVoice || !expected || !heard) return false;
-  if (stripVietnameseTones(expected) === stripVietnameseTones(heard))
-    return true;
-  return softSingingKey(expected) === softSingingKey(heard);
-}
-
 function wordsInLine(
   line: KaraokeLine,
   lineIndex: number,
@@ -134,19 +89,10 @@ function wordsInLine(
 // An anchor is certain only when *every* longest ordered match assigns that
 // rank to the same lyric position. One "la" against two simultaneous "la"s stays
 // unknown instead of awarding it to whichever chorus was scanned first.
-function uniqueAnchors(
-  words: TimedWord[],
-  heard: string[],
-  softVoice = false,
-): (Anchor | null)[] {
+function uniqueAnchors(words: TimedWord[], heard: string[]): (Anchor | null)[] {
   const rows = words.length;
   const cols = heard.length;
-  if (
-    rows === cols &&
-    words.every((word, i) =>
-      wordsMatchForSinging(word.text, heard[i], softVoice),
-    )
-  )
+  if (rows === cols && words.every((word, i) => word.text === heard[i]))
     return words.map((_, i) => ({ expected: i, heard: i }));
   // A very long, unsegmented result must not stall audio playback or allocate
   // a quadratic table for an entire song. No position can then be asserted.
@@ -156,13 +102,10 @@ function uniqueAnchors(
   for (let i = 0; i < rows; i++) {
     const row = i * stride;
     for (let j = 0; j < cols; j++) {
-      prefix[row + stride + j + 1] = wordsMatchForSinging(
-        words[i].text,
-        heard[j],
-        softVoice,
-      )
-        ? prefix[row + j] + 1
-        : Math.max(prefix[row + stride + j], prefix[row + j + 1]);
+      prefix[row + stride + j + 1] =
+        words[i].text === heard[j]
+          ? prefix[row + j] + 1
+          : Math.max(prefix[row + stride + j], prefix[row + j + 1]);
     }
   }
   const length = prefix[rows * stride + cols];
@@ -172,7 +115,7 @@ function uniqueAnchors(
     let diagonal = 0;
     for (let j = cols - 1; j >= 0; j--) {
       const previous = suffix[j];
-      if (wordsMatchForSinging(words[i].text, heard[j], softVoice)) {
+      if (words[i].text === heard[j]) {
         const rank = prefix[i * stride + j];
         if (rank + 1 + diagonal === length) {
           const previousAnchor = anchors[rank];
@@ -207,57 +150,12 @@ export class LiveSingingAttempt {
   private lastEnd = -1;
   private cursor = -1;
 
-  constructor(
-    private readonly lyrics: KaraokeLyrics,
-    private readonly softVoice = false,
-  ) {
+  constructor(private readonly lyrics: KaraokeLyrics) {
     this.byLine = lyrics.lines.map((line, i) => {
       const words = wordsInLine(line, i, this.words.length);
       this.words.push(...words);
       return words;
     });
-  }
-
-  /**
-   * Selects the recognition alternative (from maxAlternatives) that matches
-   * the most expected lyric words in the active time window.
-   */
-  bestAlternative(
-    alternatives: readonly string[],
-    fromMs: number,
-    toMs: number,
-    earliestCapturedMs = 0,
-  ): string {
-    if (alternatives.length <= 1) return alternatives[0] ?? "";
-    const searchFrom = Math.max(earliestCapturedMs, fromMs - finalLagMs);
-    const windowEnd = Math.max(toMs + 400, fromMs + 400);
-    const eligible = this.words.filter((word) =>
-      overlaps(word, searchFrom, windowEnd),
-    );
-    if (!eligible.length) return alternatives[0] ?? "";
-    let best = alternatives[0] ?? "";
-    let bestScore = -1;
-    for (const candidate of alternatives) {
-      const tokens = tokenizeVietnameseText(candidate);
-      let score = 0;
-      let cursor = 0;
-      for (const token of tokens) {
-        const hit = eligible.findIndex(
-          (w, idx) =>
-            idx >= cursor &&
-            wordsMatchForSinging(w.text, token, this.softVoice),
-        );
-        if (hit !== -1) {
-          score += eligible[hit].text === token ? 2 : 1;
-          cursor = hit + 1;
-        }
-      }
-      if (score > bestScore) {
-        bestScore = score;
-        best = candidate;
-      }
-    }
-    return best;
   }
 
   accept(
@@ -298,13 +196,9 @@ export class LiveSingingAttempt {
       word.end <= toMs;
     const exactCore =
       core.length === heard.length &&
-      core.every(
-        (word, i) =>
-          covers(word) &&
-          wordsMatchForSinging(word.text, heard[i], this.softVoice),
-      );
+      core.every((word, i) => covers(word) && word.text === heard[i]);
     const words = exactCore ? core : eligible;
-    const anchors = uniqueAnchors(words, heard, this.softVoice);
+    const anchors = uniqueAnchors(words, heard);
     let changed = false;
     let lastPosition = -1;
     const mark = (word: TimedWord, state: LiveWordState) => {
@@ -412,17 +306,14 @@ export class LiveSingingAttempt {
     for (const token of heard) {
       if (idx >= eligible.length) break;
       const current = eligible[idx];
-      if (wordsMatchForSinging(current.text, token, this.softVoice)) {
+      if (current.text === token) {
         map.set(current.id, "matched");
         idx++;
         while (idx < eligible.length && !isOpen(eligible[idx])) idx++;
         continue;
       }
       // Ignore immediate stutter of previous word
-      if (
-        idx > 0 &&
-        wordsMatchForSinging(eligible[idx - 1].text, token, this.softVoice)
-      ) {
+      if (idx > 0 && eligible[idx - 1].text === token) {
         continue;
       }
       // Lookahead up to 3 words in the same line (like Reading previewAlignment)
@@ -432,7 +323,7 @@ export class LiveSingingAttempt {
         if (
           eligible[look].lineIndex === current.lineIndex &&
           isOpen(eligible[look]) &&
-          wordsMatchForSinging(eligible[look].text, token, this.softVoice)
+          eligible[look].text === token
         ) {
           ahead = look;
           break;
@@ -463,16 +354,9 @@ export class LiveSingingAttempt {
   /**
    * Tracks continuous playback across timed words while the microphone is
    * active. Any word whose time window was played through without being sung
-   * is marked as "omitted" ("Bỏ qua") once its window ends. If interim
-   * preview already matched a word (e.g. soft singing), it locks in that
-   * match rather than marking it omitted.
+   * is marked as "omitted" ("Bỏ qua") once its window ends.
    */
-  observePlayback(
-    fromMs: number,
-    toMs: number,
-    graceMs = 150,
-    preview?: ReadonlyMap<string, LiveWordState>,
-  ): boolean {
+  observePlayback(fromMs: number, toMs: number, graceMs = 150): boolean {
     if (
       !Number.isFinite(fromMs) ||
       !Number.isFinite(toMs) ||
@@ -491,53 +375,32 @@ export class LiveSingingAttempt {
       const duration = Math.max(1, word.clockEnd - word.clockStart);
       const required = Math.min(180, Math.max(40, duration * 0.35));
       if (
-        (word.state === "unknown" || word.clockOmitted) &&
+        word.state === "unknown" &&
         word.playedMs >= required &&
         toMs >= word.clockEnd + graceMs
       ) {
-        const previewState = preview?.get(word.id);
-        if (previewState === "matched" || previewState === "different") {
-          if (word.state !== previewState || word.clockOmitted) {
-            word.state = previewState;
-            word.clockOmitted = false;
-            changed = true;
-          }
-        } else if (word.state === "unknown") {
-          word.state = "omitted";
-          word.clockOmitted = true;
-          changed = true;
-        }
+        word.state = "omitted";
+        word.clockOmitted = true;
+        changed = true;
       }
     }
     return changed;
   }
 
-  flushPlayedOmissions(
-    currentMs: number,
-    preview?: ReadonlyMap<string, LiveWordState>,
-  ): boolean {
+  flushPlayedOmissions(currentMs: number): boolean {
     let changed = false;
     for (const word of this.words) {
       if (word.clockStart === null || word.clockEnd === null) continue;
       const duration = Math.max(1, word.clockEnd - word.clockStart);
       const required = Math.min(180, Math.max(40, duration * 0.35));
       if (
-        (word.state === "unknown" || word.clockOmitted) &&
+        word.state === "unknown" &&
         word.playedMs >= required &&
         currentMs >= word.clockStart + required
       ) {
-        const previewState = preview?.get(word.id);
-        if (previewState === "matched" || previewState === "different") {
-          if (word.state !== previewState || word.clockOmitted) {
-            word.state = previewState;
-            word.clockOmitted = false;
-            changed = true;
-          }
-        } else if (word.state === "unknown") {
-          word.state = "omitted";
-          word.clockOmitted = true;
-          changed = true;
-        }
+        word.state = "omitted";
+        word.clockOmitted = true;
+        changed = true;
       }
     }
     return changed;
