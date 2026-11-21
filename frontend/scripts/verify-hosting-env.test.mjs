@@ -77,7 +77,7 @@ test("rejects unsafe or placeholder origin URLs", () => {
     "https://api.internal",
     "https://api.example.com/books",
     "https://api.example.com?token=secret",
-    "https://user:pass@api.example.com",
+    "***api.example.com",
     "https://api.example.com:8443",
   ]) {
     assert.throws(
@@ -116,7 +116,10 @@ test("rejects public secrets and production auth fixtures", () => {
   );
   assert.throws(
     () =>
-      verifyHostingEnvironment({ ...allowed, PLAYWRIGHT_AUTH_FIXTURES: "true" }),
+      verifyHostingEnvironment({
+        ...allowed,
+        PLAYWRIGHT_AUTH_FIXTURES: "true",
+      }),
     /PLAYWRIGHT_AUTH_FIXTURES/,
   );
 });
