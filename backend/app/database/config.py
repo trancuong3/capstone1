@@ -121,6 +121,33 @@ READING_REMINDER_APP_URL = (
     os.getenv("READING_REMINDER_APP_URL") or "http://localhost:3000/reading-management"
 ).strip()
 
+# "Nobody in frame" parent email (opt-in per parent, off by default).
+# The client only reports an absence episode; all timing, TTL and limits below
+# are server-side so a client can neither shorten the wait nor widen the limits.
+READING_PRESENCE_GRACE_SECONDS = _int_env(
+    "READING_PRESENCE_GRACE_SECONDS", 60, minimum=15, maximum=600
+)
+READING_PRESENCE_POLL_SECONDS = _int_env(
+    "READING_PRESENCE_POLL_SECONDS", 10, minimum=2, maximum=120
+)
+READING_PRESENCE_TTL_SECONDS = _int_env(
+    "READING_PRESENCE_TTL_SECONDS", 300, minimum=60, maximum=1800
+)
+READING_PRESENCE_HEARTBEAT_SECONDS = _int_env(
+    "READING_PRESENCE_HEARTBEAT_SECONDS", 30, minimum=10, maximum=120
+)
+READING_PRESENCE_SESSION_COOLDOWN_SECONDS = _int_env(
+    "READING_PRESENCE_SESSION_COOLDOWN_SECONDS", 1800, minimum=60, maximum=86400
+)
+READING_PRESENCE_MAX_PER_PARENT_PER_DAY = _int_env(
+    "READING_PRESENCE_MAX_PER_PARENT_PER_DAY", 3, minimum=1, maximum=20
+)
+# When set, presence emails are written as .eml files in this directory instead
+# of being sent through SMTP (local mail sink for acceptance testing).
+READING_PRESENCE_MAIL_SINK_DIR = (
+    os.getenv("READING_PRESENCE_MAIL_SINK_DIR") or ""
+).strip() or None
+
 APP_ENVIRONMENT = (
     os.getenv("APP_ENVIRONMENT") or "development"
 ).strip().lower()

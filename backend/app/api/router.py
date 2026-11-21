@@ -8,6 +8,7 @@ from app.api.routes import (
     profile,
     reading,
     reading_management,
+    reading_presence,
     system,
     support,
     voice,
@@ -33,6 +34,11 @@ api_router.include_router(admin_ocr.router, prefix="/books", tags=["Admin OCR"])
 api_router.include_router(admin_viread_training.router, prefix="/books", tags=["Admin ViOCR Training"])
 api_router.include_router(reading.router, prefix="/reading", tags=["Reading"])
 api_router.include_router(reading_management.router, prefix="/reading-management", tags=["Reading Management"])
+api_router.include_router(
+    reading_presence.router,
+    prefix="/reading-presence",
+    tags=["Reading Presence"],
+)
 api_router.include_router(
     sentence_shooter.router,
     prefix="/games/sentence-shooter",
