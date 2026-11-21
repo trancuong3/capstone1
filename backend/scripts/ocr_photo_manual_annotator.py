@@ -406,7 +406,9 @@ def main(argv: list[str] | None = None) -> int:
         os.close(descriptor)
         records = load_or_create_draft(draft_path, keys)
         run_gui(cases, root_dir, draft_path, records)
-    except (ImportError, ValueError, OSError, RuntimeError) as exc:
+    except Exception as exc:
+        # Tk startup may raise TclError, which is not a RuntimeError.
+        # Suppress raw exception messages because they may include private paths.
         print(f"Private annotator could not run: {type(exc).__name__}", file=sys.stderr)
         return 2
     finally:
