@@ -7,6 +7,7 @@ from scripts.ocr_word_error_diagnostics import (
     MAX_ALIGNMENT_TOKENS,
     analyze_word_errors,
     classify_substitution,
+    edge_punctuation_neutral_tokens,
 )
 
 
@@ -32,6 +33,23 @@ class WordErrorDiagnosticsTests(unittest.TestCase):
     def test_identical_text_and_position(self):
         self.assertEqual(analyze_word_errors("Bé An", "Bé An")["errors"], [])
         self.assertEqual(analyze_word_errors("", "")["error_count"], 0)
+
+    def test_edge_punctuation_neutral_scoring_preserves_vietnamese_letters(self):
+        self.assertEqual(
+            edge_punctuation_neutral_tokens("“Bé” đang đọc sách!!! —"),
+            ["Bé", "đang", "đọc", "sách"],
+        )
+        self.assertEqual(
+            edge_punctuation_neutral_tokens("đọc sách"), ["đọc", "sách"],
+        )
+        self.assertNotEqual(
+            edge_punctuation_neutral_tokens("đọc sách"),
+            edge_punctuation_neutral_tokens("doc sach"),
+        )
+        self.assertEqual(
+            edge_punctuation_neutral_tokens("xì-gà 'd'accord'"),
+            ["xì-gà", "d'accord"],
+        )
 
     def test_bounded_memory(self):
         result = analyze_word_errors("A " * (MAX_ALIGNMENT_TOKENS + 1), "B")
