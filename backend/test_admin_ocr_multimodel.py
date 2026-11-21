@@ -31,6 +31,7 @@ from app.services.ocr_ai.ollama_provider import OllamaOcrProvider
 from app.services.ocr_ai.orchestrator import OcrCorrectionOrchestrator
 from app.services.ocr_ai.schemas import ChunkCorrectionResult
 from app.services.ocr_ai.validators import validate_chunk_result
+from app.services.ocr_engine import normalize_word
 
 
 def _image() -> bytes:
@@ -593,6 +594,20 @@ class OllamaProviderBoundaryTests(unittest.IsolatedAsyncioTestCase):
 
 
 class OcrFallbackOrchestratorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_standalone_punctuation_is_preserved_without_a_word_box(self):
+        calls = []
+        result = await OcrCorrectionOrchestrator(
+            _config(), providers=[_Provider("gemini_3_5", calls)]
+        ).correct(
+            "Bé — đi",
+            _image(),
+            _boxes(2),
+            word_normalizer=normalize_word,
+        )
+
+        self.assertEqual(result, "Bé — đi")
+        self.assertEqual(calls[0][4], ("Bé", "đi"))
+
     async def test_provider_start_and_success_diagnostics_describe_real_call(self):
         calls = []
         provider = _Provider("gemini_3_5", calls)

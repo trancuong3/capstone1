@@ -1526,12 +1526,22 @@ export function AdminOcrReviewScreen({
   }
 
   async function retryWorkflow() {
-    if (!aiWorkflow || aiWorkflow.status !== "FAILED" || busy !== null) return;
+    if (!aiWorkflow || busy !== null) return;
+    const retryingSafety =
+      aiWorkflow.status !== "FAILED" &&
+      aiWorkflow.proofread_text !== null &&
+      (aiWorkflow.safety_status === "FAILED" ||
+        aiWorkflow.safety_status === "STALE");
+    if (aiWorkflow.status !== "FAILED" && !retryingSafety) return;
     setBusy("workflow");
     setNotice(null);
     try {
       setAiWorkflow(await ocr.retryWorkflow(pageId, aiWorkflow.workflow_id));
-      setNotice("Đã đưa giai đoạn lỗi vào hàng đợi thử lại.");
+      setNotice(
+        retryingSafety || aiWorkflow.stage === "CHILD_SAFETY_SCANNING"
+          ? "Đã đưa riêng Child Safety vào hàng đợi; Proofreading và OCR được giữ nguyên."
+          : "Đã đưa riêng Proofreading vào hàng đợi thử lại.",
+      );
     } catch (cause) {
       setNotice(
         isServiceError(cause)
@@ -1965,9 +1975,19 @@ export function AdminOcrReviewScreen({
         (finding) => String(finding.severity ?? "").toUpperCase() === "HIGH",
       )),
   );
+  const workflowCanAutoConfirmSafety = Boolean(
+    aiWorkflow?.safety_status === "PROVISIONAL" &&
+    aiWorkflow.suitability === "SUITABLE" &&
+    aiWorkflow.findings.length === 0 &&
+    aiWorkflow.safety_input_hash === aiWorkflow.candidate_hash,
+  );
+  const workflowSafetyConfirmed = Boolean(
+    aiWorkflow?.safety_status === "CONFIRMED" ||
+    aiWorkflow?.safety_status === "AUTO_CONFIRMED",
+  );
   const workflowFinalApprovalBlocked = Boolean(
     aiWorkflow?.proofread_text &&
-    (aiWorkflow.safety_status !== "CONFIRMED" ||
+    (!(workflowSafetyConfirmed || workflowCanAutoConfirmSafety) ||
       !aiWorkflow.hash_match ||
       workflowHasHighRisk),
   );
@@ -2782,8 +2802,9 @@ export function AdminOcrReviewScreen({
                     >
                       {workflowHasHighRisk
                         ? "Safety có cảnh báo mức HIGH hoặc NOT_RECOMMENDED. Luồng hiện tại chưa có chính sách Admin override cho trường hợp này nên chưa thể lưu VERIFIED."
-                        : aiWorkflow.safety_status !== "CONFIRMED"
-                          ? "Cần Admin xác nhận kết quả Child Safety khớp Candidate hiện tại trước khi lưu VERIFIED."
+                        : aiWorkflow.safety_status !== "CONFIRMED" &&
+                            !workflowCanAutoConfirmSafety
+                          ? "Cần Child Safety hoàn tất cho Candidate hiện tại; tự xác nhận chỉ áp dụng khi kết quả SUITABLE và không có finding."
                           : "Safety hash chưa khớp Candidate hiện tại; hãy chờ quét lại trước khi lưu VERIFIED."}
                     </p>
                   ) : null}
@@ -2891,6 +2912,10 @@ export function AdminOcrReviewScreen({
               {aiWorkflow.status === "FAILED" ||
               aiWorkflow.safety_status === "FAILED"
                 ? (() => {
+                    const safetyFailure =
+                      aiWorkflow.stage === "CHILD_SAFETY_SCANNING" ||
+                      (aiWorkflow.proofread_text !== null &&
+                        aiWorkflow.safety_status === "FAILED");
                     const failureEvent = [...aiWorkflow.provider_events]
                       .reverse()
                       .find(
@@ -2898,27 +2923,51 @@ export function AdminOcrReviewScreen({
                           Boolean(event.error_code) &&
                           (!event.stage || event.stage === aiWorkflow.stage),
                       );
+                    const failedStageEvent = [...aiWorkflow.review_history]
+                      .reverse()
+                      .find(
+                        (event) =>
+                          event.event === "WORKFLOW_STAGE_FAILED" &&
+                          event.stage ===
+                            (safetyFailure
+                              ? "CHILD_SAFETY_SCANNING"
+                              : "PROOFREADING"),
+                      );
+                    const recordedFailureCode = failedStageEvent?.error_code;
+                    const failureCode =
+                      aiWorkflow.error_code ??
+                      (typeof recordedFailureCode === "string"
+                        ? recordedFailureCode
+                        : null);
                     const failureMessage =
-                      aiWorkflow.error_code === "INVALID_EVIDENCE"
+                      failureCode === "INVALID_EVIDENCE"
                         ? "AI trả về evidence không thể đối chiếu chính xác với Candidate. Nội dung OCR và Candidate vẫn được giữ nguyên."
-                        : aiWorkflow.error_code === "INVALID_JSON"
+                        : failureCode === "INVALID_JSON"
                           ? "Provider trả về JSON không hợp lệ; kết quả Safety chưa được lưu."
-                          : aiWorkflow.error_code === "INVALID_OUTPUT_SCHEMA"
-                            ? "Provider trả kết quả không đúng cấu trúc Safety yêu cầu."
-                            : "Safety chưa hoàn tất; Candidate hiện tại chưa được đánh giá an toàn.";
+                          : failureCode === "MISSING_REQUIRED_FIELDS"
+                            ? "Provider thiếu trường bắt buộc; Safety chưa được xác nhận."
+                            : failureCode === "INVALID_OUTPUT_SCHEMA"
+                              ? "Provider trả kết quả không đúng cấu trúc Safety yêu cầu."
+                              : failureCode === "PROVIDER_TIMEOUT"
+                                ? "Provider hết thời gian chờ; Candidate chưa được đánh giá an toàn."
+                                : failureCode === "PROVIDER_UNAVAILABLE"
+                                  ? "Provider không khả dụng; Candidate chưa được đánh giá an toàn."
+                                  : safetyFailure
+                                    ? "Safety chưa hoàn tất; Candidate hiện tại chưa được đánh giá an toàn."
+                                    : "Proofreading chưa hoàn tất; Candidate hiện tại chưa được cập nhật.";
                     return (
                       <div
                         className="mt-4 rounded-control border border-amber-500 bg-amber-50 p-3 text-sm text-amber-950"
                         role="alert"
                       >
                         <p className="font-bold">
-                          {aiWorkflow.stage === "CHILD_SAFETY_SCANNING"
+                          {safetyFailure
                             ? "Child Safety chưa hoàn tất."
                             : "Proofreading chưa hoàn tất."}
                         </p>
                         <p className="mt-1">{failureMessage}</p>
                         <p className="mt-1">
-                          Lỗi: {aiWorkflow.error_code ?? "UNKNOWN"}
+                          Lỗi: {failureCode ?? "UNKNOWN"}
                           {failureEvent?.provider
                             ? ` · Provider ${String(failureEvent.provider)}`
                             : ""}
@@ -2932,16 +2981,34 @@ export function AdminOcrReviewScreen({
                           {` · ${new Date(aiWorkflow.updated_at).toLocaleString("vi-VN")}`}
                         </p>
                         <p className="mt-1">
-                          Có thể thử lại riêng giai đoạn Safety; không chạy lại
-                          Proofreading.
+                          {safetyFailure
+                            ? "Có thể thử lại riêng giai đoạn Safety; Proofreading và OCR được giữ nguyên."
+                            : "Có thể thử lại riêng Proofreading; OCR được giữ nguyên."}
                         </p>
                       </div>
                     );
                   })()
                 : null}
 
+              {aiWorkflow.status === "READY_FOR_ADMIN_REVIEW" &&
+              aiWorkflow.safety_status === "STALE" ? (
+                <p
+                  className="mt-4 rounded-control border border-amber-400 bg-amber-50 p-3 text-sm text-amber-950"
+                  role="status"
+                >
+                  Candidate đã đổi sau Proofreading. Child Safety cần chạy riêng
+                  trên Candidate mới trước khi xác minh hoặc xuất bản.
+                </p>
+              ) : null}
+
               <div className="mt-4 flex flex-wrap gap-2">
-                {aiWorkflow.status === "FAILED" ? (
+                {aiWorkflow.status === "FAILED" ||
+                (aiWorkflow.proofread_text !== null &&
+                  (aiWorkflow.safety_status === "FAILED" ||
+                    aiWorkflow.safety_status === "STALE") &&
+                  !["QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING"].includes(
+                    aiWorkflow.status,
+                  )) ? (
                   <Button
                     className="h-10 w-auto px-3"
                     disabled={busy !== null}
@@ -2951,9 +3018,10 @@ export function AdminOcrReviewScreen({
                     variant="secondary"
                   >
                     <RefreshCw aria-hidden className="size-4" />
-                    {aiWorkflow.stage === "CHILD_SAFETY_SCANNING"
-                      ? "Thử lại Child Safety"
-                      : "Thử lại Proofreading"}
+                    {aiWorkflow.status === "FAILED" &&
+                    aiWorkflow.stage === "PROOFREADING"
+                      ? "Thử lại Proofreading"
+                      : "Thử lại Child Safety"}
                   </Button>
                 ) : null}
                 {aiWorkflow.safety_status === "PROVISIONAL" &&
@@ -3097,7 +3165,8 @@ export function AdminOcrReviewScreen({
                 ) : (
                   <p className="mt-2 text-sm text-muted">
                     {aiWorkflow.safety_status === "PROVISIONAL" ||
-                    aiWorkflow.safety_status === "CONFIRMED"
+                    aiWorkflow.safety_status === "CONFIRMED" ||
+                    aiWorkflow.safety_status === "AUTO_CONFIRMED"
                       ? "AI chưa phát hiện finding trong Candidate này."
                       : "Findings sẽ hiển thị sau khi Safety hoàn tất."}
                   </p>
@@ -3212,6 +3281,12 @@ export function AdminOcrReviewScreen({
                         {String(event.http_status ?? "—")}
                         {" · "}
                         {String(event.duration_ms ?? 0)} ms
+                        {event.output_mode
+                          ? ` · ${String(event.output_mode)}`
+                          : ""}
+                        {Number(event.retry_count ?? 0) > 0
+                          ? ` · fallback ${String(event.retry_count)}`
+                          : ""}
                         {event.error_code
                           ? ` · ${String(event.error_code)}`
                           : ""}

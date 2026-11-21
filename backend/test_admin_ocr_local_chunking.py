@@ -16,6 +16,18 @@ from app.services.admin_ocr_chunking import (
 
 
 class LocalOcrChunkingTests(unittest.TestCase):
+    def test_correction_word_filter_preserves_standalone_punctuation(self):
+        plan = chunk_ocr_text(
+            "Bé — đi",
+            word_normalizer=lambda token: "" if token == "—" else token,
+        )
+
+        self.assertEqual([token.text for token in plan.tokens], ["Bé", "đi"])
+        self.assertEqual(
+            reconstruct_ocr_text(plan, {0: ("Bé", "đi")}),
+            "Bé — đi",
+        )
+
     def test_long_articles_are_chunked_without_dropping_source_tokens(self):
         plan = chunk_ocr_text(" ".join(f"tu{i}" for i in range(3000)))
 

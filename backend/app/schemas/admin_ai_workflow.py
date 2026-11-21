@@ -84,7 +84,9 @@ class AdminAiWorkflowRead(BaseModel):
     suitability: Literal[
         "SUITABLE", "SUITABLE_WITH_GUIDANCE", "REVIEW_REQUIRED", "NOT_RECOMMENDED"
     ] | None
-    safety_status: Literal["PENDING", "STALE", "PROVISIONAL", "CONFIRMED", "FAILED"]
+    safety_status: Literal[
+        "PENDING", "STALE", "PROVISIONAL", "CONFIRMED", "AUTO_CONFIRMED", "FAILED"
+    ]
     findings: list[dict[str, Any]] = Field(default_factory=list)
     provider_events: list[dict[str, Any]] = Field(default_factory=list)
     ocr_approved_at: datetime | None

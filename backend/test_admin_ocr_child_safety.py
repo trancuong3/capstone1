@@ -15,7 +15,9 @@ import httpx
 from fastapi import HTTPException
 
 from app.services.ocr_ai.child_safety import (
+    ChildSafetyError,
     ChildSafetyOrchestrator,
+    _OUTPUT_SCHEMA,
     _chunks,
     _validate_result,
     compact_finding_text,
@@ -136,6 +138,56 @@ class ChildSafetyOrchestrationTests(unittest.IsolatedAsyncioTestCase):
             [event["provider"] for event in result["provider_events"]],
             ["gemini_primary", "groq_qwen", "ollama_local"],
         )
+
+    async def test_ollama_retries_once_in_json_mode_when_schema_format_is_rejected(self):
+        calls = []
+        config = OcrCorrectionConfig(
+            cloud_enabled=False,
+            local=LocalOcrConfig(timeout_seconds=2),
+        )
+
+        def handler(request):
+            payload = json.loads(request.content)
+            calls.append(payload["format"])
+            if isinstance(payload["format"], dict):
+                return httpx.Response(400, json={"error": "schema format unsupported"})
+            return _ollama(json.dumps(_valid(), ensure_ascii=False))
+
+        result = await ChildSafetyOrchestrator(
+            config, transport=httpx.MockTransport(handler)
+        ).analyze("Văn bản tiếng Việt.")
+
+        self.assertEqual(calls, [_OUTPUT_SCHEMA, "json"])
+        self.assertEqual(result["suitability"], "SUITABLE")
+        self.assertEqual(result["provider_events"][0]["output_mode"], "json_fallback")
+        self.assertEqual(result["provider_events"][0]["retry_count"], 1)
+
+    async def test_ollama_invalid_evidence_stays_a_failed_exact_match(self):
+        config = OcrCorrectionConfig(
+            cloud_enabled=False,
+            local=LocalOcrConfig(timeout_seconds=2),
+        )
+        invalid = _valid([{
+            "category": "VIOLENCE",
+            "content_type": "DESCRIPTION",
+            "severity": "MEDIUM",
+            "evidence": "a plausible but absent phrase",
+            "explanation": "A specific concern needs review.",
+            "recommendation": "Admin should review the source.",
+        }])
+
+        with self.assertRaises(ChildSafetyError) as raised:
+            await ChildSafetyOrchestrator(
+                config,
+                transport=httpx.MockTransport(
+                    lambda _request: _ollama(json.dumps(invalid, ensure_ascii=False))
+                ),
+            ).analyze("Candidate original không chứa câu trích này.")
+
+        self.assertEqual(raised.exception.code, "INVALID_EVIDENCE")
+        self.assertEqual(raised.exception.provider_events[0]["error_code"], "INVALID_EVIDENCE")
+        self.assertFalse(raised.exception.provider_events[0]["availability"])
+
 
     async def test_nfc_and_crlf_evidence_maps_back_to_original_candidate_offsets(self):
         source = "Ba\u0301n nho\u0301\r\nđánh bạn rồi xin lỗi."
@@ -267,6 +319,26 @@ class EvidenceValidationTests(unittest.TestCase):
                     _valid([self.finding(evidence)]), source=source, source_offset=0
                 )
 
+    def test_missing_fields_and_wrong_json_types_have_stable_schema_errors(self):
+        with self.assertRaisesRegex(ValueError, "MISSING_REQUIRED_FIELDS"):
+            _validate_result({"suitability": "SUITABLE"}, source="Text", source_offset=0)
+
+        malformed_values = (
+            {"suitability": [], "findings": []},
+            _valid([self.finding("đánh bạn") | {"category": []}]),
+        )
+        for malformed in malformed_values:
+            with self.subTest(malformed=malformed), self.assertRaisesRegex(
+                ValueError, "INVALID_OUTPUT_SCHEMA"
+            ):
+                _validate_result(malformed, source="Em bé đánh bạn.", source_offset=0)
+
+    def test_empty_evidence_is_classified_as_evidence_failure(self):
+        with self.assertRaisesRegex(ValueError, "INVALID_EVIDENCE"):
+            _validate_result(
+                _valid([self.finding("   ")]), source="Một câu.", source_offset=0
+            )
+
     def test_chunk_boundaries_do_not_split_vietnamese_combining_marks(self):
         text = "a" * 8999 + "e\u0301" + " cuối trang."
         chunks = _chunks(text)
@@ -343,6 +415,8 @@ class EvidenceValidationTests(unittest.TestCase):
         self.assertIn("Educational descriptions of prevention", _SYSTEM_PROMPT)
         self.assertIn("medical, historical, or educational discussion", _SYSTEM_PROMPT)
         self.assertIn("no more than 40 whitespace-", _SYSTEM_PROMPT)
+        self.assertIn("REVIEW_REQUIRED", _SYSTEM_PROMPT)
+        self.assertIn("one contiguous substring", _SYSTEM_PROMPT)
 
 
 class WorkflowVerificationGuardTests(unittest.TestCase):
@@ -354,6 +428,7 @@ class WorkflowVerificationGuardTests(unittest.TestCase):
             "CandidateHash": digest,
             "SafetyInputHash": digest,
             "SafetyStatus": "CONFIRMED",
+            "SafetyConfirmedBy": uuid4(),
             "Status": "READY_FOR_ADMIN_REVIEW",
             "Suitability": "SUITABLE",
             "Findings": [],
@@ -366,12 +441,32 @@ class WorkflowVerificationGuardTests(unittest.TestCase):
             self.workflow(), content_hash(candidate)
         )
 
-    def test_pending_provisional_failed_and_stale_safety_are_blocked(self):
+    def test_pending_failed_and_stale_safety_are_blocked(self):
         candidate = "Câu chuyện phù hợp với trẻ em."
-        for state in ("PENDING", "PROVISIONAL", "FAILED", "STALE"):
+        for state in ("PENDING", "FAILED", "STALE"):
             with self.subTest(state=state), self.assertRaises(HTTPException):
                 AdminOcrService._validate_ai_workflow_for_verification(
                     self.workflow(SafetyStatus=state), content_hash(candidate)
+                )
+
+    def test_clean_provisional_and_auto_confirmed_safety_allow_verification(self):
+        candidate = "Câu chuyện phù hợp với trẻ em."
+        for state in ("PROVISIONAL", "AUTO_CONFIRMED"):
+            with self.subTest(state=state):
+                AdminOcrService._validate_ai_workflow_for_verification(
+                    self.workflow(SafetyStatus=state), content_hash(candidate)
+                )
+
+    def test_provisional_safety_with_findings_or_review_required_is_blocked(self):
+        candidate = "Câu chuyện phù hợp với trẻ em."
+        for overrides in (
+            {"Findings": [{"severity": "LOW"}]},
+            {"Suitability": "REVIEW_REQUIRED"},
+        ):
+            with self.subTest(overrides=overrides), self.assertRaises(HTTPException):
+                AdminOcrService._validate_ai_workflow_for_verification(
+                    self.workflow(SafetyStatus="PROVISIONAL", **overrides),
+                    content_hash(candidate),
                 )
 
     def test_candidate_and_safety_hash_mismatch_are_blocked(self):

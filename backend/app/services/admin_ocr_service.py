@@ -2560,6 +2560,12 @@ class AdminOcrService:
         if revision is None:
             raise HTTPException(status_code=404, detail="Revision does not belong to this page")
         if revision.VerificationStatus != "NEEDS_REVIEW":
+            if revision.VerificationStatus == "VERIFIED":
+                replay = await self._verified_retry_response(
+                    actor_id, page, revision, payload
+                )
+                if replay is not None:
+                    return replay
             raise HTTPException(status_code=409, detail="Only a revision awaiting review can be verified")
         corrected_text = unicodedata.normalize("NFC", payload.corrected_text.strip())
         if not corrected_text:
@@ -2572,6 +2578,9 @@ class AdminOcrService:
         proofread = payload.proofread_audit
         checked_text = unicodedata.normalize("NFC", proofread.checked_text.strip())
         decisions = self._validate_proofread_final(proofread, corrected_text)
+        response_page_id = page.Id
+        response_revision_id = revision.Id
+        response_book_id = page.BookId
         workflow = None
         workflow_text_hash = safety_content_hash(corrected_text)
         if payload.workflow_id is not None:
@@ -2661,8 +2670,8 @@ class AdminOcrService:
                     "workflow_id": str(workflow.Id),
                     "candidate_hash": workflow_text_hash,
                     "safety_status": (
-                        "CONFIRMED"
-                        if workflow.SafetyStatus == "CONFIRMED"
+                        workflow.SafetyStatus
+                        if workflow.SafetyStatus in {"CONFIRMED", "AUTO_CONFIRMED"}
                         and workflow.SafetyInputHash == workflow_text_hash
                         else "PENDING"
                     ),
@@ -2727,6 +2736,114 @@ class AdminOcrService:
         except Exception:
             await self.db.rollback()
             raise
+        if workflow is not None:
+            try:
+                from app.repositories.book_content_quality_repository import (
+                    BookContentQualityRepository,
+                )
+                from app.services.book_content_quality_service import (
+                    BookContentQualityService,
+                )
+
+                await BookContentQualityService(
+                    BookContentQualityRepository(self.db)
+                ).auto_publish_if_eligible(response_book_id)
+            except Exception as exc:
+                await self.db.rollback()
+                log_diagnostic(
+                    logger,
+                    logging.ERROR,
+                    event="book_auto_publish_attempt_failed",
+                    book_id=str(response_book_id),
+                    page_id=str(response_page_id),
+                    error_code=type(exc).__name__.upper(),
+                )
+        # The post-commit workflow helper can commit or roll back its own
+        # transaction, expiring every ORM instance in this AsyncSession.
+        # Reload both rows asynchronously before building the response.
+        response_page = await self.repo.page(response_page_id)
+        response_revision = await self.repo.revision(
+            response_page_id, response_revision_id
+        )
+        if response_page is None or response_revision is None:
+            raise RuntimeError("Verified OCR revision disappeared before response serialization")
+        return await self.revision_detail(response_page, response_revision)
+
+    async def _verified_retry_response(
+        self,
+        actor_id: UUID,
+        page: BookPage,
+        revision: PageRevision,
+        payload: AdminOcrVerifyRequest,
+    ) -> AdminRevisionDetailRead | None:
+        """Return an existing result only for an exact replay of this verification."""
+        try:
+            corrected_text = unicodedata.normalize(
+                "NFC", payload.corrected_text.strip()
+            )
+            if not corrected_text:
+                return None
+            words = self._validated_words(payload.words)
+            if normalize_text_tokens(corrected_text) != [
+                str(item["normalized_text"]) for item in words
+            ]:
+                return None
+            proofread = payload.proofread_audit
+            checked_text = unicodedata.normalize(
+                "NFC", proofread.checked_text.strip()
+            )
+            decisions = self._validate_proofread_final(proofread, corrected_text)
+        except HTTPException:
+            # A stale Revision remains a 409 even when a retry body is invalid.
+            return None
+
+        content_hash = hashlib.sha256(
+            json.dumps(
+                {"text": corrected_text, "words": words},
+                ensure_ascii=False,
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        metadata = (
+            revision.ProcessingMeta
+            if isinstance(revision.ProcessingMeta, dict)
+            else {}
+        )
+        audit = metadata.get("ai_proofread_audit")
+        automatic = proofread.mode == "AI_AUTO_VERIFIED"
+        if (
+            revision.VerifiedText != corrected_text
+            or revision.DraftText != corrected_text
+            or revision.VerifiedBy != actor_id
+            or revision.VerifiedAt is None
+            or revision.ContentHash != content_hash
+            or page.CurrentVerifiedRevisionId != revision.Id
+            or not isinstance(audit, dict)
+            or audit.get("source_revision_id") != str(revision.Id)
+            or audit.get("mode") != proofread.mode
+            or audit.get("checked_text") != checked_text
+            or audit.get("suggestions") != decisions
+            or audit.get("reason_code") != proofread.reason_code
+            or audit.get("final_content_sha256") != content_hash
+            or audit.get("reviewed_by")
+            != (None if automatic else str(actor_id))
+            or audit.get("automated_by")
+            != (str(actor_id) if automatic else None)
+        ):
+            return None
+
+        workflow_snapshot = metadata.get("admin_ai_workflow")
+        if payload.workflow_id is None:
+            if isinstance(workflow_snapshot, dict):
+                return None
+        elif (
+            not isinstance(workflow_snapshot, dict)
+            or workflow_snapshot.get("workflow_id") != str(payload.workflow_id)
+            or workflow_snapshot.get("candidate_hash")
+            != safety_content_hash(corrected_text)
+        ):
+            return None
+
         return await self.revision_detail(page, revision)
 
     @staticmethod
@@ -2751,13 +2868,24 @@ class AdminOcrService:
                 status_code=409,
                 detail="AI workflow is not ready for final approval",
             )
-        if (
-            workflow.SafetyStatus != "CONFIRMED"
-            or workflow.SafetyInputHash != candidate_hash
-        ):
+        manually_confirmed = (
+            workflow.SafetyStatus == "CONFIRMED"
+            and workflow.SafetyInputHash == candidate_hash
+        )
+        eligible_for_clean_auto_confirmation = (
+            workflow.SafetyStatus in {"PROVISIONAL", "AUTO_CONFIRMED"}
+            and workflow.SafetyInputHash == candidate_hash
+            and workflow.Suitability == "SUITABLE"
+            and not workflow.Findings
+            and (
+                workflow.SafetyStatus != "AUTO_CONFIRMED"
+                or workflow.SafetyConfirmedBy is None
+            )
+        )
+        if not (manually_confirmed or eligible_for_clean_auto_confirmation):
             raise HTTPException(
                 status_code=409,
-                detail="Child Safety must be completed and confirmed for the current Candidate",
+                detail="Child Safety must be complete for the current Candidate; only clean SUITABLE results can be confirmed automatically",
             )
         if workflow.Suitability == "NOT_RECOMMENDED" or any(
             isinstance(finding, dict) and finding.get("severity") == "HIGH"
@@ -3032,7 +3160,11 @@ class AdminOcrService:
             )
         word_boxes = [tuple(item["bbox"]) for item in validated_words]
         try:
-            plan = chunk_ocr_text(normalized_draft, config.local.chunking)
+            plan = chunk_ocr_text(
+                normalized_draft,
+                config.local.chunking,
+                word_normalizer=normalize_word,
+            )
         except ChunkingError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         if len(word_boxes) != len(plan.tokens):
@@ -3078,6 +3210,7 @@ class AdminOcrService:
                 prepared.draft_text,
                 image_bytes,
                 list(prepared.word_boxes),
+                word_normalizer=normalize_word,
                 **callbacks,
             )
         except OcrOrchestrationError as exc:

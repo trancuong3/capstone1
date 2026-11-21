@@ -137,7 +137,9 @@ class BookContentQualityService:
                     "workflow_status": workflow.Status if workflow else None,
                     "safety_status": workflow.SafetyStatus if workflow else None,
                     "final_approved_text_hash": workflow.FinalApprovedTextHash if workflow else None,
-                    "safety_confirmed": bool(workflow and workflow.SafetyConfirmedAt and workflow.SafetyConfirmedBy),
+                    # Keep this aligned with CatalogRepository's SQL snapshot:
+                    # auto-confirmed scans have a timestamp and no human actor.
+                    "safety_confirmed": bool(workflow and workflow.SafetyConfirmedAt),
                     "safety_confirmed_by": bool(workflow and workflow.SafetyConfirmedBy),
                     "ocr_approved": bool(workflow and workflow.OcrApprovedAt and workflow.OcrApprovedBy),
                     "findings_hash": findings_hash,
@@ -192,6 +194,10 @@ class BookContentQualityService:
                 _, page, revision, workflow, *_fingerprints = row
             else:
                 page, revision, workflow, *_fingerprints = row
+            if page.LifecycleStatus != "ACTIVE":
+                page_blockers.append(
+                    f"Trang {page.PageNumber}: trang chưa hoàn tất xử lý."
+                )
             if revision is not None and revision.VerificationStatus == "VERIFIED":
                 ocr_completed += 1
             matches_revision = bool(
@@ -255,7 +261,7 @@ class BookContentQualityService:
                 page_blockers.append(f"Trang {page.PageNumber}: Proofreading chưa hoàn tất.")
             suggestions += len(workflow.CorrectionSuggestions or [])
             if (
-                workflow.SafetyStatus in {"PROVISIONAL", "CONFIRMED"}
+                workflow.SafetyStatus in {"PROVISIONAL", "CONFIRMED", "AUTO_CONFIRMED"}
                 and workflow.CandidateHash
                 and candidate_is_consistent
                 and workflow.SafetyInputHash == workflow.CandidateHash
@@ -291,7 +297,7 @@ class BookContentQualityService:
             if workflow.Suitability == "REVIEW_REQUIRED":
                 review_required = True
             if not (
-                workflow.SafetyStatus in {"PROVISIONAL", "CONFIRMED"}
+                workflow.SafetyStatus in {"PROVISIONAL", "CONFIRMED", "AUTO_CONFIRMED"}
                 and workflow.SafetyInputHash == workflow.CandidateHash
                 and workflow.Status == "READY_FOR_ADMIN_REVIEW"
             ):
@@ -389,14 +395,20 @@ class BookContentQualityService:
             key=lambda item: (item.CreatedAt or datetime.min.replace(tzinfo=timezone.utc), str(item.Id)),
         )
         latest_decision = ordered_decisions[-1] if ordered_decisions else None
+        metadata = (
+            latest_decision.Metadata
+            if latest_decision is not None and isinstance(latest_decision.Metadata, dict)
+            else {}
+        )
         current_decision = bool(
-            latest_decision
-            and isinstance(latest_decision.Metadata, dict)
-            and latest_decision.Metadata.get("assessment_hash") == assessment_hash
+            latest_decision and metadata.get("assessment_hash") == assessment_hash
         )
         approved = bool(
             current_decision
             and latest_decision.Action == "book.children.approved"
+        )
+        auto_published = bool(
+            approved and metadata.get("decision_source") == "AUTO_APPROVAL"
         )
         rejected = bool(
             current_decision and latest_decision.Action == "book.children.rejected"
@@ -408,25 +420,17 @@ class BookContentQualityService:
             row.Action in {"book.children.approved", "book.children.rejected"}
             and isinstance(row.Metadata, dict)
             and row.Metadata.get("assessment_hash") != assessment_hash
+            and not (
+                row.Action == "book.children.approved"
+                and row.Metadata.get("decision_source") == "AUTO_APPROVAL"
+            )
             for row in ordered_decisions
         )
-        if prior_book_approval_stale:
+        if prior_book_approval_stale and not approved:
             blockers.append("BOOK_APPROVAL_STALE")
         if rescan_requested:
             blockers.append("BOOK_RESCAN_REQUESTED")
-        if approved:
-            status_value = "APPROVED_BY_ADMIN"
-        elif rejected:
-            status_value = "REJECTED_FOR_CHILDREN"
-        elif failed_pages:
-            status_value = "SCAN_FAILED"
-        elif active_workflows or pending_pages:
-            status_value = "PROCESSING"
-        elif rescan_requested or stale_pages or prior_book_approval_stale:
-            status_value = "STALE"
-        elif unsuitable or high_count:
-            status_value = "REJECTED_FOR_CHILDREN"
-        elif (
+        ready_for_children = bool(
             page_count
             and ocr_completed == page_count
             and ocr_approval_valid == page_count
@@ -434,12 +438,28 @@ class BookContentQualityService:
             and safety_completed == page_count
             and not finding_count
             and not review_required
+            and not page_blockers
             and (not COPYRIGHT_BLOCKS_BOOK_APPROVAL or copyright_status != "NOT_CONFIGURED")
-        ):
+        )
+        if auto_published:
+            status_value = "PUBLISHED"
+        elif approved:
+            status_value = "APPROVED_BY_ADMIN"
+        elif rejected:
+            status_value = "REJECTED_FOR_CHILDREN"
+        elif failed_pages:
+            status_value = "SCAN_FAILED"
+        elif active_workflows or pending_pages:
+            status_value = "PROCESSING"
+        elif rescan_requested or stale_pages or (prior_book_approval_stale and not ready_for_children):
+            status_value = "STALE"
+        elif unsuitable or high_count:
+            status_value = "REJECTED_FOR_CHILDREN"
+        elif ready_for_children:
             status_value = "READY_FOR_CHILDREN"
         else:
             status_value = "PENDING_ADMIN_REVIEW"
-        metadata = latest_decision.Metadata if current_decision else {}
+        metadata = metadata if current_decision else {}
         return BookApprovalAssessment(
             status=status_value,
             page_count=page_count,
@@ -468,16 +488,148 @@ class BookContentQualityService:
             assessment_hash=assessment_hash,
             assessed_at=now,
             admin_approved_at=latest_decision.CreatedAt if approved else None,
-            admin_approved_by=latest_decision.ActorId if approved else None,
+            admin_approved_by=latest_decision.ActorId if approved and not auto_published else None,
             admin_approved_by_name=(
                 str(metadata.get("actor_name"))
-                if approved and metadata.get("actor_name")
+                if approved and not auto_published and metadata.get("actor_name")
                 else None
             ),
-            admin_reason=str(metadata.get("reason")) if approved and metadata.get("reason") else None,
+            admin_reason=(
+                str(metadata.get("reason"))
+                if approved and not auto_published and metadata.get("reason")
+                else None
+            ),
+            publication_source=(
+                "AUTO_APPROVAL"
+                if auto_published
+                else "ADMIN_APPROVAL"
+                if approved
+                else None
+            ),
             rights_confirmed=bool(approved and metadata.get("rights_confirmed") is True),
             blockers=blockers,
         )
+
+    async def auto_publish_if_eligible(self, book_id: UUID) -> bool:
+        """Publish only a fully verified book with clean, exact-match AI results."""
+        book = await self.repository.book(book_id, lock=True)
+        if book is None or book.LifecycleStatus == "RETIRED":
+            await self.repository.rollback()
+            return False
+        rows = await self.repository.book_assessment_rows(book_id, lock=True)
+        decisions = await self.repository.book_decisions(book_id)
+        assessment = self._assessment(rows, decisions)
+        if (
+            assessment.status != "READY_FOR_CHILDREN"
+            or not assessment.page_count
+            or any(blocker != "BOOK_APPROVAL_STALE" for blocker in assessment.blockers)
+        ):
+            await self.repository.rollback()
+            return False
+
+        approval_rows = [
+            row
+            for row in rows
+            if (row[1] if len(row) == 7 else row[0]).LifecycleStatus == "ACTIVE"
+        ]
+        if len(approval_rows) != assessment.page_count:
+            await self.repository.rollback()
+            return False
+
+        now = datetime.now(timezone.utc)
+        for row in approval_rows:
+            page, revision, workflow = row[:3]
+            if page.LifecycleStatus != "ACTIVE" or revision is None or workflow is None:
+                await self.repository.rollback()
+                return False
+            if (
+                revision.VerificationStatus != "VERIFIED"
+                or revision.VerifiedBy is None
+                or revision.VerifiedAt is None
+            ):
+                await self.repository.rollback()
+                return False
+            if (
+                workflow.PageRevisionId != revision.Id
+                or workflow.Status != "READY_FOR_ADMIN_REVIEW"
+                or workflow.SafetyStatus not in {"PROVISIONAL", "CONFIRMED", "AUTO_CONFIRMED"}
+                or workflow.SafetyInputHash != workflow.CandidateHash
+                or not isinstance(workflow.CandidateText, str)
+                or not workflow.CandidateHash
+                or AdminAiWorkflowService._hash(workflow.CandidateText) != workflow.CandidateHash
+                or workflow.ProofreadText != workflow.CandidateText
+                or not revision.VerifiedText
+                or AdminAiWorkflowService._hash(revision.VerifiedText) != workflow.CandidateHash
+                or workflow.Suitability != "SUITABLE"
+                or workflow.Findings
+            ):
+                await self.repository.rollback()
+                return False
+            if workflow.SafetyStatus == "CONFIRMED" and workflow.SafetyConfirmedBy is None:
+                await self.repository.rollback()
+                return False
+
+        for row in approval_rows:
+            page, revision, workflow = row[:3]
+            if workflow.SafetyStatus == "PROVISIONAL":
+                workflow.SafetyStatus = "AUTO_CONFIRMED"
+                workflow.SafetyConfirmedAt = now
+                workflow.SafetyConfirmedBy = None
+            elif workflow.SafetyStatus == "AUTO_CONFIRMED":
+                workflow.SafetyConfirmedAt = workflow.SafetyConfirmedAt or now
+                workflow.SafetyConfirmedBy = None
+            workflow.OcrApprovedAt = workflow.OcrApprovedAt or revision.VerifiedAt
+            workflow.OcrApprovedBy = workflow.OcrApprovedBy or revision.VerifiedBy
+            workflow.FinalApprovedTextHash = workflow.CandidateHash
+            revision_metadata = dict(revision.ProcessingMeta or {})
+            revision_metadata["admin_ai_workflow"] = {
+                "workflow_id": str(workflow.Id),
+                "candidate_hash": workflow.CandidateHash,
+                "safety_status": workflow.SafetyStatus,
+                "safety_input_hash": workflow.SafetyInputHash,
+                "approval_scope": "AUTO_BOOK_APPROVAL_EXACT_VERIFIED_TEXT",
+                "assessment_policy": BOOK_APPROVAL_POLICY_VERSION,
+            }
+            revision.ProcessingMeta = revision_metadata
+            workflow.ReviewEvents = list(workflow.ReviewEvents or []) + [{
+                "event": "AUTO_BOOK_APPROVAL",
+                "actor_id": "SYSTEM",
+                "assessment_policy": BOOK_APPROVAL_POLICY_VERSION,
+                "created_at": now.isoformat(),
+            }]
+            workflow.UpdatedAt = now
+
+        # Bind the audit to the exact post-confirmation snapshot that catalog
+        # access checks use for Parent and Child reads.
+        approved_assessment = self._assessment(rows, decisions)
+        if (
+            approved_assessment.status != "READY_FOR_CHILDREN"
+            or any(
+                blocker != "BOOK_APPROVAL_STALE"
+                for blocker in approved_assessment.blockers
+            )
+        ):
+            await self.repository.rollback()
+            return False
+        page_snapshot = self._page_snapshot(rows)
+        book.LifecycleStatus = "ACTIVE"
+        await self.repository.add_book_decision(
+            actor_id=None,
+            book_id=book_id,
+            action="book.children.approved",
+            metadata={
+                "decision": "AUTO_APPROVE",
+                "decision_source": "AUTO_APPROVAL",
+                "reason": "All active pages passed OCR verification, proofreading, and Child Safety checks.",
+                "assessment_hash": approved_assessment.assessment_hash,
+                "page_snapshot": page_snapshot,
+                "page_count": approved_assessment.page_count,
+                "policy": BOOK_APPROVAL_POLICY_VERSION,
+            },
+            request_id=str(uuid4()),
+        )
+        await self.repository.commit()
+        return True
 
     @staticmethod
     def _finding_read(
@@ -907,8 +1059,9 @@ class BookContentQualityService:
             target_page_id=target_page_id,
         )
         if existing is not None:
+            response = self._scan_read(existing)
             await self._ensure_page_ai_workflows(actor_id, book_id)
-            return self._scan_read(existing)
+            return response
         if scope == "BOOK":
             latest = await self.repository.latest_scan(book_id)
             if latest is not None and latest.Scope == "BOOK" and latest.Status == "COMPLETED":
@@ -930,8 +1083,9 @@ class BookContentQualityService:
                     for page, revision in current_pages
                 )
                 if reusable:
+                    response = self._scan_read(latest)
                     await self._ensure_page_ai_workflows(actor_id, book_id)
-                    return self._scan_read(latest)
+                    return response
         run = BookQualityScanRun(
             Id=uuid4(),
             BookId=book.Id,
@@ -948,8 +1102,9 @@ class BookContentQualityService:
         except Exception:
             await self.repository.db.rollback()
             raise
+        response = self._scan_read(run)
         await self._ensure_page_ai_workflows(actor_id, book_id)
-        return self._scan_read(run)
+        return response
 
     async def _ensure_page_ai_workflows(self, actor_id: UUID, book_id: UUID) -> None:
         """Queue missing/stale page Proofreading and Safety on the existing durable worker."""
@@ -976,7 +1131,7 @@ class BookContentQualityService:
                 if (
                     workflow.Status == "READY_FOR_ADMIN_REVIEW"
                     and workflow.CandidateHash
-                    and workflow.SafetyStatus in {"PROVISIONAL", "CONFIRMED"}
+                    and workflow.SafetyStatus in {"PROVISIONAL", "CONFIRMED", "AUTO_CONFIRMED"}
                     and workflow.SafetyInputHash == workflow.CandidateHash
                 ):
                     continue
@@ -1024,6 +1179,15 @@ class BookContentQualityService:
                 await self.repository.db.commit()
                 continue
             await workflow_service.start(actor_id, page.Id, payload)
+
+        if callable(getattr(self.repository.db, "commit", None)) and callable(
+            getattr(self.repository, "book", None)
+        ):
+            # Release page/workflow locks before the publisher reacquires them
+            # in book → page → workflow order, including when all AI results
+            # were already cached and no worker event will follow.
+            await self.repository.db.commit()
+            await self.auto_publish_if_eligible(book_id)
 
     async def list_book_scans(
         self, actor_id: UUID, book_id: UUID
@@ -1313,7 +1477,7 @@ class BookContentQualityService:
                     )
                     continue
                 if (
-                    workflow.SafetyStatus not in {"PROVISIONAL", "CONFIRMED"}
+                    workflow.SafetyStatus not in {"PROVISIONAL", "CONFIRMED", "AUTO_CONFIRMED"}
                     or workflow.SafetyInputHash != workflow.CandidateHash
                 ):
                     page_blockers.append(f"{page_label}: Child Safety thiếu hoặc stale")
@@ -1346,11 +1510,10 @@ class BookContentQualityService:
                 workflow.Suitability == "REVIEW_REQUIRED"
                 for workflow in current_workflows
             ):
-                if not payload.reason:
-                    raise HTTPException(
-                        status_code=422,
-                        detail="An Admin reason is required when approving a book with Safety findings or REVIEW_REQUIRED suitability.",
-                    )
+                raise HTTPException(
+                    status_code=409,
+                    detail="Resolve Child Safety findings and REVIEW_REQUIRED pages before approving this book.",
+                )
             # A book-level decision confirms current Safety results in one
             # auditable transaction. OCR verification and word alignment remain
             # governed by the existing per-page verification path.
@@ -1362,7 +1525,7 @@ class BookContentQualityService:
                     workflow is None
                     or revision is None
                     or workflow.PageRevisionId != revision.Id
-                    or workflow.SafetyStatus not in {"PROVISIONAL", "CONFIRMED"}
+                    or workflow.SafetyStatus not in {"PROVISIONAL", "CONFIRMED", "AUTO_CONFIRMED"}
                     or workflow.SafetyInputHash != workflow.CandidateHash
                 ):
                     raise HTTPException(status_code=409, detail="A page Safety result is stale or incomplete.")

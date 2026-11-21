@@ -263,6 +263,129 @@ class ParallelWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row.ErrorCode, "ALL_PROVIDERS_FAILED")
         self.assertEqual(row.ReviewEvents[-1]["stage"], "CHILD_SAFETY_SCANNING")
 
+    async def test_proofreading_retry_does_not_call_child_safety_when_text_is_unchanged(self):
+        workflow_id = uuid4()
+        row = SimpleNamespace(
+            Id=workflow_id,
+            WorkerId="worker-proofread-retry",
+            LeaseExpiresAt=datetime.now(timezone.utc) + timedelta(minutes=20),
+            ProviderEvents=[],
+            ReviewEvents=[{
+                "event": "WORKFLOW_STAGE_RETRY_QUEUED",
+                "stage": "PROOFREADING",
+            }],
+            SafetyHistory=[],
+            SafetyMetadata={},
+            Findings=[],
+            CandidateHistory=[],
+            CorrectionSuggestions=[],
+            UncertainWordIndices=[],
+            ProofreadMetadata={},
+            CandidateVersion=0,
+            SafetyInputHash=None,
+            SafetyStatus="FAILED",
+            Suitability=None,
+            Stage="PROOFREADING",
+            Status="PROOFREADING",
+            Attempts=1,
+            ErrorCode=None,
+        )
+        _Repository.row = row
+
+        async def correct(*_args, **_kwargs):
+            return "same text"
+
+        snapshot = {
+            "id": workflow_id,
+            "page_id": uuid4(),
+            "revision_id": uuid4(),
+            "input_text": "same text",
+            "input_words": [{"bbox": [0.1, 0.1, 0.2, 0.1]}],
+            "image_path": "books/test/page.png",
+            "stage": "PROOFREADING",
+            "total_chunks": 1,
+            "candidate_text": None,
+            "candidate_hash": None,
+            "safety_input_hash": None,
+            "safety_status": "FAILED",
+            "worker_id": "worker-proofread-retry",
+            "attempts": 1,
+            "provider_events": [],
+            "review_events": row.ReviewEvents,
+        }
+        with (
+            patch.object(worker, "AsyncSessionLocal", _Session),
+            patch.object(worker, "AdminAiWorkflowRepository", _Repository),
+            patch.object(worker, "_progress_loop", new=AsyncMockProgress()),
+            patch.object(worker.OcrCorrectionConfig, "from_environment", return_value=object()),
+            patch.object(worker.AdminOcrService, "run_prepared_ai_correction", side_effect=correct),
+            patch.object(worker, "build_child_safety_orchestrator") as safety_builder,
+            patch.object(worker, "_try_auto_publish", new=AsyncMock()),
+        ):
+            await worker._run_proofreading(snapshot, "worker-proofread-retry")
+
+        safety_builder.assert_not_called()
+        self.assertEqual(row.CandidateText, "same text")
+        self.assertEqual(row.Status, "READY_FOR_ADMIN_REVIEW")
+        self.assertEqual(row.SafetyStatus, "FAILED")
+
+    async def test_child_safety_stage_does_not_run_proofreading_or_ocr(self):
+        workflow_id = uuid4()
+        page_revision_id = uuid4()
+        candidate = "verified candidate"
+        row = SimpleNamespace(
+            Id=workflow_id,
+            PageRevisionId=page_revision_id,
+            WorkerId="worker-safety-retry",
+            LeaseExpiresAt=datetime.now(timezone.utc) + timedelta(minutes=20),
+            ProviderEvents=[],
+            ReviewEvents=[],
+            SafetyHistory=[],
+            SafetyMetadata={},
+            Findings=[],
+            CandidateText=candidate,
+            CandidateHash=worker.content_hash(candidate),
+            SafetyInputHash=None,
+            SafetyStatus="STALE",
+            Suitability=None,
+            Status="CHILD_SAFETY_SCANNING",
+            Stage="CHILD_SAFETY_SCANNING",
+            CompletedChunks=0,
+            TotalChunks=1,
+            Attempts=1,
+            ErrorCode=None,
+        )
+        _Repository.row = row
+
+        class _Safety:
+            async def analyze(self, _value):
+                return {
+                    "suitability": "SUITABLE",
+                    "findings": [],
+                    "provider_events": [],
+                }
+
+        snapshot = {
+            "id": workflow_id,
+            "book_id": uuid4(),
+            "candidate_text": candidate,
+        }
+        with (
+            patch.object(worker, "AsyncSessionLocal", _Session),
+            patch.object(worker, "AdminAiWorkflowRepository", _Repository),
+            patch.object(worker, "_progress_loop", new=AsyncMockProgress()),
+            patch.object(worker, "build_child_safety_orchestrator", return_value=_Safety()),
+            patch.object(worker.AdminOcrService, "run_prepared_ai_correction", new=AsyncMock()) as proofreader,
+            patch.object(worker, "_try_auto_publish", new=AsyncMock()),
+        ):
+            await worker._run_safety(snapshot, "worker-safety-retry")
+
+        proofreader.assert_not_awaited()
+        self.assertEqual(row.PageRevisionId, page_revision_id)
+        self.assertEqual(row.CandidateText, candidate)
+        self.assertEqual(row.Status, "READY_FOR_ADMIN_REVIEW")
+        self.assertEqual(row.SafetyStatus, "PROVISIONAL")
+
 
 class AsyncMockProgress:
     async def __call__(self, *_args):

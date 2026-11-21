@@ -105,13 +105,26 @@ class CatalogRepository:
                 AdminAiWorkflow.PageId == BookPage.Id,
                 AdminAiWorkflow.PageRevisionId == BookPage.CurrentVerifiedRevisionId,
                 AdminAiWorkflow.Status == "READY_FOR_ADMIN_REVIEW",
-                AdminAiWorkflow.SafetyStatus == "CONFIRMED",
                 AdminAiWorkflow.SafetyConfirmedAt.is_not(None),
-                AdminAiWorkflow.SafetyConfirmedBy.is_not(None),
                 AdminAiWorkflow.SafetyInputHash == AdminAiWorkflow.CandidateHash,
                 AdminAiWorkflow.FinalApprovedTextHash == AdminAiWorkflow.CandidateHash,
                 AdminAiWorkflow.OcrApprovedAt.is_not(None),
                 AdminAiWorkflow.OcrApprovedBy.is_not(None),
+                AdminAiWorkflow.Findings == [],
+                or_(
+                    and_(
+                        AdminAiWorkflow.SafetyStatus == "CONFIRMED",
+                        AdminAiWorkflow.SafetyConfirmedBy.is_not(None),
+                        AdminAiWorkflow.Suitability.in_(
+                            ("SUITABLE", "SUITABLE_WITH_GUIDANCE")
+                        ),
+                    ),
+                    and_(
+                        AdminAiWorkflow.SafetyStatus == "AUTO_CONFIRMED",
+                        AdminAiWorkflow.SafetyConfirmedBy.is_(None),
+                        AdminAiWorkflow.Suitability == "SUITABLE",
+                    ),
+                ),
                 PageRevision.ProcessingMeta["admin_ai_workflow"][
                     "workflow_id"
                 ].as_string() == cast(AdminAiWorkflow.Id, String),
@@ -121,13 +134,6 @@ class CatalogRepository:
                 PageRevision.ProcessingMeta["admin_ai_workflow"][
                     "safety_input_hash"
                 ].as_string() == AdminAiWorkflow.CandidateHash,
-                # REVIEW_REQUIRED can proceed only after the existing Admin
-                # Safety confirmation. NOT_RECOMMENDED and any HIGH finding
-                # remain blocked with no override policy in this workflow.
-                AdminAiWorkflow.Suitability.in_(
-                    ("SUITABLE", "SUITABLE_WITH_GUIDANCE", "REVIEW_REQUIRED")
-                ),
-                not_(AdminAiWorkflow.Findings.contains([{"severity": "HIGH"}])),
             )
             .correlate(BookPage)
         )

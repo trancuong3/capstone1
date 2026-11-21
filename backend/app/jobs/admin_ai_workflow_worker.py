@@ -19,7 +19,9 @@ from app.repositories.admin_ai_workflow_repository import (
     MAX_WORKFLOW_ATTEMPTS,
     AdminAiWorkflowRepository,
 )
+from app.repositories.book_content_quality_repository import BookContentQualityRepository
 from app.services.admin_ocr_service import AdminOcrService, PreparedLocalOcrCorrection
+from app.services.book_content_quality_service import BookContentQualityService
 from app.services.ocr_ai.child_safety import (
     ChildSafetyError,
     build_child_safety_orchestrator,
@@ -35,7 +37,8 @@ POLL_SECONDS = 2
 LEASE_SECONDS = 1200
 MAX_ATTEMPTS = MAX_WORKFLOW_ATTEMPTS
 DEFAULT_MAX_CONCURRENT_JOBS = 2
-PROMPT_VERSION = "viread-ocr-proofread-v1-child-safety-v1"
+PROOFREAD_PROMPT_VERSION = "viread-ocr-proofread-v1"
+CHILD_SAFETY_PROMPT_VERSION = "viread-child-safety-v2"
 
 
 def _owns_active_claim(row: AdminAiWorkflow, worker_id: str, now: datetime) -> bool:
@@ -89,6 +92,7 @@ async def _load(workflow_id: UUID) -> dict[str, object] | None:
             return None
         return {
             "id": row.Id,
+            "book_id": row.BookId,
             "page_id": row.PageId,
             "revision_id": row.PageRevisionId,
             "input_text": row.InputText,
@@ -103,7 +107,26 @@ async def _load(workflow_id: UUID) -> dict[str, object] | None:
             "worker_id": row.WorkerId,
             "attempts": row.Attempts,
             "provider_events": list(row.ProviderEvents or []),
+            "review_events": list(row.ReviewEvents or []),
         }
+
+
+async def _try_auto_publish(book_id: UUID) -> None:
+    if not isinstance(book_id, UUID):
+        return
+    try:
+        async with AsyncSessionLocal() as session:
+            await BookContentQualityService(
+                BookContentQualityRepository(session)
+            ).auto_publish_if_eligible(book_id)
+    except Exception as exc:
+        log_diagnostic(
+            logger,
+            logging.ERROR,
+            event="book_auto_publish_attempt_failed",
+            book_id=str(book_id),
+            error_code=type(exc).__name__.upper(),
+        )
 
 
 async def _progress_loop(
@@ -168,6 +191,17 @@ async def _run_proofreading(snapshot: dict[str, object], worker_id: str) -> None
     heartbeat = asyncio.create_task(_progress_loop(workflow_id, worker_id, progress_queue))
     input_hash = content_hash(input_text)
     safety_snapshot = normalize_safety_text(input_text)
+    retry_events = snapshot.get("review_events")
+    latest_review_event = (
+        retry_events[-1]
+        if isinstance(retry_events, list) and retry_events
+        else None
+    )
+    proofread_retry_only = bool(
+        isinstance(latest_review_event, dict)
+        and latest_review_event.get("event") == "WORKFLOW_STAGE_RETRY_QUEUED"
+        and latest_review_event.get("stage") == "PROOFREADING"
+    )
 
     async def scan_original_text() -> tuple[dict[str, object] | None, Exception | None]:
         safety_started_at = time.perf_counter()
@@ -189,7 +223,11 @@ async def _run_proofreading(snapshot: dict[str, object], worker_id: str) -> None
         snapshot.get("safety_input_hash") == input_hash
         and snapshot.get("safety_status") in {"PROVISIONAL", "CONFIRMED"}
     )
-    safety_task = None if cached_safety else asyncio.create_task(scan_original_text())
+    safety_task = (
+        None
+        if cached_safety or proofread_retry_only
+        else asyncio.create_task(scan_original_text())
+    )
     corrected: str | None = None
     proofread_error: Exception | None = None
     safety_result: dict[str, object] | None = None
@@ -226,7 +264,7 @@ async def _run_proofreading(snapshot: dict[str, object], worker_id: str) -> None
             "run_id": str(workflow_id),
             "input_text_hash": input_hash,
             "corrected_text_hash": corrected_hash,
-            "prompt_version": PROMPT_VERSION,
+            "prompt_version": PROOFREAD_PROMPT_VERSION,
             "processing_time_ms": proofread_duration_ms,
             "status": "SUCCEEDED",
         }
@@ -261,7 +299,7 @@ async def _run_proofreading(snapshot: dict[str, object], worker_id: str) -> None
                 "scan_id": str(uuid4()),
                 "content_hash": input_hash,
                 "target": "GRADE_1_TO_5",
-                "prompt_version": PROMPT_VERSION,
+                "prompt_version": CHILD_SAFETY_PROMPT_VERSION,
                 "processing_time_ms": safety_result.get("_processing_time_ms"),
                 "status": "PROVISIONAL",
                 "input_version": "ORIGINAL_OCR",
@@ -305,6 +343,20 @@ async def _run_proofreading(snapshot: dict[str, object], worker_id: str) -> None
             row.SafetyInputHash = None
             row.Suitability = None
             row.Findings = []
+            if proofread_retry_only:
+                # Retrying Proofreading does not silently invoke Child Safety.
+                # The new candidate is explicitly left stale for a separate Safety retry.
+                row.Stage = "READY_FOR_ADMIN_REVIEW"
+                row.Status = "READY_FOR_ADMIN_REVIEW"
+                row.WorkerId = None
+                row.LeaseExpiresAt = None
+                row.RetryAfter = None
+                row.CompletedChunks = 1
+                row.TotalChunks = 1
+                row.Attempts = 0
+                row.ErrorCode = None
+                await session.commit()
+                return
             row.WorkerId = None
             row.LeaseExpiresAt = None
             row.RetryAfter = None
@@ -344,6 +396,8 @@ async def _run_proofreading(snapshot: dict[str, object], worker_id: str) -> None
             str(error_code),
             list(getattr(safety_error, "provider_events", []) or []),
         )
+    elif corrected_hash == input_hash:
+        await _try_auto_publish(snapshot["book_id"])
 
 
 async def _run_safety(snapshot: dict[str, object], worker_id: str) -> None:
@@ -389,7 +443,7 @@ async def _run_safety(snapshot: dict[str, object], worker_id: str) -> None:
             "scan_id": str(uuid4()),
             "content_hash": expected_hash,
             "target": "GRADE_1_TO_5",
-            "prompt_version": PROMPT_VERSION,
+            "prompt_version": CHILD_SAFETY_PROMPT_VERSION,
             "processing_time_ms": max(0, int((now - started).total_seconds() * 1000)),
             "status": "PROVISIONAL",
             "input_version": "PROOFREAD_CANDIDATE",
@@ -406,6 +460,7 @@ async def _run_safety(snapshot: dict[str, object], worker_id: str) -> None:
         row.RetryAfter = None
         row.UpdatedAt = now
         await session.commit()
+    await _try_auto_publish(snapshot["book_id"])
 
 
 async def _fail(

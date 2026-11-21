@@ -125,7 +125,7 @@ async def list_admin_quality_books(
     search: str | None = Query(default=None, max_length=120),
     approval_status: Literal[
         "PROCESSING", "SCAN_FAILED", "PENDING_ADMIN_REVIEW", "READY_FOR_CHILDREN",
-        "APPROVED_BY_ADMIN", "REJECTED_FOR_CHILDREN", "STALE",
+        "PUBLISHED", "APPROVED_BY_ADMIN", "REJECTED_FOR_CHILDREN", "STALE",
     ] | None = Query(default=None),
     alert_filter: Literal["CHILD_SAFETY", "COPYRIGHT", "BOTH"] | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),

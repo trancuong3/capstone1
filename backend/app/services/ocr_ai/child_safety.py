@@ -42,10 +42,14 @@ criticism of harmful acts, and fictional storytelling. Distinguish mention,
 description, promotion, and instruction. Do not flag a keyword without context.
 Return only JSON that matches the requested schema. Do not use confidence scores.
 If no content needs reporting, return suitability SUITABLE and an empty findings array.
+If the text or context is insufficient to decide, return suitability REVIEW_REQUIRED
+with an empty findings array. Never claim SUITABLE just because you cannot decide.
 Do not invent findings. For every finding, copy a short, exact evidence excerpt from
-the supplied source. Do not paraphrase, translate, correct spelling, add punctuation,
-or replace words in evidence. Evidence must be present in the source exactly; preserve
-its words and punctuation. Review surrounding context before classifying it.
+the supplied source as one contiguous substring. Copy its characters and punctuation
+exactly. Do not paraphrase, translate, correct spelling, add quotation marks, or add
+or remove characters. Prefer a distinctive excerpt that occurs only once in the
+supplied source; if no exact excerpt supports a finding, return REVIEW_REQUIRED with
+an empty findings array. Review surrounding context before classifying it.
 
 Choose the category for the underlying act, not merely a nearby keyword:
 - SEXUAL_CONTENT covers sexual acts, explicit sexual descriptions, sexual exploitation,
@@ -99,10 +103,19 @@ class SafetyProvider:
 
 
 class ChildSafetyError(RuntimeError):
-    def __init__(self, code: str, provider_events: list[dict[str, Any]]):
+    def __init__(
+        self,
+        code: str,
+        provider_events: list[dict[str, Any]],
+        *,
+        output_mode: str | None = None,
+        retry_count: int = 0,
+    ):
         super().__init__(code)
         self.code = code
         self.provider_events = provider_events
+        self.output_mode = output_mode
+        self.retry_count = retry_count
 
 
 def normalize_safety_text(value: str) -> str:
@@ -306,17 +319,31 @@ def _chunks(text: str, *, target_chars: int = 9000, overlap_chars: int = 400) ->
 
 
 def _validate_result(value: object, *, source: str, source_offset: int) -> tuple[str, list[dict[str, Any]]]:
-    if not isinstance(value, dict) or set(value) != {"suitability", "findings"}:
+    if not isinstance(value, dict):
+        raise ValueError("INVALID_OUTPUT_SCHEMA")
+    required_result_fields = {"suitability", "findings"}
+    if required_result_fields - set(value):
+        raise ValueError("MISSING_REQUIRED_FIELDS")
+    if set(value) != required_result_fields:
         raise ValueError("INVALID_OUTPUT_SCHEMA")
     suitability = value["suitability"]
     findings_value = value["findings"]
-    if suitability not in SUITABILITIES or not isinstance(findings_value, list):
+    if (
+        not isinstance(suitability, str)
+        or suitability not in SUITABILITIES
+        or not isinstance(findings_value, list)
+    ):
         raise ValueError("INVALID_OUTPUT_SCHEMA")
     findings: list[dict[str, Any]] = []
     for raw in findings_value:
-        if not isinstance(raw, dict) or set(raw) != {
+        if not isinstance(raw, dict):
+            raise ValueError("INVALID_OUTPUT_SCHEMA")
+        required_finding_fields = {
             "category", "content_type", "severity", "evidence", "explanation", "recommendation"
-        }:
+        }
+        if required_finding_fields - set(raw):
+            raise ValueError("MISSING_REQUIRED_FIELDS")
+        if set(raw) != required_finding_fields:
             raise ValueError("INVALID_OUTPUT_SCHEMA")
         category = raw["category"]
         content_type = raw["content_type"]
@@ -325,14 +352,17 @@ def _validate_result(value: object, *, source: str, source_offset: int) -> tuple
         explanation = raw["explanation"]
         recommendation = raw["recommendation"]
         if (
-            category not in CATEGORIES or content_type not in CONTENT_TYPES
-            or severity not in SEVERITIES or not isinstance(evidence, str)
-            or not evidence.strip() or len(evidence) > 1000
+            not isinstance(category, str) or category not in CATEGORIES
+            or not isinstance(content_type, str) or content_type not in CONTENT_TYPES
+            or not isinstance(severity, str) or severity not in SEVERITIES
+            or not isinstance(evidence, str) or len(evidence) > 1000
             or not isinstance(explanation, str) or not explanation.strip()
             or len(explanation) > 2000 or not isinstance(recommendation, str)
             or not recommendation.strip() or len(recommendation) > 2000
         ):
             raise ValueError("INVALID_OUTPUT_SCHEMA")
+        if not evidence.strip():
+            raise ValueError("INVALID_EVIDENCE")
         match = _find_evidence(source, evidence)
         if match is None:
             raise ValueError("INVALID_EVIDENCE")
@@ -432,13 +462,18 @@ class ChildSafetyOrchestrator:
             if provider.family in disabled_families:
                 continue
             started = time.perf_counter()
+            output_mode = self._output_mode(provider)
+            retry_count = 0
             try:
-                result, status_code = await asyncio.wait_for(
+                result, status_code, output_mode, retry_count = await asyncio.wait_for(
                     self._request(provider, source),
                     timeout=(self.config.local.timeout_seconds if provider.family == "ollama" else self.config.cloud_timeout_seconds),
                 )
                 suitability, findings = _validate_result(result, source=source, source_offset=0)
-                events.append(self._event(provider, chunk_id, True, status_code, None, started))
+                events.append(self._event(
+                    provider, chunk_id, True, status_code, None, started,
+                    output_mode=output_mode, retry_count=retry_count,
+                ))
                 return suitability, findings
             except asyncio.TimeoutError:
                 code, status_code = "PROVIDER_TIMEOUT", None
@@ -449,18 +484,44 @@ class ChildSafetyOrchestrator:
             except ChildSafetyError as exc:
                 code, status_code = exc.code, None
                 status_code = getattr(exc, "status_code", status_code)
+                output_mode = exc.output_mode or output_mode
+                retry_count = exc.retry_count
             except Exception as exc:
                 # Never persist upstream response bodies, credentials, or OCR text.
-                code = str(exc) if str(exc) in {"INVALID_OUTPUT_SCHEMA", "INVALID_EVIDENCE"} else "PROVIDER_ERROR"
+                known_output_errors = {
+                    "INVALID_OUTPUT_SCHEMA", "MISSING_REQUIRED_FIELDS", "INVALID_EVIDENCE",
+                }
+                code = (
+                    str(exc)
+                    if isinstance(exc, ValueError) and str(exc) in known_output_errors
+                    else "SYSTEM_ERROR"
+                )
                 status_code = getattr(exc, "status_code", None)
             errors.append(code)
-            events.append(self._event(provider, chunk_id, False, status_code, code, started))
+            events.append(self._event(
+                provider, chunk_id, False, status_code, code, started,
+                output_mode=output_mode, retry_count=retry_count,
+            ))
             if status_code in {401, 403, 429} or (isinstance(status_code, int) and status_code >= 500):
                 disabled_families.add(provider.family)
         raise ChildSafetyError(errors[-1] if errors else "NO_PROVIDER_CONFIGURED", events)
 
     @staticmethod
-    def _event(provider: SafetyProvider, chunk_id: int, available: bool, status_code: int | None, code: str | None, started: float) -> dict[str, Any]:
+    def _output_mode(provider: SafetyProvider) -> str:
+        return "json_object" if provider.family == "groq" else "json_schema"
+
+    @staticmethod
+    def _event(
+        provider: SafetyProvider,
+        chunk_id: int,
+        available: bool,
+        status_code: int | None,
+        code: str | None,
+        started: float,
+        *,
+        output_mode: str,
+        retry_count: int,
+    ) -> dict[str, Any]:
         return {
             "provider": provider.name,
             "model": provider.model,
@@ -470,12 +531,15 @@ class ChildSafetyOrchestrator:
             "http_status": status_code,
             "error_code": code,
             "duration_ms": int((time.perf_counter() - started) * 1000),
-            "retry_count": 0,
+            "retry_count": retry_count,
+            "output_mode": output_mode,
             "successful_chunks": int(available),
             "failed_chunks": int(not available),
         }
 
-    async def _request(self, provider: SafetyProvider, source: str) -> tuple[object, int]:
+    async def _request(
+        self, provider: SafetyProvider, source: str
+    ) -> tuple[object, int, str, int]:
         request_data = json.dumps({"untrusted_ocr_text": source}, ensure_ascii=False)
         if provider.family == "google":
             if not self.config.gemini_api_key:
@@ -520,10 +584,19 @@ class ChildSafetyOrchestrator:
             url = self.config.local.base_url.rstrip("/") + "/api/chat"
             headers = {}
         timeout = self.config.local.timeout_seconds if provider.family == "ollama" else self.config.cloud_timeout_seconds
+        output_mode = self._output_mode(provider)
+        retry_count = 0
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(timeout), trust_env=False, follow_redirects=False, transport=self.transport
         ) as client:
             response = await client.post(url, headers=headers, json=payload)
+            # Older Ollama servers may reject JSON Schema in `format`. Retry
+            # once in JSON mode; the application validator remains authoritative.
+            if provider.family == "ollama" and response.status_code in {400, 422}:
+                payload["format"] = "json"
+                response = await client.post(url, headers=headers, json=payload)
+                output_mode = "json_fallback"
+                retry_count = 1
         if response.status_code != 200:
             status_code = response.status_code
             if status_code in {401, 403}:
@@ -536,7 +609,9 @@ class ChildSafetyOrchestrator:
                 error_code = "PROVIDER_UNAVAILABLE"
             else:
                 error_code = "PROVIDER_REJECTED"
-            error = ChildSafetyError(error_code, [])
+            error = ChildSafetyError(
+                error_code, [], output_mode=output_mode, retry_count=retry_count
+            )
             error.status_code = status_code  # type: ignore[attr-defined]
             raise error
         try:
@@ -559,8 +634,10 @@ class ChildSafetyOrchestrator:
                 raise ValueError
             result = json.loads(content)
         except (AttributeError, IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise ChildSafetyError("INVALID_JSON", []) from exc
-        return result, response.status_code
+            raise ChildSafetyError(
+                "INVALID_JSON", [], output_mode=output_mode, retry_count=retry_count
+            ) from exc
+        return result, response.status_code, output_mode, retry_count
 
 
 def build_child_safety_orchestrator(transport: httpx.AsyncBaseTransport | None = None) -> ChildSafetyOrchestrator:

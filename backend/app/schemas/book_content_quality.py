@@ -206,6 +206,7 @@ class BookApprovalAssessment(BaseModel):
         "SCAN_FAILED",
         "PENDING_ADMIN_REVIEW",
         "READY_FOR_CHILDREN",
+        "PUBLISHED",
         "APPROVED_BY_ADMIN",
         "REJECTED_FOR_CHILDREN",
         "STALE",
@@ -235,6 +236,7 @@ class BookApprovalAssessment(BaseModel):
     admin_approved_by: UUID | None = None
     admin_approved_by_name: str | None = None
     admin_reason: str | None = None
+    publication_source: Literal["AUTO_APPROVAL", "ADMIN_APPROVAL"] | None = None
     rights_confirmed: bool = False
     blockers: list[str] = Field(default_factory=list)
 
