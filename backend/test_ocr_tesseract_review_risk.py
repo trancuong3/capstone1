@@ -44,6 +44,38 @@ class TesseractRiskTests(unittest.TestCase):
         )
         self.assertNotIn("mỉm", json.dumps(scored, ensure_ascii=False))
 
+    def test_latest_uniquely_aligned_gallery_counts_still_block_production(self):
+        """Counts-only 10-page fixture: private glyphs and references stay local."""
+        broad = {
+            "flips": 18, "corrected": 13, "regressed": 3,
+            "changed_other": 2, "ambiguous": 0,
+        }
+        confirmed = {
+            "flips": 5, "corrected": 4, "regressed": 1,
+            "changed_other": 0, "ambiguous": 0,
+        }
+        latest = report(broad, confirmed)
+        scored = assess_review_risk(latest)
+        self.assertFalse(scored["production_deployment_allowed"])
+        self.assertIn("correct_to_wrong_regressions", scored["reason_codes"])
+        self.assertNotIn("unresolved_token_alignment", scored["reason_codes"])
+        self.assertIn("not_independent_held_out", scored["reason_codes"])
+        self.assertIn("word_boxes_not_verified", scored["reason_codes"])
+        primary = scored["per_policy"]["tesseract_line_priority"]
+        strict = scored["per_policy"]["tesseract_line_vietocr_crop_agreement"]
+        self.assertEqual(primary["confirmed_corrected_by_position"], 13)
+        self.assertEqual(primary["confirmed_regressed_by_position"], 3)
+        self.assertEqual(primary["ambiguous_position"], 0)
+        self.assertEqual(primary["review_required"], 5)
+        self.assertEqual(strict["confirmed_corrected_by_position"], 4)
+        self.assertEqual(strict["confirmed_regressed_by_position"], 1)
+        self.assertEqual(strict["review_required"], 1)
+        self.assertEqual(primary["correction_fraction_of_flips"], round(13/18, 6))
+        self.assertEqual(strict["correction_fraction_of_flips"], 0.8)
+        serialized = json.dumps(scored, ensure_ascii=False)
+        for private_text in ("pages.jsonl", "crops/", "index.html"):
+            self.assertNotIn(private_text, serialized)
+
     def test_no_flips_is_not_production_approval(self):
         no_changes = {"flips": 0, "corrected": 0, "regressed": 0,
                       "changed_other": 0, "ambiguous": 0}
