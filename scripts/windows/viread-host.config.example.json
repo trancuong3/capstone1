@@ -11,5 +11,6 @@
   "frontendEnvFile": "F:\\c1\\capstone1\\frontend\\.env.local",
   "ocrCloudCorrectionEnabled": false,
   "ocrWarmupEnabled": false,
+  "ocrDevice": "cpu",
   "logRetentionMb": 20
 }

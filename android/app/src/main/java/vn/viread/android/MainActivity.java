@@ -46,6 +46,7 @@ public final class MainActivity extends Activity {
     private TextView errorMessageView;
     private TrustedNavigation navigation;
     private PermissionRequest pendingPermission;
+    private boolean awaitingSystemPermission;
     private ValueCallback<Uri[]> pendingFiles;
     private String lastFailedUrl;
 
@@ -58,6 +59,17 @@ public final class MainActivity extends Activity {
         getWindow().setNavigationBarColor(0xFF153A53);
 
         FrameLayout content = new FrameLayout(this);
+        content.setBackgroundColor(0xFF153A53);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            content.setOnApplyWindowInsetsListener((view, insets) -> {
+                android.graphics.Insets bars = insets.getInsets(
+                        android.view.WindowInsets.Type.systemBars()
+                                | android.view.WindowInsets.Type.ime()
+                                | android.view.WindowInsets.Type.displayCutout());
+                view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                return insets;
+            });
+        }
         webView = new WebView(this);
         content.addView(webView, new FrameLayout.LayoutParams(-1, -1));
 
@@ -131,6 +143,7 @@ public final class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 progress.setVisibility(View.GONE);
+                CookieManager.getInstance().flush();
             }
         });
 
@@ -298,11 +311,13 @@ public final class MainActivity extends Activity {
         if (needed.isEmpty()) {
             grantPending();
         } else {
+            awaitingSystemPermission = true;
             requestPermissions(needed.toArray(new String[0]), WEB_PERMISSION_CODE);
         }
     }
 
     private void grantPending() {
+        awaitingSystemPermission = false;
         PermissionRequest request = pendingPermission;
         pendingPermission = null;
         String origin = request != null && request.getOrigin() != null
@@ -316,6 +331,7 @@ public final class MainActivity extends Activity {
     }
 
     private void denyPending() {
+        awaitingSystemPermission = false;
         PermissionRequest request = pendingPermission;
         pendingPermission = null;
         if (request != null) request.deny();
@@ -325,6 +341,7 @@ public final class MainActivity extends Activity {
     public void onRequestPermissionsResult(int code, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(code, permissions, results);
         if (code != WEB_PERMISSION_CODE) return;
+        awaitingSystemPermission = false;
         boolean granted = results.length > 0;
         for (int result : results) granted &= result == PackageManager.PERMISSION_GRANTED;
         if (granted) grantPending();
@@ -343,13 +360,32 @@ public final class MainActivity extends Activity {
     @Override
     protected void onPause() {
         if (webView != null) {
-            // Frontend hooks listen for this event and release camera/recording tracks.
-            webView.evaluateJavascript("document.dispatchEvent(new Event('viread:android-background'))", null);
-            webView.onPause();
             CookieManager.getInstance().flush();
+            // Do NOT fire background release or cancel pendingPermission while an in-app
+            // system permission dialog or native file picker is transiently overlaid.
+            if (!awaitingSystemPermission && pendingFiles == null) {
+                webView.evaluateJavascript(
+                        "document.dispatchEvent(new Event('viread:android-background'))", null);
+                webView.onPause();
+            }
         }
-        denyPending();
+        if (!awaitingSystemPermission) {
+            denyPending();
+        }
         super.onPause();
+    }
+
+    @Override
+    protected void onStop() {
+        if (webView != null && !awaitingSystemPermission && pendingFiles == null) {
+            webView.evaluateJavascript(
+                    "document.dispatchEvent(new Event('viread:android-background'))", null);
+            webView.onPause();
+        }
+        if (!awaitingSystemPermission) {
+            denyPending();
+        }
+        super.onStop();
     }
 
     @Override
