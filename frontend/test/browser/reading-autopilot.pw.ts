@@ -57,6 +57,7 @@ async function installAutopilotSession(
   options: {
     failFirstComplete?: boolean;
     initialState?: "ready" | "reading" | "question";
+    customFirstPageWords?: readonly string[];
   } = {},
 ): Promise<AutopilotHarness> {
   await installApiFixture(page);
@@ -118,6 +119,16 @@ async function installAutopilotSession(
       body: JSON.stringify(body),
     });
 
+  const activeFirstPageWords = options.customFirstPageWords
+    ? options.customFirstPageWords.map((text, index) => ({
+        word_id: `91000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+        word_index: index,
+        text,
+        bbox: [0.08 + index * 0.21, 0.22, 0.18, 0.08] as const,
+        line_index: 0,
+      }))
+    : pageOneWords;
+
   const pages = [
     {
       page_id: PAGE_1_ID,
@@ -128,8 +139,8 @@ async function installAutopilotSession(
       height: 800,
       image_overlay_safe: false,
       image_url: null,
-      text: "Bé mèo nhỏ đang",
-      words: pageOneWords,
+      text: activeFirstPageWords.map((w) => w.text).join(" "),
+      words: activeFirstPageWords,
     },
     {
       page_id: PAGE_2_ID,
@@ -472,6 +483,7 @@ async function installAutopilotSession(
       },
     });
 
+    let activeGainNode: GainNode | null = null;
     Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
       configurable: true,
       value: async (constraints?: MediaStreamConstraints) => {
@@ -485,6 +497,7 @@ async function installAutopilotSession(
         await ctx.resume();
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
+        activeGainNode = gain;
         const dest = ctx.createMediaStreamDestination();
         osc.frequency.value = 240;
         gain.gain.value = 0.12;
@@ -515,6 +528,11 @@ async function installAutopilotSession(
           const active = instances[instances.length - 1];
           if (!active) throw new Error("No active SpeechRecognition instance");
           active.say(transcript, confidence);
+        },
+        setQuiet: (quiet: boolean) => {
+          if (activeGainNode) {
+            activeGainNode.gain.value = quiet ? 0 : 0.12;
+          }
         },
         spoken: () => [...spoken],
       },
@@ -966,6 +984,89 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
     ]);
     await expect(page.getByText("Ai nấu cơm cho bé?")).not.toBeVisible({
       timeout: 15_000,
+    });
+  });
+
+  test("G25-G28: Multi-chunk low-confidence Grade-1 spelling ('ê' -> 'tơ' -> 'ê' -> 'tê') & ~1.5s empathetic multi-sentence comfort with companion bubble", async ({
+    page,
+  }, testInfo) => {
+    mkdirSync(EVIDENCE_DIR, { recursive: true });
+    const harness = await installAutopilotSession(page, {
+      initialState: "reading",
+      customFirstPageWords: ["Tê", "mèo", "nhỏ", "đang"],
+    });
+
+    await page
+      .getByRole("button", { name: "Bé đọc với nhận diện giọng nói" })
+      .click();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (
+            window as unknown as {
+              __autopilotSpeech: { count: () => number };
+            }
+          ).__autopilotSpeech.count(),
+        ),
+      )
+      .toBe(1);
+
+    // 1. Child spells out "Tê" across 4 separate low-confidence events ("ê", "tơ", "ê", "tê")
+    for (const [chunk, conf] of [
+      ["ê", 0.34],
+      ["tơ", 0.36],
+      ["ê", 0.35],
+      ["tê", 0.88],
+    ] as const) {
+      await page.evaluate(
+        ([text, c]) =>
+          (
+            window as unknown as {
+              __autopilotSpeech: { say: (t: string, conf?: number) => void };
+            }
+          ).__autopilotSpeech.say(text, c),
+        [chunk, conf] as const,
+      );
+      await page.waitForTimeout(120);
+    }
+
+    await expect(page.getByRole("button", { name: "Tê" })).toHaveAttribute(
+      "data-reading-state",
+      "correct",
+    );
+    await expect(page.getByTestId("reading-companion-bubble")).toHaveAttribute(
+      "data-companion-mood",
+      "celebrating",
+    );
+
+    // 2. Child misreads "mèo" as "méo" (tone error) and goes quiet -> empathetic multi-sentence comfort fires ~1.5s later!
+    await page.evaluate(() => {
+      const api = (
+        window as unknown as {
+          __autopilotSpeech: {
+            say: (t: string) => void;
+            setQuiet: (q: boolean) => void;
+          };
+        }
+      ).__autopilotSpeech;
+      api.say("méo");
+      api.setQuiet(true);
+    });
+
+    const bubble = page.getByTestId("reading-companion-bubble");
+    await expect(bubble).toHaveAttribute("data-companion-mood", "comforting", {
+      timeout: 6_000,
+    });
+    await expect(bubble).toContainText(/dấu thanh/i);
+    expect(harness.ttsRequests.some((t) => t.includes("mèo"))).toBe(true);
+
+    await assertNoHorizontalOverflow(page);
+    await page.screenshot({
+      path: resolve(
+        EVIDENCE_DIR,
+        `e2e-autopilot-empathetic-${testInfo.project.name}.png`,
+      ),
+      fullPage: false,
     });
   });
 });

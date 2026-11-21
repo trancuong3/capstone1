@@ -15,7 +15,10 @@
  *    creates duplicate comparison reports.
  */
 
-import { matchPhonicsSpelling } from "@/lib/reading/phonics-spelling";
+import {
+  isPhonicsInProgress,
+  matchPhonicsSpelling,
+} from "@/lib/reading/phonics-spelling";
 import {
   normalizeRealtimeWord,
   tokenizeRealtimeText,
@@ -159,9 +162,14 @@ export class SentenceReinforcementTracker {
   private readonly completedKeys = new Set<string>();
   private active: ActiveSentenceReinforcement | null = null;
   private activeMatched = new Set<number>();
+  private spellingBuffer: { cursor: number; tokens: string[] } | null = null;
 
   getActive(): ActiveSentenceReinforcement | null {
     return this.active;
+  }
+
+  getBufferedSpellingTokens(): readonly string[] {
+    return this.spellingBuffer?.tokens ?? [];
   }
 
   hasReinforced(sentenceKey: string): boolean {
@@ -183,6 +191,7 @@ export class SentenceReinforcementTracker {
     const span = extractSentenceForWord(words, triggerWordId, options);
     if (!span || this.completedKeys.has(span.sentenceKey)) return null;
     this.activeMatched = new Set();
+    this.spellingBuffer = null;
     this.active = {
       span,
       triggerWordId,
@@ -194,14 +203,15 @@ export class SentenceReinforcementTracker {
 
   /**
    * Consume a final speech transcript during sentence reinforcement.
-   * Accepts normal fluent speech AND Grade-1 phonics spelling-out.
+   * Accepts normal fluent speech AND Grade-1 phonics spelling-out (including
+   * multi-chunk spelling like "ê" -> "tờ" -> "ê" -> "tê").
    * Marks completed once the child has read >= 65% of the sentence's words
    * (or at least 2 words for 2-3 word sentences) including the final word or
    * the practiced word.
    */
   consumeSpeech(transcript: string): ReinforcementSpeechResult {
     if (!this.active) return "ignored";
-    const tokens = tokenizeRealtimeText(transcript);
+    let tokens = tokenizeRealtimeText(transcript);
     if (!tokens.length) return "ignored";
 
     const expected = this.active.span.words.map((w) =>
@@ -215,6 +225,25 @@ export class SentenceReinforcementTracker {
     }
 
     let newlyMatched = 0;
+    if (this.spellingBuffer && this.spellingBuffer.cursor === cursor) {
+      const combined = [...this.spellingBuffer.tokens, ...tokens];
+      const bufferedMatch = matchPhonicsSpelling(combined, expected[cursor]);
+      if (bufferedMatch) {
+        this.spellingBuffer = null;
+        this.activeMatched.add(cursor);
+        newlyMatched += 1;
+        cursor += 1;
+        tokens = combined.slice(bufferedMatch.consumedCount);
+      } else if (isPhonicsInProgress(combined, expected[cursor])) {
+        this.spellingBuffer = { cursor, tokens: combined };
+        return "in-progress";
+      } else {
+        this.spellingBuffer = null;
+      }
+    } else {
+      this.spellingBuffer = null;
+    }
+
     for (let i = 0; i < tokens.length && cursor < expected.length;) {
       if (tokens[i] === expected[cursor]) {
         this.activeMatched.add(cursor);
@@ -223,13 +252,18 @@ export class SentenceReinforcementTracker {
         i += 1;
         continue;
       }
-      const phonics = matchPhonicsSpelling(tokens.slice(i), expected[cursor]);
+      const remaining = tokens.slice(i);
+      const phonics = matchPhonicsSpelling(remaining, expected[cursor]);
       if (phonics) {
         this.activeMatched.add(cursor);
         newlyMatched += 1;
         cursor += 1;
         i += phonics.consumedCount;
         continue;
+      }
+      if (isPhonicsInProgress(remaining, expected[cursor])) {
+        this.spellingBuffer = { cursor, tokens: [...remaining] };
+        return "in-progress";
       }
       // Look slightly ahead inside the sentence in case one word was dropped
       const ahead = expected.indexOf(tokens[i], cursor + 1);
@@ -272,11 +306,13 @@ export class SentenceReinforcementTracker {
     }
     this.active = null;
     this.activeMatched = new Set();
+    this.spellingBuffer = null;
   }
 
   reset(): void {
     this.completedKeys.clear();
     this.active = null;
     this.activeMatched = new Set();
+    this.spellingBuffer = null;
   }
 }

@@ -32,6 +32,14 @@ export interface RealtimeHesitation {
   beforeWordId: string | null;
 }
 
+export interface RealtimeWordMismatch {
+  readonly wordId: string;
+  readonly wordIndex: number;
+  readonly expectedText: string;
+  readonly spokenToken: string;
+  readonly seq: number;
+}
+
 export interface RealtimeAlignmentSnapshot {
   currentWordId: string | null;
   currentWordIndex: number;
@@ -44,6 +52,8 @@ export interface RealtimeAlignmentSnapshot {
   previewMatchedWordIds: Set<string>;
   /** Words first read wrongly/skipped, then fixed by the child in the same capture. */
   correctedWordIds?: Set<string>;
+  /** Words where the child uttered a brief slip and immediately self-corrected. */
+  selfCorrectedSlipWordIds?: Set<string>;
   /** Words matched after Grade-1 phonics spelling-out (e.g. "ô i ôi tờ ôi tôi"). */
   spelledOutWordIds?: Set<string>;
   /** True while the child is mid-way through spelling out the current word. */
@@ -160,8 +170,28 @@ export class RealtimeAlignmentEngine {
    */
   private replayPos: number | null = null;
   private readonly correctedWordIds = new Set<string>();
+  private readonly selfCorrectedSlipWordIds = new Set<string>();
   private readonly spelledOutWordIds = new Set<string>();
   private spellingInProgress = false;
+  /**
+   * Cross-segment spelling buffer (G26): accumulates Grade-1 phonics cues
+   * spoken across separate `isFinal` events ("ê" -> "tờ" -> "ê" -> "tê")
+   * without pushing partial cues into `pendingToken`.
+   */
+  private spellingBuffer: {
+    bookIndex: number;
+    wordId: string;
+    tokens: string[];
+  } | null = null;
+  private mismatchSeq = 0;
+  private trailingMismatch: {
+    bookIndex: number;
+    wordId: string;
+    wordIndex: number;
+    expectedText: string;
+    spokenToken: string;
+    seq: number;
+  } | null = null;
   private rejectedSegments = 0;
   private readonly finalSegmentIds = new Set<string>();
   private currentBookIndex = 0;
@@ -171,7 +201,11 @@ export class RealtimeAlignmentEngine {
    * Giữ lại một từ chưa khớp để chờ từ tiếp theo xác nhận.
    * Tránh một kết quả nhận dạng sai làm lệch toàn bộ các từ phía sau.
    */
-  private pendingToken: { token: string; spokenIndex: number } | null = null;
+  private pendingToken: {
+    token: string;
+    spokenIndex: number;
+    seq: number;
+  } | null = null;
 
   private readonly statusByWordId = new Map<string, RealtimeWordState>();
 
@@ -209,10 +243,24 @@ export class RealtimeAlignmentEngine {
   markUncertain(): void {
     this.uncertain = true;
     this.pendingToken = null;
+    this.spellingBuffer = null;
+    this.spellingInProgress = false;
+    this.trailingMismatch = null;
   }
 
   hasUncertainty(): boolean {
     return this.uncertain;
+  }
+
+  /** Active phonics cues accumulated for the current book word, if any. */
+  getBufferedSpellingTokens(): readonly string[] {
+    if (
+      this.spellingBuffer &&
+      this.spellingBuffer.bookIndex === this.currentBookIndex
+    ) {
+      return this.spellingBuffer.tokens;
+    }
+    return [];
   }
 
   addFinalTranscript(
@@ -222,13 +270,54 @@ export class RealtimeAlignmentEngine {
     if (segmentId && this.finalSegmentIds.has(segmentId))
       return this.getSnapshot();
     if (segmentId) this.finalSegmentIds.add(segmentId);
-    const tokens = tokenizeRealtimeText(text);
+    let tokens = tokenizeRealtimeText(text);
+    if (tokens.length === 0) return this.getSnapshot();
 
     // Speech that does not follow the book (TV, another speaker) must neither
     // colour words nor penalise the child.
     if (this.isOffTopic(tokens)) {
       this.rejectedSegments += 1;
       return this.getSnapshot();
+    }
+
+    // Merge with cross-segment SpellingBuffer if active on the current word
+    if (
+      this.spellingBuffer &&
+      this.spellingBuffer.bookIndex === this.currentBookIndex &&
+      this.currentBookIndex < this.bookWords.length
+    ) {
+      const target = this.bookWords[this.currentBookIndex];
+      const combined = [...this.spellingBuffer.tokens, ...tokens];
+      const combinedPhonics = matchPhonicsSpelling(
+        combined,
+        target.normalizedText,
+      );
+      if (combinedPhonics) {
+        this.spellingBuffer = null;
+        this.pendingToken = null;
+        this.replayPos = null;
+        this.spellingInProgress = false;
+        this.trailingMismatch = null;
+        const spokenIndex = this.spokenWords.length;
+        this.spokenWords.push(target.normalizedText);
+        this.spokenToBookIndex.set(spokenIndex, this.currentBookIndex);
+        this.spelledOutWordIds.add(target.wordId);
+        this.setWordStatus(this.currentBookIndex, "MATCH");
+        this.currentBookIndex += 1;
+        tokens = combined.slice(combinedPhonics.consumedCount);
+      } else if (isPhonicsInProgress(combined, target.normalizedText)) {
+        this.spellingBuffer = {
+          bookIndex: this.currentBookIndex,
+          wordId: target.wordId,
+          tokens: combined,
+        };
+        this.spellingInProgress = true;
+        this.trailingMismatch = null;
+        return this.getSnapshot();
+      } else {
+        this.spellingBuffer = null;
+        this.spellingInProgress = false;
+      }
     }
 
     let index = 0;
@@ -238,9 +327,11 @@ export class RealtimeAlignmentEngine {
         const remaining = tokens.slice(index);
         const phonics = matchPhonicsSpelling(remaining, target.normalizedText);
         if (phonics) {
+          this.spellingBuffer = null;
           this.pendingToken = null;
           this.replayPos = null;
           this.spellingInProgress = false;
+          this.trailingMismatch = null;
           const spokenIndex = this.spokenWords.length;
           this.spokenWords.push(target.normalizedText);
           this.spokenToBookIndex.set(spokenIndex, this.currentBookIndex);
@@ -252,11 +343,18 @@ export class RealtimeAlignmentEngine {
         }
         if (isPhonicsInProgress(remaining, target.normalizedText)) {
           // The child paused halfway through sounding out the current word
-          // (e.g. "ô i ôi" before "tờ ôi tôi"). Hold the cursor cleanly.
+          // (e.g. "ê" -> "tờ" -> "ê" -> "tê" or "ô i ôi" -> "tờ ôi tôi").
+          this.spellingBuffer = {
+            bookIndex: this.currentBookIndex,
+            wordId: target.wordId,
+            tokens: [...remaining],
+          };
           this.spellingInProgress = true;
+          this.trailingMismatch = null;
           break;
         }
       }
+      this.spellingBuffer = null;
       this.spellingInProgress = false;
       this.processToken(tokens[index]);
       index += 1;
@@ -283,15 +381,40 @@ export class RealtimeAlignmentEngine {
   private alignedTokenCount(tokens: readonly string[]): number {
     let cursor = this.currentBookIndex;
     let matched = 0;
+    const buffered =
+      this.spellingBuffer?.bookIndex === this.currentBookIndex
+        ? this.spellingBuffer.tokens
+        : [];
     for (let index = 0; index < tokens.length; index += 1) {
       const token = tokens[index];
       if (cursor < this.bookWords.length) {
+        const remaining = tokens.slice(index);
+        if (index === 0 && buffered.length > 0) {
+          const combined = [...buffered, ...remaining];
+          const bufferedPhonics = matchPhonicsSpelling(
+            combined,
+            this.bookWords[cursor].normalizedText,
+          );
+          if (bufferedPhonics && bufferedPhonics.consumedCount > buffered.length) {
+            const consumedFromNew =
+              bufferedPhonics.consumedCount - buffered.length;
+            matched += consumedFromNew;
+            index += consumedFromNew - 1;
+            cursor += 1;
+            continue;
+          }
+          if (
+            isPhonicsInProgress(combined, this.bookWords[cursor].normalizedText)
+          ) {
+            matched += remaining.length;
+            break;
+          }
+        }
         if (this.bookWords[cursor].normalizedText === token) {
           matched += 1;
           cursor += 1;
           continue;
         }
-        const remaining = tokens.slice(index);
         const phonics = matchPhonicsSpelling(
           remaining,
           this.bookWords[cursor].normalizedText,
@@ -432,8 +555,36 @@ export class RealtimeAlignmentEngine {
         continue;
       }
 
-      // 1b. Đánh vần lớp 1 (ví dụ "ô i ôi tờ ôi tôi" -> "tôi").
+      // 1b. Đánh vần lớp 1 (kể cả ghép tiếp từ SpellingBuffer đang dở).
       const remaining = tokens.slice(tokenIndex);
+      const buffered =
+        tokenIndex === 0 && this.spellingBuffer?.bookIndex === cursor
+          ? this.spellingBuffer.tokens
+          : [];
+      if (buffered.length > 0) {
+        const combined = [...buffered, ...remaining];
+        const bufferedPhonics = matchPhonicsSpelling(
+          combined,
+          currentWord.normalizedText,
+        );
+        if (
+          bufferedPhonics &&
+          bufferedPhonics.consumedCount > buffered.length
+        ) {
+          setPreviewStatus(cursor, "MATCH");
+          previewSpelling = false;
+          cursor += 1;
+          targetIndex =
+            cursor < this.bookWords.length ? cursor : Math.max(0, cursor - 1);
+          tokenIndex += bufferedPhonics.consumedCount - buffered.length - 1;
+          continue;
+        }
+        if (isPhonicsInProgress(combined, currentWord.normalizedText)) {
+          previewSpelling = true;
+          targetIndex = cursor;
+          break;
+        }
+      }
       const phonics = matchPhonicsSpelling(
         remaining,
         currentWord.normalizedText,
@@ -582,9 +733,9 @@ export class RealtimeAlignmentEngine {
 
       if (token === currentWord.normalizedText) {
         // Nếu pending lặp lại từ ngay trước con trỏ, xác nhận lần đọc lặp.
-        // Nếu không, coi pending là nhiễu/interim sai và giữ nguyên con trỏ.
+        // Nếu không, bé vừa tự sửa ngay một tiếng đọc nhỡ ở từ hiện tại.
         if (!this.tryMarkRepeatedWord(pending.token, pending.spokenIndex)) {
-          // Không có bằng chứng đủ mạnh để gán pending vào sách.
+          this.selfCorrectedSlipWordIds.add(currentWord.wordId);
         }
 
         this.processConfirmedMatch(spokenIndex, this.currentBookIndex);
@@ -602,8 +753,11 @@ export class RealtimeAlignmentEngine {
           return;
         }
 
-        this.setWordStatus(this.currentBookIndex, "SUBSTITUTE");
-        this.spokenToBookIndex.set(pending.spokenIndex, this.currentBookIndex);
+        this.recordSubstitute(
+          this.currentBookIndex,
+          pending.token,
+          pending.spokenIndex,
+        );
         this.currentBookIndex += 1;
 
         this.processTokenAtCurrentPosition(token, spokenIndex);
@@ -627,8 +781,11 @@ export class RealtimeAlignmentEngine {
       if (this.tryStartReplay(token)) return;
 
       // Hai từ liên tiếp đều không khớp: xác nhận từ trước là đọc sai.
-      this.setWordStatus(this.currentBookIndex, "SUBSTITUTE");
-      this.spokenToBookIndex.set(pending.spokenIndex, this.currentBookIndex);
+      this.recordSubstitute(
+        this.currentBookIndex,
+        pending.token,
+        pending.spokenIndex,
+      );
       this.currentBookIndex += 1;
 
       this.processTokenAtCurrentPosition(token, spokenIndex);
@@ -659,13 +816,15 @@ export class RealtimeAlignmentEngine {
       }
 
       this.setWordStatus(matchedIndex, "MATCH");
+      this.trailingMismatch = null;
       this.spokenToBookIndex.set(spokenIndex, matchedIndex);
       this.currentBookIndex = matchedIndex + 1;
       return;
     }
 
     // Chưa đủ bằng chứng để kết luận SUBSTITUTE. Chờ thêm một từ.
-    this.pendingToken = { token, spokenIndex };
+    this.mismatchSeq += 1;
+    this.pendingToken = { token, spokenIndex, seq: this.mismatchSeq };
   }
 
   private processTokenAtCurrentPosition(
@@ -704,12 +863,35 @@ export class RealtimeAlignmentEngine {
       }
 
       this.setWordStatus(matchedIndex, "MATCH");
+      this.trailingMismatch = null;
       this.spokenToBookIndex.set(spokenIndex, matchedIndex);
       this.currentBookIndex = matchedIndex + 1;
       return;
     }
 
-    this.pendingToken = { token, spokenIndex };
+    this.mismatchSeq += 1;
+    this.pendingToken = { token, spokenIndex, seq: this.mismatchSeq };
+  }
+
+  private recordSubstitute(
+    bookIndex: number,
+    spokenToken: string,
+    spokenIndex: number,
+  ): void {
+    const word = this.bookWords[bookIndex];
+    this.setWordStatus(bookIndex, "SUBSTITUTE");
+    this.spokenToBookIndex.set(spokenIndex, bookIndex);
+    if (word && !this.trailingMismatch) {
+      this.mismatchSeq += 1;
+      this.trailingMismatch = {
+        bookIndex,
+        wordId: word.wordId,
+        wordIndex: word.wordIndex,
+        expectedText: word.text,
+        spokenToken,
+        seq: this.mismatchSeq,
+      };
+    }
   }
 
   /**
@@ -723,6 +905,7 @@ export class RealtimeAlignmentEngine {
     const behind = this.findBehindFrom(this.currentBookIndex, token);
     if (behind === -1) return false;
     this.pendingToken = null;
+    this.trailingMismatch = null;
     this.applyReplayMatch(behind);
     return true;
   }
@@ -745,6 +928,7 @@ export class RealtimeAlignmentEngine {
     }
     this.setWordStatus(anchor, "MATCH");
     this.setWordStatus(anchor + 1, "MATCH");
+    this.trailingMismatch = null;
     this.spokenToBookIndex.set(firstSpoken, anchor);
     this.spokenToBookIndex.set(secondSpoken, anchor + 1);
     this.currentBookIndex = anchor + 2;
@@ -754,9 +938,83 @@ export class RealtimeAlignmentEngine {
     const bookWord = this.bookWords[bookIndex];
     if (!bookWord) return;
 
+    this.trailingMismatch = null;
     this.setWordStatus(bookIndex, "MATCH");
     this.spokenToBookIndex.set(spokenIndex, bookIndex);
     this.currentBookIndex = bookIndex + 1;
+  }
+
+  /**
+   * Non-mutating inspection of an unresolved wrong-word attempt at the reading
+   * frontier (G27). Returns `null` when the child is spelling out (`SpellingBuffer`),
+   * when no mistake occurred, or when the child already read further and
+   * matched subsequent words on the page.
+   */
+  getTrailingMismatch(): RealtimeWordMismatch | null {
+    if (this.spellingInProgress || this.uncertain || this.finished) {
+      return null;
+    }
+    if (this.trailingMismatch) {
+      return {
+        wordId: this.trailingMismatch.wordId,
+        wordIndex: this.trailingMismatch.wordIndex,
+        expectedText: this.trailingMismatch.expectedText,
+        spokenToken: this.trailingMismatch.spokenToken,
+        seq: this.trailingMismatch.seq,
+      };
+    }
+    if (this.pendingToken && this.currentBookIndex < this.bookWords.length) {
+      const prev = this.bookWords[this.currentBookIndex - 1];
+      if (prev && prev.normalizedText === this.pendingToken.token) {
+        return null;
+      }
+      const current = this.bookWords[this.currentBookIndex];
+      return {
+        wordId: current.wordId,
+        wordIndex: current.wordIndex,
+        expectedText: current.text,
+        spokenToken: this.pendingToken.token,
+        seq: this.pendingToken.seq,
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Called after the short self-correction grace window (~1.4s) expires while
+   * the child paused on a wrong word (G27). Marks the misread word `SUBSTITUTE`
+   * (preserving first-pass mispronunciation evidence) and holds the cursor on
+   * that word so the teacher can comfort & coach that exact word.
+   */
+  holdAtTrailingMismatchForCoaching(): {
+    snapshot: RealtimeAlignmentSnapshot;
+    mismatch: RealtimeWordMismatch;
+  } | null {
+    const mismatch = this.getTrailingMismatch();
+    if (!mismatch) return null;
+
+    if (this.trailingMismatch) {
+      const targetBookIndex = this.trailingMismatch.bookIndex;
+      this.pendingToken = null;
+      this.spellingBuffer = null;
+      this.spellingInProgress = false;
+      this.trailingMismatch = null;
+      this.currentBookIndex = targetBookIndex;
+      return { snapshot: this.getSnapshot(), mismatch };
+    }
+
+    if (this.pendingToken && this.currentBookIndex < this.bookWords.length) {
+      const pending = this.pendingToken;
+      this.pendingToken = null;
+      this.spellingBuffer = null;
+      this.spellingInProgress = false;
+      this.trailingMismatch = null;
+      this.setWordStatus(this.currentBookIndex, "SUBSTITUTE");
+      this.spokenToBookIndex.set(pending.spokenIndex, this.currentBookIndex);
+      return { snapshot: this.getSnapshot(), mismatch };
+    }
+
+    return null;
   }
 
   /**
@@ -894,6 +1152,9 @@ export class RealtimeAlignmentEngine {
     if (index === -1) return this.getSnapshot();
     this.pendingToken = null;
     this.replayPos = null;
+    this.spellingBuffer = null;
+    this.spellingInProgress = false;
+    this.trailingMismatch = null;
     const from = index >= this.currentBookIndex ? this.currentBookIndex : index;
     for (let at = from; at <= index; at += 1) this.setWordStatus(at, "DELETE");
     this.currentBookIndex = Math.max(this.currentBookIndex, index + 1);
@@ -907,6 +1168,9 @@ export class RealtimeAlignmentEngine {
   finish(): RealtimeAlignmentSnapshot {
     this.finished = true;
     this.replayPos = null;
+    this.spellingBuffer = null;
+    this.spellingInProgress = false;
+    this.trailingMismatch = null;
     if (this.uncertain) return this.getSnapshot();
     this.flushPendingToken();
 
@@ -927,8 +1191,11 @@ export class RealtimeAlignmentEngine {
     this.finished = false;
     this.replayPos = null;
     this.correctedWordIds.clear();
+    this.selfCorrectedSlipWordIds.clear();
     this.spelledOutWordIds.clear();
     this.spellingInProgress = false;
+    this.spellingBuffer = null;
+    this.trailingMismatch = null;
     this.rejectedSegments = 0;
     this.finalSegmentIds.clear();
     this.spokenWords = [];
@@ -959,6 +1226,7 @@ export class RealtimeAlignmentEngine {
       spokenWords: [...this.spokenWords],
       previewMatchedWordIds: new Set(),
       correctedWordIds: new Set(this.correctedWordIds),
+      selfCorrectedSlipWordIds: new Set(this.selfCorrectedSlipWordIds),
       spelledOutWordIds: new Set(this.spelledOutWordIds),
       spellingInProgress: this.spellingInProgress,
       rejectedSegmentCount: this.rejectedSegments,

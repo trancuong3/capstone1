@@ -48,9 +48,17 @@ import {
 import {
   hasUsableTranscript,
   hasUsableBrowserConfidence,
+  hasUsablePhonicsBrowserConfidence,
   isConfidentExactBrowserRead,
+  isConfidentPhonicsBrowserRead,
   hasHighConfidenceKeytermResult,
 } from "@/lib/reading/recognition-evidence";
+import {
+  generateSpokenPhonicsGuide,
+  isLikelyPhonicsCueForWord,
+} from "@/lib/reading/phonics-spelling";
+import { classifyReadingMistake } from "@/lib/reading/reading-mistake-classifier";
+import type { CompanionBubbleState } from "@/components/reading/reading-companion-bubble";
 import type { WordTimestamp } from "@/lib/api/speech-service";
 import {
   BrowserTranscriptCollector,
@@ -69,6 +77,7 @@ import {
   RealtimeAlignmentEngine,
   timingsForTranscript,
   type RealtimeAlignmentSnapshot,
+  type RealtimeWordMismatch,
 } from "@/lib/reading/realtime-alignment";
 import {
   sortRetryWordRecords,
@@ -83,7 +92,10 @@ import type {
   WordTimedPlayOptions,
 } from "@/hooks/use-speech-player";
 import { EchoGuard } from "@/lib/reading/echo-guard";
-import { InteractivePromptSelector } from "@/lib/reading/interactive-prompts";
+import {
+  InteractivePromptSelector,
+  mistakeCategoryToPromptCategory,
+} from "@/lib/reading/interactive-prompts";
 import {
   SentenceReinforcementTracker,
   type ActiveSentenceReinforcement,
@@ -358,8 +370,10 @@ function ReadingSessionScreen({
   const retryIncorrectCountsRef = useRef(new Map<string, number>());
 
   // Automatic reading flow: parent switches, echo protection, help ladder.
-  const { preferences: automationPreferences } = useAutomationPreferences();
+  const { preferences: automationPreferences, coachingStyle } =
+    useAutomationPreferences();
   const automationRef = useRef(automationPreferences);
+  const coachingStyleRef = useRef(coachingStyle);
   const echoGuard = useMemo(() => new EchoGuard(), []);
   const assistantPlaybackSeqRef = useRef(0);
   /** Words the app read aloud for the child: practised, never plain green. */
@@ -367,14 +381,21 @@ function ReadingSessionScreen({
   /** Words the app encouraged the child past after the allowed attempts. */
   const gaveUpWordIdsRef = useRef<Set<string>>(new Set());
   const passageHelpStepsRef = useRef(new Map<string, number>());
+  const wrongWordGraceTimerRef = useRef<number | null>(null);
+  const overcamePraiseTimerRef = useRef<number | null>(null);
+  const lastCoachedMismatchSeqRef = useRef(0);
+  const retryBrowserCollectorRef = useRef<string[]>([]);
   const waitUntilRef = useRef(0);
   const pauseReadingRef = useRef<() => Promise<void>>(async () => undefined);
   const [assistedWordIds, setAssistedWordIds] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const [companionBubble, setCompanionBubble] =
+    useState<CompanionBubbleState | null>(null);
   const [presencePaused, setPresencePaused] = useState(false);
   useEffect(() => {
     automationRef.current = automationPreferences;
+    coachingStyleRef.current = coachingStyle;
   });
   const presenceSessionPhase: SessionPhase =
     uiState === "complete"
@@ -575,6 +596,16 @@ function ReadingSessionScreen({
     return () => {
       mountedRef.current = false;
       clearPageSilenceTimer();
+      if (typeof window !== "undefined") {
+        if (wrongWordGraceTimerRef.current !== null) {
+          window.clearTimeout(wrongWordGraceTimerRef.current);
+          wrongWordGraceTimerRef.current = null;
+        }
+        if (overcamePraiseTimerRef.current !== null) {
+          window.clearTimeout(overcamePraiseTimerRef.current);
+          overcamePraiseTimerRef.current = null;
+        }
+      }
       listeningGenerationRef.current += 1;
       isListeningActiveRef.current = false;
       retryModeRef.current = false;
@@ -918,7 +949,7 @@ function ReadingSessionScreen({
                 page_number: retryContext.pageNumber,
                 word_index: retryContext.wordIndex,
                 text: retryContext.text,
-                original_status: "OMISSION",
+                original_status: retryItem?.original_status ?? "OMISSION",
               });
             }
             break;
@@ -1066,7 +1097,10 @@ function ReadingSessionScreen({
   }
 
   function resetPagePresentation() {
+    clearCoachingTimers();
     pageHelpWordRef.current = null;
+    lastCoachedMismatchSeqRef.current = 0;
+    setCompanionBubble(null);
     sentenceReinforcementRef.current.reset();
     setActiveSentenceReinforcement(null);
     lastPreviewTranscriptRef.current = null;
@@ -1142,6 +1176,25 @@ function ReadingSessionScreen({
       window.clearTimeout(pageSilenceTimerRef.current);
       pageSilenceTimerRef.current = null;
     }
+  }
+
+  function clearWrongWordGraceTimer(): void {
+    if (wrongWordGraceTimerRef.current !== null) {
+      window.clearTimeout(wrongWordGraceTimerRef.current);
+      wrongWordGraceTimerRef.current = null;
+    }
+  }
+
+  function clearOvercamePraiseTimer(): void {
+    if (overcamePraiseTimerRef.current !== null) {
+      window.clearTimeout(overcamePraiseTimerRef.current);
+      overcamePraiseTimerRef.current = null;
+    }
+  }
+
+  function clearCoachingTimers(): void {
+    clearWrongWordGraceTimer();
+    clearOvercamePraiseTimer();
   }
 
   function finishPassageAlignment(
@@ -1322,6 +1375,200 @@ function ReadingSessionScreen({
   }
 
   /**
+   * Empathetic 4-step Grade-1 teacher coaching ladder triggered ~1.4s after a
+   * clear wrong-word attempt if the child hasn't self-corrected (G27, G28):
+   *  1. Warm multi-sentence comfort matched to mistake type (TONE / NEAR_SOUND / GENERAL) + invite retry.
+   *  2. Warm encouragement + SGK step-by-step phonics spelling (`generateSpokenPhonicsGuide`) + 0.75x slow word.
+   *  3. Praise persistence + phrase model + invite blending.
+   *  4. Multi-sentence praise of courage/effort + save to practice basket (`assisted`, never green) + sentence re-read.
+   */
+  async function offerEmpatheticWrongWordHelp(
+    engine: RealtimeAlignmentEngine,
+    capturePage: ReadingPageDTO,
+    mismatch: RealtimeWordMismatch,
+  ): Promise<void> {
+    if (
+      !isListeningActiveRef.current ||
+      assistantAudioPendingRef.current ||
+      listeningStopRef.current
+    ) {
+      return;
+    }
+    clearPageSilenceTimer();
+    clearCoachingTimers();
+    const generation = assistantAudioGenerationRef.current + 1;
+    const isCurrent = () =>
+      mountedRef.current &&
+      !retryModeRef.current &&
+      generation === assistantAudioGenerationRef.current &&
+      alignmentEngineRef.current === engine;
+    let resume = false;
+    try {
+      await playAssistantAudio(
+        async () => {
+          if (!isCurrent()) return;
+          const index = capturePage.words.findIndex(
+            (entry) => entry.word_id === mismatch.wordId,
+          );
+          const word = capturePage.words[index];
+          if (!word) return;
+          const style = coachingStyleRef.current;
+          const step = (passageHelpStepsRef.current.get(word.word_id) ?? 0) + 1;
+          passageHelpStepsRef.current.set(word.word_id, step);
+          const phraseWords = capturePage.words.slice(index, index + 3);
+
+          if (step >= 4) {
+            const effortPraise =
+              style === "gentle"
+                ? promptSelectorRef.current.next("comfortGiveUpEffort", {
+                    word: word.text,
+                  })
+                : promptSelectorRef.current.next("encourageMoveOn");
+            setCompanionBubble({
+              mood: "comforting",
+              title: "Cô giáo tự hào về sự kiên trì của bé!",
+              message: effortPraise,
+            });
+            setLatestTranscript(effortPraise);
+            await speakGuarded(effortPraise);
+            if (!isCurrent()) return;
+            gaveUpWordIdsRef.current.add(word.word_id);
+            helpedWordIdsRef.current.add(word.word_id);
+            pageHelpWordRef.current = null;
+            applyRealtimeSnapshot(engine.giveUpWord(word.word_id));
+            const reinforced = maybeArmSentenceReinforcement(
+              capturePage,
+              word.word_id,
+              "helped",
+            );
+            if (reinforced && isCurrent()) {
+              const promptText = promptSelectorRef.current.next(
+                "sentenceReinforceAfterHelp",
+                { sentence: reinforced.span.text },
+              );
+              setCompanionBubble({
+                mood: "teaching",
+                title: "Cô giáo mời bé đọc nối cả câu",
+                message: promptText,
+              });
+              setLatestTranscript(promptText);
+              await speakGuarded(promptText);
+              resume = isCurrent();
+              return;
+            }
+            resume = engine.getSnapshot().currentWordId !== null;
+            return;
+          }
+
+          for (const helped of step === 3 ? phraseWords : [word]) {
+            helpedWordIdsRef.current.add(helped.word_id);
+          }
+          pageHelpWordRef.current = {
+            wordId: word.word_id,
+            awaitingAttempt: true,
+          };
+
+          if (step === 1) {
+            const mistakeType = classifyReadingMistake(
+              word.text,
+              mismatch.spokenToken,
+            );
+            const category = mistakeCategoryToPromptCategory(
+              mistakeType,
+              style,
+            );
+            const comfortText = promptSelectorRef.current.next(category, {
+              word: word.text,
+            });
+            const title =
+              mistakeType === "TONE"
+                ? "Cô giáo dịu dàng · Mình chú ý dấu thanh nhé"
+                : mistakeType === "NEAR_SOUND"
+                  ? "Cô giáo dịu dàng · Hai âm gần giống nhau nè"
+                  : "Cô giáo dịu dàng · Không sao đâu, có cô đây!";
+            setCompanionBubble({
+              mood: "comforting",
+              title,
+              message: comfortText,
+            });
+            setLatestTranscript(comfortText);
+            await speakGuarded(comfortText);
+          } else if (step === 2) {
+            if (style === "gentle") {
+              const warmIntro = promptSelectorRef.current.next(
+                "comfortStep2WarmIntro",
+              );
+              const phonicsGuide = generateSpokenPhonicsGuide(word.text);
+              const combined = `${warmIntro} ${phonicsGuide}`;
+              setCompanionBubble({
+                mood: "teaching",
+                title: "Cô giáo đánh vần mẫu từng bước",
+                message: combined,
+              });
+              setLatestTranscript(phonicsGuide);
+              await speakGuarded(warmIntro);
+              if (!isCurrent()) return;
+              await speakGuarded(phonicsGuide);
+              if (!isCurrent()) return;
+              await speakGuarded(word.text, {
+                wordSample: true,
+                speedScale: 0.75,
+              });
+            } else {
+              const slowIntro = promptSelectorRef.current.next("wordSlowIntro");
+              setCompanionBubble({
+                mood: "teaching",
+                title: "Cô giáo đọc chậm",
+                message: `${slowIntro} “${word.text}”`,
+              });
+              setLatestTranscript(slowIntro);
+              await speakGuarded(word.text, {
+                wordSample: true,
+                speedScale: 0.75,
+              });
+            }
+          } else {
+            const phrase = phraseWords.map((entry) => entry.text).join(" ");
+            const step3Text =
+              style === "gentle"
+                ? promptSelectorRef.current.next("comfortStep3Phrase", {
+                    phrase,
+                  })
+                : `Mình đọc cả cụm “${phrase}” nhé.`;
+            setCompanionBubble({
+              mood: "teaching",
+              title: "Cô giáo khích lệ · Đọc nối theo cụm từ",
+              message: step3Text,
+            });
+            setLatestTranscript(step3Text);
+            await speakGuarded(step3Text);
+            if (!isCurrent()) return;
+            await speakGuarded(phrase);
+          }
+          resume = isCurrent();
+        },
+        true,
+        false,
+        true,
+      );
+      if (!isCurrent()) return;
+      if (resume) {
+        const started = await startListeningRef.current();
+        if (isCurrent()) setIsMicRecording(started);
+      } else if (!engine.getSnapshot().currentWordId) {
+        await autoCompletePageAfterFinalWordRef.current(engine.getSnapshot());
+      }
+    } catch {
+      if (isCurrent()) {
+        engine.markUncertain();
+        setLatestTranscript(
+          "Chưa phát được tiếng mẫu. Con có thể bấm nghe lại nhé.",
+        );
+      }
+    }
+  }
+
+  /**
    * Help ladder for a word the child is stuck on (silence or a spoken request):
    * model the word → say it slower → read the phrase → encourage and move on,
    * remembering the word as "needs practice". Helped words are never green.
@@ -1337,6 +1584,7 @@ function ReadingSessionScreen({
     )
       return;
     clearPageSilenceTimer();
+    clearCoachingTimers();
     const generation = assistantAudioGenerationRef.current + 1;
     const isCurrent = () =>
       mountedRef.current &&
@@ -1550,11 +1798,51 @@ function ReadingSessionScreen({
             }
             const engine = alignmentEngineRef.current;
             if (!engine || !mountedRef.current) return;
+            clearOvercamePraiseTimer();
+            const isPhonicsCueUsable = (
+              rawText: string,
+              confidence?: number,
+            ): boolean => {
+              if (!hasUsablePhonicsBrowserConfidence(confidence)) return false;
+              const activeReinforce =
+                sentenceReinforcementRef.current.getActive();
+              if (activeReinforce) {
+                let nextIdx = 0;
+                while (
+                  nextIdx < activeReinforce.span.words.length &&
+                  activeReinforce.matchedIndices.has(nextIdx)
+                ) {
+                  nextIdx += 1;
+                }
+                const reinforceTarget =
+                  activeReinforce.span.words[nextIdx]?.text;
+                return Boolean(
+                  reinforceTarget &&
+                    isLikelyPhonicsCueForWord(
+                      rawText,
+                      reinforceTarget,
+                      sentenceReinforcementRef.current.getBufferedSpellingTokens(),
+                    ),
+                );
+              }
+              const targetId = engine.getSnapshot().currentWordId;
+              const targetWord = page?.words.find(
+                (w) => w.word_id === targetId,
+              )?.text;
+              return Boolean(
+                targetWord &&
+                  isLikelyPhonicsCueForWord(
+                    rawText,
+                    targetWord,
+                    engine.getBufferedSpellingTokens(),
+                  ),
+              );
+            };
             const newFinals = browserTranscriptCollectorRef.current.addResults(
               event,
-              (part, usable) => {
+              (part, usable, confidence) => {
                 if (passageContainsHelpRef.current) return false;
-                if (!usable) {
+                if (!usable && !isPhonicsCueUsable(part, confidence)) {
                   markCaptureUncertain(engine, page);
                   return false;
                 }
@@ -1604,26 +1892,83 @@ function ReadingSessionScreen({
                 // for the full sentence (e.g. "Tôi ăn cơm") is evaluated here
                 // without overwriting first-pass assessment or duplicating reports.
                 if (sentenceReinforcementRef.current.getActive()) {
+                  const activeSpan =
+                    sentenceReinforcementRef.current.getActive()?.span ?? null;
                   const outcome =
                     sentenceReinforcementRef.current.consumeSpeech(part);
                   setActiveSentenceReinforcement(
                     sentenceReinforcementRef.current.getActive(),
                   );
+                  if (
+                    outcome !== "ignored" &&
+                    activeSpan &&
+                    engine.getSnapshot().currentWordIndex >= 0 &&
+                    engine.getSnapshot().currentWordIndex <= activeSpan.endIndex
+                  ) {
+                    applyRealtimeSnapshot(engine.addFinalTranscript(part));
+                  }
                   if (outcome === "completed") {
                     void finishSentenceReinforcement(engine, true);
                   }
-                  return false;
+                  return outcome !== "ignored";
                 }
                 const helpedWordBefore =
                   pageHelpWordRef.current?.wordId ?? null;
+                const wasMispronouncedBefore = Boolean(
+                  helpedWordBefore &&
+                    mispronouncedWordIdsRef.current.has(helpedWordBefore),
+                );
                 if (pageHelpWordRef.current)
                   pageHelpWordRef.current.awaitingAttempt = false;
                 const prevSnapshot = engine.getSnapshot();
                 const rejectedBefore = prevSnapshot.rejectedSegmentCount ?? 0;
                 const correctedBeforeSize =
                   prevSnapshot.correctedWordIds?.size ?? 0;
+                const slipBeforeSize =
+                  prevSnapshot.selfCorrectedSlipWordIds?.size ?? 0;
+                const spelledBeforeSize =
+                  prevSnapshot.spelledOutWordIds?.size ?? 0;
                 const scored = engine.addFinalTranscript(part);
                 applyRealtimeSnapshot(scored);
+                if (scored.statusByWordId.get(helpedWordBefore ?? "")?.status === "MATCH") {
+                  pageHelpWordRef.current = null;
+                }
+
+                // Visual companion celebration for quick self-correction or phonics spelling
+                if ((scored.selfCorrectedSlipWordIds?.size ?? 0) > slipBeforeSize) {
+                  const slipId = [...(scored.selfCorrectedSlipWordIds ?? [])].at(
+                    -1,
+                  );
+                  const slipWord =
+                    page?.words.find((w) => w.word_id === slipId)?.text ?? "";
+                  if (slipWord) {
+                    setCompanionBubble({
+                      mood: "celebrating",
+                      title: "Cô giáo khen bé · Tự sửa rất nhanh!",
+                      message: promptSelectorRef.current.next(
+                        "celebrateQuickSelfFix",
+                        { word: slipWord },
+                      ),
+                    });
+                  }
+                } else if (
+                  (scored.spelledOutWordIds?.size ?? 0) > spelledBeforeSize
+                ) {
+                  const spelledId = [...(scored.spelledOutWordIds ?? [])].at(-1);
+                  const spelledWord =
+                    page?.words.find((w) => w.word_id === spelledId)?.text ?? "";
+                  if (spelledWord) {
+                    setCompanionBubble({
+                      mood: "celebrating",
+                      title: "Cô giáo khen bé · Đánh vần giỏi quá!",
+                      message: promptSelectorRef.current.next(
+                        "spelledOutPraise",
+                        { word: spelledWord },
+                      ),
+                    });
+                  }
+                }
+
                 // After fixing a helped or self-corrected word, invite the child
                 // to read back the full enclosing sentence once for fluency (G20).
                 const resolvedWordId =
@@ -1635,6 +1980,21 @@ function ReadingSessionScreen({
                       ? ([...(scored.correctedWordIds ?? [])].at(-1) ?? null)
                       : null;
                 if (resolvedWordId && page) {
+                  const fixedWordText =
+                    page.words.find((w) => w.word_id === resolvedWordId)
+                      ?.text ?? "";
+                  const overcomeMessage = fixedWordText
+                    ? promptSelectorRef.current.next("celebrateOvercameWord", {
+                        word: fixedWordText,
+                      })
+                    : null;
+                  if (overcomeMessage) {
+                    setCompanionBubble({
+                      mood: "celebrating",
+                      title: "Hoan hô · Bé đã vượt qua chữ khó!",
+                      message: overcomeMessage,
+                    });
+                  }
                   const reinforced = maybeArmSentenceReinforcement(
                     page,
                     resolvedWordId,
@@ -1642,6 +2002,45 @@ function ReadingSessionScreen({
                   );
                   if (reinforced && isCurrent()) {
                     void announceSentenceReinforcement(reinforced, engine);
+                  } else if (
+                    wasMispronouncedBefore &&
+                    overcomeMessage &&
+                    coachingStyleRef.current === "gentle" &&
+                    scored.currentWordId !== null
+                  ) {
+                    // Only speak praise after a brief pause so we never cut off
+                    // the child if they immediately continue reading the next word!
+                    clearOvercamePraiseTimer();
+                    overcamePraiseTimerRef.current = window.setTimeout(() => {
+                      overcamePraiseTimerRef.current = null;
+                      if (
+                        !isCurrent() ||
+                        !isListeningActiveRef.current ||
+                        speechRecorder.getIsSpeaking() ||
+                        alignmentEngineRef.current !== engine
+                      ) {
+                        return;
+                      }
+                      const allowed = promptSelectorRef.current.nextIfAllowed(
+                        "celebrateOvercameWord",
+                        performance.now(),
+                        { word: fixedWordText },
+                      );
+                      if (!allowed) return;
+                      void playAssistantAudio(
+                        async () => {
+                          if (!isCurrent()) return;
+                          await speakGuarded(allowed);
+                        },
+                        true,
+                        false,
+                        false,
+                      ).then(async () => {
+                        if (!isCurrent()) return;
+                        const started = await startListeningRef.current();
+                        if (isCurrent()) setIsMicRecording(started);
+                      });
+                    }, 900);
                   }
                 }
                 // Speech that does not follow the book (TV, another speaker)
@@ -1662,9 +2061,14 @@ function ReadingSessionScreen({
 
               if (result.isFinal) continue;
 
-              const part = hasUsableBrowserConfidence(result[0]?.confidence)
-                ? result[0]?.transcript?.trim() || ""
-                : "";
+              const rawInterim = result[0]?.transcript?.trim() || "";
+              const conf = result[0]?.confidence;
+              const part =
+                rawInterim &&
+                (hasUsableBrowserConfidence(conf) ||
+                  isPhonicsCueUsable(rawInterim, conf))
+                  ? rawInterim
+                  : "";
 
               if (part) {
                 interimText += (interimText ? " " : "") + part;
@@ -1690,10 +2094,67 @@ function ReadingSessionScreen({
               setPreviewSnapshot(null);
             }
 
+            // 3b. Nhịp chờ tự sửa ~1.4s khi bé đọc sai từ hiện tại (G27):
+            // Nếu bé đang nói tiếp / đang đánh vần / đã sửa đúng -> hủy timer.
+            // Nếu sau ~1.4s bé vẫn dừng ở từ đọc sai -> lập tức vỗ về theo nhóm lỗi!
+            const trailingMismatch = engine.getTrailingMismatch();
+            const trimmedInterim = interimText.trim();
+            if (
+              !trailingMismatch ||
+              trimmedInterim ||
+              engine.getSnapshot().spellingInProgress ||
+              sentenceReinforcementRef.current.getActive() !== null
+            ) {
+              clearWrongWordGraceTimer();
+            } else if (
+              page &&
+              automationRef.current.assist &&
+              performance.now() >= waitUntilRef.current &&
+              trailingMismatch.seq > lastCoachedMismatchSeqRef.current
+            ) {
+              clearWrongWordGraceTimer();
+              const targetMismatchSeq = trailingMismatch.seq;
+              const armGrace = (delayMs: number) => {
+                wrongWordGraceTimerRef.current = window.setTimeout(() => {
+                  wrongWordGraceTimerRef.current = null;
+                  if (
+                    !isCurrent() ||
+                    !isListeningActiveRef.current ||
+                    alignmentEngineRef.current !== engine ||
+                    !automationRef.current.assist ||
+                    performance.now() < waitUntilRef.current ||
+                    sentenceReinforcementRef.current.getActive() !== null
+                  ) {
+                    return;
+                  }
+                  const activeMismatch = engine.getTrailingMismatch();
+                  if (
+                    !activeMismatch ||
+                    activeMismatch.seq !== targetMismatchSeq
+                  ) {
+                    return;
+                  }
+                  if (speechRecorder.getIsSpeaking()) {
+                    armGrace(500);
+                    return;
+                  }
+                  const held = engine.holdAtTrailingMismatchForCoaching();
+                  if (!held) return;
+                  lastCoachedMismatchSeqRef.current = held.mismatch.seq;
+                  applyRealtimeSnapshot(held.snapshot);
+                  void offerEmpatheticWrongWordHelp(
+                    engine,
+                    page,
+                    held.mismatch,
+                  );
+                }, delayMs);
+              };
+              armGrace(1_400);
+            }
+
             // 4. Cập nhật nội dung transcript (tránh setState lặp khi interim giống hệt).
             if (!mountedRef.current) return;
 
-            const trimmedInterim = interimText.trim();
             if (trimmedInterim) {
               if (lastPreviewTranscriptRef.current !== trimmedInterim) {
                 lastPreviewTranscriptRef.current = trimmedInterim;
@@ -1745,6 +2206,7 @@ function ReadingSessionScreen({
                   event.error === "language-not-supported"))
             ) {
               clearPageSilenceTimer();
+              clearCoachingTimers();
               isListeningActiveRef.current = false;
               isUsingRecorderRef.current = false;
               speechRecorder.cancel();
@@ -1942,6 +2404,7 @@ function ReadingSessionScreen({
     forPassageHelp?: boolean;
   }): Promise<string> {
     clearPageSilenceTimer();
+    clearCoachingTimers();
     // Snapshot the page before waiting for asynchronous recorder/provider work.
     const targetPage = page;
     const targetEngine = alignmentEngineRef.current;
@@ -3660,11 +4123,17 @@ function ReadingSessionScreen({
         return;
       }
       const captureQuality = speechRecorder.getQuality?.();
-      const exactBrowserRead = isConfidentExactBrowserRead(
-        candidate.text,
-        browserTranscript,
-        retryBrowserConfidenceRef.current,
-      );
+      const exactBrowserRead =
+        isConfidentExactBrowserRead(
+          candidate.text,
+          browserTranscript,
+          retryBrowserConfidenceRef.current,
+        ) ||
+        isConfidentPhonicsBrowserRead(
+          candidate.text,
+          browserTranscript,
+          retryBrowserConfidenceRef.current,
+        );
       if (
         hasShortWordBlockingAudioIssue(captureQuality) &&
         !(exactBrowserRead && captureQuality?.status === "AUDIO_TOO_SHORT")
@@ -3960,6 +4429,7 @@ function ReadingSessionScreen({
       setRetryRecording(null);
       retryBrowserFinalRef.current = "";
       retryBrowserConfidenceRef.current = null;
+      retryBrowserCollectorRef.current = [];
       setRetryFeedback("listening");
       setLatestTranscript(prompt ?? "");
     }
@@ -4065,9 +4535,18 @@ function ReadingSessionScreen({
       ) {
         const result = event.results[index];
         const text = result[0]?.transcript?.trim() ?? "";
+        const conf = result[0]?.confidence;
+        const usableNormal = hasUsableBrowserConfidence(conf);
+        const usablePhonics =
+          !usableNormal &&
+          hasUsablePhonicsBrowserConfidence(conf) &&
+          isLikelyPhonicsCueForWord(
+            text,
+            candidate.text,
+            retryBrowserCollectorRef.current,
+          );
 
-        if (!text || !hasUsableBrowserConfidence(result[0]?.confidence))
-          continue;
+        if (!text || (!usableNormal && !usablePhonics)) continue;
 
         // Browser recognition is a better speech-onset signal than raw
         // microphone volume, which can be triggered by room noise.
@@ -4076,25 +4555,33 @@ function ReadingSessionScreen({
 
         if (result.isFinal) {
           finalTranscripts.push(text);
-          finalConfidence = Math.min(
-            finalConfidence,
-            result[0]?.confidence ?? 0,
-          );
+          finalConfidence = Math.min(finalConfidence, conf ?? 0);
         } else {
           interim = [interim, text].filter(Boolean).join(" ");
         }
       }
 
       if (interim) {
-        setLatestTranscript(interim);
+        setLatestTranscript(
+          [...retryBrowserCollectorRef.current, interim]
+            .filter(Boolean)
+            .join(" "),
+        );
       }
 
       if (finalTranscripts.length === 0) {
         return;
       }
 
-      const finalText = finalTranscripts.join(" ");
-      retryBrowserConfidenceRef.current = finalConfidence;
+      retryBrowserCollectorRef.current = [
+        ...retryBrowserCollectorRef.current,
+        ...finalTranscripts,
+      ];
+      const finalText = retryBrowserCollectorRef.current.join(" ");
+      retryBrowserConfidenceRef.current =
+        retryBrowserConfidenceRef.current === null
+          ? finalConfidence
+          : Math.min(retryBrowserConfidenceRef.current, finalConfidence);
       retryBrowserFinalRef.current = finalText;
 
       if (retryProcessingRef.current) return;
@@ -5158,6 +5645,8 @@ function ReadingSessionScreen({
         repeatedWordIds={repeatedWordIds}
         hesitationWordIds={hesitationWordIds}
         assistedWordIds={assistedWordIds}
+        companionBubble={companionBubble}
+        isCompanionSpeaking={speechPlayer.isPlaying}
         comparisonResult={comparisonResult}
       >
         {activeSentenceReinforcement ? (
