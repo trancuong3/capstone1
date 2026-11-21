@@ -63,7 +63,7 @@ async function installAutopilotSession(
   const now = "2026-11-21T12:00:00Z";
   const base = `/reading/sessions/${ids.session}`;
   let currentIndex = 0;
-  let completedPages = [false, false];
+  const completedPages = [false, false];
   let failCompleteRemaining = options.failFirstComplete ? 1 : 0;
   let presenceEnabled = false;
   const completeCalls: string[] = [];
