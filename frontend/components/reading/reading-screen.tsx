@@ -5605,6 +5605,14 @@ function ReadingSessionScreen({
         typeof (window as unknown as { webkitAudioContext?: unknown })
           .webkitAudioContext === "function");
     if (!hasRealAudioApi) return;
+    const liveTrack = speechRecorder.getStream?.()?.getAudioTracks()?.[0];
+    const hasInjectedRec =
+      typeof window !== "undefined" &&
+      isInjectedTestSpeechRecognition(
+        (window as unknown as WindowWithSpeech).SpeechRecognition ||
+          (window as unknown as WindowWithSpeech).webkitSpeechRecognition,
+      );
+    if (!liveTrack && !hasInjectedRec) return;
     let cancelled = false;
     let activeRec: BrowserSpeechRecognition | null = null;
     const promptText = promptSelectorRef.current.next(
@@ -6169,10 +6177,7 @@ function ReadingSessionScreen({
               void completeReadingSession();
             },
           }}
-          title={adaptTextToTeacherPersona(
-            "Con có muốn cùng cô đọc lại từ khó không?",
-            getEffectiveTeacherPersona().gender,
-          )}
+          title="Mình đọc lại những từ này nhé?"
         />
       ) : confirmFinish ? (
         <ReadingStatusDialog

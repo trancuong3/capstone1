@@ -519,6 +519,14 @@ export function resolveLocalFirstSpeechRecognitionConstructor(
   if (isInjectedTestSpeechRecognition(candidate)) {
     return candidate;
   }
+  const explicitlyDisabled =
+    Object.prototype.hasOwnProperty.call(win, "SpeechRecognition") &&
+    win.SpeechRecognition === undefined &&
+    Object.prototype.hasOwnProperty.call(win, "webkitSpeechRecognition") &&
+    win.webkitSpeechRecognition === undefined;
+  if (explicitlyDisabled) {
+    return undefined;
+  }
   const hasNativeWebSpeech = typeof candidate === "function";
   const hasWebAudio =
     typeof win.AudioContext === "function" ||
