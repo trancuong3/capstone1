@@ -26,15 +26,19 @@ if (-not (Test-Path $ConfigPath)) {
         exit 2
     }
     $autoCfg = Get-Content $examplePath -Raw -Encoding UTF8 | ConvertFrom-Json
-    # Auto-detect active private LAN IPv4 address
+    # Auto-detect active physical Wi-Fi / Ethernet LAN IPv4 address (skipping WSL/Hyper-V virtual switches)
     try {
         $lanCand = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
             Where-Object {
                 $_.IPAddress -notlike "127.*" -and
                 $_.IPAddress -notlike "169.254.*" -and
+                $_.InterfaceAlias -notlike "*vEthernet*" -and
+                $_.InterfaceAlias -notlike "*WSL*" -and
+                $_.InterfaceAlias -notlike "*VMware*" -and
+                $_.InterfaceAlias -notlike "*VirtualBox*" -and
                 ($_.IPAddress -like "192.168.*" -or $_.IPAddress -like "10.*" -or $_.IPAddress -like "172.*") -and
                 $_.PrefixOrigin -ne "WellKnown"
-            } | Select-Object -First 1
+            } | Sort-Object { if ($_.InterfaceAlias -like "*Wi-Fi*") { 0 } else { 1 } } | Select-Object -First 1
         if ($lanCand -and $lanCand.IPAddress) {
             $autoCfg.lanHost = [string]$lanCand.IPAddress
         }
