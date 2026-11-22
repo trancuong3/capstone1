@@ -2403,8 +2403,11 @@ function ReadingSessionScreen({
                   ) {
                     return;
                   }
-                  if (speechRecorder.getIsSpeaking()) {
-                    armGrace(500);
+                  if (
+                    speechRecorder.getIsSpeaking() ||
+                    (isLocalSegmentRec && rec.hasPendingUploads())
+                  ) {
+                    armGrace(450);
                     return;
                   }
                   const held = engine.holdAtTrailingMismatchForCoaching();
@@ -2418,7 +2421,7 @@ function ReadingSessionScreen({
                   );
                 }, delayMs);
               };
-              armGrace(1_400);
+              armGrace(isLocalSegmentRec ? 1_850 : 1_400);
             }
 
             // 4. Cập nhật nội dung transcript (tránh setState lặp khi interim giống hệt).

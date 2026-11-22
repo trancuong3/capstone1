@@ -386,10 +386,71 @@ export class TtsPlayback {
         this.auditUtterance(operation, kind, spokenText);
 
         let elapsed = 0;
-        for (const chunk of splitSpeechText(
+        const shouldSentencePipeline =
+          !options.wordSample &&
+          operation.voice.provider === "local" &&
+          spokenText.length > 90 &&
+          /[.!?…]\s+\S/u.test(spokenText);
+        const chunks = splitSpeechText(
           spokenText,
-          SHORT_TTS_MAX_CHARACTERS,
-        )) {
+          shouldSentencePipeline ? 95 : SHORT_TTS_MAX_CHARACTERS,
+        );
+
+        const fetchChunk = async (
+          chunkText: string,
+        ): Promise<{
+          audio: Blob;
+          usedFallbackVoice: boolean;
+          key: string;
+        }> => {
+          const normalized = chunkText.normalize("NFC");
+          const shortKey = JSON.stringify([
+            operation.voice.provider,
+            operation.voice.cacheVoiceId,
+            operation.voice.modelVersion,
+            operation.voice.speed,
+            normalized,
+            Boolean(options.wordSample),
+          ]);
+          const cachedShort = this.shortCache.get(shortKey);
+          if (cachedShort) {
+            return {
+              audio: cachedShort.audio,
+              usedFallbackVoice: cachedShort.usedFallbackVoice,
+              key: shortKey,
+            };
+          }
+          let source = await this.wait(
+            operation,
+            this.speech.synthesize(normalized, {
+              voiceId: operation.voice.requestedVoiceId ?? undefined,
+              speed: operation.voice.speed,
+              wordSample: Boolean(options.wordSample),
+              signal: operation.controller.signal,
+            }),
+          );
+          this.ensure(operation);
+          const usedFallbackVoice = Boolean(
+            getSynthesizedAudioMeta(source)?.usedFallbackVoice,
+          );
+          if (options.wordSample) {
+            source = await this.wait(operation, prepareWordSampleAudio(source));
+          }
+          this.cacheShort(shortKey, {
+            audio: source,
+            usedFallbackVoice,
+          });
+          return { audio: source, usedFallbackVoice, key: shortKey };
+        };
+
+        let nextPrefetch: Promise<{
+          audio: Blob;
+          usedFallbackVoice: boolean;
+          key: string;
+        }> | null = null;
+
+        for (let idx = 0; idx < chunks.length; idx += 1) {
+          const chunk = chunks[idx];
           await this.waitIfPaused(operation);
           this.ensure(operation);
           const onStart = (duration: number) =>
@@ -397,62 +458,38 @@ export class TtsPlayback {
           const onTime = (time: number, duration: number) =>
             options.onTimeUpdate?.(elapsed + time, elapsed + duration);
 
-          const shortKey = JSON.stringify([
-            operation.voice.provider,
-            operation.voice.cacheVoiceId,
-            operation.voice.modelVersion,
-            operation.voice.speed,
-            chunk.text.normalize("NFC"),
-            Boolean(options.wordSample),
-          ]);
+          let fetched: {
+            audio: Blob;
+            usedFallbackVoice: boolean;
+            key: string;
+          };
+          try {
+            fetched = await (nextPrefetch ?? fetchChunk(chunk.text));
+            nextPrefetch = null;
+            this.ensure(operation);
+          } catch (error) {
+            nextPrefetch = null;
+            this.ensure(operation);
+            if (isAbort(error)) throw error;
+            this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+            throw unavailable();
+          }
 
-          let source: Blob | null = null;
-          let usedFallbackVoice = false;
-          const cachedShort = this.shortCache.get(shortKey);
-          if (cachedShort) {
-            source = cachedShort.audio;
-            usedFallbackVoice = cachedShort.usedFallbackVoice;
-          } else {
-            try {
-              source = await this.wait(
-                operation,
-                this.speech.synthesize(chunk.text.normalize("NFC"), {
-                  voiceId: operation.voice.requestedVoiceId ?? undefined,
-                  speed: operation.voice.speed,
-                  wordSample: Boolean(options.wordSample),
-                  signal: operation.controller.signal,
-                }),
-              );
-              this.ensure(operation);
-              usedFallbackVoice = Boolean(
-                getSynthesizedAudioMeta(source)?.usedFallbackVoice,
-              );
-              if (options.wordSample) {
-                source = await this.wait(
-                  operation,
-                  prepareWordSampleAudio(source),
-                );
-              }
-              this.cacheShort(shortKey, {
-                audio: source,
-                usedFallbackVoice,
-              });
-            } catch (error) {
-              this.ensure(operation);
-              if (isAbort(error)) throw error;
-              this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
-              throw unavailable();
-            }
+          // Prefetch the next sentence in parallel while the current sentence plays!
+          if (idx + 1 < chunks.length) {
+            nextPrefetch = fetchChunk(chunks[idx + 1].text);
+            // Suppress unhandled rejection if playback aborts before nextPrefetch is awaited
+            nextPrefetch.catch(() => undefined);
           }
 
           this.setFallbackNotice(
-            usedFallbackVoice ? SERVER_FALLBACK_VOICE_NOTICE : null,
+            fetched.usedFallbackVoice ? SERVER_FALLBACK_VOICE_NOTICE : null,
           );
           try {
             // Speed is already applied once at generation -> playbackRate MUST stay 1.0!
             elapsed += await this.playAudio(
               operation,
-              source,
+              fetched.audio,
               undefined,
               0,
               onStart,
@@ -464,8 +501,8 @@ export class TtsPlayback {
             this.ensure(operation);
             if (isAbort(error) || error instanceof PartialPlaybackError)
               throw error;
-            this.shortCacheBytes -= source.size;
-            this.shortCache.delete(shortKey);
+            this.shortCacheBytes -= fetched.audio.size;
+            this.shortCache.delete(fetched.key);
             this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
             throw error;
           }
