@@ -119,7 +119,9 @@ import {
   mistakeCategoryToPromptCategory,
 } from "@/lib/reading/interactive-prompts";
 import {
+  isVoiceExitSentenceReinforcement,
   SentenceReinforcementTracker,
+  shouldEscapeToUpcomingWords,
   type ActiveSentenceReinforcement,
 } from "@/lib/reading/sentence-reinforcement";
 import { parseVoiceIntent } from "@/lib/reading/voice-intent";
@@ -2130,9 +2132,15 @@ function ReadingSessionScreen({
                 // Sentence-level fluency reinforcement (G20): speech read back
                 // for the full sentence (e.g. "Tôi ăn cơm") is evaluated here
                 // without overwriting first-pass assessment or duplicating reports.
+                // Never-Trap invariant: child can exit via voice ("Bỏ qua"/"Đọc tiếp"),
+                // button click, OR by reading ahead into the next sentence on the page!
                 if (sentenceReinforcementRef.current.getActive()) {
                   const activeSpan =
                     sentenceReinforcementRef.current.getActive()?.span ?? null;
+                  if (isVoiceExitSentenceReinforcement(part)) {
+                    void finishSentenceReinforcement(engine, false);
+                    return false;
+                  }
                   const outcome =
                     sentenceReinforcementRef.current.consumeSpeech(part);
                   setActiveSentenceReinforcement(
@@ -2148,8 +2156,24 @@ function ReadingSessionScreen({
                   }
                   if (outcome === "completed") {
                     void finishSentenceReinforcement(engine, true);
+                    return false;
                   }
-                  return false;
+                  if (
+                    outcome === "ignored" &&
+                    activeSpan &&
+                    page &&
+                    shouldEscapeToUpcomingWords(
+                      part,
+                      page.words.slice(activeSpan.endIndex + 1),
+                    )
+                  ) {
+                    // Child clearly continued reading the next sentence -> auto-escape & score!
+                    sentenceReinforcementRef.current.finishCurrent();
+                    setActiveSentenceReinforcement(null);
+                    // Fall through to normal alignment below so the child's next sentence is scored immediately
+                  } else {
+                    return false;
+                  }
                 }
                 const helpedWordBefore =
                   pageHelpWordRef.current?.wordId ?? null;
@@ -6078,30 +6102,60 @@ function ReadingSessionScreen({
         companionBubble={companionBubble}
         isCompanionSpeaking={speechPlayer.isPlaying}
         comparisonResult={comparisonResult}
-      >
-        {activeSentenceReinforcement ? (
-          <div
-            role="status"
-            aria-live="polite"
-            className="fixed bottom-24 left-1/2 z-40 flex w-[calc(100%-32px)] max-w-[560px] -translate-x-1/2 flex-wrap items-center justify-between gap-3 rounded-card border-2 border-primary bg-cream px-4 py-3 shadow-md"
-          >
-            <p className="min-w-0 flex-1 text-base font-bold text-ink">
-              Đọc lại cả câu: “{activeSentenceReinforcement.span.text}”
-            </p>
-            <Button
-              variant="secondary"
-              className="h-10! min-h-10! w-auto! px-3! py-1! text-sm!"
-              onClick={() =>
-                void finishSentenceReinforcement(
-                  alignmentEngineRef.current,
-                  false,
-                )
-              }
+        sentenceReinforcementPanel={
+          activeSentenceReinforcement ? (
+            <div
+              role="status"
+              aria-live="polite"
+              data-testid="sentence-reinforcement-banner"
+              className="flex flex-wrap items-center justify-between gap-3 rounded-card border-2 border-primary bg-cream px-4 py-3 shadow-xs"
             >
-              Bỏ qua đọc lại câu
-            </Button>
-          </div>
-        ) : null}
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
+                  Đọc lại cả câu
+                </p>
+                <span className="sr-only">
+                  Đọc lại cả câu: “{activeSentenceReinforcement.span.text}”
+                </span>
+                <p
+                  aria-hidden="true"
+                  className="flex flex-wrap items-center gap-1.5 text-base font-bold text-ink sm:text-lg"
+                >
+                  {activeSentenceReinforcement.span.words.map((w, idx) => {
+                    const matched =
+                      activeSentenceReinforcement.matchedIndices.has(idx);
+                    return (
+                      <span
+                        key={`${w.word_id}-${idx}`}
+                        data-reinforce-matched={matched ? "true" : "false"}
+                        className={
+                          matched
+                            ? "rounded-control bg-emerald-100 px-1.5 py-0.5 text-emerald-900 transition-colors duration-200"
+                            : "rounded-control px-1.5 py-0.5 text-ink transition-colors duration-200"
+                        }
+                      >
+                        {w.text}
+                      </span>
+                    );
+                  })}
+                </p>
+              </div>
+              <Button
+                variant="secondary"
+                className="h-10! min-h-10! w-auto! shrink-0 px-3! py-1! text-sm!"
+                onClick={() =>
+                  void finishSentenceReinforcement(
+                    alignmentEngineRef.current,
+                    false,
+                  )
+                }
+              >
+                Bỏ qua đọc lại câu
+              </Button>
+            </div>
+          ) : null
+        }
+      >
         {uiState === "page-turn" ? (
           <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
             Đang chuyển trang và liên kết lại từ đang đọc…
