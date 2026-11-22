@@ -356,6 +356,50 @@ CREATE TABLE public.readingcomparisonreports (
   createdat timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE public.progressreports (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  childid uuid NOT NULL REFERENCES public.childprofiles(id) ON DELETE CASCADE,
+  periodstart date NOT NULL,
+  periodend date NOT NULL,
+  summary jsonb NOT NULL DEFAULT '{}'::jsonb,
+  generatedat timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE public.consentrecords (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  parentid uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  childid uuid NOT NULL REFERENCES public.childprofiles(id) ON DELETE CASCADE,
+  scope text NOT NULL,
+  granted boolean NOT NULL,
+  grantedat timestamptz,
+  revokedat timestamptz
+);
+
+CREATE TABLE public.readingpresencesettings (
+  parentid uuid PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
+  emailenabled boolean NOT NULL DEFAULT false,
+  updatedat timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE public.readingpresencealerts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  sessionid uuid NOT NULL REFERENCES public.readingsessions(id) ON DELETE CASCADE,
+  parentid uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  childid uuid NOT NULL REFERENCES public.childprofiles(id) ON DELETE CASCADE,
+  episodeid uuid NOT NULL,
+  status varchar(16) NOT NULL DEFAULT 'PENDING',
+  dueat timestamptz NOT NULL,
+  expiresat timestamptz NOT NULL,
+  lastconfirmedat timestamptz NOT NULL,
+  attempts integer NOT NULL DEFAULT 0,
+  claimedat timestamptz,
+  sentat timestamptz,
+  cancelreason varchar(32),
+  errorcode varchar(64),
+  createdat timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (sessionid, episodeid)
+);
+
 CREATE TABLE public.readinggoals (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   childid uuid NOT NULL REFERENCES public.childprofiles(id) ON DELETE CASCADE,
