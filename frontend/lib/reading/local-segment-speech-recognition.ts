@@ -155,6 +155,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private noiseFloor = INITIAL_NOISE_FLOOR;
   private turnSeq = 0;
   private pendingUploads: Set<Promise<void>> = new Set();
+  private uploadChain: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly speechService: SpeechService,
@@ -167,6 +168,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.stopping = false;
     this.abortController = new AbortController();
     this.resultsHistory = [];
+    this.uploadChain = Promise.resolve();
     this.resetSegmentState();
     void this.openAudioGraph(audioTrack);
   }
@@ -392,8 +394,8 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     const turnId = nextTurnId(ctx.pageId ?? "live", seq);
     const signal = this.abortController?.signal;
 
-    const uploadTask = this.speechService
-      .transcribe(wavBlob, {
+    const transcribeOnce = () =>
+      this.speechService.transcribe(wavBlob, {
         filename: "segment.wav",
         languageCode: "vi",
         keyterms: ctx.keyterms,
@@ -402,9 +404,26 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         turnId,
         source: "local_live_segment",
         signal,
-        timeoutMs: 10_000,
-      })
-      .then((res) => {
+        timeoutMs: 12_000,
+      });
+
+    const transcribeWithRetry = async () => {
+      try {
+        return await transcribeOnce();
+      } catch (err) {
+        if (signal?.aborted || (!this.active && !this.stopping)) throw err;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        if (signal?.aborted || (!this.active && !this.stopping)) throw err;
+        return await transcribeOnce();
+      }
+    };
+
+    // Start upload immediately, but deliver results strictly in FIFO order via uploadChain
+    // so segment N+1 NEVER overtakes segment N and causes false RED alignment skips!
+    const responsePromise = transcribeWithRetry();
+    const deliveryTask = this.uploadChain
+      .then(async () => {
+        const res = await responsePromise;
         if (!this.active && !this.stopping) return;
         const text = (res.text ?? "").normalize("NFC").trim();
         if (!text) return;
@@ -434,10 +453,11 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         // Segment error is handled gracefully; final recorder transcription remains as backup
       })
       .finally(() => {
-        this.pendingUploads.delete(uploadTask);
+        this.pendingUploads.delete(deliveryTask);
       });
 
-    this.pendingUploads.add(uploadTask);
+    this.uploadChain = deliveryTask;
+    this.pendingUploads.add(deliveryTask);
   }
 }
 

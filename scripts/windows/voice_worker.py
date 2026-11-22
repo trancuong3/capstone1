@@ -39,8 +39,14 @@ from pydantic import BaseModel, Field
 VOICE_RUNTIME_ROOT = Path(
     os.environ.get("VIREAD_VOICE_RUNTIME_DIR", r"F:\c1\tools\voice-runtime")
 )
-os.environ.setdefault("HF_HOME", str(VOICE_RUNTIME_ROOT / "hf-cache"))
+HF_CACHE_DIR = Path(
+    os.environ.get("HF_HOME", str(VOICE_RUNTIME_ROOT / "hf-cache"))
+)
+os.environ.setdefault("HF_HOME", str(HF_CACHE_DIR))
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+if (HF_CACHE_DIR / "hub").is_dir() and any((HF_CACHE_DIR / "hub").iterdir()):
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from vieneu import Vieneu  # noqa: E402
 from vieneu_utils.core_utils import gaps_to_silence  # noqa: E402
@@ -77,7 +83,7 @@ TTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_AUDIO_BYTES = 15 * 1024 * 1024
 MAX_TEXT_CHARS = 5000
-QUEUE_WAIT_SECONDS = 25.0
+QUEUE_WAIT_SECONDS = 40.0
 
 
 @dataclass(frozen=True, slots=True)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import math
 import os
@@ -222,6 +223,53 @@ class LocalVoiceProvider:
             )
         )
         self.base_url = raw_url.strip().rstrip("/") or DEFAULT_LOCAL_VOICE_WORKER_URL
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                trust_env=False,
+                limits=httpx.Limits(
+                    max_connections=24,
+                    max_keepalive_connections=12,
+                    keepalive_expiry=30.0,
+                ),
+            )
+        return self._client
+
+    async def _post_with_retry(
+        self,
+        path: str,
+        *,
+        timeout: float,
+        json: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
+    ) -> httpx.Response:
+        url = f"{self.base_url}{path}"
+        last_exc: Exception | None = None
+        for attempt in range(2):
+            client = self._get_client()
+            try:
+                resp = await client.post(
+                    url,
+                    timeout=timeout,
+                    json=json,
+                    data=data,
+                    files=files,
+                )
+                if resp.status_code == 503 and attempt == 0:
+                    await asyncio.sleep(0.35)
+                    continue
+                return resp
+            except (httpx.ConnectError, httpx.RemoteProtocolError, httpx.ReadError) as exc:
+                last_exc = exc
+                if attempt == 0:
+                    await asyncio.sleep(0.35)
+                    continue
+                raise
+        assert last_exc is not None
+        raise last_exc
 
     async def get_health(self) -> dict[str, Any]:
         try:
@@ -284,6 +332,19 @@ class LocalVoiceProvider:
             pass
         return [dict(v) for v in STATIC_LOCAL_VOICES], False
 
+    @staticmethod
+    def _resolve_target_voice_id(voice_id: str | None) -> tuple[str, bool]:
+        """Resolve requested voice ID, gracefully migrating stale legacy (e.g. ElevenLabs) IDs."""
+        known_ids = {str(item["voice_id"]) for item in STATIC_LOCAL_VOICES}
+        cleaned = (voice_id or "").strip()
+        if not cleaned:
+            return DEFAULT_LOCAL_VOICE_ID, False
+        if cleaned in known_ids:
+            return cleaned, False
+        if not cleaned.startswith("local_") and not cleaned.startswith("google_"):
+            return DEFAULT_LOCAL_VOICE_ID, True
+        return cleaned, False
+
     async def synthesize(
         self,
         *,
@@ -292,18 +353,18 @@ class LocalVoiceProvider:
         speed: float = 1.0,
         word_sample: bool = False,
     ) -> LocalSynthesizedAudio:
-        target_voice = (voice_id or "").strip() or DEFAULT_LOCAL_VOICE_ID
+        target_voice, migrated_legacy = self._resolve_target_voice_id(voice_id)
         try:
-            async with httpx.AsyncClient(timeout=25.0, trust_env=False) as client:
-                resp = await client.post(
-                    f"{self.base_url}/tts",
-                    json={
-                        "text": text,
-                        "voice_id": target_voice,
-                        "speed": speed,
-                        "word_sample": word_sample,
-                    },
-                )
+            resp = await self._post_with_retry(
+                "/tts",
+                timeout=45.0,
+                json={
+                    "text": text,
+                    "voice_id": target_voice,
+                    "speed": speed,
+                    "word_sample": word_sample,
+                },
+            )
         except httpx.TimeoutException as exc:
             raise LocalVoiceTechnicalError(
                 status_code=503, code="LOCAL_TTS_TIMEOUT"
@@ -332,6 +393,7 @@ class LocalVoiceProvider:
             model_version=resp.headers.get(
                 "x-voice-model-version", LOCAL_TTS_MODEL_VERSION
             ),
+            used_fallback_voice=migrated_legacy,
         )
 
     async def synthesize_timed(
@@ -341,19 +403,19 @@ class LocalVoiceProvider:
         voice_id: str | None = None,
         speed: float = 1.0,
     ) -> LocalTimedSpeech:
-        target_voice = (voice_id or "").strip() or DEFAULT_LOCAL_VOICE_ID
+        target_voice, _ = self._resolve_target_voice_id(voice_id)
         passage_text = " ".join(words)
         try:
-            async with httpx.AsyncClient(timeout=35.0, trust_env=False) as client:
-                resp = await client.post(
-                    f"{self.base_url}/tts/timed",
-                    json={
-                        "text": passage_text,
-                        "voice_id": target_voice,
-                        "speed": speed,
-                        "word_sample": False,
-                    },
-                )
+            resp = await self._post_with_retry(
+                "/tts/timed",
+                timeout=60.0,
+                json={
+                    "text": passage_text,
+                    "voice_id": target_voice,
+                    "speed": speed,
+                    "word_sample": False,
+                },
+            )
         except httpx.TimeoutException as exc:
             raise LocalVoiceTechnicalError(
                 status_code=503, code="LOCAL_TTS_TIMEOUT"
@@ -418,17 +480,17 @@ class LocalVoiceProvider:
         voice_id: str | None = None,
         speed: float = 1.0,
     ) -> LocalPhonicsSpeech:
-        target_voice = (voice_id or "").strip() or DEFAULT_LOCAL_VOICE_ID
+        target_voice, _ = self._resolve_target_voice_id(voice_id)
         try:
-            async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
-                resp = await client.post(
-                    f"{self.base_url}/tts/phonics",
-                    json={
-                        "steps": steps,
-                        "voice_id": target_voice,
-                        "speed": speed,
-                    },
-                )
+            resp = await self._post_with_retry(
+                "/tts/phonics",
+                timeout=45.0,
+                json={
+                    "steps": steps,
+                    "voice_id": target_voice,
+                    "speed": speed,
+                },
+            )
         except httpx.TimeoutException as exc:
             raise LocalVoiceTechnicalError(
                 status_code=503, code="LOCAL_TTS_TIMEOUT"
@@ -490,12 +552,12 @@ class LocalVoiceProvider:
         language_code: str | None = "vi",
     ) -> LocalTranscription:
         try:
-            async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
-                resp = await client.post(
-                    f"{self.base_url}/stt",
-                    data={"language": (language_code or "vi").strip() or "vi"},
-                    files={"audio_file": (filename, audio, content_type)},
-                )
+            resp = await self._post_with_retry(
+                "/stt",
+                timeout=20.0,
+                data={"language": (language_code or "vi").strip() or "vi"},
+                files={"audio_file": (filename, audio, content_type)},
+            )
         except httpx.TimeoutException as exc:
             raise LocalVoiceTechnicalError(
                 status_code=503, code="LOCAL_STT_TIMEOUT"
