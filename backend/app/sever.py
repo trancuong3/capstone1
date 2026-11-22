@@ -560,6 +560,7 @@ app.add_middleware(
         "X-Resolved-Voice-Id",
         "X-Voice-Provider",
         "X-Voice-Region",
+        "X-Voice-Gender",
         "X-Voice-Model-Version",
         "X-Voice-Fallback",
         "X-Voice-Fallback-Reason",

@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { PhonicsLessonCard } from "@/components/reading/phonics-lesson-card";
+import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useReportServices } from "@/hooks/use-report-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
@@ -39,9 +40,11 @@ import {
 } from "@/lib/reading/phonics-lesson";
 import { hasUsableBrowserConfidence } from "@/lib/reading/recognition-evidence";
 import {
+  getEffectiveTeacherPersona,
   lockSessionVoice,
   releaseSessionVoiceLock,
 } from "@/lib/reading/session-voice-lock";
+import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import {
   isAssistantPromptBleed,
   shortWordContext,
@@ -431,7 +434,7 @@ export function DifficultWordPracticePanel({
 
   useEffect(() => {
     mountedRef.current = true;
-    lockSessionVoice(practiceSessionLockId);
+    lockSessionVoice(practiceSessionLockId, { forceUpdate: true });
     return () => {
       mountedRef.current = false;
       flowGenerationRef.current += 1;
@@ -444,13 +447,16 @@ export function DifficultWordPracticePanel({
     async (text: string, generation: number, wordSample = false) => {
       if (!mountedRef.current || generation !== flowGenerationRef.current)
         return false;
-      setCoachCue(text);
+      const adaptedText = wordSample
+        ? text
+        : adaptTextToTeacherPersona(text, getEffectiveTeacherPersona().gender);
+      setCoachCue(adaptedText);
       try {
         await withRequestDeadline(
           () =>
             wordSample
-              ? speechPlayer.play(text, { wordSample: true })
-              : speechPlayer.play(text, { coaching: true }),
+              ? speechPlayer.play(adaptedText, { wordSample: true })
+              : speechPlayer.play(adaptedText, { coaching: true }),
           undefined,
           CUE_TIMEOUT_MS,
         );
@@ -506,7 +512,10 @@ export function DifficultWordPracticePanel({
       setIsPlayingPhonics(true);
       setActivePhonicsStep(0);
       setCoachCue(
-        `Cô đánh vần từng bước tiếng “${phonicsLesson.focusSyllable}” nhé.`,
+        adaptTextToTeacherPersona(
+          `Cô đánh vần từng bước tiếng “${phonicsLesson.focusSyllable}” nhé.`,
+          getEffectiveTeacherPersona().gender,
+        ),
       );
 
       try {
@@ -1414,6 +1423,7 @@ export function DifficultWordPracticePanel({
         </Button>
 
         <div className="flex flex-wrap items-center gap-2">
+          <VoiceEngineBadge compact />
           {wordIndexInQueue >= 0 ? (
             <span className="rounded-full bg-[#F6FAF8] px-3 py-1 text-xs font-bold text-[#526970]">
               Từ {wordIndexInQueue + 1}/{words.length}

@@ -19,8 +19,10 @@ import { resolvePostFinishUiState } from "@/lib/reading/post-finish-questions";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import {
   isInjectedTestSpeechRecognition,
+  LocalSegmentSpeechRecognition,
   resolveLocalFirstSpeechRecognitionConstructor,
 } from "@/lib/reading/local-segment-speech-recognition";
 import {
@@ -30,11 +32,15 @@ import {
   type SupportedPhonicsLessonPlan,
 } from "@/lib/reading/phonics-lesson";
 import {
+  getEffectiveTeacherPersona,
   lockSessionVoice,
   setActiveVoiceSession,
 } from "@/lib/reading/session-voice-lock";
+import { recordSttEngineUsage } from "@/lib/reading/voice-engine-status";
+import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import {
   classifyRetryTranscript,
+  classifyYesNoVoiceIntent,
   hasConfusableNasalEnding,
   isAssistantPromptBleed,
   normalizeShortWordTranscript,
@@ -1344,11 +1350,14 @@ function ReadingSessionScreen({
     text: string,
     options?: SpeechPlayOptions,
   ): Promise<void> {
+    const spokenText = options?.wordSample
+      ? text
+      : adaptTextToTeacherPersona(text, getEffectiveTeacherPersona().gender);
     const id = `assistant-${(assistantPlaybackSeqRef.current += 1)}`;
-    echoGuard.playbackStarted(id, text, performance.now());
+    echoGuard.playbackStarted(id, spokenText, performance.now());
     try {
-      if (options === undefined) await speechPlayer.play(text);
-      else await speechPlayer.play(text, options);
+      if (options === undefined) await speechPlayer.play(spokenText);
+      else await speechPlayer.play(spokenText, options);
     } finally {
       echoGuard.playbackEnded(id, performance.now());
     }
@@ -1979,6 +1988,15 @@ function ReadingSessionScreen({
         ) as (new () => BrowserSpeechRecognition) | undefined;
         if (SpeechRec) {
           const rec = new SpeechRec();
+          const isLocalSegmentRec =
+            rec instanceof LocalSegmentSpeechRecognition;
+          if (!isLocalSegmentRec) {
+            recordSttEngineUsage({
+              provider: "browser",
+              fallbackUsed: true,
+              fallbackReason: "BROWSER_SPEECH_RECOGNITION",
+            });
+          }
           rec.continuous = true;
           rec.interimResults = true;
           rec.lang = "vi-VN";
@@ -1996,6 +2014,7 @@ function ReadingSessionScreen({
             }
             const audioQuality = speechRecorder.getQuality?.();
             if (
+              !isLocalSegmentRec &&
               audioQuality &&
               audioQuality.durationMs >= 300 &&
               hasUnusableAudio(audioQuality)
@@ -5572,6 +5591,107 @@ function ReadingSessionScreen({
       }
     }
   }
+  // Voice-first post-reading wrap-up: when the book finishes with wrong/difficult words,
+  // speak the warm question in the locked voice & listen for the child's "Có" / "Không" reply.
+  useEffect(() => {
+    if (!retryPrompt || retryCandidatesRef.current.length === 0) return;
+    if (!automationRef.current.assist) return;
+    const hasRealAudioApi =
+      typeof window !== "undefined" &&
+      (typeof window.AudioContext === "function" ||
+        typeof (window as unknown as { webkitAudioContext?: unknown })
+          .webkitAudioContext === "function");
+    if (!hasRealAudioApi) return;
+    let cancelled = false;
+    let activeRec: BrowserSpeechRecognition | null = null;
+    const promptText = promptSelectorRef.current.next(
+      "postReadingWrongWordsAsk",
+    );
+
+    const stopRec = () => {
+      if (!activeRec) return;
+      const target = activeRec;
+      activeRec = null;
+      try {
+        target.onresult = null;
+        target.onerror = null;
+        target.onend = null;
+        target.abort?.();
+        target.stop();
+      } catch {
+        // Ignore cleanup errors
+      }
+    };
+
+    const runVoiceWrapUp = async () => {
+      try {
+        await speakGuarded(promptText);
+      } catch {
+        // Fallback silently to visual buttons if TTS is unavailable
+      }
+      if (cancelled || !mountedRef.current || typeof window === "undefined") {
+        return;
+      }
+      try {
+        const win = window as unknown as WindowWithSpeech & {
+          AudioContext?: typeof AudioContext;
+          webkitAudioContext?: typeof AudioContext;
+        };
+        const SpeechRec = resolveLocalFirstSpeechRecognitionConstructor(
+          win,
+          speechService,
+          () => ({
+            sessionId,
+            pageId: page?.page_id ?? null,
+            keyterms: ["có", "không", "đọc lại", "bỏ qua", "thôi", "muốn"],
+          }),
+          () => speechRecorder.getStream?.()?.getAudioTracks()?.[0],
+        ) as (new () => BrowserSpeechRecognition) | undefined;
+        if (!SpeechRec || cancelled) return;
+        const rec = new SpeechRec();
+        activeRec = rec;
+        rec.continuous = false;
+        rec.interimResults = false;
+        rec.lang = "vi-VN";
+        rec.maxAlternatives = 1;
+        rec.onresult = (event: BrowserSpeechEvent) => {
+          if (cancelled || !mountedRef.current) return;
+          for (let i = event.resultIndex; i < event.results.length; i += 1) {
+            const item = event.results[i];
+            if (!item?.isFinal) continue;
+            const spoken = item[0]?.transcript ?? "";
+            const intent = classifyYesNoVoiceIntent(spoken);
+            if (intent === "yes") {
+              stopRec();
+              if (startRetrySession(retryCandidatesRef.current)) {
+                setRetryPrompt(false);
+              }
+              return;
+            }
+            if (intent === "no") {
+              stopRec();
+              retryModeRef.current = false;
+              setRetryPrompt(false);
+              void completeReadingSession();
+              return;
+            }
+          }
+        };
+        rec.onerror = () => stopRec();
+        rec.start();
+      } catch {
+        // Keep manual buttons usable if mic cannot open
+      }
+    };
+
+    void runVoiceWrapUp();
+    return () => {
+      cancelled = true;
+      stopRec();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [retryPrompt]);
+
   async function finishReading() {
     if (finishStartedRef.current) return;
 
@@ -5718,6 +5838,7 @@ function ReadingSessionScreen({
                 trong phạm vi · {pageProgress.completed_pages}/
                 {pageProgress.total_pages} trang đã hoàn thành
               </p>
+              <VoiceEngineBadge compact className="mt-1" />
             </div>
             <div className="flex min-w-0 flex-wrap gap-2">
               <Button
@@ -6023,7 +6144,10 @@ function ReadingSessionScreen({
         </Modal>
       ) : retryPrompt ? (
         <ReadingStatusDialog
-          body={`Bé còn ${retryCandidates.length} từ cần đọc lại. Mình cùng luyện thêm một lần nhé!`}
+          body={adaptTextToTeacherPersona(
+            `Bé còn ${retryCandidates.length} từ cần đọc lại. Con có muốn cùng cô đọc lại không? Con có thể nói “Có” hoặc “Không” nhé!`,
+            getEffectiveTeacherPersona().gender,
+          )}
           onClose={() => undefined}
           primaryAction={{
             isLoading: isBusy,
@@ -6042,7 +6166,10 @@ function ReadingSessionScreen({
               void completeReadingSession();
             },
           }}
-          title="Mình đọc lại những từ này nhé?"
+          title={adaptTextToTeacherPersona(
+            "Con có muốn cùng cô đọc lại từ khó không?",
+            getEffectiveTeacherPersona().gender,
+          )}
         />
       ) : confirmFinish ? (
         <ReadingStatusDialog

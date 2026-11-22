@@ -22,6 +22,7 @@ import {
   inferProviderFromVoiceId,
   inferRegionFromVoiceId,
   recordSessionUtteranceVoice,
+  REGION_DEFAULT_VOICE_ID,
   type VoiceProviderKind,
   type VoiceRegion,
 } from "@/lib/reading/session-voice-lock";
@@ -150,8 +151,11 @@ function resolveOperationVoice(
     };
   }
 
-  const requestedVoiceId = prefs.voiceId;
-  const cacheVoiceId = requestedVoiceId ?? DEFAULT_LOCAL_VOICE_ID;
+  const requestedVoiceId =
+    prefs.voiceId ??
+    REGION_DEFAULT_VOICE_ID[policy.region] ??
+    DEFAULT_LOCAL_VOICE_ID;
+  const cacheVoiceId = requestedVoiceId;
   const provider = inferProviderFromVoiceId(cacheVoiceId);
   const region = inferRegionFromVoiceId(cacheVoiceId, policy.region);
   const modelVersion = inferModelVersionForVoiceId(

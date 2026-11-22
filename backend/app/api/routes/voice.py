@@ -19,6 +19,8 @@ from fastapi import (
 
 from app.api.deps import get_current_parent_id
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
+from app.providers.google_voice_provider import GOOGLE_VOICE_BY_ID
+from app.providers.local_voice_provider import STATIC_LOCAL_VOICES
 from app.schemas.voice import (
     PhonicsSpeechRead,
     PhonicsSpeechRequest,
@@ -103,11 +105,22 @@ async def text_to_speech(
     except VoiceProviderError as error:
         raise provider_http_exception(error) from None
 
+    voice_gender = "female"
+    for item in STATIC_LOCAL_VOICES:
+        if item.get("voice_id") == audio.resolved_voice_id:
+            voice_gender = str(item.get("gender") or "female")
+            break
+    else:
+        g_meta = GOOGLE_VOICE_BY_ID.get(audio.resolved_voice_id)
+        if g_meta is not None:
+            voice_gender = str(g_meta.get("gender") or "female")
+
     headers = {
         "Cache-Control": "no-store",
         "X-Voice-Provider": audio.provider,
         "X-Resolved-Voice-Id": audio.resolved_voice_id,
         "X-Voice-Region": audio.region,
+        "X-Voice-Gender": voice_gender,
         "X-Voice-Model-Version": audio.model_version,
         "X-Voice-Fallback": "1" if audio.used_fallback_voice else "0",
     }

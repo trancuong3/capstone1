@@ -6,6 +6,11 @@
  */
 
 import type { ReadingMistakeCategory } from "@/lib/reading/reading-mistake-classifier";
+import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
+import {
+  adaptTextToTeacherPersona,
+  type VoiceGender,
+} from "@/lib/reading/voice-persona";
 
 export type PromptCategory =
   | "comfortToneMistake"
@@ -26,6 +31,10 @@ export type PromptCategory =
   | "sentenceReinforceAfterHelp"
   | "sentenceReinforceDone"
   | "pageFluentPraise"
+  | "fluentStreakPraise"
+  | "postReadingWrongWordsAsk"
+  | "postReadingAcceptReview"
+  | "postReadingSkipToQuiz"
   | "quizAskChoice"
   | "quizCorrect"
   | "quizTryAgain"
@@ -164,9 +173,31 @@ export const INTERACTIVE_PROMPT_BANKS: Readonly<
     "Tuyệt vời! Con đọc liền câu rất rõ ràng và tự tin.",
   ],
   pageFluentPraise: [
-    "Con đọc xong trang này rất trôi chảy!",
-    "Giỏi quá, mình lật sang trang tiếp theo nhé!",
-    "Tuyệt vời, con đọc rõ ràng lắm!",
+    "Con đọc xong trang này rất trôi chảy! Cô khen con nhé!",
+    "Giỏi quá, mình lật sang trang tiếp theo cùng cô nhé!",
+    "Tuyệt vời, con đọc rõ ràng lắm! Mình sang trang mới nào!",
+    "Hoan hô con yêu, trang này con đọc mượt mà quá đi!",
+  ],
+  fluentStreakPraise: [
+    "Con đọc đều và trôi chảy quá, cô nghe thích lắm!",
+    "Tuyệt vời bạn nhỏ ơi, nhịp đọc của con rất tự tin!",
+    "Giỏi quá, con đọc liền mạch rõ từng chữ một luôn!",
+  ],
+  postReadingWrongWordsAsk: [
+    "Con vừa đọc xong bài rồi, giỏi lắm! Con có muốn cùng cô đọc lại vài từ khó lúc nãy không? Con nói có hoặc không nhé!",
+    "Chúc mừng con đã hoàn thành bài đọc! Lúc nãy có vài từ hơi khó một xíu, con có muốn cùng cô ôn lại cho thật thuộc không nào?",
+    "Hoan hô con yêu đã đọc hết bài rồi! Con có muốn cùng cô đọc lại mấy từ vừa vấp lúc nãy, hay mình qua phần câu hỏi luôn nhé?",
+    "Tuyệt vời quá, con đã đọc xong cả bài rồi đó! Con có muốn cùng cô luyện lại những từ khó một chút không? Trả lời cô biết nha!",
+  ],
+  postReadingAcceptReview: [
+    "Tuyệt vời! Con chăm chỉ quá, giờ mình cùng cô đọc lại từng từ khó cho thật chuẩn nhé!",
+    "Cô khen tinh thần ham học của con nhé! Mình bắt đầu ôn lại từng từ một nào!",
+    "Hay lắm bạn nhỏ ơi! Mình cùng nhau chinh phục lại các từ khó nhé!",
+  ],
+  postReadingSkipToQuiz: [
+    "Được luôn con ơi! Vậy giờ cô trò mình sang phần câu hỏi vui về bài đọc nhé!",
+    "Nhất trí với con nha! Mình chuyển sang trả lời câu hỏi cùng cô nào!",
+    "Không sao đâu con, để lúc khác mình ôn cũng được! Giờ mình cùng trả lời câu hỏi thú vị nhé!",
   ],
   quizAskChoice: [
     "Bé chọn đáp án nào?",
@@ -219,6 +250,7 @@ export class InteractivePromptSelector {
   next(
     category: PromptCategory,
     vars?: Readonly<Record<string, string>>,
+    gender?: VoiceGender,
   ): string {
     const bank = INTERACTIVE_PROMPT_BANKS[category];
     const prev = this.lastIndex.get(category) ?? -1;
@@ -230,7 +262,8 @@ export class InteractivePromptSelector {
         template = template.replaceAll(`{${key}}`, value);
       }
     }
-    return template;
+    const resolvedGender = gender ?? getEffectiveTeacherPersona().gender;
+    return adaptTextToTeacherPersona(template, resolvedGender);
   }
 
   /**
@@ -241,6 +274,7 @@ export class InteractivePromptSelector {
     category: PromptCategory,
     nowMs: number,
     vars?: Readonly<Record<string, string>>,
+    gender?: VoiceGender,
   ): string | null {
     const cooldown = OPTIONAL_COOLDOWN_MS[category] ?? 0;
     const last = this.lastOptionalAt.get(category);
@@ -248,7 +282,7 @@ export class InteractivePromptSelector {
       return null;
     }
     this.lastOptionalAt.set(category, nowMs);
-    return this.next(category, vars);
+    return this.next(category, vars, gender);
   }
 
   reset(): void {

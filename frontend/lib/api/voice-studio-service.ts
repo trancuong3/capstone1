@@ -6,6 +6,8 @@ import {
   getActiveSessionVoiceLock,
   getVoicePolicyPreferences,
 } from "@/lib/reading/session-voice-lock";
+import { recordTtsEngineUsage } from "@/lib/reading/voice-engine-status";
+import { resolveVoiceGender } from "@/lib/reading/voice-persona";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
@@ -250,6 +252,17 @@ export function createVoiceStudioService(): VoiceStudioService {
         throw failure(502);
       }
       if (!audio.size) throw failure(502);
+      const timedProvider = parsed.data.provider ?? "local";
+      const resolvedId =
+        parsed.data.resolved_voice_id ?? options.voiceId ?? null;
+      recordTtsEngineUsage({
+        provider: timedProvider,
+        fallbackUsed:
+          Boolean(parsed.data.used_fallback_voice) ||
+          timedProvider === "google",
+        voiceId: resolvedId,
+        voiceGender: resolveVoiceGender(resolvedId),
+      });
       return {
         audio,
         durationSeconds: parsed.data.duration_seconds,

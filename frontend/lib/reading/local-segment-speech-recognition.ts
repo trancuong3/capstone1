@@ -56,12 +56,16 @@ export interface LocalSegmentContextSnapshot {
 }
 
 const TARGET_SAMPLE_RATE = 16_000;
-const SPEECH_RMS_ONSET = 0.013;
-const SPEECH_RMS_HOLD = 0.009;
-const SILENCE_FLUSH_MS = 380;
-const MIN_SPEECH_MS = 200;
-const MAX_SEGMENT_MS = 2_600;
-const PRE_ROLL_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.2);
+const MIN_SPEECH_RMS_ONSET = 0.004;
+const MIN_SPEECH_RMS_HOLD = 0.0025;
+const INITIAL_NOISE_FLOOR = 0.0022;
+const MAX_NOISE_FLOOR = 0.01;
+const MIN_NOISE_FLOOR = 0.0012;
+const SILENCE_FLUSH_MS = 520;
+const MIN_SPEECH_MS = 140;
+const MAX_SEGMENT_MS = 4_200;
+const PRE_ROLL_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.25);
+const OVERLAP_CARRY_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.24);
 
 function downsampleTo16k(input: Float32Array, inputRate: number): Float32Array {
   if (inputRate === TARGET_SAMPLE_RATE || inputRate <= 0) {
@@ -148,6 +152,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private speechSamples = 0;
   private silenceSamples = 0;
   private inSpeech = false;
+  private noiseFloor = INITIAL_NOISE_FLOOR;
   private turnSeq = 0;
   private pendingUploads: Set<Promise<void>> = new Set();
 
@@ -265,6 +270,10 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       this.audioCtx = ctx;
       if (ctx.state === "suspended") {
         await ctx.resume().catch(() => undefined);
+        if (ctx.state === "suspended") {
+          await new Promise((resolve) => setTimeout(resolve, 60));
+          await ctx.resume().catch(() => undefined);
+        }
       }
 
       const source = ctx.createMediaStreamSource(stream);
@@ -305,9 +314,14 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       sumSq += chunk[i] * chunk[i];
     }
     const rms = Math.sqrt(sumSq / Math.max(1, chunk.length));
+    const onsetThreshold = Math.max(
+      MIN_SPEECH_RMS_ONSET,
+      this.noiseFloor * 2.2,
+    );
+    const holdThreshold = Math.max(MIN_SPEECH_RMS_HOLD, this.noiseFloor * 1.5);
 
     if (!this.inSpeech) {
-      if (rms >= SPEECH_RMS_ONSET) {
+      if (rms >= onsetThreshold) {
         this.inSpeech = true;
         this.silenceSamples = 0;
         if (this.preRoll.length > 0) {
@@ -318,6 +332,10 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         this.speechChunks.push(chunk);
         this.speechSamples += chunk.length;
       } else {
+        this.noiseFloor = Math.min(
+          MAX_NOISE_FLOOR,
+          Math.max(MIN_NOISE_FLOOR, this.noiseFloor * 0.94 + rms * 0.06),
+        );
         const merged = new Float32Array(this.preRoll.length + chunk.length);
         merged.set(this.preRoll, 0);
         merged.set(chunk, this.preRoll.length);
@@ -331,7 +349,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
 
     this.speechChunks.push(chunk);
     this.speechSamples += chunk.length;
-    if (rms < SPEECH_RMS_HOLD) {
+    if (rms < holdThreshold) {
       this.silenceSamples += chunk.length;
     } else {
       this.silenceSamples = 0;
@@ -340,15 +358,14 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     const silenceMs = (this.silenceSamples / TARGET_SAMPLE_RATE) * 1000;
     const speechMs = (this.speechSamples / TARGET_SAMPLE_RATE) * 1000;
 
-    if (
-      (silenceMs >= SILENCE_FLUSH_MS && speechMs >= MIN_SPEECH_MS) ||
-      speechMs >= MAX_SEGMENT_MS
-    ) {
-      this.flushCurrentSegment();
+    if (silenceMs >= SILENCE_FLUSH_MS && speechMs >= MIN_SPEECH_MS) {
+      this.flushCurrentSegment(false);
+    } else if (speechMs >= MAX_SEGMENT_MS) {
+      this.flushCurrentSegment(true);
     }
   }
 
-  private flushCurrentSegment(): void {
+  private flushCurrentSegment(carryOverlap = false): void {
     if (!this.speechChunks.length) {
       this.resetSegmentState();
       return;
@@ -360,7 +377,14 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       combined.set(part, offset);
       offset += part.length;
     }
+    const overlapTail =
+      carryOverlap && combined.length > OVERLAP_CARRY_SAMPLES
+        ? combined.slice(combined.length - OVERLAP_CARRY_SAMPLES)
+        : null;
     this.resetSegmentState();
+    if (overlapTail) {
+      this.preRoll = overlapTail;
+    }
 
     const wavBlob = encodeFloat32ToWav16kBlob(combined);
     const seq = ++this.turnSeq;

@@ -8,6 +8,11 @@ import {
   type VoiceProviderMode,
 } from "@/lib/reading/session-voice-lock";
 import { setSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
+import {
+  recordSttEngineUsage,
+  recordTtsEngineUsage,
+} from "@/lib/reading/voice-engine-status";
+import { resolveVoiceGender } from "@/lib/reading/voice-persona";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
@@ -376,13 +381,28 @@ export function createSpeechService(): SpeechService {
             response.headers.get("x-resolved-voice-id")?.trim() || null;
           const usedFallbackVoice =
             response.headers.get("x-voice-fallback") === "1";
+          const provider =
+            response.headers.get("x-voice-provider")?.trim() || "local";
+          const fallbackReason =
+            response.headers.get("x-voice-fallback-reason")?.trim() || null;
+          const voiceGender = resolveVoiceGender(
+            resolvedVoiceId ?? options.voiceId,
+            response.headers.get("x-voice-gender"),
+          );
           setSynthesizedAudioMeta(audio, {
             resolvedVoiceId,
             usedFallbackVoice,
-            provider: response.headers.get("x-voice-provider")?.trim() || null,
+            provider,
             region: response.headers.get("x-voice-region")?.trim() || null,
             modelVersion:
               response.headers.get("x-voice-model-version")?.trim() || null,
+          });
+          recordTtsEngineUsage({
+            provider,
+            fallbackUsed: usedFallbackVoice,
+            fallbackReason,
+            voiceId: resolvedVoiceId ?? options.voiceId ?? null,
+            voiceGender,
           });
           return audio;
         },
@@ -445,12 +465,23 @@ export function createSpeechService(): SpeechService {
             throw failure("TTS_UNAVAILABLE", 502);
           }
           if (!audio.size) throw failure("TTS_UNAVAILABLE", 502);
+          const phonicsProvider = parsed.data.provider ?? "local";
+          const phonicsUsedFallback =
+            phonicsProvider === "google" ||
+            (Boolean(options.voiceId) &&
+              parsed.data.resolved_voice_id !== options.voiceId);
           setSynthesizedAudioMeta(audio, {
             resolvedVoiceId: parsed.data.resolved_voice_id,
-            usedFallbackVoice: false,
-            provider: parsed.data.provider ?? "local",
+            usedFallbackVoice: phonicsUsedFallback,
+            provider: phonicsProvider,
             region: parsed.data.region ?? "north",
             modelVersion: parsed.data.model_version,
+          });
+          recordTtsEngineUsage({
+            provider: phonicsProvider,
+            fallbackUsed: phonicsUsedFallback,
+            voiceId: parsed.data.resolved_voice_id,
+            voiceGender: resolveVoiceGender(parsed.data.resolved_voice_id),
           });
           return {
             audio,
@@ -557,6 +588,13 @@ export function createSpeechService(): SpeechService {
               response.headers.get("x-voice-provider")?.trim() || null;
             const fallbackUsed =
               response.headers.get("x-voice-fallback") === "1";
+            const fallbackReason =
+              response.headers.get("x-voice-fallback-reason")?.trim() || null;
+            recordSttEngineUsage({
+              provider: providerHeader ?? "local",
+              fallbackUsed,
+              fallbackReason,
+            });
             return {
               text: parsed.data.text,
               language_code: parsed.data.language_code ?? null,

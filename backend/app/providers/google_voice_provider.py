@@ -27,6 +27,7 @@ from app.providers.local_voice_provider import (
     LocalTimedWord,
     LocalTranscription,
 )
+from app.services.vietnamese_tts_normalizer import normalize_vietnamese_tts_text
 
 GOOGLE_STT_ENDPOINT = "https://speech.googleapis.com/v1/speech:recognize"
 GOOGLE_TTS_ENDPOINT = "https://texttospeech.googleapis.com/v1/text:synthesize"
@@ -364,8 +365,11 @@ class GoogleCloudVoiceProvider:
         if meta is None:
             raise VoiceProviderError(status_code=404, code="VOICE_NOT_FOUND")
 
+        normalized_text = normalize_vietnamese_tts_text(text) or unicodedata.normalize(
+            "NFC", text.strip()
+        )
         body = {
-            "input": {"text": unicodedata.normalize("NFC", text.strip())},
+            "input": {"text": normalized_text},
             "voice": {
                 "languageCode": "vi-VN",
                 "name": meta["google_name"],

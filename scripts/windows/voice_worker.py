@@ -284,6 +284,108 @@ def resolve_strict_voice(voice_id: str) -> LocalVoicePreset:
     return preset
 
 
+_VIET_DIACRITIC_RE = re.compile(
+    r"[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ"
+    r"ÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴĐ]"
+)
+_VIET_ONSETS = (
+    "ngh", "ng", "nh", "ch", "gh", "gi", "kh", "ph", "qu", "th", "tr",
+    "b", "c", "d", "đ", "g", "h", "k", "l", "m", "n", "p", "q", "r", "s", "t", "v", "x", "",
+)
+_VIET_CODAS = ("nh", "ng", "ch", "c", "m", "n", "p", "t", "")
+_VIET_VOWELS = set("aeiouyàáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ")
+_LATIN_LETTER_VIET_NAMES: dict[str, str] = {
+    "A": "a", "B": "bê", "C": "xê", "D": "đê", "E": "e", "F": "ép",
+    "G": "gờ", "H": "hát", "I": "i", "J": "di", "K": "ca", "L": "lờ",
+    "M": "mờ", "N": "nờ", "O": "o", "P": "pê", "Q": "quy", "R": "rờ",
+    "S": "ét", "T": "tê", "U": "u", "V": "vê", "W": "vê kép", "X": "ích",
+    "Y": "i", "Z": "dét",
+}
+_KNOWN_ACRONYMS = {"LEC", "LAB", "PDF", "AI", "TTS", "STT", "OCR", "API", "LAN", "APK", "URL", "HTTP", "HTTPS", "WIFI", "CPU", "GPU", "RAM"}
+_YEAR_RANGE_RE = re.compile(r"\b((?:19|20)\d{2})\s*[-–—]\s*((?:19|20)\d{2})\b")
+_CODE_HYPHEN_RE = re.compile(r"\b([A-Z]{2,5})-(\d{1,5})\b")
+_ALPHA_TOKEN_RE = re.compile(r"[A-Za-zÀ-ỹĐđ]+")
+_PHONICS_SINGLE_CHAR_FIX: dict[str, str] = {
+    "ă": "á",
+    "â": "ớ",
+    "đ": "đờ",
+}
+
+
+def _is_likely_vietnamese_syllable(word: str) -> bool:
+    lower = unicodedata.normalize("NFC", word).lower()
+    if not lower or len(lower) > 8:
+        return False
+    if _VIET_DIACRITIC_RE.search(lower):
+        return True
+    if word.upper() in _KNOWN_ACRONYMS:
+        return False
+    for onset in _VIET_ONSETS:
+        if onset and not lower.startswith(onset):
+            continue
+        rest = lower[len(onset):]
+        if not rest:
+            continue
+        for coda in _VIET_CODAS:
+            if coda and not rest.endswith(coda):
+                continue
+            nucleus = rest[: len(rest) - len(coda)] if coda else rest
+            if not nucleus or len(nucleus) > 3:
+                continue
+            if all(ch in _VIET_VOWELS for ch in nucleus):
+                return True
+    return False
+
+
+def _spell_acronym_vietnamese(code: str) -> str:
+    return " ".join(_LATIN_LETTER_VIET_NAMES.get(ch, ch.lower()) for ch in code.upper())
+
+
+def normalize_vietnamese_tts_text(
+    text: str,
+    *,
+    expand_ranges_and_codes: bool = True,
+    for_phonics_step: bool = False,
+) -> str:
+    cleaned = unicodedata.normalize("NFC", text or "").strip()
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"\s+", " ", cleaned)
+
+    if expand_ranges_and_codes:
+        cleaned = _YEAR_RANGE_RE.sub(r"\1 đến \2", cleaned)
+        cleaned = _CODE_HYPHEN_RE.sub(
+            lambda m: f"{_spell_acronym_vietnamese(m.group(1))} {m.group(2)}", cleaned
+        )
+
+    out_parts: list[str] = []
+    last_end = 0
+    for m in _ALPHA_TOKEN_RE.finditer(cleaned):
+        out_parts.append(cleaned[last_end : m.start()])
+        token = m.group(0)
+        if len(token) >= 2 and token.isupper():
+            before_text = cleaned[: m.start()].rstrip()
+            is_start = not before_text or before_text[-1] in ".!?:;\n"
+            if token in _KNOWN_ACRONYMS:
+                out_parts.append(_spell_acronym_vietnamese(token))
+            elif _is_likely_vietnamese_syllable(token):
+                lower = token.lower()
+                out_parts.append(lower[0].upper() + lower[1:] if is_start else lower)
+            elif len(token) <= 4 and token.isascii():
+                out_parts.append(_spell_acronym_vietnamese(token))
+            else:
+                out_parts.append(token.lower())
+        else:
+            out_parts.append(token)
+        last_end = m.end()
+    out_parts.append(cleaned[last_end:])
+    normalized = unicodedata.normalize("NFC", re.sub(r"\s+", " ", "".join(out_parts)).strip())
+
+    if for_phonics_step and normalized.lower() in _PHONICS_SINGLE_CHAR_FIX:
+        return _PHONICS_SINGLE_CHAR_FIX[normalized.lower()]
+    return normalized
+
+
 def normalize_nfc_text(text: str) -> str:
     cleaned = unicodedata.normalize("NFC", text).strip()
     if not cleaned:
@@ -313,6 +415,7 @@ def make_cache_key(
             "provider": "local",
             "voice_id": voice_id,
             "model_version": TTS_MODEL_VERSION,
+            "norm_v": 2,
             "speed": normalize_speed(speed),
             "mode": mode,
             "payload": unicodedata.normalize("NFC", payload),
@@ -461,7 +564,13 @@ def synthesize_single_utterance_sync(
         meta = json.loads(meta_cache.read_text(encoding="utf-8"))
         return wav_cache.read_bytes(), float(meta["duration_seconds"])
 
-    spoken_input = text_nfc if text_nfc[-1] in ".!?" else f"{text_nfc}."
+    normalized_text = (
+        normalize_vietnamese_tts_text(text_nfc, expand_ranges_and_codes=True)
+        or text_nfc
+    )
+    spoken_input = (
+        normalized_text if normalized_text[-1] in ".!?" else f"{normalized_text}."
+    )
     raw_wav = tts_engine.infer(
         spoken_input,
         voice=preset.preset_name,
@@ -516,9 +625,13 @@ def synthesize_timed_passage_sync(
         }
 
     sr = int(tts_engine.sample_rate)
-    chunks, gaps = normalize_to_chunks_v3_with_gaps(text_nfc, max_chars=220)
+    spoken_passage = (
+        normalize_vietnamese_tts_text(text_nfc, expand_ranges_and_codes=True)
+        or text_nfc
+    )
+    chunks, gaps = normalize_to_chunks_v3_with_gaps(spoken_passage, max_chars=220)
     if not chunks:
-        chunks = [text_nfc]
+        chunks = [spoken_passage]
         gaps = []
 
     silence_secs = gaps_to_silence(gaps) if gaps else []
@@ -673,7 +786,14 @@ def synthesize_phonics_steps_sync(
     step_timings: list[dict[str, Any]] = []
 
     for idx, step in enumerate(steps):
-        clean_step = unicodedata.normalize("NFC", step.spoken_text.strip())
+        clean_step = (
+            normalize_vietnamese_tts_text(
+                step.spoken_text,
+                expand_ranges_and_codes=True,
+                for_phonics_step=True,
+            )
+            or unicodedata.normalize("NFC", step.spoken_text.strip())
+        )
         spoken = clean_step if clean_step[-1] in ".!?" else f"{clean_step}."
         raw_wav = tts_engine.infer(
             spoken,
@@ -820,6 +940,7 @@ async def post_tts(req: TtsSynthesisRequest) -> Response:
             "X-Voice-Provider": "local",
             "X-Resolved-Voice-Id": preset.voice_id,
             "X-Voice-Region": preset.region,
+            "X-Voice-Gender": preset.gender,
             "X-Voice-Model-Version": TTS_MODEL_VERSION,
             "X-Voice-Fallback": "0",
             "X-Audio-Duration-Seconds": str(duration_s),
@@ -961,13 +1082,34 @@ async def post_stt(
 
         def _decode_sync() -> tuple[str, list[dict[str, Any]]]:
             assert runtime.stt_recognizer is not None
+            # Child-voice preprocessing: remove DC offset, apply gentle AGC for soft voices,
+            # and pad 250ms leading + 350ms trailing silence so Zipformer never clips short syllables.
+            arr = samples16.astype(np.float32, copy=True)
+            arr = arr - float(np.mean(arr))
+            peak = float(np.max(np.abs(arr))) if arr.size > 0 else 0.0
+            if 0.002 < peak < 0.45:
+                gain = min(8.0, 0.65 / peak)
+                arr = np.clip(arr * gain, -0.98, 0.98).astype(np.float32)
+
+            lead_pad_s = 0.25
+            trail_pad_s = 0.35
+            padded = np.concatenate(
+                [
+                    np.zeros(int(16000 * lead_pad_s), dtype=np.float32),
+                    arr,
+                    np.zeros(int(16000 * trail_pad_s), dtype=np.float32),
+                ]
+            )
             stream = runtime.stt_recognizer.create_stream()
-            stream.accept_waveform(16000, samples16)
+            stream.accept_waveform(16000, padded)
             runtime.stt_recognizer.decode_stream(stream)
             res = stream.result
             txt = unicodedata.normalize("NFC", res.text.strip().lower())
+            adjusted_timestamps = [
+                max(0.0, float(t) - lead_pad_s) for t in list(res.timestamps)
+            ]
             words = build_stt_words_from_sherpa(
-                list(res.tokens), list(res.timestamps), duration_s
+                list(res.tokens), adjusted_timestamps, duration_s
             )
             return txt, words
 

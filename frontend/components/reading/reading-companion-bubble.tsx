@@ -1,5 +1,11 @@
 import { BookOpenCheck, Heart, Sparkles, Volume2 } from "lucide-react";
 
+import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
+import {
+  adaptTextToTeacherPersona,
+  getTeacherPersona,
+  type VoiceGender,
+} from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 
 export type CompanionMood =
@@ -14,6 +20,7 @@ export interface CompanionBubbleState {
 interface ReadingCompanionBubbleProps {
   readonly state: CompanionBubbleState;
   readonly isSpeaking?: boolean;
+  readonly gender?: VoiceGender;
 }
 
 const MOOD_STYLES: Readonly<
@@ -74,8 +81,20 @@ function MoodIcon({ mood }: { readonly mood: CompanionMood }) {
 export function ReadingCompanionBubble({
   state,
   isSpeaking = false,
+  gender,
 }: ReadingCompanionBubbleProps) {
   const theme = MOOD_STYLES[state.mood];
+  const persona = gender
+    ? getTeacherPersona(gender)
+    : getEffectiveTeacherPersona();
+  const displayTitle = adaptTextToTeacherPersona(
+    state.title || theme.label,
+    persona.gender,
+  ).replace(/^(Cô giáo|Thầy giáo)(?!\s+AI)/u, persona.title);
+  const displayMessage = adaptTextToTeacherPersona(
+    state.message,
+    persona.gender,
+  );
 
   return (
     <div
@@ -85,6 +104,7 @@ export function ReadingCompanionBubble({
         theme.card,
       )}
       data-companion-mood={state.mood}
+      data-teacher-persona={persona.gender}
       data-testid="reading-companion-bubble"
       role="status"
     >
@@ -100,10 +120,10 @@ export function ReadingCompanionBubble({
       </div>
       <div className="min-w-0 flex-1">
         <p className={cn("text-xs font-extrabold", theme.titleColor)}>
-          {state.title || theme.label}
+          {displayTitle}
         </p>
         <p className="mt-0.5 text-sm leading-snug font-semibold text-ink sm:text-base">
-          {state.message}
+          {displayMessage}
         </p>
       </div>
     </div>

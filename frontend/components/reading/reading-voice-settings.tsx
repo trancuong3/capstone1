@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
 import { ReadingAutomationSettings } from "@/components/reading/reading-automation-settings";
+import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useSpeechPreferences } from "@/hooks/use-speech-preferences";
 import {
   createVoiceStudioService,
@@ -586,6 +587,7 @@ export function ReadingVoiceSettings({
             >
               Chế độ xử lý giọng nói (Dành cho phụ huynh)
             </h3>
+            <VoiceEngineBadge />
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <button
                 aria-pressed={policy.providerMode === "local_only"}

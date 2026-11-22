@@ -16,6 +16,12 @@ import {
   clampSpeed,
   getSpeechPreferences,
 } from "@/lib/reading/speech-preferences";
+import {
+  getTeacherPersonaForVoice,
+  resolveVoiceGender,
+  type TeacherPersona,
+  type VoiceGender,
+} from "@/lib/reading/voice-persona";
 
 export type VoiceRegion = "north" | "central" | "south";
 export type VoiceProviderMode = "local_only" | "local_with_google_fallback";
@@ -50,6 +56,7 @@ export interface SessionVoiceLock {
   readonly sessionId: string;
   readonly provider: VoiceProviderKind;
   readonly voiceId: string;
+  readonly gender?: VoiceGender;
   readonly region: VoiceRegion;
   readonly modelVersion: string;
   readonly speed: number;
@@ -299,6 +306,7 @@ export function lockSessionVoice(
     sessionId: cleanSessionId,
     provider,
     voiceId: resolvedVoiceId,
+    gender: resolveVoiceGender(resolvedVoiceId),
     region: inferRegionFromVoiceId(resolvedVoiceId, region),
     modelVersion,
     speed,
@@ -391,6 +399,23 @@ export function countUnintendedVoiceSwitches(
     }
   }
   return switches;
+}
+
+/** Resolve the single source of truth for the active/selected voice across ALL screens. */
+export function getEffectiveVoiceId(): string {
+  const active = getActiveSessionVoiceLock();
+  if (active?.voiceId) return active.voiceId;
+  const prefs = getSpeechPreferences();
+  if (prefs.voiceId) return prefs.voiceId;
+  const policy = getVoicePolicyPreferences();
+  return REGION_DEFAULT_VOICE_ID[policy.region] ?? DEFAULT_LOCAL_VOICE_ID;
+}
+
+/** Resolve the consistent Teacher Persona ("Cô giáo AI" vs "Thầy giáo AI") across ALL screens. */
+export function getEffectiveTeacherPersona(): TeacherPersona {
+  const active = getActiveSessionVoiceLock();
+  const voiceId = getEffectiveVoiceId();
+  return getTeacherPersonaForVoice(voiceId, active?.gender ?? null);
 }
 
 export function resetVoiceLockAndPolicyForTests(): void {
