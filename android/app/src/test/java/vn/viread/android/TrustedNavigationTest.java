@@ -2,6 +2,7 @@ package vn.viread.android;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import java.util.Arrays;
@@ -164,5 +165,30 @@ public final class TrustedNavigationTest {
         List<String> empty = TrustedNavigation.normalizeAcceptMimeTypes(null);
         assertEquals("*/*", TrustedNavigation.resolveIntentBaseMimeType(empty));
         assertTrue(TrustedNavigation.acceptsImages(empty));
+    }
+
+    @Test
+    public void mapsValidOAuthDeepLinkToTrustedCallbackAndRejectsInjection() {
+        TrustedNavigation policy = new TrustedNavigation("https://viread.example.com");
+        assertEquals(
+                "https://viread.example.com/auth/callback?code=pkce_code_123&next=%2Fprofile",
+                policy.extractTrustedAuthCallbackUrl(
+                        "viread://auth/callback?code=pkce_code_123&next=%2Fprofile&evil=https://bad.test"));
+        assertEquals(
+                "https://viread.example.com/auth/callback?error=access_denied",
+                policy.extractTrustedAuthCallbackUrl("viread://auth/callback?error=access_denied"));
+
+        TrustedNavigation lanPolicy = new TrustedNavigation("https://192.168.1.4:8443", true);
+        assertEquals(
+                "https://192.168.1.4:8443/auth/callback?code=lan_pkce_456",
+                lanPolicy.extractTrustedAuthCallbackUrl("viread://auth/callback?code=lan_pkce_456"));
+
+        assertNull(policy.extractTrustedAuthCallbackUrl("https://viread.example.com/auth/callback?code=abc"));
+        assertNull(policy.extractTrustedAuthCallbackUrl("viread://evil/callback?code=abc"));
+        assertNull(policy.extractTrustedAuthCallbackUrl("viread://auth/dashboard?code=abc"));
+        assertNull(policy.extractTrustedAuthCallbackUrl("viread://auth/callback"));
+        assertNull(policy.extractTrustedAuthCallbackUrl("viread://auth/callback?code=abc#frag"));
+        assertNull(policy.extractTrustedAuthCallbackUrl("viread://user@auth/callback?code=abc"));
+        assertNull(policy.extractTrustedAuthCallbackUrl("viread://auth/callback?next=https://evil.test"));
     }
 }

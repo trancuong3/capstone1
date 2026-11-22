@@ -3396,12 +3396,29 @@ class AdminOcrService:
         page_id: UUID,
         draft_text: str,
         words: list[AdminOcrWordInput],
+        *,
+        revision_id: UUID | None = None,
     ) -> PreparedLocalOcrCorrection:
         """Authorize and validate a correction before dispatching a job."""
         await self.require_admin(actor_id)
         page = await self.repo.page(page_id, lock=False)
         if page is None:
             raise HTTPException(status_code=404, detail="Page not found")
+        effective_image_path = page.ImagePath
+        if revision_id is not None:
+            revision = await self.repo.revision(page_id, revision_id, lock=False)
+            if revision is None:
+                raise HTTPException(
+                    status_code=404, detail="Revision does not belong to this page"
+                )
+            meta = (
+                revision.ProcessingMeta
+                if isinstance(getattr(revision, "ProcessingMeta", None), dict)
+                else {}
+            )
+            candidate_image_path = meta.get("source_image_path")
+            if isinstance(candidate_image_path, str) and candidate_image_path.strip():
+                effective_image_path = candidate_image_path.strip()
         if not draft_text.strip():
             raise HTTPException(status_code=422, detail="Draft text must not be blank")
 
@@ -3414,7 +3431,7 @@ class AdminOcrService:
                 status_code=422,
                 detail="Draft text and OCR word data are inconsistent",
             )
-        if not page.ImagePath:
+        if not effective_image_path:
             raise HTTPException(
                 status_code=409,
                 detail="The source page image is unavailable for visual OCR verification.",
@@ -3450,7 +3467,7 @@ class AdminOcrService:
         return PreparedLocalOcrCorrection(
             config=config,
             draft_text=normalized_draft,
-            image_path=page.ImagePath,
+            image_path=effective_image_path,
             word_boxes=tuple(word_boxes),
             total_chunks=len(plan.chunks),
         )

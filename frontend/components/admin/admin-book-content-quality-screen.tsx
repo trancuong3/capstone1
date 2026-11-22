@@ -1921,6 +1921,11 @@ export function AdminBookContentQualityScreen() {
                           (workflow) =>
                             workflow.suitability === "NOT_RECOMMENDED",
                         ) ||
+                        selectedBook.ai_workflows.some(
+                          (workflow) =>
+                            workflow.image_safety_status ===
+                            "ADMIN_FLAGGED_UNSAFE",
+                        ) ||
                         busyKey === `book-decision:${selectedBook.book_id}`
                       }
                       onClick={() => void decideBook("APPROVE")}

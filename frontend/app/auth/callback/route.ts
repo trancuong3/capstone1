@@ -24,6 +24,28 @@ async function signOutQuietly(
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
   const providerError = request.nextUrl.searchParams.get("error");
+  const appShell = request.nextUrl.searchParams.get("app_shell");
+  const userAgent = request.headers.get("user-agent") ?? "";
+
+  // When OAuth finishes in Android's external browser, hand the untouched PKCE
+  // code back into the ViRead Android WebView (which owns the PKCE code_verifier)
+  // before attempting exchangeCodeForSession.
+  if (appShell === "android" && !/ViReadAndroid\//i.test(userAgent)) {
+    const deepLinkParams = new URLSearchParams();
+    if (providerError && /^[A-Za-z0-9._~-]{1,128}$/.test(providerError)) {
+      deepLinkParams.set("error", providerError);
+    } else if (code && /^[A-Za-z0-9._~-]{1,512}$/.test(code)) {
+      deepLinkParams.set("code", code);
+    } else {
+      deepLinkParams.set("error", "oauth_failed");
+    }
+    if (request.nextUrl.searchParams.get("next") === "/profile") {
+      deepLinkParams.set("next", "/profile");
+    }
+    return NextResponse.redirect(
+      `viread://auth/callback?${deepLinkParams.toString()}`,
+    );
+  }
 
   // Providers can redirect back with an OAuth error instead of an auth code.
   // Never reflect the provider's raw error text or details into the UI.
@@ -50,15 +72,20 @@ export async function GET(request: NextRequest) {
     return redirectToLogin(request, "email_required");
   }
 
-  // The role comes only from the database profile, never provider metadata.
+  // The role comes only from the active database profile, never provider metadata.
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, active")
     .eq("id", userData.user.id)
     .maybeSingle();
 
+  const isInactive =
+    profile !== null &&
+    typeof profile === "object" &&
+    "active" in profile &&
+    (profile.active === 0 || profile.active === false);
   const role =
-    profile?.role === "parent" || profile?.role === "admin"
+    !isInactive && (profile?.role === "parent" || profile?.role === "admin")
       ? profile.role
       : null;
 

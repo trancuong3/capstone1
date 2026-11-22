@@ -79,6 +79,48 @@ public final class TrustedNavigation {
     }
 
     /**
+     * Validate a {@code viread://auth/callback?...} OAuth return deep link and map it
+     * strictly onto this build's trusted HTTPS {@code /auth/callback} endpoint so the
+     * in-app WebView (holding the PKCE code_verifier) completes code exchange safely.
+     */
+    public String extractTrustedAuthCallbackUrl(String candidateDeepLink) {
+        URI uri = parse(candidateDeepLink == null ? null : candidateDeepLink.trim());
+        if (uri == null || uri.getRawUserInfo() != null || uri.getRawFragment() != null) {
+            return null;
+        }
+        if (!"viread".equalsIgnoreCase(uri.getScheme())
+                || !"auth".equalsIgnoreCase(uri.getHost())
+                || uri.getPort() != -1) {
+            return null;
+        }
+        String rawPath = uri.getRawPath();
+        if (!"/callback".equals(rawPath)) {
+            return null;
+        }
+        String rawQuery = uri.getRawQuery();
+        List<String> safePairs = new ArrayList<>();
+        if (rawQuery != null && !rawQuery.isEmpty()) {
+            for (String pair : rawQuery.split("&")) {
+                if (pair.isEmpty()) continue;
+                int eq = pair.indexOf('=');
+                String key = eq >= 0 ? pair.substring(0, eq) : pair;
+                String val = eq >= 0 ? pair.substring(eq + 1) : "";
+                if ("code".equals(key) && val.matches("[A-Za-z0-9._~%-]{1,512}")) {
+                    safePairs.add("code=" + val);
+                } else if ("error".equals(key) && val.matches("[A-Za-z0-9._~%-]{1,128}")) {
+                    safePairs.add("error=" + val);
+                } else if ("next".equals(key) && ("%2Fprofile".equalsIgnoreCase(val) || "/profile".equals(val))) {
+                    safePairs.add("next=%2Fprofile");
+                }
+            }
+        }
+        if (safePairs.isEmpty()) {
+            return null;
+        }
+        return getOrigin() + "/auth/callback?" + String.join("&", safePairs);
+    }
+
+    /**
      * External links opened in the system browser instead of the authenticated WebView.
      * HTTP, file:, javascript:, and intent: are strictly blocked.
      */

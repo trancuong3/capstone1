@@ -135,7 +135,9 @@ def local_date(moment: datetime) -> date:
 def normalize_word(value: Any) -> str:
     if not isinstance(value, str):
         return ""
-    return value.strip().strip(".,;:!?…\"'“”‘’()[]").lower()
+    import unicodedata
+
+    return unicodedata.normalize("NFC", value).strip().strip(".,;:!?…\"'“”‘’()[]").lower()
 
 
 def analyze_alignment(alignment: Any) -> dict[str, Any] | None:

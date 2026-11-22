@@ -46,10 +46,13 @@ def _ocr_engine_health(package: str, engine_name: str, status_name: str, label: 
     runtime = sys.modules.get("app.services.ocr_engine")
     engine = getattr(runtime, engine_name, None) if runtime is not None else None
     load_status = getattr(runtime, status_name, None) if runtime is not None else None
+    prefix = "_paddle" if package == "paddleocr" else "_vietocr"
+    init_error = getattr(runtime, f"{prefix}_initialization_error", None) if runtime is not None else None
+    import_error = getattr(runtime, f"{prefix}_import_error", None) if runtime is not None else None
     if engine is not None and load_status == "success":
         return _health_item(package, label, "HEALTHY", "loaded",
                             "Engine đã khởi tạo; Health không chạy nhận diện ảnh.")
-    if load_status in {"error", "not_installed"}:
+    if load_status in {"error", "not_installed"} or init_error is not None or import_error is not None:
         return _health_item(package, label, "UNAVAILABLE", "failed",
                             "Không thể khởi tạo engine OCR này.")
     if engine is not None:
@@ -175,6 +178,7 @@ _WORKER_LABELS = {
     "viread_ocr_training": "OCR training worker",
     "book_quality": "Book quality worker",
     "admin_ai_workflow": "Admin AI workflow worker",
+    "parent_book_submission": "Parent book submission worker",
     "active_model_registry": "Model registry worker",
     "local_trainer_process": "Local training process",
 }

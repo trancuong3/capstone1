@@ -257,7 +257,8 @@ def _training_config(profile: str, repo_root: Path) -> tuple[dict[str, Any], str
 
 async def _set_job(job_id: UUID, *, status: str, target: str | None = None,
                    run_id: UUID | None = None, error_code: str | None = None,
-                   metadata: dict[str, Any] | None = None, retry_delay: int = 0) -> None:
+                   metadata: dict[str, Any] | None = None, retry_delay: int = 0,
+                   worker_id: str | None = None) -> None:
     async with AsyncSessionLocal() as db:
         await db.execute(text("""
             UPDATE public.viread_ocr_training_jobs
@@ -266,9 +267,10 @@ async def _set_job(job_id: UUID, *, status: str, target: str | None = None,
                 available_at=now() + (:retry_delay * interval '1 second'),
                 metadata=metadata || CAST(:metadata AS jsonb), updated_at=now()
             WHERE id=:id
+              AND (:worker_id IS NULL OR (worker_id=:worker_id AND status='LOCAL_RUNNING' AND lease_expires_at > now()))
         """), {"id": job_id, "status": status, "target": target, "run_id": run_id,
               "error_code": error_code, "retry_delay": retry_delay,
-              "metadata": json.dumps(metadata or {})})
+              "metadata": json.dumps(metadata or {}), "worker_id": worker_id})
         await db.commit()
 
 
@@ -582,7 +584,7 @@ async def _claim_local_job(worker_id: str) -> dict[str, Any] | None:
                 attempts=job.attempts+1, progress='{"stage":"starting"}'::jsonb,
                 metadata=job.metadata || CAST(:hardware AS jsonb), updated_at=now()
             FROM next_job WHERE job.id=next_job.id
-            RETURNING job.id, job.dataset_version_id, job.manifest_sha256,
+            RETURNING job.id, job.profile, job.config_sha256, job.dataset_version_id, job.manifest_sha256,
                       job.parent_checkpoint_sha256, job.created_by, job.attempts, job.run_id,
                       job.locked_test_version_id, job.locked_test_manifest_sha256, job.metadata
         """), {"max_attempts": MAX_ATTEMPTS, "worker_id": worker_id,
@@ -932,7 +934,7 @@ async def _process_local_job(job: dict[str, Any], progress: dict[str, Any]) -> N
         benchmark = await _benchmark_candidate(job, run_id, stable_candidate, run_dir)
     final_status = ("BENCHMARKED" if benchmark and benchmark.get("gate_status") == "V2_WIN"
                     else "QUALITY_GATE_REJECTED" if benchmark else "CANDIDATE")
-    await _set_job(job_id, status=final_status, run_id=run_id,
+    await _set_job(job_id, status=final_status, run_id=run_id, worker_id=job.get("worker_id"),
                    metadata={"device": candidate.get("device"), "steps": candidate.get("steps"),
                              "checkpoint_sha256": candidate.get("checkpoint_sha256"),
                              "benchmark_status": benchmark.get("gate_status") if benchmark else "WAITING_FOR_EVALUATION"})
@@ -942,6 +944,7 @@ async def _run_local_once(worker_id: str) -> bool:
     job = await _claim_local_job(worker_id)
     if not job:
         return False
+    job["worker_id"] = worker_id
     job_id = UUID(str(job["id"]))
     heartbeat_stop = asyncio.Event()
     progress: dict[str, Any] = {"stage": "preparing"}
@@ -956,19 +959,21 @@ async def _run_local_once(worker_id: str) -> bool:
         work_root = _work_root() / "viread-vietocr-training" / str(job_id)
         if resource_failure and not (work_root / "latest.pt").is_file():
             await _set_job(job_id, status="FALLBACK_QUEUED_COLAB", target="COLAB",
-                           error_code=error_code,
+                           error_code=error_code, worker_id=worker_id,
                            metadata={"fallback_reason": error_code})
         elif resource_failure:
             await _set_job(job_id, status="BLOCKED", error_code="LOCAL_RESUME_STATE_NOT_PORTABLE",
+                           worker_id=worker_id,
                            metadata={"fallback_blocked_reason": "LOCAL_RESUME_STATE_NOT_PORTABLE"})
         elif "ACTIVE_PARENT_CHANGED" in str(exc):
-            await _set_job(job_id, status="BLOCKED", error_code="ACTIVE_PARENT_CHANGED")
+            await _set_job(job_id, status="BLOCKED", error_code="ACTIVE_PARENT_CHANGED", worker_id=worker_id)
         elif isinstance(exc, (TimeoutError, OSError, ConnectionError)) and int(job["attempts"]) < MAX_ATTEMPTS:
             delay = min(300, 30 * 2 ** max(0, int(job["attempts"]) - 1))
             await _set_job(job_id, status="QUEUED", error_code=error_code, retry_delay=delay,
+                           worker_id=worker_id,
                            metadata={"retry_in_seconds": delay, "failure_attempt": int(job["attempts"])})
         else:
-            await _set_job(job_id, status="FAILED", error_code=error_code,
+            await _set_job(job_id, status="FAILED", error_code=error_code, worker_id=worker_id,
                            metadata={"failure_attempt": int(job["attempts"]), "retry_limit": MAX_ATTEMPTS})
         log_diagnostic(logger, logging.ERROR, event="viread_local_training_failed",
                        stage="training_run", exception=exc, job_id=str(job_id),

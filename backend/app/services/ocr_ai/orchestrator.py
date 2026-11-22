@@ -180,9 +180,11 @@ class OcrCorrectionOrchestrator:
             for candidate in remaining_after
             if not self._is_local_provider(candidate)
         ]
-        local_reserve = min(
-            float(self.config.local.timeout_seconds),
-            float(self.config.total_timeout_seconds) * 0.5,
+        local_reserve = (
+            float(self.config.local.timeout_seconds)
+            if float(self.config.total_timeout_seconds)
+            > float(self.config.local.timeout_seconds)
+            else float(self.config.total_timeout_seconds) * 0.5
         )
         cloud_remaining = (deadline - local_reserve) - time.monotonic()
         if cloud_remaining <= 0:
@@ -246,6 +248,7 @@ class OcrCorrectionOrchestrator:
                         provider=provider.name,
                         code="PROVIDER_TIMEOUT",
                         status_code=504,
+                        disables_family=True,
                     )
                 coro = provider.correct_chunk(
                     chunk=request_chunk,
@@ -260,6 +263,7 @@ class OcrCorrectionOrchestrator:
                             provider=provider.name,
                             code="PROVIDER_TIMEOUT",
                             status_code=504,
+                            disables_family=True,
                         ) from exc
                 else:
                     result = await coro

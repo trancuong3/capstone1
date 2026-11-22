@@ -5,7 +5,7 @@ import unicodedata
 
 def normalize_text(text: str) -> list[str]:
     text = unicodedata.normalize("NFC", text).lower()
-    text = re.sub(r"[^\w\s]", "", text)
+    text = re.sub(r"[^\w\s]", " ", text.replace("_", " "))
     return text.split()
 
 

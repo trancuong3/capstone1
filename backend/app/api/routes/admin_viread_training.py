@@ -88,10 +88,17 @@ async def _leased_colab_job(service: VireadOcrTrainingService, job_id: UUID, wor
         SELECT id, profile, status, target, worker_id, dataset_version_id, manifest_sha256,
                config_sha256, parent_checkpoint_sha256, run_id, created_by, attempts,
                colab_execution_id, colab_execution_resource_name, colab_operation_name,
-               locked_test_version_id, locked_test_manifest_sha256, metadata
+               locked_test_version_id, locked_test_manifest_sha256, metadata,
+               (lease_expires_at IS NOT NULL AND lease_expires_at > now()) AS lease_active
         FROM public.viread_ocr_training_jobs WHERE id=:id FOR UPDATE
     """, {"id": job_id})
-    if not job or job["target"] != "COLAB" or job["status"] != "COLAB_RUNNING" or job["worker_id"] != worker_id:
+    if (
+        not job
+        or job["target"] != "COLAB"
+        or job["status"] != "COLAB_RUNNING"
+        or job["worker_id"] != worker_id
+        or not job.get("lease_active", True)
+    ):
         await service.repo.rollback()
         raise HTTPException(status_code=409, detail="Training job lease is no longer owned by this worker")
     return job
@@ -1284,8 +1291,10 @@ async def benchmark_viread_colab_job(
     result = await service.benchmark(UUID(str(job["created_by"])), payload)
     await db.execute(text("""
         UPDATE public.viread_ocr_training_jobs SET progress=CAST(:progress AS jsonb),
-            metadata=metadata || CAST(:metadata AS jsonb), updated_at=now() WHERE id=:id
-    """), {"id": job_id, "progress": json.dumps({"stage": "benchmarked", "gate_status": result["gate_status"]}),
+            metadata=metadata || CAST(:metadata AS jsonb), updated_at=now()
+        WHERE id=:id AND target='COLAB' AND status='COLAB_RUNNING' AND worker_id=:worker_id
+    """), {"id": job_id, "worker_id": worker_id,
+          "progress": json.dumps({"stage": "benchmarked", "gate_status": result["gate_status"]}),
           "metadata": json.dumps({"evaluation_status": "COMPLETED",
                                   "evaluation_gate_status": result["gate_status"],
                                   "evaluation_type": result["evaluation_type"]})})
@@ -1306,6 +1315,7 @@ async def heartbeat_viread_colab_training_job(
             lease_expires_at=now() + interval '15 minutes',
             progress=CAST(:progress AS jsonb), updated_at=now()
         WHERE id=:id AND target='COLAB' AND status='COLAB_RUNNING' AND worker_id=:worker_id
+          AND lease_expires_at IS NOT NULL AND lease_expires_at > now()
         RETURNING id
     """), {"id": job_id, "worker_id": payload.worker_id,
           "progress": json.dumps({"stage": payload.stage,
@@ -1371,8 +1381,8 @@ async def finish_viread_colab_training_job(
             available_at=now() + (:retry_delay * interval '1 second'),
             progress=CAST(:progress AS jsonb),
             metadata=metadata || CAST(:metadata AS jsonb), updated_at=now()
-        WHERE id=:id
-    """, {"id": job_id, "status": new_status, "run_id": payload.run_id or job["run_id"],
+        WHERE id=:id AND target='COLAB' AND status='COLAB_RUNNING' AND worker_id=:worker_id
+    """, {"id": job_id, "worker_id": payload.worker_id, "status": new_status, "run_id": payload.run_id or job["run_id"],
           "error_code": error_code, "retry_delay": retry_delay,
           "progress": json.dumps({"stage": new_status.lower()}),
           "metadata": json.dumps({"runtime": runtime,

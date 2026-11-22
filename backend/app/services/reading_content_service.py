@@ -749,7 +749,7 @@ class ReadingContentService:
             )
 
         if revision_id is not None:
-            revision = await self.repository.revision_snapshot(page.Id, revision_id)
+            revision = await self.repository.verified_revision(page.Id, revision_id)
         else:
             revision = await self.repository.verified_revision(
                 page.Id,

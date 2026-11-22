@@ -71,7 +71,7 @@ describe("SupabaseAdminAuthService", () => {
 
     expect(harness.initialize).toHaveBeenCalledOnce();
     expect(harness.from).toHaveBeenCalledWith("profiles");
-    expect(harness.select).toHaveBeenCalledWith("role, displayname");
+    expect(harness.select).toHaveBeenCalledWith("role, displayname, active");
     expect(harness.eq).toHaveBeenCalledWith("id", adminUser.id);
   });
 

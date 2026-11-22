@@ -27,6 +27,24 @@ class ProfileAccessDeniedError(Exception):
     """Raised when an actor does not have permission for a profile operation."""
 
 
+def _safe_avatar_url(path: object, expected_prefix: str) -> str | None:
+    if not isinstance(path, str) or not path:
+        return None
+    if (
+        not path.startswith(expected_prefix)
+        or ".." in path
+        or path.startswith(("http://", "https://"))
+    ):
+        return None
+    return create_signed_image_url(path, bucket_name=SUPABASE_AVATAR_BUCKET)
+
+
+def _ensure_active_profile(profile: Any) -> None:
+    active_val = getattr(profile, "Active", 1)
+    if active_val == 0 or active_val is False:
+        raise ProfileAccessDeniedError()
+
+
 class ProfileService:
     """Apply profile authorization and coordinate PostgreSQL with Supabase Auth."""
 
@@ -68,6 +86,7 @@ class ProfileService:
         profile = await self.repository.get_by_id(profile_id)
         if profile is None:
             raise ProfileNotFoundError()
+        _ensure_active_profile(profile)
         return profile
 
     async def update_profile_for_owner(
@@ -78,6 +97,10 @@ class ProfileService:
     ):
         if actor_id != profile_id:
             raise ProfileAccessDeniedError()
+        existing = await self.repository.get_by_id(profile_id)
+        if existing is None:
+            raise ProfileNotFoundError()
+        _ensure_active_profile(existing)
         profile = await self.repository.update_display_name(
             profile_id,
             display_name,
@@ -102,6 +125,10 @@ class ProfileService:
         contact_phone: str | None,
     ) -> dict[str, Any]:
         """Update the authenticated profile's contact number without Auth OTP."""
+        existing = await self.repository.get_by_id(parent_id)
+        if existing is None:
+            raise ProfileNotFoundError()
+        _ensure_active_profile(existing)
         profile = await self.repository.update_contact_phone(
             parent_id,
             contact_phone,
@@ -114,6 +141,7 @@ class ProfileService:
         profile = await self.repository.get_by_id(parent_id)
         if profile is None:
             raise ProfileNotFoundError()
+        _ensure_active_profile(profile)
 
         try:
             contact = await self.auth_contact_provider.get_contact_info(parent_id)
@@ -174,13 +202,8 @@ class ProfileService:
             "pending_email": pending_email,
             "email_verified": email_verified,
             "contact_info_status": status_value,
-            "avatar_url": (
-                create_signed_image_url(
-                    avatar_path,
-                    bucket_name=SUPABASE_AVATAR_BUCKET,
-                )
-                if isinstance(avatar_path, str) and avatar_path
-                else None
+            "avatar_url": _safe_avatar_url(
+                avatar_path, f"profiles/{profile.Id}/avatar/"
             ),
             # Deliberately expose only a small display-safe child summary.
             # Settings JSON and reading/event data stay out of the profile response.
@@ -190,14 +213,9 @@ class ProfileService:
                     "alias": child.Alias,
                     "grade": child.Grade,
                     "created_at": child.CreatedAt,
-                    "avatar_url": (
-                        create_signed_image_url(
-                            getattr(child, "AvatarPath", None),
-                            bucket_name=SUPABASE_AVATAR_BUCKET,
-                        )
-                        if isinstance(getattr(child, "AvatarPath", None), str)
-                        and getattr(child, "AvatarPath", None)
-                        else None
+                    "avatar_url": _safe_avatar_url(
+                        getattr(child, "AvatarPath", None),
+                        f"children/{child.Id}/avatar/",
                     ),
                 }
                 for child in children

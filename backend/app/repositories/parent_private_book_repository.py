@@ -391,6 +391,26 @@ class ParentPrivateBookRepository:
             )
         )
 
+    async def suspend_open_moderation_requests_for_book(
+        self, book_id: UUID, actor_id: UUID, reason: str, now: datetime
+    ) -> None:
+        await self.db.execute(
+            update(ParentBookModerationRequest)
+            .where(
+                ParentBookModerationRequest.BookId == book_id,
+                ParentBookModerationRequest.Status == "PENDING_ADMIN",
+            )
+            .values(
+                PreviousStatus="PENDING_ADMIN",
+                Status="SUSPENDED",
+                DecidedBy=actor_id,
+                DecidedAt=now,
+                DecisionReason=reason,
+                OptimisticLockVersion=ParentBookModerationRequest.OptimisticLockVersion + 1,
+                UpdatedAt=now,
+            )
+        )
+
     async def supersede_open_moderation_requests_for_book(
         self, book_id: UUID, now: datetime
     ) -> None:

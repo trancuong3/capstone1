@@ -113,6 +113,10 @@ class CatalogRepository:
                 AdminAiWorkflow.OcrApprovedBy.is_not(None),
                 AdminAiWorkflow.Findings == [],
                 or_(
+                    AdminAiWorkflow.ImageSafetyStatus.is_(None),
+                    AdminAiWorkflow.ImageSafetyStatus != "ADMIN_FLAGGED_UNSAFE",
+                ),
+                or_(
                     and_(
                         AdminAiWorkflow.SafetyStatus == "CONFIRMED",
                         AdminAiWorkflow.SafetyConfirmedBy.is_not(None),
@@ -442,7 +446,11 @@ class AdminCatalogRepository(CatalogRepository):
         return result.scalars().all()
 
     async def page(self, page_id: UUID):
-        return await self.db.scalar(select(BookPage).where(BookPage.Id == page_id))
+        return await self.db.scalar(
+            select(BookPage)
+            .join(Book, Book.Id == BookPage.BookId)
+            .where(BookPage.Id == page_id, is_catalog_book())
+        )
 
     async def revisions(self, page_id: UUID):
         result = await self.db.execute(

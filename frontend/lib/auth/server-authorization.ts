@@ -18,6 +18,12 @@ function readProfileRole(profile: unknown): ParentRole | null {
   if (typeof profile !== "object" || profile === null || !("role" in profile)) {
     return null;
   }
+  if (
+    "active" in profile &&
+    (profile.active === 0 || profile.active === false)
+  ) {
+    return null;
+  }
 
   return profile.role === "parent" || profile.role === "admin"
     ? profile.role
@@ -49,7 +55,7 @@ export const getAppIdentity = cache(async (): Promise<AppIdentity | null> => {
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, active")
     .eq("id", subject)
     .maybeSingle();
   const role = readProfileRole(profile);

@@ -1,6 +1,6 @@
 import json
 
-from pydantic import BaseModel, Field, ConfigDict, AwareDatetime, field_validator
+from pydantic import BaseModel, Field, ConfigDict, AwareDatetime, field_validator, model_validator
 from typing import Optional, Dict, Any
 from datetime import datetime
 from uuid import UUID
@@ -91,11 +91,17 @@ class ReadingSessionResponse(ReadingSessionBase):
 # --- READING EVENT ---
 class ReadingEventBase(BaseModel):
     Type: str = Field(..., example="MISPRONUNCIATION")
-    StartMs: int = Field(..., ge=0)
-    EndMs: Optional[int] = None
+    StartMs: int = Field(..., ge=0, le=2147483647)
+    EndMs: Optional[int] = Field(None, ge=0, le=2147483647)
     Confidence: Optional[float] = Field(None, ge=0, le=1)
     Status: str = Field(..., example="DETECTED")
     Metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_end_after_start(self) -> "ReadingEventBase":
+        if self.EndMs is not None and self.EndMs < self.StartMs:
+            raise ValueError("EndMs must be greater than or equal to StartMs")
+        return self
 
 class ReadingEventCreate(ReadingEventBase):
     SessionId: UUID

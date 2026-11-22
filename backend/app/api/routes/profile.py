@@ -171,6 +171,13 @@ class ChildProfileService:
     @staticmethod
     def _response(child: ChildProfile) -> dict:
         avatar_path = getattr(child, "AvatarPath", None)
+        expected_prefix = f"children/{child.Id}/avatar/"
+        is_safe_path = (
+            isinstance(avatar_path, str)
+            and avatar_path.startswith(expected_prefix)
+            and ".." not in avatar_path
+            and not avatar_path.startswith(("http://", "https://"))
+        )
         return {
             "id": child.Id,
             "parent_id": child.ParentId,
@@ -183,7 +190,7 @@ class ChildProfileService:
                     avatar_path,
                     bucket_name=SUPABASE_AVATAR_BUCKET,
                 )
-                if isinstance(avatar_path, str) and avatar_path
+                if is_safe_path
                 else None
             ),
         }

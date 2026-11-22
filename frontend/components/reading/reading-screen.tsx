@@ -1910,7 +1910,7 @@ function ReadingSessionScreen({
                   if (outcome === "completed") {
                     void finishSentenceReinforcement(engine, true);
                   }
-                  return outcome !== "ignored";
+                  return false;
                 }
                 const helpedWordBefore =
                   pageHelpWordRef.current?.wordId ?? null;
@@ -2457,6 +2457,16 @@ function ReadingSessionScreen({
     if (
       !browserText &&
       elevenLabsResult &&
+      !echoGuard.evaluate({
+        text: elevenLabsResult.text,
+        receivedAt: performance.now(),
+      }).accept
+    ) {
+      elevenLabsResult = null;
+    }
+    if (
+      !browserText &&
+      elevenLabsResult &&
       targetPage &&
       targetEngine &&
       isPassageHelpRequest(elevenLabsResult.text, targetEngine, targetPage)
@@ -2504,7 +2514,7 @@ function ReadingSessionScreen({
 
       if (targetEngine && alignmentEngineRef.current === targetEngine) {
         let snapshot = targetEngine.getSnapshot();
-        if (!browserText && !options.preserveAlignment) {
+        if (!browserText) {
           if (pageHelpWordRef.current)
             pageHelpWordRef.current.awaitingAttempt = false;
           snapshot = targetEngine.addFinalTranscript(resolvedText);
@@ -2512,13 +2522,13 @@ function ReadingSessionScreen({
         if (!options.preserveAlignment && options.finishAlignment !== false) {
           snapshot = finishPassageAlignment(targetEngine);
         }
-        if (timings.length && (browserText || !options.preserveAlignment)) {
+        if (timings.length) {
           snapshot = targetEngine.addHesitations(
             timings,
             snapshot.spokenWords.length - timings.length,
           );
         }
-        if (!options.preserveAlignment || (browserText && timings.length)) {
+        if (!options.preserveAlignment || !browserText || timings.length > 0) {
           applyRealtimeSnapshot(snapshot);
         }
         if (!options.preserveAlignment) {

@@ -25,6 +25,12 @@ function mapSignInError(error: AuthError) {
 
 function readAdminProfile(profile: unknown) {
   if (typeof profile !== "object" || profile === null) return null;
+  if (
+    "active" in profile &&
+    (profile.active === 0 || profile.active === false)
+  ) {
+    return null;
+  }
 
   const role = "role" in profile ? profile.role : null;
   const displayName = "displayname" in profile ? profile.displayname : null;
@@ -89,7 +95,7 @@ export function createSupabaseAdminAuthService(
       try {
         const { data, error } = await supabase
           .from("profiles")
-          .select("role, displayname")
+          .select("role, displayname, active")
           .eq("id", result.data.session.user.id)
           .maybeSingle();
         profileData = data;

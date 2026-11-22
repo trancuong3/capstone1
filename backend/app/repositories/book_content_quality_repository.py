@@ -94,7 +94,13 @@ class BookContentQualityRepository:
             )
         latest_workflow_id = (
             select(AdminAiWorkflow.Id)
-            .where(AdminAiWorkflow.PageId == BookPage.Id)
+            .where(
+                AdminAiWorkflow.PageId == BookPage.Id,
+                or_(
+                    BookPage.CurrentVerifiedRevisionId.is_(None),
+                    AdminAiWorkflow.PageRevisionId == BookPage.CurrentVerifiedRevisionId,
+                ),
+            )
             .order_by(AdminAiWorkflow.CreatedAt.desc(), AdminAiWorkflow.Id.desc())
             .limit(1)
             .correlate(BookPage)
@@ -134,7 +140,13 @@ class BookContentQualityRepository:
             return []
         latest_workflow_id = (
             select(AdminAiWorkflow.Id)
-            .where(AdminAiWorkflow.PageId == BookPage.Id)
+            .where(
+                AdminAiWorkflow.PageId == BookPage.Id,
+                or_(
+                    BookPage.CurrentVerifiedRevisionId.is_(None),
+                    AdminAiWorkflow.PageRevisionId == BookPage.CurrentVerifiedRevisionId,
+                ),
+            )
             .order_by(AdminAiWorkflow.CreatedAt.desc(), AdminAiWorkflow.Id.desc())
             .limit(1)
             .correlate(BookPage)
@@ -1050,6 +1062,8 @@ class BookContentQualityRepository:
                 BookQualityScanRun.Id == scan_id,
                 BookQualityScanRun.Status == "RUNNING",
                 BookQualityScanRun.WorkerId == worker_id,
+                BookQualityScanRun.LeaseExpiresAt.is_not(None),
+                BookQualityScanRun.LeaseExpiresAt > now,
             )
             .values(
                 LeaseExpiresAt=now + timedelta(seconds=lease_seconds),

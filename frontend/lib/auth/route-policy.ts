@@ -8,10 +8,18 @@ const parentRoutePrefixes = [
   "/children",
   "/books",
   "/my-books",
+  "/book-reports",
+  "/book-scanner",
+  "/device-permissions",
+  "/entertainment",
+  "/help-support",
   "/reading",
+  "/reading-management",
+  "/reading-preparation",
   "/sessions",
   "/reports",
   "/karaoke",
+  "/settings",
 ] as const;
 
 function matchesRoutePrefix(pathname: string, prefix: string) {

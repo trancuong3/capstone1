@@ -1779,7 +1779,7 @@ class GeminiPictureDescriptionAI:
             temperature=0.3,
         )
 
-        is_safe = _parse_bool(parsed.get("is_child_safe"), default=True)
+        is_safe = _parse_bool(parsed.get("is_child_safe"), default=False)
         if not is_safe:
             raise PictureAiError(
                 code="UNSAFE_PICTURE",

@@ -17,8 +17,12 @@ type ChildLoadState =
 export function useValidatedSelectedChild() {
   const { replace } = useRouter();
   const childService = useChildService();
-  const { selectedChildId, clearSelectedChild, setValidatedSelectedChild } =
-    useAppStore();
+  const {
+    selectedChildId,
+    selectChild,
+    clearSelectedChild,
+    setValidatedSelectedChild,
+  } = useAppStore();
   const [retryKey, setRetryKey] = useState(0);
   const [state, setState] = useState<ChildLoadState>({
     status: "loading",
@@ -29,6 +33,17 @@ export function useValidatedSelectedChild() {
     let active = true;
 
     if (!selectedChildId) {
+      if (typeof window !== "undefined") {
+        const queryChildId = new URLSearchParams(window.location.search)
+          .get("childId")
+          ?.trim();
+        if (queryChildId) {
+          selectChild(queryChildId);
+          return () => {
+            active = false;
+          };
+        }
+      }
       replace("/dashboard?focus=child-selection&reason=missing");
       return () => {
         active = false;
@@ -73,6 +88,7 @@ export function useValidatedSelectedChild() {
     clearSelectedChild,
     retryKey,
     replace,
+    selectChild,
     selectedChildId,
     setValidatedSelectedChild,
   ]);

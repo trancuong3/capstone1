@@ -174,8 +174,11 @@ class AdminAiWorkflowService:
 
         ocr_service = AdminOcrService(self.db)
         prepared = await ocr_service.prepare_ai_correction(
-            actor_id, page_id, payload.draft_text,
+            actor_id,
+            page_id,
+            payload.draft_text,
             [word for word in payload.words],
+            revision_id=payload.page_revision_id,
         )
         revision = await AdminOcrRepository(self.db).revision(
             page_id, payload.page_revision_id, lock=True
@@ -256,6 +259,8 @@ class AdminAiWorkflowService:
         self, actor_id: UUID, page_id: UUID, workflow_id: UUID
     ) -> AdminAiWorkflowRead:
         await AdminOcrService(self.db).require_admin(actor_id)
+        if await AdminOcrRepository(self.db).page(page_id) is None:
+            raise HTTPException(status_code=404, detail="Page not found")
         row = await self.repo.get(workflow_id, page_id=page_id)
         if row is None:
             raise HTTPException(status_code=404, detail="AI workflow not found")
@@ -265,6 +270,8 @@ class AdminAiWorkflowService:
         self, actor_id: UUID, page_id: UUID, revision_id: UUID
     ) -> AdminAiWorkflowRead | None:
         await AdminOcrService(self.db).require_admin(actor_id)
+        if await AdminOcrRepository(self.db).page(page_id) is None:
+            raise HTTPException(status_code=404, detail="Page not found")
         row = await self.repo.latest_for_revision(actor_id, page_id, revision_id)
         return self._read(row) if row is not None else None
 
@@ -552,6 +559,9 @@ class AdminAiWorkflowService:
         row.ImageSafetyReviewedBy = actor_id
         row.ImageSafetyImageSha256 = effective_sha
         row.ImageSafetyReason = payload.reason
+        if payload.status == "ADMIN_FLAGGED_UNSAFE":
+            row.OcrApprovedAt = None
+            row.OcrApprovedBy = None
         row.ReviewEvents = list(row.ReviewEvents or []) + [{
             "event": "IMAGE_SAFETY_REVIEWED",
             "actor_id": str(actor_id),

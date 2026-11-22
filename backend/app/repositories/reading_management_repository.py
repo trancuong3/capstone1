@@ -278,6 +278,7 @@ class ReadingManagementRepository:
                 ReadingReminderOccurrence.EmailLastAttemptAt <= stale_before,
             ),
         )
+        stale_cutoff = now - timedelta(hours=STALE_REMINDER_HOURS)
         statement = (
             select(ReadingReminderOccurrence, ReadingReminder, ChildProfile)
             .join(
@@ -285,9 +286,12 @@ class ReadingManagementRepository:
                 ReadingReminder.Id == ReadingReminderOccurrence.ReminderId,
             )
             .join(ChildProfile, ChildProfile.Id == ReadingReminder.ChildId)
+            .join(Profile, Profile.Id == ChildProfile.ParentId)
             .where(
+                Profile.Active == 1,
                 ReadingReminderOccurrence.Status == "PENDING",
                 ReadingReminderOccurrence.ScheduledFor <= now,
+                ReadingReminderOccurrence.ScheduledFor >= stale_cutoff,
                 ReadingReminderOccurrence.EmailAttempts < max_attempts,
                 ReadingReminder.EmailEnabled.is_(True),
                 ReadingReminder.IsActive.is_(True),

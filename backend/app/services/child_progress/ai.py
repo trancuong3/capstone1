@@ -168,10 +168,14 @@ def parse_assessment(
     if not actions:
         return None
 
-    allowed = {word.lower(): word for word in allowed_words}
+    import unicodedata
+
+    allowed = {unicodedata.normalize("NFC", word).lower(): word for word in allowed_words}
     practice: list[str] = []
     for raw in payload.get("practice_words") or []:
-        word = allowed.get(str(raw).strip().lower().strip(".,;:!?"))
+        word = allowed.get(
+            unicodedata.normalize("NFC", str(raw)).strip().lower().strip(".,;:!?")
+        )
         if word and word not in practice:
             practice.append(word)
 

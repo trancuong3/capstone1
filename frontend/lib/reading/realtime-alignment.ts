@@ -73,6 +73,7 @@ interface IndexedBookWord {
   wordIndex: number;
   text: string;
   normalizedText: string;
+  syllables: readonly string[];
 }
 
 /** How far behind the cursor a re-read may start (restart / self-correction). */
@@ -231,6 +232,7 @@ export class RealtimeAlignmentEngine {
       wordIndex: word.word_index ?? index,
       text: word.text,
       normalizedText: normalizeRealtimeWord(word.text),
+      syllables: tokenizeRealtimeText(word.text),
     }));
   }
 
@@ -325,6 +327,24 @@ export class RealtimeAlignmentEngine {
       if (this.currentBookIndex < this.bookWords.length) {
         const target = this.bookWords[this.currentBookIndex];
         const remaining = tokens.slice(index);
+        if (
+          target.syllables.length > 1 &&
+          remaining.length >= target.syllables.length &&
+          target.syllables.every((syl, sIdx) => remaining[sIdx] === syl)
+        ) {
+          this.spellingBuffer = null;
+          this.pendingToken = null;
+          this.replayPos = null;
+          this.spellingInProgress = false;
+          this.trailingMismatch = null;
+          const spokenIndex = this.spokenWords.length;
+          this.spokenWords.push(target.normalizedText);
+          this.spokenToBookIndex.set(spokenIndex, this.currentBookIndex);
+          this.setWordStatus(this.currentBookIndex, "MATCH");
+          this.currentBookIndex += 1;
+          index += target.syllables.length;
+          continue;
+        }
         const phonics = matchPhonicsSpelling(remaining, target.normalizedText);
         if (phonics) {
           this.spellingBuffer = null;
@@ -412,6 +432,19 @@ export class RealtimeAlignmentEngine {
             matched += remaining.length;
             break;
           }
+        }
+        if (
+          this.bookWords[cursor].syllables.length > 1 &&
+          remaining.length >= this.bookWords[cursor].syllables.length &&
+          this.bookWords[cursor].syllables.every(
+            (syl, sIdx) => remaining[sIdx] === syl,
+          )
+        ) {
+          const consumed = this.bookWords[cursor].syllables.length;
+          matched += consumed;
+          index += consumed - 1;
+          cursor += 1;
+          continue;
         }
         if (this.bookWords[cursor].normalizedText === token) {
           matched += 1;
@@ -587,6 +620,19 @@ export class RealtimeAlignmentEngine {
           targetIndex = cursor;
           break;
         }
+      }
+      if (
+        currentWord.syllables.length > 1 &&
+        remaining.length >= currentWord.syllables.length &&
+        currentWord.syllables.every((syl, sIdx) => remaining[sIdx] === syl)
+      ) {
+        setPreviewStatus(cursor, "MATCH");
+        previewSpelling = false;
+        cursor += 1;
+        targetIndex =
+          cursor < this.bookWords.length ? cursor : Math.max(0, cursor - 1);
+        tokenIndex += currentWord.syllables.length - 1;
+        continue;
       }
       const phonics = matchPhonicsSpelling(
         remaining,
