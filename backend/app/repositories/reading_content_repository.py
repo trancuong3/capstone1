@@ -238,7 +238,7 @@ class ReadingContentRepository:
             .join(Book, Book.Id == ReadingSession.BookId)
             .where(ReadingSession.Id == session_id)
             .where(CatalogRepository.readable_book(actor_id))
-            .with_for_update()
+            .with_for_update(of=ReadingSession)
             .execution_options(populate_existing=True)
         )
 

@@ -306,6 +306,7 @@ class SentenceShooterRepository:
                 .where(
                     Profile.Id == actor_id,
                     Profile.Role == "parent",
+                    Profile.Active == 1,
                     GameSession.Id == session_id,
                     GameRound.Id == round_id,
                 )
@@ -330,7 +331,9 @@ class SentenceShooterRepository:
                 .where(
                     Profile.Id == actor_id,
                     Profile.Role == "parent",
+                    Profile.Active == 1,
                     GameSession.Id == session_id,
+                    CatalogRepository.eligible_book(),
                 )
             )
         ).first()

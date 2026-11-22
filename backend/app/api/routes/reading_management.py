@@ -83,7 +83,7 @@ async def create_plan(payload: ReadingPlanCreate, actor_id: UUID = Depends(get_c
     try:
         service = build_service(db)
         row = await service.create_plan(actor_id, payload)
-        return await service.plan_dict(row, datetime.now(timezone.utc))
+        return await service.plan_dict(row, datetime.now(timezone.utc), actor_id=actor_id)
     except (ManagementForbidden, ManagementNotFound, ManagementConflict) as exc:
         raise map_domain_error(exc) from None
 
@@ -93,7 +93,7 @@ async def update_plan(plan_id: UUID, payload: ReadingPlanUpdate, actor_id: UUID 
     try:
         service = build_service(db)
         row = await service.update_plan(actor_id, plan_id, payload)
-        return await service.plan_dict(row, datetime.now(timezone.utc))
+        return await service.plan_dict(row, datetime.now(timezone.utc), actor_id=actor_id)
     except (ManagementForbidden, ManagementNotFound, ManagementConflict) as exc:
         raise map_domain_error(exc) from None
 
@@ -103,7 +103,7 @@ async def transition_plan(plan_id: UUID, payload: ReadingPlanTransition, actor_i
     try:
         service = build_service(db)
         row = await service.transition_plan(actor_id, plan_id, payload)
-        return await service.plan_dict(row, datetime.now(timezone.utc))
+        return await service.plan_dict(row, datetime.now(timezone.utc), actor_id=actor_id)
     except (ManagementForbidden, ManagementNotFound, ManagementConflict) as exc:
         raise map_domain_error(exc) from None
 

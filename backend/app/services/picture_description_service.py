@@ -692,16 +692,22 @@ class PictureDescriptionService:
             AiModelUsed=model_used[:64] if model_used else None,
             CreatedAt=now,
         )
-        updated_session, saved_attempt = await self.repository.save_attempt_and_update_session(
-            session_id=session.Id,
-            parent_id=actor_id,
-            attempt=orm_attempt,
-            new_best_stars=new_best_stars,
-            new_best_score=new_best_score,
-            new_attempts_count=int(session.AttemptsCount) + 1,
-            new_status=new_status,
-            updated_at=now,
-        )
+        try:
+            updated_session, saved_attempt = await self.repository.save_attempt_and_update_session(
+                session_id=session.Id,
+                parent_id=actor_id,
+                attempt=orm_attempt,
+                new_best_stars=new_best_stars,
+                new_best_score=new_best_score,
+                new_attempts_count=int(session.AttemptsCount) + 1,
+                new_status=new_status,
+                updated_at=now,
+            )
+        except LookupError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Resource not found",
+            ) from exc
         all_attempts = await self.repository.list_attempts(updated_session.Id)
         await self.repository.db.rollback()
 

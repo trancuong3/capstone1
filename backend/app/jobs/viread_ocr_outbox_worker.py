@@ -79,11 +79,27 @@ def deterministic_sample_id(revision_id: Any, line_index: int, image_sha256: str
 
 async def _claim_one() -> dict[str, Any] | None:
     async with AsyncSessionLocal() as db:
+        await db.execute(
+            text("""
+                UPDATE public.viread_ocr_outbox
+                SET status = 'DEAD',
+                    last_error_code = 'LEASE_EXHAUSTED',
+                    locked_at = NULL,
+                    updated_at = now()
+                WHERE status = 'PROCESSING'
+                  AND locked_at < now() - interval '10 minutes'
+                  AND attempts >= :max_attempts
+            """),
+            {"max_attempts": MAX_ATTEMPTS},
+        )
         result = await db.execute(text("""
             WITH next_event AS (
                 SELECT id FROM public.viread_ocr_outbox
-                WHERE (status IN ('PENDING', 'RETRY') AND available_at <= now())
-                   OR (status = 'PROCESSING' AND locked_at < now() - interval '10 minutes')
+                WHERE (
+                    (status IN ('PENDING', 'RETRY') AND available_at <= now())
+                    OR (status = 'PROCESSING' AND locked_at < now() - interval '10 minutes')
+                )
+                  AND attempts < :max_attempts
                 ORDER BY created_at, id
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1
@@ -94,7 +110,7 @@ async def _claim_one() -> dict[str, Any] | None:
             FROM next_event
             WHERE outbox.id = next_event.id
             RETURNING outbox.id, outbox.page_id, outbox.revision_id, outbox.actor_id, outbox.attempts
-        """))
+        """), {"max_attempts": MAX_ATTEMPTS})
         row = result.mappings().first()
         await db.commit()
         return dict(row) if row else None

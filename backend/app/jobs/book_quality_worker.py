@@ -484,11 +484,44 @@ async def _update_scan_progress(scan_id: UUID, worker_id: str) -> None:
         await session.commit()
 
 
-async def _finalize_scan(scan_id: UUID, worker_id: str) -> None:
+async def _mark_scan_unavailable(
+    scan_id: UUID,
+    message: str,
+    *,
+    worker_id: str | None = None,
+) -> None:
+    now = datetime.now(timezone.utc)
     async with AsyncSessionLocal() as session:
         repo = BookContentQualityRepository(session)
         run = await repo.scan_run(scan_id, lock=True)
-        if run is None or run.WorkerId != worker_id:
+        if run is None:
+            return
+        if worker_id is not None and run.WorkerId != worker_id:
+            return
+        if (
+            worker_id is not None
+            and run.LeaseExpiresAt is not None
+            and run.LeaseExpiresAt <= now
+        ):
+            return
+        run.Status = "FAILED"
+        run.ErrorSummary = message
+        run.CompletedAt = now
+        run.LeaseExpiresAt = None
+        run.WorkerId = None
+        await session.commit()
+
+
+async def _finalize_scan(scan_id: UUID, worker_id: str) -> None:
+    now = datetime.now(timezone.utc)
+    async with AsyncSessionLocal() as session:
+        repo = BookContentQualityRepository(session)
+        run = await repo.scan_run(scan_id, lock=True)
+        if (
+            run is None
+            or run.WorkerId != worker_id
+            or (run.LeaseExpiresAt is not None and run.LeaseExpiresAt <= now)
+        ):
             return
         pages = await repo.page_scans(scan_id)
         completed = sum(row.Status == "COMPLETED" for row in pages)
@@ -528,7 +561,9 @@ async def _process_claimed_scan(scan_id: UUID, worker_id: str) -> None:
                 return
             if run.BookId is None:
                 await _mark_scan_unavailable(
-                    scan_id, "Sách đã bị xóa trước khi scan bắt đầu."
+                    scan_id,
+                    "Sách đã bị xóa trước khi scan bắt đầu.",
+                    worker_id=worker_id,
                 )
                 return
             page_scans = await repo.create_book_page_snapshots(run)

@@ -178,13 +178,34 @@ public final class MainActivity extends Activity {
         registerModernBackCallback();
         cleanupStaleCameraCaptures(true);
 
-        if (state != null && webView.restoreState(state) != null) {
+        String initialDeepLinkCallback = resolveAuthCallbackIntent(getIntent());
+        if (initialDeepLinkCallback != null) {
+            loadTrustedUrl(initialDeepLinkCallback);
+        } else if (state != null && webView.restoreState(state) != null) {
             hasLoadedCleanPage = true;
             startupOverlay.setVisibility(View.GONE);
             webView.setVisibility(View.VISIBLE);
         } else {
             loadTrustedUrl(navigation.getOrigin());
         }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String callbackUrl = resolveAuthCallbackIntent(intent);
+        if (callbackUrl != null) {
+            loadTrustedUrl(callbackUrl);
+        }
+    }
+
+    String resolveAuthCallbackIntent(Intent intent) {
+        if (intent == null || !Intent.ACTION_VIEW.equals(intent.getAction())) {
+            return null;
+        }
+        Uri data = intent.getData();
+        return data != null ? navigation.extractTrustedAuthCallbackUrl(data.toString()) : null;
     }
 
     private void configureSystemBarsAndEdgeToEdge() {

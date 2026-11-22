@@ -546,7 +546,11 @@ class ChildSafetyOrchestrator:
                 provider, chunk_id, False, status_code, code, started,
                 output_mode=output_mode, retry_count=retry_count,
             ))
-            if status_code in {401, 403, 429} or (isinstance(status_code, int) and status_code >= 500):
+            if (
+                status_code in {401, 403, 429}
+                or (isinstance(status_code, int) and status_code >= 500)
+                or code in {"PROVIDER_TIMEOUT", "PROVIDER_NETWORK"}
+            ):
                 disabled_families.add(provider.family)
         raise ChildSafetyError(errors[-1] if errors else "NO_PROVIDER_CONFIGURED", events)
 

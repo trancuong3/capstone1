@@ -173,6 +173,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readParentRole(profile: unknown): ParentRole | null {
   if (!isRecord(profile)) return null;
+  if (
+    "active" in profile &&
+    (profile.active === 0 || profile.active === false)
+  ) {
+    return null;
+  }
 
   return profile.role === "parent" || profile.role === "admin"
     ? profile.role
@@ -542,7 +548,7 @@ export function createSupabaseAuthService(
       const { data, error } = await runProviderOperation(() =>
         supabase
           .from("profiles")
-          .select("role")
+          .select("role, active")
           .eq("id", userData.user.id)
           .maybeSingle(),
       );

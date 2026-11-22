@@ -577,7 +577,8 @@ async def _fetch_stored_page_bytes(
         if os.path.exists(image_path):
             with open(image_path, "rb") as f:
                 return f.read()
-        return download_object(image_path, bucket_name=bucket_name)
+        import asyncio
+        return await asyncio.to_thread(download_object, image_path, bucket_name=bucket_name)
     except Exception:
         return None
 
@@ -637,7 +638,12 @@ async def match_book_page_from_camera(
         .where(
             BookPage.BookId == book_id,
             BookPage.LifecycleStatus == "ACTIVE",
+            BookPage.CurrentVerifiedRevisionId.is_not(None),
             CatalogRepository.readable_book(actor_id),
+            or_(
+                ~CatalogRepository.is_private_book(),
+                CatalogRepository.is_private_page_readable(),
+            ),
         )
         .order_by(BookPage.PageNumber)
     )
@@ -678,14 +684,6 @@ async def match_book_page_from_camera(
 
     matched_orm: BookPage = match_res["page"]["page_orm"]
     revision_id = matched_orm.CurrentVerifiedRevisionId
-
-    if revision_id is None:
-        revision_id = await db.scalar(
-            select(PageRevision.Id)
-            .where(PageRevision.PageId == matched_orm.Id)
-            .order_by(PageRevision.CreatedAt.desc())
-            .limit(1)
-        )
 
     if revision_id is None:
         raise HTTPException(status_code=404, detail="Resource not found")
@@ -760,8 +758,15 @@ async def match_page_global_from_camera(
     pages_result = await db.execute(
         select(BookPage, Book)
         .join(Book, Book.Id == BookPage.BookId)
-        .where(BookPage.LifecycleStatus == "ACTIVE")
-        .where(CatalogRepository.readable_book(actor_id))
+        .where(
+            BookPage.LifecycleStatus == "ACTIVE",
+            BookPage.CurrentVerifiedRevisionId.is_not(None),
+            CatalogRepository.readable_book(actor_id),
+            or_(
+                ~CatalogRepository.is_private_book(),
+                CatalogRepository.is_private_page_readable(),
+            ),
+        )
         .order_by(BookPage.BookId, BookPage.PageNumber)
     )
     rows = pages_result.all()
@@ -802,14 +807,6 @@ async def match_page_global_from_camera(
 
     matched_orm: BookPage = match_res["page"]["page_orm"]
     revision_id = matched_orm.CurrentVerifiedRevisionId
-
-    if revision_id is None:
-        revision_id = await db.scalar(
-            select(PageRevision.Id)
-            .where(PageRevision.PageId == matched_orm.Id)
-            .order_by(PageRevision.CreatedAt.desc())
-            .limit(1)
-        )
 
     if revision_id is None:
         raise HTTPException(status_code=404, detail="Resource not found")

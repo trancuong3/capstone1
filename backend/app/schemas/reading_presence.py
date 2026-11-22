@@ -48,5 +48,10 @@ class PresenceAlertRead(BaseModel):
 class PresenceAlertCancel(BaseModel):
     model_config = ConfigDict(extra="forbid")
     reason: Literal[
-        "RETURNED", "SESSION_ENDED", "APP_BACKGROUND", "OPT_OUT", "PAUSED_BY_PARENT"
+        "RETURNED",
+        "SESSION_ENDED",
+        "APP_BACKGROUND",
+        "OPT_OUT",
+        "PAUSED_BY_PARENT",
+        "CAMERA_UNAVAILABLE",
     ] = "RETURNED"

@@ -2295,6 +2295,26 @@ class ParentPrivateBookService:
             summary=summary,
         )
 
+    @staticmethod
+    def _is_submission_in_admin_moderation_scope(
+        book: Book,
+        sub: ParentBookPageSubmission,
+        history_rows: list[ParentBookModerationRequest],
+    ) -> bool:
+        if book.ModerationStatus == MODERATION_SUSPENDED:
+            return True
+        if history_rows:
+            return True
+        if sub.ApprovedBy is not None or sub.AdminDecision is not None:
+            return True
+        return sub.WorkflowStatus in (
+            "PENDING_ADMIN",
+            "NEEDS_ADMIN_REVIEW",
+            "CHECK_FAILED",
+            "REJECTED",
+            "APPROVED_READY_TO_ADD",
+        )
+
     async def admin_get_submission_detail(
         self,
         actor_id: UUID,
@@ -2311,6 +2331,8 @@ class ParentPrivateBookService:
             raise HTTPException(status_code=404, detail="Resource not found")
 
         history_rows = await self.repo.list_moderation_history(sub.Id)
+        if not self._is_submission_in_admin_moderation_scope(book, sub, history_rows):
+            raise HTTPException(status_code=404, detail="Resource not found")
         open_req = next((r for r in history_rows if r.Status == "PENDING_ADMIN"), None)
         latest_req = open_req or (history_rows[0] if history_rows else None)
 
@@ -2436,6 +2458,12 @@ class ParentPrivateBookService:
         sub = await self.repo.get_submission(submission_id)
         if sub is None:
             raise HTTPException(status_code=404, detail="Resource not found")
+        book = await self.repo.get_private_book(sub.BookId)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        history_rows = await self.repo.list_moderation_history(sub.Id)
+        if not self._is_submission_in_admin_moderation_scope(book, sub, history_rows):
+            raise HTTPException(status_code=404, detail="Resource not found")
         storage_path = sub.SourceStoragePath
         await self.repo.add_audit_log(
             actor_id=actor_id,
@@ -2474,6 +2502,17 @@ class ParentPrivateBookService:
             raise HTTPException(
                 status_code=409,
                 detail="Phiên bản trang đã thay đổi hoặc vừa được Admin khác xử lý. Hãy tải lại dữ liệu trước khi quyết định.",
+            )
+
+        if sub.WorkflowStatus == "CANCELLED":
+            raise HTTPException(
+                status_code=409,
+                detail="Bản nộp trang này đã bị hủy nên không thể ra quyết định duyệt.",
+            )
+        if sub.WorkflowStatus == "ADDED_TO_BOOK" and payload.decision != "SUSPEND":
+            raise HTTPException(
+                status_code=409,
+                detail="Trang đã được thêm vào sách riêng; không thể đổi sang trạng thái từ chối hoặc yêu cầu sửa đơn lẻ (hãy dùng quyết định Đình chỉ sách nếu phát hiện vi phạm).",
             )
 
         if payload.decision == "APPROVE":
@@ -2635,6 +2674,26 @@ class ParentPrivateBookService:
         book.SuspendedAt = now
         book.SuspendedBy = actor_id
         book.SuspendedReason = payload.reason
+
+        locked_subs = await self.repo.list_submissions_for_book(book_id, lock=True)
+        for sub in locked_subs:
+            sub.WorkerId = None
+            sub.LeaseExpiresAt = None
+            sub.RetryAfter = None
+            sub.ApprovedSnapshotHash = None
+            sub.ApprovedSubmissionVersion = None
+            sub.ApprovedBy = None
+            sub.ApprovedAt = None
+            if sub.WorkflowStatus not in ("ADDED_TO_BOOK", "CANCELLED"):
+                sub.WorkflowStatus = "REJECTED"
+                sub.AdminDecision = "SUSPEND"
+                sub.AdminDecisionReason = payload.reason
+                sub.OptimisticLockVersion = int(sub.OptimisticLockVersion) + 1
+                sub.UpdatedAt = now
+
+        await self.repo.suspend_open_moderation_requests_for_book(
+            book.Id, actor_id, payload.reason, now
+        )
         audit = await self.repo.add_audit_log(
             actor_id=actor_id,
             action="parent_private_book.suspended",

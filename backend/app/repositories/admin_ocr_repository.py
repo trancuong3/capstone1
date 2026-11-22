@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.role_cache import get_cached_profile_role
 from app.models import Book, BookPage, PageRevision, PageRevisionWord
+from app.policies.book_access import is_catalog_book
 
 
 class AdminOcrRepository:
@@ -56,7 +57,7 @@ class AdminOcrRepository:
         return await get_cached_profile_role(self.db, profile_id)
 
     async def book(self, book_id: UUID, *, lock: bool = False) -> Book | None:
-        query = select(Book).where(Book.Id == book_id)
+        query = select(Book).where(Book.Id == book_id, is_catalog_book())
         if lock:
             query = query.with_for_update()
         return await self.db.scalar(query)
@@ -114,9 +115,13 @@ class AdminOcrRepository:
         return page
 
     async def page(self, page_id: UUID, *, lock: bool = False) -> BookPage | None:
-        query = select(BookPage).where(BookPage.Id == page_id)
+        query = (
+            select(BookPage)
+            .join(Book, Book.Id == BookPage.BookId)
+            .where(BookPage.Id == page_id, is_catalog_book())
+        )
         if lock:
-            query = query.with_for_update()
+            query = query.with_for_update(of=BookPage)
         return await self.db.scalar(query)
 
     def stage_page_reservation(self, page: BookPage) -> None:

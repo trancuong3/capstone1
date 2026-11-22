@@ -75,8 +75,8 @@ class AdminAiWorkflowRepository:
         if image_hash is not None:
             query = query.where(
                 or_(
-                    AdminAiWorkflow.ImageHash == image_hash,
-                    AdminAiWorkflow.ImageHash.is_(None),
+                    AdminAiWorkflow.SourceImageSha256 == image_hash,
+                    AdminAiWorkflow.SourceImageSha256.is_(None),
                 )
             )
         return await self.db.scalar(query)

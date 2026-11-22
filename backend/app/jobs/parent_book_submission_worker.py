@@ -87,7 +87,7 @@ async def run_once(
         submission_id = claimed.Id
 
     async with AsyncSessionLocal() as db:
-        await process_submission_stages(db, submission_id, hooks=hooks)
+        await process_submission_stages(db, submission_id, hooks=hooks, worker_id=worker_name)
     return True
 
 

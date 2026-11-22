@@ -82,7 +82,7 @@ describe("OAuth callback", () => {
 
     expect(response.headers.get("location")).toBe(`${APP_ORIGIN}/dashboard`);
     expect(harness.exchangeCodeForSession).toHaveBeenCalledWith("oauth-code");
-    expect(harness.select).toHaveBeenCalledWith("role");
+    expect(harness.select).toHaveBeenCalledWith("role, active");
     expect(harness.eq).toHaveBeenCalledWith(
       "id",
       "10000000-0000-4000-8000-000000000001",

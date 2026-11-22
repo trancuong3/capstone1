@@ -26,7 +26,7 @@ class ReadingComparisonRepository:
                 ReadingSession.Id == session_id,
                 CatalogRepository.readable_book(actor_id),
             )
-            .with_for_update().execution_options(populate_existing=True)
+            .with_for_update(of=ReadingSession).execution_options(populate_existing=True)
         )
 
     async def finalized_for_page(

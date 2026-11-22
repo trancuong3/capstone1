@@ -311,7 +311,29 @@ class SentenceShooterService:
         if selected_id in expected_ids[: game_round.NextExpectedPosition]:
             raise HTTPException(status_code=409, detail="TOKEN_ALREADY_USED")
 
-        is_correct = selected_id == expected_ids[game_round.NextExpectedPosition]
+        target_pos = game_round.NextExpectedPosition
+        expected_id_at_pos = expected_ids[target_pos]
+        is_correct = selected_id == expected_id_at_pos
+        if not is_correct:
+            token_text_by_id = {
+                str(item["id"]): str(item.get("text") or "").strip().casefold()
+                for item in (game_round.TokensSnapshot or [])
+                if isinstance(item, dict) and "id" in item
+            }
+            selected_text = token_text_by_id.get(selected_id, "")
+            expected_text = token_text_by_id.get(expected_id_at_pos, "")
+            if (
+                selected_text
+                and selected_text == expected_text
+                and selected_id in expected_ids[target_pos + 1 :]
+            ):
+                swap_idx = expected_ids.index(selected_id, target_pos + 1)
+                expected_ids[target_pos], expected_ids[swap_idx] = (
+                    expected_ids[swap_idx],
+                    expected_ids[target_pos],
+                )
+                game_round.ExpectedTokenIds = list(expected_ids)
+                is_correct = True
         if is_correct:
             game_round.NextExpectedPosition += 1
             game_round.CorrectCount += 1

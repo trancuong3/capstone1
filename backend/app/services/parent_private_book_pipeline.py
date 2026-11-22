@@ -259,6 +259,7 @@ async def process_submission_stages(
     submission_id: UUID,
     *,
     hooks: PipelineHooks | None = None,
+    worker_id: str | None = None,
 ) -> ParentBookPageSubmission | None:
     """Execute pending stages (OCR -> Proofreading -> Tool Check) for one submission.
 
@@ -288,6 +289,7 @@ async def process_submission_stages(
     ocr_words = list(row.OcrWordsJson or [])
     candidate_text = row.CandidateText
     candidate_hash = row.CandidateHash
+    candidate_page_num = int(row.TargetPageNumber or row.SourcePageNumber or 1)
     committed_texts = await repo.list_committed_page_texts(book_id)
     local_ai_enforced = not OcrCorrectionConfig.private_book_allow_cloud_ai()
 
@@ -361,9 +363,11 @@ async def process_submission_stages(
                 error_code="OCR_PROCESSING_FAILED",
             )
 
-        # Persist Stage 1 atomically with stale-version check
+        # Persist Stage 1 atomically with stale-version & lease check
         locked = await repo.get_submission(submission_id, lock=True)
-        if locked is None or _is_stale(locked, captured_version, captured_sha):
+        if locked is None or _is_stale(
+            locked, captured_version, captured_sha, expected_worker_id=worker_id
+        ):
             await db.rollback()
             return locked
 
@@ -542,7 +546,9 @@ async def process_submission_stages(
         new_candidate_hash = compute_candidate_hash(corrected_text, source_sha256=captured_sha)
 
         locked = await repo.get_submission(submission_id, lock=True)
-        if locked is None or _is_stale(locked, captured_version, captured_sha):
+        if locked is None or _is_stale(
+            locked, captured_version, captured_sha, expected_worker_id=worker_id
+        ):
             await db.rollback()
             return locked
 
@@ -636,7 +642,9 @@ async def process_submission_stages(
         if cand_fp:
             for existing_page_num, existing_text in committed_texts:
                 if content_fingerprint(existing_text) == cand_fp:
-                    dup = duplicate_page_finding(text_to_check, existing_page_num)
+                    dup = duplicate_page_finding(
+                        text_to_check, candidate_page_num, existing_page_num
+                    )
                     combined_findings.append({
                         "finding_id": hashlib.sha256(
                             f"DUP:{existing_page_num}:{cand_fp}".encode("utf-8")
@@ -772,6 +780,7 @@ async def process_submission_stages(
             expected_version=captured_version,
             expected_sha=captured_sha,
             expected_candidate_hash=expected_candidate_hash,
+            expected_worker_id=worker_id,
             workflow_id=workflow_id,
             suitability=suitability,
             findings=combined_findings,
@@ -805,6 +814,8 @@ def _is_stale(
     expected_version: int,
     expected_sha: str,
     expected_candidate_hash: str | None = None,
+    *,
+    expected_worker_id: str | None = None,
 ) -> bool:
     if locked.WorkflowStatus != "CHECKING":
         return True
@@ -814,6 +825,12 @@ def _is_stale(
         return True
     if expected_candidate_hash is not None and locked.CandidateHash != expected_candidate_hash:
         return True
+    if expected_worker_id is not None:
+        now = datetime.now(timezone.utc)
+        if locked.WorkerId != expected_worker_id:
+            return True
+        if locked.LeaseExpiresAt is None or locked.LeaseExpiresAt <= now:
+            return True
     return False
 
 
@@ -826,12 +843,19 @@ async def _persist_stage_failure(
     stage: str,
     error_code: str,
     expected_candidate_hash: str | None = None,
+    expected_worker_id: str | None = None,
     provider_events: list[dict[str, Any]] | None = None,
     workflow_id: UUID | None = None,
 ) -> ParentBookPageSubmission | None:
     repo = ParentPrivateBookRepository(db)
     locked = await repo.get_submission(submission_id, lock=True)
-    if locked is None or _is_stale(locked, expected_version, expected_sha, expected_candidate_hash):
+    if locked is None or _is_stale(
+        locked,
+        expected_version,
+        expected_sha,
+        expected_candidate_hash,
+        expected_worker_id=expected_worker_id,
+    ):
         await db.rollback()
         return locked
     now = datetime.now(timezone.utc)
@@ -866,6 +890,7 @@ async def _persist_tool_check_result(
     expected_version: int,
     expected_sha: str,
     expected_candidate_hash: str,
+    expected_worker_id: str | None = None,
     workflow_id: UUID,
     suitability: str,
     findings: list[dict[str, Any]],
@@ -875,7 +900,13 @@ async def _persist_tool_check_result(
 ) -> ParentBookPageSubmission | None:
     repo = ParentPrivateBookRepository(db)
     locked = await repo.get_submission(submission_id, lock=True)
-    if locked is None or _is_stale(locked, expected_version, expected_sha, expected_candidate_hash):
+    if locked is None or _is_stale(
+        locked,
+        expected_version,
+        expected_sha,
+        expected_candidate_hash,
+        expected_worker_id=expected_worker_id,
+    ):
         await db.rollback()
         return locked
 

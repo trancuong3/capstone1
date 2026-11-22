@@ -581,6 +581,11 @@ class BookContentQualityService:
                 unsuitable = True
             if workflow.Suitability == "REVIEW_REQUIRED":
                 review_required = True
+            if getattr(workflow, "ImageSafetyStatus", None) == "ADMIN_FLAGGED_UNSAFE":
+                unsuitable = True
+                page_blockers.append(
+                    f"Trang {page.PageNumber}: Ảnh trang đã bị đánh dấu không an toàn cho trẻ em."
+                )
             if not (
                 workflow.SafetyStatus in {"PROVISIONAL", "CONFIRMED", "AUTO_CONFIRMED"}
                 and workflow.SafetyInputHash == workflow.CandidateHash
@@ -1917,6 +1922,10 @@ class BookContentQualityService:
                     or workflow.SafetyInputHash != workflow.CandidateHash
                 ):
                     page_blockers.append(f"{page_label}: Child Safety thiếu hoặc stale")
+                if getattr(workflow, "ImageSafetyStatus", None) == "ADMIN_FLAGGED_UNSAFE":
+                    page_blockers.append(
+                        f"{page_label}: Ảnh trang đã bị đánh dấu không an toàn cho trẻ em"
+                    )
             if (
                 current.page_count == 0
                 or current.ocr_completed_pages != current.page_count

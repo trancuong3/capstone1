@@ -464,7 +464,7 @@ describe("SupabaseAuthService", () => {
       "parent",
     );
     expect(harness.from).toHaveBeenCalledWith("profiles");
-    expect(harness.select).toHaveBeenCalledWith("role");
+    expect(harness.select).toHaveBeenCalledWith("role, active");
     expect(harness.eq).toHaveBeenCalledWith("id", providerUser.id);
   });
 

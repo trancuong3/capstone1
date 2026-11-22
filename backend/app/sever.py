@@ -569,6 +569,8 @@ async def get_health(request: Request) -> dict[str, object]:
         "viread_ocr_outbox": _task_runtime_state(workers.get("viread_ocr_outbox")),
         "viread_ocr_training": _task_runtime_state(workers.get("viread_ocr_training")),
         "book_quality": _task_runtime_state(workers.get("book_quality")),
+        "admin_ai_workflow": _task_runtime_state(workers.get("admin_ai_workflow")),
+        "parent_book_submission": _task_runtime_state(workers.get("parent_book_submission")),
         "active_model_registry": (
             "disabled"
             if active_model_thread is None

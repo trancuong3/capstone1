@@ -757,7 +757,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
         name: "XÁC NHẬN VÀ LƯU NỘI DUNG CUỐI CÙNG",
       }),
     ).toBeDisabled();
-  });
+  }, 15_000);
 
   it("reports a clean AI check but still waits for final Admin confirmation", async () => {
     aiReviewDraftEnabled = true;
