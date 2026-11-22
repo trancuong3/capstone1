@@ -3,7 +3,7 @@ param(
     [string]$VoiceRuntimeDir = "F:\c1\tools\voice-runtime",
     [string]$BindHost = "127.0.0.1",
     [int]$Port = 8010,
-    [string]$TtsPrecision = "fp32",
+    [string]$TtsPrecision = "int8",
     [int]$StartupTimeoutSeconds = 90
 )
 

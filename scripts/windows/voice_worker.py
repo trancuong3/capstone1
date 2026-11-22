@@ -61,9 +61,9 @@ logging.basicConfig(
 logger = logging.getLogger("viread.voice_worker")
 
 STT_MODEL_VERSION = "sherpa-onnx-zipformer-vi-30m-int8-2026-02-09"
-TTS_PRECISION = os.environ.get("VIREAD_VOICE_TTS_PRECISION", "fp32").strip().lower()
+TTS_PRECISION = os.environ.get("VIREAD_VOICE_TTS_PRECISION", "int8").strip().lower()
 if TTS_PRECISION not in ("fp32", "int8"):
-    TTS_PRECISION = "fp32"
+    TTS_PRECISION = "int8"
 TTS_MODEL_VERSION = f"vieneu-v3-turbo-onnx-{TTS_PRECISION}-3.8.5"
 
 SHERPA_MODEL_DIR = Path(
