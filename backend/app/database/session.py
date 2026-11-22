@@ -10,6 +10,7 @@ from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import IllegalStateChangeError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool
@@ -178,6 +179,10 @@ class ConcurrencyLimitedAsyncSession(AsyncSession):
     async def close(self) -> None:
         try:
             await super().close()
+        except IllegalStateChangeError:
+            # Happens if the request task is cancelled/closed mid-checkout
+            # (e.g. client disconnect or reload while `_connection_for_bind` is in flight).
+            logger.debug("Ignored IllegalStateChangeError during interrupted session close")
         finally:
             await self._release_database_permit()
 
