@@ -257,6 +257,25 @@ async def retry_failed_viread_colab_training_job(
     if not row:
         await db.rollback()
         raise HTTPException(status_code=404, detail="Training job was not found")
+    if row["dataset_version_id"] is not None:
+        dv_row = (
+            await db.execute(
+                text(
+                    """
+                    SELECT COALESCE(to_jsonb(dv)->>'dataset_status', 'ACTIVE') AS dataset_status
+                    FROM public.viread_ocr_dataset_versions dv
+                    WHERE dv.id = :dataset_id
+                    """
+                ),
+                {"dataset_id": row["dataset_version_id"]},
+            )
+        ).mappings().first()
+        if dv_row and str(dv_row["dataset_status"]).upper() != "ACTIVE":
+            await db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="DATASET_CONSENT_REVOKED: Snapshot dataset của job này đã bị lưu trữ hoặc thu hồi quyền nên không thể chạy lại.",
+            )
     has_locked_test = bool(row["locked_test_version_id"] and row["locked_test_manifest_sha256"])
     if bool(row["locked_test_version_id"]) != bool(row["locked_test_manifest_sha256"]):
         await db.rollback()

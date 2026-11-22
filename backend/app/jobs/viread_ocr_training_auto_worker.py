@@ -395,6 +395,13 @@ async def _schedule_ready_flow1(locked_test: dict[str, Any] | None = None) -> in
 
 async def _schedule_ready_flow2(locked_test: dict[str, Any] | None = None) -> int:
     """Snapshot committed VERIFIED samples and enqueue once train/validation are ready."""
+    if os.getenv("VIREAD_FLOW2_INGESTION_PAUSED", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return 0
     async with AsyncSessionLocal() as db:
         await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('viread_training_job_schedule'))"))
         if await _has_unresolved_training_job(db):

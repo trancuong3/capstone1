@@ -1,0 +1,1133 @@
+"""Business logic for Parent Private Book -> Flow 2 (Admin Verified) OCR sample contribution.
+
+Enforces:
+- Strict book-level opt-in consent (default OFF; owner-parent only; Admin cannot opt in on behalf of parent).
+- Multi-gate recruitment (ownership, active non-suspended book/page, active current revision, completed OCR +
+  proofread + Tool Check / Admin moderation, clear training rights basis, line image quality, PII exclusion).
+- Line-level Admin verification against the actual cropped image (never auto-verified from "readable for children").
+- Atomic revocation across candidates, outbox, pool samples, active dataset snapshots, and queued training jobs.
+"""
+from __future__ import annotations
+
+import asyncio
+from collections import defaultdict
+from datetime import datetime, timezone
+import hashlib
+from io import BytesIO
+import json
+import logging
+import math
+import re
+from typing import Any
+import unicodedata
+from uuid import UUID
+
+import numpy as np
+from fastapi import HTTPException, status
+from PIL import Image, ImageStat
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
+from app.models import (
+    Book,
+    BookPage,
+    PageRevision,
+    ParentBookFlow2Candidate,
+    ParentBookOcrContributionConsent,
+    ParentBookOcrContributionConsentEvent,
+    ParentBookPageSubmission,
+)
+from app.policies.book_access import (
+    MODERATION_ACTIVE,
+    VISIBILITY_PARENT_PRIVATE,
+    admin_flow2_candidate_crop_url,
+)
+from app.repositories.parent_flow2_contribution_repository import (
+    ParentFlow2ContributionRepository,
+)
+from app.schemas.parent_private_book import (
+    FLOW2_CANDIDATE_STATUS_LABELS,
+    FLOW2_REJECTION_CODE_LABELS,
+    OCR_CONTRIBUTION_NOTICE_VERSION,
+    SOURCE_TYPE_LABELS,
+    AdminFlow2CandidateDecisionRequest,
+    AdminFlow2CandidateDecisionResponse,
+    AdminFlow2CandidatePageRead,
+    AdminFlow2CandidateRead,
+    ParentOcrContributionStateRead,
+    ParentOcrContributionUpdateRequest,
+    SourceUsageType,
+)
+from app.services.storage_service import download_object
+
+logger = logging.getLogger(__name__)
+
+ALLOWED_TRAINING_RIGHTS: frozenset[str] = frozenset(
+    {"SELF_AUTHORED", "PUBLIC_DOMAIN", "LICENSED_OR_PERMISSION"}
+)
+
+MIN_LINE_WIDTH_PX = 24
+MIN_LINE_HEIGHT_PX = 12
+MIN_LINE_ASPECT_RATIO = 0.5
+MIN_LINE_STDDEV = 8.0
+MIN_LINE_EDGE_VARIANCE = 15.0
+
+_EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+_VN_PHONE_RE = re.compile(r"(?<!\d)(?:\+84|84|0)(?:[\s.\-]?[35789])(?:[\s.\-]?\d){8}(?!\d)")
+_LONG_ID_RE = re.compile(r"(?<!\d)\d{9,14}(?!\d)")
+_ID_KEYWORD_RE = re.compile(
+    r"\b(?:cccd|cmnd|căn cước|số tài khoản|stk|tài khoản|sđt|điện thoại|hotline|zalo)\b",
+    re.IGNORECASE,
+)
+_ADDRESS_RE = re.compile(
+    r"\b(?:địa chỉ|số nhà|ngõ\s+\d+|hẻm\s+\d+|tổ dân phố|phường\s+\S+|quận\s+\S+|thôn\s+\S+)\b",
+    re.IGNORECASE,
+)
+_WORKSHEET_NAME_RE = re.compile(
+    r"\b(?:họ và tên|họ tên học sinh|họ tên bé|tên học sinh|tên bé|trường tiểu học)\s*[:\-]?\s*\S+",
+    re.IGNORECASE,
+)
+
+
+def parse_book_source_type(source_declaration: str | None) -> SourceUsageType:
+    cleaned = (source_declaration or "").strip()
+    if cleaned.startswith("[") and "]" in cleaned:
+        tag = cleaned[1:].split("]", 1)[0].strip()
+        if tag in SOURCE_TYPE_LABELS:
+            return tag  # type: ignore[return-value]
+    return "OWNED_PHYSICAL_BOOK"
+
+
+def normalize_and_validate_ocr_label(raw: str) -> str:
+    text_val = unicodedata.normalize("NFC", str(raw or ""))
+    if any(ord(ch) < 32 and ch not in {"\t", " "} for ch in text_val):
+        raise ValueError("Nhãn OCR chứa ký tự điều khiển không hợp lệ.")
+    cleaned = unicodedata.normalize("NFC", " ".join(text_val.split()))
+    if not cleaned:
+        raise ValueError("Nhãn OCR không được để trống.")
+    if len(cleaned) > 300:
+        raise ValueError("Nhãn OCR vượt quá giới hạn 300 ký tự cho một dòng.")
+    return cleaned
+
+
+def detect_line_pii(label_text: str) -> list[str]:
+    """Deterministic Vietnamese PII detector for line labels."""
+    normalized = unicodedata.normalize("NFC", label_text or "")
+    flags: list[str] = []
+    if _EMAIL_RE.search(normalized):
+        flags.append("EMAIL")
+    if _VN_PHONE_RE.search(normalized):
+        flags.append("PHONE_NUMBER")
+    if _ID_KEYWORD_RE.search(normalized) and _LONG_ID_RE.search(normalized):
+        flags.append("ACCOUNT_OR_ID_NUMBER")
+    if _ADDRESS_RE.search(normalized) and re.search(r"\d", normalized):
+        flags.append("PERSONAL_ADDRESS")
+    if _WORKSHEET_NAME_RE.search(normalized):
+        flags.append("CHILD_WORKSHEET_PERSONAL_INFO")
+    return flags
+
+
+def evaluate_line_crop_quality(crop_rgb: Image.Image) -> tuple[bool, dict[str, Any], str | None]:
+    """Enforce clean-sample-standard.md image quality thresholds."""
+    width, height = crop_rgb.size
+    aspect_ratio = round(width / height, 3) if height > 0 else 0.0
+    gray = crop_rgb.convert("L")
+    stat = ImageStat.Stat(gray)
+    stddev = round(float(stat.stddev[0]) if stat.stddev else 0.0, 3)
+
+    arr = np.asarray(gray, dtype=np.float32)
+    if arr.shape[0] >= 3 and arr.shape[1] >= 3:
+        # Discrete Laplacian variance (sharpness / edge contrast)
+        lap = (
+            arr[:-2, 1:-1]
+            + arr[2:, 1:-1]
+            + arr[1:-1, :-2]
+            + arr[1:-1, 2:]
+            - 4.0 * arr[1:-1, 1:-1]
+        )
+        edge_variance = round(float(np.var(lap)), 3)
+    else:
+        edge_variance = 0.0
+
+    metrics = {
+        "width": width,
+        "height": height,
+        "aspect_ratio": aspect_ratio,
+        "stddev": stddev,
+        "edge_variance": edge_variance,
+    }
+    if width < MIN_LINE_WIDTH_PX or height < MIN_LINE_HEIGHT_PX:
+        return False, metrics, "IMAGE_TOO_SMALL"
+    if aspect_ratio < MIN_LINE_ASPECT_RATIO:
+        return False, metrics, "INVALID_ASPECT_RATIO"
+    if stddev < MIN_LINE_STDDEV:
+        return False, metrics, "LOW_CONTRAST_OR_BLANK"
+    if edge_variance < MIN_LINE_EDGE_VARIANCE:
+        return False, metrics, "BLURRY_OR_LOW_EDGE_DETAIL"
+    return True, metrics, None
+
+
+def extract_line_crops_with_boxes(
+    image_bytes: bytes,
+    words: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Crop individual lines from a private page image and compute PNG bytes + quality metrics."""
+    with Image.open(BytesIO(image_bytes)) as src:
+        src.load()
+        page = src.convert("RGB")
+    if page.width <= 0 or page.height <= 0:
+        return []
+
+    by_line: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for w in words:
+        by_line[int(w["line_index"])].append(w)
+
+    results: list[dict[str, Any]] = []
+    for line_index, line_words in sorted(by_line.items()):
+        line_words.sort(key=lambda item: int(item["word_index"]))
+        bounds: list[tuple[float, float, float, float]] = []
+        tokens: list[str] = []
+        valid_geometry = True
+        for word in line_words:
+            box = word.get("bounding_box")
+            if not isinstance(box, list) or len(box) != 4:
+                valid_geometry = False
+                break
+            x, y, bw, bh = (float(v) for v in box)
+            if (
+                not all(math.isfinite(v) for v in (x, y, bw, bh))
+                or x < 0
+                or y < 0
+                or bw <= 0
+                or bh <= 0
+                or x + bw > 1.001
+                or y + bh > 1.001
+            ):
+                valid_geometry = False
+                break
+            bounds.append(
+                (x * page.width, y * page.height, (x + bw) * page.width, (y + bh) * page.height)
+            )
+            token = str(word.get("text") or "").strip()
+            if token:
+                tokens.append(token)
+        if not valid_geometry or not bounds or not tokens:
+            continue
+
+        left = min(b[0] for b in bounds)
+        top = min(b[1] for b in bounds)
+        right = max(b[2] for b in bounds)
+        bottom = max(b[3] for b in bounds)
+        pad_y = max(2, round((bottom - top) * 0.12))
+        crop_box = [
+            max(0, math.floor(left)),
+            max(0, math.floor(top - pad_y)),
+            min(page.width, math.ceil(right)),
+            min(page.height, math.ceil(bottom + pad_y)),
+        ]
+        if crop_box[2] <= crop_box[0] or crop_box[3] <= crop_box[1]:
+            continue
+
+        try:
+            proposed_label = normalize_and_validate_ocr_label(" ".join(tokens))
+        except ValueError:
+            continue
+
+        cropped = page.crop(tuple(crop_box))
+        quality_ok, quality_metrics, quality_reject = evaluate_line_crop_quality(cropped)
+        if not quality_ok:
+            results.append(
+                {
+                    "line_index": line_index,
+                    "eligible": False,
+                    "reject_reason": quality_reject,
+                    "quality_metrics": quality_metrics,
+                }
+            )
+            continue
+
+        buf = BytesIO()
+        cropped.save(buf, format="PNG", optimize=True)
+        png_bytes = buf.getvalue()
+        if not png_bytes:
+            continue
+        image_sha256 = hashlib.sha256(png_bytes).hexdigest()
+        pii_flags = detect_line_pii(proposed_label)
+        results.append(
+            {
+                "line_index": line_index,
+                "eligible": True,
+                "crop_box": crop_box,
+                "png_bytes": png_bytes,
+                "image_sha256": image_sha256,
+                "proposed_label": proposed_label,
+                "pii_flags": pii_flags,
+                "quality_metrics": quality_metrics,
+            }
+        )
+    return results
+
+
+def _submission_passed_private_gates(sub: ParentBookPageSubmission | None) -> bool:
+    """True only when the submission completed OCR, proofreading, and Tool Check / Admin moderation."""
+    if sub is None:
+        return False
+    if sub.WorkflowStatus != "ADDED_TO_BOOK":
+        return False
+    if sub.OcrStatus != "COMPLETED" or sub.IsImageOnly:
+        return False
+    if sub.ProofreadStatus != "COMPLETED":
+        return False
+    if sub.ToolCheckPolicyBlocked:
+        return False
+    if not sub.CandidateHash:
+        return False
+
+    # Path A: Clean Tool Check pass on exact revision snapshot
+    clean_tool_check = (
+        sub.ToolCheckStatus == "PASSED"
+        and sub.ToolCheckInputHash == sub.CandidateHash
+        and sub.ToolCheckSuitability == "SUITABLE"
+        and len(sub.ToolCheckFindingsJson or []) == 0
+    )
+    if clean_tool_check:
+        return True
+
+    # Path B: Flagged revision explicitly approved by Admin for exact snapshot & version
+    admin_approved = (
+        sub.AdminDecision == "APPROVE"
+        and sub.ApprovedBy is not None
+        and sub.ApprovedAt is not None
+        and sub.ApprovedSnapshotHash == sub.CandidateHash
+        and sub.ApprovedSubmissionVersion == sub.SubmissionVersion
+    )
+    return admin_approved
+
+
+def _build_contribution_status_notice(
+    *,
+    enabled: bool,
+    rights_eligible: bool,
+    rights_basis: str,
+    status_val: str,
+) -> str:
+    if not enabled:
+        if status_val == "REVOKED":
+            return (
+                "Đóng góp mẫu OCR đã bị thu hồi. Sách này hiện không được dùng cho các đợt "
+                "huấn luyện mới; quyền đọc sách và tiến độ của bé không bị ảnh hưởng."
+            )
+        return (
+            "Sách này hiện không được dùng để huấn luyện OCR. Bạn có thể chủ động bật đóng góp "
+            "ảnh cắt dòng chữ và nhãn đã xác minh cho Luồng 2 bất kỳ lúc nào."
+        )
+    if not rights_eligible:
+        label = SOURCE_TYPE_LABELS.get(rights_basis, rights_basis)
+        return (
+            f"Bạn đã bật đóng góp, nhưng nguồn sách hiện tại ({label}) chưa đủ căn cứ quyền "
+            "huấn luyện OCR. Chỉ sách tự biên soạn, phạm vi công cộng hoặc có giấy phép mới được tuyển mẫu."
+        )
+    return (
+        "Đang bật đóng góp mẫu OCR (Luồng 2 · Admin xác minh). Các trang đủ điều kiện sẽ tự động "
+        "đưa vào hàng đợi Admin đối chiếu từng dòng chữ trước khi đồng bộ. Bạn có thể ngừng đóng góp bất kỳ lúc nào."
+    )
+
+
+class ParentFlow2ContributionService:
+    """Service for Parent Private Book -> Flow 2 (Admin Verified) OCR contribution."""
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+        self.repo = ParentFlow2ContributionRepository(db)
+
+    async def _require_parent(self, actor_id: UUID) -> None:
+        if await self.repo.role(actor_id) != "parent":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Chỉ phụ huynh chủ sách mới được thay đổi quyền đóng góp mẫu OCR.",
+            )
+
+    async def _require_admin(self, actor_id: UUID) -> None:
+        if await self.repo.role(actor_id) != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Admin access required",
+            )
+
+    def serialize_state(
+        self,
+        book: Book,
+        consent: ParentBookOcrContributionConsent | None,
+        counts: dict[str, int] | None = None,
+        *,
+        last_recruitment_skipped_pages: int = 0,
+    ) -> ParentOcrContributionStateRead:
+        rights_basis = parse_book_source_type(book.SourceDeclaration)
+        rights_eligible = rights_basis in ALLOWED_TRAINING_RIGHTS
+        rights_ineligible_reason = (
+            None
+            if rights_eligible
+            else "Nguồn sách hiện tại chưa có căn cứ quyền huấn luyện (cần Tự biên soạn, Phạm vi công cộng hoặc Có giấy phép)."
+        )
+        enabled = bool(
+            consent is not None
+            and consent.Status == "OPTED_IN"
+            and consent.RightsConfirmed
+            and book.LifecycleStatus == "ACTIVE"
+            and book.ModerationStatus == MODERATION_ACTIVE
+        )
+        status_val = consent.Status if consent is not None else "OPTED_OUT"
+        c = counts or {}
+        return ParentOcrContributionStateRead(
+            book_id=book.Id,
+            enabled=enabled,
+            status=status_val,  # type: ignore[arg-type]
+            purpose="FLOW2_ADMIN_VERIFIED_OCR",
+            consent_version=int(consent.ConsentVersion) if consent is not None else 0,
+            notice_version=consent.NoticeVersion if consent is not None else OCR_CONTRIBUTION_NOTICE_VERSION,
+            rights_confirmed=bool(consent.RightsConfirmed) if consent is not None else False,
+            consented_at=consent.ConsentedAt if consent is not None else None,
+            revoked_at=consent.RevokedAt if consent is not None else None,
+            revoke_reason=consent.RevokeReason if consent is not None else None,
+            rights_basis=rights_basis,
+            rights_eligible_for_training=rights_eligible,
+            rights_ineligible_reason=rights_ineligible_reason,
+            pending_verification_count=int(c.get("PENDING_VERIFICATION", 0)),
+            sync_queued_count=int(c.get("SYNC_QUEUED", 0) + c.get("VERIFIED", 0)),
+            synced_count=int(c.get("SYNCED", 0)),
+            rejected_count=int(c.get("REJECTED", 0)),
+            revoked_count=int(c.get("REVOKED", 0)),
+            last_recruitment_skipped_pages=last_recruitment_skipped_pages,
+            status_notice=_build_contribution_status_notice(
+                enabled=enabled,
+                rights_eligible=rights_eligible,
+                rights_basis=rights_basis,
+                status_val=status_val,
+            ),
+        )
+
+    async def get_book_contribution_state(
+        self, actor_id: UUID, book_id: UUID
+    ) -> ParentOcrContributionStateRead:
+        await self._require_parent(actor_id)
+        book = await self.repo.get_owned_private_book(book_id, actor_id)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        consent = await self.repo.get_consent(book.Id)
+        counts = (await self.repo.get_candidate_counts_by_book([book.Id])).get(book.Id, {})
+        return self.serialize_state(book, consent, counts)
+
+    async def update_book_contribution_consent(
+        self,
+        actor_id: UUID,
+        book_id: UUID,
+        payload: ParentOcrContributionUpdateRequest,
+    ) -> ParentOcrContributionStateRead:
+        await self._require_parent(actor_id)
+        book = await self.repo.get_owned_private_book(book_id, actor_id, lock=True)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        if book.VisibilityScope != VISIBILITY_PARENT_PRIVATE or book.OwnerParentId != actor_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        now = datetime.now(timezone.utc)
+        consent = await self.repo.get_consent(book.Id, lock=True)
+
+        if payload.enabled:
+            if book.LifecycleStatus != "ACTIVE" or book.ModerationStatus != MODERATION_ACTIVE:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Sách riêng đang bị đình chỉ hoặc không còn hoạt động nên không thể bật đóng góp mẫu OCR.",
+                )
+            if not payload.rights_confirmed:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Bạn cần xác nhận có quyền cho phép sử dụng ảnh cắt dòng chữ và nhãn cho huấn luyện OCR Flow 2.",
+                )
+
+            if consent is None:
+                consent = ParentBookOcrContributionConsent(
+                    BookId=book.Id,
+                    OwnerParentId=actor_id,
+                    Purpose="FLOW2_ADMIN_VERIFIED_OCR",
+                    Status="OPTED_IN",
+                    ConsentVersion=1,
+                    NoticeVersion=payload.notice_version,
+                    RightsConfirmed=True,
+                    ConsentedAt=now,
+                    RevokedAt=None,
+                    RevokeReason=None,
+                    CreatedAt=now,
+                    UpdatedAt=now,
+                )
+                await self.repo.save_consent(consent)
+                await self.repo.add_consent_event(
+                    ParentBookOcrContributionConsentEvent(
+                        BookId=book.Id,
+                        OwnerParentId=actor_id,
+                        ActorId=actor_id,
+                        Action="OPT_IN",
+                        ConsentVersion=1,
+                        Purpose="FLOW2_ADMIN_VERIFIED_OCR",
+                        NoticeVersion=payload.notice_version,
+                        RightsConfirmed=True,
+                        CreatedAt=now,
+                    )
+                )
+            elif consent.Status != "OPTED_IN":
+                consent.Status = "OPTED_IN"
+                consent.ConsentVersion = int(consent.ConsentVersion) + 1
+                consent.NoticeVersion = payload.notice_version
+                consent.RightsConfirmed = True
+                consent.ConsentedAt = now
+                consent.RevokedAt = None
+                consent.RevokeReason = None
+                consent.UpdatedAt = now
+                await self.repo.add_consent_event(
+                    ParentBookOcrContributionConsentEvent(
+                        BookId=book.Id,
+                        OwnerParentId=actor_id,
+                        ActorId=actor_id,
+                        Action="OPT_IN",
+                        ConsentVersion=int(consent.ConsentVersion),
+                        Purpose="FLOW2_ADMIN_VERIFIED_OCR",
+                        NoticeVersion=payload.notice_version,
+                        RightsConfirmed=True,
+                        CreatedAt=now,
+                    )
+                )
+            else:
+                # Idempotent re-enable: do not bump consent_version or create duplicate events
+                consent.UpdatedAt = now
+
+            recruitment = await self.recruit_book_pages(book, consent)
+            await self.repo.add_audit_log(
+                actor_id=actor_id,
+                action="parent_private_book.ocr_contribution.opted_in",
+                resource_type="book",
+                resource_id=book.Id,
+                metadata={
+                    "consent_version": int(consent.ConsentVersion),
+                    "notice_version": consent.NoticeVersion,
+                    "recruited_candidates": recruitment["recruited_candidates"],
+                    "skipped_pages": recruitment["skipped_pages"],
+                },
+            )
+            await self.repo.commit()
+            counts = (await self.repo.get_candidate_counts_by_book([book.Id])).get(book.Id, {})
+            return self.serialize_state(
+                book,
+                consent,
+                counts,
+                last_recruitment_skipped_pages=recruitment["skipped_pages"],
+            )
+
+        # Turning OFF consent (OPT_OUT)
+        revoke_reason = payload.revoke_reason or "PARENT_OPTED_OUT"
+        if consent is None:
+            consent = ParentBookOcrContributionConsent(
+                BookId=book.Id,
+                OwnerParentId=actor_id,
+                Purpose="FLOW2_ADMIN_VERIFIED_OCR",
+                Status="OPTED_OUT",
+                ConsentVersion=1,
+                NoticeVersion=payload.notice_version,
+                RightsConfirmed=False,
+                ConsentedAt=None,
+                RevokedAt=now,
+                RevokeReason=revoke_reason,
+                CreatedAt=now,
+                UpdatedAt=now,
+            )
+            await self.repo.save_consent(consent)
+        else:
+            if consent.Status == "OPTED_IN":
+                consent.ConsentVersion = int(consent.ConsentVersion) + 1
+            consent.Status = "OPTED_OUT"
+            consent.RevokedAt = now
+            consent.RevokeReason = revoke_reason
+            consent.UpdatedAt = now
+
+        await self.repo.add_consent_event(
+            ParentBookOcrContributionConsentEvent(
+                BookId=book.Id,
+                OwnerParentId=actor_id,
+                ActorId=actor_id,
+                Action="OPT_OUT",
+                ConsentVersion=int(consent.ConsentVersion),
+                Purpose="FLOW2_ADMIN_VERIFIED_OCR",
+                NoticeVersion=consent.NoticeVersion,
+                RightsConfirmed=False,
+                Reason=revoke_reason,
+                CreatedAt=now,
+            )
+        )
+        downstream = await self.repo.revoke_candidates_and_downstream(
+            book_id=book.Id,
+            page_id=None,
+            reason=revoke_reason,
+            now=now,
+        )
+        await self.repo.add_audit_log(
+            actor_id=actor_id,
+            action="parent_private_book.ocr_contribution.opted_out",
+            resource_type="book",
+            resource_id=book.Id,
+            metadata={
+                "consent_version": int(consent.ConsentVersion),
+                "reason": revoke_reason,
+                **downstream,
+            },
+        )
+        await self.repo.commit()
+        counts = (await self.repo.get_candidate_counts_by_book([book.Id])).get(book.Id, {})
+        return self.serialize_state(book, consent, counts)
+
+    async def recruit_book_pages(
+        self,
+        book: Book,
+        consent: ParentBookOcrContributionConsent,
+    ) -> dict[str, int]:
+        """Automatically recruit all eligible active committed pages of an opted-in book."""
+        if (
+            book.VisibilityScope != VISIBILITY_PARENT_PRIVATE
+            or book.LifecycleStatus != "ACTIVE"
+            or book.ModerationStatus != MODERATION_ACTIVE
+            or consent.Status != "OPTED_IN"
+            or not consent.RightsConfirmed
+        ):
+            return {"recruited_candidates": 0, "skipped_pages": 0}
+
+        pages = await self.repo.list_active_committed_pages(book.Id)
+        recruited = 0
+        skipped_pages = 0
+        for page, rev in pages:
+            sub = await self.repo.get_committed_submission_for_revision(
+                book.Id, page.Id, rev.Id
+            )
+            page_res = await self.recruit_committed_page(
+                book=book,
+                page=page,
+                revision=rev,
+                submission=sub,
+                consent=consent,
+            )
+            recruited += page_res["recruited_candidates"]
+            if page_res["page_skipped"]:
+                skipped_pages += 1
+        return {"recruited_candidates": recruited, "skipped_pages": skipped_pages}
+
+    async def recruit_committed_page_if_opted_in(
+        self,
+        *,
+        book: Book,
+        page: BookPage,
+        revision: PageRevision,
+        submission: ParentBookPageSubmission | None,
+    ) -> dict[str, int]:
+        """Hook called after add_page_to_book() commits a page; recruits only if book is OPTED_IN."""
+        consent = await self.repo.get_consent(book.Id)
+        if consent is None or consent.Status != "OPTED_IN" or not consent.RightsConfirmed:
+            return {"recruited_candidates": 0, "page_skipped": False}
+        return await self.recruit_committed_page(
+            book=book,
+            page=page,
+            revision=revision,
+            submission=submission,
+            consent=consent,
+        )
+
+    async def recruit_committed_page(
+        self,
+        *,
+        book: Book,
+        page: BookPage,
+        revision: PageRevision,
+        submission: ParentBookPageSubmission | None,
+        consent: ParentBookOcrContributionConsent,
+    ) -> dict[str, Any]:
+        """Enforce all Section 3 gates for one committed page and insert line candidates."""
+        if (
+            book.VisibilityScope != VISIBILITY_PARENT_PRIVATE
+            or book.LifecycleStatus != "ACTIVE"
+            or book.ModerationStatus != MODERATION_ACTIVE
+            or page.LifecycleStatus != "ACTIVE"
+            or page.CurrentVerifiedRevisionId != revision.Id
+            or revision.VerificationStatus != "VERIFIED"
+            or consent.Status != "OPTED_IN"
+            or not consent.RightsConfirmed
+        ):
+            return {"recruited_candidates": 0, "page_skipped": True, "reason": "INACTIVE_OR_NO_CONSENT"}
+
+        if not _submission_passed_private_gates(submission):
+            return {"recruited_candidates": 0, "page_skipped": True, "reason": "PRIVATE_GATES_NOT_MET"}
+
+        rights_basis = (
+            submission.SourceType
+            if submission is not None and submission.SourceType in SOURCE_TYPE_LABELS
+            else parse_book_source_type(book.SourceDeclaration)
+        )
+        if rights_basis not in ALLOWED_TRAINING_RIGHTS:
+            return {"recruited_candidates": 0, "page_skipped": True, "reason": "RIGHTS_BASIS_INSUFFICIENT"}
+
+        source_image_path = str(
+            (revision.ProcessingMeta or {}).get("source_image_path") or page.ImagePath or ""
+        ).strip()
+        source_content_hash = str(revision.ContentHash or "").strip()
+        if not source_image_path or not source_content_hash:
+            return {"recruited_candidates": 0, "page_skipped": True, "reason": "MISSING_IMAGE_OR_HASH"}
+
+        words = await self.repo.list_revision_words(revision.Id)
+        if not words:
+            return {"recruited_candidates": 0, "page_skipped": True, "reason": "NO_REVISION_WORDS"}
+
+        word_dicts = [
+            {
+                "word_index": int(w.WordIndex),
+                "line_index": int(w.LineIndex),
+                "text": w.Text,
+                "bounding_box": list(w.BoundingBox or []),
+            }
+            for w in words
+        ]
+        try:
+            image_bytes = await asyncio.to_thread(
+                download_object, source_image_path, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET
+            )
+        except Exception as exc:
+            logger.warning("Failed to download private page image for Flow 2 recruitment: %s", type(exc).__name__)
+            return {"recruited_candidates": 0, "page_skipped": True, "reason": "IMAGE_DOWNLOAD_FAILED"}
+
+        extracted = await asyncio.to_thread(extract_line_crops_with_boxes, image_bytes, word_dicts)
+        now = datetime.now(timezone.utc)
+        recruited = 0
+
+        for line in extracted:
+            if not line.get("eligible"):
+                continue
+            line_index = int(line["line_index"])
+            image_sha256 = str(line["image_sha256"])
+            proposed_label = str(line["proposed_label"])
+            pii_flags = list(line.get("pii_flags") or [])
+            pii_status = "FLAGGED_PII" if pii_flags else "CLEAR"
+            idempotency_key = f"{book.Id}:{page.Id}:{revision.Id}:{line_index}:{image_sha256}"
+
+            existing = await self.repo.get_candidate_by_idempotency_key(idempotency_key)
+            if existing is not None:
+                # Idempotent: never duplicate; if previously revoked and now opted back in cleanly, reopen for verification
+                if existing.Status == "REVOKED" and pii_status == "CLEAR":
+                    existing.ConsentVersion = int(consent.ConsentVersion)
+                    existing.Status = "PENDING_VERIFICATION"
+                    existing.RevokedAt = None
+                    existing.RevokeReason = None
+                    existing.UpdatedAt = now
+                    recruited += 1
+                continue
+
+            # If PII is detected, record as REJECTED immediately so it can NEVER enter training
+            if pii_status == "FLAGGED_PII":
+                cand = ParentBookFlow2Candidate(
+                    BookId=book.Id,
+                    OwnerParentId=book.OwnerParentId,
+                    PageId=page.Id,
+                    RevisionId=revision.Id,
+                    SubmissionId=submission.Id if submission is not None else None,
+                    ConsentVersion=int(consent.ConsentVersion),
+                    LineIndex=line_index,
+                    IdempotencyKey=idempotency_key,
+                    SourceImagePath=source_image_path,
+                    SourceContentHash=source_content_hash,
+                    CropBoxJson=line["crop_box"],
+                    ImageSha256=image_sha256,
+                    ProposedLabel=proposed_label,
+                    RightsBasis=rights_basis,
+                    PiiCheckStatus="FLAGGED_PII",
+                    PiiFlagsJson=pii_flags,
+                    QualityMetricsJson=line["quality_metrics"],
+                    Status="REJECTED",
+                    RejectionCode="CONTAINS_PII",
+                    RejectionReason=f"Tự động loại do phát hiện dấu hiệu thông tin cá nhân: {', '.join(pii_flags)}",
+                    CreatedAt=now,
+                    UpdatedAt=now,
+                )
+                await self.repo.create_candidate(cand)
+                continue
+
+            # Check if an Admin ALREADY verified this exact revision+line+image+content_hash
+            prior_verified = await self.repo.get_prior_admin_verified_candidate(
+                revision_id=revision.Id,
+                line_index=line_index,
+                image_sha256=image_sha256,
+                source_content_hash=source_content_hash,
+            )
+            if prior_verified is not None:
+                # Already exists and verified on this exact revision
+                continue
+
+            cand = ParentBookFlow2Candidate(
+                BookId=book.Id,
+                OwnerParentId=book.OwnerParentId,
+                PageId=page.Id,
+                RevisionId=revision.Id,
+                SubmissionId=submission.Id if submission is not None else None,
+                ConsentVersion=int(consent.ConsentVersion),
+                LineIndex=line_index,
+                IdempotencyKey=idempotency_key,
+                SourceImagePath=source_image_path,
+                SourceContentHash=source_content_hash,
+                CropBoxJson=line["crop_box"],
+                ImageSha256=image_sha256,
+                ProposedLabel=proposed_label,
+                RightsBasis=rights_basis,
+                PiiCheckStatus="CLEAR",
+                PiiFlagsJson=[],
+                QualityMetricsJson=line["quality_metrics"],
+                Status="PENDING_VERIFICATION",
+                CreatedAt=now,
+                UpdatedAt=now,
+            )
+            await self.repo.create_candidate(cand)
+            recruited += 1
+
+        return {"recruited_candidates": recruited, "page_skipped": False}
+
+    async def revoke_on_lifecycle_change(
+        self,
+        *,
+        book: Book,
+        actor_id: UUID,
+        reason: str,
+        page_id: UUID | None = None,
+        consent_event_action: str | None = None,
+    ) -> dict[str, int]:
+        """Called inside book delete, book suspend, page delete, or page revision edit/replace transactions."""
+        now = datetime.now(timezone.utc)
+        if page_id is None and consent_event_action in ("REVOKE_BOOK_DELETED", "REVOKE_BOOK_SUSPENDED"):
+            consent = await self.repo.get_consent(book.Id, lock=True)
+            if consent is not None and consent.Status == "OPTED_IN":
+                consent.Status = "REVOKED"
+                consent.ConsentVersion = int(consent.ConsentVersion) + 1
+                consent.RevokedAt = now
+                consent.RevokeReason = reason
+                consent.UpdatedAt = now
+                await self.repo.add_consent_event(
+                    ParentBookOcrContributionConsentEvent(
+                        BookId=book.Id,
+                        OwnerParentId=book.OwnerParentId,
+                        ActorId=actor_id,
+                        Action=consent_event_action,
+                        ConsentVersion=int(consent.ConsentVersion),
+                        Purpose="FLOW2_ADMIN_VERIFIED_OCR",
+                        NoticeVersion=consent.NoticeVersion,
+                        RightsConfirmed=False,
+                        Reason=reason,
+                        CreatedAt=now,
+                    )
+                )
+
+        return await self.repo.revoke_candidates_and_downstream(
+            book_id=book.Id,
+            page_id=page_id,
+            reason=reason,
+            now=now,
+        )
+
+    # ------------------------------------------------------------------
+    # Admin Line-Label Verification Queue ("Chất lượng sách -> Sách người dùng")
+    # ------------------------------------------------------------------
+    def _serialize_admin_candidate(
+        self,
+        cand: ParentBookFlow2Candidate,
+        book_title: str,
+        page_number: int,
+        *,
+        base_url: str | None = None,
+    ) -> AdminFlow2CandidateRead:
+        return AdminFlow2CandidateRead(
+            id=cand.Id,
+            book_id=cand.BookId,
+            book_title=book_title,
+            page_id=cand.PageId,
+            page_number=page_number,
+            revision_id=cand.RevisionId,
+            line_index=int(cand.LineIndex),
+            consent_version=int(cand.ConsentVersion),
+            crop_image_url=admin_flow2_candidate_crop_url(cand.Id, base_url=base_url),
+            image_sha256=cand.ImageSha256,
+            proposed_label=cand.ProposedLabel,
+            verified_label=cand.VerifiedLabel,
+            rights_basis=cand.RightsBasis,  # type: ignore[arg-type]
+            rights_basis_label=SOURCE_TYPE_LABELS.get(cand.RightsBasis, cand.RightsBasis),
+            pii_check_status=cand.PiiCheckStatus,  # type: ignore[arg-type]
+            pii_flags=list(cand.PiiFlagsJson or []),
+            quality_metrics=dict(cand.QualityMetricsJson or {}),
+            status=cand.Status,  # type: ignore[arg-type]
+            status_label=FLOW2_CANDIDATE_STATUS_LABELS.get(cand.Status, cand.Status),
+            verified_at=cand.VerifiedAt,
+            rejection_code=cand.RejectionCode,
+            rejection_reason=cand.RejectionReason,
+            outbox_event_id=cand.OutboxEventId,
+            sample_id=cand.SampleId,
+            revoked_at=cand.RevokedAt,
+            revoke_reason=cand.RevokeReason,
+            created_at=cand.CreatedAt,
+            updated_at=cand.UpdatedAt,
+        )
+
+    async def admin_list_candidates(
+        self,
+        actor_id: UUID,
+        *,
+        status_filter: str | None = "PENDING_VERIFICATION",
+        book_id: UUID | None = None,
+        limit: int = 25,
+        offset: int = 0,
+        base_url: str | None = None,
+    ) -> AdminFlow2CandidatePageRead:
+        await self._require_admin(actor_id)
+        rows, total, summary = await self.repo.list_admin_candidates(
+            status_filter=status_filter or None,
+            book_id=book_id,
+            limit=limit,
+            offset=offset,
+        )
+        return AdminFlow2CandidatePageRead(
+            items=[
+                self._serialize_admin_candidate(cand, title, page_num, base_url=base_url)
+                for cand, title, page_num in rows
+            ],
+            total=total,
+            limit=limit,
+            offset=offset,
+            summary=summary,
+        )
+
+    async def admin_read_candidate_crop_image(
+        self, actor_id: UUID, candidate_id: UUID
+    ) -> tuple[bytes, str]:
+        """Stream ONLY the cropped line PNG to an authenticated Admin (never Parent B / Child B)."""
+        await self._require_admin(actor_id)
+        cand = await self.repo.get_candidate(candidate_id)
+        if cand is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+
+        image_bytes = await asyncio.to_thread(
+            download_object, cand.SourceImagePath, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET
+        )
+
+        def _render_crop() -> bytes:
+            with Image.open(BytesIO(image_bytes)) as src:
+                src.load()
+                rgb = src.convert("RGB")
+                box = list(cand.CropBoxJson or [])
+                if len(box) != 4:
+                    raise HTTPException(status_code=409, detail="Invalid line crop geometry")
+                cropped = rgb.crop((int(box[0]), int(box[1]), int(box[2]), int(box[3])))
+                out = BytesIO()
+                cropped.save(out, format="PNG", optimize=True)
+                return out.getvalue()
+
+        png_bytes = await asyncio.to_thread(_render_crop)
+        return png_bytes, "image/png"
+
+    async def admin_decide_candidate(
+        self,
+        actor_id: UUID,
+        candidate_id: UUID,
+        payload: AdminFlow2CandidateDecisionRequest,
+    ) -> AdminFlow2CandidateDecisionResponse:
+        await self._require_admin(actor_id)
+        cand = await self.repo.get_candidate(candidate_id, lock=True)
+        if cand is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+
+        now = datetime.now(timezone.utc)
+
+        if payload.decision == "REJECT":
+            reason = payload.reason or (
+                FLOW2_REJECTION_CODE_LABELS.get(payload.rejection_code or "", None)
+                if payload.rejection_code
+                else None
+            )
+            if not reason or len(reason.strip()) < 3:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Vui lòng chọn mã từ chối hoặc nhập lý do từ chối mẫu.",
+                )
+            if cand.Status in ("SYNCED", "REVOKED"):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Mẫu đang ở trạng thái {cand.Status} nên không thể từ chối.",
+                )
+            cand.Status = "REJECTED"
+            cand.RejectionCode = payload.rejection_code or "OTHER"
+            cand.RejectionReason = reason.strip()
+            cand.VerifiedBy = actor_id
+            cand.VerifiedAt = now
+            cand.UpdatedAt = now
+            audit = await self.repo.add_audit_log(
+                actor_id=actor_id,
+                action="admin.flow2_candidate.rejected",
+                resource_type="parent_book_flow2_candidate",
+                resource_id=cand.Id,
+                metadata={
+                    "book_id": str(cand.BookId),
+                    "page_id": str(cand.PageId),
+                    "revision_id": str(cand.RevisionId),
+                    "rejection_code": cand.RejectionCode,
+                    "reason": cand.RejectionReason,
+                },
+            )
+            await self.repo.commit()
+            return AdminFlow2CandidateDecisionResponse(
+                candidate_id=cand.Id,
+                book_id=cand.BookId,
+                page_id=cand.PageId,
+                revision_id=cand.RevisionId,
+                decision="REJECT",
+                status="REJECTED",
+                rejection_code=cand.RejectionCode,
+                rejection_reason=cand.RejectionReason,
+                decided_at=now,
+                audit_log_id=audit.Id,
+            )
+
+        # APPROVE: strict live re-verification of ownership, consent, active page/revision, rights, PII, label
+        if cand.Status in ("SYNC_QUEUED", "SYNCED") and cand.OutboxEventId is not None:
+            # Idempotent replay if already approved & queued/synced
+            audit = await self.repo.add_audit_log(
+                actor_id=actor_id,
+                action="admin.flow2_candidate.approve_idempotent_replay",
+                resource_type="parent_book_flow2_candidate",
+                resource_id=cand.Id,
+                metadata={"status": cand.Status, "outbox_event_id": str(cand.OutboxEventId)},
+            )
+            await self.repo.commit()
+            return AdminFlow2CandidateDecisionResponse(
+                candidate_id=cand.Id,
+                book_id=cand.BookId,
+                page_id=cand.PageId,
+                revision_id=cand.RevisionId,
+                decision="APPROVE",
+                status=cand.Status,  # type: ignore[arg-type]
+                verified_label=cand.VerifiedLabel,
+                outbox_event_id=cand.OutboxEventId,
+                decided_at=cand.VerifiedAt or now,
+                audit_log_id=audit.Id,
+            )
+
+        if cand.Status != "PENDING_VERIFICATION":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Mẫu đang ở trạng thái {cand.Status}, không thể xác nhận duyệt.",
+            )
+
+        book = await self.repo.get_private_book(cand.BookId)
+        consent = await self.repo.get_consent(cand.BookId)
+        page, rev = await self.repo.get_page_and_revision(cand.PageId, cand.RevisionId)
+
+        if (
+            book is None
+            or book.LifecycleStatus != "ACTIVE"
+            or book.ModerationStatus != MODERATION_ACTIVE
+            or consent is None
+            or consent.Status != "OPTED_IN"
+            or not consent.RightsConfirmed
+            or int(consent.ConsentVersion) != int(cand.ConsentVersion)
+            or page is None
+            or page.LifecycleStatus != "ACTIVE"
+            or rev is None
+            or page.CurrentVerifiedRevisionId != rev.Id
+            or rev.VerificationStatus != "VERIFIED"
+            or rev.ContentHash != cand.SourceContentHash
+        ):
+            cand.Status = "REVOKED"
+            cand.RevokedAt = now
+            cand.RevokeReason = "STALE_CONSENT_OR_REVISION_AT_ADMIN_APPROVAL"
+            cand.UpdatedAt = now
+            await self.repo.commit()
+            raise HTTPException(
+                status_code=409,
+                detail="Quyền đóng góp hoặc phiên bản trang đã thay đổi nên mẫu này đã bị thu hồi và không thể duyệt.",
+            )
+
+        if cand.RightsBasis not in ALLOWED_TRAINING_RIGHTS:
+            raise HTTPException(
+                status_code=409,
+                detail="Nguồn sách của mẫu không đủ căn cứ quyền huấn luyện.",
+            )
+
+        raw_label = payload.verified_label if payload.verified_label is not None else cand.ProposedLabel
+        try:
+            verified_label = normalize_and_validate_ocr_label(raw_label)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        pii_flags = detect_line_pii(verified_label)
+        if cand.PiiCheckStatus != "CLEAR" or pii_flags:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Nhãn chứa dấu hiệu thông tin cá nhân ({', '.join(pii_flags or cand.PiiFlagsJson or ['PII'])}) nên không thể đưa vào tập huấn luyện.",
+            )
+
+        verified_label_sha256 = hashlib.sha256(verified_label.encode("utf-8")).hexdigest()
+        cand.VerifiedLabel = verified_label
+        cand.VerifiedLabelSha256 = verified_label_sha256
+        cand.VerifiedBy = actor_id
+        cand.VerifiedAt = now
+        cand.Status = "SYNC_QUEUED"
+        cand.UpdatedAt = now
+
+        outbox_payload = json.dumps(
+            {
+                "source_origin": "PARENT_PRIVATE_CONTRIBUTION",
+                "book_id": str(cand.BookId),
+                "candidate_id": str(cand.Id),
+                "consent_version": int(cand.ConsentVersion),
+                "notice_version": consent.NoticeVersion,
+                "rights_basis": cand.RightsBasis,
+                "line_index": int(cand.LineIndex),
+                "source_content_hash": cand.SourceContentHash,
+                "image_sha256": cand.ImageSha256,
+                "verified_label_sha256": verified_label_sha256,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        outbox_event_id = await self.repo.enqueue_candidate_outbox(
+            candidate_id=cand.Id,
+            page_id=cand.PageId,
+            revision_id=cand.RevisionId,
+            actor_id=actor_id,
+            payload_json=outbox_payload,
+        )
+        cand.OutboxEventId = outbox_event_id
+
+        audit = await self.repo.add_audit_log(
+            actor_id=actor_id,
+            action="admin.flow2_candidate.approved",
+            resource_type="parent_book_flow2_candidate",
+            resource_id=cand.Id,
+            metadata={
+                "book_id": str(cand.BookId),
+                "page_id": str(cand.PageId),
+                "revision_id": str(cand.RevisionId),
+                "consent_version": int(cand.ConsentVersion),
+                "outbox_event_id": str(outbox_event_id),
+                "verified_label_sha256": verified_label_sha256,
+            },
+        )
+        await self.repo.commit()
+
+        return AdminFlow2CandidateDecisionResponse(
+            candidate_id=cand.Id,
+            book_id=cand.BookId,
+            page_id=cand.PageId,
+            revision_id=cand.RevisionId,
+            decision="APPROVE",
+            status="SYNC_QUEUED",
+            verified_label=verified_label,
+            outbox_event_id=outbox_event_id,
+            decided_at=now,
+            audit_log_id=audit.Id,
+        )

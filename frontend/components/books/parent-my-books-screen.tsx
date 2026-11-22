@@ -315,7 +315,9 @@ function ParentMyBooksContent({ currentUserId }: { currentUserId: string }) {
           <p className="mt-0.5 text-emerald-900">
             Chỉ bạn và các hồ sơ trẻ thuộc tài khoản này có thể đọc sách riêng
             sau khi trang hoàn tất kiểm tra. Sách riêng không bao giờ xuất hiện
-            trong thư viện chung và không dùng để huấn luyện mô hình AI chung.
+            trong thư viện chung và mặc định không được dùng để huấn luyện OCR.
+            Bạn có thể chủ động bật hoặc ngừng đóng góp mẫu OCR cho từng cuốn
+            sách bên trong trang quản lý sách.
           </p>
         </div>
       </div>

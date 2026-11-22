@@ -24,4 +24,10 @@ from .game_session import GameAttempt, GameRound, GameSession
 from .picture_description import PictureDescriptionAttempt, PictureDescriptionSession
 from .admin_ai_workflow import AdminAiWorkflow
 from .difficult_word_practice import DifficultWordPracticeAttempt
-from .parent_private_book import ParentBookModerationRequest, ParentBookPageSubmission
+from .parent_private_book import (
+    ParentBookFlow2Candidate,
+    ParentBookModerationRequest,
+    ParentBookOcrContributionConsent,
+    ParentBookOcrContributionConsentEvent,
+    ParentBookPageSubmission,
+)
