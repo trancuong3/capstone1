@@ -294,18 +294,12 @@ test.describe("Mobile & Android WebView Full UI + OCR Parity E2E", () => {
       name: /^Bắt đầu đọc$/i,
     });
     await expect(startSessionBtn).toBeEnabled({ timeout: 20_000 });
-<<<<<<< HEAD
     await assertMobileScreenHealth(
       page,
       projectName,
-      "05_reading_preparation",
+      "06_reading_preparation",
       [startSessionBtn],
     );
-=======
-    await assertMobileScreenHealth(page, projectName, "06_reading_preparation", [
-      startSessionBtn,
-    ]);
->>>>>>> feat/android-app-complete-20261122
 
     await startSessionBtn.click();
     await page.waitForURL(/\/reading\/[0-9a-f-]+/i, { timeout: 25_000 });

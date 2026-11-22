@@ -194,6 +194,9 @@ public final class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        if (webView != null) {
+            webView.onResume();
+        }
         String callbackUrl = resolveAuthCallbackIntent(intent);
         if (callbackUrl != null) {
             loadTrustedUrl(callbackUrl);
@@ -1174,15 +1177,6 @@ public final class MainActivity extends Activity {
             denyPending();
         }
         super.onStop();
-    }
-
-    @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        setIntent(intent);
-        if (webView != null) {
-            webView.onResume();
-        }
     }
 
     @Override
