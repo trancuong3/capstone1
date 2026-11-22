@@ -78,6 +78,7 @@ interface ReadingLayoutProps {
   onReadWord?: () => void;
   onSpellWord?: () => void;
   phonicsPanel?: ReactNode;
+  sentenceReinforcementPanel?: ReactNode;
   onToggleListening?: () => void;
   onWordClick?: (word: ReadingPageWordDTO) => void;
   page: ReadingPageDTO;
@@ -136,6 +137,7 @@ export function ReadingLayout({
   onReadWord,
   onSpellWord,
   phonicsPanel,
+  sentenceReinforcementPanel,
   onToggleListening,
   onWordClick,
   page,
@@ -449,6 +451,12 @@ export function ReadingLayout({
           <p className="min-w-0 flex-1 truncate text-sm font-semibold text-ink italic">
             &ldquo;{latestTranscript}&rdquo;
           </p>
+        </div>
+      ) : null}
+
+      {sentenceReinforcementPanel ? (
+        <div className="mx-auto w-full max-w-[1008px]">
+          {sentenceReinforcementPanel}
         </div>
       ) : null}
 

@@ -24,6 +24,7 @@ import os
 import re
 import time
 import unicodedata
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -85,6 +86,22 @@ TTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 MAX_AUDIO_BYTES = 15 * 1024 * 1024
 MAX_TEXT_CHARS = 5000
 QUEUE_WAIT_SECONDS = 40.0
+TTS_MEM_CACHE_MAX_ENTRIES = 128
+_TTS_MEM_CACHE: OrderedDict[str, tuple[bytes, float]] = OrderedDict()
+
+
+def _mem_cache_get(key: str) -> tuple[bytes, float] | None:
+    hit = _TTS_MEM_CACHE.get(key)
+    if hit is not None:
+        _TTS_MEM_CACHE.move_to_end(key)
+    return hit
+
+
+def _mem_cache_put(key: str, value: tuple[bytes, float]) -> None:
+    _TTS_MEM_CACHE[key] = value
+    _TTS_MEM_CACHE.move_to_end(key)
+    while len(_TTS_MEM_CACHE) > TTS_MEM_CACHE_MAX_ENTRIES:
+        _TTS_MEM_CACHE.popitem(last=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -913,33 +930,47 @@ async def post_tts(req: TtsSynthesisRequest) -> Response:
     preset = resolve_strict_voice(req.voice_id)
     text_nfc = normalize_nfc_text(req.text)
     speed = normalize_speed(req.speed)
+    word_count = len(WORD_TOKEN_RE.findall(text_nfc))
+    cache_mode = "word" if (req.word_sample or word_count <= 3) else "sentence"
+    cache_key = make_cache_key(
+        voice_id=preset.voice_id,
+        speed=speed,
+        mode=cache_mode,
+        payload=text_nfc,
+    )
 
-    try:
-        await asyncio.wait_for(
-            runtime.tts_semaphore.acquire(), timeout=QUEUE_WAIT_SECONDS
-        )
-    except TimeoutError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "VOICE_WORKER_BUSY",
-                "message": "Bộ đọc giọng nói trên máy đang bận xử lý câu trước.",
-            },
-        ) from exc
+    # Ultra-fast in-memory LRU cache (< 10ms TTFA, never blocks TTS semaphore)
+    mem_hit = _mem_cache_get(cache_key)
+    if mem_hit is not None:
+        wav_bytes, duration_s = mem_hit
+    else:
+        try:
+            await asyncio.wait_for(
+                runtime.tts_semaphore.acquire(), timeout=QUEUE_WAIT_SECONDS
+            )
+        except TimeoutError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "VOICE_WORKER_BUSY",
+                    "message": "Bộ đọc giọng nói trên máy đang bận xử lý câu trước.",
+                },
+            ) from exc
 
-    runtime.active_tts_jobs += 1
-    try:
-        wav_bytes, duration_s = await asyncio.to_thread(
-            synthesize_single_utterance_sync,
-            runtime.tts_engine,
-            text_nfc,
-            preset,
-            speed,
-            req.word_sample,
-        )
-    finally:
-        runtime.active_tts_jobs -= 1
-        runtime.tts_semaphore.release()
+        runtime.active_tts_jobs += 1
+        try:
+            wav_bytes, duration_s = await asyncio.to_thread(
+                synthesize_single_utterance_sync,
+                runtime.tts_engine,
+                text_nfc,
+                preset,
+                speed,
+                req.word_sample,
+            )
+        finally:
+            runtime.active_tts_jobs -= 1
+            runtime.tts_semaphore.release()
+        _mem_cache_put(cache_key, (wav_bytes, duration_s))
 
     return Response(
         content=wav_bytes,
