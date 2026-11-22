@@ -96,6 +96,21 @@ const server = https.createServer(tlsOptions, (req, res) => {
     },
     (upstreamRes) => {
       const respHeaders = filterHeaders(upstreamRes.headers);
+      if (typeof respHeaders.location === "string") {
+        const loc = respHeaders.location;
+        const internalOrigins = [
+          `http://localhost:${frontendPort}`,
+          `https://localhost:${frontendPort}`,
+          `http://127.0.0.1:${frontendPort}`,
+          `https://127.0.0.1:${frontendPort}`,
+        ];
+        for (const internalOrigin of internalOrigins) {
+          if (loc === internalOrigin || loc.startsWith(internalOrigin + "/") || loc.startsWith(internalOrigin + "?")) {
+            respHeaders.location = `https://${incomingHost}${loc.slice(internalOrigin.length)}`;
+            break;
+          }
+        }
+      }
       res.writeHead(upstreamRes.statusCode || 502, respHeaders);
       upstreamRes.pipe(res);
     },

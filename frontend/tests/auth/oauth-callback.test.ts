@@ -162,4 +162,38 @@ describe("OAuth callback", () => {
     );
     expect(createServerSupabaseClientMock).not.toHaveBeenCalled();
   });
+
+  it("preserves LAN HTTPS reverse-proxy origin via x-forwarded-host and rejects malformed host headers", async () => {
+    const harness = makeSupabase();
+    createServerSupabaseClientMock.mockResolvedValue(harness.client);
+
+    const proxiedReq = new NextRequest(
+      new URL("/auth/callback?code=lan-oauth-code", "http://127.0.0.1:3001"),
+      {
+        headers: {
+          host: "192.168.1.4:8443",
+          "x-forwarded-host": "192.168.1.4:8443",
+          "x-forwarded-proto": "https",
+        },
+      },
+    );
+    const proxiedResp = await GET(proxiedReq);
+    expect(proxiedResp.headers.get("location")).toBe(
+      "https://192.168.1.4:8443/dashboard",
+    );
+
+    const spoofedReq = new NextRequest(
+      new URL("/auth/callback?code=lan-oauth-code", "http://127.0.0.1:3001"),
+      {
+        headers: {
+          "x-forwarded-host": "evil.example/phish",
+          "x-forwarded-proto": "https",
+        },
+      },
+    );
+    const spoofedResp = await GET(spoofedReq);
+    const spoofedLoc = spoofedResp.headers.get("location") ?? "";
+    expect(spoofedLoc).not.toContain("evil.example");
+    expect(new URL(spoofedLoc).pathname).toBe("/dashboard");
+  });
 });

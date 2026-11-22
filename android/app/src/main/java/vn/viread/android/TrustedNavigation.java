@@ -187,6 +187,48 @@ public final class TrustedNavigation {
         return false;
     }
 
+    /**
+     * Inspect an outbound HTTPS OAuth authorize URL (e.g. {@code https://<project>.supabase.co/auth/v1/authorize})
+     * and return the cryptographic {@code viread_nonce} embedded in {@code redirect_to} when it targets
+     * the RFC 8252 Android loopback listener ({@code 127.0.0.1:3000/auth/callback} or {@code localhost:3000/auth/callback}).
+     * Returns {@code null} for all non-OAuth or non-loopback URLs.
+     */
+    public static String extractOAuthLoopbackNonce(String candidateUrl) {
+        URI authUri = parse(candidateUrl);
+        if (authUri == null
+                || !"https".equalsIgnoreCase(authUri.getScheme())
+                || authUri.getHost() == null
+                || authUri.getRawUserInfo() != null) {
+            return null;
+        }
+        String authPath = authUri.getRawPath();
+        if (authPath == null || !authPath.endsWith("/auth/v1/authorize")) {
+            return null;
+        }
+        String redirectTo = OAuthLoopbackServer.extractDecodedQueryParam(
+                authUri.getRawQuery(), "redirect_to");
+        URI redirectUri = parse(redirectTo);
+        if (redirectUri == null
+                || !"http".equalsIgnoreCase(redirectUri.getScheme())
+                || redirectUri.getHost() == null
+                || redirectUri.getRawUserInfo() != null) {
+            return null;
+        }
+        String redirectHost = redirectUri.getHost().toLowerCase(Locale.ROOT);
+        boolean isLoopbackHost = "127.0.0.1".equals(redirectHost) || "localhost".equals(redirectHost);
+        if (!isLoopbackHost
+                || redirectUri.getPort() != OAuthLoopbackServer.DEFAULT_PORT
+                || !"/auth/callback".equals(redirectUri.getRawPath())) {
+            return null;
+        }
+        String nonce = OAuthLoopbackServer.extractDecodedQueryParam(
+                redirectUri.getRawQuery(), "viread_nonce");
+        if (nonce == null || !nonce.matches("[A-Za-z0-9_-]{16,128}")) {
+            return null;
+        }
+        return nonce;
+    }
+
     private static boolean isValidMimeToken(String token) {
         if (token.contains("..")) return false;
         int slash = token.indexOf('/');
