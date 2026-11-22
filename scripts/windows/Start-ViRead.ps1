@@ -20,8 +20,37 @@ if (-not $ConfigPath) {
 }
 
 if (-not (Test-Path $ConfigPath)) {
-    [Console]::Error.WriteLine("Missing ViRead host config: $ConfigPath. Copy scripts\windows\viread-host.config.example.json and update lanHost.")
-    exit 2
+    $examplePath = Join-Path $scriptDir "viread-host.config.example.json"
+    if (-not (Test-Path $examplePath)) {
+        [Console]::Error.WriteLine("Missing ViRead host config template: $examplePath.")
+        exit 2
+    }
+    $autoCfg = Get-Content $examplePath -Raw -Encoding UTF8 | ConvertFrom-Json
+    # Auto-detect active private LAN IPv4 address
+    try {
+        $lanCand = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.IPAddress -notlike "127.*" -and
+                $_.IPAddress -notlike "169.254.*" -and
+                ($_.IPAddress -like "192.168.*" -or $_.IPAddress -like "10.*" -or $_.IPAddress -like "172.*") -and
+                $_.PrefixOrigin -ne "WellKnown"
+            } | Select-Object -First 1
+        if ($lanCand -and $lanCand.IPAddress) {
+            $autoCfg.lanHost = [string]$lanCand.IPAddress
+        }
+    } catch { }
+
+    # Avoid colliding with another active worktree if default ports (8443/3001/8001) are busy
+    $defaultBusy = [bool](Get-NetTCPConnection -LocalPort 8443,3001,8001 -State Listen -ErrorAction SilentlyContinue)
+    if ($defaultBusy) {
+        $autoCfg.httpsPort = 9443
+        $autoCfg.frontendPort = 3002
+        $autoCfg.backendPort = 8002
+        $autoCfg.runtimeDir = "F:\c1\viread-local-voice-runtime"
+    }
+
+    $autoCfg | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 $ConfigPath
+    Write-Host "Auto-created $ConfigPath (LAN: https://$($autoCfg.lanHost):$($autoCfg.httpsPort))."
 }
 
 $cfg = Get-Content $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -100,6 +129,10 @@ if (Test-Path $stateFile) {
         $allUp = (Test-ProcessAlive $prev.backendPid) -and (Test-ProcessAlive $prev.frontendPid) -and (Test-ProcessAlive $prev.proxyPid) `
             -and [bool](Test-PortListening $backendPort) -and [bool](Test-PortListening $frontendPort) -and [bool](Test-PortListening $httpsPort)
         if ($allUp) {
+            $voiceWorkerPyCheck = Join-Path $voiceRuntimeDir ".venv\Scripts\python.exe"
+            if ((Test-Path $voiceWorkerPyCheck) -and -not (Test-PortListening $voiceWorkerPort)) {
+                & (Join-Path $scriptDir "Start-ViReadVoiceWorker.ps1") -VoiceRuntimeDir $voiceRuntimeDir -Port $voiceWorkerPort -StartupTimeoutSeconds $StartupTimeoutSeconds
+            }
             Write-Host "ViRead host stack is already running (backend=$($prev.backendPid), frontend=$($prev.frontendPid), proxy=$($prev.proxyPid))."
             Write-Host "LAN URL: https://${lanHost}:${httpsPort}"
             exit 0
@@ -156,8 +189,10 @@ if ($needFeBuild) {
     }
     $savedEnv["NEXT_PUBLIC_API_URL"] = [Environment]::GetEnvironmentVariable("NEXT_PUBLIC_API_URL", "Process")
     $savedEnv["NEXT_DIST_DIR"] = [Environment]::GetEnvironmentVariable("NEXT_DIST_DIR", "Process")
+    $savedEnv["TURBOPACK_ROOT"] = [Environment]::GetEnvironmentVariable("TURBOPACK_ROOT", "Process")
     [Environment]::SetEnvironmentVariable("NEXT_PUBLIC_API_URL", $lanApiUrl, "Process")
     [Environment]::SetEnvironmentVariable("NEXT_DIST_DIR", ".next-lan", "Process")
+    [Environment]::SetEnvironmentVariable("TURBOPACK_ROOT", (Split-Path -Parent $repoRoot), "Process")
     $tsconfigPath = Join-Path $repoRoot "frontend\tsconfig.json"
     $tsconfigBackup = if (Test-Path $tsconfigPath) { Get-Content $tsconfigPath -Raw -Encoding UTF8 } else { $null }
     Push-Location (Join-Path $repoRoot "frontend")

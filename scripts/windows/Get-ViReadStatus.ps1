@@ -82,7 +82,7 @@ if ($AsJson) {
     Write-Host "Logs:       $($report.logsDir)"
 }
 
-if ($report.processes.backend.running -and $report.processes.frontend.running -and $report.processes.proxy.running -and $beHealth -and $beHealth.ocr.ready) {
+if ($report.processes.backend.running -and $report.processes.frontend.running -and $report.processes.proxy.running -and $beHealth -and ($beHealth.status -in @("ok", "degraded"))) {
     exit 0
 }
 exit 1
