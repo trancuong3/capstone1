@@ -285,41 +285,81 @@ class RouteTests(unittest.TestCase):
             self.assertEqual(client.post(url, json=body).status_code, 422, body)
 
     def test_returns_audio_and_word_times(self):
-        studio.clear_caches()
-        body = {"audio_base64": base64.b64encode(b"mp3").decode(), "alignment": alignment_for(TEXT)}
-        with patch.object(studio.httpx, "AsyncClient", fake_client([json_response(body)], [])):
-            with patch.dict(os.environ, {"ELEVENLABS_API_KEY": "route-key"}):
-                response = self.client().post(
-                    "/voice/text-to-speech/timed", json={"words": WORDS, "speed": 0.9}
-                )
+        from unittest.mock import AsyncMock, MagicMock
+        from app.providers.local_voice_provider import LocalTimedSpeech, LocalTimedWord
+
+        orchestrator = MagicMock()
+        orchestrator.synthesize_timed = AsyncMock(
+            return_value=LocalTimedSpeech(
+                audio=b"wav-bytes",
+                content_type="audio/wav",
+                duration_seconds=1.3,
+                words=[
+                    LocalTimedWord(index=0, start=0.0, end=0.2),
+                    LocalTimedWord(index=1, start=0.3, end=0.5),
+                    LocalTimedWord(index=2, start=0.6, end=0.8),
+                    LocalTimedWord(index=3, start=0.9, end=1.3),
+                ],
+                resolved_voice_id="local_north_truc_ly",
+                region="north",
+                model_version="vieneu-v3-turbo-onnx-fp32-3.8.5",
+            )
+        )
+        with patch.object(studio_routes, "get_voice_orchestrator", return_value=orchestrator):
+            response = self.client().post(
+                "/voice/text-to-speech/timed", json={"words": WORDS, "speed": 0.9}
+            )
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertEqual(base64.b64decode(data["audio_base64"]), b"mp3")
-        self.assertEqual(data["content_type"], "audio/mpeg")
+        self.assertEqual(base64.b64decode(data["audio_base64"]), b"wav-bytes")
+        self.assertEqual(data["content_type"], "audio/wav")
+        self.assertEqual(data["provider"], "local")
         self.assertEqual(len(data["words"]), 4)
         self.assertEqual(data["words"][0], {"index": 0, "start": 0.0, "end": 0.2})
 
     def test_provider_error_does_not_leak_details(self):
-        studio.clear_caches()
-        with patch.object(studio.httpx, "AsyncClient", fake_client([json_response({"detail": "quota secret"}, 429)], [])):
-            with patch.dict(os.environ, {"ELEVENLABS_API_KEY": "route-key-2"}):
-                response = self.client().post("/voice/text-to-speech/timed", json={"words": WORDS})
+        from unittest.mock import AsyncMock, MagicMock
+
+        orchestrator = MagicMock()
+        orchestrator.synthesize_timed = AsyncMock(
+            side_effect=VoiceProviderError(status_code=503, code="LOCAL_TTS_UNAVAILABLE")
+        )
+        with patch.object(studio_routes, "get_voice_orchestrator", return_value=orchestrator):
+            response = self.client().post("/voice/text-to-speech/timed", json={"words": WORDS})
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json(), {"detail": {"code": "SPEECH_UNAVAILABLE"}})
+        self.assertEqual(response.json(), {"detail": {"code": "LOCAL_TTS_UNAVAILABLE"}})
 
     def test_voice_list_response(self):
-        studio.clear_caches()
-        body = {"voices": [{"voice_id": "v1", "name": "Sarah", "labels": {"gender": "female"}}], "has_more": False}
-        with patch.object(studio.httpx, "AsyncClient", fake_client([json_response(body)], [])):
-            with patch.dict(os.environ, {"ELEVENLABS_API_KEY": "list-key", "ELEVENLABS_VOICE_ID": "v1"}):
-                response = self.client().get("/voice/voices")
+        from unittest.mock import AsyncMock, MagicMock
+
+        orchestrator = MagicMock()
+        orchestrator.list_voices = AsyncMock(
+            return_value={
+                "voices": [
+                    {
+                        "voice_id": "local_north_truc_ly",
+                        "name": "Cô Trúc Ly",
+                        "provider": "local",
+                        "region": "north",
+                        "region_label": "Miền Bắc",
+                        "gender": "female",
+                        "is_default": True,
+                    }
+                ],
+                "default_voice_id": "local_north_truc_ly",
+                "local_worker_ready": True,
+                "google_tts_available": False,
+            }
+        )
+        with patch.object(studio_routes, "get_voice_orchestrator", return_value=orchestrator):
+            response = self.client().get("/voice/voices")
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertEqual(data["default_voice_id"], "v1")
+        self.assertEqual(data["default_voice_id"], "local_north_truc_ly")
         self.assertEqual(data["voices"][0]["gender"], "female")
+        self.assertEqual(data["voices"][0]["region"], "north")
 
     def test_402_unavailable_voice_falls_back_to_default_voice_and_sets_headers(self):
-        from app.api.routes import voice as voice_routes
         from app.providers.elevenlabs_voice_provider import (
             DEFAULT_VOICE_ID,
             ElevenLabsVoiceProvider,
@@ -348,21 +388,7 @@ class RouteTests(unittest.TestCase):
             self.assertEqual(len(calls), 2)
             self.assertTrue(calls[1][1].endswith(f"/{DEFAULT_VOICE_ID}/with-timestamps"))
 
-            # Subsequent short TTS for the same unavailable voice skips the 402 request
-            app = FastAPI()
-            app.include_router(voice_routes.router, prefix="/voice")
-            app.dependency_overrides[get_current_parent_id] = lambda: ACTOR_ID
-            short_calls = []
-            short_responses = [
-                httpx.Response(200, content=b"short-mp3", headers={"content-type": "audio/mpeg"})
-            ]
-            with patch.object(
-                ElevenLabsVoiceProvider.__module__ and studio.httpx, "AsyncClient",
-                fake_client(short_responses, short_calls),
-            ):
-                pass
-
-        # Verify short synthesize fallback + X-Voice-Fallback header directly
+        # Verify short ElevenLabsVoiceProvider fallback behavior directly
         studio.clear_caches()
         short_calls = []
         short_responses = [
@@ -370,20 +396,14 @@ class RouteTests(unittest.TestCase):
             httpx.Response(200, content=b"mp3-ok", headers={"content-type": "audio/mpeg"}),
         ]
         from app.providers import elevenlabs_voice_provider as base_provider
-        with patch.object(base_provider.httpx, "AsyncClient", fake_client(short_responses, short_calls)), patch.dict(
-            os.environ, {"ELEVENLABS_API_KEY": "short-fb-key"}, clear=False
-        ):
-            app = FastAPI()
-            app.include_router(voice_routes.router, prefix="/voice")
-            app.dependency_overrides[get_current_parent_id] = lambda: ACTOR_ID
-            client = TestClient(app)
-            r1 = client.post(
-                "/voice/text-to-speech",
-                json={"text": "Xin chào", "voice_id": "xeRzNgA5BGMAmllSnOuF", "speed": 1.1},
+        with patch.object(base_provider.httpx, "AsyncClient", fake_client(short_responses, short_calls)):
+            short_res = run(
+                ElevenLabsVoiceProvider(api_key="short-fb-key").synthesize(
+                    text="Xin chào", requested_voice_id="xeRzNgA5BGMAmllSnOuF", speed=1.1
+                )
             )
-        self.assertEqual(r1.status_code, 200)
-        self.assertEqual(r1.headers.get("X-Resolved-Voice-Id"), DEFAULT_VOICE_ID)
-        self.assertEqual(r1.headers.get("X-Voice-Fallback"), "1")
+        self.assertEqual(short_res.resolved_voice_id, DEFAULT_VOICE_ID)
+        self.assertTrue(short_res.used_fallback_voice)
         self.assertEqual(len(short_calls), 2)
         self.assertEqual(short_calls[1][2]["json"]["voice_settings"]["speed"], 1.1)
 

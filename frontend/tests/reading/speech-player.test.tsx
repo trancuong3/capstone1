@@ -178,10 +178,7 @@ describe("useSpeechPlayer", () => {
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:reading-audio");
   });
 
-  it("rejects decode and play failures instead of reporting successful playback", async () => {
-    speechSynthesisMock.speak.mockImplementation(() => {
-      throw new Error("Browser speech is unavailable");
-    });
+  it("rejects decode and play failures without switching to OS speechSynthesis", async () => {
     const { result } = renderHook(() => useSpeechPlayer());
     let playback!: Promise<void>;
 
@@ -190,8 +187,11 @@ describe("useSpeechPlayer", () => {
     });
     await waitFor(() => expect(FakeAudio.instances).toHaveLength(1));
     act(() => FakeAudio.instances[0].fail());
-    await expect(playback).rejects.toThrow("Browser speech is unavailable");
+    await expect(playback).rejects.toThrow(
+      /Giọng đọc trên máy hiện chưa sẵn sàng/,
+    );
     expect(revokeObjectURL).toHaveBeenCalledOnce();
+    expect(speechSynthesisMock.speak).not.toHaveBeenCalled();
 
     FakeAudio.instances = [];
     const playFailure = new Error("Autoplay was denied");
@@ -199,91 +199,78 @@ describe("useSpeechPlayer", () => {
     act(() => {
       playback = result.current.play("mèo");
     });
-    await expect(playback).rejects.toThrow("Browser speech is unavailable");
+    await expect(playback).rejects.toThrow("Autoplay was denied");
     expect(revokeObjectURL).toHaveBeenCalledTimes(2);
+    expect(speechSynthesisMock.speak).not.toHaveBeenCalled();
   });
 
-  it("uses the device's Vietnamese voice when server TTS is unavailable", async () => {
+  it("never falls back to OS speechSynthesis when server TTS is unavailable and surfaces fallbackNotice", async () => {
     speechServiceMock.synthesize.mockRejectedValueOnce(
-      new Error("402 paid_plan_required"),
+      new Error("503 LOCAL_TTS_UNAVAILABLE"),
     );
     const { result } = renderHook(() => useSpeechPlayer());
-    const onPlay = vi.fn();
-    const onTimeUpdate = vi.fn();
-    const onEnded = vi.fn();
-    const playback = result.current.play("Bé đọc chữ khỏe nhé.", {
-      onPlay,
-      onTimeUpdate,
-      onEnded,
-    });
-
-    await waitFor(() =>
-      expect(speechSynthesisMock.speak).toHaveBeenCalledOnce(),
-    );
-    const utterance = speechSynthesisMock.speak.mock
-      .calls[0][0] as FakeSpeechSynthesisUtterance;
-    expect(utterance.lang).toBe("vi-VN");
-    expect(utterance.voice?.lang).toBe("vi-VN");
-    expect(result.current.isPlaying).toBe(true);
+    let caught: Error | null = null;
 
     await act(async () => {
-      utterance.onstart?.({} as SpeechSynthesisEvent);
-      utterance.onboundary?.({ charIndex: 4 } as SpeechSynthesisEvent);
-      utterance.onend?.({} as SpeechSynthesisEvent);
-      await playback;
+      try {
+        await result.current.play("Bé đọc chữ khỏe nhé.");
+      } catch (err) {
+        caught = err as Error;
+      }
     });
 
-    expect(onPlay).toHaveBeenCalledOnce();
-    expect(onTimeUpdate).toHaveBeenCalled();
-    expect(onEnded).toHaveBeenCalledOnce();
+    expect(caught).toBeInstanceOf(Error);
+    expect(speechSynthesisMock.speak).not.toHaveBeenCalled();
+    expect(result.current.fallbackNotice).toMatch(
+      /Giọng đọc đã khóa đang tạm bận/,
+    );
     expect(result.current.isPlaying).toBe(false);
   });
 
-  it("reuses the device voice briefly after a server TTS failure", async () => {
-    speechServiceMock.synthesize.mockRejectedValue(
-      new Error("502 TTS unavailable"),
-    );
+  it("retries server TTS on the next play call instead of locking onto OS voice", async () => {
+    speechServiceMock.synthesize
+      .mockRejectedValueOnce(new Error("502 TTS unavailable"))
+      .mockResolvedValueOnce(
+        new Blob(["encoded audio"], { type: "audio/wav" }),
+      );
     const { result } = renderHook(() => useSpeechPlayer());
-    const first = result.current.play("mèo");
 
-    await waitFor(() =>
-      expect(speechSynthesisMock.speak).toHaveBeenCalledOnce(),
-    );
-    const firstUtterance = speechSynthesisMock.speak.mock
-      .calls[0][0] as FakeSpeechSynthesisUtterance;
     await act(async () => {
-      firstUtterance.onend?.({} as SpeechSynthesisEvent);
-      await first;
+      await expect(result.current.play("mèo")).rejects.toThrow();
     });
+    expect(speechSynthesisMock.speak).not.toHaveBeenCalled();
 
-    const second = result.current.play("khỏe");
-    await waitFor(() =>
-      expect(speechSynthesisMock.speak).toHaveBeenCalledTimes(2),
-    );
-    const secondUtterance = speechSynthesisMock.speak.mock
-      .calls[1][0] as FakeSpeechSynthesisUtterance;
+    let second!: Promise<void>;
+    act(() => {
+      second = result.current.play("khỏe");
+    });
+    await waitFor(() => expect(FakeAudio.instances).toHaveLength(1));
     await act(async () => {
-      secondUtterance.onend?.({} as SpeechSynthesisEvent);
+      FakeAudio.instances[0].finish();
       await second;
     });
 
-    expect(speechServiceMock.synthesize).toHaveBeenCalledOnce();
+    expect(speechServiceMock.synthesize).toHaveBeenCalledTimes(2);
+    expect(result.current.fallbackNotice).toBeNull();
   });
 
-  it("cancels browser speech and rejects when stopped", async () => {
-    speechServiceMock.synthesize.mockRejectedValueOnce(
-      new Error("402 paid_plan_required"),
+  it("aborts in-flight synthesis or playback cleanly when stopped", async () => {
+    let resolveSynth!: (blob: Blob) => void;
+    speechServiceMock.synthesize.mockReturnValueOnce(
+      new Promise<Blob>((resolve) => {
+        resolveSynth = resolve;
+      }),
     );
     const { result } = renderHook(() => useSpeechPlayer());
-    const playback = result.current.play("khỏe").catch((error: Error) => error);
-
-    await waitFor(() =>
-      expect(speechSynthesisMock.speak).toHaveBeenCalledOnce(),
-    );
+    let playback!: Promise<unknown>;
+    act(() => {
+      playback = result.current.play("khỏe").catch((error: Error) => error);
+    });
     act(() => result.current.stop());
+    resolveSynth(new Blob(["encoded audio"], { type: "audio/wav" }));
 
     expect(await playback).toMatchObject({ name: "AbortError" });
-    expect(speechSynthesisMock.cancel).toHaveBeenCalledOnce();
+    expect(speechSynthesisMock.speak).not.toHaveBeenCalled();
     expect(result.current.isPlaying).toBe(false);
   });
 

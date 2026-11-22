@@ -40,6 +40,7 @@ async function installReading(
   options: {
     longPage?: boolean;
     fallback?: boolean;
+    shortTtsFail?: boolean;
     noVietnameseVoice?: boolean;
   } = {},
 ) {
@@ -56,8 +57,11 @@ async function installReading(
   const prompts: { text: string; voice_id?: string; speed?: number }[] = [];
   const headers = {
     "access-control-allow-origin": "http://127.0.0.1:3106",
-    "access-control-allow-headers": "authorization,content-type,accept",
+    "access-control-allow-headers":
+      "authorization,content-type,accept,x-voice-policy-mode,x-allow-google-stt-fallback,x-allow-google-tts-fallback,x-voice-region,x-voice-session-id,x-voice-page-id,x-voice-turn-id",
     "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-expose-headers":
+      "x-voice-provider,x-resolved-voice-id,x-voice-region,x-voice-model-version,x-voice-fallback",
   };
   const respond = (route: Route, body: unknown, status = 200) =>
     route.fulfill({
@@ -195,6 +199,12 @@ async function installReading(
           speed?: number;
         },
       );
+      if (options.shortTtsFail)
+        return respond(
+          route,
+          { detail: { code: "LOCAL_TTS_UNAVAILABLE" } },
+          503,
+        );
       return route.fulfill({
         status: 200,
         headers,
@@ -294,33 +304,31 @@ async function installReading(
   return { api, requests, unexpected, writes, text, prompts };
 }
 
-test("Phase 3: a second word cancels the first device sample", async ({
+test("Phase 3: a second word cancels the first locked-voice sample with zero OS voice switching", async ({
   page,
 }) => {
   const fixture = await installReading(page);
   await page.getByRole("button", { name: "Bé", exact: true }).click();
   await expect
-    .poll(() => page.evaluate(() => window.__ttsProbe.utterances.length))
+    .poll(() => page.evaluate(() => window.__ttsProbe.audios.length))
     .toBe(1);
   await page.getByRole("button", { name: "mèo", exact: true }).click();
   await expect
-    .poll(() => page.evaluate(() => window.__ttsProbe.utterances.length))
+    .poll(() => page.evaluate(() => window.__ttsProbe.audios.length))
     .toBe(2);
 
-  // Word samples prefer a Vietnamese device voice when available. A second
-  // selection must cancel the old utterance, not overlap it or call the server.
+  // Word samples strictly use the session-locked voice (never OS speechSynthesis).
+  // Selecting a second word cancels the first audio element cleanly.
   const playback = await page.evaluate(() => ({
-    texts: window.__ttsProbe.utterances.map((utterance) => utterance.text),
-    firstStopped: window.__ttsProbe.utterances[0]?.onend === null,
-    secondActive: typeof window.__ttsProbe.utterances[1]?.onend === "function",
-    cancelled: window.__ttsProbe.cancels,
+    utteranceCount: window.__ttsProbe.utterances.length,
+    firstPaused: window.__ttsProbe.audios[0]?.paused === true,
+    secondActive: window.__ttsProbe.audios[1]?.paused === false,
   }));
-  expect(playback.texts).toEqual(["bé. bé.", "mèo. mèo."]);
-  expect(playback.firstStopped).toBe(true);
+  expect(playback.utteranceCount).toBe(0);
+  expect(playback.firstPaused).toBe(true);
   expect(playback.secondActive).toBe(true);
-  expect(playback.cancelled).toBeGreaterThanOrEqual(1);
   await expect(page.getByText("Đọc mẫu từ")).toBeVisible();
-  expect(fixture.prompts).toEqual([]);
+  expect(fixture.prompts.map((p) => p.text)).toEqual(["bé", "mèo"]);
   expect(fixture.requests).toEqual([]);
   expect(fixture.writes).toEqual([]);
 });
@@ -443,37 +451,33 @@ test("Phase 3: 801 words finish through two separately decoded chunks", async ({
   expect(fixture.writes).toEqual([]);
 });
 
-test("Phase 3: browser fallback uses boundary events and stops safely", async ({
+test("Phase 3: timed failure falls back to locked-voice short TTS without OS voice switching", async ({
   page,
 }, testInfo) => {
   const fixture = await installReading(page, { fallback: true });
   await page.getByRole("button", { name: "Nghe đọc mẫu cả trang" }).click();
   await expect
-    .poll(() => page.evaluate(() => window.__ttsProbe.utterances.length))
+    .poll(() => page.evaluate(() => window.__ttsProbe.audios.length))
     .toBe(1);
-  expect(await page.evaluate(() => window.__ttsProbe.utterances[0].rate)).toBe(
-    0.9,
+  expect(await page.evaluate(() => window.__ttsProbe.utterances.length)).toBe(
+    0,
   );
-  await page.evaluate(() => {
-    const utterance = window.__ttsProbe.utterances[0];
-    utterance.onboundary?.({
-      utterance,
-      charIndex: 3,
-      elapsedTime: 0.5,
-    } as SpeechSynthesisEvent);
-  });
-  await expect(
-    page.locator('[data-word-id="90000000-0000-4000-8000-000000000002"]'),
-  ).toHaveAttribute("data-reading-state", "current");
+  expect(fixture.prompts.map((p) => p.text)).toEqual([fixture.text]);
   await page.screenshot({
     path: testInfo.outputPath("fallback-word-highlight.png"),
   });
   await page.getByRole("button", { name: "Tạm dừng mẫu", exact: true }).click();
+  await expect
+    .poll(() => page.evaluate(() => window.__ttsProbe.audios[0]?.paused))
+    .toBe(true);
   await page.getByRole("button", { name: "Tiếp tục mẫu", exact: true }).click();
-  expect(await page.evaluate(() => window.__ttsProbe.pauses)).toBe(1);
-  expect(await page.evaluate(() => window.__ttsProbe.resumes)).toBe(1);
+  await expect
+    .poll(() => page.evaluate(() => window.__ttsProbe.audios[0]?.paused))
+    .toBe(false);
   await page.getByRole("button", { name: "Dừng đọc mẫu", exact: true }).click();
-  expect(await page.evaluate(() => window.__ttsProbe.cancels)).toBe(1);
+  await expect
+    .poll(() => page.evaluate(() => window.__ttsProbe.audios[0]?.paused))
+    .toBe(true);
   await expect(page.locator("[data-child-error-count]")).toHaveAttribute(
     "data-child-error-count",
     "0",
@@ -481,11 +485,12 @@ test("Phase 3: browser fallback uses boundary events and stops safely", async ({
   expect(fixture.writes).toEqual([]);
 });
 
-test("Phase 3: unavailable Vietnamese browser voice produces a safe recoverable error", async ({
+test("Phase 3: unavailable TTS produces a safe recoverable error with zero OS voice switching", async ({
   page,
 }) => {
   const fixture = await installReading(page, {
     fallback: true,
+    shortTtsFail: true,
     noVietnameseVoice: true,
   });
   await page.getByRole("button", { name: "Nghe đọc mẫu cả trang" }).click();

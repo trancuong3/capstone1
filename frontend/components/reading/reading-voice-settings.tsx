@@ -1,7 +1,14 @@
 "use client";
 
 import { RefreshCw, SlidersHorizontal, Volume2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import { Button } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
@@ -13,6 +20,17 @@ import {
   type VoiceOption,
 } from "@/lib/api/voice-studio-service";
 import {
+  getActiveSessionVoiceLock,
+  getVoicePolicyPreferences,
+  inferRegionFromVoiceId,
+  lockSessionVoice,
+  setVoicePolicyPreferences,
+  subscribeVoicePolicy,
+  VOICE_REGION_LABELS,
+  type VoiceProviderMode,
+  type VoiceRegion,
+} from "@/lib/reading/session-voice-lock";
+import {
   clampSpeed,
   SPEED_MAX,
   SPEED_MIN,
@@ -21,13 +39,22 @@ import {
 } from "@/lib/reading/speech-preferences";
 import { cn } from "@/lib/utils/cn";
 
-const PREVIEW_TEXT = "Chào bé, mình cùng đọc sách nhé.";
+const PREVIEW_TEXT =
+  "Chào con, hôm nay cô trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.";
 const SPEED_PRESETS = [
-  { label: "Chậm rõ (Lớp 1)", value: 0.75 },
-  { label: "Chậm", value: 0.8 },
-  { label: "Vừa", value: 0.9 },
-  { label: "Nhanh", value: 1.1 },
+  { label: "Chậm", value: 0.85 },
+  { label: "Vừa", value: 1.0 },
+  { label: "Nhanh", value: 1.15 },
 ] as const;
+const REGION_TABS: readonly {
+  readonly id: "all" | VoiceRegion;
+  readonly label: string;
+}[] = [
+  { id: "all", label: "Tất cả vùng" },
+  { id: "north", label: "Miền Bắc" },
+  { id: "central", label: "Miền Trung" },
+  { id: "south", label: "Miền Nam" },
+];
 const GENDER_LABELS: Record<string, string> = { female: "Nữ", male: "Nam" };
 
 type LoadState =
@@ -49,6 +76,21 @@ function voiceTitle(voice: VoiceOption): string {
   return voice.name.split(" - ")[0] ?? voice.name;
 }
 
+function resolveVoiceRegion(voice: VoiceOption): VoiceRegion | null {
+  if (
+    voice.region === "north" ||
+    voice.region === "central" ||
+    voice.region === "south"
+  ) {
+    return voice.region;
+  }
+  const accent = (voice.accent ?? "").toLowerCase();
+  if (accent.includes("bắc") || accent === "northern") return "north";
+  if (accent.includes("trung") || accent === "central") return "central";
+  if (accent.includes("nam") || accent === "southern") return "south";
+  return null;
+}
+
 function voiceDetails(voice: VoiceOption): string {
   const ages: Record<string, string> = {
     young: "Trẻ trung",
@@ -60,20 +102,22 @@ function voiceDetails(voice: VoiceOption): string {
   };
   return [
     voice.gender ? (GENDER_LABELS[voice.gender] ?? voice.gender) : null,
-    voice.accent
-      ? ((
-          {
-            northern: "Giọng Bắc",
-            southern: "Giọng Nam",
-            central: "Giọng Trung",
-            american: "Giọng Mỹ",
-            british: "Giọng Anh",
-          } as Record<string, string>
-        )[voice.accent.toLowerCase()] ?? voice.accent)
-      : null,
+    voice.region_label ??
+      (voice.accent
+        ? ((
+            {
+              northern: "Giọng Bắc",
+              southern: "Giọng Nam",
+              central: "Giọng Trung",
+              american: "Giọng Mỹ",
+              british: "Giọng Anh",
+            } as Record<string, string>
+          )[voice.accent.toLowerCase()] ?? voice.accent)
+        : null),
     voice.age
       ? (ages[voice.age.toLowerCase()] ?? voice.age.replaceAll("_", " "))
       : null,
+    voice.provider === "google" ? "Google dự phòng" : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -92,9 +136,18 @@ export function ReadingVoiceSettings({
 }: ReadingVoiceSettingsProps) {
   const voiceStudio = useMemo(() => createVoiceStudioService(), []);
   const { preferences, update } = useSpeechPreferences();
+  const policy = useSyncExternalStore(
+    subscribeVoicePolicy,
+    getVoicePolicyPreferences,
+    getVoicePolicyPreferences,
+  );
   const [isOpen, setIsOpen] = useState(false);
   const [loadState, setLoadState] = useState<LoadState>({ status: "idle" });
+  const [regionTab, setRegionTab] = useState<"all" | VoiceRegion>("all");
   const [filter, setFilter] = useState("all");
+  const [removedVoiceNotice, setRemovedVoiceNotice] = useState<string | null>(
+    null,
+  );
   const [previewError, setPreviewError] = useState(false);
   const mountedRef = useRef(true);
   const previewGenerationRef = useRef(0);
@@ -107,6 +160,24 @@ export function ReadingVoiceSettings({
       loadControllerRef.current?.abort();
     };
   }, []);
+
+  const syncPausedSessionLock = useCallback(
+    (nextVoiceId?: string | null, nextSpeed?: number, modelVer?: string) => {
+      const activeLock = getActiveSessionVoiceLock();
+      if (!activeLock) return;
+      lockSessionVoice(activeLock.sessionId, {
+        voiceId:
+          nextVoiceId !== undefined
+            ? nextVoiceId
+            : getSpeechPreferences().voiceId,
+        speed:
+          nextSpeed !== undefined ? nextSpeed : getSpeechPreferences().speed,
+        modelVersion: modelVer,
+        forceUpdate: true,
+      });
+    },
+    [],
+  );
 
   const loadVoices = useCallback(() => {
     loadControllerRef.current?.abort();
@@ -121,21 +192,97 @@ export function ReadingVoiceSettings({
         if (
           storedVoice &&
           !data.voices.some((voice) => voice.voice_id === storedVoice)
-        )
+        ) {
+          setRemovedVoiceNotice(
+            "Giọng đã lưu trước đây không còn khả dụng, ViRead đã chuyển về giọng mặc định để phụ huynh kiểm tra lại.",
+          );
           update({ voiceId: null });
+          syncPausedSessionLock(null);
+        }
         setLoadState({ status: "ready", data });
       })
       .catch(() => {
         if (mountedRef.current && !controller.signal.aborted)
           setLoadState({ status: "error" });
       });
-  }, [voiceStudio, update]);
+  }, [voiceStudio, update, syncPausedSessionLock]);
 
-  function change(value: Parameters<typeof update>[0]) {
+  function change(
+    value: Parameters<typeof update>[0],
+    selectedOption?: VoiceOption,
+  ) {
     previewGenerationRef.current += 1;
     onStopPreview();
     setPreviewError(false);
+    setRemovedVoiceNotice(null);
     update(value);
+    if (selectedOption) {
+      const reg = resolveVoiceRegion(selectedOption);
+      setVoicePolicyPreferences({
+        ...(reg ? { region: reg } : {}),
+        ...(selectedOption.model_version
+          ? { modelVersion: selectedOption.model_version }
+          : {}),
+      });
+    }
+    syncPausedSessionLock(
+      value.voiceId,
+      value.speed,
+      selectedOption?.model_version ?? undefined,
+    );
+  }
+
+  function changeProviderPolicy(
+    nextPolicy: Partial<{
+      providerMode: VoiceProviderMode;
+      allowGoogleSttFallback: boolean;
+      allowGoogleTtsFallback: boolean;
+    }>,
+  ) {
+    previewGenerationRef.current += 1;
+    onStopPreview();
+    setPreviewError(false);
+    const updated = setVoicePolicyPreferences(nextPolicy);
+    // If Google TTS was disabled while a Google voice was chosen, reset cleanly to local voice
+    const currentVoiceId = getSpeechPreferences().voiceId;
+    if (
+      currentVoiceId?.startsWith("google_") &&
+      (updated.providerMode !== "local_with_google_fallback" ||
+        !updated.allowGoogleTtsFallback)
+    ) {
+      update({ voiceId: null });
+      syncPausedSessionLock(null);
+    }
+    if (isOpen) {
+      loadVoices();
+    }
+  }
+
+  function selectRegionTab(nextTab: "all" | VoiceRegion) {
+    setRegionTab(nextTab);
+    if (nextTab === "all") return;
+    setVoicePolicyPreferences({ region: nextTab });
+    if (loadState.status === "ready") {
+      const regionVoices = loadState.data.voices.filter(
+        (v) => resolveVoiceRegion(v) === nextTab,
+      );
+      if (regionVoices.length > 0) {
+        const currentId =
+          preferences.voiceId ?? loadState.data.default_voice_id;
+        if (!regionVoices.some((v) => v.voice_id === currentId)) {
+          const pick = regionVoices[0];
+          change(
+            {
+              voiceId:
+                pick.voice_id === loadState.data.default_voice_id
+                  ? null
+                  : pick.voice_id,
+            },
+            pick,
+          );
+        }
+      }
+    }
   }
 
   function open() {
@@ -163,13 +310,24 @@ export function ReadingVoiceSettings({
     );
   const isChildVoice = (voice: VoiceOption) =>
     voice.age?.toLowerCase() === "child";
-  const matchesFilter = (voice: VoiceOption) =>
-    filter === "all" ||
-    (filter === "young"
-      ? isYouthful(voice)
-      : filter === "child"
-        ? isChildVoice(voice)
-        : voice.gender?.toLowerCase() === filter);
+
+  const hasRegionalMetadata =
+    loadState.status === "ready" &&
+    loadState.data.voices.some((v) => resolveVoiceRegion(v) !== null);
+
+  const matchesFilter = (voice: VoiceOption) => {
+    if (regionTab !== "all" && hasRegionalMetadata) {
+      if (resolveVoiceRegion(voice) !== regionTab) return false;
+    }
+    return (
+      filter === "all" ||
+      (filter === "young"
+        ? isYouthful(voice)
+        : filter === "child"
+          ? isChildVoice(voice)
+          : voice.gender?.toLowerCase() === filter)
+    );
+  };
 
   const selectedVoice =
     loadState.status === "ready"
@@ -181,6 +339,14 @@ export function ReadingVoiceSettings({
     loadState.status === "ready"
       ? loadState.data.voices.filter(matchesFilter)
       : [];
+
+  const activeRegionLabel = selectedVoice
+    ? (VOICE_REGION_LABELS[
+        resolveVoiceRegion(selectedVoice) ??
+          inferRegionFromVoiceId(selectedVoice.voice_id, policy.region)
+      ] ?? "Miền Bắc")
+    : VOICE_REGION_LABELS[policy.region];
+
   return (
     <>
       <Button
@@ -207,8 +373,21 @@ export function ReadingVoiceSettings({
               : preferences.voiceId
                 ? "Giọng đã lưu"
                 : "Giọng mặc định"}{" "}
-            · {formatSpeed(preferences.speed)}
+            · {activeRegionLabel} · {formatSpeed(preferences.speed)} ·{" "}
+            {policy.providerMode === "local_only"
+              ? "Chỉ máy này"
+              : "Máy này + Google dự phòng"}
           </div>
+
+          {removedVoiceNotice ? (
+            <p
+              role="status"
+              className="rounded-control border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-950"
+            >
+              {removedVoiceNotice}
+            </p>
+          ) : null}
+
           <section aria-labelledby="voice-speed-heading" className="space-y-3">
             <div className="flex items-baseline justify-between gap-3">
               <h3
@@ -266,8 +445,37 @@ export function ReadingVoiceSettings({
               className="text-label font-semibold text-ink"
               id="voice-choice-heading"
             >
-              Chọn giọng đọc
+              Chọn vùng miền & giọng đọc
             </h3>
+
+            {hasRegionalMetadata ? (
+              <div
+                aria-label="Chọn vùng miền"
+                className="grid grid-cols-2 gap-1.5 sm:grid-cols-4"
+                role="group"
+              >
+                {REGION_TABS.map((tab) => {
+                  const active = regionTab === tab.id;
+                  return (
+                    <button
+                      aria-pressed={active}
+                      className={cn(
+                        "rounded-control border px-2.5 py-1.5 text-xs font-bold transition",
+                        active
+                          ? "border-primary bg-primary text-white"
+                          : "border-border bg-white text-ink hover:border-primary",
+                      )}
+                      key={tab.id}
+                      onClick={() => selectRegionTab(tab.id)}
+                      type="button"
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
             {loadState.status === "ready" &&
             loadState.data.voices.length > 0 ? (
               <select
@@ -311,7 +519,7 @@ export function ReadingVoiceSettings({
             ) : loadState.data.voices.length === 0 ? (
               <p className="text-body text-muted">
                 Chưa có giọng đọc trong danh sách. Bé có thể dùng giọng mặc định
-                hoặc giọng tiếng Việt trên thiết bị nếu có.
+                trên máy này.
               </p>
             ) : (
               <div
@@ -350,12 +558,15 @@ export function ReadingVoiceSettings({
                         className="size-4 shrink-0 accent-primary"
                         checked={selected}
                         onChange={() =>
-                          change({
-                            voiceId:
-                              voice.voice_id === defaultVoiceId
-                                ? null
-                                : voice.voice_id,
-                          })
+                          change(
+                            {
+                              voiceId:
+                                voice.voice_id === defaultVoiceId
+                                  ? null
+                                  : voice.voice_id,
+                            },
+                            voice,
+                          )
                         }
                       />
                     </label>
@@ -363,6 +574,109 @@ export function ReadingVoiceSettings({
                 })}
               </div>
             )}
+          </section>
+
+          <section
+            aria-labelledby="voice-provider-policy-heading"
+            className="space-y-2.5 rounded-control border border-border bg-white p-3"
+          >
+            <h3
+              className="text-label font-semibold text-ink"
+              id="voice-provider-policy-heading"
+            >
+              Chế độ xử lý giọng nói (Dành cho phụ huynh)
+            </h3>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <button
+                aria-pressed={policy.providerMode === "local_only"}
+                className={cn(
+                  "rounded-control border-2 px-3 py-2 text-left text-xs font-bold transition",
+                  policy.providerMode === "local_only"
+                    ? "border-primary bg-primary text-white"
+                    : "border-border bg-cream/60 text-ink hover:border-primary",
+                )}
+                onClick={() =>
+                  changeProviderPolicy({
+                    providerMode: "local_only",
+                    allowGoogleSttFallback: false,
+                    allowGoogleTtsFallback: false,
+                  })
+                }
+                type="button"
+              >
+                Chỉ máy này
+                <span
+                  className={cn(
+                    "mt-0.5 block font-normal",
+                    policy.providerMode === "local_only"
+                      ? "text-white/90"
+                      : "text-muted",
+                  )}
+                >
+                  Chạy 100% local, không gọi Google
+                </span>
+              </button>
+              <button
+                aria-pressed={
+                  policy.providerMode === "local_with_google_fallback"
+                }
+                className={cn(
+                  "rounded-control border-2 px-3 py-2 text-left text-xs font-bold transition",
+                  policy.providerMode === "local_with_google_fallback"
+                    ? "border-primary bg-primary text-white"
+                    : "border-border bg-cream/60 text-ink hover:border-primary",
+                )}
+                onClick={() =>
+                  changeProviderPolicy({
+                    providerMode: "local_with_google_fallback",
+                  })
+                }
+                type="button"
+              >
+                Máy này + Google dự phòng
+                <span
+                  className={cn(
+                    "mt-0.5 block font-normal",
+                    policy.providerMode === "local_with_google_fallback"
+                      ? "text-white/90"
+                      : "text-muted",
+                  )}
+                >
+                  Ưu tiên local, bật riêng từng dự phòng
+                </span>
+              </button>
+            </div>
+
+            {policy.providerMode === "local_with_google_fallback" ? (
+              <div className="space-y-2 rounded-lg bg-cream/70 p-2.5 text-xs">
+                <label className="flex cursor-pointer items-center justify-between gap-2 font-medium text-ink">
+                  <span>Dự phòng Google cho Nhận diện giọng nói (STT)</span>
+                  <input
+                    checked={policy.allowGoogleSttFallback}
+                    className="size-4 accent-primary"
+                    onChange={(e) =>
+                      changeProviderPolicy({
+                        allowGoogleSttFallback: e.target.checked,
+                      })
+                    }
+                    type="checkbox"
+                  />
+                </label>
+                <label className="flex cursor-pointer items-center justify-between gap-2 font-medium text-ink">
+                  <span>Dự phòng Google cho Đọc mẫu (TTS)</span>
+                  <input
+                    checked={policy.allowGoogleTtsFallback}
+                    className="size-4 accent-primary"
+                    onChange={(e) =>
+                      changeProviderPolicy({
+                        allowGoogleTtsFallback: e.target.checked,
+                      })
+                    }
+                    type="checkbox"
+                  />
+                </label>
+              </div>
+            ) : null}
           </section>
 
           <ReadingAutomationSettings />

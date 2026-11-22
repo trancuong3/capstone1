@@ -303,19 +303,21 @@ export function decomposeVietnameseSyllable(
     }
   }
 
+  // Single-vowel "gi" words like "gì" / "gỉ" / "gị": onset "gi", rhyme "i"
+  // (must be checked BEFORE single-char onset "g" matches "gi").
   let onset = "";
   let rhyme = untoned;
-  for (const candidate of ONSETS) {
-    if (untoned.startsWith(candidate) && untoned.length > candidate.length) {
-      onset = candidate;
-      rhyme = untoned.slice(candidate.length);
-      break;
-    }
-  }
-  // Single-vowel "gi" words like "gì" / "gỉ" / "gị": onset "gi", rhyme "i".
-  if (!onset && untoned === "gi") {
+  if (untoned === "gi") {
     onset = "gi";
     rhyme = "i";
+  } else {
+    for (const candidate of ONSETS) {
+      if (untoned.startsWith(candidate) && untoned.length > candidate.length) {
+        onset = candidate;
+        rhyme = untoned.slice(candidate.length);
+        break;
+      }
+    }
   }
 
   return {

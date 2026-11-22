@@ -8,6 +8,11 @@ import {
   resetSpeechPreferencesCache,
   setSpeechPreferences,
 } from "@/lib/reading/speech-preferences";
+import {
+  getVoicePolicyPreferences,
+  resetVoiceLockAndPolicyForTests,
+  setVoicePolicyPreferences,
+} from "@/lib/reading/session-voice-lock";
 
 const { voiceStudioMock } = vi.hoisted(() => ({
   voiceStudioMock: { listVoices: vi.fn(), synthesizeTimed: vi.fn() },
@@ -36,7 +41,9 @@ const VOICES = {
 
 beforeEach(() => {
   window.localStorage.clear();
+  window.sessionStorage.clear();
   resetSpeechPreferencesCache();
+  resetVoiceLockAndPolicyForTests();
   voiceStudioMock.listVoices.mockReset().mockResolvedValue(VOICES);
 });
 
@@ -190,14 +197,14 @@ describe("reading voice settings", () => {
     expect(getSpeechPreferences().voiceId).toBeNull();
   });
 
-  it("changes the speed with presets and the slider", async () => {
+  it("changes the speed with presets (0.85, 1.00, 1.15) and the slider", async () => {
     const user = userEvent.setup();
     setup();
     await user.click(screen.getByRole("button", { name: /Giọng đọc/ }));
     await screen.findByRole("radio", { name: /Jessica/ });
 
     await user.click(screen.getByRole("button", { name: "Chậm" }));
-    expect(getSpeechPreferences().speed).toBe(0.8);
+    expect(getSpeechPreferences().speed).toBe(0.85);
     expect(screen.getByRole("button", { name: "Chậm" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -206,8 +213,112 @@ describe("reading voice settings", () => {
     const slider = screen.getByRole("slider");
     expect(slider).toHaveAttribute("min", "0.7");
     expect(slider).toHaveAttribute("max", "1.2");
+
+    await user.click(screen.getByRole("button", { name: "Vừa" }));
+    expect(getSpeechPreferences().speed).toBe(1.0);
+
     await user.click(screen.getByRole("button", { name: "Nhanh" }));
-    expect(getSpeechPreferences().speed).toBe(1.1);
+    expect(getSpeechPreferences().speed).toBe(1.15);
+  });
+
+  it("lets parents filter Bắc · Trung · Nam regional voices and control separate STT/TTS Google fallbacks", async () => {
+    voiceStudioMock.listVoices.mockResolvedValue({
+      default_voice_id: "local_north_truc_ly",
+      voices: [
+        {
+          voice_id: "local_north_truc_ly",
+          name: "Cô Trúc Ly - Miền Bắc",
+          gender: "female",
+          region: "north",
+          region_label: "Miền Bắc",
+          provider: "local",
+          model_version: "vieneu-v3-turbo-onnx-fp32-3.8.5",
+        },
+        {
+          voice_id: "local_central_ngoc_tran",
+          name: "Cô Ngọc Trân - Miền Trung",
+          gender: "female",
+          region: "central",
+          region_label: "Miền Trung",
+          provider: "local",
+          model_version: "vieneu-v3-turbo-onnx-fp32-3.8.5",
+        },
+        {
+          voice_id: "local_south_thuc_doan",
+          name: "Cô Thục Đoan - Miền Nam",
+          gender: "female",
+          region: "south",
+          region_label: "Miền Nam",
+          provider: "local",
+          model_version: "vieneu-v3-turbo-onnx-fp32-3.8.5",
+        },
+        {
+          voice_id: "google_vi_vn_neural2_a",
+          name: "Google Nữ Bắc - Dự phòng",
+          gender: "female",
+          region: "north",
+          region_label: "Miền Bắc",
+          provider: "google",
+          model_version: "google-cloud-tts-v1",
+        },
+      ],
+    });
+
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole("button", { name: /Giọng đọc/ }));
+    await screen.findByRole("radio", { name: /Cô Trúc Ly/ });
+
+    // Default mode is local_only ("Chỉ máy này") with both Google fallbacks OFF
+    expect(getVoicePolicyPreferences()).toMatchObject({
+      providerMode: "local_only",
+      allowGoogleSttFallback: false,
+      allowGoogleTtsFallback: false,
+    });
+
+    // Switch region tabs: Miền Trung -> auto-selects Central voice
+    await user.click(screen.getByRole("button", { name: "Miền Trung" }));
+    expect(getVoicePolicyPreferences().region).toBe("central");
+    expect(getSpeechPreferences().voiceId).toBe("local_central_ngoc_tran");
+
+    // Switch region tabs: Miền Nam -> auto-selects Southern voice
+    await user.click(screen.getByRole("button", { name: "Miền Nam" }));
+    expect(getVoicePolicyPreferences().region).toBe("south");
+    expect(getSpeechPreferences().voiceId).toBe("local_south_thuc_doan");
+
+    // Enable "Máy này + Google dự phòng" and toggle STT & TTS independently
+    await user.click(
+      screen.getByRole("button", { name: /Máy này \+ Google dự phòng/ }),
+    );
+    expect(getVoicePolicyPreferences().providerMode).toBe(
+      "local_with_google_fallback",
+    );
+
+    const sttCheckbox = screen.getByLabelText(
+      /Dự phòng Google cho Nhận diện giọng nói \(STT\)/,
+    );
+    const ttsCheckbox = screen.getByLabelText(
+      /Dự phòng Google cho Đọc mẫu \(TTS\)/,
+    );
+    expect(sttCheckbox).not.toBeChecked();
+    expect(ttsCheckbox).not.toBeChecked();
+
+    await user.click(sttCheckbox);
+    expect(getVoicePolicyPreferences().allowGoogleSttFallback).toBe(true);
+    expect(getVoicePolicyPreferences().allowGoogleTtsFallback).toBe(false);
+
+    await user.click(ttsCheckbox);
+    expect(getVoicePolicyPreferences().allowGoogleTtsFallback).toBe(true);
+
+    // Choose Google voice while allowed, then turn off Google TTS fallback -> resets to local voice
+    setVoicePolicyPreferences({ region: "north" });
+    await user.click(screen.getByRole("button", { name: "Tất cả vùng" }));
+    await user.click(screen.getByRole("radio", { name: /Google Nữ Bắc/ }));
+    expect(getSpeechPreferences().voiceId).toBe("google_vi_vn_neural2_a");
+
+    await user.click(ttsCheckbox);
+    expect(getVoicePolicyPreferences().allowGoogleTtsFallback).toBe(false);
+    expect(getSpeechPreferences().voiceId).toBeNull();
   });
 
   it("previews the voice and stops the preview when the dialog closes", async () => {

@@ -2,6 +2,10 @@ import { z } from "zod";
 
 import { ServiceError } from "@/lib/api/service-error";
 import { withRequestDeadline } from "@/lib/api/request-deadline";
+import {
+  getActiveSessionVoiceLock,
+  getVoicePolicyPreferences,
+} from "@/lib/reading/session-voice-lock";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
@@ -11,6 +15,10 @@ const safeMessage =
 const voiceSchema = z.object({
   voice_id: z.string().min(1),
   name: z.string().min(1),
+  provider: z.string().nullable().optional(),
+  region: z.string().nullable().optional(),
+  region_label: z.string().nullable().optional(),
+  model_version: z.string().nullable().optional(),
   category: z.string().nullable().optional(),
   gender: z.string().nullable().optional(),
   accent: z.string().nullable().optional(),
@@ -18,11 +26,14 @@ const voiceSchema = z.object({
   use_case: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
   preview_url: z.string().nullable().optional(),
+  is_default: z.boolean().optional(),
 });
 
 const voiceListSchema = z.object({
   voices: z.array(voiceSchema),
   default_voice_id: z.string(),
+  local_worker_ready: z.boolean().optional(),
+  google_tts_available: z.boolean().optional(),
 });
 
 const timedSpeechSchema = z.object({
@@ -36,7 +47,10 @@ const timedSpeechSchema = z.object({
       end: z.number().nonnegative(),
     }),
   ),
+  provider: z.string().optional(),
   resolved_voice_id: z.string().nullable().optional(),
+  region: z.string().nullable().optional(),
+  model_version: z.string().nullable().optional(),
   used_fallback_voice: z.boolean().optional(),
 });
 
@@ -53,7 +67,10 @@ export interface TimedSpeech {
   readonly audio: Blob;
   readonly durationSeconds: number;
   readonly words: readonly WordTiming[];
+  readonly provider?: string;
   readonly resolvedVoiceId?: string | null;
+  readonly region?: string | null;
+  readonly modelVersion?: string | null;
   readonly usedFallbackVoice?: boolean;
 }
 
@@ -158,7 +175,17 @@ function base64ToBlob(base64: string, contentType: string): Blob {
 export function createVoiceStudioService(): VoiceStudioService {
   return {
     async listVoices(signal) {
-      const payload = await request("/voice/voices", { method: "GET" }, signal);
+      const policy = getVoicePolicyPreferences();
+      const query =
+        policy.providerMode === "local_with_google_fallback" &&
+        policy.allowGoogleTtsFallback
+          ? "?provider_mode=local_with_google_fallback&allow_google_tts=true"
+          : "";
+      const payload = await request(
+        `/voice/voices${query}`,
+        { method: "GET" },
+        signal,
+      );
       const parsed = voiceListSchema.safeParse(payload);
       if (!parsed.success) throw failure(502);
       const seen = new Set<string>();
@@ -173,6 +200,8 @@ export function createVoiceStudioService(): VoiceStudioService {
     },
 
     async synthesizeTimed(words, options = {}) {
+      const policy = getVoicePolicyPreferences();
+      const activeLock = getActiveSessionVoiceLock();
       const payload = await request(
         "/voice/text-to-speech/timed",
         {
@@ -181,13 +210,21 @@ export function createVoiceStudioService(): VoiceStudioService {
             words,
             ...(options.voiceId ? { voice_id: options.voiceId } : {}),
             ...(options.speed !== undefined ? { speed: options.speed } : {}),
+            ...(policy.providerMode !== "local_only"
+              ? { provider_mode: policy.providerMode }
+              : {}),
+            ...(policy.allowGoogleTtsFallback
+              ? { allow_google_tts: true }
+              : {}),
+            ...(activeLock?.sessionId
+              ? { session_id: activeLock.sessionId }
+              : {}),
           }),
         },
         options.signal,
         options.timeoutMs,
       );
       const parsed = timedSpeechSchema.safeParse(payload);
-      // Timings must describe every word, otherwise highlighting would drift.
       if (!parsed.success || parsed.data.words.length !== words.length) {
         throw failure(502);
       }
@@ -217,7 +254,10 @@ export function createVoiceStudioService(): VoiceStudioService {
         audio,
         durationSeconds: parsed.data.duration_seconds,
         words: parsed.data.words,
+        provider: parsed.data.provider ?? "local",
         resolvedVoiceId: parsed.data.resolved_voice_id ?? null,
+        region: parsed.data.region ?? null,
+        modelVersion: parsed.data.model_version ?? null,
         usedFallbackVoice: Boolean(parsed.data.used_fallback_voice),
       };
     },

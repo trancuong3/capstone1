@@ -45,6 +45,8 @@ $frontendEnvFile = if ($cfg.frontendEnvFile) { [string]$cfg.frontendEnvFile } el
 $ocrCloudEnabled = if ($null -ne $cfg.ocrCloudCorrectionEnabled) { [bool]$cfg.ocrCloudCorrectionEnabled } else { $false }
 $ocrWarmupEnabled = if ($null -ne $cfg.ocrWarmupEnabled) { [bool]$cfg.ocrWarmupEnabled } else { $false }
 $ocrDevice = if ($cfg.ocrDevice) { ([string]$cfg.ocrDevice).Trim().ToLowerInvariant() } else { "cpu" }
+$voiceRuntimeDir = if ($cfg.voiceRuntimeDir) { [string]$cfg.voiceRuntimeDir } else { "F:\c1\tools\voice-runtime" }
+$voiceWorkerPort = if ($cfg.voiceWorkerPort) { [int]$cfg.voiceWorkerPort } else { 8010 }
 $logRetentionMb = if ($cfg.logRetentionMb) { [int]$cfg.logRetentionMb } else { 20 }
 $maxLogBytes = $logRetentionMb * 1MB
 
@@ -233,10 +235,19 @@ function Launch-Service([string]$filePath, [string[]]$argsList, [string]$workDir
 }
 
 try {
+    # 0b. Start Local Voice Worker on 127.0.0.1:<voiceWorkerPort> when provisioned
+    $voiceWorkerPy = Join-Path $voiceRuntimeDir ".venv\Scripts\python.exe"
+    if (Test-Path $voiceWorkerPy) {
+        Write-Host "[0/3] Starting ViRead Local Voice Worker (127.0.0.1:$voiceWorkerPort)..."
+        & (Join-Path $scriptDir "Start-ViReadVoiceWorker.ps1") -VoiceRuntimeDir $voiceRuntimeDir -Port $voiceWorkerPort -StartupTimeoutSeconds $StartupTimeoutSeconds
+        if ($LASTEXITCODE -ne 0) { throw "Local Voice Worker failed to start on port $voiceWorkerPort." }
+    }
+
     # 1. Start FastAPI backend on 127.0.0.1:<backendPort>
     Write-Host "[1/3] Starting ViRead FastAPI backend (127.0.0.1:$backendPort)..."
     $beOverrides = @{}
     foreach ($kv in $beEnv.GetEnumerator()) { $beOverrides[$kv.Key] = $kv.Value }
+    $beOverrides["VIREAD_LOCAL_VOICE_WORKER_URL"] = "http://127.0.0.1:$voiceWorkerPort"
     $existingCors = if ($beOverrides.ContainsKey("CORS_ALLOWED_ORIGINS")) { $beOverrides["CORS_ALLOWED_ORIGINS"] } else { "http://localhost:3000,http://127.0.0.1:3000" }
     $corsSet = @($existingCors.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     if ($corsSet -notcontains $lanOrigin) { $corsSet += $lanOrigin }

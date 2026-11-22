@@ -95,12 +95,20 @@ class VoiceRouteTests(unittest.TestCase):
         self.assertEqual(payload["text"], "Con hãy đọc cả cụm: cành cây.")
 
     def test_text_to_speech_returns_provider_audio_without_provider_details(self):
-        provider = MagicMock()
-        provider.synthesize = AsyncMock(
-            return_value=SynthesizedAudio(content=b"mp3-bytes", content_type="audio/mpeg")
+        from app.providers.local_voice_provider import LocalSynthesizedAudio
+
+        orchestrator = MagicMock()
+        orchestrator.synthesize = AsyncMock(
+            return_value=LocalSynthesizedAudio(
+                content=b"wav-bytes",
+                content_type="audio/wav",
+                resolved_voice_id="voice_123",
+                region="north",
+                model_version="vieneu-v3-turbo-onnx-fp32-3.8.5",
+            )
         )
 
-        with patch.object(voice_routes, "ElevenLabsVoiceProvider", return_value=provider):
+        with patch.object(voice_routes, "get_voice_orchestrator", return_value=orchestrator):
             with make_client() as client:
                 response = client.post(
                     "/voice/text-to-speech",
@@ -108,27 +116,41 @@ class VoiceRouteTests(unittest.TestCase):
                 )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.content, b"mp3-bytes")
-        self.assertEqual(response.headers["content-type"], "audio/mpeg")
+        self.assertEqual(response.content, b"wav-bytes")
+        self.assertEqual(response.headers["content-type"], "audio/wav")
         self.assertEqual(response.headers["cache-control"], "no-store")
-        provider.synthesize.assert_awaited_once_with(
-            text="Bé đọc cùng mình nhé.", requested_voice_id="voice_123", speed=1.0
-        )
+        self.assertEqual(response.headers["x-voice-provider"], "local")
+        self.assertEqual(response.headers["x-resolved-voice-id"], "voice_123")
+        orchestrator.synthesize.assert_awaited_once()
+        kwargs = orchestrator.synthesize.await_args.kwargs
+        self.assertEqual(kwargs["text"], "Bé đọc cùng mình nhé.")
+        self.assertEqual(kwargs["requested_voice_id"], "voice_123")
+        self.assertEqual(kwargs["speed"], 1.0)
 
     def test_short_tts_speed_reaches_provider_and_invalid_values_never_do(self):
-        provider = MagicMock()
-        provider.synthesize = AsyncMock(return_value=SynthesizedAudio(content=b"mp3", content_type="audio/mpeg"))
-        with patch.object(voice_routes, "ElevenLabsVoiceProvider", return_value=provider):
+        from app.providers.local_voice_provider import LocalSynthesizedAudio
+
+        orchestrator = MagicMock()
+        orchestrator.synthesize = AsyncMock(
+            return_value=LocalSynthesizedAudio(
+                content=b"wav",
+                content_type="audio/wav",
+                resolved_voice_id="local_north_truc_ly",
+                region="north",
+                model_version="vieneu-v3-turbo-onnx-fp32-3.8.5",
+            )
+        )
+        with patch.object(voice_routes, "get_voice_orchestrator", return_value=orchestrator):
             with make_client() as client:
-                for speed in (0.7, 0.75, 0.8, 0.9, 1.0, 1.1, 1.2):
+                for speed in (0.7, 0.75, 0.8, 0.85, 0.9, 1.0, 1.1, 1.15, 1.2):
                     with self.subTest(speed=speed):
                         response = client.post("/voice/text-to-speech", json={"text": "Bé đọc.", "speed": speed})
                         self.assertEqual(response.status_code, 200)
-                        self.assertEqual(provider.synthesize.await_args.kwargs["speed"], speed)
-                provider.synthesize.reset_mock()
+                        self.assertEqual(orchestrator.synthesize.await_args.kwargs["speed"], speed)
+                orchestrator.synthesize.reset_mock()
                 for speed in (0.69, 1.21):
                     self.assertEqual(client.post("/voice/text-to-speech", json={"text": "Bé đọc.", "speed": speed}).status_code, 422)
-                provider.synthesize.assert_not_awaited()
+                orchestrator.synthesize.assert_not_awaited()
 
     def test_text_to_speech_requires_authenticated_request(self):
         with make_client(authenticated=False) as client:
@@ -136,8 +158,8 @@ class VoiceRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
 
     def test_text_to_speech_rejects_blank_or_oversized_content_before_provider(self):
-        provider = MagicMock()
-        with patch.object(voice_routes, "ElevenLabsVoiceProvider", return_value=provider):
+        orchestrator = MagicMock()
+        with patch.object(voice_routes, "get_voice_orchestrator", return_value=orchestrator):
             with make_client() as client:
                 blank = client.post("/voice/text-to-speech", json={"text": "   "})
                 oversized = client.post(
@@ -145,12 +167,12 @@ class VoiceRouteTests(unittest.TestCase):
                 )
         self.assertEqual(blank.status_code, 422)
         self.assertEqual(oversized.status_code, 422)
-        provider.synthesize.assert_not_called()
+        orchestrator.synthesize.assert_not_called()
 
     def test_text_to_speech_hides_provider_failure_details(self):
-        provider = MagicMock()
-        provider.synthesize = AsyncMock(side_effect=VoiceProviderError())
-        with patch.object(voice_routes, "ElevenLabsVoiceProvider", return_value=provider):
+        orchestrator = MagicMock()
+        orchestrator.synthesize = AsyncMock(side_effect=VoiceProviderError())
+        with patch.object(voice_routes, "get_voice_orchestrator", return_value=orchestrator):
             with make_client() as client:
                 response = client.post("/voice/text-to-speech", json={"text": "Xin chào"})
         self.assertEqual(response.status_code, 502)
@@ -158,15 +180,19 @@ class VoiceRouteTests(unittest.TestCase):
         self.assertNotIn("ElevenLabs", response.text)
 
     def test_speech_to_text_passes_audio_in_memory_and_returns_safe_transcript(self):
-        provider = MagicMock()
-        provider.transcribe = AsyncMock(
-            return_value=Transcription(
+        from app.providers.local_voice_provider import LocalTranscription
+
+        orchestrator = MagicMock()
+        orchestrator.transcribe = AsyncMock(
+            return_value=LocalTranscription(
                 text="Con mèo đang ngủ.",
                 language_code="vi",
-                language_probability=0.99,
+                language_probability=None,
+                words=None,
+                provider="local",
             )
         )
-        with patch.object(voice_routes, "ElevenLabsVoiceProvider", return_value=provider):
+        with patch.object(voice_routes, "get_voice_orchestrator", return_value=orchestrator):
             with make_client() as client:
                 response = client.post(
                     "/voice/speech-to-text",
@@ -175,26 +201,27 @@ class VoiceRouteTests(unittest.TestCase):
                 )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["x-voice-provider"], "local")
+        self.assertEqual(response.headers["x-voice-fallback"], "0")
         self.assertEqual(
             response.json(),
             {
                 "text": "Con mèo đang ngủ.",
                 "language_code": "vi",
-                "language_probability": 0.99,
+                "language_probability": None,
                 "words": None,
             },
         )
-        provider.transcribe.assert_awaited_once_with(
-            audio=b"audio-bytes",
-            filename="reading.webm",
-            content_type="audio/webm",
-            language_code="vi",
-            keyterms=None,
-        )
+        orchestrator.transcribe.assert_awaited_once()
+        kwargs = orchestrator.transcribe.await_args.kwargs
+        self.assertEqual(kwargs["audio"], b"audio-bytes")
+        self.assertEqual(kwargs["filename"], "reading.webm")
+        self.assertEqual(kwargs["content_type"], "audio/webm")
+        self.assertEqual(kwargs["language_code"], "vi")
 
     def test_speech_to_text_rejects_non_audio_and_never_forwards_it(self):
-        provider = MagicMock()
-        with patch.object(voice_routes, "ElevenLabsVoiceProvider", return_value=provider):
+        orchestrator = MagicMock()
+        with patch.object(voice_routes, "get_voice_orchestrator", return_value=orchestrator):
             with make_client() as client:
                 response = client.post(
                     "/voice/speech-to-text",
@@ -202,17 +229,17 @@ class VoiceRouteTests(unittest.TestCase):
                 )
         self.assertEqual(response.status_code, 415)
         self.assertEqual(response.json(), {"detail": {"code": "UNSUPPORTED_AUDIO"}})
-        provider.transcribe.assert_not_called()
+        orchestrator.transcribe.assert_not_called()
 
     def test_speech_to_text_returns_safe_specific_quota_code(self):
-        provider = MagicMock()
-        provider.transcribe = AsyncMock(
+        orchestrator = MagicMock()
+        orchestrator.transcribe = AsyncMock(
             side_effect=VoiceProviderError(
                 status_code=503,
                 code="STT_QUOTA_EXCEEDED",
             )
         )
-        with patch.object(voice_routes, "ElevenLabsVoiceProvider", return_value=provider):
+        with patch.object(voice_routes, "get_voice_orchestrator", return_value=orchestrator):
             with make_client() as client:
                 response = client.post(
                     "/voice/speech-to-text",
@@ -417,9 +444,9 @@ class VoiceRouteTests(unittest.TestCase):
         self.assertEqual(calls, 1)
 
     def test_speech_to_text_hides_provider_failure_details(self):
-        provider = MagicMock()
-        provider.transcribe = AsyncMock(side_effect=VoiceProviderError(status_code=503))
-        with patch.object(voice_routes, "ElevenLabsVoiceProvider", return_value=provider):
+        orchestrator = MagicMock()
+        orchestrator.transcribe = AsyncMock(side_effect=VoiceProviderError(status_code=503))
+        with patch.object(voice_routes, "get_voice_orchestrator", return_value=orchestrator):
             with make_client() as client:
                 response = client.post(
                     "/voice/speech-to-text",

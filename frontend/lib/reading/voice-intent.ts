@@ -1,11 +1,12 @@
 import { normalizeVietnameseText } from "@/lib/reading/vietnamese-text";
 
 /**
- * Giọng nói điều khiển trong lúc đọc. Chỉ nhận cả câu nói ngắn (một lệnh),
- * không tìm lệnh bên trong câu dài, và luôn nhường cho văn bản sách khi cụm
- * lệnh trùng với đoạn bé sắp đọc.
+ * Giọng nói điều khiển trong lúc đọc & luyện từ khó. Chỉ nhận cả câu nói ngắn
+ * (một lệnh), không tìm lệnh bên trong câu dài, và luôn nhường cho văn bản sách
+ * khi cụm lệnh trùng với đoạn bé sắp đọc.
  */
-export type VoiceIntentType = "HELP" | "WAIT" | "STOP" | "RESUME" | "NONE";
+export type VoiceIntentType =
+  "HELP" | "SPELL" | "REPLAY" | "WAIT" | "STOP" | "RESUME" | "NONE";
 
 export interface VoiceIntent {
   readonly type: VoiceIntentType;
@@ -32,6 +33,14 @@ const COMMANDS: readonly {
   patterns: readonly RegExp[];
 }[] = [
   {
+    type: "SPELL",
+    patterns: [
+      /^(?:cô |thầy )?đánh vần(?: giúp| cho| hộ)?(?: con| bé| em)?(?: từ này| chữ này| tiếng này)?$/u,
+      /^(?:cho )?(?:con |bé |em )?nghe đánh vần(?: từ này| chữ này| tiếng này)?$/u,
+      /^(?:con|bé|em) (?:muốn|cần) (?:cô |thầy )?đánh vần(?: giúp)?$/u,
+    ],
+  },
+  {
     type: "HELP",
     patterns: [
       /^(?:con|bé|em) (?:không|chưa) biết(?: đọc)?(?: từ này| chữ này| chỗ này)?$/u,
@@ -39,6 +48,13 @@ const COMMANDS: readonly {
       /^(?:cô |thầy )?đọc(?: giúp| cho| hộ) (?:con|bé|em)$/u,
       /^(?:cô |thầy )?giúp (?:con|bé|em) đọc(?: từ này| chữ này)?$/u,
       /^(?:con|bé|em) cần (?:cô )?(?:giúp|đọc mẫu)$/u,
+    ],
+  },
+  {
+    type: "REPLAY",
+    patterns: [
+      /^(?:cô |thầy )?(?:đọc|nghe) lại(?: lần nữa| một lần nữa| giúp con| cho con)?$/u,
+      /^(?:cho )?(?:con |bé |em )?nghe lại(?: từ này| chữ này)?$/u,
     ],
   },
   {

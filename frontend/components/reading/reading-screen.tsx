@@ -14,10 +14,25 @@ import { Modal } from "@/components/common/modal";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ComprehensionQuestion } from "@/components/reading/comprehension-question";
+import { PhonicsLessonCard } from "@/components/reading/phonics-lesson-card";
 import { resolvePostFinishUiState } from "@/lib/reading/post-finish-questions";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import {
+  isInjectedTestSpeechRecognition,
+  resolveLocalFirstSpeechRecognitionConstructor,
+} from "@/lib/reading/local-segment-speech-recognition";
+import {
+  buildPhonicsLesson,
+  READING_MASTERY_LABELS,
+  type PhonicsLessonPlan,
+  type SupportedPhonicsLessonPlan,
+} from "@/lib/reading/phonics-lesson";
+import {
+  lockSessionVoice,
+  setActiveVoiceSession,
+} from "@/lib/reading/session-voice-lock";
 import {
   classifyRetryTranscript,
   hasConfusableNasalEnding,
@@ -31,6 +46,7 @@ import {
   tokenizeVietnameseText,
 } from "@/lib/reading/vietnamese-text";
 import {
+  isSpellingHelpRequest,
   isWordHelpRequest,
   MAX_WORD_HELP_ROUNDS,
   WORD_HELP_SILENCE_LIMIT,
@@ -458,6 +474,20 @@ function ReadingSessionScreen({
   const pageWordsByRevisionRef = useRef(
     new Map<string, readonly ReadingPageWordDTO[]>(),
   );
+  const [activePhonicsLesson, setActivePhonicsLesson] = useState<{
+    readonly wordId: string | null;
+    readonly plan: PhonicsLessonPlan;
+  } | null>(null);
+  const [activePhonicsStepIndex, setActivePhonicsStepIndex] = useState<
+    number | null
+  >(null);
+  const [isPlayingPhonicsLesson, setIsPlayingPhonicsLesson] = useState(false);
+  const [phonicsStatusHint, setPhonicsStatusHint] = useState<string | null>(
+    null,
+  );
+  const phonicsSpelledWordIdsRef = useRef(new Set<string>());
+  const passageContainsSpellRef = useRef(false);
+
   const finishStartedRef = useRef(false);
   const retryReportSaveStartedRef = useRef(false);
   const mountedRef = useRef(false);
@@ -572,7 +602,9 @@ function ReadingSessionScreen({
         true,
       );
     } catch (err) {
-      console.warn("Lỗi phát âm 1 từ:", err);
+      if (!(err instanceof Error && err.name === "AbortError")) {
+        console.warn("Lỗi phát âm 1 từ:", err);
+      }
     } finally {
       if (
         mountedRef.current &&
@@ -593,8 +625,10 @@ function ReadingSessionScreen({
 
   useEffect(() => {
     mountedRef.current = true;
+    lockSessionVoice(sessionId);
     return () => {
       mountedRef.current = false;
+      setActiveVoiceSession(null);
       clearPageSilenceTimer();
       if (typeof window !== "undefined") {
         if (wrongWordGraceTimerRef.current !== null) {
@@ -629,7 +663,7 @@ function ReadingSessionScreen({
         // Safe ignore
       }
     };
-  }, [cancelRecording]);
+  }, [cancelRecording, sessionId]);
 
   useEffect(() => {
     if (countdown === null) return;
@@ -1246,15 +1280,63 @@ function ReadingSessionScreen({
     words: readonly string[],
     options: WordTimedPlayOptions,
   ): Promise<void> {
+    const sampleText = options.text ?? words.join(" ");
     const id = `assistant-${(assistantPlaybackSeqRef.current += 1)}`;
-    echoGuard.playbackStarted(
-      id,
-      options.text ?? words.join(" "),
-      performance.now(),
-    );
+    echoGuard.playbackStarted(id, sampleText, performance.now());
     return speechPlayer
-      .playWithWordTimings(words, options)
+      .playWithWordTimings(words, options, () =>
+        speechPlayer.play(sampleText, {
+          onPlay: () => options.onPlay?.(),
+          onEnded: options.onEnded,
+        }),
+      )
       .finally(() => echoGuard.playbackEnded(id, performance.now()));
+  }
+
+  function isPassageSpellRequest(
+    text: string,
+    engine: RealtimeAlignmentEngine,
+    capturePage: ReadingPageDTO,
+  ): boolean {
+    const nextId = engine.getSnapshot().currentWordId;
+    const next = capturePage.words.findIndex((word) => word.word_id === nextId);
+    const upcoming =
+      next < 0
+        ? ""
+        : capturePage.words
+            .slice(next, next + 12)
+            .map((word) => word.text)
+            .join(" ");
+    if (parseVoiceIntent(text, { upcomingText: upcoming }).type === "SPELL") {
+      return true;
+    }
+    return isSpellingHelpRequest(text, upcoming);
+  }
+
+  /** Speak step-by-step phonics lesson and register all steps with EchoGuard. */
+  async function speakPhonicsLessonGuarded(
+    lesson: SupportedPhonicsLessonPlan,
+    onStep?: (stepIdx: number) => void,
+  ): Promise<void> {
+    const id = `assistant-${(assistantPlaybackSeqRef.current += 1)}`;
+    const fullSpoken = lesson.steps.map((s) => s.spokenText).join(" ");
+    echoGuard.playbackStarted(id, fullSpoken, performance.now());
+    setIsPlayingPhonicsLesson(true);
+    try {
+      if (typeof speechPlayer.playPhonicsLesson === "function") {
+        await speechPlayer.playPhonicsLesson(lesson, {
+          onStepChange: (idx) => onStep?.(idx),
+        });
+      } else {
+        for (const step of lesson.steps) {
+          onStep?.(step.index);
+          await speechPlayer.play(step.spokenText);
+        }
+      }
+    } finally {
+      setIsPlayingPhonicsLesson(false);
+      echoGuard.playbackEnded(id, performance.now());
+    }
   }
 
   /** Speak one assistant utterance and register it with the echo guard. */
@@ -1684,6 +1766,118 @@ function ReadingSessionScreen({
     }
   }
 
+  /**
+   * Explicit step-by-step Vietnamese phonics (`Đánh vần từng bước`) right in-place
+   * on the current book page (triggered by voice "Đánh vần giúp con" / "Nghe đánh vần"
+   * or button `Nghe đánh vần`), sharing `phonics-lesson.ts` with Difficult Words Practice.
+   */
+  async function offerExplicitPhonicsHelp(
+    engine: RealtimeAlignmentEngine | null,
+    capturePage: ReadingPageDTO | null,
+    explicitWord?: { readonly word_id: string | null; readonly text: string },
+    allowInterrupt = false,
+  ): Promise<void> {
+    if (listeningStopRef.current) return;
+    if (assistantAudioPendingRef.current && !allowInterrupt) return;
+    if (allowInterrupt) {
+      stopAssistantAudio();
+      setIsReadingWord(false);
+    }
+    clearPageSilenceTimer();
+    clearCoachingTimers();
+
+    const target =
+      explicitWord ??
+      (retryModeRef.current
+        ? (() => {
+            const cand = retryCandidatesRef.current[retryPositionRef.current];
+            return cand ? { word_id: cand.wordId, text: cand.text } : null;
+          })()
+        : (() => {
+            const wid = isListeningActiveRef.current
+              ? (engine?.getSnapshot().currentWordId ?? currentWordId)
+              : (currentWordId ?? engine?.getSnapshot().currentWordId);
+            const found =
+              (wid
+                ? capturePage?.words.find((w) => w.word_id === wid)
+                : null) ?? capturePage?.words[0];
+            return found ? { word_id: found.word_id, text: found.text } : null;
+          })());
+    if (!target) return;
+
+    const plan = buildPhonicsLesson(target.text);
+    setActivePhonicsLesson({ wordId: target.word_id, plan });
+    setActivePhonicsStepIndex(plan.supported ? 0 : null);
+    setPhonicsStatusHint(null);
+
+    if (target.word_id && !retryModeRef.current) {
+      helpedWordIdsRef.current.add(target.word_id);
+      phonicsSpelledWordIdsRef.current.add(target.word_id);
+      pageHelpWordRef.current = {
+        wordId: target.word_id,
+        awaitingAttempt: true,
+      };
+    }
+
+    const generation = assistantAudioGenerationRef.current + 1;
+    const isCurrent = () =>
+      mountedRef.current && generation === assistantAudioGenerationRef.current;
+    const wasListening = isListeningActiveRef.current || isMicRecording;
+
+    try {
+      await playAssistantAudio(
+        async () => {
+          if (!isCurrent()) return;
+          if (!plan.supported) {
+            setPhonicsStatusHint(plan.message);
+            if (plan.canPlayWholeWord) {
+              await speakGuarded(target.text, { wordSample: true });
+            }
+            return;
+          }
+          setLatestTranscript(
+            `Đánh vần tiếng “${plan.focusSyllable}”: ${plan.steps.map((s) => s.displayText).join(" · ")}`,
+          );
+          await speakPhonicsLessonGuarded(plan, (stepIdx) => {
+            if (isCurrent()) setActivePhonicsStepIndex(stepIdx);
+          });
+          if (!isCurrent()) return;
+          const invite = `Giờ con đọc trọn tiếng “${plan.focusSyllable}” nhé.`;
+          setPhonicsStatusHint(invite);
+          await speakGuarded("Đến lượt con đọc nhé.");
+        },
+        true,
+        false,
+        wasListening,
+      );
+      if (!isCurrent()) return;
+      if (wasListening && !retryModeRef.current) {
+        const started = await startListeningRef.current();
+        if (isCurrent()) setIsMicRecording(started);
+      } else if (wasListening && retryModeRef.current) {
+        const cand = retryCandidatesRef.current[retryPositionRef.current];
+        if (cand) {
+          void startRetryRecognition(cand);
+        }
+      }
+    } catch {
+      if (isCurrent()) {
+        setPhonicsStatusHint(
+          "Giọng đánh vần đã khóa đang tạm bận. Bé xem các bước trên màn hình và bấm Nghe đánh vần lại nhé.",
+        );
+      }
+    }
+  }
+
+  function handleSpellCurrentWord(): void {
+    void offerExplicitPhonicsHelp(
+      alignmentEngineRef.current,
+      page,
+      undefined,
+      true,
+    );
+  }
+
   async function beginListening(): Promise<boolean> {
     const generation = listeningGenerationRef.current;
     const isCurrent = () =>
@@ -1695,6 +1889,7 @@ function ReadingSessionScreen({
     setComparisonError(null);
     browserTranscriptCollectorRef.current.reset();
     passageContainsHelpRef.current = false;
+    passageContainsSpellRef.current = false;
     const captureEngine = alignmentEngineRef.current;
     let quietWindows = 0;
     let lastSpeechMs = 0;
@@ -1765,8 +1960,23 @@ function ReadingSessionScreen({
 
     if (typeof window !== "undefined") {
       try {
-        const win = window as unknown as WindowWithSpeech;
-        const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition;
+        const win = window as unknown as WindowWithSpeech & {
+          AudioContext?: typeof AudioContext;
+          webkitAudioContext?: typeof AudioContext;
+        };
+        const SpeechRec = resolveLocalFirstSpeechRecognitionConstructor(
+          win,
+          speechService,
+          () => ({
+            sessionId,
+            pageId: page?.page_id ?? null,
+            keyterms: (page?.words ?? [])
+              .map((w) => w.text.normalize("NFC").trim())
+              .filter(Boolean)
+              .slice(0, 40),
+          }),
+          () => speechRecorder.getStream?.()?.getAudioTracks()?.[0],
+        ) as (new () => BrowserSpeechRecognition) | undefined;
         if (SpeechRec) {
           const rec = new SpeechRec();
           rec.continuous = true;
@@ -1841,7 +2051,12 @@ function ReadingSessionScreen({
             const newFinals = browserTranscriptCollectorRef.current.addResults(
               event,
               (part, usable, confidence) => {
-                if (passageContainsHelpRef.current) return false;
+                if (
+                  passageContainsHelpRef.current ||
+                  passageContainsSpellRef.current
+                ) {
+                  return false;
+                }
                 if (!usable && !isPhonicsCueUsable(part, confidence)) {
                   markCaptureUncertain(engine, page);
                   return false;
@@ -1854,6 +2069,11 @@ function ReadingSessionScreen({
                     receivedAt: performance.now(),
                   }).accept
                 ) {
+                  return false;
+                }
+                if (page && isPassageSpellRequest(part, engine, page)) {
+                  passageContainsSpellRef.current = true;
+                  if (!isListeningActiveRef.current) engine.markUncertain();
                   return false;
                 }
                 if (page && isPassageHelpRequest(part, engine, page)) {
@@ -1935,6 +2155,23 @@ function ReadingSessionScreen({
                   "MATCH"
                 ) {
                   pageHelpWordRef.current = null;
+                }
+                if (
+                  activePhonicsLesson?.wordId &&
+                  scored.statusByWordId.get(activePhonicsLesson.wordId)
+                    ?.status === "MATCH"
+                ) {
+                  setPhonicsStatusHint(
+                    READING_MASTERY_LABELS.CORRECT_AFTER_SPELLING,
+                  );
+                } else if (
+                  activePhonicsLesson?.plan.supported &&
+                  scored.spellingInProgress &&
+                  scored.currentWordId === activePhonicsLesson.wordId
+                ) {
+                  setPhonicsStatusHint(
+                    `Con đánh vần đúng nhịp rồi! Giờ con đọc trọn tiếng “${activePhonicsLesson.plan.focusSyllable}” nhé!`,
+                  );
                 }
 
                 // Visual companion celebration for quick self-correction or phonics spelling
@@ -2056,6 +2293,11 @@ function ReadingSessionScreen({
                 return (scored.rejectedSegmentCount ?? 0) === rejectedBefore;
               },
             );
+            if (passageContainsSpellRef.current) {
+              if (page && isCurrent())
+                void offerExplicitPhonicsHelp(engine, page);
+              return;
+            }
             if (passageContainsHelpRef.current) {
               if (page && isCurrent()) void offerPassageHelp(engine, page);
               return;
@@ -4212,6 +4454,16 @@ function ReadingSessionScreen({
 
       if (
         hasUsableTranscript(transcription) &&
+        isSpellingHelpRequest(transcript, candidate.text)
+      ) {
+        await offerExplicitPhonicsHelp(null, page, {
+          word_id: candidate.wordId,
+          text: candidate.text,
+        });
+        return;
+      }
+      if (
+        hasUsableTranscript(transcription) &&
         isWordHelpRequest(transcript, candidate.text)
       ) {
         await offerRetryHelp(candidate);
@@ -4489,7 +4741,10 @@ function ReadingSessionScreen({
     }
 
     const win = window as unknown as WindowWithSpeech;
-    const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition;
+    const rawRetryRec = win.SpeechRecognition || win.webkitSpeechRecognition;
+    const SpeechRec = isInjectedTestSpeechRecognition(rawRetryRec)
+      ? rawRetryRec
+      : undefined;
 
     // Không có Browser SpeechRecognition:
     // vẫn có thể sử dụng MediaRecorder + STT backend.
@@ -5649,6 +5904,27 @@ function ReadingSessionScreen({
         onReadSample={() => void handleReadSample()}
         onReadWord={
           retryMode ? () => void handleReadSample() : handleReadCurrentWord
+        }
+        onSpellWord={handleSpellCurrentWord}
+        phonicsPanel={
+          activePhonicsLesson ? (
+            <PhonicsLessonCard
+              activeStepIndex={activePhonicsStepIndex}
+              compact
+              isListeningRetry={isMicRecording}
+              isPlayingPhonics={isPlayingPhonicsLesson}
+              isPlayingWord={isReadingWord}
+              lesson={activePhonicsLesson.plan}
+              onPlayPhonics={handleSpellCurrentWord}
+              onPlayWord={
+                retryMode
+                  ? () => void handleReadSample()
+                  : handleReadCurrentWord
+              }
+              onStopAudio={stopAssistantAudio}
+              statusHint={phonicsStatusHint}
+            />
+          ) : null
         }
         onSkipRetryWord={skipRetryWord}
         onToggleListening={() => void handleToggleListening()}

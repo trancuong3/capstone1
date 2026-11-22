@@ -16,6 +16,9 @@ import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useReadingServices } from "@/hooks/use-reading-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
+import { createSpeechService } from "@/lib/api/speech-service";
+import { resolveLocalFirstSpeechRecognitionConstructor } from "@/lib/reading/local-segment-speech-recognition";
+import { lockSessionVoice } from "@/lib/reading/session-voice-lock";
 import {
   choiceLetterForSpeech,
   matchComprehensionVoiceInput,
@@ -85,6 +88,7 @@ export function ComprehensionQuestion({
   sessionId,
 }: ComprehensionQuestionProps) {
   const { comprehensionService } = useReadingServices();
+  const speechService = useMemo(() => createSpeechService(), []);
   const speechPlayer = useSpeechPlayer();
   const echoGuard = useMemo(() => new EchoGuard(), []);
   const prompts = useMemo(() => new InteractivePromptSelector(), []);
@@ -298,7 +302,17 @@ export function ComprehensionQuestion({
       ) {
         return;
       }
-      const Ctor = getSpeechRecognitionCtor();
+      lockSessionVoice(sessionId);
+      const Ctor = resolveLocalFirstSpeechRecognitionConstructor(
+        window as unknown as {
+          SpeechRecognition?: BrowserSpeechRecognitionCtor;
+          webkitSpeechRecognition?: BrowserSpeechRecognitionCtor;
+          AudioContext?: typeof AudioContext;
+          webkitAudioContext?: typeof AudioContext;
+        },
+        speechService,
+        () => ({ sessionId }),
+      ) as BrowserSpeechRecognitionCtor | undefined;
       if (!Ctor) {
         setVoicePhase("idle");
         return;
@@ -442,7 +456,9 @@ export function ComprehensionQuestion({
       clearRemindTimer,
       echoGuard,
       prompts,
+      sessionId,
       speakGuarded,
+      speechService,
       stopAllVoice,
       stopVoiceRecognition,
       submitAnswer,
@@ -457,8 +473,10 @@ export function ComprehensionQuestion({
       const hasVoiceApi =
         Boolean(getSpeechRecognitionCtor()) ||
         (typeof window !== "undefined" &&
-          Boolean(window.speechSynthesis?.getVoices?.().length));
+          (typeof window.AudioContext === "function" ||
+            Boolean(window.speechSynthesis?.getVoices?.().length)));
       if (!hasVoiceApi) return;
+      lockSessionVoice(sessionId);
 
       stopAllVoice();
       const gen = flowGenRef.current;
@@ -487,7 +505,7 @@ export function ComprehensionQuestion({
         startVoiceListenRef.current(value, gen);
       }
     },
-    [prompts, speakGuarded, stopAllVoice],
+    [prompts, sessionId, speakGuarded, stopAllVoice],
   );
 
   useEffect(() => {

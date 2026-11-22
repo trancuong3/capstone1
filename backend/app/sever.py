@@ -555,7 +555,15 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Request-ID", "X-Resolved-Voice-Id", "X-Voice-Fallback"],
+    expose_headers=[
+        "X-Request-ID",
+        "X-Resolved-Voice-Id",
+        "X-Voice-Provider",
+        "X-Voice-Region",
+        "X-Voice-Model-Version",
+        "X-Voice-Fallback",
+        "X-Voice-Fallback-Reason",
+    ],
 )
 
 @app.get("/health", tags=["System"])
