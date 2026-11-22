@@ -13,7 +13,7 @@ os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 
-from app.api.deps import get_current_parent_id
+from app.api.deps import clear_auth_token_cache, get_current_parent_id
 
 
 ACTOR_ID = UUID("11111111-1111-4111-8111-111111111111")
@@ -108,6 +108,43 @@ class AuthenticationDependencyTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as caught:
                 get_current_parent_id(CREDENTIALS)
         self.assertEqual(caught.exception.status_code, 503)
+
+
+    def test_short_lived_token_cache_reuses_verified_actor_and_never_caches_errors(self):
+        clear_auth_token_cache()
+        self.addCleanup(clear_auth_token_cache)
+        supabase = SimpleNamespace(
+            auth=SimpleNamespace(
+                get_user=Mock(
+                    return_value=SimpleNamespace(
+                        user=SimpleNamespace(id=str(ACTOR_ID))
+                    )
+                )
+            )
+        )
+        with (
+            patch.dict(os.environ, {"AUTH_TOKEN_CACHE_TTL_SECONDS": "30"}, clear=False),
+            patch("app.api.deps.get_supabase_client", return_value=supabase),
+        ):
+            self.assertEqual(get_current_parent_id(CREDENTIALS), ACTOR_ID)
+            self.assertEqual(get_current_parent_id(CREDENTIALS), ACTOR_ID)
+        supabase.auth.get_user.assert_called_once_with(CREDENTIALS.credentials)
+
+        bad_creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="bad-token")
+        failing = SimpleNamespace(
+            auth=SimpleNamespace(
+                get_user=Mock(side_effect=ProviderError("invalid", 401))
+            )
+        )
+        with (
+            patch.dict(os.environ, {"AUTH_TOKEN_CACHE_TTL_SECONDS": "30"}, clear=False),
+            patch("app.api.deps.get_supabase_client", return_value=failing),
+        ):
+            for _ in range(2):
+                with self.assertRaises(HTTPException) as caught:
+                    get_current_parent_id(bad_creds)
+                self.assertEqual(caught.exception.status_code, 401)
+        self.assertEqual(failing.auth.get_user.call_count, 2)
 
 
 if __name__ == "__main__":
