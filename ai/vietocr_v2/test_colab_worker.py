@@ -84,6 +84,34 @@ class ColabWorkerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "WORKER_CODE_OR_DEPENDENCY_LOCK_MISMATCH"):
             verify_worker_source_lock(config)
 
+    def test_process_job_fails_fast_on_source_lock_before_downloading_dataset(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = ColabWorker("https://viread.example", "x" * 48, temp_dir)
+            try:
+                job = {
+                    "id": "d8cc3c25-5c78-4118-abf4-8aa65b718704",
+                    "profile": "FLOW2_ADMIN_VERIFIED",
+                    "manifest_sha256": "a" * 64,
+                    "config_sha256": "b" * 64,
+                    "metadata": {
+                        "training_config": {
+                            "trainer_sha256": "0" * 64,
+                            "requirements_sha256": "0" * 64,
+                            "colab_requirements_sha256": "0" * 64,
+                        }
+                    },
+                }
+                with patch.object(worker, "assert_runtime_capacity", return_value={"device": "T4"}):
+                    with patch.object(worker, "heartbeat_loop", return_value=None):
+                        with patch.object(worker, "dataset", side_effect=AssertionError("dataset() must not run on lock mismatch")):
+                            with self.assertRaisesRegex(
+                                ValueError,
+                                r"WORKER_CODE_OR_DEPENDENCY_LOCK_MISMATCH: commit=.*trainer_sha256\(",
+                            ):
+                                worker.process_job(job)
+            finally:
+                worker.session.close()
+
     def test_worker_requires_https_for_remote_backend_and_long_token(self):
         with self.assertRaisesRegex(ValueError, "HTTPS"):
             ColabWorker("http://viread.example", "x" * 48, tempfile.gettempdir())
