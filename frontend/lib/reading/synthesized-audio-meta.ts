@@ -1,6 +1,9 @@
 export interface SynthesizedAudioMeta {
   readonly resolvedVoiceId: string | null;
   readonly usedFallbackVoice: boolean;
+  readonly provider?: string | null;
+  readonly region?: string | null;
+  readonly modelVersion?: string | null;
 }
 
 const synthesizedAudioMeta = new WeakMap<Blob, SynthesizedAudioMeta>();

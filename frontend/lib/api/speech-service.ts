@@ -2,12 +2,22 @@ import { z } from "zod";
 
 import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
 import { withRequestDeadline } from "@/lib/api/request-deadline";
+import {
+  getActiveSessionVoiceLock,
+  getVoicePolicyPreferences,
+  type VoiceProviderMode,
+} from "@/lib/reading/session-voice-lock";
 import { setSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
+import {
+  recordSttEngineUsage,
+  recordTtsEngineUsage,
+} from "@/lib/reading/voice-engine-status";
+import { resolveVoiceGender } from "@/lib/reading/voice-persona";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
 const safeMessage =
-  "Chức năng giọng nói đang chưa sẵn sàng. Vui lòng thử lại sau.";
+  "Chức năng giọng nói trên máy đang chưa sẵn sàng. Ba mẹ và bé vui lòng thử lại nhé.";
 
 const wordTimestampSchema = z.object({
   text: z.string(),
@@ -24,6 +34,24 @@ const transcriptionSchema = z.object({
   words: z.array(wordTimestampSchema).nullable().optional(),
 });
 
+const phonicsSpeechSchema = z.object({
+  audio_base64: z.string().min(1),
+  content_type: z.string().startsWith("audio/"),
+  duration_seconds: z.number().positive(),
+  step_timings: z.array(
+    z.object({
+      id: z.string(),
+      index: z.number().int().nonnegative(),
+      start: z.number().nonnegative(),
+      end: z.number().nonnegative(),
+    }),
+  ),
+  provider: z.string().optional(),
+  resolved_voice_id: z.string(),
+  region: z.string().optional(),
+  model_version: z.string(),
+});
+
 export interface WordTimestamp {
   readonly text: string;
   readonly start: number;
@@ -37,13 +65,42 @@ export interface SpeechTranscript {
   readonly language_code: string | null;
   readonly language_probability: number | null;
   readonly words: readonly WordTimestamp[] | null;
+  readonly provider?: string | null;
+  readonly fallback_used?: boolean;
 }
 
 export interface TextToSpeechOptions {
   readonly signal?: AbortSignal;
   readonly voiceId?: string;
   readonly speed?: number;
+  readonly wordSample?: boolean;
+  readonly providerMode?: VoiceProviderMode;
+  readonly allowGoogleTts?: boolean;
+  readonly sessionId?: string | null;
   readonly timeoutMs?: number;
+}
+
+export interface PhonicsStepTiming {
+  readonly id: string;
+  readonly index: number;
+  readonly start: number;
+  readonly end: number;
+}
+
+export interface SynthesizedPhonicsSpeech {
+  readonly audio: Blob;
+  readonly durationSeconds: number;
+  readonly stepTimings: readonly PhonicsStepTiming[];
+  readonly provider: string;
+  readonly resolvedVoiceId: string;
+  readonly region: string;
+  readonly modelVersion: string;
+}
+
+export interface SynthesizePhonicsStepInput {
+  readonly id: string;
+  readonly spokenText: string;
+  readonly pauseAfterMs?: number;
 }
 
 export { getSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
@@ -53,12 +110,22 @@ export interface SpeechToTextOptions {
   readonly filename?: string;
   readonly languageCode?: string;
   readonly keyterms?: readonly string[];
+  readonly providerMode?: VoiceProviderMode;
+  readonly allowGoogleStt?: boolean;
+  readonly sessionId?: string | null;
+  readonly pageId?: string | null;
+  readonly turnId?: string | null;
+  readonly source?: string;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
 }
 
 export interface SpeechService {
   synthesize(text: string, options?: TextToSpeechOptions): Promise<Blob>;
+  synthesizePhonics?(
+    steps: readonly SynthesizePhonicsStepInput[],
+    options?: TextToSpeechOptions,
+  ): Promise<SynthesizedPhonicsSpeech>;
   transcribe(
     audio: Blob,
     options?: SpeechToTextOptions,
@@ -81,10 +148,11 @@ function failure(
       case "STT_QUOTA_EXCEEDED":
         code = "STT_QUOTA_EXCEEDED";
         message =
-          "Dịch vụ nhận diện giọng nói đã hết lượt sử dụng. ViRead sẽ dùng kết quả nhận diện cuối cùng của trình duyệt nếu có.";
+          "Dịch vụ nhận diện dự phòng đã hết hạn mức. Ba mẹ kiểm tra lại bộ giọng nói trên máy nhé.";
         shouldRetry = false;
         break;
       case "STT_AUTH_FAILED":
+      case "GOOGLE_STT_AUTH_ERROR":
         code = "STT_AUTH_FAILED";
         shouldRetry = false;
         break;
@@ -97,15 +165,23 @@ function failure(
         shouldRetry = false;
         break;
       case "STT_CONCURRENCY_LIMITED":
+      case "LOCAL_STT_BUSY":
         code = "STT_CONCURRENCY_LIMITED";
-        message = "Dịch vụ nhận diện đang bận. Bé có thể thử lại sau nhé.";
+        message =
+          "Bộ nhận diện giọng nói trên máy đang bận. Bé thử lại sau ít giây nhé.";
         shouldRetry = true;
         break;
       case "STT_TEMPORARILY_UNAVAILABLE":
+      case "LOCAL_STT_UNAVAILABLE":
+      case "GOOGLE_STT_UNAVAILABLE":
         code = "STT_TEMPORARILY_UNAVAILABLE";
+        message =
+          "Bộ nhận diện giọng nói trên máy chưa bật hoặc đang khởi động. Ba mẹ kiểm tra dịch vụ giọng nói local rồi bấm Thử lại nhé.";
         shouldRetry = true;
         break;
       case "STT_TIMEOUT":
+      case "LOCAL_STT_TIMEOUT":
+      case "GOOGLE_STT_TIMEOUT":
         code = "STT_TIMEOUT";
         shouldRetry = true;
         break;
@@ -114,14 +190,17 @@ function failure(
         shouldRetry = true;
         break;
       case "STT_RATE_LIMITED":
+      case "GOOGLE_STT_COOLDOWN":
         code = "STT_RATE_LIMITED";
         shouldRetry = true;
         break;
       case "STT_INVALID_AUDIO":
+      case "INVALID_AUDIO":
         code = "STT_INVALID_AUDIO";
         shouldRetry = false;
         break;
       case "STT_PROVIDER_REJECTED":
+      case "GOOGLE_STT_REJECTED":
         code = "STT_PROVIDER_REJECTED";
         shouldRetry = false;
         break;
@@ -150,8 +229,6 @@ async function accessToken(
 ) {
   try {
     const supabase = createBrowserSupabaseClient();
-    // Keep STT/TTS requests behind Supabase session restoration, just like
-    // ordinary API requests. initialize() is idempotent across concurrent calls.
     const { error: initializationError } = await supabase.auth.initialize();
     if (initializationError) throw failure(capabilityCode, 401);
 
@@ -166,7 +243,10 @@ async function accessToken(
 }
 
 async function speechRequest(
-  path: "/voice/text-to-speech" | "/voice/speech-to-text",
+  path:
+    | "/voice/text-to-speech"
+    | "/voice/text-to-speech/phonics"
+    | "/voice/speech-to-text",
   capabilityCode: "STT_UNAVAILABLE" | "TTS_UNAVAILABLE",
   init: RequestInit,
   signal?: AbortSignal,
@@ -187,23 +267,21 @@ async function speechRequest(
     });
     if (!response.ok) {
       let providerCode: string | undefined;
-      if (path === "/voice/speech-to-text") {
-        try {
-          const payload: unknown = await response.clone().json();
-          if (
-            typeof payload === "object" &&
-            payload !== null &&
-            "detail" in payload &&
-            typeof payload.detail === "object" &&
-            payload.detail !== null &&
-            "code" in payload.detail &&
-            typeof payload.detail.code === "string"
-          ) {
-            providerCode = payload.detail.code;
-          }
-        } catch {
-          // Non-JSON provider responses remain a generic safe service error.
+      try {
+        const payload: unknown = await response.clone().json();
+        if (
+          typeof payload === "object" &&
+          payload !== null &&
+          "detail" in payload &&
+          typeof payload.detail === "object" &&
+          payload.detail !== null &&
+          "code" in payload.detail &&
+          typeof payload.detail.code === "string"
+        ) {
+          providerCode = payload.detail.code;
         }
+      } catch {
+        // Non-JSON provider responses remain a generic safe service error.
       }
       throw failure(
         capabilityCode,
@@ -244,16 +322,31 @@ function appendKeyterms(
   }
 
   for (const keyterm of uniqueKeyterms) {
-    // Gửi cùng tên field nhiều lần để backend nhận thành list[str].
     form.append("keyterms", keyterm);
   }
+}
+
+function base64ToBlob(base64: string, contentType: string): Blob {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return new Blob([bytes], { type: contentType });
 }
 
 export function createSpeechService(): SpeechService {
   return {
     async synthesize(text, options = {}) {
-      const normalizedText = text.trim();
+      const normalizedText = text.normalize("NFC").trim();
       if (!normalizedText) throw failure("TTS_UNAVAILABLE", 422);
+
+      const policy = getVoicePolicyPreferences();
+      const mode = options.providerMode ?? policy.providerMode;
+      const allowGoogleTts =
+        options.allowGoogleTts ?? policy.allowGoogleTtsFallback;
+      const activeLock = getActiveSessionVoiceLock();
+      const sessionId = options.sessionId ?? activeLock?.sessionId ?? null;
 
       return withRequestDeadline(
         async (signal) => {
@@ -269,6 +362,10 @@ export function createSpeechService(): SpeechService {
                 ...(options.speed !== undefined
                   ? { speed: options.speed }
                   : {}),
+                ...(options.wordSample ? { word_sample: true } : {}),
+                ...(mode !== "local_only" ? { provider_mode: mode } : {}),
+                ...(allowGoogleTts ? { allow_google_tts: true } : {}),
+                ...(sessionId ? { session_id: sessionId } : {}),
               }),
             },
             signal,
@@ -284,11 +381,117 @@ export function createSpeechService(): SpeechService {
             response.headers.get("x-resolved-voice-id")?.trim() || null;
           const usedFallbackVoice =
             response.headers.get("x-voice-fallback") === "1";
+          const provider =
+            response.headers.get("x-voice-provider")?.trim() || "local";
+          const fallbackReason =
+            response.headers.get("x-voice-fallback-reason")?.trim() || null;
+          const voiceGender = resolveVoiceGender(
+            resolvedVoiceId ?? options.voiceId,
+            response.headers.get("x-voice-gender"),
+          );
           setSynthesizedAudioMeta(audio, {
             resolvedVoiceId,
             usedFallbackVoice,
+            provider,
+            region: response.headers.get("x-voice-region")?.trim() || null,
+            modelVersion:
+              response.headers.get("x-voice-model-version")?.trim() || null,
+          });
+          recordTtsEngineUsage({
+            provider,
+            fallbackUsed: usedFallbackVoice,
+            fallbackReason,
+            voiceId: resolvedVoiceId ?? options.voiceId ?? null,
+            voiceGender,
           });
           return audio;
+        },
+        options.signal,
+        options.timeoutMs ?? 30_000,
+      );
+    },
+
+    async synthesizePhonics(steps, options = {}) {
+      if (!steps.length) throw failure("TTS_UNAVAILABLE", 422);
+
+      const policy = getVoicePolicyPreferences();
+      const mode = options.providerMode ?? policy.providerMode;
+      const allowGoogleTts =
+        options.allowGoogleTts ?? policy.allowGoogleTtsFallback;
+      const activeLock = getActiveSessionVoiceLock();
+      const sessionId = options.sessionId ?? activeLock?.sessionId ?? null;
+
+      return withRequestDeadline(
+        async (signal) => {
+          const response = await speechRequest(
+            "/voice/text-to-speech/phonics",
+            "TTS_UNAVAILABLE",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                steps: steps.map((s) => ({
+                  id: s.id,
+                  spoken_text: s.spokenText.normalize("NFC").trim(),
+                  pause_after_ms: s.pauseAfterMs ?? 420,
+                })),
+                ...(options.voiceId ? { voice_id: options.voiceId } : {}),
+                ...(options.speed !== undefined
+                  ? { speed: options.speed }
+                  : {}),
+                ...(mode !== "local_only" ? { provider_mode: mode } : {}),
+                ...(allowGoogleTts ? { allow_google_tts: true } : {}),
+                ...(sessionId ? { session_id: sessionId } : {}),
+              }),
+            },
+            signal,
+          );
+          const payload: unknown = await response.json();
+          signal.throwIfAborted();
+          const parsed = phonicsSpeechSchema.safeParse(payload);
+          if (
+            !parsed.success ||
+            parsed.data.step_timings.length !== steps.length
+          ) {
+            throw failure("TTS_UNAVAILABLE", 502);
+          }
+          let audio: Blob;
+          try {
+            audio = base64ToBlob(
+              parsed.data.audio_base64,
+              parsed.data.content_type,
+            );
+          } catch {
+            throw failure("TTS_UNAVAILABLE", 502);
+          }
+          if (!audio.size) throw failure("TTS_UNAVAILABLE", 502);
+          const phonicsProvider = parsed.data.provider ?? "local";
+          const phonicsUsedFallback =
+            phonicsProvider === "google" ||
+            (Boolean(options.voiceId) &&
+              parsed.data.resolved_voice_id !== options.voiceId);
+          setSynthesizedAudioMeta(audio, {
+            resolvedVoiceId: parsed.data.resolved_voice_id,
+            usedFallbackVoice: phonicsUsedFallback,
+            provider: phonicsProvider,
+            region: parsed.data.region ?? "north",
+            modelVersion: parsed.data.model_version,
+          });
+          recordTtsEngineUsage({
+            provider: phonicsProvider,
+            fallbackUsed: phonicsUsedFallback,
+            voiceId: parsed.data.resolved_voice_id,
+            voiceGender: resolveVoiceGender(parsed.data.resolved_voice_id),
+          });
+          return {
+            audio,
+            durationSeconds: parsed.data.duration_seconds,
+            stepTimings: parsed.data.step_timings,
+            provider: parsed.data.provider ?? "local",
+            resolvedVoiceId: parsed.data.resolved_voice_id,
+            region: parsed.data.region ?? "north",
+            modelVersion: parsed.data.model_version,
+          };
         },
         options.signal,
         options.timeoutMs ?? 30_000,
@@ -313,12 +516,36 @@ export function createSpeechService(): SpeechService {
               ? "recording.wav"
               : "recording.webm");
 
-      const form = new FormData();
+      const policy = getVoicePolicyPreferences();
+      const mode = options.providerMode ?? policy.providerMode;
+      const allowGoogleStt =
+        options.allowGoogleStt ?? policy.allowGoogleSttFallback;
+      const activeLock = getActiveSessionVoiceLock();
+      const sessionId = options.sessionId ?? activeLock?.sessionId ?? null;
 
+      const form = new FormData();
       form.append("file", fileBlob, filename);
 
       if (options.languageCode) {
         form.append("language_code", options.languageCode);
+      }
+      if (mode !== "local_only") {
+        form.append("provider_mode", mode);
+      }
+      if (allowGoogleStt) {
+        form.append("allow_google_stt", "true");
+      }
+      if (sessionId) {
+        form.append("session_id", sessionId);
+      }
+      if (options.pageId) {
+        form.append("page_id", options.pageId);
+      }
+      if (options.turnId) {
+        form.append("turn_id", options.turnId);
+      }
+      if (options.source) {
+        form.append("source", options.source);
       }
 
       appendKeyterms(form, options.keyterms);
@@ -357,11 +584,24 @@ export function createSpeechService(): SpeechService {
             const parsed = transcriptionSchema.safeParse(payload);
             if (!parsed.success)
               throw failure("STT_UNAVAILABLE", response.status);
+            const providerHeader =
+              response.headers.get("x-voice-provider")?.trim() || null;
+            const fallbackUsed =
+              response.headers.get("x-voice-fallback") === "1";
+            const fallbackReason =
+              response.headers.get("x-voice-fallback-reason")?.trim() || null;
+            recordSttEngineUsage({
+              provider: providerHeader ?? "local",
+              fallbackUsed,
+              fallbackReason,
+            });
             return {
               text: parsed.data.text,
               language_code: parsed.data.language_code ?? null,
               language_probability: parsed.data.language_probability ?? null,
               words: parsed.data.words ?? null,
+              ...(providerHeader ? { provider: providerHeader } : {}),
+              ...(fallbackUsed ? { fallback_used: true } : {}),
             };
           })(),
         ]);

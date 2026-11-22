@@ -3,15 +3,18 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { createSpeechService } from "@/lib/api/speech-service";
 import { createVoiceStudioService } from "@/lib/api/voice-studio-service";
+import type { SupportedPhonicsLessonPlan } from "@/lib/reading/phonics-lesson";
+import { subscribeVoicePolicy } from "@/lib/reading/session-voice-lock";
 import { subscribeSpeechPreferences } from "@/lib/reading/speech-preferences";
 import {
   TtsPlayback,
+  type PhonicsPlayOptions,
   type PlaybackState,
   type SpeechPlayOptions,
   type WordTimedPlayOptions,
 } from "@/lib/reading/tts-playback";
 
-export type { SpeechPlayOptions, WordTimedPlayOptions };
+export type { PhonicsPlayOptions, SpeechPlayOptions, WordTimedPlayOptions };
 
 export interface SpeechPlayer {
   readonly isPlaying: boolean;
@@ -19,6 +22,10 @@ export interface SpeechPlayer {
   readonly state: PlaybackState;
   readonly fallbackNotice: string | null;
   play(text: string, options?: SpeechPlayOptions): Promise<void>;
+  playPhonicsLesson(
+    lesson: SupportedPhonicsLessonPlan,
+    options?: PhonicsPlayOptions,
+  ): Promise<void>;
   playWithWordTimings(
     words: readonly string[],
     options: WordTimedPlayOptions,
@@ -53,6 +60,15 @@ export function useSpeechPlayer(): SpeechPlayer {
           : Promise.reject(
               new DOMException("Audio player is not ready", "AbortError"),
             ),
+      playPhonicsLesson: (
+        lesson: SupportedPhonicsLessonPlan,
+        options?: PhonicsPlayOptions,
+      ) =>
+        mounted.current
+          ? player.playPhonicsLesson(lesson, options)
+          : Promise.reject(
+              new DOMException("Audio player is not ready", "AbortError"),
+            ),
       playWithWordTimings: (
         words: readonly string[],
         options: WordTimedPlayOptions,
@@ -68,12 +84,14 @@ export function useSpeechPlayer(): SpeechPlayer {
   );
   useEffect(() => {
     mounted.current = true;
-    const unsubscribe = subscribeSpeechPreferences(
+    const unsubSpeech = subscribeSpeechPreferences(
       player.handlePreferencesChange,
     );
+    const unsubPolicy = subscribeVoicePolicy(player.handlePreferencesChange);
     return () => {
       mounted.current = false;
-      unsubscribe();
+      unsubSpeech();
+      unsubPolicy();
       player.dispose();
     };
   }, [player]);

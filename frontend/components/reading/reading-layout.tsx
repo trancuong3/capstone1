@@ -76,6 +76,8 @@ interface ReadingLayoutProps {
   onPause: () => void;
   onReadSample?: () => void;
   onReadWord?: () => void;
+  onSpellWord?: () => void;
+  phonicsPanel?: ReactNode;
   onToggleListening?: () => void;
   onWordClick?: (word: ReadingPageWordDTO) => void;
   page: ReadingPageDTO;
@@ -132,6 +134,8 @@ export function ReadingLayout({
   onPause,
   onReadSample,
   onReadWord,
+  onSpellWord,
+  phonicsPanel,
   onToggleListening,
   onWordClick,
   page,
@@ -176,6 +180,16 @@ export function ReadingLayout({
             <p className="text-sm tabular-nums text-muted">{progressLabel}</p>
           )}
         </div>
+        {onSpellWord && (currentWordText || page.words.length > 0) ? (
+          <button
+            type="button"
+            onClick={onSpellWord}
+            disabled={controlsDisabled}
+            className="inline-flex min-h-11 items-center gap-2 rounded-control border border-primary/30 bg-sky/60 px-3 font-semibold text-primary hover:bg-sky disabled:opacity-55"
+          >
+            <Volume2 aria-hidden="true" className="size-4" /> Nghe đánh vần
+          </button>
+        ) : null}
         <button
           type="button"
           aria-label="Nhờ gia sư giúp đọc"
@@ -438,6 +452,9 @@ export function ReadingLayout({
         </div>
       ) : null}
 
+      {phonicsPanel ? (
+        <div className="mx-auto w-full max-w-[1008px]">{phonicsPanel}</div>
+      ) : null}
       {!retryMode && companionBubble ? (
         <ReadingCompanionBubble
           isSpeaking={isCompanionSpeaking}

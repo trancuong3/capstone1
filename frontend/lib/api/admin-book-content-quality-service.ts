@@ -81,6 +81,8 @@ export interface AdminBookContentQualityService {
   getUserBookSubmission?: AdminUserBooksQualityApi["getUserBookSubmission"];
   decideUserBookSubmission?: AdminUserBooksQualityApi["decideUserBookSubmission"];
   suspendUserBook?: AdminUserBooksQualityApi["suspendUserBook"];
+  listFlow2Candidates?: AdminUserBooksQualityApi["listFlow2Candidates"];
+  decideFlow2Candidate?: AdminUserBooksQualityApi["decideFlow2Candidate"];
 }
 
 export function createAdminBookContentQualityService(): AdminBookContentQualityService {

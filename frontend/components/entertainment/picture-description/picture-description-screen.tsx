@@ -42,6 +42,7 @@ import { Button } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { isInjectedTestSpeechRecognition } from "@/lib/reading/local-segment-speech-recognition";
 import { usePictureDescriptionService } from "@/hooks/use-picture-description-service";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
@@ -430,23 +431,7 @@ export function PictureDescriptionScreen() {
         await speechPlayer.play(cleaned);
         setPlayingSpeechKey((current) => (current === key ? null : current));
       } catch {
-        if (typeof window !== "undefined" && "speechSynthesis" in window) {
-          const utterance = new SpeechSynthesisUtterance(cleaned);
-          utterance.lang = "vi-VN";
-          utterance.onend = () => {
-            setPlayingSpeechKey((current) =>
-              current === key ? null : current,
-            );
-          };
-          utterance.onerror = () => {
-            setPlayingSpeechKey((current) =>
-              current === key ? null : current,
-            );
-          };
-          window.speechSynthesis.speak(utterance);
-        } else {
-          setPlayingSpeechKey(null);
-        }
+        setPlayingSpeechKey(null);
       }
     },
     [playingSpeechKey, speechPlayer, stopSpeechPlayback],
@@ -661,7 +646,10 @@ export function PictureDescriptionScreen() {
     setIsRecordingVoice(true);
     setVoiceMessage("Đang lắng nghe bé nói mô tả bức tranh...");
 
-    const SpeechRecognition = getSpeechRecognitionCtor();
+    const rawCtor = getSpeechRecognitionCtor();
+    const SpeechRecognition = isInjectedTestSpeechRecognition(rawCtor)
+      ? rawCtor
+      : null;
     if (SpeechRecognition) {
       try {
         const recognition = new SpeechRecognition();

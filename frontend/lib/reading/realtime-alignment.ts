@@ -1,6 +1,8 @@
 import type { ReadingPageWordDTO } from "@/types/reading";
 import type { WordTimestamp } from "@/lib/api/speech-service";
 import {
+  isLikelyPhonicsCueToken,
+  isPhonicsCueForWindow,
   isPhonicsInProgress,
   matchPhonicsSpelling,
 } from "@/lib/reading/phonics-spelling";
@@ -373,6 +375,30 @@ export class RealtimeAlignmentEngine {
           this.trailingMismatch = null;
           break;
         }
+        // Multi-word Vietnamese phonics sequence guard (2-4 upcoming words):
+        // Many Grade 1-2 children spell 2-4 words in a row (e.g. "môi trường tự nhiên")
+        // before reading the whole phrase smoothly. Never turn intermediate spelling
+        // cues into RED SUBSTITUTE / DELETE errors on subsequent words!
+        const aheadConsumed = this.tryConsumeAheadPhonicsCluster(
+          remaining,
+          this.currentBookIndex,
+        );
+        if (aheadConsumed > 0) {
+          this.pendingToken = null;
+          this.spellingInProgress = true;
+          this.trailingMismatch = null;
+          index += aheadConsumed;
+          continue;
+        }
+        if (
+          this.isMultiWordPhonicsCueAt(tokens, index, this.currentBookIndex)
+        ) {
+          this.pendingToken = null;
+          this.spellingInProgress = true;
+          this.trailingMismatch = null;
+          index += 1;
+          continue;
+        }
       }
       this.spellingBuffer = null;
       this.spellingInProgress = false;
@@ -396,6 +422,85 @@ export class RealtimeAlignmentEngine {
   private isOffTopic(tokens: readonly string[]): boolean {
     if (tokens.length < 3) return false;
     return this.alignedTokenCount(tokens) / tokens.length < 0.5;
+  }
+
+  private getPhonicsWindowTargets(cursor: number): string[] {
+    const end = Math.min(this.bookWords.length, cursor + 4);
+    const targets: string[] = [];
+    for (let i = cursor; i < end; i += 1) {
+      targets.push(this.bookWords[i].normalizedText);
+    }
+    return targets;
+  }
+
+  /**
+   * Detects when a child spells an upcoming word (cursor+1 .. cursor+3) in a
+   * 2-4 word cluster before coming back to read the full phrase smoothly.
+   * Returns consumed cue+syllable count so we hold at `cursor` without painting
+   * skipped words RED.
+   */
+  private tryConsumeAheadPhonicsCluster(
+    remaining: readonly string[],
+    cursor: number,
+  ): number {
+    if (remaining.length < 2) return 0;
+    const maxAhead = Math.min(this.bookWords.length - 1, cursor + 3);
+    for (let ahead = cursor + 1; ahead <= maxAhead; ahead += 1) {
+      const aheadMatch = matchPhonicsSpelling(
+        remaining,
+        this.bookWords[ahead].normalizedText,
+      );
+      if (aheadMatch && aheadMatch.consumedCount >= 2) {
+        return aheadMatch.consumedCount;
+      }
+    }
+    return 0;
+  }
+
+  /**
+   * Returns true when `tokens[index]` is an intermediate Vietnamese spelling cue
+   * (e.g. "ô", "i", "mờ", "nặng", "ự", "iên", "huyền") within a multi-word
+   * spelling sequence for the upcoming 4-word window.
+   *
+   * Strictly excludes normal book words in `[cursor - 2 .. cursor + 3]` so
+   * repeated words ("ba ba") and normal misreads ("tồi" for "tôi") are NEVER
+   * swallowed as spelling cues.
+   */
+  private isMultiWordPhonicsCueAt(
+    tokens: readonly string[],
+    index: number,
+    cursor: number,
+  ): boolean {
+    const token = tokens[index];
+    if (!token || cursor >= this.bookWords.length) return false;
+
+    // Never swallow any actual book word around the cursor (preserves repeats & skips)
+    const nearbyStart = Math.max(0, cursor - 2);
+    const nearbyEnd = Math.min(this.bookWords.length, cursor + 4);
+    for (let i = nearbyStart; i < nearbyEnd; i += 1) {
+      if (this.bookWords[i].normalizedText === token) return false;
+    }
+
+    const windowTargets = this.getPhonicsWindowTargets(cursor);
+    const tokenIsUniversalCue = isLikelyPhonicsCueToken(token);
+    const tokenIsPureRhymeCue =
+      !tokenIsUniversalCue &&
+      /^[aeiouyàáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ]/u.test(
+        token,
+      ) &&
+      isPhonicsCueForWindow(token, windowTargets);
+
+    if (!tokenIsUniversalCue && !tokenIsPureRhymeCue) return false;
+
+    // Require either active spelling mode OR an adjacent unambiguous phonics cue token
+    if (this.spellingInProgress) return true;
+
+    const prev = index > 0 ? tokens[index - 1] : null;
+    const next = index + 1 < tokens.length ? tokens[index + 1] : null;
+    return Boolean(
+      (prev && isLikelyPhonicsCueToken(prev)) ||
+      (next && isLikelyPhonicsCueToken(next)),
+    );
   }
 
   private alignedTokenCount(tokens: readonly string[]): number {
@@ -466,6 +571,19 @@ export class RealtimeAlignmentEngine {
         ) {
           matched += remaining.length;
           break;
+        }
+        const aheadPhonicsCount = this.tryConsumeAheadPhonicsCluster(
+          remaining,
+          cursor,
+        );
+        if (aheadPhonicsCount > 0) {
+          matched += aheadPhonicsCount;
+          index += aheadPhonicsCount - 1;
+          continue;
+        }
+        if (this.isMultiWordPhonicsCueAt(tokens, index, cursor)) {
+          matched += 1;
+          continue;
         }
       }
       if (cursor > 0 && this.bookWords[cursor - 1]?.normalizedText === token) {
@@ -726,6 +844,24 @@ export class RealtimeAlignmentEngine {
 
   private processToken(token: string): void {
     if (!token) return;
+
+    // Ignore pure breath/hesitation fillers ("ờ", "ừm", "ầm", "hừm") when they do NOT
+    // appear in the nearby book words so post-pause inhales never mark the next word RED.
+    if (
+      (token === "ờ" || token === "ừm" || token === "ầm" || token === "hừm") &&
+      this.currentBookIndex < this.bookWords.length
+    ) {
+      const start = Math.max(0, this.currentBookIndex - 1);
+      const end = Math.min(this.bookWords.length, this.currentBookIndex + 4);
+      let inBook = false;
+      for (let i = start; i < end; i += 1) {
+        if (this.bookWords[i].normalizedText === token) {
+          inBook = true;
+          break;
+        }
+      }
+      if (!inBook) return;
+    }
 
     const spokenIndex = this.spokenWords.length;
     this.spokenWords.push(token);

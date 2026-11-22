@@ -214,6 +214,137 @@ export type ParentPageSubmissionDTO = z.infer<
   typeof parentPageSubmissionSchema
 >;
 
+export const ocrContributionConsentStatusSchema = z.enum([
+  "OPTED_OUT",
+  "OPTED_IN",
+  "REVOKED",
+]);
+export type OcrContributionConsentStatus = z.infer<
+  typeof ocrContributionConsentStatusSchema
+>;
+
+export const flow2CandidateStatusSchema = z.enum([
+  "PENDING_VERIFICATION",
+  "VERIFIED",
+  "SYNC_QUEUED",
+  "SYNCED",
+  "REJECTED",
+  "REVOKED",
+]);
+export type Flow2CandidateStatus = z.infer<typeof flow2CandidateStatusSchema>;
+
+export const flow2RejectionCodeSchema = z.enum([
+  "BLURRY_OR_TRUNCATED",
+  "LABEL_IMAGE_MISMATCH",
+  "DIACRITIC_ERROR",
+  "CONTAINS_PII",
+  "UNCLEAR_RIGHTS",
+  "OTHER",
+]);
+export type Flow2RejectionCode = z.infer<typeof flow2RejectionCodeSchema>;
+
+export const FLOW2_REJECTION_CODE_LABELS: Record<Flow2RejectionCode, string> = {
+  BLURRY_OR_TRUNCATED: "Ảnh mờ, thiếu nét hoặc cắt cụt chữ",
+  LABEL_IMAGE_MISMATCH: "Nhãn không khớp chữ in thật trên ảnh",
+  DIACRITIC_ERROR: "Sai dấu tiếng Việt, chữ đ/Đ hoặc thứ tự chữ",
+  CONTAINS_PII: "Chứa thông tin cá nhân / riêng tư",
+  UNCLEAR_RIGHTS: "Chưa rõ căn cứ quyền sử dụng cho huấn luyện",
+  OTHER: "Lý do khác",
+};
+
+export const OCR_CONTRIBUTION_NOTICE_VERSION = "v1-2026-11-22";
+
+export const parentOcrContributionStateSchema = z.object({
+  book_id: z.guid(),
+  enabled: z.boolean(),
+  status: ocrContributionConsentStatusSchema,
+  purpose: z.literal("FLOW2_ADMIN_VERIFIED_OCR"),
+  consent_version: z.number().int().nonnegative(),
+  notice_version: z.string(),
+  rights_confirmed: z.boolean(),
+  consented_at: z.string().nullable(),
+  revoked_at: z.string().nullable(),
+  revoke_reason: z.string().nullable(),
+  rights_basis: sourceUsageTypeSchema,
+  rights_eligible_for_training: z.boolean(),
+  rights_ineligible_reason: z.string().nullable(),
+  pending_verification_count: z.number().int().nonnegative(),
+  sync_queued_count: z.number().int().nonnegative(),
+  synced_count: z.number().int().nonnegative(),
+  rejected_count: z.number().int().nonnegative(),
+  revoked_count: z.number().int().nonnegative(),
+  last_recruitment_skipped_pages: z.number().int().nonnegative().optional(),
+  status_notice: z.string(),
+});
+export type ParentOcrContributionStateDTO = z.infer<
+  typeof parentOcrContributionStateSchema
+>;
+
+export const adminFlow2CandidateSchema = z.object({
+  id: z.guid(),
+  book_id: z.guid(),
+  book_title: z.string(),
+  page_id: z.guid(),
+  page_number: z.number().int().positive(),
+  revision_id: z.guid(),
+  line_index: z.number().int().nonnegative(),
+  consent_version: z.number().int().positive(),
+  crop_image_url: z.string(),
+  image_sha256: z.string(),
+  proposed_label: z.string(),
+  verified_label: z.string().nullable(),
+  rights_basis: z.enum([
+    "SELF_AUTHORED",
+    "PUBLIC_DOMAIN",
+    "LICENSED_OR_PERMISSION",
+  ]),
+  rights_basis_label: z.string(),
+  pii_check_status: z.enum(["CLEAR", "FLAGGED_PII"]),
+  pii_flags: z.array(z.string()),
+  quality_metrics: z.record(z.string(), z.unknown()),
+  status: flow2CandidateStatusSchema,
+  status_label: z.string(),
+  verified_at: z.string().nullable(),
+  rejection_code: z.string().nullable(),
+  rejection_reason: z.string().nullable(),
+  outbox_event_id: z.guid().nullable(),
+  sample_id: z.guid().nullable(),
+  revoked_at: z.string().nullable(),
+  revoke_reason: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type AdminFlow2CandidateDTO = z.infer<typeof adminFlow2CandidateSchema>;
+
+export const adminFlow2CandidatePageSchema = z.object({
+  items: z.array(adminFlow2CandidateSchema),
+  total: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+  offset: z.number().int().nonnegative(),
+  summary: z.record(z.string(), z.number().int().nonnegative()),
+});
+export type AdminFlow2CandidatePageDTO = z.infer<
+  typeof adminFlow2CandidatePageSchema
+>;
+
+export const adminFlow2CandidateDecisionResponseSchema = z.object({
+  candidate_id: z.guid(),
+  book_id: z.guid(),
+  page_id: z.guid(),
+  revision_id: z.guid(),
+  decision: z.enum(["APPROVE", "REJECT"]),
+  status: flow2CandidateStatusSchema,
+  verified_label: z.string().nullable(),
+  outbox_event_id: z.guid().nullable(),
+  rejection_code: z.string().nullable(),
+  rejection_reason: z.string().nullable(),
+  decided_at: z.string(),
+  audit_log_id: z.guid(),
+});
+export type AdminFlow2CandidateDecisionResponseDTO = z.infer<
+  typeof adminFlow2CandidateDecisionResponseSchema
+>;
+
 export const parentPrivateBookSummarySchema = z.object({
   id: z.guid(),
   title: z.string(),
@@ -233,6 +364,7 @@ export const parentPrivateBookSummarySchema = z.object({
   readable_for_children: z.boolean(),
   has_held_multipage_batch: z.boolean(),
   privacy_notice: z.string(),
+  ocr_contribution: parentOcrContributionStateSchema.nullable().optional(),
   created_at: z.string(),
 });
 export type ParentPrivateBookSummaryDTO = z.infer<

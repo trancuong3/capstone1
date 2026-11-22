@@ -1,25 +1,43 @@
-import type { SpeechService } from "@/lib/api/speech-service";
-import { installAndroidAudioUnlock } from "@/lib/reading/android-audio-unlock";
-import { getSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
+import type {
+  PhonicsStepTiming,
+  SpeechService,
+  SynthesizedPhonicsSpeech,
+} from "@/lib/api/speech-service";
 import type {
   TimedSpeech,
   VoiceStudioService,
   WordTiming,
 } from "@/lib/api/voice-studio-service";
 import { withRequestDeadline } from "@/lib/api/request-deadline";
+import { installAndroidAudioUnlock } from "@/lib/reading/android-audio-unlock";
+import type {
+  PhonicsLessonStep,
+  SupportedPhonicsLessonPlan,
+} from "@/lib/reading/phonics-lesson";
+import {
+  DEFAULT_LOCAL_VOICE_ID,
+  getActiveSessionVoiceLock,
+  getVoicePolicyPreferences,
+  inferModelVersionForVoiceId,
+  inferProviderFromVoiceId,
+  inferRegionFromVoiceId,
+  recordSessionUtteranceVoice,
+  REGION_DEFAULT_VOICE_ID,
+  type VoiceProviderKind,
+  type VoiceRegion,
+} from "@/lib/reading/session-voice-lock";
 import { prepareWordSampleAudio } from "@/lib/reading/short-word-audio";
-import { normalizeVietnameseWord } from "@/lib/reading/vietnamese-text";
 import {
   clampSpeed,
   getSpeechPreferences,
-  type SpeechPreferences,
 } from "@/lib/reading/speech-preferences";
+import { getSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
 import {
   hasMatchingSpeechWords,
   SHORT_TTS_MAX_CHARACTERS,
-  speechWordAtCharacter,
   splitSpeechText,
 } from "@/lib/reading/tts-text";
+import { normalizeVietnameseWord } from "@/lib/reading/vietnamese-text";
 import {
   findActiveWordIndex,
   HIGHLIGHT_LEAD_SECONDS,
@@ -33,19 +51,22 @@ export type PlaybackState =
   | "completed"
   | "fallback"
   | "error";
+
 export interface SpeechPlayOptions {
-  /** Use the word's pronunciation recording when one is available. */
+  /** Normalize & prepare crisp single-word model in the locked voice. */
   wordSample?: boolean;
-  /** Prefer a Vietnamese device voice for spoken guidance. */
+  /** Spoken coaching / guidance utterance in the locked voice. */
   coaching?: boolean;
   /** Relative speed for this utterance only (< 1 = slower, clearer help). */
   speedScale?: number;
+  /** Utterance category for session voice-consistency auditing. */
+  utteranceKind?: string;
   onPlay?: (duration: number) => void;
   onTimeUpdate?: (currentTime: number, duration: number) => void;
-  /** Browser boundaries only; audio without timing never guesses word indexes. */
   onWordChange?: (index: number) => void;
   onEnded?: () => void;
 }
+
 export interface WordTimedPlayOptions {
   /** Verified page text, preserving its punctuation and paragraphs. */
   text?: string;
@@ -54,80 +75,152 @@ export interface WordTimedPlayOptions {
   onWordChange?: (index: number) => void;
   onEnded?: () => void;
 }
+
+export interface PhonicsPlayOptions {
+  speedScale?: number;
+  onPlay?: (duration: number) => void;
+  onStepChange?: (stepIndex: number, step: PhonicsLessonStep) => void;
+  onTimeUpdate?: (currentTime: number, duration: number) => void;
+  onEnded?: () => void;
+}
+
+interface ResolvedOperationVoice {
+  readonly sessionId: string | null;
+  readonly provider: VoiceProviderKind;
+  readonly requestedVoiceId: string | null;
+  readonly cacheVoiceId: string;
+  readonly region: VoiceRegion;
+  readonly modelVersion: string;
+  readonly speed: number;
+}
+
 interface Operation {
   readonly controller: AbortController;
-  readonly preferences: SpeechPreferences;
-  /** Allows slower-than-0.7 device speech for step-2 clearer word models. */
-  readonly browserRate: number;
+  readonly voice: ResolvedOperationVoice;
   paused: boolean;
   started: boolean;
   resumeWait?: () => void;
 }
+
 interface ActiveMedia {
   pause(): void;
   resume(): Promise<void>;
 }
+
 function stopped(): Error {
   return new DOMException("Audio playback was stopped.", "AbortError");
 }
+
 function unavailable(): Error {
   return new Error(
-    "Không có giọng đọc tiếng Việt khả dụng. Bé có thể thử lại nhé.",
+    "Giọng đọc trên máy hiện chưa sẵn sàng. Ba mẹ và bé có thể xem chữ trên màn hình và bấm Thử lại nhé.",
   );
 }
+
 function isAbort(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
+const LOCKED_VOICE_UNAVAILABLE_NOTICE =
+  "Giọng đọc đã khóa đang tạm bận. ViRead giữ nguyên hướng dẫn bằng chữ để không tự đổi giọng khác — bé bấm Thử lại nhé.";
 const SERVER_FALLBACK_VOICE_NOTICE =
   "Giọng đã chọn hiện chưa khả dụng, hệ thống đang đọc bằng giọng mặc định.";
-const BROWSER_FALLBACK_NOTICE =
-  "Giọng đọc máy chủ tạm bận, đang dùng giọng đọc tiếng Việt của trình duyệt.";
 
-// Original CC0 recordings by Penn Zero MSSJ for Lingua Libre on Wikimedia Commons.
-// https://commons.wikimedia.org/wiki/File:LL-Q9199_(vie)-Penn_Zero_MSSJ-thức.wav
-// https://commons.wikimedia.org/wiki/File:LL-Q9199_(vie)-Penn_Zero_MSSJ-thực.wav
-const WORD_RECORDINGS = new Map([
-  ["thức", "/audio/word-samples/thuc-sac.wav"],
-  ["thực", "/audio/word-samples/thuc-nang.wav"],
-]);
-const WORD_SAMPLE_MAX_RATE = 0.7;
+function resolveOperationVoice(
+  speedLimit = Infinity,
+  speedScale = 1,
+): ResolvedOperationVoice {
+  const activeLock = getActiveSessionVoiceLock();
+  const prefs = getSpeechPreferences();
+  const policy = getVoicePolicyPreferences();
 
-function selectVietnameseVoice(synthesis: SpeechSynthesis) {
-  const vietnamese = synthesis
-    .getVoices()
-    .filter((voice) => /^vi(?:[-_]|$)/iu.test(voice.lang));
-  return vietnamese.find((voice) => voice.localService) ?? vietnamese[0];
+  const baseSpeed = activeLock ? activeLock.speed : prefs.speed;
+  const limited = Math.min(baseSpeed, speedLimit);
+  const scaled = speedScale === 1 ? limited : limited * speedScale;
+  const effectiveSpeed = clampSpeed(scaled);
+
+  if (activeLock) {
+    return {
+      sessionId: activeLock.sessionId,
+      provider: activeLock.provider,
+      requestedVoiceId: activeLock.voiceId,
+      cacheVoiceId: activeLock.voiceId,
+      region: activeLock.region,
+      modelVersion: activeLock.modelVersion,
+      speed: effectiveSpeed,
+    };
+  }
+
+  const requestedVoiceId =
+    prefs.voiceId ??
+    REGION_DEFAULT_VOICE_ID[policy.region] ??
+    DEFAULT_LOCAL_VOICE_ID;
+  const cacheVoiceId = requestedVoiceId;
+  const provider = inferProviderFromVoiceId(cacheVoiceId);
+  const region = inferRegionFromVoiceId(cacheVoiceId, policy.region);
+  const modelVersion = inferModelVersionForVoiceId(
+    cacheVoiceId,
+    policy.modelVersion,
+  );
+
+  return {
+    sessionId: null,
+    provider,
+    requestedVoiceId,
+    cacheVoiceId,
+    region,
+    modelVersion,
+    speed: effectiveSpeed,
+  };
 }
 
-/** Owns one synthesis operation, ordered chunk queue and media clock. */
+function findActivePhonicsStepIndex(
+  timings: readonly PhonicsStepTiming[],
+  currentTime: number,
+): number {
+  for (let i = timings.length - 1; i >= 0; i -= 1) {
+    if (currentTime + 0.02 >= timings[i].start) {
+      return i;
+    }
+  }
+  return timings.length > 0 ? 0 : -1;
+}
+
+/**
+ * Owns one synthesis operation, ordered chunk queue and media clock.
+ * Strictly enforces "Một buổi, một giọng" (never switches to browser OS voice
+ * or static third-party speaker recordings).
+ */
 export class TtsPlayback {
   private state: PlaybackState = "idle";
   private fallbackNotice: string | null = null;
   private readonly listeners = new Set<() => void>();
+
   getState = (): PlaybackState => this.state;
   getFallbackNotice = (): string | null => this.fallbackNotice;
+
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
     };
   };
+
   private setFallbackNotice = (notice: string | null): void => {
     if (notice === this.fallbackNotice) return;
     this.fallbackNotice = notice;
     this.listeners.forEach((listener) => listener());
   };
+
   private onState = (state: PlaybackState): void => {
     if (state === this.state) return;
     this.state = state;
     this.listeners.forEach((listener) => listener());
   };
+
   private current: Operation | null = null;
   private media: ActiveMedia | null = null;
   private frame: number | null = null;
-  private serverRetryAfter = 0;
-  private timedRetryAfter = 0;
   private readonly cache = new Map<string, TimedSpeech>();
   private cacheBytes = 0;
   private readonly shortCache = new Map<
@@ -135,6 +228,10 @@ export class TtsPlayback {
     { readonly audio: Blob; readonly usedFallbackVoice: boolean }
   >();
   private shortCacheBytes = 0;
+  private readonly phonicsCache = new Map<string, SynthesizedPhonicsSpeech>();
+  private phonicsCacheBytes = 0;
+  private timedCooldownUntil = 0;
+
   constructor(
     private readonly speech: SpeechService,
     private readonly studio: VoiceStudioService,
@@ -143,8 +240,7 @@ export class TtsPlayback {
   }
 
   handlePreferencesChange = (): void => {
-    this.serverRetryAfter = 0;
-    this.timedRetryAfter = 0;
+    this.timedCooldownUntil = 0;
     this.setFallbackNotice(null);
     this.stop();
   };
@@ -156,13 +252,17 @@ export class TtsPlayback {
     this.cancelFrame();
     this.onState("idle");
   };
+
   dispose = (): void => {
     this.stop();
     this.cache.clear();
     this.cacheBytes = 0;
     this.shortCache.clear();
     this.shortCacheBytes = 0;
+    this.phonicsCache.clear();
+    this.phonicsCacheBytes = 0;
   };
+
   pause = (): void => {
     if (!this.current || this.current.paused) return;
     this.current.paused = true;
@@ -172,8 +272,9 @@ export class TtsPlayback {
       this.onState("paused");
     } catch {
       this.stop();
-    } // Unsupported device pause is an honest stop.
+    }
   };
+
   resume = async (): Promise<void> => {
     const operation = this.current;
     if (!operation?.paused) return;
@@ -184,14 +285,17 @@ export class TtsPlayback {
     if (this.current === operation)
       this.onState(this.media ? "playing" : "loading");
   };
+
   private cancelFrame(): void {
     if (this.frame !== null) cancelAnimationFrame(this.frame);
     this.frame = null;
   }
+
   private ensure(operation: Operation): void {
     operation.controller.signal.throwIfAborted();
     if (this.current !== operation) throw stopped();
   }
+
   private async waitIfPaused(operation: Operation): Promise<void> {
     this.ensure(operation);
     if (!operation.paused) return;
@@ -203,33 +307,24 @@ export class TtsPlayback {
     );
     this.ensure(operation);
   }
+
   private wait<T>(operation: Operation, promise: Promise<T>): Promise<T> {
-    // Cancellation must settle even if an adapter ignores its AbortSignal.
     return withRequestDeadline(
       () => promise,
       operation.controller.signal,
       600_000,
     );
   }
+
   private async run(
     action: (operation: Operation) => Promise<void>,
     speedLimit = Infinity,
     speedScale = 1,
   ): Promise<void> {
     this.stop();
-    const preferences = getSpeechPreferences();
-    const limited = Math.min(preferences.speed, speedLimit);
-    const scaled = speedScale === 1 ? limited : limited * speedScale;
     const operation: Operation = {
       controller: new AbortController(),
-      preferences: {
-        ...preferences,
-        speed: speedScale === 1 ? limited : clampSpeed(scaled),
-      },
-      browserRate:
-        speedScale === 1
-          ? limited
-          : Number(Math.min(1.2, Math.max(0.5, scaled)).toFixed(2)),
+      voice: resolveOperationVoice(speedLimit, speedScale),
       paused: false,
       started: false,
     };
@@ -246,6 +341,7 @@ export class TtsPlayback {
       if (this.current === operation) this.current = null;
     }
   }
+
   private started(operation: Operation, callback: () => void): void {
     this.ensure(operation);
     if (operation.started) return;
@@ -253,170 +349,325 @@ export class TtsPlayback {
     callback();
   }
 
+  private auditUtterance(
+    operation: Operation,
+    kind: string,
+    textPreview: string,
+  ): void {
+    recordSessionUtteranceVoice(
+      {
+        kind,
+        provider: operation.voice.provider,
+        voiceId: operation.voice.cacheVoiceId,
+        region: operation.voice.region,
+        modelVersion: operation.voice.modelVersion,
+        speed: operation.voice.speed,
+        textPreview,
+      },
+      operation.voice.sessionId,
+    );
+  }
+
   play = (text: string, options: SpeechPlayOptions = {}): Promise<void> =>
     this.run(
       async (operation) => {
         const spokenText = options.wordSample
           ? normalizeVietnameseWord(text)
-          : options.coaching
-            ? text.normalize("NFC")
-            : text;
+          : text.normalize("NFC");
         if (!spokenText.trim()) throw unavailable();
-        const recording = options.wordSample && WORD_RECORDINGS.get(spokenText);
+
+        const kind =
+          options.utteranceKind ??
+          (options.wordSample
+            ? "word_sample"
+            : options.coaching
+              ? "coaching"
+              : "prompt");
+        this.auditUtterance(operation, kind, spokenText);
+
         let elapsed = 0;
-        for (const chunk of splitSpeechText(
+        const shouldSentencePipeline =
+          !options.wordSample &&
+          operation.voice.provider === "local" &&
+          spokenText.length > 90 &&
+          /[.!?…]\s+\S/u.test(spokenText);
+        const chunks = splitSpeechText(
           spokenText,
-          SHORT_TTS_MAX_CHARACTERS,
-        )) {
+          shouldSentencePipeline ? 95 : SHORT_TTS_MAX_CHARACTERS,
+        );
+
+        const fetchChunk = async (
+          chunkText: string,
+        ): Promise<{
+          audio: Blob;
+          usedFallbackVoice: boolean;
+          key: string;
+        }> => {
+          const normalized = chunkText.normalize("NFC");
+          const shortKey = JSON.stringify([
+            operation.voice.provider,
+            operation.voice.cacheVoiceId,
+            operation.voice.modelVersion,
+            operation.voice.speed,
+            normalized,
+            Boolean(options.wordSample),
+          ]);
+          const cachedShort = this.shortCache.get(shortKey);
+          if (cachedShort) {
+            return {
+              audio: cachedShort.audio,
+              usedFallbackVoice: cachedShort.usedFallbackVoice,
+              key: shortKey,
+            };
+          }
+          let source = await this.wait(
+            operation,
+            this.speech.synthesize(normalized, {
+              voiceId: operation.voice.requestedVoiceId ?? undefined,
+              speed: operation.voice.speed,
+              wordSample: Boolean(options.wordSample),
+              signal: operation.controller.signal,
+            }),
+          );
+          this.ensure(operation);
+          const usedFallbackVoice = Boolean(
+            getSynthesizedAudioMeta(source)?.usedFallbackVoice,
+          );
+          if (options.wordSample) {
+            source = await this.wait(operation, prepareWordSampleAudio(source));
+          }
+          this.cacheShort(shortKey, {
+            audio: source,
+            usedFallbackVoice,
+          });
+          return { audio: source, usedFallbackVoice, key: shortKey };
+        };
+
+        let nextPrefetch: Promise<{
+          audio: Blob;
+          usedFallbackVoice: boolean;
+          key: string;
+        }> | null = null;
+
+        for (let idx = 0; idx < chunks.length; idx += 1) {
+          const chunk = chunks[idx];
           await this.waitIfPaused(operation);
           this.ensure(operation);
           const onStart = (duration: number) =>
             this.started(operation, () => options.onPlay?.(duration));
           const onTime = (time: number, duration: number) =>
             options.onTimeUpdate?.(elapsed + time, elapsed + duration);
-          const deviceText = options.wordSample
-            ? `${chunk.text}. ${chunk.text}.`
-            : chunk.text;
-          if (recording) {
-            this.setFallbackNotice(null);
-            let source: Blob | string = recording;
-            if (typeof OfflineAudioContext !== "undefined") {
-              try {
-                source = await withRequestDeadline(
-                  async (signal) => {
-                    const response = await fetch(recording, { signal });
-                    if (!response.ok) return recording;
-                    const original = await response.blob();
-                    const prepared = await prepareWordSampleAudio(original);
-                    return original === prepared ? recording : prepared;
-                  },
-                  operation.controller.signal,
-                  2000,
-                );
-              } catch {
-                this.ensure(operation);
-              }
-            }
+
+          let fetched: {
+            audio: Blob;
+            usedFallbackVoice: boolean;
+            key: string;
+          };
+          try {
+            fetched = await (nextPrefetch ?? fetchChunk(chunk.text));
+            nextPrefetch = null;
+            this.ensure(operation);
+          } catch (error) {
+            nextPrefetch = null;
+            this.ensure(operation);
+            if (isAbort(error)) throw error;
+            this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+            throw unavailable();
+          }
+
+          // Prefetch the next sentence in parallel while the current sentence plays!
+          if (idx + 1 < chunks.length) {
+            nextPrefetch = fetchChunk(chunks[idx + 1].text);
+            // Suppress unhandled rejection if playback aborts before nextPrefetch is awaited
+            nextPrefetch.catch(() => undefined);
+          }
+
+          this.setFallbackNotice(
+            fetched.usedFallbackVoice ? SERVER_FALLBACK_VOICE_NOTICE : null,
+          );
+          try {
+            // Speed is already applied once at generation -> playbackRate MUST stay 1.0!
             elapsed += await this.playAudio(
               operation,
-              source,
+              fetched.audio,
               undefined,
               0,
               onStart,
               undefined,
               onTime,
-              operation.browserRate,
+              1,
             );
-            continue;
+          } catch (error) {
+            this.ensure(operation);
+            if (isAbort(error) || error instanceof PartialPlaybackError)
+              throw error;
+            this.shortCacheBytes -= fetched.audio.size;
+            this.shortCache.delete(fetched.key);
+            this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+            throw error;
           }
-          const deviceCanCoach =
-            options.coaching &&
-            typeof window !== "undefined" &&
-            window.speechSynthesis &&
-            selectVietnameseVoice(window.speechSynthesis);
-          if (options.wordSample || deviceCanCoach) {
-            try {
-              this.setFallbackNotice(null);
-              elapsed += await this.playBrowser(
-                operation,
-                deviceText,
-                onStart,
-                (index) => options.onWordChange?.(chunk.wordOffset + index),
-                onTime,
-              );
-              continue;
-            } catch (error) {
-              this.ensure(operation);
-              if (isAbort(error) || error instanceof PartialPlaybackError)
-                throw error;
-            }
-          }
-          let source: Blob | null = null;
-          let usedFallbackVoice = false;
-          const shortKey = JSON.stringify([
-            operation.preferences.voiceId,
-            operation.preferences.speed,
-            chunk.text,
-            Boolean(options.wordSample),
-          ]);
-          const cachedShort = this.shortCache.get(shortKey);
-          if (cachedShort) {
-            source = cachedShort.audio;
-            usedFallbackVoice = cachedShort.usedFallbackVoice;
-          } else if (Date.now() >= this.serverRetryAfter) {
-            try {
-              source = await this.wait(
-                operation,
-                this.speech.synthesize(chunk.text, {
-                  voiceId: operation.preferences.voiceId ?? undefined,
-                  speed: operation.preferences.speed,
-                  signal: operation.controller.signal,
-                }),
-              );
-              this.ensure(operation);
-              usedFallbackVoice = Boolean(
-                getSynthesizedAudioMeta(source)?.usedFallbackVoice,
-              );
-              if (options.wordSample)
-                source = await this.wait(
-                  operation,
-                  prepareWordSampleAudio(source),
-                );
-              this.cacheShort(shortKey, {
-                audio: source,
-                usedFallbackVoice,
-              });
-            } catch (error) {
-              this.ensure(operation);
-              if (isAbort(error)) throw error;
-              this.serverRetryAfter = Date.now() + 60_000;
-            }
-          }
-          let duration = 0;
-          if (source) {
-            this.setFallbackNotice(
-              usedFallbackVoice ? SERVER_FALLBACK_VOICE_NOTICE : null,
-            );
-            try {
-              duration = await this.playAudio(
-                operation,
-                source,
-                undefined,
-                0,
-                onStart,
-                undefined,
-                onTime,
-              );
-            } catch (error) {
-              this.ensure(operation);
-              if (isAbort(error) || error instanceof PartialPlaybackError)
-                throw error;
-              this.shortCacheBytes -= source.size;
-              this.shortCache.delete(shortKey);
-              source = null;
-            }
-          }
-          if (!source) {
-            this.setFallbackNotice(BROWSER_FALLBACK_NOTICE);
-            this.onState("fallback");
-            duration = await this.playBrowser(
-              operation,
-              deviceText,
-              onStart,
-              (index) => options.onWordChange?.(chunk.wordOffset + index),
-              onTime,
-            );
-          }
-          elapsed += duration;
         }
         this.ensure(operation);
         options.onEnded?.();
       },
-      options.wordSample
-        ? WORD_SAMPLE_MAX_RATE
-        : options.coaching
-          ? 0.85
-          : undefined,
+      Infinity,
+      options.speedScale,
+    );
+
+  playPhonicsLesson = (
+    lesson: SupportedPhonicsLessonPlan,
+    options: PhonicsPlayOptions = {},
+  ): Promise<void> =>
+    this.run(
+      async (operation) => {
+        if (!lesson.steps.length) throw unavailable();
+        this.auditUtterance(
+          operation,
+          "phonics_lesson",
+          lesson.steps.map((s) => s.spokenText).join(" "),
+        );
+
+        const phonicsKey = JSON.stringify([
+          operation.voice.provider,
+          operation.voice.cacheVoiceId,
+          operation.voice.modelVersion,
+          operation.voice.speed,
+          lesson.steps.map((s) => [
+            s.id,
+            s.spokenText.normalize("NFC"),
+            s.pauseAfterMs,
+          ]),
+        ]);
+
+        // Preferred path: single combined step-timed WAV from `/voice/text-to-speech/phonics`
+        if (this.speech.synthesizePhonics) {
+          let synthesized = this.phonicsCache.get(phonicsKey);
+          if (!synthesized) {
+            try {
+              synthesized = await this.wait(
+                operation,
+                this.speech.synthesizePhonics(
+                  lesson.steps.map((s) => ({
+                    id: s.id,
+                    spokenText: s.spokenText.normalize("NFC"),
+                    pauseAfterMs: s.pauseAfterMs,
+                  })),
+                  {
+                    voiceId: operation.voice.requestedVoiceId ?? undefined,
+                    speed: operation.voice.speed,
+                    signal: operation.controller.signal,
+                  },
+                ),
+              );
+              this.ensure(operation);
+              this.cachePhonics(phonicsKey, synthesized);
+            } catch (error) {
+              this.ensure(operation);
+              if (isAbort(error)) throw error;
+              this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+              throw unavailable();
+            }
+          }
+
+          this.setFallbackNotice(null);
+          let lastEmittedStep = -1;
+          const emitStepForTime = (currentTime: number) => {
+            const idx = findActivePhonicsStepIndex(
+              synthesized.stepTimings,
+              currentTime,
+            );
+            if (idx >= 0 && idx !== lastEmittedStep && lesson.steps[idx]) {
+              lastEmittedStep = idx;
+              options.onStepChange?.(idx, lesson.steps[idx]);
+            }
+          };
+
+          await this.playAudio(
+            operation,
+            synthesized.audio,
+            undefined,
+            0,
+            (duration) =>
+              this.started(operation, () => {
+                options.onPlay?.(duration);
+                emitStepForTime(0);
+              }),
+            undefined,
+            (currentTime, duration) => {
+              emitStepForTime(currentTime);
+              options.onTimeUpdate?.(currentTime, duration);
+            },
+            1,
+          );
+          this.ensure(operation);
+          options.onEnded?.();
+          return;
+        }
+
+        // Fallback for unit-test mocks that only implement `speech.synthesize`:
+        // plays each step sequentially in the exact same locked voice with deterministic pauses.
+        let elapsed = 0;
+        for (const step of lesson.steps) {
+          await this.waitIfPaused(operation);
+          this.ensure(operation);
+          const stepKey = JSON.stringify([
+            operation.voice.provider,
+            operation.voice.cacheVoiceId,
+            operation.voice.modelVersion,
+            operation.voice.speed,
+            step.spokenText.normalize("NFC"),
+            true,
+          ]);
+          let stepBlob = this.shortCache.get(stepKey)?.audio ?? null;
+          if (!stepBlob) {
+            try {
+              stepBlob = await this.wait(
+                operation,
+                this.speech.synthesize(step.spokenText.normalize("NFC"), {
+                  voiceId: operation.voice.requestedVoiceId ?? undefined,
+                  speed: operation.voice.speed,
+                  wordSample: true,
+                  signal: operation.controller.signal,
+                }),
+              );
+              this.ensure(operation);
+              this.cacheShort(stepKey, {
+                audio: stepBlob,
+                usedFallbackVoice: false,
+              });
+            } catch (error) {
+              this.ensure(operation);
+              if (isAbort(error)) throw error;
+              this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+              throw unavailable();
+            }
+          }
+
+          this.setFallbackNotice(null);
+          options.onStepChange?.(step.index, step);
+          elapsed += await this.playAudio(
+            operation,
+            stepBlob,
+            undefined,
+            0,
+            (duration) =>
+              this.started(operation, () => options.onPlay?.(duration)),
+            undefined,
+            (time, duration) =>
+              options.onTimeUpdate?.(elapsed + time, elapsed + duration),
+            1,
+          );
+          await this.wait(
+            operation,
+            new Promise<void>((resolve) => {
+              window.setTimeout(resolve, Math.min(200, step.pauseAfterMs));
+            }),
+          );
+        }
+        this.ensure(operation);
+        options.onEnded?.();
+      },
+      Infinity,
       options.speedScale,
     );
 
@@ -426,8 +677,10 @@ export class TtsPlayback {
     fallback?: () => Promise<void>,
   ): Promise<void> =>
     this.run(async (operation) => {
-      const text = options.text ?? words.join(" ");
+      const text = (options.text ?? words.join(" ")).normalize("NFC");
       if (!text.trim()) throw unavailable();
+      this.auditUtterance(operation, "page_sample", text);
+
       const canMap = hasMatchingSpeechWords(text, words);
       if (!canMap) options.onWordChange?.(-1);
       let elapsed = 0;
@@ -444,23 +697,29 @@ export class TtsPlayback {
           if (canMap) options.onWordChange?.(chunk.wordOffset + index);
         };
         const key = JSON.stringify([
-          operation.preferences.voiceId,
-          operation.preferences.speed,
+          operation.voice.provider,
+          operation.voice.cacheVoiceId,
+          operation.voice.modelVersion,
+          operation.voice.speed,
           chunk.words,
         ]);
         try {
-          if (Date.now() < this.timedRetryAfter) throw unavailable();
           let timed = this.cache.get(key);
           if (!timed) {
+            if (fallback && Date.now() < this.timedCooldownUntil) {
+              await fallback();
+              return;
+            }
             timed = await this.wait(
               operation,
               this.studio.synthesizeTimed(chunk.words, {
-                voiceId: operation.preferences.voiceId,
-                speed: operation.preferences.speed,
+                voiceId: operation.voice.requestedVoiceId,
+                speed: operation.voice.speed,
                 signal: operation.controller.signal,
               }),
             );
             this.ensure(operation);
+            this.timedCooldownUntil = 0;
             this.cacheTimed(key, timed);
           }
           this.setFallbackNotice(
@@ -473,6 +732,8 @@ export class TtsPlayback {
             elapsed,
             onStart,
             onWord,
+            undefined,
+            1,
           );
         } catch (error) {
           this.ensure(operation);
@@ -483,27 +744,13 @@ export class TtsPlayback {
             this.cacheBytes -= invalid.audio.size;
             this.cache.delete(key);
           }
-          this.timedRetryAfter = Date.now() + 30_000;
+          this.timedCooldownUntil = Date.now() + 15_000;
           if (!completedChunks && fallback) {
-            // Compatibility for an explicit entire-page fallback. A later
-            // chunk failure must never replay a previously completed chunk.
             await fallback();
             return;
           }
-          this.setFallbackNotice(BROWSER_FALLBACK_NOTICE);
-          this.onState("fallback");
-          for (const part of splitSpeechText(
-            chunk.text,
-            SHORT_TTS_MAX_CHARACTERS,
-          )) {
-            await this.waitIfPaused(operation);
-            elapsed += await this.playBrowser(
-              operation,
-              part.text,
-              onStart,
-              (index) => onWord(part.wordOffset + index),
-            );
-          }
+          this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+          throw unavailable();
         }
         completedChunks += 1;
       }
@@ -524,8 +771,8 @@ export class TtsPlayback {
     this.shortCache.set(key, entry);
     this.shortCacheBytes += entry.audio.size;
     while (
-      this.shortCache.size > 16 ||
-      this.shortCacheBytes > 8 * 1024 * 1024
+      this.shortCache.size > 24 ||
+      this.shortCacheBytes > 12 * 1024 * 1024
     ) {
       const first = this.shortCache.keys().next().value;
       if (first === undefined) break;
@@ -543,6 +790,26 @@ export class TtsPlayback {
       if (first === undefined) break;
       this.cacheBytes -= this.cache.get(first)?.audio.size ?? 0;
       this.cache.delete(first);
+    }
+  }
+
+  private cachePhonics(key: string, speech: SynthesizedPhonicsSpeech): void {
+    if (speech.audio.size > 6 * 1024 * 1024) return;
+    const prev = this.phonicsCache.get(key);
+    if (prev) {
+      this.phonicsCacheBytes -= prev.audio.size;
+      this.phonicsCache.delete(key);
+    }
+    this.phonicsCache.set(key, speech);
+    this.phonicsCacheBytes += speech.audio.size;
+    while (
+      this.phonicsCache.size > 16 ||
+      this.phonicsCacheBytes > 12 * 1024 * 1024
+    ) {
+      const first = this.phonicsCache.keys().next().value;
+      if (first === undefined) break;
+      this.phonicsCacheBytes -= this.phonicsCache.get(first)?.audio.size ?? 0;
+      this.phonicsCache.delete(first);
     }
   }
 
@@ -572,7 +839,7 @@ export class TtsPlayback {
     let audio: HTMLAudioElement;
     try {
       audio = new Audio(url);
-      // Synthesized audio already includes the requested speed.
+      // Synthesized audio already includes the requested speed once.
       audio.defaultPlaybackRate = playbackRate;
       audio.playbackRate = playbackRate;
       audio.preservesPitch = true;
@@ -691,165 +958,8 @@ export class TtsPlayback {
       void begin();
     });
   }
-
-  private async vietnameseVoice(
-    operation: Operation,
-    synthesis: SpeechSynthesis,
-  ): Promise<SpeechSynthesisVoice> {
-    const choose = () => selectVietnameseVoice(synthesis);
-    const voice = choose();
-    if (voice) return voice;
-    if (synthesis.getVoices().length) throw unavailable();
-    return new Promise((resolve, reject) => {
-      const signal = operation.controller.signal;
-      const finish = (found?: SpeechSynthesisVoice, error?: unknown) => {
-        clearTimeout(timer);
-        synthesis.removeEventListener?.("voiceschanged", changed);
-        signal.removeEventListener("abort", abort);
-        if (found) resolve(found);
-        else reject(error ?? unavailable());
-      };
-      const changed = () => {
-        const found = choose();
-        if (found) finish(found);
-      };
-      const abort = () => finish(undefined, stopped());
-      const timer = setTimeout(() => finish(), 1_500);
-      synthesis.addEventListener?.("voiceschanged", changed);
-      signal.addEventListener("abort", abort, { once: true });
-      changed();
-    });
-  }
-
-  private async playBrowser(
-    operation: Operation,
-    text: string,
-    onStart: (duration: number) => void,
-    onWord?: (index: number) => void,
-    onTime?: (time: number, duration: number) => void,
-  ): Promise<number> {
-    this.ensure(operation);
-    if (
-      !window.speechSynthesis ||
-      typeof SpeechSynthesisUtterance === "undefined"
-    )
-      throw unavailable();
-    const synthesis = window.speechSynthesis;
-    const voice = await this.vietnameseVoice(operation, synthesis);
-    await this.waitIfPaused(operation);
-    this.ensure(operation);
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "vi-VN";
-    utterance.voice = voice;
-    utterance.rate = operation.browserRate;
-    utterance.pitch = 1;
-    utterance.volume = 1;
-    const estimate = Math.max(
-      0.5,
-      (text.match(/\S+/gu)?.length ?? 0) / (2.25 * operation.browserRate),
-    );
-    return new Promise<number>((resolve, reject) => {
-      let settled = false;
-      const signal = operation.controller.signal;
-      const active = () =>
-        !settled && this.current === operation && !signal.aborted;
-      const finish = (error?: unknown, duration = estimate) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        signal.removeEventListener("abort", abort);
-        utterance.onstart =
-          utterance.onboundary =
-          utterance.onend =
-          utterance.onerror =
-            null;
-        if (this.media === media) this.media = null;
-        if (error) reject(error);
-        else resolve(duration);
-      };
-      const cancel = () => {
-        try {
-          synthesis.cancel();
-        } catch {
-          /* Already released our listeners and promise. */
-        }
-      };
-      const abort = () => {
-        finish(stopped());
-        cancel();
-      };
-      let timer = setTimeout(
-        () => {
-          finish(unavailable());
-          cancel();
-        },
-        Math.max(15_000, estimate * 4_000),
-      );
-      const media: ActiveMedia = {
-        pause: () => {
-          if (!synthesis.pause) throw unavailable();
-          clearTimeout(timer);
-          synthesis.pause();
-        },
-        resume: async () => {
-          if (!synthesis.resume) throw unavailable();
-          synthesis.resume();
-          timer = setTimeout(
-            () => {
-              finish(unavailable());
-              cancel();
-            },
-            Math.max(15_000, estimate * 4_000),
-          );
-        },
-      };
-      this.media = media;
-      signal.addEventListener("abort", abort, { once: true });
-      utterance.onstart = () => {
-        if (active()) {
-          this.onState(operation.paused ? "paused" : "playing");
-          if (operation.paused) media.pause();
-          onStart(estimate);
-        }
-      };
-      let lastIndex = -1;
-      utterance.onboundary = (event) => {
-        if (!active() || operation.paused) return;
-        const index = speechWordAtCharacter(text, event.charIndex);
-        if (index >= 0 && index !== lastIndex) {
-          lastIndex = index;
-          onWord?.(index);
-        }
-        if (Number.isFinite(event.elapsedTime))
-          onTime?.(event.elapsedTime, estimate);
-      };
-      utterance.onend = (event) => {
-        if (!active()) return;
-        const duration =
-          Number.isFinite(event.elapsedTime) && event.elapsedTime > 0
-            ? event.elapsedTime
-            : estimate;
-        onTime?.(duration, duration);
-        finish(undefined, duration);
-      };
-      utterance.onerror = (event) => {
-        if (active())
-          finish(
-            ["canceled", "interrupted"].includes(event.error)
-              ? stopped()
-              : unavailable(),
-          );
-      };
-      try {
-        synthesis.speak(utterance);
-      } catch (error) {
-        finish(error);
-      }
-    });
-  }
 }
 
-/** A started chunk cannot automatically be replayed without repeating words. */
 class PartialPlaybackError extends Error {
   constructor() {
     super("Âm thanh bị gián đoạn. Bé có thể nghe lại từ đầu nhé.");

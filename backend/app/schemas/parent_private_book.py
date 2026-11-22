@@ -337,7 +337,8 @@ class ParentPrivateBookSummaryRead(BaseModel):
     ready_to_add_count: int = 0
     readable_for_children: bool = False
     has_held_multipage_batch: bool = False
-    privacy_notice: str = "Chỉ bạn và các hồ sơ trẻ của bạn có thể đọc sách này sau khi trang được kiểm tra."
+    privacy_notice: str = "Chỉ bạn và các hồ sơ trẻ của bạn có thể đọc sách này sau khi trang được kiểm tra. Sách mặc định không được dùng để huấn luyện OCR."
+    ocr_contribution: "ParentOcrContributionStateRead | None" = None
     created_at: datetime
 
 
@@ -533,3 +534,171 @@ class AdminUserBookDecisionResponse(BaseModel):
     decided_at: datetime
     reason: str
     audit_log_id: UUID
+
+
+# ---------------------------------------------------------------------------
+# Parent Private Book -> Flow 2 (Admin Verified) OCR Contribution Schemas
+# ---------------------------------------------------------------------------
+OcrContributionConsentStatus = Literal["OPTED_OUT", "OPTED_IN", "REVOKED"]
+
+Flow2CandidateStatus = Literal[
+    "PENDING_VERIFICATION",
+    "VERIFIED",
+    "SYNC_QUEUED",
+    "SYNCED",
+    "REJECTED",
+    "REVOKED",
+]
+
+Flow2CandidateRejectionCode = Literal[
+    "BLURRY_OR_TRUNCATED",
+    "LABEL_IMAGE_MISMATCH",
+    "DIACRITIC_ERROR",
+    "CONTAINS_PII",
+    "UNCLEAR_RIGHTS",
+    "OTHER",
+]
+
+FLOW2_CANDIDATE_STATUS_LABELS: dict[str, str] = {
+    "PENDING_VERIFICATION": "Chờ xác minh mẫu",
+    "VERIFIED": "Đã xác minh nhãn",
+    "SYNC_QUEUED": "Chờ đồng bộ Drive",
+    "SYNCED": "Đã đồng bộ Flow 2",
+    "REJECTED": "Bị từ chối",
+    "REVOKED": "Đã thu hồi",
+}
+
+FLOW2_REJECTION_CODE_LABELS: dict[str, str] = {
+    "BLURRY_OR_TRUNCATED": "Ảnh mờ, thiếu nét hoặc cắt cụt chữ",
+    "LABEL_IMAGE_MISMATCH": "Nhãn không khớp chữ in thật trên ảnh",
+    "DIACRITIC_ERROR": "Sai dấu tiếng Việt, chữ đ/Đ hoặc thứ tự chữ",
+    "CONTAINS_PII": "Chứa thông tin cá nhân / riêng tư",
+    "UNCLEAR_RIGHTS": "Chưa rõ căn cứ quyền sử dụng cho huấn luyện",
+    "OTHER": "Lý do khác",
+}
+
+OCR_CONTRIBUTION_NOTICE_VERSION = "v1-2026-11-22"
+
+
+class ParentOcrContributionStateRead(BaseModel):
+    book_id: UUID
+    enabled: bool = False
+    status: OcrContributionConsentStatus = "OPTED_OUT"
+    purpose: Literal["FLOW2_ADMIN_VERIFIED_OCR"] = "FLOW2_ADMIN_VERIFIED_OCR"
+    consent_version: int = 0
+    notice_version: str = OCR_CONTRIBUTION_NOTICE_VERSION
+    rights_confirmed: bool = False
+    consented_at: datetime | None = None
+    revoked_at: datetime | None = None
+    revoke_reason: str | None = None
+    rights_basis: SourceUsageType = "OWNED_PHYSICAL_BOOK"
+    rights_eligible_for_training: bool = False
+    rights_ineligible_reason: str | None = None
+    pending_verification_count: int = 0
+    sync_queued_count: int = 0
+    synced_count: int = 0
+    rejected_count: int = 0
+    revoked_count: int = 0
+    last_recruitment_skipped_pages: int = 0
+    status_notice: str
+
+
+class ParentOcrContributionUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+    rights_confirmed: bool = False
+    notice_version: str = Field(default=OCR_CONTRIBUTION_NOTICE_VERSION, min_length=3, max_length=64)
+    revoke_reason: str | None = Field(default=None, max_length=500)
+
+    @field_validator("notice_version")
+    @classmethod
+    def clean_notice_version(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Phiên bản thông báo đồng ý không hợp lệ.")
+        return cleaned
+
+    @field_validator("revoke_reason")
+    @classmethod
+    def clean_revoke_reason(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class AdminFlow2CandidateRead(BaseModel):
+    """Privacy-minimized candidate view for Admin line-label verification (no email, no child profile)."""
+
+    id: UUID
+    book_id: UUID
+    book_title: str
+    page_id: UUID
+    page_number: int
+    revision_id: UUID
+    line_index: int
+    consent_version: int
+    crop_image_url: str
+    image_sha256: str
+    proposed_label: str
+    verified_label: str | None = None
+    rights_basis: Literal["SELF_AUTHORED", "PUBLIC_DOMAIN", "LICENSED_OR_PERMISSION"]
+    rights_basis_label: str
+    pii_check_status: Literal["CLEAR", "FLAGGED_PII"]
+    pii_flags: list[str] = Field(default_factory=list)
+    quality_metrics: dict[str, Any] = Field(default_factory=dict)
+    status: Flow2CandidateStatus
+    status_label: str
+    verified_at: datetime | None = None
+    rejection_code: str | None = None
+    rejection_reason: str | None = None
+    outbox_event_id: UUID | None = None
+    sample_id: UUID | None = None
+    revoked_at: datetime | None = None
+    revoke_reason: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminFlow2CandidatePageRead(BaseModel):
+    items: list[AdminFlow2CandidateRead]
+    total: int
+    limit: int
+    offset: int
+    summary: dict[str, int]
+
+
+class AdminFlow2CandidateDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["APPROVE", "REJECT"]
+    verified_label: str | None = Field(default=None, max_length=300)
+    rejection_code: Flow2CandidateRejectionCode | None = None
+    reason: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("verified_label", "reason")
+    @classmethod
+    def clean_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class AdminFlow2CandidateDecisionResponse(BaseModel):
+    candidate_id: UUID
+    book_id: UUID
+    page_id: UUID
+    revision_id: UUID
+    decision: Literal["APPROVE", "REJECT"]
+    status: Flow2CandidateStatus
+    verified_label: str | None = None
+    outbox_event_id: UUID | None = None
+    rejection_code: str | None = None
+    rejection_reason: str | None = None
+    decided_at: datetime
+    audit_log_id: UUID
+
+
+ParentPrivateBookSummaryRead.model_rebuild()

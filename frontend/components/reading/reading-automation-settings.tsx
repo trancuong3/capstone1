@@ -144,12 +144,12 @@ export function ReadingAutomationSettings() {
         onChange={(assist) => update({ assist })}
       />
       <div
-        aria-label="Mức độ tương tác của cô giáo"
+        aria-label="Mức độ tương tác của thầy cô giáo"
         className="ml-8 space-y-1.5"
         role="group"
       >
         <span className="block text-xs font-semibold text-muted">
-          Phong cách cô giáo hướng dẫn
+          Phong cách thầy cô giáo hướng dẫn
         </span>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {COACHING_STYLE_OPTIONS.map((option) => {

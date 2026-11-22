@@ -30,6 +30,7 @@ import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ToyCannon } from "@/components/entertainment/sentence-shooter/toy-cannon";
 import { useSentenceShooterService } from "@/hooks/use-sentence-shooter-service";
+import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import type {
   SentenceShooterBookDTO,
@@ -186,6 +187,7 @@ export function SentenceShooterScreen({
   const readingCompletionHref = readingSessionId
     ? `/reading/${encodeURIComponent(readingSessionId)}`
     : "/entertainment";
+  const speechPlayer = useSpeechPlayer();
 
   useEffect(() => {
     if (!childId) return;
@@ -628,17 +630,9 @@ export function SentenceShooterScreen({
   }
 
   function readSentence() {
-    if (
-      !finalSentence ||
-      typeof window === "undefined" ||
-      !window.speechSynthesis
-    )
-      return;
-    const utterance = new SpeechSynthesisUtterance(finalSentence);
-    if (!utterance.text) return;
-    utterance.lang = "vi-VN";
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
+    if (!finalSentence.trim()) return;
+    speechPlayer.stop();
+    void speechPlayer.play(finalSentence).catch(() => undefined);
   }
 
   if (childState.status === "loading" || childState.status === "redirecting") {
