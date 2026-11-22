@@ -283,7 +283,7 @@ export function ParentProfileForm({
         autoComplete="tel"
         error={errors.contact_phone}
         inputMode="tel"
-        label="Số điện thoại liên hệ"
+        label="Số điện thoại"
         maxLength={16}
         onChange={(event) => setPhone(event.target.value)}
         placeholder="0912345678 hoặc +84912345678"

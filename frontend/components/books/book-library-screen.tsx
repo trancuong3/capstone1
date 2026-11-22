@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpenText, Check, RefreshCw, SearchX } from "lucide-react";
+import { BookOpenText, RefreshCw, SearchX } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { BookCard } from "@/components/books/book-card";
@@ -215,7 +215,11 @@ export function BookLibraryScreen() {
 
   return (
     <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
-      <BookChildHeader child={child} />
+      <BookChildHeader
+        child={child}
+        fullBleedDesktop
+        mobileLabel="Cùng bé chọn một cuốn sách"
+      />
 
       {collectionNotice ? (
         <StatusMessage
@@ -235,15 +239,15 @@ export function BookLibraryScreen() {
           <h1
             aria-label={
               child
-                ? `${child.alias} muốn đọc gì hôm nay?`
-                : "Bé muốn đọc gì hôm nay?"
+                ? `Hôm nay ${child.alias} muốn đọc gì?`
+                : "Hôm nay bé muốn đọc gì?"
             }
             className="min-w-0 flex-1 text-heading font-semibold text-ink"
           >
             <span className="hidden sm:inline">
               {child
-                ? `${child.alias} muốn đọc gì hôm nay?`
-                : "Bé muốn đọc gì hôm nay?"}
+                ? `Hôm nay ${child.alias} muốn đọc gì?`
+                : "Hôm nay bé muốn đọc gì?"}
             </span>
             <span className="sm:hidden">Bé muốn đọc gì hôm nay?</span>
           </h1>
@@ -255,6 +259,7 @@ export function BookLibraryScreen() {
               aria-label="Tìm theo tên sách hoặc tác giả"
               label="Tìm cuốn sách bé thích…"
               onChange={(event) => setSearch(event.target.value)}
+              placeholder="Tìm theo tên sách hoặc tác giả"
               type="search"
               value={search}
             />
@@ -284,9 +289,6 @@ export function BookLibraryScreen() {
                   }}
                   type="button"
                 >
-                  {isSelected ? (
-                    <Check aria-hidden="true" className="size-5 shrink-0" />
-                  ) : null}
                   {grade === null ? "Tất cả" : `Lớp ${grade}`}
                 </button>
               );

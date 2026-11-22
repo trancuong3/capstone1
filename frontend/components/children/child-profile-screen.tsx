@@ -327,8 +327,8 @@ export function ChildProfileScreen({
   const description = fromRegistration
     ? "Ba mẹ tạo hồ sơ đầu tiên để bé bắt đầu đọc nhé."
     : mode === "create"
-      ? "Thêm một bạn nhỏ vào tài khoản của ba mẹ."
-      : "Ba mẹ có thể sửa tên gọi và lớp của bé.";
+      ? "Tạo hồ sơ để bắt đầu hành trình đọc cùng ViRead."
+      : "Xem và chỉnh sửa hồ sơ của bé.";
 
   return (
     <>
@@ -338,7 +338,7 @@ export function ChildProfileScreen({
 
           <p className="mt-2 text-body text-muted">{description}</p>
         </div>
-        <Card className="gap-4 sm:px-8 sm:py-6">
+        <Card className="gap-4 sm:px-8 sm:py-8">
           <h2 className="text-2xl font-extrabold text-ink">Thông tin của bé</h2>
           {saveNotice === "created" ? (
             <StatusMessage tone="success">Hồ sơ bé đã được tạo.</StatusMessage>
@@ -371,6 +371,7 @@ export function ChildProfileScreen({
 
           <ChildProfileForm
             avatarUrl={mode === "edit" ? child?.avatar_url : null}
+            showOptionalAvatarNote={mode === "create"}
             defaultValues={
               mode === "edit" && child
                 ? {
@@ -425,9 +426,8 @@ export function ChildProfileScreen({
           ) : null}
         </Card>
         {!fromRegistration ? (
-          <ButtonLink href="/children" variant="quiet">
-            <ArrowLeft aria-hidden="true" className="size-5" />
-            Về danh sách hồ sơ
+          <ButtonLink className="min-h-16" href="/children" variant="quiet">
+            Quay lại
           </ButtonLink>
         ) : null}
       </section>

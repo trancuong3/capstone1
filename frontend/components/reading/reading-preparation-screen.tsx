@@ -1,19 +1,10 @@
 "use client";
 
-import {
-  ArrowLeft,
-  ArrowRight,
-  CheckCircle2,
-  Mic,
-  RefreshCw,
-  ShieldCheck,
-} from "lucide-react";
+import { ArrowLeft, Mic, RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { BookChildHeader } from "@/components/books/book-child-header";
 import { BookCover } from "@/components/books/book-cover";
-import { SelectedChildIdentity } from "@/components/children/selected-child-identity";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
@@ -54,9 +45,9 @@ type PreparationState =
   | { status: "error"; contextKey: string };
 
 const microphoneStatusLabels: Record<MicrophonePermissionUiState, string> = {
-  checking: "Đang kiểm tra",
-  granted: "Đã được cấp quyền",
-  prompt: "Chưa cấp quyền",
+  checking: "Chưa kiểm tra",
+  granted: "Microphone đã sẵn sàng",
+  prompt: "Chưa kiểm tra",
   denied: "Đang bị từ chối",
   unsupported: "Không hỗ trợ kiểm tra tự động",
   no_device: "Không tìm thấy microphone",
@@ -69,15 +60,13 @@ function microphoneDescription(
   verified: boolean,
 ): string {
   if (verified) {
-    return "Microphone đã mở thành công. ViRead đã dừng luồng kiểm tra tạm thời.";
+    return "Cấp quyền microphone để tiếp tục. Thiết bị tạm thời dùng để kiểm tra sẽ được đóng sau đó.";
   }
   switch (status) {
     case "checking":
-      return "Đang đọc trạng thái quyền microphone của trình duyệt…";
     case "granted":
-      return "Trình duyệt báo đã cấp quyền. Hãy kiểm tra thiết bị thật trước khi bắt đầu.";
     case "prompt":
-      return "Chưa cấp quyền microphone. Bấm nút kiểm tra để trình duyệt hỏi quyền truy cập.";
+      return "Cấp quyền microphone để tiếp tục. Thiết bị tạm thời dùng để kiểm tra sẽ được đóng sau đó.";
     case "denied":
       return "Vui lòng cấp quyền microphone trong cài đặt trình duyệt rồi thử lại.";
     case "unsupported":
@@ -522,17 +511,7 @@ export function ReadingPreparationScreen({
 
   return (
     <section className="mx-auto flex w-full max-w-[960px] flex-col gap-6">
-      <BookChildHeader
-        child={data.child}
-        backHref={detailHref}
-        mobileLabel="Chuẩn bị đọc sách"
-      />
-      <SelectedChildIdentity child={data.child} />
-
       <header className="flex flex-col gap-2">
-        <p className="text-label font-extrabold uppercase tracking-[0.12em] text-primary">
-          Trước khi đọc
-        </p>
         <h1 className="text-heading font-extrabold leading-tight text-ink">
           Chuẩn bị đọc sách
         </h1>
@@ -541,27 +520,23 @@ export function ReadingPreparationScreen({
         </p>
       </header>
 
-      <article className="grid gap-5 rounded-card border border-border bg-white p-5 shadow-[0_2px_10px_rgba(33,60,66,0.06)] sm:grid-cols-[240px_1fr] sm:items-center sm:gap-8 sm:p-8">
+      <article className="grid gap-6 sm:grid-cols-[220px_minmax(0,1fr)] sm:items-start sm:gap-8">
         <BookCover book={data.book} className="mx-auto w-full max-w-[220px]" />
         <div className="flex flex-col gap-3">
           <div>
             <h2 className="text-2xl font-extrabold text-ink">
               {data.book.title}
             </h2>
-            {data.book.author ? (
-              <p className="mt-1 text-body text-muted">{data.book.author}</p>
-            ) : null}
+            <p className="mt-3 text-body text-muted">
+              {[data.book.author, data.child.alias, `Lớp ${data.child.grade}`]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
           </div>
           {data.startPage && data.endPage && data.rangeValid ? (
-            <p className="font-semibold text-primary">
+            <p className="w-fit rounded-full bg-sky px-2 py-2 text-sm font-semibold text-primary-hover">
               Phạm vi đọc: Trang {data.startPage.page_number}–
-              {data.endPage.page_number} ({data.rangePages.length} trang)
-            </p>
-          ) : null}
-          {data.confidence !== null && data.startPage ? (
-            <p className="text-sm text-muted">
-              Trang OCR xác nhận: Trang {data.startPage.page_number} · Độ tin
-              cậy {Math.round(data.confidence * 100)}%
+              {data.endPage.page_number}
             </p>
           ) : null}
           {data.explicitPageInvalid ? (
@@ -584,66 +559,39 @@ export function ReadingPreparationScreen({
 
       <section
         aria-labelledby="microphone-check-title"
-        className="rounded-card border border-primary/20 bg-sky p-5 sm:p-8"
+        className="rounded-card border border-border bg-white p-5 sm:p-8"
       >
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
-          <span className="flex size-14 shrink-0 items-center justify-center rounded-card bg-white text-primary">
-            <Mic aria-hidden="true" className="size-7" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2
-                className="text-xl font-extrabold text-ink"
-                id="microphone-check-title"
-              >
-                Microphone
-              </h2>
-              <span className="rounded-control bg-white px-3 py-1 text-sm font-semibold text-primary">
-                {isVerifying
-                  ? "Đang kiểm tra"
-                  : microphoneVerified
-                    ? "Đã xác minh thiết bị"
-                    : statusText}
-              </span>
-            </div>
-            <p className="mt-2 text-body text-muted">
-              {microphoneDescription(permissionState, microphoneVerified)}
-            </p>
-            {permissionMessage ? (
-              <StatusMessage
-                className="mt-3"
-                title="Chưa thể xác minh microphone"
-                tone="error"
-              >
-                {permissionMessage}
-              </StatusMessage>
-            ) : null}
-            <Button
-              className="mt-4 sm:w-auto"
-              disabled={isVerifying || isStarting}
-              isLoading={isVerifying}
-              onClick={() => void handleVerifyMicrophone()}
-              variant="secondary"
-            >
-              <RefreshCw aria-hidden="true" className="size-5" />
-              {microphoneVerified
-                ? "Kiểm tra lại microphone"
-                : "Kiểm tra và cấp quyền microphone"}
-            </Button>
-          </div>
-          {microphoneVerified ? (
-            <CheckCircle2
-              aria-label="Microphone đã được xác minh"
-              className="size-7 shrink-0 text-success-ink"
-            />
-          ) : null}
+        <h2
+          className="text-2xl font-extrabold text-ink"
+          id="microphone-check-title"
+        >
+          Kiểm tra microphone
+        </h2>
+        <p className="mt-3 text-body text-muted">
+          ViRead chỉ ghi âm sau khi buổi đọc bắt đầu.
+        </p>
+        <Mic aria-hidden="true" className="mb-6 mt-6 size-11 text-primary" />
+        <div className="rounded-card bg-sky p-4">
+          <p className="font-bold text-ink">
+            {isVerifying ? "Đang kiểm tra" : statusText}
+          </p>
+          <p className="mt-2 text-body text-muted">
+            {permissionMessage ??
+              microphoneDescription(permissionState, microphoneVerified)}
+          </p>
         </div>
+        <Button
+          className="mt-6 w-full max-w-[680px] min-h-16"
+          disabled={isVerifying || isStarting}
+          isLoading={isVerifying}
+          onClick={() => void handleVerifyMicrophone()}
+          variant="primary"
+        >
+          {microphoneVerified
+            ? "Kiểm tra lại microphone"
+            : "Kiểm tra và cấp quyền microphone"}
+        </Button>
       </section>
-
-      <StatusMessage title="Quyền riêng tư" tone="info">
-        ViRead chỉ mở luồng âm thanh tạm thời để kiểm tra microphone rồi dừng
-        mọi track. Không lưu hoặc tải âm thanh trong bước này.
-      </StatusMessage>
 
       {startError ? (
         <StatusMessage title="Chưa thể bắt đầu đọc" tone="error">
@@ -651,31 +599,19 @@ export function ReadingPreparationScreen({
         </StatusMessage>
       ) : null}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+      <div className="flex flex-col gap-6">
         <Button
-          className="sm:max-w-[320px]"
+          className="min-h-16"
           disabled={!canStart}
           isLoading={isStarting}
           onClick={() => void handleStartReading()}
         >
           {isStarting ? "Đang tạo buổi đọc…" : "Bắt đầu đọc"}
-          {!isStarting ? (
-            <ArrowRight aria-hidden="true" className="size-5" />
-          ) : null}
         </Button>
-        <ButtonLink
-          className="sm:max-w-[260px]"
-          href={detailHref}
-          variant="quiet"
-        >
-          <ArrowLeft aria-hidden="true" className="size-5" />
+        <ButtonLink className="min-h-16" href={detailHref} variant="quiet">
           Quay lại chi tiết sách
         </ButtonLink>
       </div>
-      <p className="inline-flex items-center gap-2 text-sm text-muted">
-        <ShieldCheck aria-hidden="true" className="size-4" />
-        Buổi đọc chỉ được tạo sau khi microphone và trang sách đã được xác minh.
-      </p>
     </section>
   );
 }

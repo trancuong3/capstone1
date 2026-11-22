@@ -1,6 +1,5 @@
 "use client";
 
-import { ImagePlus, RefreshCw, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/common/button";
@@ -14,6 +13,7 @@ interface ProfileAvatarUploadProps {
   imageUrl?: string | null;
   selectedFile: File | null;
   isRemoved: boolean;
+  showOptionalNote?: boolean;
   onSelectFile: (file: File) => void;
   onRemove: () => void;
 }
@@ -23,6 +23,7 @@ export function ProfileAvatarUpload({
   imageUrl,
   selectedFile,
   isRemoved,
+  showOptionalNote = false,
   onSelectFile,
   onRemove,
 }: ProfileAvatarUploadProps) {
@@ -70,8 +71,6 @@ export function ProfileAvatarUpload({
     : selectedFile && previewUrl
       ? previewUrl
       : imageUrl;
-  const hasAvatar = Boolean(selectedFile || (imageUrl && !isRemoved));
-
   return (
     <div className="flex flex-col items-start gap-4 bg-white">
       <ProfileAvatar
@@ -85,7 +84,6 @@ export function ProfileAvatarUpload({
       />
 
       <div className="flex w-full min-w-0 flex-col items-start gap-2">
-        <p className="text-label font-semibold text-ink">Ảnh đại diện</p>
         <div className="grid w-full gap-4 sm:grid-cols-2">
           <input
             accept="image/jpeg,image/png,image/webp"
@@ -104,26 +102,20 @@ export function ProfileAvatarUpload({
             type="button"
             variant="secondary"
           >
-            {selectedFile ? (
-              <RefreshCw aria-hidden="true" className="size-5" />
-            ) : (
-              <ImagePlus aria-hidden="true" className="size-5" />
-            )}
-            {selectedFile || imageUrl ? "Thay đổi ảnh" : "Tải ảnh lên"}
+            {selectedFile ? "Thay đổi ảnh" : "Chọn ảnh"}
           </Button>
-          {hasAvatar || isRemoved ? (
-            <Button
-              className="px-4"
-              onClick={handleRemove}
-              type="button"
-              variant="quiet"
-            >
-              <Trash2 aria-hidden="true" className="size-5" />
-              {isRemoved ? "Khôi phục ảnh" : "Xóa ảnh"}
-            </Button>
-          ) : null}
+          <Button
+            className="px-4"
+            onClick={handleRemove}
+            type="button"
+            variant="quiet"
+          >
+            {isRemoved ? "Khôi phục ảnh" : "Xóa ảnh"}
+          </Button>
         </div>
-        <p className="text-sm text-muted">PNG, JPG hoặc WEBP. Tối đa 5 MB.</p>
+        {showOptionalNote ? (
+          <p className="text-body text-muted">Ảnh đại diện là tùy chọn.</p>
+        ) : null}
         {isLowResolution ? (
           <p className="text-sm text-warning" role="status">
             Ảnh có độ phân giải thấp và có thể hơi mờ khi hiển thị.

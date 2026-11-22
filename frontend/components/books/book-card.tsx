@@ -1,5 +1,3 @@
-import { ArrowRight, Heart, ListChecks } from "lucide-react";
-
 import { BookCover } from "@/components/books/book-cover";
 import { ButtonLink } from "@/components/common/button";
 import type { BookListItemDTO } from "@/types/book";
@@ -35,18 +33,16 @@ export function BookCard({
       </p>
       <ButtonLink
         aria-label={`Đọc sách ${book.title}`}
-        className="order-last mt-auto w-full"
+        className="order-last mt-auto min-h-16 w-full"
         href={`/books/${encodeURIComponent(book.id)}`}
       >
         Xem sách
-        <ArrowRight aria-hidden="true" className="size-5" />
       </ButtonLink>
       {onToggleCollection ? (
         <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap">
           {(["FAVORITE", "WANT_TO_READ"] as const).map((type) => {
             const saved = savedTypes.includes(type);
             const label = type === "FAVORITE" ? "Yêu thích" : "Muốn đọc";
-            const ActionIcon = type === "FAVORITE" ? Heart : ListChecks;
             return (
               <button
                 aria-label={
@@ -68,7 +64,6 @@ export function BookCard({
                 onClick={() => onToggleCollection(type)}
                 type="button"
               >
-                <ActionIcon aria-hidden="true" className="size-4" />
                 {saved ? "Đã lưu" : label}
               </button>
             );
