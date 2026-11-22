@@ -366,39 +366,41 @@ export function ReadingLayout({
           </span>
         </div>
       ) : isPlayingSample ? (
-        <div className="mx-auto flex w-full max-w-[1008px] items-center justify-between gap-3 rounded-card border border-border bg-white px-4 py-3">
-          <div className="flex items-center gap-2 truncate">
+        <div className="mx-auto flex w-full max-w-[1008px] flex-wrap items-center justify-between gap-2.5 rounded-card border border-border bg-white px-4 py-3">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             <Volume2
               aria-hidden="true"
               className="size-4 shrink-0 text-primary"
             />
-            <span className="text-sm font-semibold text-ink shrink-0">
+            <span className="shrink-0 text-sm font-semibold text-ink">
               Đọc mẫu
             </span>
-            <span className="text-sm text-muted truncate">
+            <span className="truncate text-sm text-muted">
               {isSamplePaused
                 ? "Đã tạm dừng đọc mẫu."
                 : "Đang phát âm toàn bộ trang sách theo giọng mẫu..."}
             </span>
           </div>
-          {onToggleSamplePause ? (
-            <button
-              type="button"
-              onClick={onToggleSamplePause}
-              className="min-h-11 shrink-0 rounded-control border border-border bg-white px-3 py-1 text-sm font-semibold text-ink hover:bg-canvas"
-            >
-              {isSamplePaused ? "Tiếp tục mẫu" : "Tạm dừng mẫu"}
-            </button>
-          ) : null}
-          {onReadSample ? (
-            <button
-              type="button"
-              onClick={onReadSample}
-              className="min-h-11 shrink-0 rounded-control border border-border bg-white px-3 py-1 text-sm font-semibold text-ink hover:bg-canvas"
-            >
-              Dừng mẫu
-            </button>
-          ) : null}
+          <div className="flex shrink-0 items-center gap-2">
+            {onToggleSamplePause ? (
+              <button
+                type="button"
+                onClick={onToggleSamplePause}
+                className="min-h-11 shrink-0 rounded-control border border-border bg-white px-3 py-1 text-sm font-semibold text-ink hover:bg-canvas"
+              >
+                {isSamplePaused ? "Tiếp tục mẫu" : "Tạm dừng mẫu"}
+              </button>
+            ) : null}
+            {onReadSample ? (
+              <button
+                type="button"
+                onClick={onReadSample}
+                className="min-h-11 shrink-0 rounded-control border border-border bg-white px-3 py-1 text-sm font-semibold text-ink hover:bg-canvas"
+              >
+                Dừng mẫu
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : isReadingWord ? (
         <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple/50 bg-purple px-4 py-3">

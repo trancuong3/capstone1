@@ -75,8 +75,8 @@
 | **QA-26** | Post-reading wrong-word wrap-up via voice `"Có/Không"` & buttons | `PASS FIXTURE` | `teacher-persona-and-multiword-phonics.test.tsx`, `reading-screen.test.tsx` |
 | **QA-27** | Comprehension question reads aloud with tones, accepts voice/tap, saves once | `PASS TÍCH HỢP THẬT` | `reading-autopilot.pw.ts` (`G24`, Desktop + Mobile) |
 | **QA-28** | Save failure during auto-advance shows safe retry without losing/duplicating | `PASS TÍCH HỢP THẬT` | `reading-autopilot.pw.ts` (`G10`, Desktop + Mobile) |
-| **QA-29** | Android APK build/signing/Robolectric + real physical Android mic/speaker test | `BLOCKED` | **APK build, Robolectric JVM tests, Lint, `apksigner` v2 & `verify_apk_quality.py` PASSED** (`2.08 MB`, SHA-256 `1ddf3781eb9fe1d63dd97d0fc1dee7e33791179c1232134d868d7cf152ff6e2d`); **physical Android device test BLOCKED** (`adb devices` = 0 devices, no emulator installed). |
-| **QA-30** | Multi-page endurance with concurrent OCR + voice worker restart recovery | `PASS TÍCH HỢP THẬT` | `qa_endurance_and_lan_probe.json`, live worker stop/restart + `0` HF calls verified |
+| **QA-29** | Android APK build/signing/Robolectric + real physical Android mic/speaker/LAN/rotation/persistence test | **`PASS MÁY THẬT`** | Verified live on **HONOR MTN-NX1** (`ATSYVB6205006984`, Android 16 / API 36, `arm64-v8a`, WebView `157.0.8103.50`, Wi-Fi `192.168.33.59` → `https://192.168.34.66:9443`): `test-device.ps1` PASS (`SHA-256: 1ddf3781...`), real login + `am force-stop` cookie persistence (`new_pid=8105` → `/dashboard`), `RECORD_AUDIO` + `CAMERA` granted, real hardware mic capture (`48kHz`, `51,200` samples → LAN `Sherpa-ONNX` `200 OK` `provider=local`), real back camera (`480×640`), real speaker playback for Cô giáo AI (`female`) & Thầy giáo AI (`male`) across Bắc/Trung/Nam + 3 monotonic speeds (`2.677s > 2.230s > 1.969s`) on `vieneu-v3-turbo-onnx-int8-3.8.5`, 5/5 exact Vietnamese tone STT roundtrips over Wi-Fi (`một`, `mốt`, `bà`, `tâm`, unseen poetry `0% WER`), 365-word book page (`NHỮNG NGƯỜI KHỐN KHỔ`), phonics panel (`khéo`: `e·o→eo`, `khờ+eo`), Portrait (`369×774`, `0px` overflow) + Landscape (`774×331`, `0px` overflow), `Nghe mẫu` (`Dừng mẫu` active), `/sessions` persistence (`Đã hoàn thành`), live Voice Worker outage (`503`) → restart recovery (`200 OK`, `796 ms`), **`0` console errors, `0` JS errors, `0` logcat SSL/cleartext/crash errors**. Also caught & fixed mobile `Đọc mẫu` bar wrapping (`flex-wrap` in `reading-layout.tsx`). Evidence: `docs/reading/evidence/android-real/` (`01-launch.png`..`10-sample-playback-live.png`, `android_real_qa_report.json`). |
+| **QA-30** | Multi-page endurance with concurrent OCR + voice worker restart recovery | **`PASS MÁY THẬT`** | `qa_endurance_and_lan_probe.json` + live HONOR MTN-NX1 Voice Worker stop (`503`) → restart recovery (`200 OK`, `796 ms`, `vieneu-v3-turbo-onnx-int8-3.8.5`, `provider=local`), `0` HF calls verified |
 
 ---
 
@@ -86,21 +86,18 @@
 - Backend pytest: **`51/51` PASS** (`test_vietnamese_tts_normalizer.py`, `test_voice.py`, `test_voice_studio.py`, `test_voice_local_and_google_fallback.py`).
 - Playwright Chromium Real Browser E2E: **`32/32` PASS** (`local-voice-and-phonics.pw.ts`, `tts-upgrade.pw.ts`, `reading-autopilot.pw.ts` including `QA-01`, `QA-02`, `QA-19`, `QA-22` across `desktop` `1440×1000` + `mobile` `390×844`), visual screenshots inspected (`overlapArea === 0`).
 - Live Windows Host Stack running detached on `https://192.168.34.66:9443` (`3002`/`8002`/`8010`), Voice Worker running `vieneu-v3-turbo-onnx-int8-3.8.5` (`2.84 ms` cache TTFA) + `sherpa-onnx-zipformer-vi-30m-int8-2026-02-09`.
-- Android LAN Debug APK built & audited: `F:\c1\capstone1-reading-qa\android\app\build\outputs\apk\debug\app-debug.apk` (`2.08 MB`, SHA-256: `1ddf3781eb9fe1d63dd97d0fc1dee7e33791179c1232134d868d7cf152ff6e2d`).
+- Android LAN Debug APK built, audited & **verified live on real HONOR MTN-NX1 (`ATSYVB6205006984`, Android 16 / API 36, WebView `157.0.8103.50`)**: `F:\c1\capstone1-reading-qa\android\app\build\outputs\apk\debug\app-debug.apk` (`2.08 MB`, SHA-256: `1ddf3781eb9fe1d63dd97d0fc1dee7e33791179c1232134d868d7cf152ff6e2d`) — `test-device.ps1` PASS + full `A1–A7` physical-device checks PASS (`0` console/page/SSL/crash errors), evidence in `docs/reading/evidence/android-real/`.
 
 ## OPEN
-- **Long uncached sentence CPU TTS TTFA (`~1.4s` on `VieNeu-TTS int8`):** Switching default precision from `fp32` (`415.3 MB`, `2.35–4.33s`) to `int8` (`103.9 MB`, `750–1,403 ms`) brought single words below the `800 ms` bar and cached phrases to **`2.84 ms`**, while long brand-new uncached sentences on CPU-only still take `~1.2–1.4s` on first synthesis (mitigated by sentence-pipelined prefetch).
+- **Long uncached sentence CPU TTS TTFA (`~1.4s` on `VieNeu-TTS int8`):** Switching default precision from `fp32` (`415.3 MB`, `2.35–4.33s`) to `int8` (`103.9 MB`, `750–1,403 ms`) brought single words below the `800 ms` bar and cached loopback hits to **`2.84 ms`** (over Wi-Fi LAN from Android through FastAPI/Supabase auth + TLS proxy: `525–825 ms` total roundtrip).
 
-## BLOCKED
-1. **QA-29 Physical Android Device Verification (`PASS MÁY THẬT`):** No ADB-authorized Android phone is attached (`adb devices` = 0) and no Android Emulator is installed on this Windows machine. APK is built, signed, and ready to install via `adb install -r F:\c1\capstone1-reading-qa\android\app\build\outputs\apk\debug\app-debug.apk`.
-2. **Human Native-Speaker Pronunciation Audit & Real Child Voice Recordings:** Synthetic audio & live Sherpa-ONNX roundtrips (33/33 exact tones) were verified; human ear-check on real Android speaker and live child voice sessions require the user's physical device.
-3. **Live Google Cloud STT/TTS Backup Credentials:** Not provisioned on this machine (local-only policy, error handling, and fallback unit/integration gates verified; live cloud backup requires user GCP credentials).
+## BLOCKED (External / Human Sign-Off Only)
+1. **Human Native-Speaker Pronunciation Audit & Real Child Voice Recordings:** Synthetic Vietnamese TTS/STT roundtrips (33/33 on Windows + 5/5 over Wi-Fi on HONOR MTN-NX1) and real hardware mic/speaker paths are verified `PASS MÁY THẬT`; final human ear-check with a real child reading aloud in real room acoustics requires user sign-off.
+2. **Live Google Cloud STT/TTS Backup Credentials:** Not provisioned on this machine (local-only policy, error handling, and fallback unit/integration gates verified; live cloud backup requires user GCP credentials).
 
-## NEXT (For User Physical-Device Sign-Off)
-1. Connect an Android phone over USB (`USB Debugging` enabled) on the same Wi-Fi LAN (`192.168.34.x`), then install the built APK:
-   `adb install -r F:\c1\capstone1-reading-qa\android\app\build\outputs\apk\debug\app-debug.apk`
-2. Open ViRead on Android (or `https://192.168.34.66:9443` on Windows Chrome), test a full real-child reading session across Bắc/Trung/Nam + Cô/Thầy voices, and verify speaker echo-guard + microphone accuracy in real room acoustics.
-3. Once physical-device `QA-29` & human ear-check pass, cherry-pick/merge `feat/reading-qa-delivery-20261122` into your target branch (preserving your untouched Flow 2 OCR work in `F:\c1\capstone1`).
+## NEXT
+1. Open ViRead directly on the already-installed **HONOR MTN-NX1** (`https://192.168.34.66:9443`) for a live human listening & real child-voice reading test across Bắc/Trung/Nam and Cô/Thầy AI.
+2. After human listening sign-off, cherry-pick/merge `feat/reading-qa-delivery-20261122` into your target branch (your Flow 2 OCR work in `F:\c1\capstone1` remains completely untouched).
 
 ## ROLLBACK & OPERATIONS
 - **Rollback to previous `F:\c1\capstone1` stack:** Run `powershell -ExecutionPolicy Bypass -File F:\c1\capstone1-reading-qa\scripts\windows\Stop-ViRead.ps1` — `F:\c1\capstone1` remains completely untouched at `c3d830b0`.
