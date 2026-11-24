@@ -15,6 +15,7 @@
 import {
   clampSpeed,
   getSpeechPreferences,
+  setSpeechPreferences,
 } from "@/lib/reading/speech-preferences";
 import {
   getTeacherPersonaForVoice,
@@ -236,6 +237,16 @@ function sanitizeSessionLock(raw: unknown): SessionVoiceLock | null {
   };
 }
 
+function isLegacyExternalVoiceId(voiceId: string | null | undefined): boolean {
+  const cleaned = (voiceId ?? "").trim();
+  if (!cleaned) return false;
+  if (cleaned.startsWith("local_") || cleaned.startsWith("google_")) {
+    return false;
+  }
+  // Legacy ElevenLabs IDs saved in old browser localStorage are 18-28 mixed-case alphanumeric chars
+  return /^[A-Za-z0-9]{18,28}$/.test(cleaned);
+}
+
 export function getSessionVoiceLock(
   sessionId: string,
 ): SessionVoiceLock | null {
@@ -270,14 +281,24 @@ export function lockSessionVoice(
 ): SessionVoiceLock {
   const cleanSessionId = sessionId.trim();
   const existing = getSessionVoiceLock(cleanSessionId);
-  if (existing && !overrides?.forceUpdate) {
+  if (
+    existing &&
+    !overrides?.forceUpdate &&
+    !isLegacyExternalVoiceId(existing.voiceId)
+  ) {
     activeSessionId = cleanSessionId;
     return existing;
   }
 
   const speechPrefs = getSpeechPreferences();
   const policyPrefs = getVoicePolicyPreferences();
-  const requestedVoice = overrides?.voiceId ?? speechPrefs.voiceId;
+  let requestedVoice = overrides?.voiceId ?? speechPrefs.voiceId;
+  if (isLegacyExternalVoiceId(requestedVoice)) {
+    requestedVoice = null;
+    if (isLegacyExternalVoiceId(speechPrefs.voiceId)) {
+      setSpeechPreferences({ voiceId: null });
+    }
+  }
   const region =
     overrides?.region ??
     inferRegionFromVoiceId(requestedVoice, policyPrefs.region);
@@ -404,9 +425,13 @@ export function countUnintendedVoiceSwitches(
 /** Resolve the single source of truth for the active/selected voice across ALL screens. */
 export function getEffectiveVoiceId(): string {
   const active = getActiveSessionVoiceLock();
-  if (active?.voiceId) return active.voiceId;
+  if (active?.voiceId && !isLegacyExternalVoiceId(active.voiceId)) {
+    return active.voiceId;
+  }
   const prefs = getSpeechPreferences();
-  if (prefs.voiceId) return prefs.voiceId;
+  if (prefs.voiceId && !isLegacyExternalVoiceId(prefs.voiceId)) {
+    return prefs.voiceId;
+  }
   const policy = getVoicePolicyPreferences();
   return REGION_DEFAULT_VOICE_ID[policy.region] ?? DEFAULT_LOCAL_VOICE_ID;
 }

@@ -845,6 +845,24 @@ export class RealtimeAlignmentEngine {
   private processToken(token: string): void {
     if (!token) return;
 
+    // Ignore pure breath/hesitation fillers ("ờ", "ừm", "ầm", "hừm") when they do NOT
+    // appear in the nearby book words so post-pause inhales never mark the next word RED.
+    if (
+      (token === "ờ" || token === "ừm" || token === "ầm" || token === "hừm") &&
+      this.currentBookIndex < this.bookWords.length
+    ) {
+      const start = Math.max(0, this.currentBookIndex - 1);
+      const end = Math.min(this.bookWords.length, this.currentBookIndex + 4);
+      let inBook = false;
+      for (let i = start; i < end; i += 1) {
+        if (this.bookWords[i].normalizedText === token) {
+          inBook = true;
+          break;
+        }
+      }
+      if (!inBook) return;
+    }
+
     const spokenIndex = this.spokenWords.length;
     this.spokenWords.push(token);
 

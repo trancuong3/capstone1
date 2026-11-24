@@ -31,6 +31,7 @@ from typing import Any, Literal
 import av
 import librosa
 import numpy as np
+from scipy import signal as scipy_signal
 import sherpa_onnx
 import soundfile as sf
 from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
@@ -39,8 +40,14 @@ from pydantic import BaseModel, Field
 VOICE_RUNTIME_ROOT = Path(
     os.environ.get("VIREAD_VOICE_RUNTIME_DIR", r"F:\c1\tools\voice-runtime")
 )
-os.environ.setdefault("HF_HOME", str(VOICE_RUNTIME_ROOT / "hf-cache"))
+HF_CACHE_DIR = Path(
+    os.environ.get("HF_HOME", str(VOICE_RUNTIME_ROOT / "hf-cache"))
+)
+os.environ.setdefault("HF_HOME", str(HF_CACHE_DIR))
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+if (HF_CACHE_DIR / "hub").is_dir() and any((HF_CACHE_DIR / "hub").iterdir()):
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 from vieneu import Vieneu  # noqa: E402
 from vieneu_utils.core_utils import gaps_to_silence  # noqa: E402
@@ -77,7 +84,7 @@ TTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_AUDIO_BYTES = 15 * 1024 * 1024
 MAX_TEXT_CHARS = 5000
-QUEUE_WAIT_SECONDS = 25.0
+QUEUE_WAIT_SECONDS = 40.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,7 +225,9 @@ class VoiceRuntimeEngine:
                 num_threads=4,
                 sample_rate=16000,
                 feature_dim=80,
-                decoding_method="greedy_search",
+                decoding_method="modified_beam_search",
+                max_active_paths=6,
+                blank_penalty=-0.05,
             )
             logger.info(
                 "Loaded STT (%s) in %.2fs",
@@ -1082,14 +1091,26 @@ async def post_stt(
 
         def _decode_sync() -> tuple[str, list[dict[str, Any]]]:
             assert runtime.stt_recognizer is not None
-            # Child-voice preprocessing: remove DC offset, apply gentle AGC for soft voices,
-            # and pad 250ms leading + 350ms trailing silence so Zipformer never clips short syllables.
+            # Child-voice acoustic preprocessing:
+            # 1) Remove DC offset + 80Hz Butterworth high-pass filter (strips laptop fan & 50/60Hz hum)
+            # 2) RMS-aware gentle AGC so soft-spoken children reach clean speech loudness without clipping
+            # 3) Pad 250ms leading + 350ms trailing silence so Zipformer never drops initial/final syllables
             arr = samples16.astype(np.float32, copy=True)
             arr = arr - float(np.mean(arr))
+            if arr.size > 32:
+                sos = scipy_signal.butter(
+                    2, 80.0, btype="highpass", fs=16000.0, output="sos"
+                )
+                arr = scipy_signal.sosfilt(sos, arr).astype(np.float32)
+
+            rms = float(np.sqrt(np.mean(arr * arr))) if arr.size > 0 else 0.0
             peak = float(np.max(np.abs(arr))) if arr.size > 0 else 0.0
-            if 0.002 < peak < 0.45:
-                gain = min(8.0, 0.65 / peak)
-                arr = np.clip(arr * gain, -0.98, 0.98).astype(np.float32)
+            if rms > 0.0004 and peak > 0.0015:
+                gain_rms = 0.08 / rms
+                gain_peak = 0.92 / peak
+                gain = min(15.0, gain_rms, gain_peak)
+                if gain > 1.0:
+                    arr = np.clip(arr * gain, -0.98, 0.98).astype(np.float32)
 
             lead_pad_s = 0.25
             trail_pad_s = 0.35

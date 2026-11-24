@@ -56,16 +56,17 @@ export interface LocalSegmentContextSnapshot {
 }
 
 const TARGET_SAMPLE_RATE = 16_000;
-const MIN_SPEECH_RMS_ONSET = 0.004;
-const MIN_SPEECH_RMS_HOLD = 0.0025;
-const INITIAL_NOISE_FLOOR = 0.0022;
-const MAX_NOISE_FLOOR = 0.01;
-const MIN_NOISE_FLOOR = 0.0012;
-const SILENCE_FLUSH_MS = 520;
-const MIN_SPEECH_MS = 140;
-const MAX_SEGMENT_MS = 4_200;
-const PRE_ROLL_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.25);
-const OVERLAP_CARRY_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.24);
+const MIN_SPEECH_RMS_ONSET = 0.0028;
+const MIN_SPEECH_RMS_HOLD = 0.0016;
+const INITIAL_NOISE_FLOOR = 0.0018;
+const MAX_NOISE_FLOOR = 0.0055;
+const MIN_NOISE_FLOOR = 0.0009;
+const SILENCE_FLUSH_MS = 720;
+const MIN_SPEECH_MS = 120;
+const MAX_SEGMENT_MS = 4_500;
+const PRE_ROLL_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.45);
+const QUIET_TAIL_CARRY_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.35);
+const OVERLAP_CARRY_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.32);
 
 function downsampleTo16k(input: Float32Array, inputRate: number): Float32Array {
   if (inputRate === TARGET_SAMPLE_RATE || inputRate <= 0) {
@@ -151,15 +152,22 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private speechChunks: Float32Array[] = [];
   private speechSamples = 0;
   private silenceSamples = 0;
+  private quietFrameStreak = 0;
   private inSpeech = false;
   private noiseFloor = INITIAL_NOISE_FLOOR;
   private turnSeq = 0;
   private pendingUploads: Set<Promise<void>> = new Set();
+  private uploadChain: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly speechService: SpeechService,
     private readonly getContext?: () => LocalSegmentContextSnapshot,
   ) {}
+
+  /** True while the child is currently speaking or an STT segment upload is still in flight. */
+  hasPendingUploads(): boolean {
+    return this.inSpeech || this.pendingUploads.size > 0;
+  }
 
   start(audioTrack?: MediaStreamTrack): void {
     if (this.active) return;
@@ -167,6 +175,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.stopping = false;
     this.abortController = new AbortController();
     this.resultsHistory = [];
+    this.uploadChain = Promise.resolve();
     this.resetSegmentState();
     void this.openAudioGraph(audioTrack);
   }
@@ -277,7 +286,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       }
 
       const source = ctx.createMediaStreamSource(stream);
-      const processor = ctx.createScriptProcessor(4096, 1, 1);
+      const processor = ctx.createScriptProcessor(2048, 1, 1);
       const silentGain = ctx.createGain();
       silentGain.gain.value = 0;
 
@@ -310,20 +319,27 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
 
   private consumeSamples16k(chunk: Float32Array): void {
     let sumSq = 0;
+    let peak = 0;
     for (let i = 0; i < chunk.length; i += 1) {
-      sumSq += chunk[i] * chunk[i];
+      const sample = chunk[i];
+      sumSq += sample * sample;
+      const abs = Math.abs(sample);
+      if (abs > peak) peak = abs;
     }
     const rms = Math.sqrt(sumSq / Math.max(1, chunk.length));
     const onsetThreshold = Math.max(
       MIN_SPEECH_RMS_ONSET,
-      this.noiseFloor * 2.2,
+      this.noiseFloor * 2.0,
     );
-    const holdThreshold = Math.max(MIN_SPEECH_RMS_HOLD, this.noiseFloor * 1.5);
+    const holdThreshold = Math.max(MIN_SPEECH_RMS_HOLD, this.noiseFloor * 1.4);
+    const isOnsetFrame = rms >= onsetThreshold || peak >= onsetThreshold * 3.0;
+    const isVoicedFrame = rms >= holdThreshold || peak >= holdThreshold * 3.0;
 
     if (!this.inSpeech) {
-      if (rms >= onsetThreshold) {
+      if (isOnsetFrame) {
         this.inSpeech = true;
         this.silenceSamples = 0;
+        this.quietFrameStreak = 0;
         if (this.preRoll.length > 0) {
           this.speechChunks.push(this.preRoll);
           this.speechSamples += this.preRoll.length;
@@ -334,7 +350,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       } else {
         this.noiseFloor = Math.min(
           MAX_NOISE_FLOOR,
-          Math.max(MIN_NOISE_FLOOR, this.noiseFloor * 0.94 + rms * 0.06),
+          Math.max(MIN_NOISE_FLOOR, this.noiseFloor * 0.95 + rms * 0.05),
         );
         const merged = new Float32Array(this.preRoll.length + chunk.length);
         merged.set(this.preRoll, 0);
@@ -349,9 +365,14 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
 
     this.speechChunks.push(chunk);
     this.speechSamples += chunk.length;
-    if (rms < holdThreshold) {
-      this.silenceSamples += chunk.length;
+    if (!isVoicedFrame) {
+      this.quietFrameStreak += 1;
+      // Ignore single-frame (~42ms) glottal dips inside Vietnamese hỏi/ngã/nặng/huyền tones
+      if (this.quietFrameStreak >= 2) {
+        this.silenceSamples += chunk.length;
+      }
     } else {
+      this.quietFrameStreak = 0;
       this.silenceSamples = 0;
     }
 
@@ -371,19 +392,26 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       return;
     }
     const total = this.speechSamples;
+    const silenceTailSamples = this.silenceSamples;
     const combined = new Float32Array(total);
     let offset = 0;
     for (const part of this.speechChunks) {
       combined.set(part, offset);
       offset += part.length;
     }
-    const overlapTail =
-      carryOverlap && combined.length > OVERLAP_CARRY_SAMPLES
-        ? combined.slice(combined.length - OVERLAP_CARRY_SAMPLES)
-        : null;
+    // Always preserve a rolling pre-roll across flushes!
+    // - On silence flush: carry the quiet tail (<= 350ms, strictly within silenceTailSamples)
+    //   so the onset of the very next sentence's first word is NEVER chopped, with zero duplication.
+    // - On max-length forced flush: carry 320ms overlap so mid-sentence syllables aren't split.
+    const carryCount = carryOverlap
+      ? Math.min(combined.length, OVERLAP_CARRY_SAMPLES)
+      : Math.min(combined.length, silenceTailSamples, QUIET_TAIL_CARRY_SAMPLES);
+    const preservedPreRoll =
+      carryCount > 0 ? combined.slice(combined.length - carryCount) : null;
     this.resetSegmentState();
-    if (overlapTail) {
-      this.preRoll = overlapTail;
+    this.quietFrameStreak = 0;
+    if (preservedPreRoll) {
+      this.preRoll = preservedPreRoll;
     }
 
     const wavBlob = encodeFloat32ToWav16kBlob(combined);
@@ -392,8 +420,8 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     const turnId = nextTurnId(ctx.pageId ?? "live", seq);
     const signal = this.abortController?.signal;
 
-    const uploadTask = this.speechService
-      .transcribe(wavBlob, {
+    const transcribeOnce = () =>
+      this.speechService.transcribe(wavBlob, {
         filename: "segment.wav",
         languageCode: "vi",
         keyterms: ctx.keyterms,
@@ -402,9 +430,26 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         turnId,
         source: "local_live_segment",
         signal,
-        timeoutMs: 10_000,
-      })
-      .then((res) => {
+        timeoutMs: 12_000,
+      });
+
+    const transcribeWithRetry = async () => {
+      try {
+        return await transcribeOnce();
+      } catch (err) {
+        if (signal?.aborted || (!this.active && !this.stopping)) throw err;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        if (signal?.aborted || (!this.active && !this.stopping)) throw err;
+        return await transcribeOnce();
+      }
+    };
+
+    // Start upload immediately, but deliver results strictly in FIFO order via uploadChain
+    // so segment N+1 NEVER overtakes segment N and causes false RED alignment skips!
+    const responsePromise = transcribeWithRetry();
+    const deliveryTask = this.uploadChain
+      .then(async () => {
+        const res = await responsePromise;
         if (!this.active && !this.stopping) return;
         const text = (res.text ?? "").normalize("NFC").trim();
         if (!text) return;
@@ -434,10 +479,11 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         // Segment error is handled gracefully; final recorder transcription remains as backup
       })
       .finally(() => {
-        this.pendingUploads.delete(uploadTask);
+        this.pendingUploads.delete(deliveryTask);
       });
 
-    this.pendingUploads.add(uploadTask);
+    this.uploadChain = deliveryTask;
+    this.pendingUploads.add(deliveryTask);
   }
 }
 
