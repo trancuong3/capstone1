@@ -665,6 +665,38 @@ class BookContentQualityRepository:
             .limit(1)
         )
 
+    async def latest_scans_for_books(
+        self, book_ids: list[UUID]
+    ) -> dict[UUID, BookQualityScanRun]:
+        if not book_ids:
+            return {}
+        ranked = (
+            select(
+                BookQualityScanRun.Id.label("scan_id"),
+                func.row_number()
+                .over(
+                    partition_by=BookQualityScanRun.BookId,
+                    order_by=(
+                        BookQualityScanRun.CreatedAt.desc(),
+                        BookQualityScanRun.Id.desc(),
+                    ),
+                )
+                .label("row_number"),
+            )
+            .where(BookQualityScanRun.BookId.in_(book_ids))
+            .subquery()
+        )
+        result = await self.db.scalars(
+            select(BookQualityScanRun)
+            .join(ranked, ranked.c.scan_id == BookQualityScanRun.Id)
+            .where(ranked.c.row_number == 1)
+        )
+        scans: dict[UUID, BookQualityScanRun] = {}
+        for run in result.all():
+            if run.BookId is not None:
+                scans[run.BookId] = run
+        return scans
+
     async def scan_run(
         self, scan_id: UUID, *, lock: bool = False
     ) -> BookQualityScanRun | None:
@@ -695,6 +727,28 @@ class BookContentQualityRepository:
             .order_by(BookQualityFinding.ExcerptStart, BookQualityFinding.CreatedAt, BookQualityFinding.Id)
         )
         return list(result.scalars().all())
+
+    async def findings_for_scan(
+        self, scan_id: UUID
+    ) -> dict[UUID, list[BookQualityFinding]]:
+        result = await self.db.scalars(
+            select(BookQualityFinding)
+            .join(
+                BookQualityPageScan,
+                BookQualityPageScan.Id == BookQualityFinding.PageScanId,
+            )
+            .where(BookQualityPageScan.ScanRunId == scan_id)
+            .order_by(
+                BookQualityFinding.PageScanId,
+                BookQualityFinding.ExcerptStart,
+                BookQualityFinding.CreatedAt,
+                BookQualityFinding.Id,
+            )
+        )
+        grouped: dict[UUID, list[BookQualityFinding]] = {}
+        for finding in result.all():
+            grouped.setdefault(finding.PageScanId, []).append(finding)
+        return grouped
 
     async def finding(
         self, finding_id: UUID, *, lock: bool = False

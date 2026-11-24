@@ -16,11 +16,13 @@ export function isAndroidAudioUnlocked(): boolean {
   return unlocked;
 }
 
-export function unlockAudioNow(): void {
-  if (unlocked || typeof window === "undefined") return;
+export function unlockAudioNow(options?: { readonly force?: boolean }): void {
+  if ((unlocked && !options?.force) || typeof window === "undefined") return;
   unlocked = true;
-  cleanupListeners?.();
-  cleanupListeners = null;
+  if (cleanupListeners) {
+    cleanupListeners();
+    cleanupListeners = null;
+  }
 
   try {
     const win = window as unknown as {
@@ -52,8 +54,12 @@ export function unlockAudioNow(): void {
             probe.pause();
             probe.src = "";
           })
-          .catch(() => {
+          .catch((error: unknown) => {
             probe.src = "";
+            if (error instanceof Error && error.name === "NotAllowedError") {
+              unlocked = false;
+              installAndroidAudioUnlock();
+            }
           });
       }
     }

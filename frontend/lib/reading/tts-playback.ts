@@ -933,7 +933,17 @@ export class TtsPlayback {
           this.cancelFrame();
           this.frame = requestAnimationFrame(tick);
         } catch (error) {
-          if (active()) finish(error);
+          if (active()) {
+            if (error instanceof Error && error.name === "NotAllowedError") {
+              const blocked = new Error(
+                "Trình duyệt đang chờ bé chạm nút Nghe lại để bật âm thanh.",
+              );
+              blocked.name = "NotAllowedError";
+              finish(blocked);
+              return;
+            }
+            finish(error);
+          }
         }
       };
       const media: ActiveMedia = { pause: () => audio.pause(), resume: begin };

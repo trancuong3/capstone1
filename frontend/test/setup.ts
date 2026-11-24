@@ -3,6 +3,8 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
+import { resetAllApiCachesForTests } from "@/lib/api/read-cache";
+
 vi.mock("next/link", async () => {
   const { createElement } = await import("react");
   return {
@@ -47,4 +49,5 @@ vi.mock("next/navigation", async () => {
 
 afterEach(() => {
   cleanup();
+  resetAllApiCachesForTests();
 });

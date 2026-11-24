@@ -48,14 +48,41 @@ from app.services.ocr_evidence import (
     HYBRID_OCR_EVIDENCE_CONTRACT,
     find_split_merge_candidates,
 )
-from app.services.ocr_engine import (
-    OcrEngineUnavailable,
-    OcrNoTextDetected,
+from app.services.ocr_inference_job_service import (
+    JOB_KIND_ADMIN_REPROCESS,
+    JOB_KIND_ADMIN_REUPLOAD,
+    JOB_KIND_ADMIN_UPLOAD,
+    PRIORITY_ADMIN_OCR,
+    OcrInferenceJobService,
     align_ocr_tokens,
-    extract_text_and_boxes,
+    is_remote_ocr_mode,
     normalize_text_tokens,
     normalize_word,
 )
+
+
+class OcrEngineUnavailable(RuntimeError):
+    """Lightweight placeholder mirroring app.services.ocr_engine.OcrEngineUnavailable."""
+
+
+class OcrNoTextDetected(RuntimeError):
+    """Lightweight placeholder mirroring app.services.ocr_engine.OcrNoTextDetected."""
+
+
+def _is_ocr_exception(exc: BaseException, class_name: str) -> bool:
+    return any(cls.__name__ == class_name for cls in type(exc).__mro__)
+
+
+def extract_text_and_boxes(image_bytes: bytes):
+    """Lazy proxy preserving unit-test patch targets without importing ocr_engine at startup."""
+    from app.services import ocr_engine as _ocr_engine
+
+    try:
+        return _ocr_engine.extract_text_and_boxes(image_bytes)
+    except _ocr_engine.OcrNoTextDetected as exc:
+        raise OcrNoTextDetected(str(exc)) from exc
+    except _ocr_engine.OcrEngineUnavailable as exc:
+        raise OcrEngineUnavailable(str(exc)) from exc
 from app.services.admin_ocr_chunking import ChunkingError, chunk_ocr_text
 from app.services.ocr_ai.config import OcrCorrectionConfig
 from app.services.ocr_ai.exceptions import OcrConfigurationError, OcrOrchestrationError
@@ -1459,6 +1486,19 @@ class AdminOcrService:
                 raise
 
             try:
+                if is_remote_ocr_mode():
+                    return await self._ingest_via_remote_worker(
+                        actor_id=actor_id,
+                        book_id=book_id,
+                        page_id=page_id,
+                        object_path=object_path,
+                        image_digest=image_digest,
+                        content_type=content_type,
+                        width=width,
+                        height=height,
+                        upload_id=upload_id,
+                        started_at=started_at,
+                    )
                 ocr = await run_in_threadpool(extract_text_and_boxes, data)
                 words = self._word_data(ocr["words"])
                 text_value = unicodedata.normalize("NFC", str(ocr["text"]).strip())
@@ -1521,6 +1561,13 @@ class AdminOcrService:
                     page_id, object_path, object_may_exist=storage_uploaded,
                     book_id=book_id, started_at=started_at,
                 )
+                if _is_ocr_exception(exc, "OcrEngineUnavailable"):
+                    raise HTTPException(status_code=503, detail=str(exc)) from exc
+                if _is_ocr_exception(exc, "OcrNoTextDetected"):
+                    raise HTTPException(
+                        status_code=422,
+                        detail="No usable text was detected; check the image quality",
+                    ) from exc
                 log_diagnostic(
                     logger,
                     logging.ERROR,
@@ -1841,6 +1888,21 @@ class AdminOcrService:
             raise
 
         try:
+            if is_remote_ocr_mode():
+                return await self._replace_page_image_via_remote_worker(
+                    actor_id=actor_id,
+                    book_id=book_id,
+                    page_id=page_id,
+                    previous_image_path=previous_image_path,
+                    object_path=object_path,
+                    image_digest=image_digest,
+                    content_type=content_type,
+                    width=width,
+                    height=height,
+                    expected_verified_revision_id=expected_verified_revision_id,
+                    expected_latest_revision_id=expected_latest_revision_id,
+                    upload_id=upload_id,
+                )
             ocr = await run_in_threadpool(extract_text_and_boxes, data)
             words = self._word_data(ocr["words"])
             text_value = unicodedata.normalize("NFC", str(ocr["text"]).strip())
@@ -1881,6 +1943,13 @@ class AdminOcrService:
                 object_path, object_may_exist=storage_uploaded,
                 book_id=book_id, page_id=page_id, started_at=started_at,
             )
+            if _is_ocr_exception(exc, "OcrEngineUnavailable"):
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            if _is_ocr_exception(exc, "OcrNoTextDetected"):
+                raise HTTPException(
+                    status_code=422,
+                    detail="No usable text was detected; check the replacement image",
+                ) from exc
             log_diagnostic(
                 logger,
                 logging.ERROR,
@@ -2350,6 +2419,10 @@ class AdminOcrService:
                 status_code=409,
                 detail="The verified revision changed; reload the page before creating a draft",
             )
+        if isinstance(self.db, AsyncSession):
+            await OcrInferenceJobService(self.db).cancel_for_page(
+                page.Id, reason="SUPERSEDED_BY_ADMIN_EDIT_DRAFT"
+            )
         latest_revisions = await self.repo.revisions(page_id)
         if (
             latest_revisions
@@ -2535,6 +2608,10 @@ class AdminOcrService:
             json.dumps({"text": draft_text, "words": words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
         ).hexdigest()
         try:
+            if isinstance(self.db, AsyncSession):
+                await OcrInferenceJobService(self.db).cancel_for_page(
+                    page.Id, reason="SUPERSEDED_BY_ADMIN_SAVE_DRAFT"
+                )
             existing_rows = await self.repo.words(revision.Id)
             self._preserve_trusted_word_scores(revision, words, existing_rows)
             self._set_word_review_statuses(revision, words, existing_rows)
@@ -2571,6 +2648,10 @@ class AdminOcrService:
                 if replay is not None:
                     return replay
             raise HTTPException(status_code=409, detail="Only a revision awaiting review can be verified")
+        if isinstance(self.db, AsyncSession):
+            await OcrInferenceJobService(self.db).cancel_for_page(
+                page.Id, reason="SUPERSEDED_BY_ADMIN_VERIFY"
+            )
         corrected_text = unicodedata.normalize("NFC", payload.corrected_text.strip())
         if not corrected_text:
             raise HTTPException(status_code=422, detail="Verified text must not be blank")
@@ -3184,6 +3265,19 @@ class AdminOcrService:
         await self.db.rollback()
 
         try:
+            if is_remote_ocr_mode():
+                return await self._reprocess_via_remote_worker(
+                    actor_id=actor_id,
+                    book_id=page_book_id,
+                    page_id=page.Id,
+                    source_image_path=source_image_path,
+                    source_width=source_width,
+                    source_height=source_height,
+                    source_sha256=latest_metadata.get("source_image_sha256"),
+                    expected_page_image_path=page.ImagePath,
+                    expected_verified_revision_id=expected_verified_revision_id,
+                    expected_latest_revision_id=expected_latest_revision_id,
+                )
             image_bytes = await run_in_threadpool(download_object, source_image_path)
             ocr = await run_in_threadpool(extract_text_and_boxes, image_bytes)
         except OcrEngineUnavailable as exc:
@@ -3198,6 +3292,15 @@ class AdminOcrService:
                 status_code=422,
                 detail="Stored image could not be decoded",
             ) from exc
+        except Exception as exc:
+            if _is_ocr_exception(exc, "OcrEngineUnavailable"):
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            if _is_ocr_exception(exc, "OcrNoTextDetected"):
+                raise HTTPException(
+                    status_code=422,
+                    detail="No usable text was detected during reprocessing",
+                ) from exc
+            raise
 
         words = self._word_data(ocr["words"])
         text_value = unicodedata.normalize("NFC", str(ocr["text"]).strip())
@@ -3327,6 +3430,10 @@ class AdminOcrService:
             raise HTTPException(status_code=409, detail="Page/book relationship changed; reload and retry")
         if page.LifecycleStatus not in ("ACTIVE", "PROCESSING", "RETIRED"):
             raise HTTPException(status_code=409, detail="Page lifecycle state is not supported")
+        if isinstance(self.db, AsyncSession):
+            await OcrInferenceJobService(self.db).cancel_for_page(
+                page.Id, reason="SUPERSEDED_BY_ADMIN_RETIRE"
+            )
 
         changed = False
         try:
@@ -3518,6 +3625,511 @@ class AdminOcrService:
                 status_code=status_code,
                 detail="Không thể hoàn tất AI OCR; bản nháp hiện tại vẫn được giữ nguyên.",
             ) from exc
+
+    async def _ingest_via_remote_worker(
+        self,
+        *,
+        actor_id: UUID,
+        book_id: UUID,
+        page_id: UUID,
+        object_path: str,
+        image_digest: str,
+        content_type: str,
+        width: int,
+        height: int,
+        upload_id: UUID | None,
+        started_at: float,
+    ) -> tuple[int, AdminRevisionDetailRead]:
+        job_service = OcrInferenceJobService(self.db)
+        if not await job_service.has_online_worker():
+            raise OcrEngineUnavailable(
+                "Remote OCR worker is offline; cannot run synchronous page OCR"
+            )
+        job = await job_service.enqueue_job(
+            job_kind=JOB_KIND_ADMIN_UPLOAD,
+            owner_user_id=actor_id,
+            book_id=book_id,
+            page_id=page_id,
+            image_path=object_path,
+            image_sha256=image_digest,
+            image_width=width,
+            image_height=height,
+            image_mime_type=content_type,
+            priority=PRIORITY_ADMIN_OCR,
+            idempotency_key=f"admin_upload:{upload_id}" if upload_id else None,
+            processing_meta={
+                "upload_id": str(upload_id) if upload_id else None,
+                "expected_page_image_path": object_path,
+            },
+        )
+        await self.db.commit()
+        completed = await job_service.wait_for_job_completion(job.Id)
+        if completed.Status != "SUCCEEDED":
+            if (completed.ErrorCode or "").upper() == "NO_TEXT_DETECTED":
+                raise OcrNoTextDetected("No usable text was detected")
+            raise OcrEngineUnavailable(completed.ErrorCode or "Remote OCR worker failed")
+        if completed.RevisionId is None:
+            raise OcrEngineUnavailable("Remote OCR job completed without revision ID")
+        page = await self.repo.page(page_id)
+        revision = await self.repo.revision(page_id, completed.RevisionId)
+        if page is None or revision is None:
+            raise HTTPException(status_code=409, detail="Page or revision state changed during OCR")
+        return int(page.PageNumber), await self.revision_detail(page, revision)
+
+    async def _replace_page_image_via_remote_worker(
+        self,
+        *,
+        actor_id: UUID,
+        book_id: UUID,
+        page_id: UUID,
+        previous_image_path: str,
+        object_path: str,
+        image_digest: str,
+        content_type: str,
+        width: int,
+        height: int,
+        expected_verified_revision_id: UUID | None,
+        expected_latest_revision_id: UUID | None,
+        upload_id: UUID | None,
+    ) -> AdminRevisionDetailRead:
+        job_service = OcrInferenceJobService(self.db)
+        if not await job_service.has_online_worker():
+            raise OcrEngineUnavailable(
+                "Remote OCR worker is offline; cannot run synchronous replacement OCR"
+            )
+        await job_service.cancel_for_page(page_id, reason="SUPERSEDED_BY_ADMIN_REUPLOAD")
+        job = await job_service.enqueue_job(
+            job_kind=JOB_KIND_ADMIN_REUPLOAD,
+            owner_user_id=actor_id,
+            book_id=book_id,
+            page_id=page_id,
+            image_path=object_path,
+            image_sha256=image_digest,
+            image_width=width,
+            image_height=height,
+            image_mime_type=content_type,
+            priority=PRIORITY_ADMIN_OCR,
+            idempotency_key=f"admin_reupload:{page_id}:{upload_id}" if upload_id else None,
+            expected_verified_revision_id=expected_verified_revision_id,
+            expected_latest_revision_id=expected_latest_revision_id,
+            processing_meta={
+                "upload_id": str(upload_id) if upload_id else None,
+                "expected_page_image_path": previous_image_path,
+            },
+        )
+        await self.db.commit()
+        completed = await job_service.wait_for_job_completion(job.Id)
+        if completed.Status != "SUCCEEDED":
+            if (completed.ErrorCode or "").upper() == "NO_TEXT_DETECTED":
+                raise OcrNoTextDetected("No usable text was detected")
+            raise OcrEngineUnavailable(completed.ErrorCode or "Remote OCR worker failed")
+        if completed.RevisionId is None:
+            raise OcrEngineUnavailable("Remote OCR job completed without revision ID")
+        page = await self.repo.page(page_id)
+        revision = await self.repo.revision(page_id, completed.RevisionId)
+        if page is None or revision is None:
+            raise HTTPException(status_code=409, detail="Page or revision state changed during OCR")
+        return await self.revision_detail(page, revision)
+
+    async def _reprocess_via_remote_worker(
+        self,
+        *,
+        actor_id: UUID,
+        book_id: UUID,
+        page_id: UUID,
+        source_image_path: str,
+        source_width: int | None,
+        source_height: int | None,
+        source_sha256: str | None,
+        expected_page_image_path: str,
+        expected_verified_revision_id: UUID | None,
+        expected_latest_revision_id: UUID | None,
+    ) -> AdminRevisionDetailRead:
+        job_service = OcrInferenceJobService(self.db)
+        if not await job_service.has_online_worker():
+            raise OcrEngineUnavailable(
+                "Remote OCR worker is offline; cannot reprocess page synchronously"
+            )
+        resolved_sha = (
+            str(source_sha256)
+            if isinstance(source_sha256, str) and len(source_sha256) == 64
+            else hashlib.sha256(
+                await run_in_threadpool(download_object, source_image_path)
+            ).hexdigest()
+        )
+        await job_service.cancel_for_page(page_id, reason="SUPERSEDED_BY_ADMIN_REPROCESS")
+        job = await job_service.enqueue_job(
+            job_kind=JOB_KIND_ADMIN_REPROCESS,
+            owner_user_id=actor_id,
+            book_id=book_id,
+            page_id=page_id,
+            image_path=source_image_path,
+            image_sha256=resolved_sha,
+            image_width=int(source_width) if source_width else None,
+            image_height=int(source_height) if source_height else None,
+            priority=PRIORITY_ADMIN_OCR,
+            expected_verified_revision_id=expected_verified_revision_id,
+            expected_latest_revision_id=expected_latest_revision_id,
+            processing_meta={"expected_page_image_path": expected_page_image_path},
+        )
+        await self.db.commit()
+        completed = await job_service.wait_for_job_completion(job.Id)
+        if completed.Status != "SUCCEEDED":
+            if (completed.ErrorCode or "").upper() == "NO_TEXT_DETECTED":
+                raise OcrNoTextDetected("No usable text was detected")
+            raise OcrEngineUnavailable(completed.ErrorCode or "Remote OCR worker failed")
+        if completed.RevisionId is None:
+            raise OcrEngineUnavailable("Remote OCR job completed without revision ID")
+        page = await self.repo.page(page_id)
+        revision = await self.repo.revision(page_id, completed.RevisionId)
+        if page is None or revision is None:
+            raise HTTPException(status_code=409, detail="Page or revision state changed during OCR")
+        return await self.revision_detail(page, revision)
+
+    async def enqueue_upload_page_job(
+        self,
+        actor_id: UUID,
+        book_id: UUID,
+        file: UploadFile,
+        *,
+        upload_id: UUID | None = None,
+    ) -> dict[str, object]:
+        await self.require_admin(actor_id)
+        await self.db.rollback()
+        data, content_type, extension, width, height = await self._read_validate_image(file)
+        image_digest = hashlib.sha256(data).hexdigest()
+        job_service = OcrInferenceJobService(self.db)
+        if upload_id is not None:
+            existing_job = await job_service.repo.get_by_idempotency(
+                JOB_KIND_ADMIN_UPLOAD, actor_id, f"admin_upload:{upload_id}"
+            )
+            if existing_job is not None:
+                if existing_job.ImageSha256 != image_digest:
+                    raise HTTPException(status_code=409, detail="Upload identity already belongs to a different image")
+                return OcrInferenceJobService.serialize_job(existing_job)
+
+        page_id = uuid4()
+        object_path = f"books/{book_id}/pages/{page_id}/{uuid4().hex}.{extension}"
+        book = await self.repo.book(book_id, lock=True)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Book not found")
+        if book.LifecycleStatus != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Cannot add pages to an archived book")
+        page_number = await self.repo.next_active_page_number(book_id)
+        page = BookPage(
+            Id=page_id,
+            BookId=book_id,
+            PageNumber=page_number,
+            ImagePath=object_path,
+            Width=width,
+            Height=height,
+            ContentType="CONTENT",
+            LifecycleStatus="PROCESSING",
+            ProcessingMeta={
+                "storage": "supabase",
+                "image_sha256": image_digest,
+                **({"upload_id": str(upload_id)} if upload_id else {}),
+            },
+        )
+        self.repo.stage_page_reservation(page)
+        await self.repo.flush()
+        await self.db.commit()
+
+        try:
+            await run_in_threadpool(upload_object, object_path, data, content_type)
+            job = await job_service.enqueue_job(
+                job_kind=JOB_KIND_ADMIN_UPLOAD,
+                owner_user_id=actor_id,
+                book_id=book_id,
+                page_id=page_id,
+                image_path=object_path,
+                image_sha256=image_digest,
+                image_width=width,
+                image_height=height,
+                image_mime_type=content_type,
+                priority=PRIORITY_ADMIN_OCR,
+                idempotency_key=f"admin_upload:{upload_id}" if upload_id else None,
+                processing_meta={
+                    "upload_id": str(upload_id) if upload_id else None,
+                    "expected_page_image_path": object_path,
+                },
+            )
+            await self.db.commit()
+            return OcrInferenceJobService.serialize_job(job)
+        except Exception:
+            await self.db.rollback()
+            await self._abort_page_upload(
+                page_id, object_path, object_may_exist=True, book_id=book_id, started_at=time.perf_counter()
+            )
+            raise
+
+    async def enqueue_reprocess_job(self, actor_id: UUID, page_id: UUID) -> dict[str, object]:
+        await self.require_admin(actor_id)
+        page = await self.repo.page(page_id, lock=True)
+        if page is None:
+            await self.db.rollback()
+            raise HTTPException(status_code=404, detail="Page not found")
+        if page.LifecycleStatus != "ACTIVE":
+            await self.db.rollback()
+            raise HTTPException(status_code=409, detail="Cannot reprocess an inactive or retired page")
+        expected_verified_revision_id = page.CurrentVerifiedRevisionId
+        revisions = await self.repo.revisions(page.Id)
+        expected_latest_revision_id = revisions[0].Id if revisions else None
+        latest_meta = dict(revisions[0].ProcessingMeta or {}) if revisions else {}
+        candidate_path = latest_meta.get("source_image_path")
+        source_path = (
+            candidate_path if isinstance(candidate_path, str) and candidate_path else page.ImagePath
+        )
+        source_sha = latest_meta.get("source_image_sha256")
+        if not (isinstance(source_sha, str) and len(source_sha) == 64):
+            source_sha = hashlib.sha256(
+                await run_in_threadpool(download_object, source_path)
+            ).hexdigest()
+        job_service = OcrInferenceJobService(self.db)
+        await job_service.cancel_for_page(page.Id, reason="SUPERSEDED_BY_ADMIN_REPROCESS")
+        job = await job_service.enqueue_job(
+            job_kind=JOB_KIND_ADMIN_REPROCESS,
+            owner_user_id=actor_id,
+            book_id=page.BookId,
+            page_id=page.Id,
+            image_path=source_path,
+            image_sha256=str(source_sha),
+            image_width=int(latest_meta.get("source_image_width") or page.Width or 0) or None,
+            image_height=int(latest_meta.get("source_image_height") or page.Height or 0) or None,
+            priority=PRIORITY_ADMIN_OCR,
+            expected_verified_revision_id=expected_verified_revision_id,
+            expected_latest_revision_id=expected_latest_revision_id,
+            processing_meta={"expected_page_image_path": page.ImagePath},
+        )
+        await self.db.commit()
+        return OcrInferenceJobService.serialize_job(job)
+
+    async def enqueue_reupload_ocr_job(
+        self,
+        actor_id: UUID,
+        page_id: UUID,
+        file: UploadFile,
+        *,
+        upload_id: UUID | None = None,
+    ) -> dict[str, object]:
+        await self.require_admin(actor_id)
+        probe = await self.repo.page(page_id)
+        if probe is None:
+            raise HTTPException(status_code=404, detail="Page not found")
+        book = await self.repo.book(probe.BookId, lock=True)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Book not found")
+        if book.LifecycleStatus != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Cannot edit pages of an archived book")
+        page = await self.repo.page(page_id, lock=True)
+        if page is None or page.LifecycleStatus != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Page is no longer active; reload and retry")
+
+        expected_verified_revision_id = page.CurrentVerifiedRevisionId
+        previous_image_path = page.ImagePath
+        existing_revisions = await self.repo.revisions(page_id)
+        expected_latest_revision_id = existing_revisions[0].Id if existing_revisions else None
+        await self.db.rollback()
+
+        data, content_type, extension, width, height = await self._read_validate_image(file)
+        image_digest = hashlib.sha256(data).hexdigest()
+        object_path = f"books/{book.Id}/pages/{page_id}/{uuid4().hex}.{extension}"
+
+        job_service = OcrInferenceJobService(self.db)
+        if upload_id is not None:
+            existing_job = await job_service.repo.get_by_idempotency(
+                JOB_KIND_ADMIN_REUPLOAD, actor_id, f"admin_reupload:{page_id}:{upload_id}"
+            )
+            if existing_job is not None:
+                if existing_job.ImageSha256 != image_digest:
+                    raise HTTPException(status_code=409, detail="Upload identity already belongs to a different image")
+                return OcrInferenceJobService.serialize_job(existing_job)
+
+        await run_in_threadpool(upload_object, object_path, data, content_type)
+        try:
+            await job_service.cancel_for_page(page_id, reason="SUPERSEDED_BY_ADMIN_REUPLOAD")
+            job = await job_service.enqueue_job(
+                job_kind=JOB_KIND_ADMIN_REUPLOAD,
+                owner_user_id=actor_id,
+                book_id=book.Id,
+                page_id=page_id,
+                image_path=object_path,
+                image_sha256=image_digest,
+                image_width=width,
+                image_height=height,
+                image_mime_type=content_type,
+                priority=PRIORITY_ADMIN_OCR,
+                idempotency_key=f"admin_reupload:{page_id}:{upload_id}" if upload_id else None,
+                expected_verified_revision_id=expected_verified_revision_id,
+                expected_latest_revision_id=expected_latest_revision_id,
+                processing_meta={
+                    "upload_id": str(upload_id) if upload_id else None,
+                    "expected_page_image_path": previous_image_path,
+                },
+            )
+            await self.db.commit()
+            return OcrInferenceJobService.serialize_job(job)
+        except Exception:
+            await self.db.rollback()
+            await self._cleanup_uploaded_object(
+                object_path,
+                object_may_exist=True,
+                book_id=book.Id,
+                page_id=page_id,
+                started_at=time.perf_counter(),
+            )
+            raise
+
+    async def apply_remote_ocr_job_completion(
+        self,
+        *,
+        job: object,
+        full_text: str,
+        words: list[dict[str, object]],
+        ocr_meta: dict[str, object],
+        no_text_detected: bool,
+        model_profile: str | None,
+        model_sha256: str | None,
+        now: datetime,
+    ) -> dict[str, object]:
+        book_id = getattr(job, "BookId", None)
+        page_id = getattr(job, "PageId", None)
+        if book_id is None or page_id is None:
+            return {"stale_reason": "MISSING_BOOK_OR_PAGE_TARGET"}
+        book = await self.repo.book(book_id, lock=True)
+        if book is None or book.LifecycleStatus != "ACTIVE":
+            return {"stale_reason": "BOOK_INACTIVE_OR_DELETED"}
+        page = await self.repo.page(page_id, lock=True)
+        if page is None:
+            return {"stale_reason": "PAGE_DELETED"}
+        if page.LifecycleStatus == "RETIRED":
+            return {"stale_reason": "PAGE_RETIRED"}
+
+        proc_meta = dict(getattr(job, "ProcessingMeta", None) or {})
+        expected_page_path = proc_meta.get("expected_page_image_path") or getattr(job, "ImagePath", None)
+        if expected_page_path and page.ImagePath != expected_page_path:
+            return {"stale_reason": "PAGE_IMAGE_REPLACED"}
+        if page.CurrentVerifiedRevisionId != getattr(job, "ExpectedVerifiedRevisionId", None):
+            return {"stale_reason": "VERIFIED_REVISION_CHANGED_MID_JOB"}
+
+        revisions = await self.repo.revisions(page.Id)
+        latest_rev_id = revisions[0].Id if revisions else None
+        if latest_rev_id != getattr(job, "ExpectedLatestRevisionId", None):
+            return {"stale_reason": "PAGE_REVISION_ADDED_MID_JOB"}
+
+        text_value = unicodedata.normalize("NFC", str(full_text or "").strip())
+        if no_text_detected or not text_value:
+            return {"stale_reason": "OCR_NO_TEXT_DETECTED"}
+
+        normalized_words = self._word_data(words)
+        metadata = dict(ocr_meta or {})
+        metadata.update(
+            {
+                "source_image_path": getattr(job, "ImagePath", page.ImagePath),
+                "source_image_width": getattr(job, "ImageWidth", None) or page.Width,
+                "source_image_height": getattr(job, "ImageHeight", None) or page.Height,
+                "source_image_sha256": getattr(job, "ImageSha256", None),
+                "ocr_job_id": str(getattr(job, "Id", "")),
+                "remote_worker_id": getattr(job, "WorkerId", None),
+                "word_evidence_v2_authoritative": True,
+            }
+        )
+        if model_profile:
+            metadata["vietocr_profile"] = model_profile
+        if model_sha256:
+            metadata["vietocr_sha256"] = model_sha256
+
+        if (
+            getattr(job, "JobKind", None) == JOB_KIND_ADMIN_REPROCESS
+            and page.CurrentVerifiedRevisionId is not None
+        ):
+            verified_ref = await self.repo.revision(page.Id, page.CurrentVerifiedRevisionId)
+            if (
+                verified_ref is not None
+                and verified_ref.VerificationStatus == "VERIFIED"
+                and isinstance(verified_ref.VerifiedText, str)
+                and verified_ref.VerifiedText.strip()
+            ):
+                ref_text = unicodedata.normalize("NFC", verified_ref.VerifiedText).strip()
+                metadata["verified_reference_alignment"] = self._apply_verified_reference(
+                    normalized_words, ref_text
+                )
+                metadata["reference_source"] = "current_verified_revision"
+                metadata["reference_revision_id"] = str(verified_ref.Id)
+
+        metadata["word_review_statuses"] = [
+            str(word.get("ocr_review_status", "needs_review")) for word in normalized_words
+        ]
+        metadata["word_score_sources"] = self._word_score_sources(normalized_words, metadata)
+        metadata["word_evidence_v2"] = [
+            self._normalize_word_evidence(word.get("ocr_evidence")) for word in normalized_words
+        ]
+        content_hash = hashlib.sha256(
+            json.dumps({"text": text_value, "words": normalized_words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+
+        revision_id = uuid4()
+        upload_id_raw = proc_meta.get("upload_id")
+        if getattr(job, "JobKind", None) == JOB_KIND_ADMIN_UPLOAD:
+            if page.LifecycleStatus != "PROCESSING":
+                return {"stale_reason": "PAGE_RESERVATION_NOT_PENDING"}
+            self.repo.set_page_lifecycle_status(page, "ACTIVE")
+            page.ProcessingMeta = {
+                "storage": "supabase",
+                "image_sha256": getattr(job, "ImageSha256", None),
+                "upload_revision_id": str(revision_id),
+                "ocr_job_id": str(getattr(job, "Id", "")),
+                **({"upload_id": str(upload_id_raw)} if upload_id_raw else {}),
+            }
+            revision = PageRevision(
+                Id=revision_id,
+                PageId=page.Id,
+                RevisionNo="1",
+                VerificationStatus="NEEDS_REVIEW",
+                OriginalOcrText=text_value,
+                VerifiedText=None,
+                DraftText=text_value,
+                ContentHash=content_hash,
+                ProcessingMeta=metadata,
+                CreatedAt=now,
+            )
+            self.repo.stage_page_revision_bundle(page, revision, normalized_words)
+            await self.repo.flush()
+            return {"revision_id": revision.Id}
+
+        if page.LifecycleStatus != "ACTIVE":
+            return {"stale_reason": "PAGE_NOT_ACTIVE"}
+        if getattr(job, "JobKind", None) == JOB_KIND_ADMIN_REUPLOAD:
+            new_width = int(getattr(job, "ImageWidth", None) or page.Width)
+            new_height = int(getattr(job, "ImageHeight", None) or page.Height)
+            self.repo.set_page_image_source(
+                page,
+                image_path=str(getattr(job, "ImagePath", page.ImagePath)),
+                width=new_width,
+                height=new_height,
+            )
+            page.ProcessingMeta = {
+                **dict(page.ProcessingMeta or {}),
+                "image_sha256": getattr(job, "ImageSha256", None),
+                "ocr_job_id": str(getattr(job, "Id", "")),
+                **({"upload_id": str(upload_id_raw)} if upload_id_raw else {}),
+            }
+        next_number = await self.repo.next_revision_number(page.Id)
+        revision = PageRevision(
+            Id=revision_id,
+            PageId=page.Id,
+            RevisionNo=str(next_number),
+            VerificationStatus="NEEDS_REVIEW",
+            OriginalOcrText=text_value,
+            VerifiedText=None,
+            DraftText=text_value,
+            ContentHash=content_hash,
+            ProcessingMeta=metadata,
+            CreatedAt=now,
+        )
+        self.repo.stage_revision_bundle(revision, normalized_words)
+        await self.repo.flush()
+        return {"revision_id": revision.Id}
 
     async def image_url(self, page: BookPage) -> str:
         image_path = page.ImagePath

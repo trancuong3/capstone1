@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/common/button";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { clearApiReadCache } from "@/lib/api/read-cache";
 import type { AdminPageImageUI } from "@/types/admin";
 
 interface AdminPageImagePreviewProps {
@@ -117,6 +118,7 @@ function AdminPageImagePreviewContent({
           className="mt-2 sm:w-auto"
           variant="secondary"
           onClick={() => {
+            clearApiReadCache();
             setState("loading");
             setRequestKey((key) => key + 1);
           }}

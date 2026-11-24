@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.api.deps import get_current_parent_id
 from app.api.routes.voice import get_voice_orchestrator, provider_http_exception
@@ -25,11 +25,14 @@ router = APIRouter()
 
 @router.get("/voices", response_model=VoiceListRead)
 async def list_voices(
+    response: Response,
     provider_mode: VoiceProviderMode = Query(default="local_only"),
     allow_google_tts: bool = Query(default=False),
     _actor_id: UUID = Depends(get_current_parent_id),
 ) -> VoiceListRead:
     """List curated Bắc · Trung · Nam local voices (plus Google backup voices when enabled)."""
+
+    response.headers["Cache-Control"] = "no-store"
 
     policy = VoicePolicyContext(
         provider_mode=provider_mode,
@@ -51,9 +54,12 @@ async def list_voices(
 @router.post("/text-to-speech/timed", response_model=TimedSpeechRead)
 async def timed_text_to_speech(
     payload: TimedSpeechRequest,
+    response: Response,
     _actor_id: UUID = Depends(get_current_parent_id),
 ) -> TimedSpeechRead:
     """Synthesize a page in the locked voice and return per-word start/end times."""
+
+    response.headers["Cache-Control"] = "no-store"
 
     policy = VoicePolicyContext(
         provider_mode=payload.provider_mode,

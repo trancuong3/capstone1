@@ -68,12 +68,17 @@ from app.services.document_rasterizer_service import (
     rasterize_uploaded_document,
 )
 from app.services.ocr_ai.child_safety import content_hash as safety_content_hash
-from app.services.ocr_engine import normalize_word
-from app.services.parent_flow2_contribution_service import ParentFlow2ContributionService
-from app.services.parent_private_book_pipeline import (
+from app.services.ocr_inference_job_service import (
+    JOB_KIND_PARENT_SUBMISSION,
+    PRIORITY_PARENT_SUBMISSION,
+    OcrInferenceJobService,
     align_edited_text_to_words,
     compute_candidate_hash,
+    is_remote_ocr_mode,
+    normalize_word,
+    schedule_parent_submission_post_ocr,
 )
+from app.services.parent_flow2_contribution_service import ParentFlow2ContributionService
 from app.services.storage_service import delete_object, download_object, upload_object
 
 logger = logging.getLogger(__name__)
@@ -99,6 +104,52 @@ def _ext_from_path(path: str) -> str:
     if lower.endswith(".webp"):
         return "webp"
     return "png"
+
+
+def _coerce_word_bounding_box(item: dict[str, Any], idx: int, total: int) -> list[float]:
+    """Coerce word bbox from canonical list or legacy {x, y, w, h} dict into a bounded [x, y, w, h] list."""
+    raw: object = None
+    for key in ("bounding_box", "bbox", "BoundingBox"):
+        cand = item.get(key)
+        if cand is not None:
+            raw = cand
+            break
+    vals: list[float] | None = None
+    if isinstance(raw, (list, tuple)) and len(raw) == 4:
+        try:
+            vals = [float(v) for v in raw]
+        except (TypeError, ValueError):
+            vals = None
+    elif isinstance(raw, dict):
+        try:
+            vals = [
+                float(raw["x"]),
+                float(raw["y"]),
+                float(raw.get("w", raw.get("width", 0.0))),
+                float(raw.get("h", raw.get("height", 0.0))),
+            ]
+        except (KeyError, TypeError, ValueError):
+            vals = None
+    if vals is not None:
+        x, y, w, h = vals
+        if (
+            all(v == v and abs(v) != float("inf") for v in vals)
+            and 0.0 <= x < 1.0
+            and 0.0 <= y < 1.0
+            and w > 0.0
+            and h > 0.0
+        ):
+            return [round(x, 6), round(y, 6), round(min(w, 1.0 - x), 6), round(min(h, 1.0 - y), 6)]
+    count = max(1, total)
+    cols = min(8, count)
+    col = idx % cols
+    row = idx // cols
+    rows = max(1, (count + cols - 1) // cols)
+    x = min(0.92, 0.05 + col * (0.86 / cols))
+    y = min(0.92, 0.06 + row * min(0.08, 0.84 / rows))
+    w = min(0.84 / cols, 1.0 - x)
+    h = min(0.06, 1.0 - y)
+    return [round(x, 6), round(y, 6), round(max(0.015, w), 6), round(max(0.015, h), 6)]
 
 
 def _parse_source_declaration(raw: str | None) -> tuple[str, str | None]:
@@ -807,6 +858,15 @@ class ParentPrivateBookService:
                 reset_staged += 1
 
             await self.repo.supersede_open_moderation_requests_for_book(locked_book.Id, now)
+            affected_subs = list(new_submissions)
+            if reset_sub_ids:
+                all_book_subs = await self.repo.list_submissions_for_book(
+                    locked_book.Id, lock=True
+                )
+                affected_subs.extend(s for s in all_book_subs if s.Id in reset_sub_ids and s not in new_submissions)
+            await self._sync_remote_ocr_for_submissions(
+                affected_subs, reason="BOOK_METADATA_UPDATED_RECHECK"
+            )
             await self._safe_revoke_flow2_contributions(
                 book=locked_book,
                 actor_id=actor_id,
@@ -842,6 +902,45 @@ class ParentPrivateBookService:
             ocr_contribution=contrib_map.get(locked_book.Id),
         )
 
+    async def _sync_remote_ocr_for_submissions(
+        self,
+        submissions: list[ParentBookPageSubmission],
+        *,
+        reason: str = "SUPERSEDED_BY_PARENT_ACTION",
+    ) -> None:
+        if not is_remote_ocr_mode() or not isinstance(self.db, AsyncSession):
+            return
+        job_svc = OcrInferenceJobService(self.db)
+        for sub in submissions:
+            await job_svc.cancel_for_submission(sub.Id, reason=reason)
+            if sub.WorkflowStatus == "CHECKING" and sub.OcrStatus == "PENDING":
+                await job_svc.enqueue_job(
+                    job_kind=JOB_KIND_PARENT_SUBMISSION,
+                    owner_user_id=sub.OwnerParentId,
+                    book_id=sub.BookId,
+                    submission_id=sub.Id,
+                    image_bucket=SUPABASE_PRIVATE_BOOKS_BUCKET,
+                    image_path=sub.SourceStoragePath,
+                    image_sha256=sub.SourceSha256,
+                    image_width=int(sub.ImageWidth),
+                    image_height=int(sub.ImageHeight),
+                    priority=PRIORITY_PARENT_SUBMISSION,
+                    idempotency_key=(
+                        f"parent_sub:{sub.Id}:v{int(sub.SubmissionVersion)}:o{int(sub.OptimisticLockVersion or 1)}"
+                    ),
+                    expected_version=int(sub.SubmissionVersion),
+                    expected_candidate_hash=sub.CandidateHash,
+                    processing_meta={"source_page_number": int(sub.SourcePageNumber)},
+                )
+
+    @staticmethod
+    def _dispatch_post_ocr_if_ready(submissions: list[ParentBookPageSubmission]) -> None:
+        if not is_remote_ocr_mode():
+            return
+        for sub in submissions:
+            if sub.WorkflowStatus == "CHECKING" and sub.OcrStatus in ("COMPLETED", "NO_TEXT_DETECTED"):
+                schedule_parent_submission_post_ocr(sub.Id)
+
     async def delete_book(
         self, actor_id: UUID, book_id: UUID
     ) -> ParentDeletePrivateBookResponse:
@@ -873,6 +972,8 @@ class ParentPrivateBookService:
             sub.UpdatedAt = now
             cancelled_submissions_count += 1
 
+        if is_remote_ocr_mode() and isinstance(self.db, AsyncSession):
+            await OcrInferenceJobService(self.db).cancel_for_book(book.Id, reason="BOOK_DELETED")
         await self.repo.supersede_open_moderation_requests_for_book(book.Id, now)
         await self._safe_revoke_flow2_contributions(
             book=book,
@@ -1077,6 +1178,9 @@ class ParentPrivateBookService:
                     # Proofreading (Stage 2) and Tool Check (Stage 3) stay PENDING to re-check from scratch!
 
             await self.repo.supersede_open_moderation_requests(sub.Id, now)
+            await self._sync_remote_ocr_for_submissions(
+                [sub], reason="SUPERSEDED_BY_PARENT_COMMITTED_EDIT"
+            )
             await self._safe_revoke_flow2_contributions(
                 book=locked_book,
                 actor_id=actor_id,
@@ -1097,6 +1201,7 @@ class ParentPrivateBookService:
             )
             await self.repo.commit()
             await self.db.refresh(sub)
+            self._dispatch_post_ocr_if_ready([sub])
         except Exception:
             await self.repo.rollback()
             await asyncio.to_thread(
@@ -1234,6 +1339,9 @@ class ParentPrivateBookService:
                 )
 
             await self.repo.supersede_open_moderation_requests(sub.Id, now)
+            await self._sync_remote_ocr_for_submissions(
+                [sub], reason="SUPERSEDED_BY_PARENT_COMMITTED_REPLACE"
+            )
             await self._safe_revoke_flow2_contributions(
                 book=locked_book,
                 actor_id=actor_id,
@@ -1285,6 +1393,10 @@ class ParentPrivateBookService:
             linked_sub.LeaseExpiresAt = None
             linked_sub.RetryAfter = None
             linked_sub.UpdatedAt = now
+            if is_remote_ocr_mode() and isinstance(self.db, AsyncSession):
+                await OcrInferenceJobService(self.db).cancel_for_submission(
+                    linked_sub.Id, reason="BOOK_PAGE_RETIRED"
+                )
 
         await self._safe_revoke_flow2_contributions(
             book=book,
@@ -1444,6 +1556,9 @@ class ParentPrivateBookService:
                     detail="Sách riêng đang bị đình chỉ hoặc ngừng hoạt động.",
                 )
             await self.repo.add_submissions(created_rows)
+            await self._sync_remote_ocr_for_submissions(
+                created_rows, reason="INITIAL_SUBMIT"
+            )
             await self.repo.commit()
         except IntegrityError:
             await self.repo.rollback()
@@ -1618,8 +1733,10 @@ class ParentPrivateBookService:
             )
 
         await self.repo.supersede_open_moderation_requests(sub.Id, now)
+        await self._sync_remote_ocr_for_submissions([sub], reason="SUPERSEDED_BY_PARENT_EDIT")
         await self.repo.commit()
         await self.db.refresh(sub)
+        self._dispatch_post_ocr_if_ready([sub])
         return self._serialize_submission(book, sub, base_url=base_url)
 
     async def replace_submission_file(
@@ -1750,6 +1867,9 @@ class ParentPrivateBookService:
             sub.TempExpiresAt = now + timedelta(days=STAGING_TTL_DAYS)
             sub.UpdatedAt = now
             await self.repo.supersede_open_moderation_requests(sub.Id, now)
+            await self._sync_remote_ocr_for_submissions(
+                [sub], reason="SUPERSEDED_BY_PARENT_REPLACE"
+            )
             await self.repo.commit()
             await self.db.refresh(sub)
         except Exception:
@@ -1816,9 +1936,14 @@ class ParentPrivateBookService:
         sub.LeaseExpiresAt = None
         sub.RetryAfter = None
         sub.TempExpiresAt = now + timedelta(days=STAGING_TTL_DAYS)
+        sub.OptimisticLockVersion = int(sub.OptimisticLockVersion or 1) + 1
         sub.UpdatedAt = now
+        await self._sync_remote_ocr_for_submissions(
+            [sub], reason="SUPERSEDED_BY_PARENT_RETRY"
+        )
         await self.repo.commit()
         await self.db.refresh(sub)
+        self._dispatch_post_ocr_if_ready([sub])
         return self._serialize_submission(book, sub, base_url=base_url)
 
     async def cancel_submission(
@@ -1839,6 +1964,10 @@ class ParentPrivateBookService:
         sub.WorkerId = None
         sub.LeaseExpiresAt = None
         sub.UpdatedAt = now
+        if is_remote_ocr_mode() and isinstance(self.db, AsyncSession):
+            await OcrInferenceJobService(self.db).cancel_for_submission(
+                sub.Id, reason="SUBMISSION_CANCELLED"
+            )
         await self.repo.supersede_open_moderation_requests(sub.Id, now)
         await self.repo.commit()
 
@@ -1846,6 +1975,32 @@ class ParentPrivateBookService:
         if storage_path and not any(h.SourceStoragePath == storage_path for h in history):
             await asyncio.to_thread(delete_object, storage_path, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET)
         return {"status": "cancelled", "submission_id": str(submission_id)}
+
+    async def get_submission_ocr_job_status(
+        self, actor_id: UUID, book_id: UUID, submission_id: UUID
+    ) -> dict[str, object]:
+        await self._require_parent(actor_id)
+        book = await self.repo.get_owned_private_book(book_id, actor_id)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        sub = await self.repo.get_owned_submission(book_id, submission_id, actor_id)
+        if sub is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        job_svc = OcrInferenceJobService(self.db)
+        job = await job_svc.repo.latest_for_submission(submission_id)
+        if job is None:
+            return {
+                "submission_id": str(submission_id),
+                "ocr_status": sub.OcrStatus,
+                "workflow_status": sub.WorkflowStatus,
+                "job": None,
+            }
+        return {
+            "submission_id": str(submission_id),
+            "ocr_status": sub.OcrStatus,
+            "workflow_status": sub.WorkflowStatus,
+            "job": OcrInferenceJobService.serialize_job(job),
+        }
 
     # ------------------------------------------------------------------
     # Parent -> Admin Review Escalation
@@ -2174,7 +2329,7 @@ class ParentPrivateBookService:
                     LineIndex=max(0, int(item.get("line_index", 0) or 0)),
                     Text=str(item["text"]),
                     NormalizedText=str(item.get("normalized_text") or normalize_word(str(item["text"])) or str(item["text"]).lower()),
-                    BoundingBox=list(item["bounding_box"]),
+                    BoundingBox=_coerce_word_bounding_box(item, idx, len(raw_words)),
                     OCRConfidence=item.get("ocr_confidence"),
                 )
                 for idx, item in enumerate(raw_words)
@@ -2838,6 +2993,8 @@ class ParentPrivateBookService:
                 "visibility_scope": book.VisibilityScope,
             },
         )
+        if is_remote_ocr_mode() and isinstance(self.db, AsyncSession):
+            await OcrInferenceJobService(self.db).cancel_for_book(book.Id, reason="BOOK_SUSPENDED")
         await self.repo.commit()
         return {
             "book_id": str(book.Id),

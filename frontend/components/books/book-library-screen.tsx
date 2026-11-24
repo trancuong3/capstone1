@@ -154,8 +154,8 @@ export function BookLibraryScreen() {
           search,
           include_private: true,
         });
-        // A second request is only needed to distinguish an empty catalog
-        // from an empty filtered result. Never substitute sample books.
+        // Only issue the unfiltered probe when the filtered list is empty so
+        // normal grade-filtered loads execute a single request.
         const hasFilters = selectedGrade !== null || search.trim().length > 0;
         const hasCatalog =
           books.length > 0 ||

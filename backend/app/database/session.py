@@ -5,6 +5,7 @@ import logging
 import socket
 import ssl
 import sys
+import threading
 import time
 from typing import Any
 
@@ -263,8 +264,19 @@ async def get_db():
         yield session
 
 
+_DNS_CACHE_TTL_SECONDS = 60.0
+_dns_cache_lock = threading.Lock()
+_dns_cache: dict[tuple[str, int], float] = {}
+
+
+def clear_database_dns_cache() -> None:
+    """Clear the short-lived DNS probe cache (intended for tests or failover)."""
+    with _dns_cache_lock:
+        _dns_cache.clear()
+
+
 async def probe_database_connection(*, timeout: float | None = None) -> dict[str, Any]:
-    """Verify DNS resolution and read-only SELECT 1 connectivity without exposing secrets."""
+    """Verify DNS resolution (briefly cached) and read-only SELECT 1 connectivity without exposing secrets."""
     effective_timeout = (
         DATABASE_CONNECT_TIMEOUT if timeout is None else max(0.5, float(timeout))
     )
@@ -275,11 +287,19 @@ async def probe_database_connection(*, timeout: float | None = None) -> dict[str
 
     try:
         if host:
-            loop = asyncio.get_running_loop()
-            await asyncio.wait_for(
-                loop.getaddrinfo(host, port, type=socket.SOCK_STREAM),
-                timeout=effective_timeout,
-            )
+            cache_key = (host, port)
+            now = time.monotonic()
+            with _dns_cache_lock:
+                expires_at = _dns_cache.get(cache_key)
+                dns_cached = expires_at is not None and now < expires_at
+            if not dns_cached:
+                loop = asyncio.get_running_loop()
+                await asyncio.wait_for(
+                    loop.getaddrinfo(host, port, type=socket.SOCK_STREAM),
+                    timeout=effective_timeout,
+                )
+                with _dns_cache_lock:
+                    _dns_cache[cache_key] = time.monotonic() + _DNS_CACHE_TTL_SECONDS
         dns_resolved = True
 
         async def _select_one() -> bool:
