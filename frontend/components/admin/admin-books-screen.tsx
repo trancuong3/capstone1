@@ -375,49 +375,49 @@ export function AdminBooksScreen() {
                   {item.verified_count}
                 </p>
                 <div className="grid w-full max-w-[820px] grid-cols-2 gap-3 sm:grid-cols-4">
-                    <ButtonLink
-                      className="!h-[76px] !w-full !min-w-0 !max-w-none px-2 text-center"
-                      variant="secondary"
-                      href={`/admin/books/${encodeURIComponent(book.id)}`}
-                    >
-                      Xem các trang
-                    </ButtonLink>
+                  <ButtonLink
+                    className="!h-[76px] !w-full !min-w-0 !max-w-none px-2 text-center"
+                    variant="secondary"
+                    href={`/admin/books/${encodeURIComponent(book.id)}`}
+                  >
+                    Xem các trang
+                  </ButtonLink>
 
-                    <ButtonLink
-                      className="!h-[76px] !w-full !min-w-0 !max-w-none px-2 text-center"
-                      variant="quiet"
-                      href={editHref}
-                    >
-                      {missingTitle ? "Bổ sung tiêu đề" : "Chỉnh sửa thông tin"}
-                    </ButtonLink>
+                  <ButtonLink
+                    className="!h-[76px] !w-full !min-w-0 !max-w-none px-2 text-center"
+                    variant="quiet"
+                    href={editHref}
+                  >
+                    {missingTitle ? "Bổ sung tiêu đề" : "Chỉnh sửa thông tin"}
+                  </ButtonLink>
 
-                    <Button
-                      className="!h-[76px] !w-full !min-w-0 !max-w-none whitespace-normal px-2 text-center"
-                      disabled={isBusy}
-                      isLoading={lifecycleBusyBookId === book.id}
-                      onClick={() => void changeLifecycle(book)}
-                      variant="quiet"
-                    >
-                      {lifecycleBusyBookId === book.id
-                        ? "Đang cập nhật…"
-                        : book.lifecycle_status === "ACTIVE"
-                          ? "Ngừng hoạt động"
-                          : "Kích hoạt lại"}
-                    </Button>
+                  <Button
+                    className="!h-[76px] !w-full !min-w-0 !max-w-none whitespace-normal px-2 text-center"
+                    disabled={isBusy}
+                    isLoading={lifecycleBusyBookId === book.id}
+                    onClick={() => void changeLifecycle(book)}
+                    variant="quiet"
+                  >
+                    {lifecycleBusyBookId === book.id
+                      ? "Đang cập nhật…"
+                      : book.lifecycle_status === "ACTIVE"
+                        ? "Ngừng hoạt động"
+                        : "Kích hoạt lại"}
+                  </Button>
 
-                    <Button
-                      className="!h-[76px] !w-full !min-w-0 !max-w-none px-2"
-                      disabled={isBusy}
-                      onClick={() => {
-                        setActionNotice(null);
-                        setDeleteError(null);
-                        setPendingDelete(book);
-                      }}
-                      variant="destructive"
-                    >
-                      <Trash2 aria-hidden="true" className="size-4 shrink-0" />
-                      Xóa sách
-                    </Button>
+                  <Button
+                    className="!h-[76px] !w-full !min-w-0 !max-w-none px-2"
+                    disabled={isBusy}
+                    onClick={() => {
+                      setActionNotice(null);
+                      setDeleteError(null);
+                      setPendingDelete(book);
+                    }}
+                    variant="destructive"
+                  >
+                    <Trash2 aria-hidden="true" className="size-4 shrink-0" />
+                    Xóa sách
+                  </Button>
                 </div>
               </Card>
             );
