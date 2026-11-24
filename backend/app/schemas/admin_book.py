@@ -1,5 +1,6 @@
 """Request contracts for Admin book metadata and lifecycle mutations."""
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -44,3 +45,8 @@ class AdminBookWriteRequest(BaseModel):
 
 class AdminBookLifecycleRequest(BaseModel):
     status: Literal["ACTIVE", "RETIRED"]
+
+
+class AdminBookSoftDeleteResponse(BaseModel):
+    book_id: UUID
+    is_deleted: Literal[True]
