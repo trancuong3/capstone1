@@ -179,6 +179,7 @@ export function AdminFlow2CandidatesPanel() {
                     : "border-border bg-white text-ink hover:bg-surface-subtle"
                 }`}
                 onClick={() => {
+                  if (active) return;
                   setLoading(Boolean(bookContentQuality.listFlow2Candidates));
                   setError(null);
                   setStatusFilter(f.key);
@@ -247,7 +248,9 @@ export function AdminFlow2CandidatesPanel() {
                       ? "border-primary bg-sky/40"
                       : "border-border bg-white hover:bg-surface-subtle"
                   }`}
-                  onClick={() => selectCandidate(item)}
+                  onClick={() => {
+                    if (!isSelected) selectCandidate(item);
+                  }}
                   type="button"
                 >
                   <div className="flex w-full items-center justify-between gap-2">

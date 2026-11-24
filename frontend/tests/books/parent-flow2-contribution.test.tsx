@@ -181,6 +181,15 @@ describe("Parent Private Book -> Flow 2 OCR Contribution UI", () => {
     fireEvent.change(input, {
       target: { value: "Một con vịt xòe ra hai cái cánh." },
     });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Truyện tự sáng tác nhà A/i }),
+    );
+    expect(input).toHaveValue("Một con vịt xòe ra hai cái cánh.");
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Chờ xác minh mẫu (1)" }),
+    );
+    expect(screen.getByLabelText(/Nhãn dòng chữ chính xác/i)).toBe(input);
     fireEvent.click(screen.getByRole("button", { name: /Xác nhận nhãn/i }));
 
     await waitFor(() => {
