@@ -133,6 +133,7 @@ class ParentBookContentQualityPostgresTests(unittest.IsolatedAsyncioTestCase):
                             (is_deleted = false AND deleted_at IS NULL AND deleted_by IS NULL)
                             OR (is_deleted = true AND deleted_at IS NOT NULL)
                         )
+                    );
             """))
             await connection.execute(text("""
                 CREATE TABLE bookpages (
