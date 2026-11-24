@@ -263,6 +263,9 @@ export function createAdminServiceFixture() {
       updateStatus: vi
         .fn<AdminServices["books"]["updateStatus"]>()
         .mockRejectedValue(unavailable()),
+      delete: vi
+        .fn<AdminServices["books"]["delete"]>()
+        .mockResolvedValue({ book_id: ADMIN_BOOK_ID, is_deleted: true }),
     },
     pages: {
       list: vi

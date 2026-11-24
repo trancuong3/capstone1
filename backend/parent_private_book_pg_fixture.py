@@ -24,7 +24,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 MIGRATION_PATH = REPO_ROOT / "supabase" / "migrations" / "20261121220000_parent_private_books.sql"
 
 DEFAULT_LOCAL_ADMIN_PG_URL = "postgresql://postgres:viread_local_test@127.0.0.1:5432/postgres"
-
+SOFT_DELETE_MIGRATION_PATH = (
+    REPO_ROOT
+    / "supabase"
+    / "migrations"
+    / "20261124120000_soft_delete_catalog_books.sql"
+)
 
 def _resolve_local_pg_admin_url() -> str:
     explicit = os.getenv("PARENT_PRIVATE_BOOK_TEST_ADMIN_URL")
@@ -851,11 +856,26 @@ class DisposablePrivateBookDatabase:
                     ),
                 )
             conn.commit()
+            if not MIGRATION_PATH.is_file():
+              raise FileNotFoundError(f"Parent private books migration missing: {MIGRATION_PATH}")
 
+            if not SOFT_DELETE_MIGRATION_PATH.is_file():
+              raise FileNotFoundError(
+                  f"Soft-delete books migration missing: {SOFT_DELETE_MIGRATION_PATH}"
+              )
             # 3. Apply the REAL parent private books migration verbatim!
             migration_sql = MIGRATION_PATH.read_text(encoding="utf-8")
+            soft_delete_migration_sql = SOFT_DELETE_MIGRATION_PATH.read_text(
+                encoding="utf-8"
+            )
+
             with conn.cursor() as cur:
+                # Apply parent private books migration first.
                 cur.execute(migration_sql)
+
+                # Apply soft-delete catalog books migration afterward.
+                cur.execute(soft_delete_migration_sql)
+
             conn.commit()
         finally:
             conn.close()

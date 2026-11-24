@@ -4,7 +4,8 @@ on:
   push:
     branches:
       - main
-      - fix/retry-reading-controls
+      - "feature/**"
+      - "fix/**"
   pull_request:
     branches:
       - main

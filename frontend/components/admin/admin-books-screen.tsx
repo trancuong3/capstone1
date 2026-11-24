@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -12,6 +13,7 @@ import {
 import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
+import { Modal } from "@/components/common/modal";
 import { SelectField } from "@/components/common/select-field";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
@@ -45,7 +47,11 @@ export function AdminBooksScreen() {
   const [lifecycleBusyBookId, setLifecycleBusyBookId] = useState<string | null>(
     null,
   );
+  const [pendingDelete, setPendingDelete] = useState<AdminBookDTO | null>(null);
+  const [deleteBusyBookId, setDeleteBusyBookId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
+  const deleteInFlightRef = useRef(false);
   const requestIdRef = useRef(0);
   const loadRef = useRef<() => Promise<boolean>>(async () => false);
 
@@ -149,6 +155,64 @@ export function AdminBooksScreen() {
       });
     } finally {
       setLifecycleBusyBookId(null);
+    }
+  }
+
+  function closeDeleteDialog() {
+    if (deleteInFlightRef.current) return;
+    setPendingDelete(null);
+    setDeleteError(null);
+  }
+
+  async function confirmDeleteBook() {
+    const book = pendingDelete;
+    if (!book || deleteInFlightRef.current) return;
+
+    deleteInFlightRef.current = true;
+    setDeleteBusyBookId(book.id);
+    setDeleteError(null);
+    setActionNotice(null);
+    try {
+      const result = await books.delete(book.id);
+      if (result.book_id !== book.id || result.is_deleted !== true) {
+        throw new Error("Unexpected delete response");
+      }
+
+      requestIdRef.current += 1;
+      const remainingItems = (items ?? []).filter(
+        (item) => item.book.id !== book.id,
+      );
+      setItems(remainingItems);
+      setPageNumber((currentPage) =>
+        Math.min(
+          currentPage,
+          Math.max(1, Math.ceil(remainingItems.length / pageSize)),
+        ),
+      );
+      setPendingDelete(null);
+      setActionNotice({
+        tone: "info",
+        title: "Đã xóa sách",
+        message:
+          "Sách đã được ẩn khỏi Kho sách. Lịch sử và dữ liệu liên quan vẫn được giữ lại.",
+      });
+    } catch (cause) {
+      setDeleteError(
+        isServiceError(cause) && cause.status === 401
+          ? "Phiên đăng nhập không hợp lệ hoặc đã hết hạn. Hãy đăng nhập lại rồi thử."
+          : isServiceError(cause) && cause.status === 403
+            ? "Tài khoản hiện tại không có quyền Admin để xóa sách."
+            : isServiceError(cause) && cause.status === 404
+              ? "Không tìm thấy sách trong Kho sách. Danh sách chưa được thay đổi."
+              : isServiceError(cause) && cause.status === 409
+                ? "Trạng thái sách đã thay đổi. Hãy tải lại Kho sách rồi thử lại."
+                : isServiceError(cause)
+                  ? cause.message
+                  : "Không thể xóa sách lúc này. Danh sách chưa được thay đổi.",
+      );
+    } finally {
+      deleteInFlightRef.current = false;
+      setDeleteBusyBookId(null);
     }
   }
 
@@ -269,7 +333,8 @@ export function AdminBooksScreen() {
           {visibleItems?.map((item) => {
             const book = item.book;
             const missingTitle = !book.title.trim();
-            const isBusy = lifecycleBusyBookId !== null;
+            const isBusy =
+              lifecycleBusyBookId !== null || deleteBusyBookId !== null;
             const editHref = missingTitle
               ? `/admin/books/${encodeURIComponent(book.id)}/edit?issue=MISSING_TITLE`
               : `/admin/books/${encodeURIComponent(book.id)}/edit`;
@@ -309,17 +374,25 @@ export function AdminBooksScreen() {
                   Cần duyệt {item.needs_review_count} · Đã duyệt{" "}
                   {item.verified_count}
                 </p>
-                <div className="grid gap-3 sm:grid-cols-3">
+                <div className="grid w-full max-w-[820px] grid-cols-2 gap-3 sm:grid-cols-4">
                   <ButtonLink
+                    className="!h-[76px] !w-full !min-w-0 !max-w-none px-2 text-center"
                     variant="secondary"
                     href={`/admin/books/${encodeURIComponent(book.id)}`}
                   >
                     Xem các trang
                   </ButtonLink>
-                  <ButtonLink variant="quiet" href={editHref}>
+
+                  <ButtonLink
+                    className="!h-[76px] !w-full !min-w-0 !max-w-none px-2 text-center"
+                    variant="quiet"
+                    href={editHref}
+                  >
                     {missingTitle ? "Bổ sung tiêu đề" : "Chỉnh sửa thông tin"}
                   </ButtonLink>
+
                   <Button
+                    className="!h-[76px] !w-full !min-w-0 !max-w-none whitespace-normal px-2 text-center"
                     disabled={isBusy}
                     isLoading={lifecycleBusyBookId === book.id}
                     onClick={() => void changeLifecycle(book)}
@@ -330,6 +403,20 @@ export function AdminBooksScreen() {
                       : book.lifecycle_status === "ACTIVE"
                         ? "Ngừng hoạt động"
                         : "Kích hoạt lại"}
+                  </Button>
+
+                  <Button
+                    className="!h-[76px] !w-full !min-w-0 !max-w-none px-2"
+                    disabled={isBusy}
+                    onClick={() => {
+                      setActionNotice(null);
+                      setDeleteError(null);
+                      setPendingDelete(book);
+                    }}
+                    variant="destructive"
+                  >
+                    <Trash2 aria-hidden="true" className="size-4 shrink-0" />
+                    Xóa sách
                   </Button>
                 </div>
               </Card>
@@ -344,6 +431,44 @@ export function AdminBooksScreen() {
           />
         </div>
       )}
+      <Modal
+        closeOnEscape={deleteBusyBookId === null}
+        isOpen={pendingDelete !== null}
+        onClose={closeDeleteDialog}
+        showCloseButton={deleteBusyBookId === null}
+        title="Xác nhận xóa sách"
+      >
+        <div className="grid gap-5">
+          <p className="text-body text-ink">
+            Bạn có chắc chắn muốn xóa sách này khỏi kho sách không? Sách sẽ
+            không còn hiển thị trong danh sách sách đang hoạt động. Hệ thống vẫn
+            giữ lại bản ghi sách và các dữ liệu lịch sử đọc, kết quả học tập,
+            kết quả trò chơi cùng bằng chứng kiểm duyệt cần thiết.
+          </p>
+          {deleteError ? (
+            <StatusMessage tone="error" title="Không thể xóa sách">
+              {deleteError}
+            </StatusMessage>
+          ) : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Button
+              disabled={deleteBusyBookId !== null}
+              onClick={closeDeleteDialog}
+              variant="secondary"
+            >
+              Hủy
+            </Button>
+            <Button
+              disabled={deleteBusyBookId !== null}
+              isLoading={deleteBusyBookId !== null}
+              onClick={() => void confirmDeleteBook()}
+              variant="destructive"
+            >
+              {deleteBusyBookId !== null ? "Đang xóa…" : "Xóa sách"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </>
   );
 }

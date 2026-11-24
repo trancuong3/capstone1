@@ -1,6 +1,7 @@
 """Persistence operations for Admin book metadata and lifecycle changes."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import select
@@ -20,8 +21,39 @@ class AdminBookRepository:
 
     async def get(self, book_id: UUID) -> Book | None:
         return await self.db.scalar(
-            select(Book).where(Book.Id == book_id, Book.VisibilityScope == "CATALOG")
+            select(Book).where(
+                Book.Id == book_id,
+                Book.VisibilityScope == "CATALOG",
+                Book.IsDeleted.is_(False),
+            )
         )
+
+    async def soft_delete(self, book_id: UUID, *, actor_id: UUID) -> bool:
+        """Mark a catalog book deleted while retaining its row and all related data.
+
+        The row lock serializes concurrent Admin requests. A repeated request
+        returns the existing deletion state without changing its original actor
+        or timestamp.
+        """
+        book = await self.db.scalar(
+            select(Book)
+            .where(Book.Id == book_id, Book.VisibilityScope == "CATALOG")
+            .with_for_update()
+        )
+        if book is None:
+            return False
+        if book.IsDeleted:
+            return True
+
+        book.IsDeleted = True
+        book.DeletedAt = datetime.now(timezone.utc)
+        book.DeletedBy = actor_id
+        try:
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            raise
+        return True
 
     async def is_ready_for_children(self, book_id: UUID) -> bool:
         return await CatalogRepository(self.db).is_ready_for_children(book_id)

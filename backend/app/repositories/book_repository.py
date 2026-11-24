@@ -186,6 +186,7 @@ class CatalogRepository:
         ).correlate(Book)
         criteria = [
             is_catalog_book(),
+            Book.IsDeleted.is_(False),
             child_content_page,
             not_(unready_page),
             not_(explicitly_rejected_book),
@@ -236,7 +237,9 @@ class CatalogRepository:
         return result.scalars().all()
 
     async def get(self, book_id: UUID):
-        return await self.db.scalar(select(Book).where(Book.Id == book_id))
+        return await self.db.scalar(
+            select(Book).where(Book.Id == book_id, Book.IsDeleted.is_(False))
+        )
 
     async def is_eligible(self, book_id: UUID) -> bool:
         return (await self.db.scalar(select(Book.Id).where(Book.Id == book_id, self.eligible_book()))) is not None
@@ -324,7 +327,7 @@ class AdminCatalogRepository(CatalogRepository):
         return int(value) if value is not None else None
 
     async def books(self, search: str | None, lifecycle_status: str | None):
-        query = select(Book).where(is_catalog_book())
+        query = select(Book).where(is_catalog_book(), Book.IsDeleted.is_(False))
         if search and search.strip():
             pattern = self.search_pattern(search)
             query = query.where(or_(Book.Name.ilike(pattern, escape="\\"), Book.Title.ilike(pattern, escape="\\"), Book.Author.ilike(pattern, escape="\\")))
@@ -392,7 +395,7 @@ class AdminCatalogRepository(CatalogRepository):
                 ),
             )
             .outerjoin(stats, stats.c.book_id == Book.Id)
-            .where(is_catalog_book())
+            .where(is_catalog_book(), Book.IsDeleted.is_(False))
         )
         if search and search.strip():
             pattern = self.search_pattern(search)

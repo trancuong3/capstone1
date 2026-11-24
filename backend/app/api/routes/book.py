@@ -24,7 +24,11 @@ from app.schemas.book import (
 from app.repositories.metadata_quality_repository import MetadataQualityRepository
 from app.repositories.admin_book_repository import AdminBookRepository
 from app.schemas.metadata_quality import MetadataQualityIssueType, MetadataQualityResponse
-from app.schemas.admin_book import AdminBookLifecycleRequest, AdminBookWriteRequest
+from app.schemas.admin_book import (
+    AdminBookLifecycleRequest,
+    AdminBookSoftDeleteResponse,
+    AdminBookWriteRequest,
+)
 from app.services.book_service import AdminCatalogService, BookService, CatalogService
 from app.services.admin_book_service import AdminBookService
 from app.services.metadata_quality_service import MetadataQualityService
@@ -174,6 +178,18 @@ async def update_admin_book_status(
     return await AdminBookService(AdminBookRepository(db)).update_lifecycle(
         actor_id, book_id, payload.status
     )
+
+
+@router.delete(
+    "/admin/catalog/{book_id}",
+    response_model=AdminBookSoftDeleteResponse,
+)
+async def delete_admin_book(
+    book_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminBookService(AdminBookRepository(db)).soft_delete(actor_id, book_id)
 
 
 @router.get("/admin/catalog", response_model=list[AdminCatalogBookResponse])

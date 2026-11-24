@@ -17,6 +17,10 @@ const adminBookDtoSchema = z.object({
   max_grade: z.number().int(),
   lifecycle_status: z.enum(["ACTIVE", "RETIRED"]),
 });
+const adminBookSoftDeleteSchema = z.object({
+  book_id: z.guid(),
+  is_deleted: z.literal(true),
+});
 
 export interface AdminBookService {
   list(query?: AdminBookQueryUI): Promise<readonly AdminBookListItemUI[]>;
@@ -24,6 +28,7 @@ export interface AdminBookService {
   create(request: AdminBookCreateDTO): Promise<AdminBookDTO>;
   update(bookId: string, request: AdminBookUpdateDTO): Promise<AdminBookDTO>;
   updateStatus(bookId: string, request: StatusPatchDTO): Promise<AdminBookDTO>;
+  delete(bookId: string): Promise<{ book_id: string; is_deleted: true }>;
 }
 
 export function createAdminBookService(): AdminBookService {
@@ -82,6 +87,13 @@ export function createAdminBookService(): AdminBookService {
         adminBookDtoSchema.refine((book) => book.id === bookId),
         undefined,
         { method: "PATCH", body: { status: request.status } },
+      ),
+    delete: (bookId) =>
+      requestApi(
+        `/books/admin/catalog/${encodeURIComponent(bookId)}`,
+        adminBookSoftDeleteSchema.refine((result) => result.book_id === bookId),
+        undefined,
+        { method: "DELETE" },
       ),
   };
 }
