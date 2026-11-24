@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import sys
 import threading
 import time
 import unicodedata
@@ -24,6 +25,7 @@ from fastapi import HTTPException, UploadFile
 from PIL import Image, ImageOps, UnidentifiedImageError
 from starlette.concurrency import run_in_threadpool
 
+from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
 from app.diagnostic_logging import log_diagnostic
 from app.repositories.local_ocr_scan_repository import LocalOcrScanRepository
 from app.schemas.reading import (
@@ -33,14 +35,39 @@ from app.schemas.reading import (
     ReadingPageRead,
     ReadingPageWordRead,
 )
-from app.services import ocr_engine
-from app.services.ocr_engine import (
-    OcrEngineUnavailable,
-    OcrNoTextDetected,
-    extract_text_and_boxes,
+from app.services import storage_service
+from app.services.ocr_inference_job_service import (
+    JOB_KIND_LOCAL_SCAN,
+    PRIORITY_LOCAL_SCAN,
+    OcrInferenceJobService,
+    is_remote_ocr_mode,
     normalize_text_tokens,
     normalize_word,
 )
+
+
+class OcrEngineUnavailable(RuntimeError):
+    """Lightweight placeholder matching app.services.ocr_engine.OcrEngineUnavailable."""
+
+
+class OcrNoTextDetected(RuntimeError):
+    """Lightweight placeholder matching app.services.ocr_engine.OcrNoTextDetected."""
+
+
+def _is_ocr_exception(exc: BaseException, class_name: str) -> bool:
+    return any(cls.__name__ == class_name for cls in type(exc).__mro__)
+
+
+def extract_text_and_boxes(image_bytes: bytes):
+    """Lazy proxy preserving unit-test patch targets without importing ocr_engine at startup."""
+    from app.services import ocr_engine as _ocr_engine
+
+    try:
+        return _ocr_engine.extract_text_and_boxes(image_bytes)
+    except _ocr_engine.OcrNoTextDetected as exc:
+        raise OcrNoTextDetected(str(exc)) from exc
+    except _ocr_engine.OcrEngineUnavailable as exc:
+        raise OcrEngineUnavailable(str(exc)) from exc
 
 logger = logging.getLogger(__name__)
 
@@ -105,10 +132,16 @@ def _normalize_bbox(raw_bbox: object) -> tuple[float, float, float, float]:
 
 
 def _detect_runtime_device(metadata: dict[str, Any]) -> str:
-    """Report actual execution device observed in ocr_engine, never guessed from config."""
+    """Report actual execution device observed on runtime, never guessed from config."""
+    explicit_dev = str(metadata.get("runtime_device") or "").lower()
+    if explicit_dev.startswith("cuda"):
+        return "cuda"
+    if explicit_dev.startswith("cpu"):
+        return "cpu"
     statuses = metadata.get("engine_statuses")
-    if isinstance(statuses, dict) and statuses.get("vietocr") == "success":
-        predictor = getattr(ocr_engine, "_vietocr_engine", None)
+    ocr_engine_mod = sys.modules.get("app.services.ocr_engine")
+    if isinstance(statuses, dict) and statuses.get("vietocr") == "success" and ocr_engine_mod is not None:
+        predictor = getattr(ocr_engine_mod, "_vietocr_engine", None)
         if predictor is not None:
             dev = getattr(predictor, "device", None)
             if dev is not None:
@@ -124,7 +157,7 @@ def _detect_runtime_device(metadata: dict[str, Any]) -> str:
                     return "cuda"
                 if cfg_dev.startswith("cpu"):
                     return "cpu"
-        torch_mod = getattr(ocr_engine, "torch", None)
+        torch_mod = getattr(ocr_engine_mod, "torch", None)
         if torch_mod is not None:
             try:
                 return "cuda" if torch_mod.cuda.is_available() else "cpu"
@@ -204,6 +237,103 @@ class LocalOcrScanService:
 
         return clean_bytes, image_sha256
 
+    async def _run_remote_ocr_scan(
+        self,
+        *,
+        actor_id: UUID,
+        scan_job_id: UUID,
+        clean_bytes: bytes,
+        image_sha256: str,
+        book_id: UUID | None,
+        idempotency_key: UUID | None,
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        job_service = OcrInferenceJobService(self.repository.db)
+        if not await job_service.has_online_worker():
+            raise HTTPException(
+                status_code=503,
+                detail="Remote OCR worker is offline; live page scan is temporarily unavailable.",
+            )
+
+        with Image.open(BytesIO(clean_bytes)) as img:
+            width, height = img.size
+            fmt = (img.format or "PNG").upper()
+        ext = "jpg" if fmt == "JPEG" else ("webp" if fmt == "WEBP" else "png")
+        mime_type = "image/jpeg" if ext == "jpg" else f"image/{ext}"
+        storage_path = f"local-scans/{actor_id}/{scan_job_id}.{ext}"
+
+        await asyncio.to_thread(
+            storage_service.upload_object,
+            storage_path,
+            clean_bytes,
+            mime_type,
+            bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
+        )
+        job_id: UUID | None = None
+        try:
+            job = await job_service.enqueue_job(
+                job_kind=JOB_KIND_LOCAL_SCAN,
+                owner_user_id=actor_id,
+                book_id=book_id,
+                local_scan_request_id=str(scan_job_id),
+                image_bucket=SUPABASE_PRIVATE_BOOKS_BUCKET,
+                image_path=storage_path,
+                image_sha256=image_sha256,
+                image_width=int(width),
+                image_height=int(height),
+                image_mime_type=mime_type,
+                priority=PRIORITY_LOCAL_SCAN,
+                idempotency_key=f"local_scan:{idempotency_key}" if idempotency_key else None,
+            )
+            job_id = job.Id
+            await self.repository.db.commit()
+
+            try:
+                completed = await job_service.wait_for_job_completion(
+                    job.Id,
+                    timeout_seconds=min(float(timeout_seconds), 45.0),
+                )
+            except HTTPException:
+                await OcrInferenceJobService(self.repository.db).cancel_job(
+                    job.Id, reason="SYNC_SCAN_TIMEOUT"
+                )
+                raise
+
+            if completed.Status == "DEAD_LETTER":
+                if (completed.ErrorCode or "").upper() == "NO_TEXT_DETECTED":
+                    raise OcrNoTextDetected("No text detected")
+                raise OcrEngineUnavailable(completed.ErrorCode or "Remote OCR worker failed")
+            if completed.Status != "SUCCEEDED":
+                raise OcrEngineUnavailable(completed.CancelledReason or "Remote OCR scan cancelled")
+
+            payload = dict(completed.ResultPayload or {})
+            if payload.get("no_text_detected"):
+                raise OcrNoTextDetected("No usable text detected")
+            return {
+                "text": str(payload.get("full_text") or ""),
+                "words": list(payload.get("words") or []),
+                "metadata": {
+                    **dict(payload.get("ocr_meta") or {}),
+                    "runtime_device": str(
+                        (payload.get("ocr_meta") or {}).get("runtime_device") or "cpu"
+                    ),
+                },
+            }
+        finally:
+            try:
+                await asyncio.to_thread(
+                    storage_service.delete_object,
+                    storage_path,
+                    bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
+                )
+            except Exception:
+                pass
+            if job_id is not None:
+                try:
+                    await self.repository.db.rollback()
+                except Exception:
+                    pass
+
     async def scan_page(
         self,
         actor_id: UUID,
@@ -255,10 +385,21 @@ class LocalOcrScanService:
         )
 
         try:
-            ocr_result = await asyncio.wait_for(
-                run_in_threadpool(extract_text_and_boxes, clean_bytes),
-                timeout=timeout_seconds,
-            )
+            if is_remote_ocr_mode():
+                ocr_result = await self._run_remote_ocr_scan(
+                    actor_id=actor_id,
+                    scan_job_id=scan_job_id,
+                    clean_bytes=clean_bytes,
+                    image_sha256=image_sha256,
+                    book_id=book_id,
+                    idempotency_key=idempotency_key,
+                    timeout_seconds=timeout_seconds,
+                )
+            else:
+                ocr_result = await asyncio.wait_for(
+                    run_in_threadpool(extract_text_and_boxes, clean_bytes),
+                    timeout=timeout_seconds,
+                )
         except (TimeoutError, asyncio.TimeoutError) as exc:
             log_diagnostic(
                 logger,
@@ -273,38 +414,40 @@ class LocalOcrScanService:
                 status_code=504,
                 detail="Local OCR processing timed out; please retry",
             ) from exc
-        except OcrNoTextDetected as exc:
-            log_diagnostic(
-                logger,
-                logging.INFO,
-                event="local_ocr_page_scan_no_text",
-                stage="ocr_inference",
-                request_id=request_id,
-                scan_job_id=str(scan_job_id),
-                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-            raise HTTPException(
-                status_code=422,
-                detail="No usable text was detected; check the image quality",
-            ) from exc
-        except OcrEngineUnavailable as exc:
-            log_diagnostic(
-                logger,
-                logging.ERROR,
-                event="local_ocr_page_scan_unavailable",
-                stage="ocr_inference",
-                exception=exc,
-                request_id=request_id,
-                scan_job_id=str(scan_job_id),
-                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
-            )
-            raise HTTPException(
-                status_code=503,
-                detail="Local OCR engine is unavailable",
-            ) from exc
+        except HTTPException:
+            raise
         except ValueError as exc:
             raise HTTPException(status_code=422, detail="Image decoding failed") from exc
         except Exception as exc:
+            if _is_ocr_exception(exc, "OcrNoTextDetected"):
+                log_diagnostic(
+                    logger,
+                    logging.INFO,
+                    event="local_ocr_page_scan_no_text",
+                    stage="ocr_inference",
+                    request_id=request_id,
+                    scan_job_id=str(scan_job_id),
+                    elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+                )
+                raise HTTPException(
+                    status_code=422,
+                    detail="No usable text was detected; check the image quality",
+                ) from exc
+            if _is_ocr_exception(exc, "OcrEngineUnavailable"):
+                log_diagnostic(
+                    logger,
+                    logging.ERROR,
+                    event="local_ocr_page_scan_unavailable",
+                    stage="ocr_inference",
+                    exception=exc,
+                    request_id=request_id,
+                    scan_job_id=str(scan_job_id),
+                    elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+                )
+                raise HTTPException(
+                    status_code=503,
+                    detail="Local OCR engine is unavailable",
+                ) from exc
             log_diagnostic(
                 logger,
                 logging.ERROR,

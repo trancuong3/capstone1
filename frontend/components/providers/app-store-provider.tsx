@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { clearApiReadCache } from "@/lib/api/read-cache";
 import type { ChildProfileDTO } from "@/types/child";
 
 export interface AppStore {
@@ -33,12 +34,15 @@ export function AppStoreProvider({ children }: AppStoreProviderProps) {
 
   const selectChild = useCallback((childId: string) => {
     if (!childId) return;
-    setSelection((current) =>
-      current.childId === childId ? current : { childId, child: null },
-    );
+    setSelection((current) => {
+      if (current.childId === childId) return current;
+      clearApiReadCache();
+      return { childId, child: null };
+    });
   }, []);
 
   const clearSelectedChild = useCallback(() => {
+    clearApiReadCache();
     setSelection({ childId: null, child: null });
   }, []);
 

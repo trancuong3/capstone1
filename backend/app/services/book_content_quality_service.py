@@ -1435,6 +1435,43 @@ class BookContentQualityService:
             for run in await self.repository.scan_runs_for_book(book_id)
         ]
 
+    async def _build_scan_detail(self, run: BookQualityScanRun) -> BookQualityScanDetail:
+        page_scans = await self.repository.page_scans(run.Id)
+        findings_by_page_scan: dict[UUID, list[BookQualityFinding]] = {}
+        if page_scans and callable(getattr(self.repository, "findings_for_scan", None)):
+            findings_by_page_scan = await self.repository.findings_for_scan(run.Id)
+        else:
+            for page_scan in page_scans:
+                findings_by_page_scan[page_scan.Id] = (
+                    await self.repository.findings_for_page_scan(page_scan.Id)
+                )
+
+        pages = [
+            BookQualityPageScanRead(
+                id=page_scan.Id,
+                page_id=page_scan.PageId,
+                page_number=page_scan.PageNumberSnapshot,
+                page_lifecycle_status=page_scan.PageLifecycleSnapshot,
+                page_revision_id=page_scan.PageRevisionId,
+                content_hash=page_scan.ContentHash,
+                status=page_scan.Status,
+                rule_check_status=page_scan.RuleCheckStatus,
+                ai_analysis_status=page_scan.AIAnalysisStatus,
+                rejected_ai_finding_count=page_scan.RejectedAIFindingCount,
+                error_code=page_scan.ErrorCode,
+                error_summary=page_scan.ErrorSummary,
+                findings=[
+                    self._finding_read(finding, page_scan.PageNumberSnapshot)
+                    for finding in findings_by_page_scan.get(page_scan.Id, [])
+                ],
+            )
+            for page_scan in page_scans
+        ]
+        return BookQualityScanDetail(
+            **self._scan_read(run).model_dump(),
+            pages=pages,
+        )
+
     async def get_scan_detail(
         self, actor_id: UUID, scan_id: UUID
     ) -> BookQualityScanDetail:
@@ -1442,33 +1479,7 @@ class BookContentQualityService:
         run = await self.repository.scan_run(scan_id)
         if run is None:
             raise HTTPException(status_code=404, detail="Resource not found")
-        pages = []
-        for page_scan in await self.repository.page_scans(scan_id):
-            findings = await self.repository.findings_for_page_scan(page_scan.Id)
-            pages.append(
-                BookQualityPageScanRead(
-                    id=page_scan.Id,
-                    page_id=page_scan.PageId,
-                    page_number=page_scan.PageNumberSnapshot,
-                    page_lifecycle_status=page_scan.PageLifecycleSnapshot,
-                    page_revision_id=page_scan.PageRevisionId,
-                    content_hash=page_scan.ContentHash,
-                    status=page_scan.Status,
-                    rule_check_status=page_scan.RuleCheckStatus,
-                    ai_analysis_status=page_scan.AIAnalysisStatus,
-                    rejected_ai_finding_count=page_scan.RejectedAIFindingCount,
-                    error_code=page_scan.ErrorCode,
-                    error_summary=page_scan.ErrorSummary,
-                    findings=[
-                        self._finding_read(finding, page_scan.PageNumberSnapshot)
-                        for finding in findings
-                    ],
-                )
-            )
-        return BookQualityScanDetail(
-            **self._scan_read(run).model_dump(),
-            pages=pages,
-        )
+        return await self._build_scan_detail(run)
 
     async def list_books(
         self,
@@ -1554,9 +1565,26 @@ class BookContentQualityService:
             ]
         total = len(assessed_rows)
         page = assessed_rows[offset : offset + limit]
+        page_book_ids = [row[0].Id for row, _ in page]
+        latest_scans_by_book: dict[UUID, BookQualityScanRun | None] = {}
+        if page_book_ids:
+            if callable(getattr(self.repository, "latest_scans_for_books", None)):
+                batched_scans = await self.repository.latest_scans_for_books(page_book_ids)
+                if isinstance(batched_scans, dict):
+                    latest_scans_by_book = batched_scans
+                else:
+                    for scan in batched_scans:
+                        if scan.BookId is not None and scan.BookId not in latest_scans_by_book:
+                            latest_scans_by_book[scan.BookId] = scan
+            else:
+                for page_book_id in page_book_ids:
+                    latest_scans_by_book[page_book_id] = await self.repository.latest_scan(
+                        page_book_id
+                    )
+
         items = []
         for (book, report_count, open_report_count, finding_count, review_count), assessment in page:
-            latest = await self.repository.latest_scan(book.Id)
+            latest = latest_scans_by_book.get(book.Id)
             items.append(
                 BookQualityBookSummary(
                     book_id=book.Id,
@@ -1588,7 +1616,7 @@ class BookContentQualityService:
         reports, _ = await self.repository.reports_for_book(book_id, limit=50)
         scans = await self.repository.scan_runs_for_book(book_id)
         latest_detail = (
-            await self.get_scan_detail(actor_id, scans[0].Id) if scans else None
+            await self._build_scan_detail(scans[0]) if scans else None
         )
         workflows = await self.repository.ai_workflows_for_book(book_id)
         workflow_summary = await self.repository.ai_workflow_summary_for_book(book_id)

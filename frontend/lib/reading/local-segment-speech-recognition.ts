@@ -11,6 +11,7 @@
  * (detected via non-native constructor source).
  */
 
+import { isServiceError } from "@/lib/api/service-error";
 import type { SpeechService } from "@/lib/api/speech-service";
 
 export interface SegmentSpeechResultAlternative {
@@ -169,6 +170,8 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private interimGeneration = 0;
   private pendingUploads: Set<Promise<void>> = new Set();
   private uploadChain: Promise<void> = Promise.resolve();
+  private consecutiveServiceFailures = 0;
+  private sttCircuitOpen = false;
 
   constructor(
     private readonly speechService: SpeechService,
@@ -180,10 +183,38 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     return this.inSpeech || this.pendingUploads.size > 0;
   }
 
+  private isServiceOutageError(err: unknown): boolean {
+    if (this.abortController?.signal.aborted) return false;
+    if (err instanceof Error && err.name === "AbortError") return false;
+    if (isServiceError(err)) {
+      return err.status === 0 || err.status === 429 || err.status >= 500;
+    }
+    if (typeof err === "object" && err !== null && "status" in err) {
+      const code = Number((err as { status?: unknown }).status);
+      if (Number.isFinite(code) && (code === 0 || code === 429 || code >= 500)) {
+        return true;
+      }
+    }
+    return err instanceof TypeError;
+  }
+
+  private tripServiceCircuitBreaker(): void {
+    if (this.sttCircuitOpen || !this.active) return;
+    this.sttCircuitOpen = true;
+    this.active = false;
+    this.stopping = false;
+    this.abortController?.abort();
+    this.resetSegmentState();
+    this.teardownAudioGraph();
+    this.onerror?.({ error: "stt-unavailable" });
+  }
+
   start(audioTrack?: MediaStreamTrack): void {
     if (this.active) return;
     this.active = true;
     this.stopping = false;
+    this.consecutiveServiceFailures = 0;
+    this.sttCircuitOpen = false;
     this.abortController = new AbortController();
     this.resultsHistory = [];
     this.uploadChain = Promise.resolve();
@@ -413,6 +444,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     if (
       !this.active ||
       this.stopping ||
+      this.sttCircuitOpen ||
       !this.inSpeech ||
       !this.speechChunks.length
     ) {
@@ -444,6 +476,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         timeoutMs: 4_000,
       })
       .then((res) => {
+        this.consecutiveServiceFailures = 0;
         if (
           !this.active ||
           this.stopping ||
@@ -475,8 +508,13 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           results: resultsObj,
         });
       })
-      .catch(() => {
-        // Non-blocking preview: ignore transient interim failures cleanly
+      .catch((err) => {
+        if (this.isServiceOutageError(err)) {
+          this.consecutiveServiceFailures += 1;
+          if (this.consecutiveServiceFailures >= 2) {
+            this.tripServiceCircuitBreaker();
+          }
+        }
       })
       .finally(() => {
         this.interimInFlight = false;
@@ -486,7 +524,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private flushCurrentSegment(carryOverlap = false): void {
     this.interimGeneration += 1;
     this.lastInterimSpeechSamples = 0;
-    if (!this.speechChunks.length) {
+    if (this.sttCircuitOpen || !this.speechChunks.length) {
       this.resetSegmentState();
       return;
     }
@@ -536,7 +574,13 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       try {
         return await transcribeOnce();
       } catch (err) {
-        if (signal?.aborted || (!this.active && !this.stopping)) throw err;
+        if (
+          this.isServiceOutageError(err) ||
+          signal?.aborted ||
+          (!this.active && !this.stopping)
+        ) {
+          throw err;
+        }
         await new Promise((resolve) => setTimeout(resolve, 250));
         if (signal?.aborted || (!this.active && !this.stopping)) throw err;
         return await transcribeOnce();
@@ -549,6 +593,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     const deliveryTask = this.uploadChain
       .then(async () => {
         const res = await responsePromise;
+        this.consecutiveServiceFailures = 0;
         if (!this.active && !this.stopping) return;
         const text = (res.text ?? "").normalize("NFC").trim();
         if (!text) return;
@@ -574,8 +619,11 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           results: resultsObj,
         });
       })
-      .catch(() => {
-        // Segment error is handled gracefully; final recorder transcription remains as backup
+      .catch((err) => {
+        if (this.isServiceOutageError(err)) {
+          this.consecutiveServiceFailures += 1;
+          this.tripServiceCircuitBreaker();
+        }
       })
       .finally(() => {
         this.pendingUploads.delete(deliveryTask);

@@ -328,6 +328,20 @@ async def cancel_my_submission(
     )
 
 
+@router.get("/my-books/{book_id}/submissions/{submission_id}/ocr-job")
+async def get_my_submission_ocr_job(
+    book_id: UUID,
+    submission_id: UUID,
+    response: Response,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    _apply_no_store(response)
+    return await ParentPrivateBookService(db).get_submission_ocr_job_status(
+        actor_id, book_id, submission_id
+    )
+
+
 @router.post(
     "/my-books/{book_id}/submissions/{submission_id}/request-admin-review",
     response_model=ParentPageSubmissionRead,

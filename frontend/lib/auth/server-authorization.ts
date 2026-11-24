@@ -1,33 +1,25 @@
 import "server-only";
 
 import { cache } from "react";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { readPlaywrightAuthFixture } from "@/lib/auth/playwright-auth-fixture";
 import { getRoleHome } from "@/lib/auth/route-policy";
+import {
+  computeSupabaseAuthCookieFingerprint,
+  readProfileRole,
+  verifySsrAuthHeader,
+  verifySsrRoleCacheCookie,
+  VIREAD_ROLE_CACHE_COOKIE,
+  VIREAD_SSR_AUTH_HEADER,
+} from "@/lib/auth/ssr-auth-cache";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { ParentRole, UUID } from "@/types/profile";
 
 export interface AppIdentity {
   readonly id: UUID;
   readonly role: ParentRole;
-}
-
-function readProfileRole(profile: unknown): ParentRole | null {
-  if (typeof profile !== "object" || profile === null || !("role" in profile)) {
-    return null;
-  }
-  if (
-    "active" in profile &&
-    (profile.active === 0 || profile.active === false)
-  ) {
-    return null;
-  }
-
-  return profile.role === "parent" || profile.role === "admin"
-    ? profile.role
-    : null;
 }
 
 export const getAppIdentity = cache(async (): Promise<AppIdentity | null> => {
@@ -44,16 +36,46 @@ export const getAppIdentity = cache(async (): Promise<AppIdentity | null> => {
     };
   }
 
-  const supabase = await createServerSupabaseClient();
-  const { data: claimsData, error: claimsError } =
-    await supabase.auth.getClaims();
-  const subject = claimsData?.claims.sub;
-
-  if (claimsError || typeof subject !== "string" || !subject) {
-    return null;
+  const cookieStore = await cookies();
+  const cookieHash = computeSupabaseAuthCookieFingerprint(cookieStore.getAll());
+  const verifiedHeader = verifySsrAuthHeader(
+    requestHeaders.get(VIREAD_SSR_AUTH_HEADER),
+    cookieHash,
+  );
+  if (verifiedHeader?.role) {
+    return {
+      id: verifiedHeader.userId,
+      role: verifiedHeader.role,
+    };
   }
 
-  const { data: profile, error: profileError } = await supabase
+  let subject = verifiedHeader?.userId ?? null;
+  let supabase: Awaited<ReturnType<typeof createServerSupabaseClient>> | null =
+    null;
+
+  if (!subject) {
+    supabase = await createServerSupabaseClient();
+    const { data: claimsData, error: claimsError } =
+      await supabase.auth.getClaims();
+    const claimsSubject = claimsData?.claims.sub;
+
+    if (claimsError || typeof claimsSubject !== "string" || !claimsSubject) {
+      return null;
+    }
+    subject = claimsSubject;
+  }
+
+  const cachedRole = verifySsrRoleCacheCookie(
+    cookieStore.get(VIREAD_ROLE_CACHE_COOKIE)?.value,
+    subject,
+    cookieHash,
+  );
+  if (cachedRole) {
+    return { id: subject, role: cachedRole };
+  }
+
+  const client = supabase ?? (await createServerSupabaseClient());
+  const { data: profile, error: profileError } = await client
     .from("profiles")
     .select("role, active")
     .eq("id", subject)

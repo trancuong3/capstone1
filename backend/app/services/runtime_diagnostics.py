@@ -250,3 +250,91 @@ def runtime_configuration_diagnostics(*, include_ocr: bool = True) -> dict[str, 
         "tesseract_command_configured": tesseract_configured,
         "tesseract_executable_available": tesseract_executable,
     }
+
+
+READY_OCR_DETAIL_STATUSES = frozenset({"loaded", "inference_verified", "healthy"})
+
+
+def is_ocr_engine_ready_status(detail_status: object) -> bool:
+    """Only loaded or inference-verified engines count as OCR ready (never 'installed')."""
+    return str(detail_status or "").strip().lower() in READY_OCR_DETAIL_STATUSES
+
+
+async def collect_remote_ocr_health() -> dict[str, Any]:
+    """Collect remote Windows OCR worker heartbeats, engine states, and durable queue depth."""
+    from datetime import datetime, timezone
+
+    from app.database.session import AsyncSessionLocal
+    from app.repositories.ocr_inference_job_repository import OcrInferenceJobRepository
+    from app.services.ocr_inference_job_service import worker_heartbeat_ttl_seconds
+
+    now = datetime.now(timezone.utc)
+    ttl_seconds = worker_heartbeat_ttl_seconds()
+    async with AsyncSessionLocal() as db:
+        repo = OcrInferenceJobRepository(db)
+        workers = await repo.list_worker_heartbeats(limit=10)
+        queue = await repo.queue_depth_counts(now=now)
+
+    serialized_workers: list[dict[str, Any]] = []
+    latest_online_engines: dict[str, Any] = {}
+    any_online_ready = False
+
+    for worker in workers:
+        hb_at = worker.LastHeartbeatAt
+        if hb_at is not None and hb_at.tzinfo is None:
+            hb_at = hb_at.replace(tzinfo=timezone.utc)
+        age_seconds = round(max(0.0, (now - hb_at).total_seconds()), 1) if hb_at else None
+        status_upper = str(worker.Status or "OFFLINE").upper()
+        online = age_seconds is not None and age_seconds <= ttl_seconds and status_upper != "OFFLINE"
+
+        raw_engines = dict(worker.Engines or {})
+        engine_summary: dict[str, dict[str, Any]] = {}
+        worker_has_ready_engine = False
+        for eng_id in ("paddleocr", "vietocr", "tesseract_vie"):
+            info = raw_engines.get(eng_id)
+            if isinstance(info, dict):
+                detail = str(info.get("detail_status") or "unknown")
+                verified = bool(info.get("inference_verified", False))
+                loaded = bool(info.get("loaded", False))
+                engine_summary[eng_id] = {
+                    "status": str(info.get("status") or "UNKNOWN"),
+                    "detail_status": detail,
+                    "installed": bool(info.get("installed", False)),
+                    "loaded": loaded,
+                    "inference_verified": verified,
+                }
+                if (is_ocr_engine_ready_status(detail) and (loaded or verified or detail == "healthy")) or verified:
+                    worker_has_ready_engine = True
+
+        worker_entry = {
+            "worker_id": worker.WorkerId,
+            "hostname": worker.Hostname,
+            "status": status_upper,
+            "online": online,
+            "last_heartbeat_at": hb_at.isoformat() if hb_at else None,
+            "age_seconds": age_seconds,
+            "active_job_count": int(worker.ActiveJobCount or 0),
+            "concurrency_limit": int(worker.ConcurrencyLimit or 1),
+            "model_profile": worker.ModelProfile,
+            "model_sha256": worker.ModelSha256,
+            "app_version": worker.AppVersion,
+            "git_sha": worker.GitSha,
+            "engines": engine_summary,
+        }
+        serialized_workers.append(worker_entry)
+
+        if online and status_upper in {"IDLE", "BUSY"} and worker_has_ready_engine:
+            any_online_ready = True
+            if not latest_online_engines:
+                latest_online_engines = engine_summary
+        elif online and not latest_online_engines and engine_summary:
+            latest_online_engines = engine_summary
+
+    return {
+        "mode": "remote_worker",
+        "ready": any_online_ready,
+        "heartbeat_ttl_seconds": ttl_seconds,
+        "engines": latest_online_engines,
+        "workers": serialized_workers,
+        "queue": queue,
+    }

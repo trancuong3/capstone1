@@ -73,13 +73,34 @@ def _normalize_text(value: str) -> str:
 
 
 def _valid_box(raw: object) -> list[float] | None:
+    vals: list[float] | None = None
     if isinstance(raw, (list, tuple)) and len(raw) == 4:
         try:
-            x, y, w, h = (float(v) for v in raw)
+            vals = [float(v) for v in raw]
         except (TypeError, ValueError):
             return None
+    elif isinstance(raw, dict):
+        try:
+            vals = [
+                float(raw["x"]),
+                float(raw["y"]),
+                float(raw.get("w", raw.get("width", 0.0))),
+                float(raw.get("h", raw.get("height", 0.0))),
+            ]
+        except (KeyError, TypeError, ValueError):
+            return None
+    if vals is not None:
+        x, y, w, h = vals
         if 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0 and w > 0.0 and h > 0.0 and x + w <= 1.001 and y + h <= 1.001:
             return [round(x, 6), round(y, 6), round(min(w, 1.0 - x), 6), round(min(h, 1.0 - y), 6)]
+    return None
+
+
+def _item_box(raw_item: dict[str, Any]) -> list[float] | None:
+    for key in ("bounding_box", "bbox", "BoundingBox"):
+        box = _valid_box(raw_item.get(key))
+        if box is not None:
+            return box
     return None
 
 
@@ -100,19 +121,22 @@ def align_edited_text_to_words(
     if not tokens_with_lines:
         return []
 
-    valid_base = [
-        w for w in base_words
-        if isinstance(w, dict) and _valid_box(w.get("bounding_box")) is not None
-    ]
+    valid_base: list[tuple[dict[str, Any], list[float]]] = []
+    for w in base_words:
+        if not isinstance(w, dict):
+            continue
+        box = _item_box(w)
+        if box is not None:
+            valid_base.append((w, box))
     if len(valid_base) == len(tokens_with_lines):
         aligned: list[dict[str, Any]] = []
-        for idx, ((line_idx, tok), orig) in enumerate(zip(tokens_with_lines, valid_base)):
+        for idx, ((line_idx, tok), (orig, box)) in enumerate(zip(tokens_with_lines, valid_base)):
             aligned.append({
                 "word_index": idx,
                 "line_index": int(orig.get("line_index", line_idx)),
                 "text": tok,
                 "normalized_text": normalize_word(tok) or tok.lower(),
-                "bounding_box": _valid_box(orig.get("bounding_box")),
+                "bounding_box": box,
                 "ocr_confidence": orig.get("ocr_confidence"),
             })
         return aligned
@@ -120,10 +144,10 @@ def align_edited_text_to_words(
     # Group base boxes by line or fallback evenly across the OCR text envelope so
     # edited additions/deletions always retain valid normalized page coordinates.
     if valid_base:
-        xs = [w["bounding_box"][0] for w in valid_base]
-        ys = [w["bounding_box"][1] for w in valid_base]
-        x2s = [w["bounding_box"][0] + w["bounding_box"][2] for w in valid_base]
-        y2s = [w["bounding_box"][1] + w["bounding_box"][3] for w in valid_base]
+        xs = [box[0] for _, box in valid_base]
+        ys = [box[1] for _, box in valid_base]
+        x2s = [box[0] + box[2] for _, box in valid_base]
+        y2s = [box[1] + box[3] for _, box in valid_base]
         left, top = max(0.02, min(xs)), max(0.02, min(ys))
         right, bottom = min(0.98, max(x2s)), min(0.98, max(y2s))
     else:

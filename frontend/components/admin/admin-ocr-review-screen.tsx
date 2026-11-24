@@ -964,18 +964,38 @@ export function AdminOcrReviewScreen({
     setNotice(null);
     revisionChoiceRequestIdRef.current += 1;
     try {
-      const [nextBook, bookPages] = await Promise.all([
-        books.get(bookId),
-        pages.list(bookId),
-      ]);
+      const bookPromise = books.get(bookId);
+      const bookPages = await pages.list(bookId);
       const belongsToBook = bookPages.some(
         (item) => item.processing.page_id === pageId,
       );
       if (!belongsToBook) {
+        void bookPromise.catch(() => {});
         if (requestId === requestIdRef.current) setError("not-found");
         return;
       }
-      const nextHistory = await revisions.list(pageId);
+
+      const historyPromise = revisions.list(pageId);
+      const preferredCallsPromise = preferredRevisionId
+        ? Promise.all([
+            ocr
+              .getRevision(pageId, preferredRevisionId)
+              .then((value) => ({ ok: true as const, value }))
+              .catch((cause: unknown) => ({ ok: false as const, cause })),
+            pages
+              .getImage(pageId, preferredRevisionId)
+              .then((value) => ({ ok: true as const, value }))
+              .catch((cause: unknown) => ({ ok: false as const, cause })),
+            ocr
+              .getLatestWorkflow(pageId, preferredRevisionId)
+              .catch(() => null),
+          ])
+        : null;
+
+      const [nextBook, nextHistory] = await Promise.all([
+        bookPromise,
+        historyPromise,
+      ]);
       const active = nextHistory[0];
       if (!active) {
         if (requestId === requestIdRef.current) setError("unavailable");
@@ -987,13 +1007,27 @@ export function AdminOcrReviewScreen({
           )
         : undefined;
       const selectedRevision = preferredRevision ?? active;
-      const [nextDetail, nextImage, nextWorkflow] = await Promise.all([
-        ocr.getRevision(pageId, selectedRevision.page_revision_id),
-        pages.getImage(pageId, selectedRevision.page_revision_id),
-        ocr
-          .getLatestWorkflow(pageId, selectedRevision.page_revision_id)
-          .catch(() => null),
-      ]);
+
+      let nextDetail: Awaited<ReturnType<typeof ocr.getRevision>>;
+      let nextImage: Awaited<ReturnType<typeof pages.getImage>>;
+      let nextWorkflow: Awaited<ReturnType<typeof ocr.getLatestWorkflow>>;
+
+      if (preferredRevision && preferredCallsPromise) {
+        const [detailRes, imageRes, workflowRes] = await preferredCallsPromise;
+        if (!detailRes.ok) throw detailRes.cause;
+        if (!imageRes.ok) throw imageRes.cause;
+        nextDetail = detailRes.value;
+        nextImage = imageRes.value;
+        nextWorkflow = workflowRes;
+      } else {
+        [nextDetail, nextImage, nextWorkflow] = await Promise.all([
+          ocr.getRevision(pageId, selectedRevision.page_revision_id),
+          pages.getImage(pageId, selectedRevision.page_revision_id),
+          ocr
+            .getLatestWorkflow(pageId, selectedRevision.page_revision_id)
+            .catch(() => null),
+        ]);
+      }
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setBook(nextBook);
       setImage(nextImage);

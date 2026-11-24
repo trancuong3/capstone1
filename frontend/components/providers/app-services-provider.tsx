@@ -1,6 +1,15 @@
 "use client";
 
-import { createContext, useMemo, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  type ReactNode,
+} from "react";
+
+import { AuthRuntimeContext } from "@/components/auth/auth-service-provider";
+import { setApiReadCacheActorScope } from "@/lib/api/read-cache";
 
 import type { BookService } from "@/lib/api/book-service";
 import type { BookContentReportService } from "@/lib/api/book-content-report-service";
@@ -101,6 +110,13 @@ export function AppServicesProvider({
   children,
   scenario,
 }: AppServicesProviderProps) {
+  const parentServices = useContext(AppServicesContext);
+  const authRuntime = useContext(AuthRuntimeContext);
+
+  useLayoutEffect(() => {
+    setApiReadCacheActorScope(authRuntime?.session?.user?.id ?? null);
+  }, [authRuntime?.session?.user?.id]);
+
   const isTest =
     typeof process !== "undefined" &&
     process.env.NODE_ENV === "test" &&
@@ -160,6 +176,10 @@ export function AppServicesProvider({
     }),
     [isReadingEnabled],
   );
+
+  if (parentServices && scenario === undefined) {
+    return <>{children}</>;
+  }
 
   return (
     <AppServicesContext.Provider value={services}>
