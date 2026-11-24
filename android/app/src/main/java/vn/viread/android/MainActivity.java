@@ -930,9 +930,7 @@ public final class MainActivity extends Activity {
             return FileProvider.getUriForFile(context, authority, photoFile);
         } catch (IllegalArgumentException ex) {
             // Work around androidx FileProvider SimplePathStrategy hardcoding '/' on Windows JVM tests
-            if (File.separatorChar != '\\') {
-                throw ex;
-            }
+            // and Robolectric retaining static FileProvider.sCache across per-test temp cache dirs on Linux CI.
             File allowedRoot = new File(context.getCacheDir(), "camera_captures").getCanonicalFile();
             File canonicalFile = photoFile.getCanonicalFile();
             String rootPrefix = allowedRoot.getPath() + File.separator;

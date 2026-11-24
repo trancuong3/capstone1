@@ -1,0 +1,27 @@
+name: Render Backend Keep-Alive
+
+on:
+  schedule:
+    # Ping Render Free backend every 10 minutes to prevent 15-minute idle spin-down
+    # (cold starts add 30-60s latency on /dashboard -> /me and /children).
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-keepalive
+  cancel-in-progress: true
+
+jobs:
+  ping-health:
+    name: Keep Render backend warm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Ping Render /health endpoint
+        run: |
+          curl -fsS --retry 2 --retry-delay 5 --max-time 45 \
+            "https://capstone1-ssd8.onrender.com/health" > /dev/null
+          echo "Render backend is warm and healthy."

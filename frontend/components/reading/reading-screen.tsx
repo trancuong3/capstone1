@@ -14,12 +14,33 @@ import { Modal } from "@/components/common/modal";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ComprehensionQuestion } from "@/components/reading/comprehension-question";
+import { PhonicsLessonCard } from "@/components/reading/phonics-lesson-card";
 import { resolvePostFinishUiState } from "@/lib/reading/post-finish-questions";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
+import {
+  isInjectedTestSpeechRecognition,
+  LocalSegmentSpeechRecognition,
+  resolveLocalFirstSpeechRecognitionConstructor,
+} from "@/lib/reading/local-segment-speech-recognition";
+import {
+  buildPhonicsLesson,
+  READING_MASTERY_LABELS,
+  type PhonicsLessonPlan,
+  type SupportedPhonicsLessonPlan,
+} from "@/lib/reading/phonics-lesson";
+import {
+  getEffectiveTeacherPersona,
+  lockSessionVoice,
+  setActiveVoiceSession,
+} from "@/lib/reading/session-voice-lock";
+import { recordSttEngineUsage } from "@/lib/reading/voice-engine-status";
+import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import {
   classifyRetryTranscript,
+  classifyYesNoVoiceIntent,
   hasConfusableNasalEnding,
   isAssistantPromptBleed,
   normalizeShortWordTranscript,
@@ -31,6 +52,7 @@ import {
   tokenizeVietnameseText,
 } from "@/lib/reading/vietnamese-text";
 import {
+  isSpellingHelpRequest,
   isWordHelpRequest,
   MAX_WORD_HELP_ROUNDS,
   WORD_HELP_SILENCE_LIMIT,
@@ -97,7 +119,9 @@ import {
   mistakeCategoryToPromptCategory,
 } from "@/lib/reading/interactive-prompts";
 import {
+  isVoiceExitSentenceReinforcement,
   SentenceReinforcementTracker,
+  shouldEscapeToUpcomingWords,
   type ActiveSentenceReinforcement,
 } from "@/lib/reading/sentence-reinforcement";
 import { parseVoiceIntent } from "@/lib/reading/voice-intent";
@@ -458,6 +482,20 @@ function ReadingSessionScreen({
   const pageWordsByRevisionRef = useRef(
     new Map<string, readonly ReadingPageWordDTO[]>(),
   );
+  const [activePhonicsLesson, setActivePhonicsLesson] = useState<{
+    readonly wordId: string | null;
+    readonly plan: PhonicsLessonPlan;
+  } | null>(null);
+  const [activePhonicsStepIndex, setActivePhonicsStepIndex] = useState<
+    number | null
+  >(null);
+  const [isPlayingPhonicsLesson, setIsPlayingPhonicsLesson] = useState(false);
+  const [phonicsStatusHint, setPhonicsStatusHint] = useState<string | null>(
+    null,
+  );
+  const phonicsSpelledWordIdsRef = useRef(new Set<string>());
+  const passageContainsSpellRef = useRef(false);
+
   const finishStartedRef = useRef(false);
   const retryReportSaveStartedRef = useRef(false);
   const mountedRef = useRef(false);
@@ -572,7 +610,9 @@ function ReadingSessionScreen({
         true,
       );
     } catch (err) {
-      console.warn("Lỗi phát âm 1 từ:", err);
+      if (!(err instanceof Error && err.name === "AbortError")) {
+        console.warn("Lỗi phát âm 1 từ:", err);
+      }
     } finally {
       if (
         mountedRef.current &&
@@ -593,8 +633,10 @@ function ReadingSessionScreen({
 
   useEffect(() => {
     mountedRef.current = true;
+    lockSessionVoice(sessionId);
     return () => {
       mountedRef.current = false;
+      setActiveVoiceSession(null);
       clearPageSilenceTimer();
       if (typeof window !== "undefined") {
         if (wrongWordGraceTimerRef.current !== null) {
@@ -629,7 +671,7 @@ function ReadingSessionScreen({
         // Safe ignore
       }
     };
-  }, [cancelRecording]);
+  }, [cancelRecording, sessionId]);
 
   useEffect(() => {
     if (countdown === null) return;
@@ -1246,15 +1288,63 @@ function ReadingSessionScreen({
     words: readonly string[],
     options: WordTimedPlayOptions,
   ): Promise<void> {
+    const sampleText = options.text ?? words.join(" ");
     const id = `assistant-${(assistantPlaybackSeqRef.current += 1)}`;
-    echoGuard.playbackStarted(
-      id,
-      options.text ?? words.join(" "),
-      performance.now(),
-    );
+    echoGuard.playbackStarted(id, sampleText, performance.now());
     return speechPlayer
-      .playWithWordTimings(words, options)
+      .playWithWordTimings(words, options, () =>
+        speechPlayer.play(sampleText, {
+          onPlay: () => options.onPlay?.(),
+          onEnded: options.onEnded,
+        }),
+      )
       .finally(() => echoGuard.playbackEnded(id, performance.now()));
+  }
+
+  function isPassageSpellRequest(
+    text: string,
+    engine: RealtimeAlignmentEngine,
+    capturePage: ReadingPageDTO,
+  ): boolean {
+    const nextId = engine.getSnapshot().currentWordId;
+    const next = capturePage.words.findIndex((word) => word.word_id === nextId);
+    const upcoming =
+      next < 0
+        ? ""
+        : capturePage.words
+            .slice(next, next + 12)
+            .map((word) => word.text)
+            .join(" ");
+    if (parseVoiceIntent(text, { upcomingText: upcoming }).type === "SPELL") {
+      return true;
+    }
+    return isSpellingHelpRequest(text, upcoming);
+  }
+
+  /** Speak step-by-step phonics lesson and register all steps with EchoGuard. */
+  async function speakPhonicsLessonGuarded(
+    lesson: SupportedPhonicsLessonPlan,
+    onStep?: (stepIdx: number) => void,
+  ): Promise<void> {
+    const id = `assistant-${(assistantPlaybackSeqRef.current += 1)}`;
+    const fullSpoken = lesson.steps.map((s) => s.spokenText).join(" ");
+    echoGuard.playbackStarted(id, fullSpoken, performance.now());
+    setIsPlayingPhonicsLesson(true);
+    try {
+      if (typeof speechPlayer.playPhonicsLesson === "function") {
+        await speechPlayer.playPhonicsLesson(lesson, {
+          onStepChange: (idx) => onStep?.(idx),
+        });
+      } else {
+        for (const step of lesson.steps) {
+          onStep?.(step.index);
+          await speechPlayer.play(step.spokenText);
+        }
+      }
+    } finally {
+      setIsPlayingPhonicsLesson(false);
+      echoGuard.playbackEnded(id, performance.now());
+    }
   }
 
   /** Speak one assistant utterance and register it with the echo guard. */
@@ -1262,11 +1352,14 @@ function ReadingSessionScreen({
     text: string,
     options?: SpeechPlayOptions,
   ): Promise<void> {
+    const spokenText = options?.wordSample
+      ? text
+      : adaptTextToTeacherPersona(text, getEffectiveTeacherPersona().gender);
     const id = `assistant-${(assistantPlaybackSeqRef.current += 1)}`;
-    echoGuard.playbackStarted(id, text, performance.now());
+    echoGuard.playbackStarted(id, spokenText, performance.now());
     try {
-      if (options === undefined) await speechPlayer.play(text);
-      else await speechPlayer.play(text, options);
+      if (options === undefined) await speechPlayer.play(spokenText);
+      else await speechPlayer.play(spokenText, options);
     } finally {
       echoGuard.playbackEnded(id, performance.now());
     }
@@ -1684,6 +1777,118 @@ function ReadingSessionScreen({
     }
   }
 
+  /**
+   * Explicit step-by-step Vietnamese phonics (`Đánh vần từng bước`) right in-place
+   * on the current book page (triggered by voice "Đánh vần giúp con" / "Nghe đánh vần"
+   * or button `Nghe đánh vần`), sharing `phonics-lesson.ts` with Difficult Words Practice.
+   */
+  async function offerExplicitPhonicsHelp(
+    engine: RealtimeAlignmentEngine | null,
+    capturePage: ReadingPageDTO | null,
+    explicitWord?: { readonly word_id: string | null; readonly text: string },
+    allowInterrupt = false,
+  ): Promise<void> {
+    if (listeningStopRef.current) return;
+    if (assistantAudioPendingRef.current && !allowInterrupt) return;
+    if (allowInterrupt) {
+      stopAssistantAudio();
+      setIsReadingWord(false);
+    }
+    clearPageSilenceTimer();
+    clearCoachingTimers();
+
+    const target =
+      explicitWord ??
+      (retryModeRef.current
+        ? (() => {
+            const cand = retryCandidatesRef.current[retryPositionRef.current];
+            return cand ? { word_id: cand.wordId, text: cand.text } : null;
+          })()
+        : (() => {
+            const wid = isListeningActiveRef.current
+              ? (engine?.getSnapshot().currentWordId ?? currentWordId)
+              : (currentWordId ?? engine?.getSnapshot().currentWordId);
+            const found =
+              (wid
+                ? capturePage?.words.find((w) => w.word_id === wid)
+                : null) ?? capturePage?.words[0];
+            return found ? { word_id: found.word_id, text: found.text } : null;
+          })());
+    if (!target) return;
+
+    const plan = buildPhonicsLesson(target.text);
+    setActivePhonicsLesson({ wordId: target.word_id, plan });
+    setActivePhonicsStepIndex(plan.supported ? 0 : null);
+    setPhonicsStatusHint(null);
+
+    if (target.word_id && !retryModeRef.current) {
+      helpedWordIdsRef.current.add(target.word_id);
+      phonicsSpelledWordIdsRef.current.add(target.word_id);
+      pageHelpWordRef.current = {
+        wordId: target.word_id,
+        awaitingAttempt: true,
+      };
+    }
+
+    const generation = assistantAudioGenerationRef.current + 1;
+    const isCurrent = () =>
+      mountedRef.current && generation === assistantAudioGenerationRef.current;
+    const wasListening = isListeningActiveRef.current || isMicRecording;
+
+    try {
+      await playAssistantAudio(
+        async () => {
+          if (!isCurrent()) return;
+          if (!plan.supported) {
+            setPhonicsStatusHint(plan.message);
+            if (plan.canPlayWholeWord) {
+              await speakGuarded(target.text, { wordSample: true });
+            }
+            return;
+          }
+          setLatestTranscript(
+            `Đánh vần tiếng “${plan.focusSyllable}”: ${plan.steps.map((s) => s.displayText).join(" · ")}`,
+          );
+          await speakPhonicsLessonGuarded(plan, (stepIdx) => {
+            if (isCurrent()) setActivePhonicsStepIndex(stepIdx);
+          });
+          if (!isCurrent()) return;
+          const invite = `Giờ con đọc trọn tiếng “${plan.focusSyllable}” nhé.`;
+          setPhonicsStatusHint(invite);
+          await speakGuarded("Đến lượt con đọc nhé.");
+        },
+        true,
+        false,
+        wasListening,
+      );
+      if (!isCurrent()) return;
+      if (wasListening && !retryModeRef.current) {
+        const started = await startListeningRef.current();
+        if (isCurrent()) setIsMicRecording(started);
+      } else if (wasListening && retryModeRef.current) {
+        const cand = retryCandidatesRef.current[retryPositionRef.current];
+        if (cand) {
+          void startRetryRecognition(cand);
+        }
+      }
+    } catch {
+      if (isCurrent()) {
+        setPhonicsStatusHint(
+          "Giọng đánh vần đã khóa đang tạm bận. Bé xem các bước trên màn hình và bấm Nghe đánh vần lại nhé.",
+        );
+      }
+    }
+  }
+
+  function handleSpellCurrentWord(): void {
+    void offerExplicitPhonicsHelp(
+      alignmentEngineRef.current,
+      page,
+      undefined,
+      true,
+    );
+  }
+
   async function beginListening(): Promise<boolean> {
     const generation = listeningGenerationRef.current;
     const isCurrent = () =>
@@ -1695,6 +1900,7 @@ function ReadingSessionScreen({
     setComparisonError(null);
     browserTranscriptCollectorRef.current.reset();
     passageContainsHelpRef.current = false;
+    passageContainsSpellRef.current = false;
     const captureEngine = alignmentEngineRef.current;
     let quietWindows = 0;
     let lastSpeechMs = 0;
@@ -1765,10 +1971,34 @@ function ReadingSessionScreen({
 
     if (typeof window !== "undefined") {
       try {
-        const win = window as unknown as WindowWithSpeech;
-        const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition;
+        const win = window as unknown as WindowWithSpeech & {
+          AudioContext?: typeof AudioContext;
+          webkitAudioContext?: typeof AudioContext;
+        };
+        const SpeechRec = resolveLocalFirstSpeechRecognitionConstructor(
+          win,
+          speechService,
+          () => ({
+            sessionId,
+            pageId: page?.page_id ?? null,
+            keyterms: (page?.words ?? [])
+              .map((w) => w.text.normalize("NFC").trim())
+              .filter(Boolean)
+              .slice(0, 40),
+          }),
+          () => speechRecorder.getStream?.()?.getAudioTracks()?.[0],
+        ) as (new () => BrowserSpeechRecognition) | undefined;
         if (SpeechRec) {
           const rec = new SpeechRec();
+          const isLocalSegmentRec =
+            rec instanceof LocalSegmentSpeechRecognition;
+          if (!isLocalSegmentRec) {
+            recordSttEngineUsage({
+              provider: "browser",
+              fallbackUsed: true,
+              fallbackReason: "BROWSER_SPEECH_RECOGNITION",
+            });
+          }
           rec.continuous = true;
           rec.interimResults = true;
           rec.lang = "vi-VN";
@@ -1786,6 +2016,7 @@ function ReadingSessionScreen({
             }
             const audioQuality = speechRecorder.getQuality?.();
             if (
+              !isLocalSegmentRec &&
               audioQuality &&
               audioQuality.durationMs >= 300 &&
               hasUnusableAudio(audioQuality)
@@ -1841,7 +2072,12 @@ function ReadingSessionScreen({
             const newFinals = browserTranscriptCollectorRef.current.addResults(
               event,
               (part, usable, confidence) => {
-                if (passageContainsHelpRef.current) return false;
+                if (
+                  passageContainsHelpRef.current ||
+                  passageContainsSpellRef.current
+                ) {
+                  return false;
+                }
                 if (!usable && !isPhonicsCueUsable(part, confidence)) {
                   markCaptureUncertain(engine, page);
                   return false;
@@ -1854,6 +2090,11 @@ function ReadingSessionScreen({
                     receivedAt: performance.now(),
                   }).accept
                 ) {
+                  return false;
+                }
+                if (page && isPassageSpellRequest(part, engine, page)) {
+                  passageContainsSpellRef.current = true;
+                  if (!isListeningActiveRef.current) engine.markUncertain();
                   return false;
                 }
                 if (page && isPassageHelpRequest(part, engine, page)) {
@@ -1891,9 +2132,15 @@ function ReadingSessionScreen({
                 // Sentence-level fluency reinforcement (G20): speech read back
                 // for the full sentence (e.g. "Tôi ăn cơm") is evaluated here
                 // without overwriting first-pass assessment or duplicating reports.
+                // Never-Trap invariant: child can exit via voice ("Bỏ qua"/"Đọc tiếp"),
+                // button click, OR by reading ahead into the next sentence on the page!
                 if (sentenceReinforcementRef.current.getActive()) {
                   const activeSpan =
                     sentenceReinforcementRef.current.getActive()?.span ?? null;
+                  if (isVoiceExitSentenceReinforcement(part)) {
+                    void finishSentenceReinforcement(engine, false);
+                    return false;
+                  }
                   const outcome =
                     sentenceReinforcementRef.current.consumeSpeech(part);
                   setActiveSentenceReinforcement(
@@ -1909,8 +2156,24 @@ function ReadingSessionScreen({
                   }
                   if (outcome === "completed") {
                     void finishSentenceReinforcement(engine, true);
+                    return false;
                   }
-                  return false;
+                  if (
+                    outcome === "ignored" &&
+                    activeSpan &&
+                    page &&
+                    shouldEscapeToUpcomingWords(
+                      part,
+                      page.words.slice(activeSpan.endIndex + 1),
+                    )
+                  ) {
+                    // Child clearly continued reading the next sentence -> auto-escape & score!
+                    sentenceReinforcementRef.current.finishCurrent();
+                    setActiveSentenceReinforcement(null);
+                    // Fall through to normal alignment below so the child's next sentence is scored immediately
+                  } else {
+                    return false;
+                  }
                 }
                 const helpedWordBefore =
                   pageHelpWordRef.current?.wordId ?? null;
@@ -1935,6 +2198,23 @@ function ReadingSessionScreen({
                   "MATCH"
                 ) {
                   pageHelpWordRef.current = null;
+                }
+                if (
+                  activePhonicsLesson?.wordId &&
+                  scored.statusByWordId.get(activePhonicsLesson.wordId)
+                    ?.status === "MATCH"
+                ) {
+                  setPhonicsStatusHint(
+                    READING_MASTERY_LABELS.CORRECT_AFTER_SPELLING,
+                  );
+                } else if (
+                  activePhonicsLesson?.plan.supported &&
+                  scored.spellingInProgress &&
+                  scored.currentWordId === activePhonicsLesson.wordId
+                ) {
+                  setPhonicsStatusHint(
+                    `Con đánh vần đúng nhịp rồi! Giờ con đọc trọn tiếng “${activePhonicsLesson.plan.focusSyllable}” nhé!`,
+                  );
                 }
 
                 // Visual companion celebration for quick self-correction or phonics spelling
@@ -2056,6 +2336,11 @@ function ReadingSessionScreen({
                 return (scored.rejectedSegmentCount ?? 0) === rejectedBefore;
               },
             );
+            if (passageContainsSpellRef.current) {
+              if (page && isCurrent())
+                void offerExplicitPhonicsHelp(engine, page);
+              return;
+            }
             if (passageContainsHelpRef.current) {
               if (page && isCurrent()) void offerPassageHelp(engine, page);
               return;
@@ -2142,8 +2427,11 @@ function ReadingSessionScreen({
                   ) {
                     return;
                   }
-                  if (speechRecorder.getIsSpeaking()) {
-                    armGrace(500);
+                  if (
+                    speechRecorder.getIsSpeaking() ||
+                    (isLocalSegmentRec && rec.hasPendingUploads())
+                  ) {
+                    armGrace(450);
                     return;
                   }
                   const held = engine.holdAtTrailingMismatchForCoaching();
@@ -2157,7 +2445,7 @@ function ReadingSessionScreen({
                   );
                 }, delayMs);
               };
-              armGrace(1_400);
+              armGrace(isLocalSegmentRec ? 1_850 : 1_400);
             }
 
             // 4. Cập nhật nội dung transcript (tránh setState lặp khi interim giống hệt).
@@ -4212,6 +4500,16 @@ function ReadingSessionScreen({
 
       if (
         hasUsableTranscript(transcription) &&
+        isSpellingHelpRequest(transcript, candidate.text)
+      ) {
+        await offerExplicitPhonicsHelp(null, page, {
+          word_id: candidate.wordId,
+          text: candidate.text,
+        });
+        return;
+      }
+      if (
+        hasUsableTranscript(transcription) &&
         isWordHelpRequest(transcript, candidate.text)
       ) {
         await offerRetryHelp(candidate);
@@ -4489,7 +4787,10 @@ function ReadingSessionScreen({
     }
 
     const win = window as unknown as WindowWithSpeech;
-    const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition;
+    const rawRetryRec = win.SpeechRecognition || win.webkitSpeechRecognition;
+    const SpeechRec = isInjectedTestSpeechRecognition(rawRetryRec)
+      ? rawRetryRec
+      : undefined;
 
     // Không có Browser SpeechRecognition:
     // vẫn có thể sử dụng MediaRecorder + STT backend.
@@ -5317,6 +5618,115 @@ function ReadingSessionScreen({
       }
     }
   }
+  // Voice-first post-reading wrap-up: when the book finishes with wrong/difficult words,
+  // speak the warm question in the locked voice & listen for the child's "Có" / "Không" reply.
+  useEffect(() => {
+    if (!retryPrompt || retryCandidatesRef.current.length === 0) return;
+    if (!automationRef.current.assist) return;
+    const hasRealAudioApi =
+      typeof window !== "undefined" &&
+      (typeof window.AudioContext === "function" ||
+        typeof (window as unknown as { webkitAudioContext?: unknown })
+          .webkitAudioContext === "function");
+    if (!hasRealAudioApi) return;
+    const liveTrack = speechRecorder.getStream?.()?.getAudioTracks()?.[0];
+    const hasInjectedRec =
+      typeof window !== "undefined" &&
+      isInjectedTestSpeechRecognition(
+        (window as unknown as WindowWithSpeech).SpeechRecognition ||
+          (window as unknown as WindowWithSpeech).webkitSpeechRecognition,
+      );
+    if (!liveTrack && !hasInjectedRec) return;
+    let cancelled = false;
+    let activeRec: BrowserSpeechRecognition | null = null;
+    const promptText = promptSelectorRef.current.next(
+      "postReadingWrongWordsAsk",
+    );
+
+    const stopRec = () => {
+      if (!activeRec) return;
+      const target = activeRec;
+      activeRec = null;
+      try {
+        target.onresult = null;
+        target.onerror = null;
+        target.onend = null;
+        target.abort?.();
+        target.stop();
+      } catch {
+        // Ignore cleanup errors
+      }
+    };
+
+    const runVoiceWrapUp = async () => {
+      try {
+        await speakGuarded(promptText);
+      } catch {
+        // Fallback silently to visual buttons if TTS is unavailable
+      }
+      if (cancelled || !mountedRef.current || typeof window === "undefined") {
+        return;
+      }
+      try {
+        const win = window as unknown as WindowWithSpeech & {
+          AudioContext?: typeof AudioContext;
+          webkitAudioContext?: typeof AudioContext;
+        };
+        const SpeechRec = resolveLocalFirstSpeechRecognitionConstructor(
+          win,
+          speechService,
+          () => ({
+            sessionId,
+            pageId: page?.page_id ?? null,
+            keyterms: ["có", "không", "đọc lại", "bỏ qua", "thôi", "muốn"],
+          }),
+          () => speechRecorder.getStream?.()?.getAudioTracks()?.[0],
+        ) as (new () => BrowserSpeechRecognition) | undefined;
+        if (!SpeechRec || cancelled) return;
+        const rec = new SpeechRec();
+        activeRec = rec;
+        rec.continuous = false;
+        rec.interimResults = false;
+        rec.lang = "vi-VN";
+        rec.maxAlternatives = 1;
+        rec.onresult = (event: BrowserSpeechEvent) => {
+          if (cancelled || !mountedRef.current) return;
+          for (let i = event.resultIndex; i < event.results.length; i += 1) {
+            const item = event.results[i];
+            if (!item?.isFinal) continue;
+            const spoken = item[0]?.transcript ?? "";
+            const intent = classifyYesNoVoiceIntent(spoken);
+            if (intent === "yes") {
+              stopRec();
+              if (startRetrySession(retryCandidatesRef.current)) {
+                setRetryPrompt(false);
+              }
+              return;
+            }
+            if (intent === "no") {
+              stopRec();
+              retryModeRef.current = false;
+              setRetryPrompt(false);
+              void completeReadingSession();
+              return;
+            }
+          }
+        };
+        rec.onerror = () => stopRec();
+        rec.start();
+      } catch {
+        // Keep manual buttons usable if mic cannot open
+      }
+    };
+
+    void runVoiceWrapUp();
+    return () => {
+      cancelled = true;
+      stopRec();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [retryPrompt]);
+
   async function finishReading() {
     if (finishStartedRef.current) return;
 
@@ -5463,6 +5873,7 @@ function ReadingSessionScreen({
                 trong phạm vi · {pageProgress.completed_pages}/
                 {pageProgress.total_pages} trang đã hoàn thành
               </p>
+              <VoiceEngineBadge compact className="mt-1" />
             </div>
             <div className="flex min-w-0 flex-wrap gap-2">
               <Button
@@ -5650,6 +6061,27 @@ function ReadingSessionScreen({
         onReadWord={
           retryMode ? () => void handleReadSample() : handleReadCurrentWord
         }
+        onSpellWord={handleSpellCurrentWord}
+        phonicsPanel={
+          activePhonicsLesson ? (
+            <PhonicsLessonCard
+              activeStepIndex={activePhonicsStepIndex}
+              compact
+              isListeningRetry={isMicRecording}
+              isPlayingPhonics={isPlayingPhonicsLesson}
+              isPlayingWord={isReadingWord}
+              lesson={activePhonicsLesson.plan}
+              onPlayPhonics={handleSpellCurrentWord}
+              onPlayWord={
+                retryMode
+                  ? () => void handleReadSample()
+                  : handleReadCurrentWord
+              }
+              onStopAudio={stopAssistantAudio}
+              statusHint={phonicsStatusHint}
+            />
+          ) : null
+        }
         onSkipRetryWord={skipRetryWord}
         onToggleListening={() => void handleToggleListening()}
         onWordClick={handleWordClick}
@@ -5670,30 +6102,60 @@ function ReadingSessionScreen({
         companionBubble={companionBubble}
         isCompanionSpeaking={speechPlayer.isPlaying}
         comparisonResult={comparisonResult}
-      >
-        {activeSentenceReinforcement ? (
-          <div
-            role="status"
-            aria-live="polite"
-            className="fixed bottom-24 left-1/2 z-40 flex w-[calc(100%-32px)] max-w-[560px] -translate-x-1/2 flex-wrap items-center justify-between gap-3 rounded-card border-2 border-primary bg-cream px-4 py-3 shadow-md"
-          >
-            <p className="min-w-0 flex-1 text-base font-bold text-ink">
-              Đọc lại cả câu: “{activeSentenceReinforcement.span.text}”
-            </p>
-            <Button
-              variant="secondary"
-              className="h-10! min-h-10! w-auto! px-3! py-1! text-sm!"
-              onClick={() =>
-                void finishSentenceReinforcement(
-                  alignmentEngineRef.current,
-                  false,
-                )
-              }
+        sentenceReinforcementPanel={
+          activeSentenceReinforcement ? (
+            <div
+              role="status"
+              aria-live="polite"
+              data-testid="sentence-reinforcement-banner"
+              className="flex flex-wrap items-center justify-between gap-3 rounded-card border-2 border-primary bg-cream px-4 py-3 shadow-xs"
             >
-              Bỏ qua đọc lại câu
-            </Button>
-          </div>
-        ) : null}
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
+                  Đọc lại cả câu
+                </p>
+                <span className="sr-only">
+                  Đọc lại cả câu: “{activeSentenceReinforcement.span.text}”
+                </span>
+                <p
+                  aria-hidden="true"
+                  className="flex flex-wrap items-center gap-1.5 text-base font-bold text-ink sm:text-lg"
+                >
+                  {activeSentenceReinforcement.span.words.map((w, idx) => {
+                    const matched =
+                      activeSentenceReinforcement.matchedIndices.has(idx);
+                    return (
+                      <span
+                        key={`${w.word_id}-${idx}`}
+                        data-reinforce-matched={matched ? "true" : "false"}
+                        className={
+                          matched
+                            ? "rounded-control bg-emerald-100 px-1.5 py-0.5 text-emerald-900 transition-colors duration-200"
+                            : "rounded-control px-1.5 py-0.5 text-ink transition-colors duration-200"
+                        }
+                      >
+                        {w.text}
+                      </span>
+                    );
+                  })}
+                </p>
+              </div>
+              <Button
+                variant="secondary"
+                className="h-10! min-h-10! w-auto! shrink-0 px-3! py-1! text-sm!"
+                onClick={() =>
+                  void finishSentenceReinforcement(
+                    alignmentEngineRef.current,
+                    false,
+                  )
+                }
+              >
+                Bỏ qua đọc lại câu
+              </Button>
+            </div>
+          ) : null
+        }
+      >
         {uiState === "page-turn" ? (
           <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
             Đang chuyển trang và liên kết lại từ đang đọc…
@@ -5747,7 +6209,10 @@ function ReadingSessionScreen({
         </Modal>
       ) : retryPrompt ? (
         <ReadingStatusDialog
-          body={`Bé còn ${retryCandidates.length} từ cần đọc lại. Mình cùng luyện thêm một lần nhé!`}
+          body={adaptTextToTeacherPersona(
+            `Bé còn ${retryCandidates.length} từ cần đọc lại. Con có muốn cùng cô đọc lại không? Con có thể nói “Có” hoặc “Không” nhé!`,
+            getEffectiveTeacherPersona().gender,
+          )}
           onClose={() => undefined}
           primaryAction={{
             isLoading: isBusy,

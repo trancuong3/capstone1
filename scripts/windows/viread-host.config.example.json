@@ -12,5 +12,7 @@
   "ocrCloudCorrectionEnabled": false,
   "ocrWarmupEnabled": false,
   "ocrDevice": "cpu",
+  "voiceRuntimeDir": "F:\\c1\\tools\\voice-runtime",
+  "voiceWorkerPort": 8010,
   "logRetentionMb": 20
 }

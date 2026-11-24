@@ -175,12 +175,19 @@ def _rng_state(torch):
     return state
 
 
+def _to_cpu_byte_tensor(torch, value: Any):
+    if hasattr(value, "to"):
+        return value.to(device="cpu", dtype=torch.uint8).contiguous()
+    return torch.tensor(list(value), dtype=torch.uint8, device="cpu")
+
+
 def _restore_rng(torch, state: dict[str, Any]) -> None:
     random.setstate(state["python"])
     __import__("numpy").random.set_state(state["numpy"])
-    torch.set_rng_state(state["torch"])
+    torch.set_rng_state(_to_cpu_byte_tensor(torch, state["torch"]))
     if "cuda" in state and torch.cuda.is_available():
-        torch.cuda.set_rng_state_all(state["cuda"])
+        cuda_states = [_to_cpu_byte_tensor(torch, item) for item in state["cuda"]]
+        torch.cuda.set_rng_state_all(cuda_states)
 
 
 class _WidthBucketBatchSampler:

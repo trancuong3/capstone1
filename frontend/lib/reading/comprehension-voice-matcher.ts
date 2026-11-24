@@ -59,6 +59,7 @@ const CHOICE_PREFIX_WORDS = new Set([
   "ạ",
   "ơi",
   "cô",
+  "thầy",
 ]);
 
 const REPLAY_PHRASES = [
@@ -68,6 +69,7 @@ const REPLAY_PHRASES = [
   "nói lại",
   "đọc lại giúp con",
   "cô đọc lại",
+  "thầy đọc lại",
 ];
 
 const STOP_PHRASES = [

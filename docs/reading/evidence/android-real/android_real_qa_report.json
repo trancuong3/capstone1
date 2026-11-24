@@ -1,0 +1,246 @@
+{
+  "executed_at": "2026-11-22T09:25:57.585Z",
+  "device": {
+    "serial": "ATSYVB6205006984",
+    "manufacturer": "HONOR",
+    "model": "MTN-NX1",
+    "android_version": "16",
+    "sdk_int": "36",
+    "abi": "arm64-v8a",
+    "wlan_ip": "inet 192.168.33.59/22 brd 192.168.35.255 scope global dynamic wlan0",
+    "wm_size": "Physical size: 1200x2640",
+    "lan_origin": "https://192.168.34.66:9443",
+    "initial_pid": "4526",
+    "user_agent": "Mozilla/5.0 (Linux; Android 16; MTN-NX1 Build/HONORMTN-N21; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/157.0.8103.50 Mobile Safari/537.36 ViReadAndroid/1.0"
+  },
+  "checks": {
+    "A1_login": {
+      "passed": true,
+      "current_url": "https://192.168.34.66:9443/reading/f3f59712-a93a-47a1-b54f-78393a9790f5?state=reading&pageId=b46d57f3-2733-43c9-b57c-b06edfdb1cf3",
+      "has_bearer_session": true
+    },
+    "A2_permissions_and_hw_media": {
+      "passed": true,
+      "granted_permissions_dump": "android.permission.CAMERA: granted=true, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED]\r\n        android.permission.RECORD_AUDIO: granted=true, flags=[ USER_SET|USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED|ONE_TIME]",
+      "real_mic_probe": {
+        "elapsed_ms": 2678,
+        "sample_rate": 48000,
+        "captured_samples": 51200,
+        "peak": 0.00162,
+        "rms": 0.00007,
+        "track": {
+          "label": "",
+          "readyState": "live",
+          "settings": {
+            "autoGainControl": true,
+            "channelCount": 1,
+            "deviceId": "default",
+            "echoCancellation": true,
+            "groupId": "381e4c652a2bcf3a334226e13d2992d3bd85026300e62d8dd2fd0d4a24373ec7",
+            "latency": 0.01,
+            "noiseSuppression": true,
+            "sampleRate": 48000,
+            "sampleSize": 16,
+            "voiceIsolation": false
+          }
+        },
+        "stt_http_status": 200,
+        "stt_ms": 1277,
+        "stt_provider": "local",
+        "stt_text": "thì"
+      },
+      "real_camera_probe": {
+        "ok": true,
+        "label": "camera 0, facing back",
+        "readyState": "live",
+        "width": 480,
+        "height": 640
+      }
+    },
+    "A3_A4_voice_lan_tts_stt": {
+      "passed": true,
+      "speed_monotonic": {
+        "slowDur": 2.677,
+        "normDur": 2.23,
+        "fastDur": 1.969
+      },
+      "tone_violations": 0,
+      "voices_status": 200,
+      "voices_count": 8,
+      "tts_checks": [
+        {
+          "label": "north_female_uncached",
+          "status": 200,
+          "bytes": 183404,
+          "ttfa_ms": 747,
+          "duration_sec": 1.91,
+          "voice_provider": "local",
+          "voice_gender": "female",
+          "model_version": "vieneu-v3-turbo-onnx-int8-3.8.5",
+          "speaker_played": true,
+          "speaker_err": null
+        },
+        {
+          "label": "north_female_cached",
+          "status": 200,
+          "bytes": 183404,
+          "ttfa_ms": 647,
+          "duration_sec": 1.91,
+          "voice_provider": "local",
+          "voice_gender": "female",
+          "model_version": "vieneu-v3-turbo-onnx-int8-3.8.5",
+          "speaker_played": false,
+          "speaker_err": null
+        },
+        {
+          "label": "north_male_thay",
+          "status": 200,
+          "bytes": 290924,
+          "ttfa_ms": 630,
+          "duration_sec": 3.03,
+          "voice_provider": "local",
+          "voice_gender": "male",
+          "model_version": "vieneu-v3-turbo-onnx-int8-3.8.5",
+          "speaker_played": true,
+          "speaker_err": null
+        },
+        {
+          "label": "central_female",
+          "status": 200,
+          "bytes": 229484,
+          "ttfa_ms": 825,
+          "duration_sec": 2.39,
+          "voice_provider": "local",
+          "voice_gender": "female",
+          "model_version": "vieneu-v3-turbo-onnx-int8-3.8.5",
+          "speaker_played": false,
+          "speaker_err": null
+        },
+        {
+          "label": "south_female_slow",
+          "status": 200,
+          "bytes": 257042,
+          "ttfa_ms": 559,
+          "duration_sec": 2.677,
+          "voice_provider": "local",
+          "voice_gender": "female",
+          "model_version": "vieneu-v3-turbo-onnx-int8-3.8.5",
+          "speaker_played": false,
+          "speaker_err": null
+        },
+        {
+          "label": "south_female_normal",
+          "status": 200,
+          "bytes": 214124,
+          "ttfa_ms": 564,
+          "duration_sec": 2.23,
+          "voice_provider": "local",
+          "voice_gender": "female",
+          "model_version": "vieneu-v3-turbo-onnx-int8-3.8.5",
+          "speaker_played": false,
+          "speaker_err": null
+        },
+        {
+          "label": "south_female_fast",
+          "status": 200,
+          "bytes": 189080,
+          "ttfa_ms": 700,
+          "duration_sec": 1.969,
+          "voice_provider": "local",
+          "voice_gender": "female",
+          "model_version": "vieneu-v3-turbo-onnx-int8-3.8.5",
+          "speaker_played": false,
+          "speaker_err": null
+        }
+      ],
+      "stt_roundtrips": [
+        {
+          "text": "một",
+          "status": 200,
+          "stt_ms": 771,
+          "got": "một",
+          "false_correct_tone_violation": false
+        },
+        {
+          "text": "mốt",
+          "status": 200,
+          "stt_ms": 793,
+          "got": "mốt",
+          "false_correct_tone_violation": false
+        },
+        {
+          "text": "bà",
+          "status": 200,
+          "stt_ms": 705,
+          "got": "bà",
+          "false_correct_tone_violation": false
+        },
+        {
+          "text": "tâm",
+          "status": 200,
+          "stt_ms": 617,
+          "got": "tâm",
+          "false_correct_tone_violation": false
+        },
+        {
+          "text": "Trăng sáng sân nhà, gió mát đầu hiên.",
+          "status": 200,
+          "stt_ms": 799,
+          "got": "trăng sáng sân nhà gió mát đầu hiên",
+          "false_correct_tone_violation": false
+        }
+      ]
+    },
+    "A5_reading_e2e_and_rotation": {
+      "passed": false,
+      "session_id": "b5c7503b-c0cf-4e62-a4d0-7265c63ea445",
+      "portrait_metrics": {
+        "innerWidth": 369,
+        "innerHeight": 774,
+        "scrollWidth": 369,
+        "overflowPx": 0,
+        "reflowMode": "source-preserved",
+        "wordCount": 0,
+        "hasOfflineTtsBadge": true,
+        "hasOfflineSttBadge": true
+      },
+      "landscape_metrics": {
+        "innerWidth": 774,
+        "innerHeight": 331,
+        "scrollWidth": 774,
+        "overflowPx": 0,
+        "stillOnSession": true
+      },
+      "phonics_visible": true,
+      "voice_modal_opened": true,
+      "sample_clicked": false,
+      "real_mic_started_in_ui": false,
+      "finish_result": {
+        "completeStatus": 200,
+        "finishStatus": 200
+      },
+      "sessions_history_persisted": true
+    },
+    "A6_force_stop_persistence": {
+      "passed": true,
+      "new_pid": "6099",
+      "url_after_relaunch": "https://192.168.34.66:9443/dashboard"
+    }
+  },
+  "console_errors": [],
+  "page_errors": [],
+  "screenshots": [
+    "F:\\c1\\capstone1-reading-qa\\docs\\reading\\evidence\\android-real\\03-reading-portrait.png",
+    "F:\\c1\\capstone1-reading-qa\\docs\\reading\\evidence\\android-real\\04-phonics-panel.png",
+    "F:\\c1\\capstone1-reading-qa\\docs\\reading\\evidence\\android-real\\05-voice-modal.png",
+    "F:\\c1\\capstone1-reading-qa\\docs\\reading\\evidence\\android-real\\06-reading-live-mic.png",
+    "F:\\c1\\capstone1-reading-qa\\docs\\reading\\evidence\\android-real\\07-reading-landscape.png",
+    "F:\\c1\\capstone1-reading-qa\\docs\\reading\\evidence\\android-real\\08-sessions-persisted.png",
+    "F:\\c1\\capstone1-reading-qa\\docs\\reading\\evidence\\android-real\\09-after-force-stop.png"
+  ],
+  "logcat_check": {
+    "sslOrCrashCount": 0,
+    "samples": []
+  },
+  "overall_passed": false
+}

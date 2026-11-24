@@ -2,6 +2,10 @@
 
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef } from "react";
 import {
+  computeUniversalPageWordLayout,
+  type WordLayoutEntry,
+} from "@/lib/reading/ocr-text-reflow";
+import {
   wordPresentationClasses,
   wordPresentationLabels,
   type PageWordEvidence,
@@ -10,7 +14,7 @@ import {
 } from "@/lib/reading/word-presentation";
 
 import { cn } from "@/lib/utils/cn";
-import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
+import type { ReadingPageWordDTO } from "@/types/reading";
 
 interface BookPageContentProps extends PageWordEvidence {
   spokenWords?: Set<string>;
@@ -18,66 +22,6 @@ interface BookPageContentProps extends PageWordEvidence {
   readOnly?: boolean;
   /** Optional instrumentation hook for render-count benchmarks. */
   onWordTokenRender?: (wordId: string) => void;
-}
-
-interface WordLayoutEntry {
-  readonly word: ReadingPageWordDTO;
-  readonly index: number;
-  readonly lineIndex: number;
-  readonly breakCount: number;
-  readonly isIndented: boolean;
-}
-
-function computePageWordLayout(page: ReadingPageDTO): WordLayoutEntry[] {
-  const textTokens = [...(page.text ?? "").matchAll(/\S+/gu)];
-  const textMatchesWords =
-    textTokens.length === page.words.length &&
-    textTokens.every(
-      (match, index) =>
-        match[0].normalize("NFC") === page.words[index].text.normalize("NFC"),
-    );
-  const paragraphStarts = new Set(page.paragraph_start_line_indices ?? []);
-  const indentedLines = new Set(page.indented_line_indices ?? []);
-
-  return page.words.map((word, index) => {
-    const previousWord = page.words[index - 1];
-    const lineIndex = word.line_index ?? 0;
-    const previousLineIndex = previousWord?.line_index ?? 0;
-    const startsLine =
-      previousWord !== undefined && lineIndex !== previousLineIndex;
-
-    let breakCount = 0;
-    if (textMatchesWords) {
-      const gap = page.text!.slice(
-        index === 0
-          ? 0
-          : textTokens[index - 1].index! + textTokens[index - 1][0].length,
-        textTokens[index].index,
-      );
-      breakCount = Math.min(2, (gap.match(/\n/gu) ?? []).length);
-    } else if (startsLine) {
-      const verticalGap = previousWord
-        ? word.bbox[1] - (previousWord.bbox[1] + previousWord.bbox[3])
-        : 0;
-      const inferredParagraphBreak =
-        previousWord !== undefined &&
-        verticalGap > Math.max(previousWord.bbox[3], word.bbox[3]) * 1.8;
-      const startsParagraph =
-        paragraphStarts.has(lineIndex) || inferredParagraphBreak;
-      breakCount = startsParagraph ? 2 : 1;
-    }
-
-    const isIndented =
-      (index === 0 || startsLine) && indentedLines.has(lineIndex);
-
-    return {
-      word,
-      index,
-      lineIndex,
-      breakCount,
-      isIndented,
-    };
-  });
 }
 
 interface WordTokenProps {
@@ -136,12 +80,12 @@ const MemoWordToken = memo(function WordToken({
       <span
         ref={handleRef}
         className={cn(
-          "mr-2 inline-block scroll-mt-24 scroll-mb-40 rounded-control px-2 py-0.5 transition-colors duration-100",
+          "mr-1.5 inline-block scroll-mt-24 scroll-mb-40 rounded-control px-2 py-0.5 transition-[background-color,color,border-color,box-shadow] duration-200 ease-out motion-reduce:transition-none",
           !readOnly &&
             "min-h-11 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
           !readOnly && "cursor-pointer select-none",
           wordPresentationClasses[presentationState],
-          isCurrent && "scale-105 font-semibold shadow-sm",
+          isCurrent && "font-semibold ring-2 ring-primary/45 shadow-xs",
           presentationState === "incorrect" &&
             "font-semibold border-b-2 border-red-500",
           presentationState === "unread" &&
@@ -232,7 +176,8 @@ export function BookPageContent(props: BookPageContentProps) {
     [],
   );
 
-  const layout = useMemo(() => computePageWordLayout(page), [page]);
+  const reflow = useMemo(() => computeUniversalPageWordLayout(page), [page]);
+  const layout: WordLayoutEntry[] = reflow.entries;
 
   const activeWordId = previewSnapshot
     ? previewSnapshot.currentWordId
@@ -253,10 +198,11 @@ export function BookPageContent(props: BookPageContentProps) {
   return (
     <div
       data-reading-panel="text"
+      data-reflow-mode={reflow.mode}
       className="mt-4 min-h-0 flex-1 py-3 sm:mt-6 sm:py-2"
     >
       {hasWords ? (
-        <p className="text-balance text-[24px] font-bold leading-[2] text-ink sm:text-[30px] sm:leading-[1.85]">
+        <p className="max-w-[58ch] text-[24px] font-bold leading-[2] tracking-[0.01em] text-ink sm:text-[30px] sm:leading-[1.9]">
           {layout.map((entry) => (
             <MemoWordToken
               key={entry.word.word_id}

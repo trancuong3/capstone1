@@ -26,6 +26,10 @@ import {
   normalizeVietnameseWord,
   tokenizeVietnameseText,
 } from "@/lib/reading/vietnamese-text";
+import {
+  adaptTextToTeacherPersona,
+  type VoiceGender,
+} from "@/lib/reading/voice-persona";
 
 export type VietnameseTone = "ngang" | "sac" | "huyen" | "hoi" | "nga" | "nang";
 
@@ -303,19 +307,21 @@ export function decomposeVietnameseSyllable(
     }
   }
 
+  // Single-vowel "gi" words like "gì" / "gỉ" / "gị": onset "gi", rhyme "i"
+  // (must be checked BEFORE single-char onset "g" matches "gi").
   let onset = "";
   let rhyme = untoned;
-  for (const candidate of ONSETS) {
-    if (untoned.startsWith(candidate) && untoned.length > candidate.length) {
-      onset = candidate;
-      rhyme = untoned.slice(candidate.length);
-      break;
-    }
-  }
-  // Single-vowel "gi" words like "gì" / "gỉ" / "gị": onset "gi", rhyme "i".
-  if (!onset && untoned === "gi") {
+  if (untoned === "gi") {
     onset = "gi";
     rhyme = "i";
+  } else {
+    for (const candidate of ONSETS) {
+      if (untoned.startsWith(candidate) && untoned.length > candidate.length) {
+        onset = candidate;
+        rhyme = untoned.slice(candidate.length);
+        break;
+      }
+    }
   }
 
   return {
@@ -408,11 +414,16 @@ export function buildPhonicsCueSet(word: string): ReadonlySet<string> {
   add(rhyme);
   // Also allow mildly toned rhyme variants ASR produces when a child pronounces
   // a rhyme in isolation (e.g. "ôi" -> "ối"/"ồi", "ơm" -> "ớm"/"ờm", "ang" -> "áng"/"àng")
+  // and always include the word's own toned rhyme even for 1-vowel rhymes (e.g. "ự" for "tự").
   if (rhyme.length >= 2) {
     const sacRhyme = applyToneToRhyme(rhyme, "sac");
     const nangRhyme = applyToneToRhyme(rhyme, "nang");
     if (sacRhyme) add(sacRhyme);
     if (nangRhyme && parts.tone === "nang") add(nangRhyme);
+  }
+  if (parts.tone === "sac" || parts.tone === "nang") {
+    const targetTonedRhyme = applyToneToRhyme(rhyme, parts.tone);
+    if (targetTonedRhyme) add(targetTonedRhyme);
   }
 
   if (coda) {
@@ -659,7 +670,68 @@ export function isLikelyPhonicsCueForWord(
  *  - "cá"   -> "Con nghe cô đánh vần nhé: cờ... a... ca... sắc... cá! Đọc trơn là: cá. Đến lượt con giỏi lắm nào!"
  *  - "tôi"  -> "Mình ghép vần cùng cô nha: ô... i... ôi, tờ... ôi... tôi! Đọc trơn là: tôi. Con thử đọc lại chữ “tôi” nhé!"
  */
-export function generateSpokenPhonicsGuide(word: string): string {
+const UNIVERSAL_PHONICS_CUE_TOKENS: ReadonlySet<string> = (() => {
+  const set = new Set<string>([
+    "sắc",
+    "sắt",
+    "xắc",
+    "huyền",
+    "hiền",
+    "hỏi",
+    "ngã",
+    "ngả",
+    "nặng",
+    "nặn",
+    "dấu",
+  ]);
+  for (const names of Object.values(CONSONANT_SPOKEN_NAMES)) {
+    for (const n of names) set.add(normalizeVietnameseWord(n));
+  }
+  for (const names of Object.values(VOWEL_SPOKEN_NAMES)) {
+    for (const n of names) set.add(normalizeVietnameseWord(n));
+  }
+  return set;
+})();
+
+/**
+ * True if a token is a recognizable Vietnamese spelling cue (consonant spoken name,
+ * single vowel letter, or tone name like "mờ", "trờ", "ô", "i", "nặng", "huyền").
+ */
+export function isLikelyPhonicsCueToken(token: string): boolean {
+  const norm = normalizeVietnameseWord(token);
+  if (!norm) return false;
+  return UNIVERSAL_PHONICS_CUE_TOKENS.has(norm);
+}
+
+/**
+ * True if `token` belongs to the phonics cue set of any upcoming target word
+ * in a multi-word cluster (e.g., spelling 2–4 words like "môi trường tự nhiên"
+ * in sequence before reading the full phrase smoothly).
+ */
+export function isPhonicsCueForWindow(
+  token: string,
+  windowTargets: readonly string[],
+): boolean {
+  const norm = normalizeVietnameseWord(token);
+  if (!norm) return false;
+  for (const target of windowTargets) {
+    const cues = buildPhonicsCueSet(target);
+    if (cues && cues.has(norm)) return true;
+  }
+  return false;
+}
+
+export function generateSpokenPhonicsGuide(
+  word: string,
+  gender: VoiceGender = "female",
+): string {
+  return adaptTextToTeacherPersona(
+    generateFemaleSpokenPhonicsGuide(word),
+    gender,
+  );
+}
+
+function generateFemaleSpokenPhonicsGuide(word: string): string {
   const parts = decomposeVietnameseSyllable(word);
   const displayWord = normalizeVietnameseWord(word) || word.trim();
   if (!parts) {

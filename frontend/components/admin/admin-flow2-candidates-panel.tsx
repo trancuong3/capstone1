@@ -39,7 +39,9 @@ export function AdminFlow2CandidatesPanel() {
     "PENDING_VERIFICATION",
   );
   const [page, setPage] = useState<AdminFlow2CandidatePageDTO | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() =>
+    Boolean(bookContentQuality.listFlow2Candidates),
+  );
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [labelDraft, setLabelDraft] = useState("");
@@ -57,32 +59,47 @@ export function AdminFlow2CandidatesPanel() {
     page?.items[0] ??
     null;
 
+  const selectCandidate = useCallback((item: AdminFlow2CandidateDTO | null) => {
+    setSelectedId(item?.id ?? null);
+    if (item) {
+      setLabelDraft(item.verified_label ?? item.proposed_label);
+      setRejectionReason("");
+      setActionError(null);
+    }
+  }, []);
+
   const reload = useCallback(() => {
+    setLoading(true);
+    setError(null);
     setReloadKey((prev) => prev + 1);
   }, []);
 
   useEffect(() => {
-    if (!bookContentQuality.listFlow2Candidates) {
-      setLoading(false);
+    const listFn = bookContentQuality.listFlow2Candidates;
+    if (!listFn) {
       return;
     }
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    bookContentQuality
-      .listFlow2Candidates({
-        status: statusFilter,
-        limit: 50,
-        offset: 0,
-      })
+    listFn({
+      status: statusFilter,
+      limit: 50,
+      offset: 0,
+    })
       .then((data) => {
         if (cancelled) return;
         setPage(data);
-        setSelectedId((prev) =>
-          prev && data.items.some((i) => i.id === prev)
-            ? prev
-            : (data.items[0]?.id ?? null),
-        );
+        setSelectedId((prev) => {
+          const next =
+            (prev ? data.items.find((i) => i.id === prev) : null) ??
+            data.items[0] ??
+            null;
+          if (next) {
+            setLabelDraft(next.verified_label ?? next.proposed_label);
+            setRejectionReason("");
+            setActionError(null);
+          }
+          return next?.id ?? null;
+        });
       })
       .catch((err) => {
         if (cancelled) return;
@@ -99,14 +116,6 @@ export function AdminFlow2CandidatesPanel() {
       cancelled = true;
     };
   }, [bookContentQuality, statusFilter, reloadKey]);
-
-  useEffect(() => {
-    if (selected) {
-      setLabelDraft(selected.verified_label ?? selected.proposed_label);
-      setRejectionReason("");
-      setActionError(null);
-    }
-  }, [selected?.id]);
 
   async function handleApprove() {
     if (!selected || !bookContentQuality.decideFlow2Candidate) return;
@@ -169,7 +178,12 @@ export function AdminFlow2CandidatesPanel() {
                     ? "border-primary bg-primary text-white"
                     : "border-border bg-white text-ink hover:bg-surface-subtle"
                 }`}
-                onClick={() => setStatusFilter(f.key)}
+                onClick={() => {
+                  if (active) return;
+                  setLoading(Boolean(bookContentQuality.listFlow2Candidates));
+                  setError(null);
+                  setStatusFilter(f.key);
+                }}
                 type="button"
               >
                 {f.label} ({count})
@@ -234,7 +248,9 @@ export function AdminFlow2CandidatesPanel() {
                       ? "border-primary bg-sky/40"
                       : "border-border bg-white hover:bg-surface-subtle"
                   }`}
-                  onClick={() => setSelectedId(item.id)}
+                  onClick={() => {
+                    if (!isSelected) selectCandidate(item);
+                  }}
                   type="button"
                 >
                   <div className="flex w-full items-center justify-between gap-2">
@@ -306,9 +322,7 @@ export function AdminFlow2CandidatesPanel() {
                 <input
                   id="flow2-verified-label-input"
                   className="w-full rounded-control border border-border bg-white px-3 py-2 text-sm font-medium text-ink focus:border-primary focus:outline-none"
-                  disabled={
-                    busy || selected.status !== "PENDING_VERIFICATION"
-                  }
+                  disabled={busy || selected.status !== "PENDING_VERIFICATION"}
                   onChange={(event) => setLabelDraft(event.target.value)}
                   type="text"
                   value={labelDraft}
@@ -330,7 +344,9 @@ export function AdminFlow2CandidatesPanel() {
                       type="button"
                     >
                       <CheckCircle2 aria-hidden="true" className="size-4" />
-                      {busy ? "Đang xử lý..." : "Xác nhận nhãn (Đạt · Đẩy đồng bộ)"}
+                      {busy
+                        ? "Đang xử lý..."
+                        : "Xác nhận nhãn (Đạt · Đẩy đồng bộ)"}
                     </Button>
                   </div>
 

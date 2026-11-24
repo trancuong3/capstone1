@@ -57,6 +57,34 @@ logger = logging.getLogger(__name__)
 _WORKER_SHUTDOWN_TIMEOUT_SECONDS = 5.0
 
 
+def _background_worker_startup_delay_seconds() -> float:
+    """Defer background worker DB polling on Render/production so initial API requests win CPU/DB."""
+    raw = os.getenv("BACKGROUND_WORKER_STARTUP_DELAY_SECONDS")
+    if raw is not None and raw.strip() != "":
+        try:
+            return max(0.0, min(60.0, float(raw.strip())))
+        except ValueError:
+            return 0.0
+    if os.getenv("RENDER") or APP_ENVIRONMENT == "production":
+        return 12.0
+    return 0.0
+
+
+async def _run_worker_with_startup_delay(
+    worker_fn,
+    stop_event: asyncio.Event,
+    delay_seconds: float,
+) -> None:
+    if delay_seconds > 0:
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=delay_seconds)
+            return
+        except TimeoutError:
+            pass
+    if not stop_event.is_set():
+        await worker_fn(stop_event)
+
+
 def _task_runtime_state(task: asyncio.Task[object] | None) -> str:
     if task is None:
         return "disabled"
@@ -192,9 +220,12 @@ async def lifespan(_app: FastAPI):
     admin_ai_workflow_task = None
     stop_parent_book_worker = asyncio.Event()
     parent_book_task = None
+    worker_startup_delay = _background_worker_startup_delay_seconds()
     if APP_ENVIRONMENT != "test" and not worker_disabled:
         book_quality_task = asyncio.create_task(
-            run_book_quality_worker(stop_book_quality_worker),
+            _run_worker_with_startup_delay(
+                run_book_quality_worker, stop_book_quality_worker, worker_startup_delay
+            ),
             name="book_quality_scan_worker",
         )
     workflow_worker_enabled = os.getenv(
@@ -202,7 +233,11 @@ async def lifespan(_app: FastAPI):
     ).strip().lower() not in {"0", "false", "no", "off"}
     if APP_ENVIRONMENT != "test" and workflow_worker_enabled:
         admin_ai_workflow_task = asyncio.create_task(
-            run_admin_ai_workflow_worker(stop_admin_ai_workflow),
+            _run_worker_with_startup_delay(
+                run_admin_ai_workflow_worker,
+                stop_admin_ai_workflow,
+                worker_startup_delay,
+            ),
             name="admin_ai_workflow_worker",
         )
     parent_book_worker_enabled = os.getenv(
@@ -210,14 +245,22 @@ async def lifespan(_app: FastAPI):
     ).strip().lower() not in {"0", "false", "no", "off"}
     if APP_ENVIRONMENT != "test" and parent_book_worker_enabled:
         parent_book_task = asyncio.create_task(
-            run_parent_book_submission_worker(stop_parent_book_worker),
+            _run_worker_with_startup_delay(
+                run_parent_book_submission_worker,
+                stop_parent_book_worker,
+                worker_startup_delay,
+            ),
             name="parent_book_submission_worker",
         )
     ocr_outbox_enabled = os.getenv("VIREAD_OCR_OUTBOX_WORKER_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
     stop_viread_ocr_outbox = asyncio.Event()
     if APP_ENVIRONMENT != "test" and ocr_outbox_enabled:
         viread_outbox_task = asyncio.create_task(
-            run_viread_ocr_outbox_worker(stop_viread_ocr_outbox),
+            _run_worker_with_startup_delay(
+                run_viread_ocr_outbox_worker,
+                stop_viread_ocr_outbox,
+                worker_startup_delay,
+            ),
             name="viread_ocr_verified_outbox_worker",
         )
     training_worker_enabled = os.getenv(
@@ -226,7 +269,11 @@ async def lifespan(_app: FastAPI):
     stop_viread_training = asyncio.Event()
     if APP_ENVIRONMENT != "test" and training_worker_enabled:
         viread_training_task = asyncio.create_task(
-            run_viread_ocr_training_auto_worker(stop_viread_training),
+            _run_worker_with_startup_delay(
+                run_viread_ocr_training_auto_worker,
+                stop_viread_training,
+                worker_startup_delay,
+            ),
             name="viread_ocr_flow2_auto_training_worker",
         )
     local_trainer_process = None
@@ -555,7 +602,16 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Request-ID", "X-Resolved-Voice-Id", "X-Voice-Fallback"],
+    expose_headers=[
+        "X-Request-ID",
+        "X-Resolved-Voice-Id",
+        "X-Voice-Provider",
+        "X-Voice-Region",
+        "X-Voice-Gender",
+        "X-Voice-Model-Version",
+        "X-Voice-Fallback",
+        "X-Voice-Fallback-Reason",
+    ],
 )
 
 @app.get("/health", tags=["System"])

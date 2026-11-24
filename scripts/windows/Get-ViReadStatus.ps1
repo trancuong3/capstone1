@@ -36,6 +36,12 @@ try {
     $beHealth = Invoke-RestMethod -Uri "http://127.0.0.1:$($cfg.backendPort)/health" -TimeoutSec 4
 } catch { }
 
+$voicePort = if ($cfg.voiceWorkerPort) { [int]$cfg.voiceWorkerPort } else { 8010 }
+$voiceHealth = $null
+try {
+    $voiceHealth = Invoke-RestMethod -Uri "http://127.0.0.1:$voicePort/health" -TimeoutSec 3
+} catch { }
+
 $report = @{
     configPath   = (Resolve-Path $ConfigPath).Path
     lanOrigin    = "https://$($cfg.lanHost):$($cfg.httpsPort)"
@@ -50,10 +56,12 @@ $report = @{
         backendListening  = [bool](Get-NetTCPConnection -LocalPort ([int]$cfg.backendPort) -State Listen -ErrorAction SilentlyContinue)
         frontendListening = [bool](Get-NetTCPConnection -LocalPort ([int]$cfg.frontendPort) -State Listen -ErrorAction SilentlyContinue)
         proxyListening    = [bool](Get-NetTCPConnection -LocalPort ([int]$cfg.httpsPort) -State Listen -ErrorAction SilentlyContinue)
+        voiceListening    = [bool](Get-NetTCPConnection -LocalPort $voicePort -State Listen -ErrorAction SilentlyContinue)
     }
-    backendHealth = $beHealth
-    logsDir       = Join-Path $runtimeDir "logs"
-    caCertPem     = Join-Path $runtimeDir "certs\viread-lan-ca.pem"
+    backendHealth     = $beHealth
+    voiceWorkerHealth = $voiceHealth
+    logsDir           = Join-Path $runtimeDir "logs"
+    caCertPem         = Join-Path $runtimeDir "certs\viread-lan-ca.pem"
 }
 
 if ($AsJson) {
@@ -65,6 +73,7 @@ if ($AsJson) {
     Write-Host "Backend:    running=$($report.processes.backend.running) pid=$($report.processes.backend.pid) port=$($cfg.backendPort) listen=$($report.ports.backendListening)"
     Write-Host "Frontend:   running=$($report.processes.frontend.running) pid=$($report.processes.frontend.pid) port=$($cfg.frontendPort) listen=$($report.ports.frontendListening)"
     Write-Host "Proxy TLS:  running=$($report.processes.proxy.running) pid=$($report.processes.proxy.pid) port=$($cfg.httpsPort) listen=$($report.ports.proxyListening)"
+    Write-Host "Voice Wkr:  port=$voicePort listen=$($report.ports.voiceListening) status=$(if ($voiceHealth) { $voiceHealth.status } else { 'UNREACHABLE' })"
     if ($beHealth) {
         Write-Host "Health:     status=$($beHealth.status) db=$($beHealth.database.status) ocr_ready=$($beHealth.ocr.ready)"
     } else {
@@ -73,7 +82,7 @@ if ($AsJson) {
     Write-Host "Logs:       $($report.logsDir)"
 }
 
-if ($report.processes.backend.running -and $report.processes.frontend.running -and $report.processes.proxy.running -and $beHealth -and $beHealth.ocr.ready) {
+if ($report.processes.backend.running -and $report.processes.frontend.running -and $report.processes.proxy.running -and $beHealth -and ($beHealth.status -in @("ok", "degraded"))) {
     exit 0
 }
 exit 1

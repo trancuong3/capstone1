@@ -83,6 +83,11 @@ if ($state.backendListenPid -and ([int]$state.backendListenPid -ne [int]$state.b
     Stop-OwnedProcess "Backend Listener" ([int]$state.backendListenPid) ([string]$state.backendListenStart)
 }
 
+$voiceWorkerStop = Join-Path $scriptDir "Stop-ViReadVoiceWorker.ps1"
+if (Test-Path $voiceWorkerStop) {
+    & $voiceWorkerStop | Out-Host
+}
+
 Remove-Item -Force $stateFile -ErrorAction SilentlyContinue
 Write-Host "ViRead local host stopped cleanly."
 exit 0

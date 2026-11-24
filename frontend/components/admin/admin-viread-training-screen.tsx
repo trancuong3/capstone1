@@ -557,7 +557,8 @@ export function AdminVireadTrainingScreen() {
                 <p className="mt-1 text-xs text-muted">
                   Chỉ nhận revision hoặc dòng chữ sách riêng đã được chủ sách
                   bật đóng góp và Admin xác minh thủ công (chặn tuyệt đối
-                  AI_AUTO_VERIFIED); mẫu gia đình không tự trở thành Locked Test.
+                  AI_AUTO_VERIFIED); mẫu gia đình không tự trở thành Locked
+                  Test.
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold">
                   <span
@@ -573,8 +574,9 @@ export function AdminVireadTrainingScreen() {
                   </span>
                   <span
                     className={`rounded-full border px-2.5 py-0.5 ${
-                      data.storage_summary?.evaluation_ready_for_model_replacement ??
-                      data.locked_test?.status === "READY"
+                      (data.storage_summary
+                        ?.evaluation_ready_for_model_replacement ??
+                      data.locked_test?.status === "READY")
                         ? "border-emerald-300 bg-emerald-50 text-emerald-900"
                         : "border-slate-300 bg-slate-100 text-slate-800"
                     }`}

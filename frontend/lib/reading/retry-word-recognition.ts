@@ -37,9 +37,72 @@ const ASSISTANT_BLEED_PHRASES = [
   "đánh vần chậm cùng cô",
   "ghép vần cùng cô",
   "nghe cô đánh vần",
+  "đánh vần chậm cùng thầy",
+  "ghép vần cùng thầy",
+  "nghe thầy đánh vần",
   "đọc trơn là",
   "đến lượt con giỏi lắm",
 ] as const;
+
+const YES_INTENT_TOKENS = new Set([
+  "có",
+  "dạ",
+  "vâng",
+  "ừ",
+  "muốn",
+  "đồng",
+  "ok",
+  "được",
+  "đọc",
+]);
+
+const NO_INTENT_TOKENS = new Set([
+  "không",
+  "thôi",
+  "bỏ",
+  "qua",
+  "khỏi",
+  "chưa",
+]);
+
+/**
+ * Classifies a child's spoken Yes/No answer to the post-reading wrap-up prompt
+ * ("Con có muốn cùng cô/thầy đọc lại vài từ khó không?").
+ */
+export function classifyYesNoVoiceIntent(
+  transcript: string,
+): "yes" | "no" | "unknown" {
+  const tokens = tokenizeVietnameseText(stripNonSpeechAnnotations(transcript));
+  if (!tokens.length) return "unknown";
+  const joined = tokens.join(" ");
+  if (
+    joined.includes("không muốn") ||
+    joined.includes("không đọc") ||
+    joined.includes("bỏ qua") ||
+    joined.includes("để sau") ||
+    joined.includes("thôi")
+  ) {
+    return "no";
+  }
+  if (
+    joined.includes("dạ có") ||
+    joined.includes("con có") ||
+    joined.includes("con muốn") ||
+    joined.includes("đọc lại") ||
+    joined.includes("đồng ý")
+  ) {
+    return "yes";
+  }
+  let yesCount = 0;
+  let noCount = 0;
+  for (const t of tokens) {
+    if (NO_INTENT_TOKENS.has(t)) noCount += 1;
+    else if (YES_INTENT_TOKENS.has(t)) yesCount += 1;
+  }
+  if (noCount > 0 && noCount >= yesCount) return "no";
+  if (yesCount > 0) return "yes";
+  return "unknown";
+}
 
 export function isAssistantPromptBleed(
   tokens: readonly string[],

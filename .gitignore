@@ -8,8 +8,9 @@ node_modules/
 out/
 next-env.d.ts
 
-# Local Windows LAN host config (machine-specific LAN IP/paths; example is committed)
+# Local Windows LAN host config & runtime PID/audio caches (machine-specific; example is committed)
 scripts/windows/viread-host.config.json
+.runtime/
 
 # Test and coverage output
 coverage/

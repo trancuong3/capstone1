@@ -58,6 +58,12 @@ async function installAutopilotSession(
     failFirstComplete?: boolean;
     initialState?: "ready" | "reading" | "question";
     customFirstPageWords?: readonly string[];
+    customFirstPageEntries?: ReadonlyArray<{
+      text: string;
+      line_index: number;
+      bbox?: readonly [number, number, number, number];
+    }>;
+    voiceGender?: "female" | "male";
   } = {},
 ): Promise<AutopilotHarness> {
   await installApiFixture(page);
@@ -119,15 +125,30 @@ async function installAutopilotSession(
       body: JSON.stringify(body),
     });
 
-  const activeFirstPageWords = options.customFirstPageWords
-    ? options.customFirstPageWords.map((text, index) => ({
+  const activeFirstPageWords = options.customFirstPageEntries
+    ? options.customFirstPageEntries.map((entry, index) => ({
         word_id: `91000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
         word_index: index,
-        text,
-        bbox: [0.08 + index * 0.21, 0.22, 0.18, 0.08] as const,
-        line_index: 0,
+        text: entry.text,
+        bbox:
+          entry.bbox ??
+          ([
+            0.08 + (index % 5) * 0.16,
+            0.14 + entry.line_index * 0.11,
+            0.14,
+            0.06,
+          ] as const),
+        line_index: entry.line_index,
       }))
-    : pageOneWords;
+    : options.customFirstPageWords
+      ? options.customFirstPageWords.map((text, index) => ({
+          word_id: `91000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+          word_index: index,
+          text,
+          bbox: [0.08 + index * 0.21, 0.22, 0.18, 0.08] as const,
+          line_index: 0,
+        }))
+      : pageOneWords;
 
   const pages = [
     {
@@ -304,13 +325,17 @@ async function installAutopilotSession(
       return route.fulfill({ status: 204, headers: corsHeaders });
     const path = new URL(route.request().url()).pathname;
     if (path === "/voice/voices") {
+      const isMale = options.voiceGender === "male";
+      const voiceId = isMale ? "local_north_thien_minh" : "fixture_vi";
       return json(route, {
-        default_voice_id: "fixture_vi",
+        default_voice_id: voiceId,
         voices: [
           {
-            voice_id: "fixture_vi",
-            name: "Giọng mẫu tiếng Việt",
-            gender: "female",
+            voice_id: voiceId,
+            name: isMale
+              ? "Thầy Thiên Minh (Miền Bắc)"
+              : "Giọng mẫu tiếng Việt",
+            gender: isMale ? "male" : "female",
           },
         ],
       });
@@ -393,6 +418,15 @@ async function installAutopilotSession(
     }
     return route.fallback();
   });
+
+  if (options.voiceGender === "male") {
+    await page.addInitScript(() => {
+      window.localStorage.setItem(
+        "viread.speech-preferences.v1",
+        JSON.stringify({ voiceId: "local_north_thien_minh", speed: 0.9 }),
+      );
+    });
+  }
 
   await page.addInitScript(() => {
     type RecInstance = {
@@ -1094,5 +1128,229 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
       ),
       fullPage: false,
     });
+  });
+
+  test("QA-01/QA-19/QA-22: Prose reflow, Thầy giáo AI male persona, 0% overlap in-flow SentenceReinforcement with live word highlight & voice escape", async ({
+    page,
+  }, testInfo) => {
+    mkdirSync(EVIDENCE_DIR, { recursive: true });
+    await installAutopilotSession(page, {
+      initialState: "reading",
+      voiceGender: "male",
+      customFirstPageEntries: [
+        { text: "Nhà", line_index: 0, bbox: [0.08, 0.14, 0.1, 0.06] },
+        { text: "em", line_index: 0, bbox: [0.22, 0.14, 0.09, 0.06] },
+        { text: "có", line_index: 0, bbox: [0.35, 0.14, 0.09, 0.06] },
+        { text: "chú", line_index: 0, bbox: [0.48, 0.14, 0.11, 0.06] },
+        { text: "mèo", line_index: 1, bbox: [0.08, 0.25, 0.12, 0.06] },
+        { text: "nhỏ.", line_index: 1, bbox: [0.24, 0.25, 0.12, 0.06] },
+        { text: "Chú", line_index: 1, bbox: [0.4, 0.25, 0.11, 0.06] },
+        { text: "rất", line_index: 1, bbox: [0.55, 0.25, 0.1, 0.06] },
+        { text: "ngoan", line_index: 2, bbox: [0.08, 0.36, 0.15, 0.06] },
+        { text: "hiền.", line_index: 2, bbox: [0.27, 0.36, 0.13, 0.06] },
+      ],
+    });
+
+    // QA-01: Mid-sentence OCR line cuts are merged in prose mode without artificial <br>
+    const readingContainer = page.locator("[data-reflow-mode]");
+    await expect(readingContainer).toHaveAttribute("data-reflow-mode", "prose");
+    expect(await readingContainer.locator("br").count()).toBe(0);
+
+    await page
+      .getByRole("button", { name: "Bé đọc với nhận diện giọng nói" })
+      .click();
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (
+            window as unknown as {
+              __autopilotSpeech: { count: () => number };
+            }
+          ).__autopilotSpeech.count(),
+        ),
+      )
+      .toBe(1);
+    await page.waitForTimeout(450);
+
+    // Read "Nhà em có", misread "chú" -> "chu" (tone mismatch triggers Thầy giáo AI coaching), then fix "chú" -> arms SentenceReinforcement!
+    await page.evaluate(() => {
+      const api = (
+        window as unknown as {
+          __autopilotSpeech: {
+            say: (t: string) => void;
+            setQuiet: (q: boolean) => void;
+          };
+        }
+      ).__autopilotSpeech;
+      api.say("Nhà em có");
+    });
+    await expect(page.getByRole("button", { name: "có" })).toHaveAttribute(
+      "data-reading-state",
+      "correct",
+    );
+
+    await page.evaluate(() => {
+      const api = (
+        window as unknown as {
+          __autopilotSpeech: {
+            say: (t: string) => void;
+            setQuiet: (q: boolean) => void;
+          };
+        }
+      ).__autopilotSpeech;
+      api.say("chu");
+      api.setQuiet(true);
+    });
+
+    const bubble = page.getByTestId("reading-companion-bubble");
+    await expect(bubble).toHaveAttribute("data-companion-mood", "comforting", {
+      timeout: 6_000,
+    });
+    // QA-22: Thầy giáo AI male persona — zero "Cô giáo" / "cô" leaks!
+    await expect(bubble).toHaveAttribute("data-teacher-persona", "male");
+    const bubbleText = await bubble.innerText();
+    expect(bubbleText).toContain("Thầy giáo AI");
+    expect(bubbleText).not.toMatch(/Cô giáo|\bcô\b/i);
+
+    // Wait for Thầy giáo AI's comforting TTS to finish, mic to reopen, and echo tail guard to clear
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() =>
+            (
+              window as unknown as {
+                __autopilotSpeech: { count: () => number };
+              }
+            ).__autopilotSpeech.count(),
+          ),
+        { timeout: 10_000 },
+      )
+      .toBeGreaterThanOrEqual(2);
+    await page.waitForTimeout(1800);
+
+    // Fix "chú" -> arms SentenceReinforcement banner in-flow!
+    await page.evaluate(() => {
+      const api = (
+        window as unknown as {
+          __autopilotSpeech: {
+            say: (t: string) => void;
+            setQuiet: (q: boolean) => void;
+          };
+        }
+      ).__autopilotSpeech;
+      api.setQuiet(false);
+      api.say("chú");
+    });
+
+    const banner = page.getByTestId("sentence-reinforcement-banner");
+    await expect(banner).toBeVisible({ timeout: 6_000 });
+
+    // Wait for Thầy giáo AI's sentence-reinforcement invitation TTS + mic reopen + echo guard
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() =>
+            (
+              window as unknown as {
+                __autopilotSpeech: { count: () => number };
+              }
+            ).__autopilotSpeech.count(),
+          ),
+        { timeout: 10_000 },
+      )
+      .toBeGreaterThanOrEqual(3);
+    await page.waitForTimeout(1800);
+
+    // QA-19: Live per-word green highlighting inside SentenceReinforcement banner
+    await page.evaluate(() => {
+      (
+        window as unknown as {
+          __autopilotSpeech: { say: (t: string) => void };
+        }
+      ).__autopilotSpeech.say("Nhà em có");
+    });
+    await expect
+      .poll(() => banner.locator('[data-reinforce-matched="true"]').count())
+      .toBeGreaterThanOrEqual(3);
+
+    // QA-19: Verify 0% bounding-box overlap between sentence-reinforcement-banner and reading-companion-bubble
+    const rects = await page.evaluate(() => {
+      const b1 = document
+        .querySelector('[data-testid="sentence-reinforcement-banner"]')
+        ?.getBoundingClientRect();
+      const b2 = document
+        .querySelector('[data-testid="reading-companion-bubble"]')
+        ?.getBoundingClientRect();
+      if (!b1 || !b2) return null;
+      const overlapX = Math.max(
+        0,
+        Math.min(b1.right, b2.right) - Math.max(b1.left, b2.left),
+      );
+      const overlapY = Math.max(
+        0,
+        Math.min(b1.bottom, b2.bottom) - Math.max(b1.top, b2.top),
+      );
+      return {
+        overlapArea: overlapX * overlapY,
+        bannerTop: b1.top,
+        bannerBottom: b1.bottom,
+        bubbleTop: b2.top,
+        bubbleBottom: b2.bottom,
+      };
+    });
+    expect(rects).not.toBeNull();
+    expect(rects!.overlapArea).toBe(0);
+
+    await assertNoHorizontalOverflow(page);
+    await page.screenshot({
+      path: resolve(
+        EVIDENCE_DIR,
+        `qa-final-reinforce-${testInfo.project.name}.png`,
+      ),
+      fullPage: false,
+    });
+
+    // QA-19: Never-Trap voice escape ("đọc tiếp") dismisses banner cleanly without trapping child
+    await page.evaluate(() => {
+      (
+        window as unknown as {
+          __autopilotSpeech: { say: (t: string) => void };
+        }
+      ).__autopilotSpeech.say("đọc tiếp");
+    });
+    await expect(banner).not.toBeVisible({ timeout: 5_000 });
+  });
+
+  test("QA-02: Poetry verse breaks preserved (data-reflow-mode='poetry')", async ({
+    page,
+  }) => {
+    await installAutopilotSession(page, {
+      initialState: "reading",
+      customFirstPageEntries: [
+        { text: "Trăng", line_index: 0, bbox: [0.1, 0.12, 0.14, 0.06] },
+        { text: "sáng", line_index: 0, bbox: [0.27, 0.12, 0.12, 0.06] },
+        { text: "sân", line_index: 0, bbox: [0.42, 0.12, 0.1, 0.06] },
+        { text: "nhà", line_index: 0, bbox: [0.55, 0.12, 0.1, 0.06] },
+        { text: "Gió", line_index: 1, bbox: [0.1, 0.22, 0.1, 0.06] },
+        { text: "mát", line_index: 1, bbox: [0.23, 0.22, 0.11, 0.06] },
+        { text: "đầu", line_index: 1, bbox: [0.37, 0.22, 0.1, 0.06] },
+        { text: "hiên", line_index: 1, bbox: [0.5, 0.22, 0.11, 0.06] },
+        { text: "Em", line_index: 2, bbox: [0.1, 0.32, 0.1, 0.06] },
+        { text: "ngồi", line_index: 2, bbox: [0.23, 0.32, 0.12, 0.06] },
+        { text: "đọc", line_index: 2, bbox: [0.38, 0.32, 0.1, 0.06] },
+        { text: "sách", line_index: 2, bbox: [0.51, 0.32, 0.12, 0.06] },
+        { text: "Chữ", line_index: 3, bbox: [0.1, 0.42, 0.11, 0.06] },
+        { text: "đẹp", line_index: 3, bbox: [0.24, 0.42, 0.1, 0.06] },
+        { text: "thật", line_index: 3, bbox: [0.37, 0.42, 0.11, 0.06] },
+        { text: "hiền.", line_index: 3, bbox: [0.51, 0.42, 0.12, 0.06] },
+      ],
+    });
+
+    const readingContainer = page.locator("[data-reflow-mode]");
+    await expect(readingContainer).toHaveAttribute(
+      "data-reflow-mode",
+      "poetry",
+    );
+    expect(await readingContainer.locator("br").count()).toBe(3);
   });
 });
