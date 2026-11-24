@@ -152,5 +152,14 @@ def admin_submission_image_url(
     return f"{root}/books/admin/quality/user-books/submissions/{submission_id}/image"
 
 
+def admin_flow2_candidate_crop_url(
+    candidate_id: UUID,
+    *,
+    base_url: str | None = None,
+) -> str:
+    root = public_api_base_url(base_url)
+    return f"{root}/books/admin/quality/user-books/flow2-candidates/{candidate_id}/crop"
+
+
 def is_book_private(book: Book) -> bool:
     return getattr(book, "VisibilityScope", VISIBILITY_CATALOG) == VISIBILITY_PARENT_PRIVATE

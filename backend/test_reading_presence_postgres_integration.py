@@ -180,7 +180,10 @@ class PresencePostgresTests(PresenceDbCase):
             await self.arm_one(now=NOW)
             # separate sessions would hit the per-session cooldown; clear it
             async with self.engine.begin() as connection:
-                await connection.execute(text("UPDATE readingpresencealerts SET createdat = createdat - interval '2 hours'"))
+                await connection.execute(
+                    text("UPDATE readingpresencealerts SET createdat = :past"),
+                    {"past": NOW - timedelta(hours=2)},
+                )
         async with self.engine.begin() as connection:
             await connection.execute(text("UPDATE readingpresencealerts SET lastconfirmedat = :t"), {"t": NOW + timedelta(seconds=60)})
 

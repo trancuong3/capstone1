@@ -64,9 +64,17 @@ const MIN_NOISE_FLOOR = 0.0009;
 const SILENCE_FLUSH_MS = 720;
 const MIN_SPEECH_MS = 120;
 const MAX_SEGMENT_MS = 4_500;
+const INTERIM_MIN_SPEECH_MS = 280;
+const INTERIM_STEP_MS = 320;
 const PRE_ROLL_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.45);
 const QUIET_TAIL_CARRY_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.35);
 const OVERLAP_CARRY_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.32);
+const INTERIM_MIN_SAMPLES = Math.floor(
+  (TARGET_SAMPLE_RATE * INTERIM_MIN_SPEECH_MS) / 1000,
+);
+const INTERIM_STEP_SAMPLES = Math.floor(
+  (TARGET_SAMPLE_RATE * INTERIM_STEP_MS) / 1000,
+);
 
 function downsampleTo16k(input: Float32Array, inputRate: number): Float32Array {
   if (inputRate === TARGET_SAMPLE_RATE || inputRate <= 0) {
@@ -156,6 +164,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private inSpeech = false;
   private noiseFloor = INITIAL_NOISE_FLOOR;
   private turnSeq = 0;
+  private lastInterimSpeechSamples = 0;
+  private interimInFlight = false;
+  private interimGeneration = 0;
   private pendingUploads: Set<Promise<void>> = new Set();
   private uploadChain: Promise<void> = Promise.resolve();
 
@@ -383,10 +394,98 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       this.flushCurrentSegment(false);
     } else if (speechMs >= MAX_SEGMENT_MS) {
       this.flushCurrentSegment(true);
+    } else if (
+      this.interimResults &&
+      !this.interimInFlight &&
+      this.speechSamples >= INTERIM_MIN_SAMPLES &&
+      this.speechSamples - this.lastInterimSpeechSamples >= INTERIM_STEP_SAMPLES
+    ) {
+      this.dispatchRollingInterim();
     }
   }
 
+  /**
+   * Real rolling partial decode (~320ms cadence) while the child is still speaking.
+   * Emits `isFinal: false` preview-only transcripts so word highlighting tracks the
+   * child's voice smoothly without fake timers and without mutating final scores.
+   */
+  private dispatchRollingInterim(): void {
+    if (
+      !this.active ||
+      this.stopping ||
+      !this.inSpeech ||
+      !this.speechChunks.length
+    ) {
+      return;
+    }
+    const total = this.speechSamples;
+    const combined = new Float32Array(total);
+    let offset = 0;
+    for (const part of this.speechChunks) {
+      combined.set(part, offset);
+      offset += part.length;
+    }
+    this.lastInterimSpeechSamples = total;
+    this.interimInFlight = true;
+    const gen = this.interimGeneration;
+    const wavBlob = encodeFloat32ToWav16kBlob(combined);
+    const ctx = this.getContext?.() ?? {};
+    const signal = this.abortController?.signal;
+
+    void this.speechService
+      .transcribe(wavBlob, {
+        filename: "interim.wav",
+        languageCode: "vi",
+        keyterms: ctx.keyterms,
+        sessionId: ctx.sessionId ?? null,
+        pageId: ctx.pageId ?? null,
+        source: "local_live_interim",
+        signal,
+        timeoutMs: 4_000,
+      })
+      .then((res) => {
+        if (
+          !this.active ||
+          this.stopping ||
+          !this.inSpeech ||
+          gen !== this.interimGeneration
+        ) {
+          return;
+        }
+        const text = (res.text ?? "").normalize("NFC").trim();
+        if (!text) return;
+        const resultIndex = this.resultsHistory.length;
+        const interimItem: SegmentSpeechResultItem = {
+          isFinal: false,
+          length: 1,
+          0: {
+            transcript: text,
+            confidence: 0,
+          },
+        };
+        const resultsObj: Record<number, SegmentSpeechResultItem> & {
+          length: number;
+        } = { length: this.resultsHistory.length + 1 };
+        for (let i = 0; i < this.resultsHistory.length; i += 1) {
+          resultsObj[i] = this.resultsHistory[i];
+        }
+        resultsObj[resultIndex] = interimItem;
+        this.onresult?.({
+          resultIndex,
+          results: resultsObj,
+        });
+      })
+      .catch(() => {
+        // Non-blocking preview: ignore transient interim failures cleanly
+      })
+      .finally(() => {
+        this.interimInFlight = false;
+      });
+  }
+
   private flushCurrentSegment(carryOverlap = false): void {
+    this.interimGeneration += 1;
+    this.lastInterimSpeechSamples = 0;
     if (!this.speechChunks.length) {
       this.resetSegmentState();
       return;
@@ -518,6 +617,14 @@ export function resolveLocalFirstSpeechRecognitionConstructor(
   const candidate = win.SpeechRecognition || win.webkitSpeechRecognition;
   if (isInjectedTestSpeechRecognition(candidate)) {
     return candidate;
+  }
+  const explicitlyDisabled =
+    Object.prototype.hasOwnProperty.call(win, "SpeechRecognition") &&
+    win.SpeechRecognition === undefined &&
+    Object.prototype.hasOwnProperty.call(win, "webkitSpeechRecognition") &&
+    win.webkitSpeechRecognition === undefined;
+  if (explicitlyDisabled) {
+    return undefined;
   }
   const hasNativeWebSpeech = typeof candidate === "function";
   const hasWebAudio =

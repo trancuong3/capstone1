@@ -35,11 +35,18 @@ def verify_worker_source_lock(config: dict[str, Any]) -> None:
         "requirements_sha256": Path(__file__).with_name("requirements.txt"),
         "colab_requirements_sha256": Path(__file__).with_name("requirements-colab.txt"),
     }
-    if any(
-        not isinstance(config.get(key), str) or sha256_file(path) != config[key]
-        for key, path in expected_files.items()
-    ):
-        raise ValueError("WORKER_CODE_OR_DEPENDENCY_LOCK_MISMATCH")
+    mismatches: list[str] = []
+    for key, path in expected_files.items():
+        expected = config.get(key)
+        actual = sha256_file(path) if path.is_file() else "MISSING"
+        if not isinstance(expected, str) or actual != expected:
+            exp_short = expected[:12] if isinstance(expected, str) else repr(expected)
+            mismatches.append(f"{key}(expected={exp_short},actual={actual[:12]})")
+    if mismatches:
+        raise ValueError(
+            f"WORKER_CODE_OR_DEPENDENCY_LOCK_MISMATCH: "
+            f"commit={_current_repo_commit()[:12]} {'; '.join(mismatches)}"
+        )
 
 
 def _current_repo_commit() -> str:
@@ -642,15 +649,8 @@ class ColabWorker:
                 progress.update(stage="downloading_candidate_artifact", runtime=runtime)
                 self.process_benchmark_only_job(job, run_dir, progress)
                 return
-            progress.update(stage="downloading_dataset", runtime=runtime)
-            dataset, items = self.dataset(job_id)
-            if not dataset or dataset["version_sha256"] != job["manifest_sha256"]:
-                raise ValueError("JOB_DATASET_MANIFEST_MISMATCH")
-            manifest, receipt, _ = self.materialize_dataset(job_id, dataset, items, run_dir)
-            parent = self.materialize_parent(job, run_dir)
-            progress.update(stage="training", completed_steps=0,
-                            total_steps=int(job["metadata"]["training_config"]["steps"]))
-            config = job["metadata"]["training_config"]
+            # Fail fast before downloading hundreds of dataset crops and the 150MB checkpoint.
+            config = metadata.get("training_config") if isinstance(metadata.get("training_config"), dict) else {}
             verify_worker_source_lock(config)
             if canonical_sha256(config) != job.get("config_sha256"):
                 raise ValueError("JOB_CONFIG_FINGERPRINT_MISMATCH")
@@ -662,6 +662,14 @@ class ColabWorker:
                     or config.get("scheduler") != "CosineAnnealingLR"
                     or config.get("preprocessing") != "opencv-line-v1"):
                 raise ValueError("JOB_TRAINING_PARAMETERS_MISMATCH")
+            progress.update(stage="downloading_dataset", runtime=runtime)
+            dataset, items = self.dataset(job_id)
+            if not dataset or dataset["version_sha256"] != job["manifest_sha256"]:
+                raise ValueError("JOB_DATASET_MANIFEST_MISMATCH")
+            manifest, receipt, _ = self.materialize_dataset(job_id, dataset, items, run_dir)
+            parent = self.materialize_parent(job, run_dir)
+            progress.update(stage="training", completed_steps=0,
+                            total_steps=int(config["steps"]))
             self.assert_runtime_capacity(run_dir)
             candidate_record = run_dir / "candidate.json"
             stable_candidate = run_dir / "candidate.pth"

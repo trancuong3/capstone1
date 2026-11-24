@@ -244,19 +244,28 @@ async def retry_failed_viread_colab_training_job(
     """Retry a pre-run failure or resume a verified candidate at Locked Test."""
     await VireadOcrTrainingService(db)._admin(actor_id)
     result = await db.execute(text("""
-        SELECT id, target, status, attempts, run_id, profile, dataset_version_id,
-               manifest_sha256, config_sha256, created_by,
-               parent_checkpoint_sha256, locked_test_version_id,
-               locked_test_manifest_sha256, colab_execution_id,
-               colab_execution_resource_name, colab_operation_name, last_error_code
-        FROM public.viread_ocr_training_jobs
-        WHERE id=:job_id
-        FOR UPDATE
+        SELECT job.id, job.target, job.status, job.attempts, job.run_id, job.profile,
+               job.dataset_version_id, job.manifest_sha256, job.config_sha256, job.created_by,
+               job.parent_checkpoint_sha256, job.locked_test_version_id,
+               job.locked_test_manifest_sha256, job.colab_execution_id,
+               job.colab_execution_resource_name, job.colab_operation_name, job.last_error_code,
+               COALESCE(to_jsonb(dv)->>'dataset_status', 'ACTIVE') AS dataset_status
+        FROM public.viread_ocr_training_jobs job
+        LEFT JOIN public.viread_ocr_dataset_versions dv ON dv.id = job.dataset_version_id
+        WHERE job.id=:job_id
+        FOR UPDATE OF job
     """), {"job_id": job_id})
     row = result.mappings().first()
     if not row:
         await db.rollback()
         raise HTTPException(status_code=404, detail="Training job was not found")
+    dataset_status = row.get("dataset_status")
+    if dataset_status is not None and str(dataset_status).upper() != "ACTIVE":
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="DATASET_CONSENT_REVOKED: Snapshot dataset của job này đã bị lưu trữ hoặc thu hồi quyền nên không thể chạy lại.",
+        )
     has_locked_test = bool(row["locked_test_version_id"] and row["locked_test_manifest_sha256"])
     if bool(row["locked_test_version_id"]) != bool(row["locked_test_manifest_sha256"]):
         await db.rollback()

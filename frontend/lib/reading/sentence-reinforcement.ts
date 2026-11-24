@@ -316,3 +316,58 @@ export class SentenceReinforcementTracker {
     this.spellingBuffer = null;
   }
 }
+
+const VOICE_EXIT_REINFORCEMENT_PHRASES = [
+  "bỏ qua",
+  "đọc tiếp",
+  "đi tiếp",
+  "qua câu",
+  "thôi",
+] as const;
+
+/** True when the child explicitly asks by voice to skip/exit sentence reinforcement. */
+export function isVoiceExitSentenceReinforcement(transcript: string): boolean {
+  const tokens = tokenizeRealtimeText(transcript);
+  if (!tokens.length || tokens.length > 6) return false;
+  const joined = tokens.join(" ");
+  return VOICE_EXIT_REINFORCEMENT_PHRASES.some((phrase) =>
+    joined.includes(phrase),
+  );
+}
+
+/**
+ * True when the child's utterance clearly continues reading the upcoming words
+ * past the reinforced sentence (`endIndex + 1 ...`), proving they moved on and
+ * must NEVER stay trapped inside `Đọc lại cả câu`.
+ */
+export function shouldEscapeToUpcomingWords(
+  transcript: string,
+  upcomingBookWords: readonly ReadingPageWordDTO[],
+): boolean {
+  if (!upcomingBookWords.length) return false;
+  const tokens = tokenizeRealtimeText(transcript);
+  if (!tokens.length) return false;
+
+  const expected = upcomingBookWords
+    .slice(0, 6)
+    .map((w) => normalizeRealtimeWord(w.text))
+    .filter(Boolean);
+  if (!expected.length) return false;
+
+  if (expected.length === 1) {
+    return tokens.includes(expected[0]);
+  }
+
+  // Require >= 2 ordered matching words starting near upcoming[0..1]
+  let matchCount = 0;
+  let cursor = 0;
+  for (const token of tokens) {
+    const found = expected.indexOf(token, cursor);
+    if (found !== -1 && found <= cursor + 1) {
+      matchCount += 1;
+      cursor = found + 1;
+      if (matchCount >= 2) return true;
+    }
+  }
+  return false;
+}

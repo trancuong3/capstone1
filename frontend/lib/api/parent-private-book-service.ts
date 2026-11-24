@@ -2,24 +2,32 @@ import { z } from "zod";
 
 import { apiQuery, requestApi } from "@/lib/api/api-client";
 import {
+  adminFlow2CandidateDecisionResponseSchema,
+  adminFlow2CandidatePageSchema,
   adminUserBookDecisionResponseSchema,
   adminUserBookQueuePageSchema,
   adminUserBookSubmissionDetailSchema,
   parentAddPageResponseSchema,
   parentDeletePrivateBookResponseSchema,
   parentDeletePrivatePageResponseSchema,
+  parentOcrContributionStateSchema,
   parentPageSubmissionSchema,
   parentPrivateBookDetailSchema,
   parentPrivateBookSummarySchema,
   parentSubmitPagesResponseSchema,
+  type AdminFlow2CandidateDecisionResponseDTO,
+  type AdminFlow2CandidatePageDTO,
   type AdminUserBookDecisionResponseDTO,
   type AdminUserBookDecisionType,
   type AdminUserBookQueueFilter,
   type AdminUserBookQueuePageDTO,
   type AdminUserBookSubmissionDetailDTO,
+  type Flow2CandidateStatus,
+  type Flow2RejectionCode,
   type ParentAddPageResponseDTO,
   type ParentDeletePrivateBookResponseDTO,
   type ParentDeletePrivatePageResponseDTO,
+  type ParentOcrContributionStateDTO,
   type ParentPageSubmissionDTO,
   type ParentPrivateBookDetailDTO,
   type ParentPrivateBookSummaryDTO,
@@ -153,6 +161,16 @@ export interface ParentPrivateBookService {
     submissionId: string,
     input: AddPrivatePageInput,
   ): Promise<ParentAddPageResponseDTO>;
+  getOcrContribution?(bookId: string): Promise<ParentOcrContributionStateDTO>;
+  updateOcrContribution?(
+    bookId: string,
+    input: {
+      enabled: boolean;
+      rights_confirmed?: boolean;
+      notice_version?: string;
+      revoke_reason?: string | null;
+    },
+  ): Promise<ParentOcrContributionStateDTO>;
 }
 
 const cancelResponseSchema = z.object({
@@ -343,6 +361,18 @@ export function createParentPrivateBookService(): ParentPrivateBookService {
         undefined,
         { method: "POST", body: input },
       ),
+    getOcrContribution: (bookId) =>
+      requestApi(
+        `/books/my-books/${encodeURIComponent(bookId)}/ocr-contribution`,
+        parentOcrContributionStateSchema,
+      ),
+    updateOcrContribution: (bookId, input) =>
+      requestApi(
+        `/books/my-books/${encodeURIComponent(bookId)}/ocr-contribution`,
+        parentOcrContributionStateSchema,
+        undefined,
+        { method: "PUT", body: input },
+      ),
   };
 }
 
@@ -367,6 +397,21 @@ export interface AdminUserBooksQualityApi {
     },
   ): Promise<AdminUserBookDecisionResponseDTO>;
   suspendUserBook(bookId: string, reason: string): Promise<void>;
+  listFlow2Candidates?(query?: {
+    status?: Flow2CandidateStatus | "";
+    book_id?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<AdminFlow2CandidatePageDTO>;
+  decideFlow2Candidate?(
+    candidateId: string,
+    payload: {
+      decision: "APPROVE" | "REJECT";
+      verified_label?: string | null;
+      rejection_code?: Flow2RejectionCode | null;
+      reason?: string | null;
+    },
+  ): Promise<AdminFlow2CandidateDecisionResponseDTO>;
 }
 
 export function createAdminUserBooksQualityApi(): AdminUserBooksQualityApi {
@@ -401,5 +446,22 @@ export function createAdminUserBooksQualityApi(): AdminUserBooksQualityApi {
         { method: "POST", body: { reason } },
       );
     },
+    listFlow2Candidates: (query) =>
+      requestApi(
+        `/books/admin/quality/user-books/flow2-candidates${apiQuery({
+          status: query?.status || undefined,
+          book_id: query?.book_id,
+          limit: query?.limit,
+          offset: query?.offset,
+        })}`,
+        adminFlow2CandidatePageSchema,
+      ),
+    decideFlow2Candidate: (candidateId, payload) =>
+      requestApi(
+        `/books/admin/quality/user-books/flow2-candidates/${encodeURIComponent(candidateId)}/decision`,
+        adminFlow2CandidateDecisionResponseSchema,
+        undefined,
+        { method: "POST", body: payload },
+      ),
   };
 }

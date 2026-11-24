@@ -8,17 +8,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_parent_id, get_db
 from app.schemas.parent_private_book import (
+    AdminFlow2CandidateDecisionRequest,
+    AdminFlow2CandidateDecisionResponse,
+    AdminFlow2CandidatePageRead,
     AdminSuspendPrivateBookRequest,
     AdminUserBookDecisionRequest,
     AdminUserBookDecisionResponse,
     AdminUserBookQueueFilter,
     AdminUserBookQueuePageRead,
     AdminUserBookSubmissionDetailRead,
+    Flow2CandidateStatus,
     ParentAcceptSpellingRequest,
     ParentAddPageRequest,
     ParentAddPageResponse,
     ParentDeletePrivateBookResponse,
     ParentDeletePrivatePageResponse,
+    ParentOcrContributionStateRead,
+    ParentOcrContributionUpdateRequest,
     ParentPageSubmissionRead,
     ParentPrivateBookCreate,
     ParentPrivateBookDetailRead,
@@ -30,6 +36,7 @@ from app.schemas.parent_private_book import (
     ParentSubmissionEditRequest,
     ParentSubmitPagesResponse,
 )
+from app.services.parent_flow2_contribution_service import ParentFlow2ContributionService
 from app.services.parent_private_book_service import ParentPrivateBookService
 
 router = APIRouter()
@@ -491,4 +498,101 @@ async def suspend_admin_user_book(
     _apply_no_store(response)
     return await ParentPrivateBookService(db).admin_suspend_book(
         actor_id, book_id, payload
+    )
+
+
+# ---------------------------------------------------------------------------
+# Parent Private Book -> Flow 2 (Admin Verified) OCR Contribution
+# ---------------------------------------------------------------------------
+@router.get(
+    "/my-books/{book_id}/ocr-contribution",
+    response_model=ParentOcrContributionStateRead,
+)
+async def get_my_private_book_ocr_contribution(
+    book_id: UUID,
+    response: Response,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    _apply_no_store(response)
+    return await ParentFlow2ContributionService(db).get_book_contribution_state(
+        actor_id, book_id
+    )
+
+
+@router.put(
+    "/my-books/{book_id}/ocr-contribution",
+    response_model=ParentOcrContributionStateRead,
+)
+async def update_my_private_book_ocr_contribution(
+    book_id: UUID,
+    payload: ParentOcrContributionUpdateRequest,
+    response: Response,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    _apply_no_store(response)
+    return await ParentFlow2ContributionService(db).update_book_contribution_consent(
+        actor_id, book_id, payload
+    )
+
+
+@router.get(
+    "/admin/quality/user-books/flow2-candidates",
+    response_model=AdminFlow2CandidatePageRead,
+)
+async def list_admin_flow2_candidates(
+    request: Request,
+    response: Response,
+    candidate_status: Flow2CandidateStatus | None = Query(default="PENDING_VERIFICATION", alias="status"),
+    book_id: UUID | None = Query(default=None),
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    _apply_no_store(response)
+    return await ParentFlow2ContributionService(db).admin_list_candidates(
+        actor_id,
+        status_filter=candidate_status,
+        book_id=book_id,
+        limit=limit,
+        offset=offset,
+        base_url=str(request.base_url),
+    )
+
+
+@router.get("/admin/quality/user-books/flow2-candidates/{candidate_id}/crop")
+async def get_admin_flow2_candidate_crop(
+    candidate_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    data, media_type = await ParentFlow2ContributionService(db).admin_read_candidate_crop_image(
+        actor_id, candidate_id
+    )
+    return Response(
+        content=data,
+        media_type=media_type,
+        headers={
+            **_PRIVATE_NO_STORE_HEADERS,
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.post(
+    "/admin/quality/user-books/flow2-candidates/{candidate_id}/decision",
+    response_model=AdminFlow2CandidateDecisionResponse,
+)
+async def decide_admin_flow2_candidate(
+    candidate_id: UUID,
+    payload: AdminFlow2CandidateDecisionRequest,
+    response: Response,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    _apply_no_store(response)
+    return await ParentFlow2ContributionService(db).admin_decide_candidate(
+        actor_id, candidate_id, payload
     )

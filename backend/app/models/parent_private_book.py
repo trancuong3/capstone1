@@ -125,3 +125,73 @@ class ParentBookModerationRequest(Base):
     OptimisticLockVersion = Column("optimistic_lock_version", Integer, nullable=False, default=1, server_default=text("1"))
     CreatedAt = Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False)
     UpdatedAt = Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ParentBookOcrContributionConsent(Base):
+    __tablename__ = "parent_book_ocr_contribution_consents"
+
+    Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    BookId = Column("book_id", UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, unique=True)
+    OwnerParentId = Column("owner_parent_id", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    Purpose = Column("purpose", Text, nullable=False, default="FLOW2_ADMIN_VERIFIED_OCR", server_default=text("'FLOW2_ADMIN_VERIFIED_OCR'"))
+    Status = Column("status", Text, nullable=False, default="OPTED_OUT", server_default=text("'OPTED_OUT'"))
+    ConsentVersion = Column("consent_version", Integer, nullable=False, default=1, server_default=text("1"))
+    NoticeVersion = Column("notice_version", String(64), nullable=False)
+    RightsConfirmed = Column("rights_confirmed", Boolean, nullable=False, default=False, server_default=text("false"))
+    ConsentedAt = Column("consented_at", DateTime(timezone=True), nullable=True)
+    RevokedAt = Column("revoked_at", DateTime(timezone=True), nullable=True)
+    RevokeReason = Column("revoke_reason", Text, nullable=True)
+    CreatedAt = Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False)
+    UpdatedAt = Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ParentBookOcrContributionConsentEvent(Base):
+    __tablename__ = "parent_book_ocr_contribution_consent_events"
+
+    Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    BookId = Column("book_id", UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    OwnerParentId = Column("owner_parent_id", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    ActorId = Column("actor_id", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    Action = Column("action", Text, nullable=False)
+    ConsentVersion = Column("consent_version", Integer, nullable=False)
+    Purpose = Column("purpose", Text, nullable=False, default="FLOW2_ADMIN_VERIFIED_OCR", server_default=text("'FLOW2_ADMIN_VERIFIED_OCR'"))
+    NoticeVersion = Column("notice_version", String(64), nullable=False)
+    RightsConfirmed = Column("rights_confirmed", Boolean, nullable=False, default=False, server_default=text("false"))
+    Reason = Column("reason", Text, nullable=True)
+    CreatedAt = Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ParentBookFlow2Candidate(Base):
+    __tablename__ = "parent_book_flow2_candidates"
+
+    Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    BookId = Column("book_id", UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
+    OwnerParentId = Column("owner_parent_id", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    PageId = Column("page_id", UUID(as_uuid=True), ForeignKey("bookpages.id", ondelete="CASCADE"), nullable=False)
+    RevisionId = Column("revision_id", UUID(as_uuid=True), ForeignKey("pagerevisions.id", ondelete="CASCADE"), nullable=False)
+    SubmissionId = Column("submission_id", UUID(as_uuid=True), ForeignKey("parent_book_page_submissions.id", ondelete="SET NULL"), nullable=True)
+    ConsentVersion = Column("consent_version", Integer, nullable=False)
+    LineIndex = Column("line_index", Integer, nullable=False)
+    IdempotencyKey = Column("idempotency_key", String(256), nullable=False, unique=True)
+    SourceImagePath = Column("source_image_path", Text, nullable=False)
+    SourceContentHash = Column("source_content_hash", String(64), nullable=False)
+    CropBoxJson = Column("crop_box_json", JSONB, nullable=False)
+    ImageSha256 = Column("image_sha256", String(64), nullable=False)
+    ProposedLabel = Column("proposed_label", Text, nullable=False)
+    VerifiedLabel = Column("verified_label", Text, nullable=True)
+    VerifiedLabelSha256 = Column("verified_label_sha256", String(64), nullable=True)
+    RightsBasis = Column("rights_basis", String(40), nullable=False)
+    PiiCheckStatus = Column("pii_check_status", String(32), nullable=False, default="CLEAR", server_default=text("'CLEAR'"))
+    PiiFlagsJson = Column("pii_flags_json", JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
+    QualityMetricsJson = Column("quality_metrics_json", JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"))
+    Status = Column("status", String(32), nullable=False, default="PENDING_VERIFICATION", server_default=text("'PENDING_VERIFICATION'"))
+    VerifiedBy = Column("verified_by", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
+    VerifiedAt = Column("verified_at", DateTime(timezone=True), nullable=True)
+    RejectionCode = Column("rejection_code", String(64), nullable=True)
+    RejectionReason = Column("rejection_reason", Text, nullable=True)
+    OutboxEventId = Column("outbox_event_id", UUID(as_uuid=True), nullable=True)
+    SampleId = Column("sample_id", UUID(as_uuid=True), nullable=True)
+    RevokedAt = Column("revoked_at", DateTime(timezone=True), nullable=True)
+    RevokeReason = Column("revoke_reason", Text, nullable=True)
+    CreatedAt = Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False)
+    UpdatedAt = Column("updated_at", DateTime(timezone=True), server_default=func.now(), nullable=False)

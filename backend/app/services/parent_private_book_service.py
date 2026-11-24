@@ -69,6 +69,7 @@ from app.services.document_rasterizer_service import (
 )
 from app.services.ocr_ai.child_safety import content_hash as safety_content_hash
 from app.services.ocr_engine import normalize_word
+from app.services.parent_flow2_contribution_service import ParentFlow2ContributionService
 from app.services.parent_private_book_pipeline import (
     align_edited_text_to_words,
     compute_candidate_hash,
@@ -381,6 +382,7 @@ class ParentPrivateBookService:
         committed_count: int,
         submissions: list[ParentBookPageSubmission],
         readable_for_children: bool,
+        ocr_contribution: Any | None = None,
     ) -> ParentPrivateBookSummaryRead:
         pending_count = sum(
             1 for s in submissions if s.WorkflowStatus in ("CHECKING", "PENDING_ADMIN", "NEEDS_RECHECK")
@@ -396,6 +398,16 @@ class ParentPrivateBookService:
             s.BatchTotalPages > 1 and s.WorkflowStatus not in ("ADDED_TO_BOOK", "CANCELLED")
             for s in submissions
         )
+        if ocr_contribution is not None and getattr(ocr_contribution, "enabled", False):
+            privacy_notice = (
+                "Chỉ bạn và các hồ sơ trẻ của bạn có thể đọc sách này. "
+                "Đóng góp mẫu OCR (Luồng 2) đang BẬT cho cuốn sách này — bạn có thể ngừng đóng góp bất kỳ lúc nào."
+            )
+        else:
+            privacy_notice = (
+                "Chỉ bạn và các hồ sơ trẻ của bạn có thể đọc sách này sau khi trang được kiểm tra. "
+                "Sách này hiện không được dùng để huấn luyện OCR."
+            )
         return ParentPrivateBookSummaryRead(
             id=book.Id,
             title=book.Title,
@@ -414,8 +426,76 @@ class ParentPrivateBookService:
             ready_to_add_count=ready_to_add_count,
             readable_for_children=readable_for_children,
             has_held_multipage_batch=has_held_multipage,
+            privacy_notice=privacy_notice,
+            ocr_contribution=ocr_contribution,
             created_at=book.CreatedAt,
         )
+
+    async def _load_contribution_states(
+        self, books: list[Book]
+    ) -> dict[UUID, Any]:
+        if not books:
+            return {}
+        svc = ParentFlow2ContributionService(self.db)
+        try:
+            async with self.db.begin_nested():
+                book_ids = [b.Id for b in books]
+                consents = await svc.repo.list_consents_for_books(book_ids)
+                counts = await svc.repo.get_candidate_counts_by_book(book_ids)
+            return {
+                b.Id: svc.serialize_state(b, consents.get(b.Id), counts.get(b.Id, {}))
+                for b in books
+            }
+        except Exception:
+            return {b.Id: svc.serialize_state(b, None, {}) for b in books}
+
+    async def _safe_revoke_flow2_contributions(
+        self,
+        *,
+        book: Book,
+        actor_id: UUID,
+        reason: str,
+        page_id: UUID | None = None,
+        consent_event_action: str | None = None,
+    ) -> None:
+        svc = ParentFlow2ContributionService(self.db)
+        try:
+            async with self.db.begin_nested():
+                await svc.revoke_on_lifecycle_change(
+                    book=book,
+                    actor_id=actor_id,
+                    reason=reason,
+                    page_id=page_id,
+                    consent_event_action=consent_event_action,
+                )
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "does not exist" in msg or "undefinedtable" in msg or "undefinedcolumn" in msg:
+                return
+            raise
+
+    async def _safe_recruit_flow2_page(
+        self,
+        *,
+        book: Book,
+        page: BookPage,
+        revision: PageRevision,
+        submission: ParentBookPageSubmission,
+    ) -> None:
+        svc = ParentFlow2ContributionService(self.db)
+        try:
+            async with self.db.begin_nested():
+                await svc.recruit_committed_page_if_opted_in(
+                    book=book,
+                    page=page,
+                    revision=revision,
+                    submission=submission,
+                )
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "does not exist" in msg or "undefinedtable" in msg or "undefinedcolumn" in msg:
+                return
+            raise
 
     # ------------------------------------------------------------------
     # Parent Book CRUD
@@ -452,8 +532,13 @@ class ParentPrivateBookService:
         )
         await self.repo.commit()
         await self.db.refresh(book)
+        contrib_map = await self._load_contribution_states([book])
         return self._serialize_book_summary(
-            book, committed_count=0, submissions=[], readable_for_children=False
+            book,
+            committed_count=0,
+            submissions=[],
+            readable_for_children=False,
+            ocr_contribution=contrib_map.get(book.Id),
         )
 
     async def list_books(
@@ -466,6 +551,7 @@ class ParentPrivateBookService:
         book_ids = [b.Id for b in books]
         committed_map = await self.repo.committed_page_counts(book_ids)
         all_subs = await self.repo.list_submissions_for_books(book_ids)
+        contrib_map = await self._load_contribution_states(books)
         subs_by_book: dict[UUID, list[ParentBookPageSubmission]] = {}
         for sub in all_subs:
             subs_by_book.setdefault(sub.BookId, []).append(sub)
@@ -483,6 +569,7 @@ class ParentPrivateBookService:
                     committed_count=committed_map.get(book.Id, 0),
                     submissions=subs_by_book.get(book.Id, []),
                     readable_for_children=readable,
+                    ocr_contribution=contrib_map.get(book.Id),
                 )
             )
         return results
@@ -497,6 +584,7 @@ class ParentPrivateBookService:
         pages_rows = await self.repo.list_committed_pages(book_id)
         submissions = await self.repo.list_submissions_for_book(book_id)
         readable = await self.repo.is_private_book_readable(book_id, actor_id)
+        contrib_map = await self._load_contribution_states([book])
 
         pages_dto = [
             ParentPrivatePageRead(
@@ -520,6 +608,7 @@ class ParentPrivateBookService:
             committed_count=len(pages_rows),
             submissions=submissions,
             readable_for_children=readable,
+            ocr_contribution=contrib_map.get(book.Id),
         )
         return ParentPrivateBookDetailRead(
             book=summary,
@@ -718,6 +807,11 @@ class ParentPrivateBookService:
                 reset_staged += 1
 
             await self.repo.supersede_open_moderation_requests_for_book(locked_book.Id, now)
+            await self._safe_revoke_flow2_contributions(
+                book=locked_book,
+                actor_id=actor_id,
+                reason="BOOK_METADATA_UPDATED_RECHECK",
+            )
             await self.repo.add_audit_log(
                 actor_id=actor_id,
                 action="parent_private_book.updated_full_recheck",
@@ -739,11 +833,13 @@ class ParentPrivateBookService:
         committed_map = await self.repo.committed_page_counts([locked_book.Id])
         submissions = await self.repo.list_submissions_for_book(locked_book.Id)
         readable = await self.repo.is_private_book_readable(locked_book.Id, actor_id)
+        contrib_map = await self._load_contribution_states([locked_book])
         return self._serialize_book_summary(
             locked_book,
             committed_count=committed_map.get(locked_book.Id, 0),
             submissions=submissions,
             readable_for_children=readable,
+            ocr_contribution=contrib_map.get(locked_book.Id),
         )
 
     async def delete_book(
@@ -778,6 +874,12 @@ class ParentPrivateBookService:
             cancelled_submissions_count += 1
 
         await self.repo.supersede_open_moderation_requests_for_book(book.Id, now)
+        await self._safe_revoke_flow2_contributions(
+            book=book,
+            actor_id=actor_id,
+            reason="BOOK_DELETED",
+            consent_event_action="REVOKE_BOOK_DELETED",
+        )
         await self.repo.add_audit_log(
             actor_id=actor_id,
             action="parent_private_book.deleted",
@@ -975,6 +1077,12 @@ class ParentPrivateBookService:
                     # Proofreading (Stage 2) and Tool Check (Stage 3) stay PENDING to re-check from scratch!
 
             await self.repo.supersede_open_moderation_requests(sub.Id, now)
+            await self._safe_revoke_flow2_contributions(
+                book=locked_book,
+                actor_id=actor_id,
+                page_id=locked_page.Id,
+                reason="PAGE_EDITED_RECHECK",
+            )
             await self.repo.add_audit_log(
                 actor_id=actor_id,
                 action="parent_private_book.page.edited_recheck",
@@ -1126,6 +1234,12 @@ class ParentPrivateBookService:
                 )
 
             await self.repo.supersede_open_moderation_requests(sub.Id, now)
+            await self._safe_revoke_flow2_contributions(
+                book=locked_book,
+                actor_id=actor_id,
+                page_id=locked_page.Id,
+                reason="PAGE_IMAGE_REPLACED",
+            )
             await self.repo.add_audit_log(
                 actor_id=actor_id,
                 action="parent_private_book.page.replaced_recheck",
@@ -1172,6 +1286,12 @@ class ParentPrivateBookService:
             linked_sub.RetryAfter = None
             linked_sub.UpdatedAt = now
 
+        await self._safe_revoke_flow2_contributions(
+            book=book,
+            actor_id=actor_id,
+            page_id=locked_page.Id,
+            reason="PAGE_DELETED",
+        )
         await self.repo.add_audit_log(
             actor_id=actor_id,
             action="parent_private_book.page.deleted",
@@ -2069,6 +2189,12 @@ class ParentPrivateBookService:
             sub.OptimisticLockVersion = int(sub.OptimisticLockVersion) + 1
             sub.UpdatedAt = now
 
+            await self._safe_recruit_flow2_page(
+                book=book,
+                page=created_page,
+                revision=created_rev,
+                submission=sub,
+            )
             await self.repo.add_audit_log(
                 actor_id=actor_id,
                 action="parent_private_book.page.added",
@@ -2693,6 +2819,12 @@ class ParentPrivateBookService:
 
         await self.repo.suspend_open_moderation_requests_for_book(
             book.Id, actor_id, payload.reason, now
+        )
+        await self._safe_revoke_flow2_contributions(
+            book=book,
+            actor_id=actor_id,
+            reason=payload.reason,
+            consent_event_action="REVOKE_BOOK_SUSPENDED",
         )
         audit = await self.repo.add_audit_log(
             actor_id=actor_id,
