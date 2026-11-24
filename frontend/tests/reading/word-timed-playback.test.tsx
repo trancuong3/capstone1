@@ -3,9 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import {
+  resetVoiceLockAndPolicyForTests,
+  setVoicePolicyPreferences,
+} from "@/lib/reading/session-voice-lock";
+import {
   resetSpeechPreferencesCache,
   setSpeechPreferences,
 } from "@/lib/reading/speech-preferences";
+import { resetVoiceEngineStatus } from "@/lib/reading/voice-engine-status";
 
 const { speechServiceMock, voiceStudioMock } = vi.hoisted(() => ({
   speechServiceMock: { synthesize: vi.fn(), transcribe: vi.fn() },
@@ -70,7 +75,10 @@ beforeEach(() => {
   FakeAudio.instances = [];
   frames = [];
   window.localStorage.clear();
+  window.sessionStorage.clear();
   resetSpeechPreferencesCache();
+  resetVoiceLockAndPolicyForTests();
+  resetVoiceEngineStatus();
   voiceStudioMock.synthesizeTimed.mockReset().mockResolvedValue(TIMED);
   speechServiceMock.synthesize.mockReset();
   vi.stubGlobal("Audio", FakeAudio);
@@ -184,6 +192,11 @@ describe("word-timed sample playback", () => {
   });
 
   it("runs an explicit caller fallback when timings are unavailable", async () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_only",
+      allowGoogleSttFallback: false,
+      allowGoogleTtsFallback: false,
+    });
     voiceStudioMock.synthesizeTimed.mockRejectedValue(new Error("no timings"));
     const fallback = vi.fn().mockResolvedValue(undefined);
     const { result } = renderHook(() => useSpeechPlayer());

@@ -91,7 +91,7 @@ describe("voice studio service", () => {
     expect(list.default_voice_id).toBe("v1");
     expect(list.voices[0]?.name).toBe("Sarah");
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/voice/voices",
+      "http://127.0.0.1:8000/voice/voices?provider_mode=local_with_google_fallback&allow_google_tts=true",
       expect.objectContaining({ method: "GET", credentials: "omit" }),
     );
     const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<
@@ -117,6 +117,8 @@ describe("voice studio service", () => {
       words: ["Bé", "Na"],
       voice_id: "v1",
       speed: 0.85,
+      provider_mode: "local_with_google_fallback",
+      allow_google_tts: true,
     });
   });
 
@@ -127,6 +129,8 @@ describe("voice studio service", () => {
     });
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
       words: ["Bé", "Na"],
+      provider_mode: "local_with_google_fallback",
+      allow_google_tts: true,
     });
   });
 

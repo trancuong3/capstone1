@@ -41,7 +41,7 @@ export function ReadingControls({
         aria-label="Điều khiển buổi đọc"
         data-reading-controls
         className={cn(
-          "grid grid-cols-2 gap-2 sm:gap-3",
+          "grid grid-cols-2 gap-1.5 sm:gap-3",
           retryMode
             ? voiceSettings
               ? "sm:grid-cols-5"
@@ -53,12 +53,12 @@ export function ReadingControls({
       >
         <Button
           aria-label="Tạm dừng buổi đọc"
-          className="min-h-14 min-w-0"
+          className="min-h-11 min-w-0 px-2.5 py-1.5 text-sm sm:min-h-14 sm:px-4 sm:py-2 sm:text-button"
           disabled={pauseDisabled ?? disabled}
           onClick={onPause}
           variant="quiet"
         >
-          <Pause aria-hidden="true" className="size-6 shrink-0" />
+          <Pause aria-hidden="true" className="size-5 shrink-0 sm:size-6" />
           <span className="max-w-full text-center whitespace-normal break-words">
             Tạm dừng
           </span>
@@ -72,7 +72,7 @@ export function ReadingControls({
                 ? "Nghe mẫu từ cần đọc lại"
                 : "Nghe đọc mẫu cả trang"
           }
-          className="min-h-14 min-w-0"
+          className="min-h-11 min-w-0 px-2.5 py-1.5 text-sm sm:min-h-14 sm:px-4 sm:py-2 sm:text-button"
           disabled={disabled}
           onClick={onReadSample ?? onHelp}
           variant="secondary"
@@ -83,7 +83,7 @@ export function ReadingControls({
               className="size-5 shrink-0 text-primary"
             />
           ) : (
-            <Volume2 aria-hidden="true" className="size-6 shrink-0" />
+            <Volume2 aria-hidden="true" className="size-5 shrink-0 sm:size-6" />
           )}
 
           <span className="max-w-full text-center whitespace-normal break-words">
@@ -103,18 +103,21 @@ export function ReadingControls({
                 ? "Bật mic"
                 : "Bé đọc với nhận diện giọng nói"
           }
-          className="min-h-14 min-w-0"
+          className="min-h-11 min-w-0 px-2.5 py-1.5 text-sm sm:min-h-14 sm:px-4 sm:py-2 sm:text-button"
           disabled={disabled}
           onClick={onToggleListening ?? onPause}
           variant="primary"
         >
           {isListening ? (
-            <span className="relative flex size-6 items-center justify-center shrink-0">
+            <span className="relative flex size-5 shrink-0 items-center justify-center sm:size-6">
               <span className="absolute size-2 rounded-full bg-red-300" />
-              <Mic aria-hidden="true" className="relative size-6 text-white" />
+              <Mic
+                aria-hidden="true"
+                className="relative size-5 text-white sm:size-6"
+              />
             </span>
           ) : (
-            <Mic aria-hidden="true" className="size-6 shrink-0" />
+            <Mic aria-hidden="true" className="size-5 shrink-0 sm:size-6" />
           )}
 
           <span className="max-w-full text-center whitespace-normal break-words">
@@ -125,12 +128,15 @@ export function ReadingControls({
         {!retryMode && (
           <Button
             aria-label="Chọn trang"
-            className="min-h-14 min-w-0"
+            className="min-h-11 min-w-0 px-2.5 py-1.5 text-sm sm:min-h-14 sm:px-4 sm:py-2 sm:text-button"
             disabled={disabled || !onChoosePage}
             onClick={onChoosePage}
             variant="quiet"
           >
-            <BookOpen aria-hidden="true" className="size-6 shrink-0" />
+            <BookOpen
+              aria-hidden="true"
+              className="size-5 shrink-0 sm:size-6"
+            />
             <span className="max-w-full text-center whitespace-normal break-words">
               Chọn trang
             </span>
@@ -140,7 +146,7 @@ export function ReadingControls({
         <Button
           aria-label={retryMode ? "Hoàn thành đọc lại" : "Kết thúc buổi đọc"}
           className={cn(
-            "min-h-14 min-w-0",
+            "min-h-11 min-w-0 px-2.5 py-1.5 text-sm sm:min-h-14 sm:px-4 sm:py-2 sm:text-button",
             (retryMode ? Boolean(voiceSettings) : !voiceSettings) &&
               "col-span-2 sm:col-span-1",
           )}
@@ -148,7 +154,7 @@ export function ReadingControls({
           onClick={onFinish}
           variant="secondary"
         >
-          <Check aria-hidden="true" className="size-6 shrink-0" />
+          <Check aria-hidden="true" className="size-5 shrink-0 sm:size-6" />
           <span className="max-w-full text-center whitespace-normal break-words">
             {retryMode ? "Hoàn thành" : "Xong"}
           </span>

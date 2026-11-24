@@ -93,6 +93,49 @@ class ParentPrivateBookRepository:
         )
         return list(result.scalars().all())
 
+    async def list_owned_private_books_paged(
+        self,
+        owner_parent_id: UUID,
+        *,
+        ready_only: bool = False,
+        search: str | None = None,
+        limit: int = 9,
+        offset: int = 0,
+    ) -> tuple[list[Book], int]:
+        cond = (
+            is_private_book_readable_by(owner_parent_id)
+            if ready_only
+            else is_private_book_owned_by(owner_parent_id)
+        )
+        filters = [cond]
+        if search and search.strip():
+            escaped = (
+                search.strip()
+                .replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+            )
+            pattern = f"%{escaped}%"
+            filters.append(
+                or_(
+                    Book.Title.ilike(pattern, escape="\\"),
+                    Book.Author.ilike(pattern, escape="\\"),
+                )
+            )
+        total = int(
+            await self.db.scalar(select(func.count(Book.Id)).where(*filters)) or 0
+        )
+        if total == 0 or offset >= total:
+            return [], total
+        result = await self.db.execute(
+            select(Book)
+            .where(*filters)
+            .order_by(Book.CreatedAt.desc(), Book.Id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars().all()), total
+
     async def is_private_book_readable(self, book_id: UUID, owner_parent_id: UUID) -> bool:
         found = await self.db.scalar(
             select(Book.Id).where(

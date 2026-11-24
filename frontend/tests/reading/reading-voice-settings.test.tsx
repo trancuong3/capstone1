@@ -269,11 +269,11 @@ describe("reading voice settings", () => {
     await user.click(screen.getByRole("button", { name: /Giọng đọc/ }));
     await screen.findByRole("radio", { name: /Cô Trúc Ly/ });
 
-    // Default mode is local_only ("Chỉ máy này") with both Google fallbacks OFF
+    // Default mode is local_with_google_fallback ("Máy này + Google dự phòng") with automatic Online fallback ON
     expect(getVoicePolicyPreferences()).toMatchObject({
-      providerMode: "local_only",
-      allowGoogleSttFallback: false,
-      allowGoogleTtsFallback: false,
+      providerMode: "local_with_google_fallback",
+      allowGoogleSttFallback: true,
+      allowGoogleTtsFallback: true,
     });
 
     // Switch region tabs: Miền Trung -> auto-selects Central voice
@@ -286,13 +286,23 @@ describe("reading voice settings", () => {
     expect(getVoicePolicyPreferences().region).toBe("south");
     expect(getSpeechPreferences().voiceId).toBe("local_south_thuc_doan");
 
-    // Enable "Máy này + Google dự phòng" and toggle STT & TTS independently
+    // Parent can explicitly switch to "Chỉ máy này" (local_only) -> turns both Google fallbacks OFF
+    await user.click(screen.getByRole("button", { name: /Chỉ máy này/ }));
+    expect(getVoicePolicyPreferences()).toMatchObject({
+      providerMode: "local_only",
+      allowGoogleSttFallback: false,
+      allowGoogleTtsFallback: false,
+    });
+
+    // Re-enabling "Máy này + Google dự phòng" -> automatically enables BOTH STT & TTS fallbacks immediately
     await user.click(
       screen.getByRole("button", { name: /Máy này \+ Google dự phòng/ }),
     );
-    expect(getVoicePolicyPreferences().providerMode).toBe(
-      "local_with_google_fallback",
-    );
+    expect(getVoicePolicyPreferences()).toMatchObject({
+      providerMode: "local_with_google_fallback",
+      allowGoogleSttFallback: true,
+      allowGoogleTtsFallback: true,
+    });
 
     const sttCheckbox = screen.getByLabelText(
       /Dự phòng Google cho Nhận diện giọng nói \(STT\)/,
@@ -300,10 +310,11 @@ describe("reading voice settings", () => {
     const ttsCheckbox = screen.getByLabelText(
       /Dự phòng Google cho Đọc mẫu \(TTS\)/,
     );
-    expect(sttCheckbox).not.toBeChecked();
-    expect(ttsCheckbox).not.toBeChecked();
+    expect(sttCheckbox).toBeChecked();
+    expect(ttsCheckbox).toBeChecked();
 
-    await user.click(sttCheckbox);
+    // Both checkboxes remain independently toggleable afterwards
+    await user.click(ttsCheckbox);
     expect(getVoicePolicyPreferences().allowGoogleSttFallback).toBe(true);
     expect(getVoicePolicyPreferences().allowGoogleTtsFallback).toBe(false);
 

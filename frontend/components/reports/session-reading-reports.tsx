@@ -185,7 +185,7 @@ function ReportCard({
       <div className="rounded-card border border-border bg-cream p-3 sm:p-5">
         {page ? (
           <article
-            className="relative mx-auto flex aspect-[3/2] min-h-[280px] w-full max-w-[1008px] flex-col overflow-hidden rounded-control bg-[#fffdfa] p-3 sm:min-h-[360px] sm:p-6"
+            className="relative mx-auto flex min-h-[280px] max-h-[70vh] w-full max-w-[1008px] flex-col overflow-y-auto overscroll-contain rounded-control bg-[#fffdfa] p-3 sm:min-h-[360px] sm:p-6"
             data-page-id={page.page_id}
             data-page-revision-id={page.page_revision_id}
           >

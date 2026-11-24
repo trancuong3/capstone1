@@ -4,7 +4,8 @@ param(
     [string]$BindHost = "127.0.0.1",
     [int]$Port = 8010,
     [string]$TtsPrecision = "int8",
-    [int]$StartupTimeoutSeconds = 90
+    [int]$StartupTimeoutSeconds = 90,
+    [switch]$ReplaceIncompatibleWorker = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,19 +27,65 @@ function Test-PortListening([int]$p) {
     return Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
 }
 
-# Idempotent check
+function Get-ProcessCommandLine([int]$pidNum) {
+    try {
+        $cim = Get-CimInstance Win32_Process -Filter "ProcessId = $pidNum" -ErrorAction SilentlyContinue
+        if ($cim -and $cim.CommandLine) {
+            return [string]$cim.CommandLine
+        }
+    } catch { }
+    return "(unknown command line)"
+}
+
+$rawWorkerToken = [Environment]::GetEnvironmentVariable("VIREAD_LOCAL_VOICE_WORKER_TOKEN", "Process")
+$workerToken = if ($rawWorkerToken) { $rawWorkerToken.Trim() } else { "" }
+$healthHeaders = @{}
+if ($workerToken) {
+    $healthHeaders["Authorization"] = "Bearer $workerToken"
+    $healthHeaders["X-ViRead-Worker-Token"] = $workerToken
+}
+
+# Idempotent check (rejects incompatible auth-gated foreign workers when no token is configured)
+$incompatibleWorker = $false
 try {
-    $health = Invoke-RestMethod -Uri "http://${BindHost}:${Port}/health" -TimeoutSec 3
+    $health = Invoke-RestMethod -Uri "http://${BindHost}:${Port}/health" -Headers $healthHeaders -TimeoutSec 3
     if ($health -and $health.status -eq "ok") {
-        Write-Host "ViRead Local Voice Worker is already healthy on http://${BindHost}:${Port}"
-        exit 0
+        $authRequired = [bool]($health.PSObject.Properties["auth_required"] -and $health.auth_required)
+        if ($authRequired -and (-not $workerToken)) {
+            $incompatibleWorker = $true
+        } else {
+            Write-Host "ViRead Local Voice Worker is already healthy on http://${BindHost}:${Port}"
+            exit 0
+        }
     }
 } catch { }
 
 $existing = Test-PortListening $Port
 if ($existing) {
-    [Console]::Error.WriteLine("Port conflict: Voice worker port $Port is already in use by PID $($existing.OwningProcess).")
-    exit 4
+    $ownerPid = [int]$existing.OwningProcess
+    $ownerCmd = Get-ProcessCommandLine $ownerPid
+    if ($incompatibleWorker) {
+        [Console]::Error.WriteLine("Incompatible voice worker detected on port $Port (auth_required=true without VIREAD_LOCAL_VOICE_WORKER_TOKEN). Owning PID=${ownerPid}, CommandLine=${ownerCmd}")
+        if ($ReplaceIncompatibleWorker) {
+            Write-Host "Stopping incompatible worker PID=${ownerPid} (-ReplaceIncompatibleWorker specified)..."
+            Stop-Process -Id $ownerPid -Force -ErrorAction SilentlyContinue
+            $freeDeadline = (Get-Date).AddSeconds(5)
+            while ((Get-Date) -lt $freeDeadline) {
+                if (-not (Test-PortListening $Port)) { break }
+                Start-Sleep -Milliseconds 250
+            }
+            if (Test-PortListening $Port) {
+                [Console]::Error.WriteLine("Port $Port is still occupied after stopping PID=${ownerPid}.")
+                exit 4
+            }
+        } else {
+            [Console]::Error.WriteLine("Re-run with -ReplaceIncompatibleWorker to replace it, or stop PID=${ownerPid} / configure VIREAD_LOCAL_VOICE_WORKER_TOKEN.")
+            exit 4
+        }
+    } else {
+        [Console]::Error.WriteLine("Port conflict: Voice worker port $Port is already in use by PID=${ownerPid}, CommandLine=${ownerCmd}")
+        exit 4
+    }
 }
 
 $stdoutLog = Join-Path $logsDir "voice-worker.stdout.log"

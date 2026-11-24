@@ -4,10 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { RefreshCw, Search } from "lucide-react";
 
-import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
+import { AdminLoading } from "@/components/admin/admin-ui";
 import { AdminUserBooksQualitySection } from "@/components/admin/admin-user-books-quality-section";
 import { Button } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { isServiceError } from "@/lib/api/service-error";
@@ -627,12 +628,6 @@ export function AdminBookContentQualityScreen() {
   }
 
   const reportSummary = reports?.summary;
-  const reportLast = reports
-    ? Math.min(reports.offset + reports.limit, reports.total)
-    : 0;
-  const bookLast = books
-    ? Math.min(books.offset + books.limit, books.total)
-    : 0;
   const aiAttentionCount =
     selectedBook?.ai_workflows.filter(
       (workflow) =>
@@ -644,22 +639,33 @@ export function AdminBookContentQualityScreen() {
 
   return (
     <section className="mt-10 border-t border-border pt-8">
-      <AdminPageHeader
-        eyebrow="Quản trị chất lượng sách"
-        title="Báo cáo phụ huynh và kiểm tra nội dung"
-        description="Theo dõi báo cáo, kết quả rà soát toàn bộ sách và các finding gắn với revision nguồn. AI chỉ đưa ra cảnh báo; Admin quyết định nội dung được sửa và xác minh."
-        actions={
+      <header className="mb-6 flex flex-col justify-between gap-4 border-b border-border pb-5 lg:flex-row lg:items-end">
+        <div className="min-w-0 max-w-3xl">
+          <p className="text-sm font-semibold text-muted">
+            Quản trị chất lượng sách
+          </p>
+          <h2 className="book-title mt-1 text-3xl text-ink sm:text-[36px]">
+            Báo cáo phụ huynh và kiểm tra nội dung
+          </h2>
+          <p className="mt-2 max-w-2xl text-body leading-6 text-muted">
+            Theo dõi báo cáo, kết quả rà soát toàn bộ sách và các finding gắn
+            với revision nguồn. AI chỉ đưa ra cảnh báo; Admin quyết định nội
+            dung được sửa và xác minh.
+          </p>
+        </div>
+        <div className="flex w-full shrink-0 flex-wrap gap-3 sm:w-auto">
           <Button
-            className="h-12 w-auto"
+            className="h-12"
             disabled={loadingReports || loadingBooks}
+            fullWidth={false}
             onClick={() => void Promise.all([loadReports(), loadBooks()])}
             variant="secondary"
           >
             <RefreshCw aria-hidden className="size-4" />
             Tải lại
           </Button>
-        }
-      />
+        </div>
+      </header>
 
       {actionError ? (
         <StatusMessage tone="error" title="Thao tác chưa hoàn tất">
@@ -670,9 +676,22 @@ export function AdminBookContentQualityScreen() {
       <div
         aria-label="Phân khu quản trị chất lượng sách"
         className="mb-6 flex flex-wrap gap-2"
+        onKeyDown={(event) => {
+          if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+            event.preventDefault();
+            const nextTab = activeTab === "catalog" ? "user-books" : "catalog";
+            setActiveTab(nextTab);
+            const nextId =
+              nextTab === "catalog"
+                ? "quality-tab-catalog"
+                : "quality-tab-user-books";
+            document.getElementById(nextId)?.focus();
+          }
+        }}
         role="tablist"
       >
         <button
+          aria-controls="quality-panel-catalog"
           aria-selected={activeTab === "catalog"}
           className={
             "inline-flex min-h-11 items-center gap-2 rounded-control border px-4 text-sm font-bold transition " +
@@ -683,6 +702,7 @@ export function AdminBookContentQualityScreen() {
           id="quality-tab-catalog"
           onClick={() => setActiveTab("catalog")}
           role="tab"
+          tabIndex={activeTab === "catalog" ? 0 : -1}
           type="button"
         >
           Sách thư viện &amp; Báo cáo
@@ -699,16 +719,29 @@ export function AdminBookContentQualityScreen() {
           id="quality-tab-user-books"
           onClick={() => setActiveTab("user-books")}
           role="tab"
+          tabIndex={activeTab === "user-books" ? 0 : -1}
           type="button"
         >
           Sách người dùng
         </button>
       </div>
 
-      {activeTab === "user-books" ? <AdminUserBooksQualitySection /> : null}
+      {activeTab === "user-books" ? (
+        <div
+          aria-labelledby="quality-tab-user-books"
+          id="quality-panel-user-books"
+          role="tabpanel"
+        >
+          <AdminUserBooksQualitySection />
+        </div>
+      ) : null}
 
       {activeTab === "catalog" ? (
-        <>
+        <div
+          aria-labelledby="quality-tab-catalog"
+          id="quality-panel-catalog"
+          role="tabpanel"
+        >
           <section aria-label="Thống kê báo cáo phụ huynh" className="mb-6">
             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
               {(
@@ -924,39 +957,20 @@ export function AdminBookContentQualityScreen() {
               </div>
             )}
 
-            {reports && reports.total > reportLimit ? (
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-muted">
-                  {reports.offset + 1}–{reportLast} / {reports.total}
-                </p>
-                <div className="flex gap-2">
-                  <Button
-                    className="h-10 w-auto px-3 text-sm"
-                    disabled={reportOffset === 0 || loadingReports}
-                    onClick={() =>
-                      setReportOffset((value) =>
-                        Math.max(0, value - reportLimit),
-                      )
-                    }
-                    variant="secondary"
-                  >
-                    Trước
-                  </Button>
-                  <Button
-                    className="h-10 w-auto px-3 text-sm"
-                    disabled={
-                      reportOffset + reportLimit >= reports.total ||
-                      loadingReports
-                    }
-                    onClick={() =>
-                      setReportOffset((value) => value + reportLimit)
-                    }
-                    variant="secondary"
-                  >
-                    Tiếp
-                  </Button>
-                </div>
-              </div>
+            {reports ? (
+              <PaginationBar
+                ariaLabel="Phân trang báo cáo phụ huynh"
+                className="mt-4"
+                compact
+                disabled={loadingReports}
+                itemLabel="báo cáo"
+                onPageChange={(nextPage) =>
+                  setReportOffset((nextPage - 1) * reportLimit)
+                }
+                page={Math.floor(reportOffset / reportLimit) + 1}
+                pageSize={reportLimit}
+                total={reports.total}
+              />
             ) : null}
           </section>
 
@@ -1371,34 +1385,20 @@ export function AdminBookContentQualityScreen() {
                 ))}
               </div>
             )}
-            {books && books.total > bookLimit ? (
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                <p className="text-sm text-muted">
-                  {books.offset + 1}–{bookLast} / {books.total}
-                </p>
-                <div className="flex gap-2">
-                  <Button
-                    className="h-10 w-auto px-3 text-sm"
-                    disabled={bookOffset === 0 || loadingBooks}
-                    onClick={() =>
-                      setBookOffset((value) => Math.max(0, value - bookLimit))
-                    }
-                    variant="secondary"
-                  >
-                    Trước
-                  </Button>
-                  <Button
-                    className="h-10 w-auto px-3 text-sm"
-                    disabled={
-                      bookOffset + bookLimit >= books.total || loadingBooks
-                    }
-                    onClick={() => setBookOffset((value) => value + bookLimit)}
-                    variant="secondary"
-                  >
-                    Tiếp
-                  </Button>
-                </div>
-              </div>
+            {books ? (
+              <PaginationBar
+                ariaLabel="Phân trang sách kiểm tra chất lượng"
+                className="mt-4"
+                compact
+                disabled={loadingBooks}
+                itemLabel="sách"
+                onPageChange={(nextPage) =>
+                  setBookOffset((nextPage - 1) * bookLimit)
+                }
+                page={Math.floor(bookOffset / bookLimit) + 1}
+                pageSize={bookLimit}
+                total={books.total}
+              />
             ) : null}
           </section>
 
@@ -2395,7 +2395,7 @@ export function AdminBookContentQualityScreen() {
               ) : null}
             </section>
           ) : null}
-        </>
+        </div>
       ) : null}
     </section>
   );

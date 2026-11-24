@@ -16,6 +16,11 @@ import {
   setSpeechPreferences,
 } from "@/lib/reading/speech-preferences";
 import { setSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
+import {
+  getVoiceEngineStatus,
+  resetVoiceEngineStatus,
+  setCachedVoiceEngineHealth,
+} from "@/lib/reading/voice-engine-status";
 
 const { speech, studio } = vi.hoisted(() => ({
   speech: {
@@ -109,6 +114,7 @@ beforeEach(() => {
   window.sessionStorage.clear();
   resetSpeechPreferencesCache();
   resetVoiceLockAndPolicyForTests();
+  resetVoiceEngineStatus();
   AudioFixture.instances = [];
   AudioFixture.nextDuration = 2;
   frames = new Map();
@@ -182,7 +188,12 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     expect(countUnintendedVoiceSwitches("session_locked_south")).toBe(0);
   });
 
-  it("never falls back to window.speechSynthesis when the locked local voice fails, surfacing a clear text notice instead", async () => {
+  it("never falls back to window.speechSynthesis in local_only mode when the locked local voice fails, surfacing a clear text notice instead", async () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_only",
+      allowGoogleSttFallback: false,
+      allowGoogleTtsFallback: false,
+    });
     lockSessionVoice("session_no_switch", {
       voiceId: "local_central_ngoc_tran",
       speed: 1.0,
@@ -197,6 +208,158 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
 
     expect(synthesis.speak).not.toHaveBeenCalled();
     expect(result.current.fallbackNotice).toMatch(/không tự đổi giọng/i);
+  });
+
+  it("auto-falls back to Online browser TTS on default policy with zero 503 spam when cached voice health reports local down and Google unconfigured", async () => {
+    class FakeUtterance {
+      text: string;
+      lang = "";
+      rate = 1;
+      voice: SpeechSynthesisVoice | null = null;
+      onstart: (() => void) | null = null;
+      onend: (() => void) | null = null;
+      onerror: ((ev: { error?: string }) => void) | null = null;
+      onboundary: ((ev: { charIndex: number }) => void) | null = null;
+      constructor(text: string) {
+        this.text = text;
+      }
+    }
+    vi.stubGlobal("SpeechSynthesisUtterance", FakeUtterance);
+    synthesis.speak.mockImplementation((u: FakeUtterance) => {
+      queueMicrotask(() => {
+        u.onstart?.();
+        u.onend?.();
+      });
+    });
+
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: { available: false, stt_ready: false, tts_ready: false },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+
+    const { result } = renderHook(() => useSpeechPlayer());
+    await result.current.play("Chào con, hôm nay mình đọc bài nhé.");
+
+    // Zero doomed backend 503 calls!
+    expect(speech.synthesize).not.toHaveBeenCalled();
+    expect(synthesis.speak).toHaveBeenCalledTimes(1);
+    expect(getVoiceEngineStatus().tts.tier).toBe("browser_default");
+    expect(getVoiceEngineStatus().tts.shortLabel).toBe(
+      "Online (Google/Trình duyệt)",
+    );
+  });
+
+  it("auto-falls back to browser TTS immediately on 503 without wasting a second Google backend call when Google Cloud TTS is unconfigured", async () => {
+    class FakeUtterance {
+      text: string;
+      lang = "";
+      rate = 1;
+      voice: SpeechSynthesisVoice | null = null;
+      onstart: (() => void) | null = null;
+      onend: (() => void) | null = null;
+      onerror: ((ev: { error?: string }) => void) | null = null;
+      onboundary: ((ev: { charIndex: number }) => void) | null = null;
+      constructor(text: string) {
+        this.text = text;
+      }
+    }
+    vi.stubGlobal("SpeechSynthesisUtterance", FakeUtterance);
+    synthesis.speak.mockImplementation((u: FakeUtterance) => {
+      queueMicrotask(() => {
+        u.onstart?.();
+        u.onend?.();
+      });
+    });
+
+    // Suppose local appeared ready earlier, then failed with 503, while Google key is NOT configured
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: { available: true, stt_ready: true, tts_ready: true },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+    speech.synthesize.mockRejectedValueOnce(new Error("503 local down"));
+
+    const { result } = renderHook(() => useSpeechPlayer());
+    await result.current.play("Con đọc lại từ mốt nhé.");
+
+    // Only 1 backend call (the initial local attempt); did NOT waste a 2nd 503 calling google_vi_vn_*
+    expect(speech.synthesize).toHaveBeenCalledTimes(1);
+    expect(synthesis.speak).toHaveBeenCalledTimes(1);
+    expect(getVoiceEngineStatus().tts.tier).toBe("browser_default");
+  });
+
+  it("never permanently locks into Online TTS — resumes Local Offline VieNeu-TTS automatically once local recovers", async () => {
+    class FakeUtterance {
+      text: string;
+      lang = "";
+      rate = 1;
+      voice: SpeechSynthesisVoice | null = null;
+      onstart: (() => void) | null = null;
+      onend: (() => void) | null = null;
+      onerror: ((ev: { error?: string }) => void) | null = null;
+      onboundary: ((ev: { charIndex: number }) => void) | null = null;
+      constructor(text: string) {
+        this.text = text;
+      }
+    }
+    vi.stubGlobal("SpeechSynthesisUtterance", FakeUtterance);
+    synthesis.speak.mockImplementation((u: FakeUtterance) => {
+      queueMicrotask(() => {
+        u.onstart?.();
+        u.onend?.();
+      });
+    });
+
+    // 1. Confirmed local outage -> uses browser Online TTS
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: { available: false, stt_ready: false, tts_ready: false },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+    const { result } = renderHook(() => useSpeechPlayer());
+    await result.current.play("Câu một lúc mất local.");
+    expect(speech.synthesize).toHaveBeenCalledTimes(0);
+    expect(synthesis.speak).toHaveBeenCalledTimes(1);
+    expect(getVoiceEngineStatus().tts.tier).toBe("browser_default");
+
+    // 2. Local worker comes back healthy -> next utterance automatically uses Local Offline VieNeu-TTS!
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: { available: true, stt_ready: true, tts_ready: true },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+    const p2 = result.current.play("Câu hai khi local đã sẵn sàng.");
+    const audio = await audioAt(0);
+    act(() => audio.finish());
+    await p2;
+
+    expect(speech.synthesize).toHaveBeenCalledTimes(1);
+    expect(synthesis.speak).toHaveBeenCalledTimes(1);
   });
 
   it("plays step-by-step phonics for 'mốt' with sample-accurate step callbacks and supports pause/resume", async () => {

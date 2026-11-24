@@ -1,6 +1,6 @@
 "use client";
 
-import { Mic, RotateCcw, Sparkles, Square, Volume2 } from "lucide-react";
+import { Mic, RotateCcw, Sparkles, Square, Volume2, X } from "lucide-react";
 
 import { Button } from "@/components/common/button";
 import type { PhonicsLessonPlan } from "@/lib/reading/phonics-lesson";
@@ -18,6 +18,7 @@ export interface PhonicsLessonCardProps {
   readonly onPlayPhonics?: () => void;
   readonly onStopAudio?: () => void;
   readonly onStartRetry?: () => void;
+  readonly onClose?: () => void;
 }
 
 export function PhonicsLessonCard({
@@ -32,6 +33,7 @@ export function PhonicsLessonCard({
   onPlayPhonics,
   onStopAudio,
   onStartRetry,
+  onClose,
 }: PhonicsLessonCardProps) {
   if (!lesson.supported) {
     return (
@@ -51,18 +53,31 @@ export function PhonicsLessonCard({
               vần lớp 1 chuẩn. Bé vẫn có thể nghe đọc mẫu cả từ nhé.
             </p>
           </div>
-          {lesson.canPlayWholeWord && onPlayWord ? (
-            <Button
-              className="w-auto!"
-              disabled={isPlayingWord || isListeningRetry}
-              onClick={onPlayWord}
-              size="compact"
-              variant="secondary"
-            >
-              <Volume2 aria-hidden="true" className="size-4" />
-              Nghe từ
-            </Button>
-          ) : null}
+          <div className="flex items-center gap-2">
+            {lesson.canPlayWholeWord && onPlayWord ? (
+              <Button
+                className="w-auto!"
+                disabled={isPlayingWord || isListeningRetry}
+                onClick={onPlayWord}
+                size="compact"
+                variant="secondary"
+              >
+                <Volume2 aria-hidden="true" className="size-4" />
+                Nghe từ
+              </Button>
+            ) : null}
+            {onClose ? (
+              <button
+                type="button"
+                aria-label="Đóng hướng dẫn đánh vần"
+                onClick={onClose}
+                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-control border border-amber-300 bg-white px-2.5 text-xs font-semibold text-amber-950 hover:bg-amber-100 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              >
+                <X aria-hidden="true" className="size-4" />
+                <span className="sr-only">Đóng</span>
+              </button>
+            ) : null}
+          </div>
         </div>
       </section>
     );
@@ -169,6 +184,18 @@ export function PhonicsLessonCard({
                 </>
               )}
             </Button>
+          ) : null}
+
+          {onClose ? (
+            <button
+              type="button"
+              aria-label="Đóng hướng dẫn đánh vần"
+              onClick={onClose}
+              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            >
+              <X aria-hidden="true" className="size-4" />
+              <span className="sr-only">Đóng</span>
+            </button>
           ) : null}
         </div>
       </div>

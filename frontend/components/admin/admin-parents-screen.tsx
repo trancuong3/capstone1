@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ChevronLeft,
   ChevronRight,
   Pencil,
   Plus,
@@ -30,6 +29,7 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
 import { Modal } from "@/components/common/modal";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
 import { useAdminServices } from "@/hooks/use-admin-services";
@@ -214,7 +214,6 @@ export function AdminParentsScreen() {
   }
 
   const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <>
@@ -407,9 +406,9 @@ export function AdminParentsScreen() {
                       </dd>
                     </div>
                   </dl>
-                  <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="flex flex-wrap gap-2">
                     <ButtonLink
-                      className="sm:w-auto"
+                      fullWidth={false}
                       href={`/admin/parents/${encodeURIComponent(parent.id)}`}
                       variant="secondary"
                     >
@@ -417,15 +416,15 @@ export function AdminParentsScreen() {
                       <ChevronRight aria-hidden className="size-5" />
                     </ButtonLink>
                     <Button
-                      className="sm:w-auto"
                       disabled={formLoading || formMode !== null}
+                      fullWidth={false}
                       onClick={() => void openEdit(parent.id)}
                       variant="secondary"
                     >
                       <Pencil aria-hidden className="size-5" /> Sửa
                     </Button>
                     <Button
-                      className="sm:w-auto"
+                      fullWidth={false}
                       onClick={() => {
                         setPendingDelete(parent);
                         setDeleteError(null);
@@ -439,31 +438,18 @@ export function AdminParentsScreen() {
               </Card>
             ))}
           </div>
-          <div className="mt-6 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-            <p className="text-sm text-muted">
-              Trang {currentPage} / {totalPages}
-            </p>
-            <div className="flex gap-3">
-              <Button
-                className="sm:w-auto"
-                disabled={offset === 0}
-                onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-                type="button"
-                variant="secondary"
-              >
-                <ChevronLeft aria-hidden className="size-5" /> Trang trước
-              </Button>
-              <Button
-                className="sm:w-auto"
-                disabled={offset + PAGE_SIZE >= total}
-                onClick={() => setOffset(offset + PAGE_SIZE)}
-                type="button"
-                variant="secondary"
-              >
-                Trang sau <ChevronRight aria-hidden className="size-5" />
-              </Button>
-            </div>
-          </div>
+          <PaginationBar
+            ariaLabel="Phân trang danh sách phụ huynh"
+            className="mt-6"
+            itemLabel="phụ huynh"
+            nextLabel="Trang sau"
+            onPageChange={(nextPage) => setOffset((nextPage - 1) * PAGE_SIZE)}
+            page={currentPage}
+            pageSize={PAGE_SIZE}
+            prevLabel="Trang trước"
+            showSummaryWhenSinglePage
+            total={total}
+          />
         </>
       )}
 

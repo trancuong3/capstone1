@@ -12,6 +12,10 @@ from typing import Any
 import httpx
 
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
+from app.services.local_voice_worker_bootstrap import (
+    ensure_local_voice_worker_running,
+    is_local_voice_worker_autostart_armed,
+)
 
 DEFAULT_LOCAL_VOICE_WORKER_URL = "http://127.0.0.1:8010"
 DEFAULT_LOCAL_VOICE_ID = "local_north_truc_ly"
@@ -223,7 +227,59 @@ class LocalVoiceProvider:
             )
         )
         self.base_url = raw_url.strip().rstrip("/") or DEFAULT_LOCAL_VOICE_WORKER_URL
+        self._worker_token = (
+            os.getenv("VIREAD_LOCAL_VOICE_WORKER_TOKEN") or ""
+        ).strip()
         self._client: httpx.AsyncClient | None = None
+        self._recovery_task: asyncio.Task[bool] | None = None
+
+    def _schedule_background_recovery(self) -> None:
+        if not is_local_voice_worker_autostart_armed():
+            return
+        if self._recovery_task is not None and not self._recovery_task.done():
+            return
+        try:
+            task = asyncio.create_task(
+                ensure_local_voice_worker_running(base_url=self.base_url)
+            )
+        except RuntimeError:
+            return
+        self._recovery_task = task
+
+        def _on_done(done_task: asyncio.Task[bool]) -> None:
+            if self._recovery_task is done_task:
+                self._recovery_task = None
+            if not done_task.cancelled():
+                try:
+                    done_task.exception()
+                except Exception:
+                    pass
+
+        task.add_done_callback(_on_done)
+
+    async def _is_incompatible_auth_worker(self) -> bool:
+        if self._worker_token:
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=1.5, trust_env=False) as client:
+                resp = await client.get(f"{self.base_url}/health")
+            if resp.status_code in (401, 403):
+                return True
+            if resp.status_code == 200:
+                payload = resp.json()
+                if isinstance(payload, dict) and bool(payload.get("auth_required")):
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def _auth_headers(self) -> dict[str, str]:
+        if not self._worker_token:
+            return {}
+        return {
+            "Authorization": f"Bearer {self._worker_token}",
+            "X-ViRead-Worker-Token": self._worker_token,
+        }
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -237,6 +293,19 @@ class LocalVoiceProvider:
             )
         return self._client
 
+    async def _reset_client(self) -> None:
+        client = self._client
+        if client is None:
+            return
+        aclose = getattr(client, "aclose", None)
+        if callable(aclose):
+            self._client = None
+            if not getattr(client, "is_closed", False):
+                try:
+                    await aclose()
+                except Exception:
+                    pass
+
     async def _post_with_retry(
         self,
         path: str,
@@ -247,25 +316,61 @@ class LocalVoiceProvider:
         files: dict[str, Any] | None = None,
     ) -> httpx.Response:
         url = f"{self.base_url}{path}"
+        headers = self._auth_headers() or None
+        backoffs = (0.25, 0.6)
         last_exc: Exception | None = None
-        for attempt in range(2):
+        for attempt in range(3):
             client = self._get_client()
             try:
                 resp = await client.post(
                     url,
                     timeout=timeout,
+                    headers=headers,
                     json=json,
                     data=data,
                     files=files,
                 )
-                if resp.status_code == 503 and attempt == 0:
-                    await asyncio.sleep(0.35)
+                if resp.status_code == 503 and attempt < 2:
+                    await asyncio.sleep(backoffs[attempt])
                     continue
+                if (
+                    resp.status_code in (400, 401, 403)
+                    and attempt == 0
+                    and not self._worker_token
+                    and is_local_voice_worker_autostart_armed()
+                    and await self._is_incompatible_auth_worker()
+                ):
+                    await self._reset_client()
+                    recovered = await ensure_local_voice_worker_running(
+                        base_url=self.base_url
+                    )
+                    if recovered:
+                        continue
                 return resp
-            except (httpx.ConnectError, httpx.RemoteProtocolError, httpx.ReadError) as exc:
+            except (
+                httpx.ConnectError,
+                httpx.RemoteProtocolError,
+                httpx.ReadError,
+            ) as exc:
                 last_exc = exc
-                if attempt == 0:
-                    await asyncio.sleep(0.35)
+                await self._reset_client()
+                if attempt < 2:
+                    if (
+                        isinstance(exc, httpx.ConnectError)
+                        and is_local_voice_worker_autostart_armed()
+                    ):
+                        recovered = await ensure_local_voice_worker_running(
+                            base_url=self.base_url
+                        )
+                        if recovered:
+                            continue
+                    await asyncio.sleep(backoffs[attempt])
+                    continue
+                raise
+            except httpx.TimeoutException as exc:
+                last_exc = exc
+                if attempt < 2:
+                    await asyncio.sleep(backoffs[attempt])
                     continue
                 raise
         assert last_exc is not None
@@ -274,10 +379,24 @@ class LocalVoiceProvider:
     async def get_health(self) -> dict[str, Any]:
         try:
             async with httpx.AsyncClient(timeout=2.5, trust_env=False) as client:
-                resp = await client.get(f"{self.base_url}/health")
+                resp = await client.get(
+                    f"{self.base_url}/health",
+                    headers=self._auth_headers() or None,
+                )
             if resp.status_code != 200:
+                if resp.status_code in (401, 403) and not self._worker_token:
+                    self._schedule_background_recovery()
                 return {"available": False, "stt_ready": False, "tts_ready": False}
             data = resp.json()
+            if bool(data.get("auth_required")) and not self._worker_token:
+                self._schedule_background_recovery()
+                return {
+                    "available": False,
+                    "stt_ready": False,
+                    "tts_ready": False,
+                    "stt_model_version": None,
+                    "tts_model_version": None,
+                }
             stt = data.get("stt") or {}
             tts = data.get("tts") or {}
             return {
@@ -287,13 +406,19 @@ class LocalVoiceProvider:
                 "stt_model_version": stt.get("model_version", LOCAL_STT_MODEL_VERSION),
                 "tts_model_version": tts.get("model_version", LOCAL_TTS_MODEL_VERSION),
             }
+        except httpx.ConnectError:
+            self._schedule_background_recovery()
+            return {"available": False, "stt_ready": False, "tts_ready": False}
         except Exception:
             return {"available": False, "stt_ready": False, "tts_ready": False}
 
     async def list_voices(self) -> tuple[list[dict[str, Any]], bool]:
         try:
             async with httpx.AsyncClient(timeout=3.0, trust_env=False) as client:
-                resp = await client.get(f"{self.base_url}/voices")
+                resp = await client.get(
+                    f"{self.base_url}/voices",
+                    headers=self._auth_headers() or None,
+                )
             if resp.status_code == 200:
                 payload = resp.json()
                 model_ver = str(

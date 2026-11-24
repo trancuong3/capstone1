@@ -1134,7 +1134,23 @@ async def post_stt(
                 )
                 arr = scipy_signal.sosfilt(sos, arr).astype(np.float32)
 
-            rms = float(np.sqrt(np.mean(arr * arr))) if arr.size > 0 else 0.0
+            # Compute RMS over active speech frames (20ms) so leading/trailing silence
+            # length never dilutes AGC gain or shifts beam decoding between interim & final.
+            frame_len = 320
+            n_frames = arr.size // frame_len
+            if n_frames > 0:
+                frames = arr[: n_frames * frame_len].reshape(n_frames, frame_len)
+                frame_rms = np.sqrt(np.mean(frames * frames, axis=1))
+                max_frame_rms = float(np.max(frame_rms))
+                active_thresh = max(0.002, max_frame_rms * 0.2)
+                active_frames = frame_rms[frame_rms >= active_thresh]
+                rms = (
+                    float(np.sqrt(np.mean(active_frames * active_frames)))
+                    if active_frames.size > 0
+                    else float(np.sqrt(np.mean(arr * arr)))
+                )
+            else:
+                rms = float(np.sqrt(np.mean(arr * arr))) if arr.size > 0 else 0.0
             peak = float(np.max(np.abs(arr))) if arr.size > 0 else 0.0
             if rms > 0.0004 and peak > 0.0015:
                 gain_rms = 0.08 / rms

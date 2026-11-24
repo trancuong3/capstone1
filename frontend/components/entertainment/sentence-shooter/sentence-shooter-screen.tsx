@@ -26,6 +26,8 @@ import { BookChildHeader } from "@/components/books/book-child-header";
 import { BookCover } from "@/components/books/book-cover";
 import { Button } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { Modal } from "@/components/common/modal";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ToyCannon } from "@/components/entertainment/sentence-shooter/toy-cannon";
@@ -139,6 +141,8 @@ export function SentenceShooterScreen({
     status: "loading",
   });
   const [selectedBookId, setSelectedBookId] = useState("");
+  const [booksPage, setBooksPage] = useState(1);
+  const SHOOTER_BOOKS_PAGE_SIZE = 9;
   const [hasManuallySelectedBook, setHasManuallySelectedBook] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [mode, setMode] = useState<ScreenMode>("lobby");
@@ -205,6 +209,7 @@ export function SentenceShooterScreen({
           controller.signal,
         );
         if (!active) return;
+        setBooksPage(1);
         setBookState({ status: "ready", books });
       } catch {
         if (!active || controller.signal.aborted) return;
@@ -1016,44 +1021,39 @@ export function SentenceShooterScreen({
           ) : null}
         </div>
 
-        {isPaused ? (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-ink/45 p-4">
-            <section
-              aria-labelledby="pause-title"
-              aria-modal="true"
-              className="w-full max-w-md rounded-card bg-white p-6 text-center shadow-xl"
-              role="dialog"
-            >
-              <h2 className="text-2xl font-extrabold text-ink" id="pause-title">
-                Tạm nghỉ một chút nhé?
-              </h2>
-              <p className="mt-2 text-muted">
-                Lượt chơi của bé đang được giữ lại.
-              </p>
-              {error ? (
-                <StatusMessage className="mt-4 text-left" tone="error">
-                  {error}
-                </StatusMessage>
-              ) : null}
-              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-                <Button
-                  className="sm:flex-1"
-                  onClick={() => setIsPaused(false)}
-                  variant="secondary"
-                >
-                  <Play aria-hidden="true" className="size-5" /> Chơi tiếp
-                </Button>
-                <Button
-                  className="sm:flex-1"
-                  onClick={() => void exitGame()}
-                  variant="quiet"
-                >
-                  Kết thúc lượt
-                </Button>
-              </div>
-            </section>
-          </div>
-        ) : null}
+        <Modal
+          closeOnBackdropClick
+          footer={
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Button
+                className="sm:flex-1"
+                onClick={() => setIsPaused(false)}
+                variant="secondary"
+              >
+                <Play aria-hidden="true" className="size-5" /> Chơi tiếp
+              </Button>
+              <Button
+                className="sm:flex-1"
+                onClick={() => void exitGame()}
+                variant="quiet"
+              >
+                Kết thúc lượt
+              </Button>
+            </div>
+          }
+          isOpen={isPaused}
+          onClose={() => setIsPaused(false)}
+          showCloseButton={false}
+          title="Tạm nghỉ một chút nhé?"
+          tone="paper"
+        >
+          <p className="text-muted">Lượt chơi của bé đang được giữ lại.</p>
+          {error ? (
+            <StatusMessage className="mt-4 text-left" tone="error">
+              {error}
+            </StatusMessage>
+          ) : null}
+        </Modal>
       </section>
     );
   }
@@ -1197,41 +1197,59 @@ export function SentenceShooterScreen({
           />
         ) : null}
         {bookState.status === "ready" && bookState.books.length > 0 ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {bookState.books.map((book) => {
-              const selected = effectiveSelectedBookId === book.id;
-              return (
-                <button
-                  aria-pressed={selected}
-                  className={[
-                    "flex min-h-28 items-center gap-4 rounded-control border bg-white p-4 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
-                    selected
-                      ? "border-primary ring-2 ring-primary/20"
-                      : "border-border hover:border-primary/60",
-                  ].join(" ")}
-                  key={book.id}
-                  onClick={() => {
-                    setHasManuallySelectedBook(true);
-                    setSelectedBookId(book.id);
-                  }}
-                  type="button"
-                >
-                  <BookCover book={toBookCover(book)} size="small" />
-                  <span className="min-w-0">
-                    <span className="block line-clamp-2 font-extrabold text-ink">
-                      {book.title}
-                    </span>
-                    <span className="mt-1 block text-sm font-semibold text-muted">
-                      {book.author ? `Tác giả: ${book.author}` : "Sách ViRead"}
-                    </span>
-                    <span className="mt-3 inline-block rounded-full bg-success-surface px-3 py-1 text-xs font-extrabold text-success-ink">
-                      Sẵn sàng chơi · {book.available_rounds} câu phù hợp
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+          <>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {bookState.books
+                .slice(
+                  (booksPage - 1) * SHOOTER_BOOKS_PAGE_SIZE,
+                  booksPage * SHOOTER_BOOKS_PAGE_SIZE,
+                )
+                .map((book) => {
+                  const selected = effectiveSelectedBookId === book.id;
+                  return (
+                    <button
+                      aria-pressed={selected}
+                      className={[
+                        "flex min-h-28 items-center gap-4 rounded-control border bg-white p-4 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                        selected
+                          ? "border-primary ring-2 ring-primary/20"
+                          : "border-border hover:border-primary/60",
+                      ].join(" ")}
+                      key={book.id}
+                      onClick={() => {
+                        setHasManuallySelectedBook(true);
+                        setSelectedBookId(book.id);
+                      }}
+                      type="button"
+                    >
+                      <BookCover book={toBookCover(book)} size="small" />
+                      <span className="min-w-0">
+                        <span className="block line-clamp-2 break-words font-extrabold text-ink">
+                          {book.title}
+                        </span>
+                        <span className="mt-1 block text-sm font-semibold text-muted">
+                          {book.author
+                            ? `Tác giả: ${book.author}`
+                            : "Sách ViRead"}
+                        </span>
+                        <span className="mt-3 inline-block rounded-full bg-success-surface px-3 py-1 text-xs font-extrabold text-success-ink">
+                          Sẵn sàng chơi · {book.available_rounds} câu phù hợp
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+            </div>
+            <PaginationBar
+              ariaLabel="Phân trang sách Xạ thủ ghép câu"
+              compact
+              itemLabel="cuốn sách"
+              onPageChange={setBooksPage}
+              page={booksPage}
+              pageSize={SHOOTER_BOOKS_PAGE_SIZE}
+              total={bookState.books.length}
+            />
+          </>
         ) : null}
       </div>
 

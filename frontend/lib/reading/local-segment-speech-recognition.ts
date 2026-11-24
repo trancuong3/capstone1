@@ -11,7 +11,15 @@
  * (detected via non-native constructor source).
  */
 
+import { ServiceError } from "@/lib/api/service-error";
 import type { SpeechService } from "@/lib/api/speech-service";
+import { getVoicePolicyPreferences } from "@/lib/reading/session-voice-lock";
+import { tokenizeVietnameseText } from "@/lib/reading/vietnamese-text";
+import {
+  getFreshVoiceEngineHealth,
+  getVoiceEngineStatus,
+  recordSttEngineUsage,
+} from "@/lib/reading/voice-engine-status";
 
 export interface SegmentSpeechResultAlternative {
   readonly transcript: string;
@@ -68,6 +76,9 @@ const INTERIM_MIN_SPEECH_MS = 280;
 const INTERIM_STEP_MS = 320;
 const PRE_ROLL_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.45);
 const QUIET_TAIL_CARRY_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.35);
+const MAX_FLUSH_TRAILING_SILENCE_SAMPLES = Math.floor(
+  TARGET_SAMPLE_RATE * 0.18,
+);
 const OVERLAP_CARRY_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.32);
 const INTERIM_MIN_SAMPLES = Math.floor(
   (TARGET_SAMPLE_RATE * INTERIM_MIN_SPEECH_MS) / 1000,
@@ -75,6 +86,14 @@ const INTERIM_MIN_SAMPLES = Math.floor(
 const INTERIM_STEP_SAMPLES = Math.floor(
   (TARGET_SAMPLE_RATE * INTERIM_STEP_MS) / 1000,
 );
+export const EMERGENCY_FAILURE_THRESHOLD = 2;
+export const LOCAL_OUTAGE_RETRY_MS = 45_000;
+
+let lastLocalSttOutageAt = 0;
+
+export function resetLocalSttEmergencyStateForTests(): void {
+  lastLocalSttOutageAt = 0;
+}
 
 function downsampleTo16k(input: Float32Array, inputRate: number): Float32Array {
   if (inputRate === TARGET_SAMPLE_RATE || inputRate <= 0) {
@@ -139,6 +158,237 @@ function nextTurnId(prefix: string, seq: number): string {
   return `${prefix}_seg_${Date.now().toString(36)}_${seq}`;
 }
 
+function lcsIndexPairs(
+  left: readonly string[],
+  right: readonly string[],
+): Array<[number, number]> {
+  const m = left.length;
+  const n = right.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () =>
+    new Array<number>(n + 1).fill(0),
+  );
+  for (let i = m - 1; i >= 0; i -= 1) {
+    for (let j = n - 1; j >= 0; j -= 1) {
+      if (left[i] === right[j]) {
+        dp[i][j] = dp[i + 1][j + 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+      }
+    }
+  }
+  const pairs: Array<[number, number]> = [];
+  let i = 0;
+  let j = 0;
+  while (i < m && j < n) {
+    if (left[i] === right[j]) {
+      pairs.push([i, j]);
+      i += 1;
+      j += 1;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      i += 1;
+    } else {
+      j += 1;
+    }
+  }
+  return pairs;
+}
+
+function containsOrderedSubsequence(
+  haystack: readonly string[],
+  needle: readonly string[],
+): boolean {
+  if (needle.length === 0 || needle.length > haystack.length) return false;
+  outer: for (let i = 0; i <= haystack.length - needle.length; i += 1) {
+    for (let j = 0; j < needle.length; j += 1) {
+      if (haystack[i + j] !== needle[j]) continue outer;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Reconciles a final STT transcript against earlier rolling interim transcripts
+ * decoded from the **exact same speech segment** when trailing silence caused
+ * beam search to flip or drop a completed word (e.g. interim `"chú mèo tên"` vs
+ * final `"chú em tên"`).
+ *
+ * Strict anti-hallucination invariants:
+ * - Only ever uses words literally decoded by the local STT model on this exact segment.
+ * - Preserves Vietnamese diacritics, tones, and `đ` (exact NFC token match).
+ * - Only repairs spans strictly bounded on the right by a matching anchor token
+ *   (so an incomplete cut-off last syllable of an interim can NEVER override the
+ *   completed syllable in the final decode).
+ * - Requires the interim span to match the exact ordered book word sequence with
+ *   strictly stronger contextual support than the final span.
+ */
+export function reconcileSegmentTranscriptWithInterims(
+  finalText: string,
+  interimTranscripts: readonly string[],
+  orderedKeyterms?: readonly string[],
+): string {
+  const normalizedFinal = finalText.normalize("NFC").trim();
+  if (
+    !normalizedFinal ||
+    !interimTranscripts.length ||
+    !orderedKeyterms?.length
+  ) {
+    return normalizedFinal;
+  }
+  const bookTokens = tokenizeVietnameseText(orderedKeyterms.join(" "));
+  if (bookTokens.length < 2) return normalizedFinal;
+
+  let currentTokens = tokenizeVietnameseText(normalizedFinal);
+  if (currentTokens.length === 0) return normalizedFinal;
+
+  const spanContextScore = (
+    leftAnchor: string | null,
+    span: readonly string[],
+    rightAnchor: string,
+  ): number => {
+    if (span.length === 0) {
+      return leftAnchor &&
+        containsOrderedSubsequence(bookTokens, [leftAnchor, rightAnchor])
+        ? 2
+        : 0;
+    }
+    if (
+      leftAnchor &&
+      containsOrderedSubsequence(bookTokens, [leftAnchor, ...span, rightAnchor])
+    ) {
+      return 3;
+    }
+    const rightMatch = containsOrderedSubsequence(bookTokens, [
+      ...span,
+      rightAnchor,
+    ]);
+    const leftMatch = leftAnchor
+      ? containsOrderedSubsequence(bookTokens, [leftAnchor, ...span])
+      : false;
+    if (leftMatch && rightMatch) return 2;
+    if (rightMatch || leftMatch) return 1;
+    return 0;
+  };
+
+  let changed = false;
+
+  for (let idx = interimTranscripts.length - 1; idx >= 0; idx -= 1) {
+    const interimTokens = tokenizeVietnameseText(interimTranscripts[idx] ?? "");
+    if (interimTokens.length < 2) continue;
+
+    const pairs = lcsIndexPairs(currentTokens, interimTokens);
+    if (pairs.length === 0) continue;
+
+    const rebuilt: string[] = [];
+    let prevR = -1;
+    let prevI = -1;
+
+    for (const [rAnchor, iAnchor] of pairs) {
+      const rSpan = currentTokens.slice(prevR + 1, rAnchor);
+      const iSpan = interimTokens.slice(prevI + 1, iAnchor);
+      const leftAnchor = prevR >= 0 ? currentTokens[prevR] : null;
+      const rightAnchor = currentTokens[rAnchor];
+
+      const eligibleSpan =
+        iSpan.length >= 1 &&
+        iSpan.length <= 2 &&
+        rSpan.length <= 2 &&
+        (rSpan.length !== iSpan.length ||
+          rSpan.some((tok, pos) => tok !== iSpan[pos]));
+
+      if (eligibleSpan) {
+        const interimScore = spanContextScore(leftAnchor, iSpan, rightAnchor);
+        const finalScore = spanContextScore(leftAnchor, rSpan, rightAnchor);
+        const minRequiredScore = rSpan.length === 0 ? 3 : leftAnchor ? 2 : 1;
+        if (interimScore >= minRequiredScore && interimScore > finalScore) {
+          rebuilt.push(...iSpan);
+          changed = true;
+        } else {
+          rebuilt.push(...rSpan);
+        }
+      } else {
+        rebuilt.push(...rSpan);
+      }
+
+      rebuilt.push(rightAnchor);
+      prevR = rAnchor;
+      prevI = iAnchor;
+    }
+
+    // Always keep the final's trailing tokens after the last matching anchor intact
+    // so an incomplete cut-off interim syllable never overrides a completed final word.
+    if (prevR + 1 < currentTokens.length) {
+      rebuilt.push(...currentTokens.slice(prevR + 1));
+    }
+    currentTokens = rebuilt;
+  }
+
+  return changed ? currentTokens.join(" ") : normalizedFinal;
+}
+
+const TECHNICAL_STT_UNAVAILABLE_CODES = new Set<string>([
+  "STT_TEMPORARILY_UNAVAILABLE",
+  "STT_UNAVAILABLE",
+  "LOCAL_STT_UNAVAILABLE",
+  "LOCAL_STT_TIMEOUT",
+  "LOCAL_STT_BUSY",
+  "GOOGLE_STT_UNCONFIGURED",
+  "GOOGLE_STT_UNAVAILABLE",
+  "STT_NETWORK_ERROR",
+  "STT_TIMEOUT",
+  "STT_RATE_LIMITED",
+  "STT_CONCURRENCY_LIMITED",
+]);
+
+export function isTechnicalSttUnavailabilityError(error: unknown): boolean {
+  if (!error) return false;
+  if (error instanceof Error && error.name === "AbortError") return false;
+  if (error instanceof TypeError) return true;
+  if (error instanceof ServiceError) {
+    if (error.status >= 500 || error.status === 429 || error.status === 0) {
+      return true;
+    }
+    return TECHNICAL_STT_UNAVAILABLE_CODES.has(String(error.code));
+  }
+  if (typeof error === "object") {
+    const rec = error as {
+      status?: unknown;
+      code?: unknown;
+      message?: unknown;
+    };
+    if (
+      typeof rec.status === "number" &&
+      (rec.status >= 500 || rec.status === 429 || rec.status === 0)
+    ) {
+      return true;
+    }
+    const code = typeof rec.code === "string" ? rec.code : "";
+    if (TECHNICAL_STT_UNAVAILABLE_CODES.has(code)) return true;
+    const message = typeof rec.message === "string" ? rec.message : "";
+    const combined = `${code} ${message}`;
+    for (const marker of TECHNICAL_STT_UNAVAILABLE_CODES) {
+      if (combined.includes(marker)) return true;
+    }
+    return (
+      combined.includes("503") ||
+      combined.includes("502") ||
+      combined.includes("504")
+    );
+  }
+  return false;
+}
+
+function getBrowserSpeechRecognitionCtor():
+  (new () => SegmentSpeechRecognitionLike) | undefined {
+  if (typeof window === "undefined") return undefined;
+  const win = window as unknown as {
+    SpeechRecognition?: new () => SegmentSpeechRecognitionLike;
+    webkitSpeechRecognition?: new () => SegmentSpeechRecognitionLike;
+  };
+  const ctor = win.SpeechRecognition || win.webkitSpeechRecognition;
+  return typeof ctor === "function" ? ctor : undefined;
+}
+
 export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLike {
   continuous = true;
   interimResults = true;
@@ -167,8 +417,13 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private lastInterimSpeechSamples = 0;
   private interimInFlight = false;
   private interimGeneration = 0;
+  private segmentInterims: string[] = [];
   private pendingUploads: Set<Promise<void>> = new Set();
   private uploadChain: Promise<void> = Promise.resolve();
+  private browserFallbackRec: SegmentSpeechRecognitionLike | null = null;
+  private usingBrowserFallback = false;
+  private browserBaseOffset = 0;
+  private consecutiveTechnicalFailures = 0;
 
   constructor(
     private readonly speechService: SpeechService,
@@ -177,6 +432,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
 
   /** True while the child is currently speaking or an STT segment upload is still in flight. */
   hasPendingUploads(): boolean {
+    if (this.usingBrowserFallback) return false;
     return this.inSpeech || this.pendingUploads.size > 0;
   }
 
@@ -184,16 +440,80 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     if (this.active) return;
     this.active = true;
     this.stopping = false;
+    this.usingBrowserFallback = false;
+    this.browserFallbackRec = null;
+    this.browserBaseOffset = 0;
     this.abortController = new AbortController();
     this.resultsHistory = [];
     this.uploadChain = Promise.resolve();
+    this.consecutiveTechnicalFailures = 0;
     this.resetSegmentState();
+
+    const policy = getVoicePolicyPreferences();
+    const freshHealth = getFreshVoiceEngineHealth();
+    const localHealthy =
+      freshHealth !== null &&
+      freshHealth.local.available &&
+      freshHealth.local.stt_ready;
+
+    if (localHealthy) {
+      // Local worker recovered -> immediately clear any emergency cooldown and stay 100% Offline!
+      lastLocalSttOutageAt = 0;
+      if (getVoiceEngineStatus().stt.fallbackUsed) {
+        recordSttEngineUsage({
+          provider: "local",
+          fallbackUsed: false,
+          fallbackReason: null,
+        });
+      }
+    } else if (
+      policy.providerMode === "local_with_google_fallback" &&
+      policy.allowGoogleSttFallback
+    ) {
+      const confirmedLocalDownNoGoogle =
+        freshHealth !== null &&
+        (!freshHealth.local.available || !freshHealth.local.stt_ready) &&
+        (!freshHealth.google.stt_configured || freshHealth.google.stt_cooldown);
+      const now = Date.now();
+      const withinEmergencyCooldown =
+        lastLocalSttOutageAt > 0 &&
+        now - lastLocalSttOutageAt < LOCAL_OUTAGE_RETRY_MS &&
+        getVoiceEngineStatus().stt.tier === "browser_default";
+
+      if (confirmedLocalDownNoGoogle || withinEmergencyCooldown) {
+        if (confirmedLocalDownNoGoogle) {
+          lastLocalSttOutageAt = now;
+        }
+        if (this.tryActivateBrowserFallback()) {
+          return;
+        }
+      } else if (
+        lastLocalSttOutageAt > 0 &&
+        now - lastLocalSttOutageAt >= LOCAL_OUTAGE_RETRY_MS
+      ) {
+        // Emergency cooldown TTL elapsed -> automatically re-try Local Offline STT!
+        lastLocalSttOutageAt = 0;
+      }
+    }
+
     void this.openAudioGraph(audioTrack);
   }
 
   stop(): void {
     if (!this.active || this.stopping) return;
     this.stopping = true;
+    if (this.usingBrowserFallback && this.browserFallbackRec) {
+      try {
+        this.browserFallbackRec.stop();
+      } catch {
+        this.browserFallbackRec = null;
+        this.usingBrowserFallback = false;
+        this.active = false;
+        this.stopping = false;
+        this.onend?.();
+      }
+      return;
+    }
     // Flush any pending speech segment before emitting onend
     if (
       this.inSpeech &&
@@ -217,9 +537,143 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.active = false;
     this.stopping = false;
     this.abortController?.abort();
+    const fallbackRec = this.browserFallbackRec;
+    this.browserFallbackRec = null;
+    this.usingBrowserFallback = false;
+    if (fallbackRec) {
+      try {
+        if (typeof fallbackRec.abort === "function") {
+          fallbackRec.abort();
+        } else {
+          fallbackRec.stop();
+        }
+      } catch {
+        // Ignore teardown errors
+      }
+    }
     this.resetSegmentState();
     this.teardownAudioGraph();
     this.onend?.();
+  }
+
+  private recordTechnicalFailureAndMaybeFallback(): boolean {
+    this.consecutiveTechnicalFailures += 1;
+    const freshHealth = getFreshVoiceEngineHealth();
+    const confirmedLocalOutage =
+      freshHealth !== null &&
+      (!freshHealth.local.available || !freshHealth.local.stt_ready);
+    if (
+      confirmedLocalOutage ||
+      this.consecutiveTechnicalFailures >= EMERGENCY_FAILURE_THRESHOLD
+    ) {
+      lastLocalSttOutageAt = Date.now();
+      return this.tryActivateBrowserFallback();
+    }
+    return false;
+  }
+
+  private tryActivateBrowserFallback(): boolean {
+    if (!this.active || this.stopping || this.usingBrowserFallback) {
+      return false;
+    }
+    const policy = getVoicePolicyPreferences();
+    if (
+      policy.providerMode !== "local_with_google_fallback" ||
+      !policy.allowGoogleSttFallback
+    ) {
+      return false;
+    }
+    const BrowserCtor = getBrowserSpeechRecognitionCtor();
+    if (!BrowserCtor) {
+      return false;
+    }
+
+    this.usingBrowserFallback = true;
+    this.abortController?.abort();
+    this.resetSegmentState();
+    this.teardownAudioGraph();
+
+    let nativeRec: SegmentSpeechRecognitionLike;
+    try {
+      nativeRec = new BrowserCtor();
+    } catch {
+      this.usingBrowserFallback = false;
+      return false;
+    }
+
+    nativeRec.lang = this.lang || "vi-VN";
+    nativeRec.continuous = this.continuous;
+    nativeRec.interimResults = this.interimResults;
+    nativeRec.maxAlternatives = this.maxAlternatives;
+    this.browserFallbackRec = nativeRec;
+    this.browserBaseOffset = this.resultsHistory.length;
+
+    nativeRec.onresult = (ev: SegmentSpeechEvent) => {
+      if (!this.active || this.browserFallbackRec !== nativeRec) return;
+      const base = this.browserBaseOffset;
+      const totalLength = base + ev.results.length;
+      const resultsObj: Record<number, SegmentSpeechResultItem> & {
+        length: number;
+      } = { length: totalLength };
+      for (let i = 0; i < base; i += 1) {
+        resultsObj[i] = this.resultsHistory[i];
+      }
+      for (let i = 0; i < ev.results.length; i += 1) {
+        const item = ev.results[i];
+        resultsObj[base + i] = item;
+        if (item?.isFinal) {
+          this.resultsHistory[base + i] = item;
+        }
+      }
+      this.onresult?.({
+        resultIndex: base + ev.resultIndex,
+        results: resultsObj,
+      });
+    };
+
+    nativeRec.onerror = (ev: SegmentSpeechErrorEvent) => {
+      if (
+        !this.active ||
+        this.stopping ||
+        this.browserFallbackRec !== nativeRec
+      ) {
+        return;
+      }
+      this.onerror?.(ev);
+    };
+
+    nativeRec.onend = () => {
+      if (this.browserFallbackRec !== nativeRec) return;
+      if (this.active && !this.stopping && this.continuous) {
+        try {
+          this.browserBaseOffset = this.resultsHistory.length;
+          nativeRec.start();
+          return;
+        } catch {
+          // Fall through to clean termination
+        }
+      }
+      this.browserFallbackRec = null;
+      this.usingBrowserFallback = false;
+      this.active = false;
+      this.stopping = false;
+      this.onend?.();
+    };
+
+    recordSttEngineUsage({
+      provider: "browser",
+      fallbackUsed: true,
+      fallbackReason: "LOCAL_STT_UNAVAILABLE",
+    });
+
+    try {
+      nativeRec.start();
+      return true;
+    } catch {
+      this.browserFallbackRec = null;
+      this.usingBrowserFallback = false;
+      return false;
+    }
   }
 
   private resetSegmentState(): void {
@@ -228,6 +682,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.speechSamples = 0;
     this.silenceSamples = 0;
     this.inSpeech = false;
+    this.segmentInterims = [];
   }
 
   private teardownAudioGraph(): void {
@@ -428,6 +883,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.lastInterimSpeechSamples = total;
     this.interimInFlight = true;
     const gen = this.interimGeneration;
+    const activeSegmentInterims = this.segmentInterims;
     const wavBlob = encodeFloat32ToWav16kBlob(combined);
     const ctx = this.getContext?.() ?? {};
     const signal = this.abortController?.signal;
@@ -444,6 +900,16 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         timeoutMs: 4_000,
       })
       .then((res) => {
+        this.consecutiveTechnicalFailures = 0;
+        lastLocalSttOutageAt = 0;
+        const text = (res.text ?? "").normalize("NFC").trim();
+        if (!text) return;
+        if (activeSegmentInterims[activeSegmentInterims.length - 1] !== text) {
+          activeSegmentInterims.push(text);
+          if (activeSegmentInterims.length > 12) {
+            activeSegmentInterims.shift();
+          }
+        }
         if (
           !this.active ||
           this.stopping ||
@@ -452,8 +918,6 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         ) {
           return;
         }
-        const text = (res.text ?? "").normalize("NFC").trim();
-        if (!text) return;
         const resultIndex = this.resultsHistory.length;
         const interimItem: SegmentSpeechResultItem = {
           isFinal: false,
@@ -475,8 +939,10 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           results: resultsObj,
         });
       })
-      .catch(() => {
-        // Non-blocking preview: ignore transient interim failures cleanly
+      .catch((err) => {
+        if (isTechnicalSttUnavailabilityError(err)) {
+          this.recordTechnicalFailureAndMaybeFallback();
+        }
       })
       .finally(() => {
         this.interimInFlight = false;
@@ -492,6 +958,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     }
     const total = this.speechSamples;
     const silenceTailSamples = this.silenceSamples;
+    const capturedInterims = this.segmentInterims;
     const combined = new Float32Array(total);
     let offset = 0;
     for (const part of this.speechChunks) {
@@ -513,7 +980,24 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       this.preRoll = preservedPreRoll;
     }
 
-    const wavBlob = encodeFloat32ToWav16kBlob(combined);
+    // Trim excess trailing silence beyond 180ms before encoding WAV so 720ms of trailing
+    // room noise never degrades Sherpa-ONNX decoding compared to the clean rolling interim.
+    let audioToEncode = combined;
+    if (
+      !carryOverlap &&
+      silenceTailSamples > MAX_FLUSH_TRAILING_SILENCE_SAMPLES
+    ) {
+      const trimCount = silenceTailSamples - MAX_FLUSH_TRAILING_SILENCE_SAMPLES;
+      const keepLength = Math.max(
+        Math.floor((TARGET_SAMPLE_RATE * MIN_SPEECH_MS) / 1000),
+        combined.length - trimCount,
+      );
+      if (keepLength < combined.length) {
+        audioToEncode = combined.subarray(0, keepLength);
+      }
+    }
+
+    const wavBlob = encodeFloat32ToWav16kBlob(audioToEncode);
     const seq = ++this.turnSeq;
     const ctx = this.getContext?.() ?? {};
     const turnId = nextTurnId(ctx.pageId ?? "live", seq);
@@ -536,9 +1020,27 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       try {
         return await transcribeOnce();
       } catch (err) {
-        if (signal?.aborted || (!this.active && !this.stopping)) throw err;
+        if (
+          signal?.aborted ||
+          this.usingBrowserFallback ||
+          (!this.active && !this.stopping)
+        ) {
+          throw err;
+        }
+        if (
+          isTechnicalSttUnavailabilityError(err) &&
+          this.recordTechnicalFailureAndMaybeFallback()
+        ) {
+          throw err;
+        }
         await new Promise((resolve) => setTimeout(resolve, 250));
-        if (signal?.aborted || (!this.active && !this.stopping)) throw err;
+        if (
+          signal?.aborted ||
+          this.usingBrowserFallback ||
+          (!this.active && !this.stopping)
+        ) {
+          throw err;
+        }
         return await transcribeOnce();
       }
     };
@@ -549,8 +1051,18 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     const deliveryTask = this.uploadChain
       .then(async () => {
         const res = await responsePromise;
-        if (!this.active && !this.stopping) return;
-        const text = (res.text ?? "").normalize("NFC").trim();
+        this.consecutiveTechnicalFailures = 0;
+        lastLocalSttOutageAt = 0;
+        if (this.usingBrowserFallback || (!this.active && !this.stopping)) {
+          return;
+        }
+        const rawText = (res.text ?? "").normalize("NFC").trim();
+        if (!rawText) return;
+        const text = reconcileSegmentTranscriptWithInterims(
+          rawText,
+          capturedInterims,
+          ctx.keyterms,
+        );
         if (!text) return;
         const resultIndex = this.resultsHistory.length;
         const item: SegmentSpeechResultItem = {
@@ -574,8 +1086,10 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           results: resultsObj,
         });
       })
-      .catch(() => {
-        // Segment error is handled gracefully; final recorder transcription remains as backup
+      .catch((err) => {
+        if (isTechnicalSttUnavailabilityError(err)) {
+          this.recordTechnicalFailureAndMaybeFallback();
+        }
       })
       .finally(() => {
         this.pendingUploads.delete(deliveryTask);

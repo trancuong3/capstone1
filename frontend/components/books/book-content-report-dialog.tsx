@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRef, useState, type FormEvent } from "react";
 
 import { Button } from "@/components/common/button";
+import { Modal } from "@/components/common/modal";
 import { useBookContentReportService } from "@/hooks/use-book-content-report-service";
 import type {
   BookContentIssueType,
@@ -89,193 +90,187 @@ export function BookContentReportDialog({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-6"
-      role="presentation"
-    >
-      <section
-        aria-labelledby="book-content-report-title"
-        aria-modal="true"
-        className="max-h-[92dvh] w-full max-w-2xl overflow-y-auto rounded-t-card bg-white p-5 shadow-2xl sm:rounded-card sm:p-7"
-        role="dialog"
-      >
-        <div className="mb-5 flex items-start justify-between gap-4">
-          <div>
-            <p className="text-sm font-semibold text-primary">
-              ViRead · Góp ý chất lượng
-            </p>
-            <h2
-              className="mt-1 text-xl font-semibold text-ink"
-              id="book-content-report-title"
+    <Modal
+      closeOnBackdropClick={!submitting}
+      closeOnEscape={!submitting}
+      footer={
+        created ? (
+          <div className="flex flex-wrap gap-3">
+            <Button fullWidth={false} onClick={onClose}>
+              Hoàn tất
+            </Button>
+            <Link
+              className="inline-flex min-h-12 items-center rounded-control border border-border px-4 font-semibold text-primary hover:bg-canvas"
+              href="/book-reports"
             >
-              {pageId ? "Báo lỗi trang sách" : "Báo lỗi sách"}
-            </h2>
-            <p className="mt-2 text-sm text-muted">
-              {bookTitle}
-              {pageNumber !== null
-                ? ` · Trang ${pageNumber}`
-                : " · Toàn bộ sách"}
-            </p>
-          </div>
-          <button
-            aria-label="Đóng biểu mẫu"
-            className="min-h-10 rounded-control px-3 font-semibold text-muted hover:bg-canvas focus-visible:outline-3 focus-visible:outline-primary"
-            disabled={submitting}
-            onClick={onClose}
-            type="button"
-          >
-            Đóng
-          </button>
-        </div>
-
-        {created ? (
-          <div className="space-y-4" role="status">
-            <div className="rounded-control border border-emerald-200 bg-emerald-50 p-4">
-              <p className="font-semibold text-emerald-900">
-                Báo cáo đã được lưu thành công.
-              </p>
-              <p className="mt-1 text-sm text-emerald-800">
-                ViRead đã ghi nhận yêu cầu kiểm tra toàn bộ cuốn sách. Admin sẽ
-                xem báo cáo và kết quả kiểm tra trước khi quyết định chỉnh sửa.
-              </p>
-            </div>
-            <dl className="grid gap-2 rounded-control border border-border p-4 text-sm sm:grid-cols-2">
-              <div>
-                <dt className="text-muted">Mã báo cáo</dt>
-                <dd className="break-all font-mono font-semibold text-ink">
-                  {created.id}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted">Trạng thái</dt>
-                <dd className="font-semibold text-ink">{created.status}</dd>
-              </div>
-              <div className="sm:col-span-2">
-                <dt className="text-muted">Yêu cầu kiểm tra</dt>
-                <dd className="break-all font-mono text-ink">
-                  {created.scan_run_id ??
-                    "Đã lưu báo cáo; chưa có mã scan trả về"}
-                </dd>
-              </div>
-            </dl>
-            <div className="flex flex-wrap gap-3">
-              <Button onClick={onClose}>Hoàn tất</Button>
-              <Link
-                className="inline-flex min-h-12 items-center rounded-control border border-border px-4 font-semibold text-primary hover:bg-canvas"
-                href="/book-reports"
-              >
-                Xem báo cáo của tôi
-              </Link>
-            </div>
+              Xem báo cáo của tôi
+            </Link>
           </div>
         ) : (
-          <form className="space-y-4" onSubmit={handleSubmit}>
+          <div className="flex flex-wrap justify-end gap-3">
+            <Button
+              disabled={submitting}
+              fullWidth={false}
+              onClick={onClose}
+              type="button"
+              variant="secondary"
+            >
+              Hủy
+            </Button>
+            <Button
+              disabled={submitting || !description.trim()}
+              form="book-content-report-form"
+              fullWidth={false}
+              type="submit"
+            >
+              {submitting ? "Đang gửi báo cáo…" : "Gửi báo cáo"}
+            </Button>
+          </div>
+        )
+      }
+      isOpen
+      onClose={() => {
+        if (!submitting) onClose();
+      }}
+      showCloseButton={!submitting}
+      title={pageId ? "Báo lỗi trang sách" : "Báo lỗi sách"}
+      tone="paper"
+    >
+      <div className="mb-4">
+        <p className="text-sm font-semibold text-primary">
+          ViRead · Góp ý chất lượng
+        </p>
+        <p className="mt-1 break-words text-sm text-muted">
+          {bookTitle}
+          {pageNumber !== null ? ` · Trang ${pageNumber}` : " · Toàn bộ sách"}
+        </p>
+      </div>
+
+      {created ? (
+        <div className="space-y-4" role="status">
+          <div className="rounded-control border border-emerald-200 bg-emerald-50 p-4">
+            <p className="font-semibold text-emerald-900">
+              Báo cáo đã được lưu thành công.
+            </p>
+            <p className="mt-1 text-sm text-emerald-800">
+              ViRead đã ghi nhận yêu cầu kiểm tra toàn bộ cuốn sách. Admin sẽ
+              xem báo cáo và kết quả kiểm tra trước khi quyết định chỉnh sửa.
+            </p>
+          </div>
+          <dl className="grid gap-2 rounded-control border border-border p-4 text-sm sm:grid-cols-2">
             <div>
-              <label
-                className="mb-2 block text-sm font-semibold text-ink"
-                htmlFor="book-report-issue"
-              >
-                Loại vấn đề
-              </label>
-              <select
-                className="min-h-12 w-full rounded-control border border-border bg-white px-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
-                id="book-report-issue"
-                onChange={(event) =>
-                  setIssueType(event.target.value as BookContentIssueType)
-                }
-                value={issueType}
-              >
-                {Object.entries(issueLabels).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
+              <dt className="text-muted">Mã báo cáo</dt>
+              <dd className="break-all font-mono font-semibold text-ink">
+                {created.id}
+              </dd>
             </div>
-
             <div>
-              <label
-                className="mb-2 block text-sm font-semibold text-ink"
-                htmlFor="book-report-description"
-              >
-                Mô tả vấn đề <span className="text-danger">*</span>
-              </label>
-              <textarea
-                className="min-h-28 w-full rounded-control border border-border bg-white p-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
-                id="book-report-description"
-                maxLength={4000}
-                onChange={(event) => setDescription(event.target.value)}
-                placeholder="Mô tả vị trí hoặc nội dung mà ba mẹ cho rằng chưa chính xác…"
-                required
-                value={description}
-              />
-              <p className="mt-1 text-right text-xs text-muted">
-                {description.length}/4000
-              </p>
+              <dt className="text-muted">Trạng thái</dt>
+              <dd className="font-semibold text-ink">{created.status}</dd>
             </div>
-
-            <div>
-              <label
-                className="mb-2 block text-sm font-semibold text-ink"
-                htmlFor="book-report-text"
-              >
-                Đoạn nội dung nghi ngờ (không bắt buộc)
-              </label>
-              <textarea
-                className="min-h-20 w-full rounded-control border border-border bg-white p-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
-                id="book-report-text"
-                maxLength={1200}
-                onChange={(event) => setReportedText(event.target.value)}
-                placeholder="Nhập từ hoặc câu có vấn đề…"
-                value={reportedText}
-              />
+            <div className="sm:col-span-2">
+              <dt className="text-muted">Yêu cầu kiểm tra</dt>
+              <dd className="break-all font-mono text-ink">
+                {created.scan_run_id ??
+                  "Đã lưu báo cáo; chưa có mã scan trả về"}
+              </dd>
             </div>
+          </dl>
+        </div>
+      ) : (
+        <form
+          className="space-y-4"
+          id="book-content-report-form"
+          onSubmit={handleSubmit}
+        >
+          <div>
+            <label
+              className="mb-2 block text-sm font-semibold text-ink"
+              htmlFor="book-report-issue"
+            >
+              Loại vấn đề
+            </label>
+            <select
+              className="min-h-12 w-full rounded-control border border-border bg-white px-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
+              id="book-report-issue"
+              onChange={(event) =>
+                setIssueType(event.target.value as BookContentIssueType)
+              }
+              value={issueType}
+            >
+              {Object.entries(issueLabels).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </div>
 
-            <div>
-              <label
-                className="mb-2 block text-sm font-semibold text-ink"
-                htmlFor="book-report-correction"
-              >
-                Nội dung đề xuất sửa (không bắt buộc)
-              </label>
-              <textarea
-                className="min-h-20 w-full rounded-control border border-border bg-white p-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
-                id="book-report-correction"
-                maxLength={1200}
-                onChange={(event) => setSuggestedCorrection(event.target.value)}
-                placeholder="Đề xuất cách viết đúng nếu ba mẹ đã xác định được…"
-                value={suggestedCorrection}
-              />
-            </div>
+          <div>
+            <label
+              className="mb-2 block text-sm font-semibold text-ink"
+              htmlFor="book-report-description"
+            >
+              Mô tả vấn đề <span className="text-danger">*</span>
+            </label>
+            <textarea
+              className="min-h-28 w-full rounded-control border border-border bg-white p-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
+              id="book-report-description"
+              maxLength={4000}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Mô tả vị trí hoặc nội dung mà ba mẹ cho rằng chưa chính xác…"
+              required
+              value={description}
+            />
+            <p className="mt-1 text-right text-xs text-muted">
+              {description.length}/4000
+            </p>
+          </div>
 
-            {error ? (
-              <p
-                className="rounded-control bg-red-50 p-3 text-sm font-semibold text-danger"
-                role="alert"
-              >
-                {error}
-              </p>
-            ) : null}
+          <div>
+            <label
+              className="mb-2 block text-sm font-semibold text-ink"
+              htmlFor="book-report-text"
+            >
+              Đoạn nội dung nghi ngờ (không bắt buộc)
+            </label>
+            <textarea
+              className="min-h-20 w-full rounded-control border border-border bg-white p-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
+              id="book-report-text"
+              maxLength={1200}
+              onChange={(event) => setReportedText(event.target.value)}
+              placeholder="Nhập từ hoặc câu có vấn đề…"
+              value={reportedText}
+            />
+          </div>
 
-            <div className="flex flex-wrap justify-end gap-3 border-t border-border pt-4">
-              <Button
-                disabled={submitting}
-                onClick={onClose}
-                type="button"
-                variant="secondary"
-              >
-                Hủy
-              </Button>
-              <Button
-                disabled={submitting || !description.trim()}
-                type="submit"
-              >
-                {submitting ? "Đang gửi báo cáo…" : "Gửi báo cáo"}
-              </Button>
-            </div>
-          </form>
-        )}
-      </section>
-    </div>
+          <div>
+            <label
+              className="mb-2 block text-sm font-semibold text-ink"
+              htmlFor="book-report-correction"
+            >
+              Nội dung đề xuất sửa (không bắt buộc)
+            </label>
+            <textarea
+              className="min-h-20 w-full rounded-control border border-border bg-white p-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
+              id="book-report-correction"
+              maxLength={1200}
+              onChange={(event) => setSuggestedCorrection(event.target.value)}
+              placeholder="Đề xuất cách viết đúng nếu ba mẹ đã xác định được…"
+              value={suggestedCorrection}
+            />
+          </div>
+
+          {error ? (
+            <p
+              className="rounded-control bg-red-50 p-3 text-sm font-semibold text-danger"
+              role="alert"
+            >
+              {error}
+            </p>
+          ) : null}
+        </form>
+      )}
+    </Modal>
   );
 }
