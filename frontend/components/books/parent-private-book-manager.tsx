@@ -27,6 +27,7 @@ import {
   type FormEvent,
 } from "react";
 
+import { ParentOcrContributionCard } from "@/components/books/parent-ocr-contribution-card";
 import { AuthenticatedImage } from "@/components/common/authenticated-image";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
@@ -1009,6 +1010,19 @@ function ParentPrivateBookManagerContent({
           </div>
         ) : null}
       </header>
+
+      {book.ocr_contribution && service.updateOcrContribution ? (
+        <ParentOcrContributionCard
+          bookTitle={book.title}
+          disabled={isSuspended || busyKey !== null}
+          onUpdate={async (input) => {
+            if (!service.updateOcrContribution) return;
+            await service.updateOcrContribution(book.id, input);
+            await loadDetail(true);
+          }}
+          state={book.ocr_contribution}
+        />
+      ) : null}
 
       {isSuspended ? (
         <StatusMessage title="Sách riêng đang bị đình chỉ" tone="error">

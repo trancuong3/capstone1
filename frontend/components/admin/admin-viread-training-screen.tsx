@@ -370,13 +370,16 @@ export function AdminVireadTrainingScreen() {
               </p>
             </Card>
             <Card className="bg-white">
-              <p className="font-bold text-muted">Mẫu dữ liệu đã đăng ký</p>
+              <p className="font-bold text-muted">Mẫu Flow 2 sẵn sàng train</p>
               <h2 className="mt-2 text-3xl font-black">
-                {totalSamples.toLocaleString("vi-VN")}
+                {(
+                  data.storage_summary?.flow2_verified_total_samples ??
+                  totalSamples
+                ).toLocaleString("vi-VN")}
               </h2>
-              <p className="mt-2 text-sm text-muted">
+              <p className="mt-2 text-xs text-muted">
                 {data.storage_summary
-                  ? `Luồng 2 trên Drive: ${data.storage_summary.flow2_drive_synced_samples.toLocaleString("vi-VN")} · Legacy: ${data.storage_summary.flow2_legacy_samples.toLocaleString("vi-VN")}`
+                  ? `Drive sẵn sàng: ${data.storage_summary.flow2_drive_synced_samples.toLocaleString("vi-VN")} · Chờ xác minh: ${(data.storage_summary.flow2_pending_verification_samples ?? 0).toLocaleString("vi-VN")} · Đã loại: ${(data.storage_summary.flow2_excluded_samples ?? 0).toLocaleString("vi-VN")} · Legacy: ${data.storage_summary.flow2_legacy_samples.toLocaleString("vi-VN")} (Tổng lịch sử/tất cả luồng: ${totalSamples.toLocaleString("vi-VN")})`
                   : "Các luồng được lưu tách riêng."}
               </p>
             </Card>
@@ -509,29 +512,80 @@ export function AdminVireadTrainingScreen() {
                   {flow2Holdout.toLocaleString("vi-VN")}
                 </p>
                 {data.storage_summary ? (
-                  <p className="mt-1 text-xs text-muted">
-                    Đồng bộ Google Drive:{" "}
-                    <strong>
-                      {data.storage_summary.flow2_drive_synced_samples.toLocaleString(
+                  <>
+                    <p className="mt-1 text-xs text-muted">
+                      Mẫu Flow 2 sẵn sàng train (Drive):{" "}
+                      <strong>
+                        {data.storage_summary.flow2_drive_synced_samples.toLocaleString(
+                          "vi-VN",
+                        )}
+                      </strong>{" "}
+                      · Chờ xác minh:{" "}
+                      {(
+                        (data.storage_summary
+                          .flow2_pending_verification_samples ?? 0) +
+                        (data.storage_summary.flow2_parent_candidates_pending ??
+                          0)
+                      ).toLocaleString("vi-VN")}{" "}
+                      · Đã loại:{" "}
+                      {(
+                        data.storage_summary.flow2_excluded_samples ?? 0
+                      ).toLocaleString("vi-VN")}{" "}
+                      · Legacy Supabase:{" "}
+                      {data.storage_summary.flow2_legacy_samples.toLocaleString(
                         "vi-VN",
                       )}
-                    </strong>{" "}
-                    · Legacy Supabase:{" "}
-                    {data.storage_summary.flow2_legacy_samples.toLocaleString(
-                      "vi-VN",
-                    )}
-                  </p>
+                    </p>
+                    <p className="mt-1 text-xs text-muted">
+                      Đóng góp từ Sách của tôi (opt-in): Chờ xác minh{" "}
+                      {(
+                        data.storage_summary.flow2_parent_candidates_pending ??
+                        0
+                      ).toLocaleString("vi-VN")}{" "}
+                      · Chờ đồng bộ{" "}
+                      {(
+                        data.storage_summary
+                          .flow2_parent_candidates_sync_queued ?? 0
+                      ).toLocaleString("vi-VN")}{" "}
+                      · Đã đồng bộ{" "}
+                      {(
+                        data.storage_summary.flow2_parent_candidates_synced ?? 0
+                      ).toLocaleString("vi-VN")}
+                    </p>
+                  </>
                 ) : null}
                 <p className="mt-1 text-xs text-muted">
-                  Chỉ nhận revision được Admin xác minh thủ công (chặn tuyệt đối
-                  AI_AUTO_VERIFIED); nhiều từ trong cùng dòng được ghép theo
-                  reading order thành một nhãn NFC.
+                  Chỉ nhận revision hoặc dòng chữ sách riêng đã được chủ sách
+                  bật đóng góp và Admin xác minh thủ công (chặn tuyệt đối
+                  AI_AUTO_VERIFIED); mẫu gia đình không tự trở thành Locked Test.
                 </p>
-                <p className="mt-2 text-sm font-bold text-muted">
-                  {flow2Train > 0 && flow2Validation > 0
-                    ? "Đủ Train/Validation; training bắt đầu độc lập với Locked Test. Candidate được giữ để đánh giá sau."
-                    : "Chưa sẵn sàng: cần trang VERIFIED thuộc train và validation; các dòng cùng trang luôn nằm chung một tập"}
-                </p>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold">
+                  <span
+                    className={`rounded-full border px-2.5 py-0.5 ${
+                      flow2Train > 0 && flow2Validation > 0
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+                        : "border-amber-300 bg-amber-50 text-amber-900"
+                    }`}
+                  >
+                    {flow2Train > 0 && flow2Validation > 0
+                      ? "Đủ điều kiện train (Train + Validation)"
+                      : "Chưa đủ điều kiện train (cần Train + Validation)"}
+                  </span>
+                  <span
+                    className={`rounded-full border px-2.5 py-0.5 ${
+                      data.storage_summary?.evaluation_ready_for_model_replacement ??
+                      data.locked_test?.status === "READY"
+                        ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+                        : "border-slate-300 bg-slate-100 text-slate-800"
+                    }`}
+                  >
+                    {(data.storage_summary
+                      ?.evaluation_ready_for_model_replacement ??
+                    data.locked_test?.status === "READY")
+                      ? "Đủ điều kiện đánh giá để thay model (Locked Test sẵn sàng)"
+                      : "Chưa đủ điều kiện đánh giá để thay model (chưa đủ Locked Test độc lập)"}
+                  </span>
+                </div>
               </li>
             </ul>
           </Card>

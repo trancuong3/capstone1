@@ -188,6 +188,52 @@ def _verified_training_split(group_id: str) -> str:
     return "train" if value < 0.8 else "validation"
 
 
+def _assign_leak_safe_splits(source_rows: list[dict[str, Any]]) -> None:
+    """Assign deterministic Train/Validation splits while clustering exact and near-duplicate
+    content across different source groups (e.g. same book/page submitted by two families)
+    into the same split so duplicate content can never leak across train and validation."""
+    if not source_rows:
+        return
+    parent: dict[str, str] = {}
+
+    def find(key: str) -> str:
+        root = parent.setdefault(key, key)
+        while parent[root] != root:
+            parent[root] = parent[parent[root]]
+            root = parent[root]
+        return root
+
+    def union(a: str, b: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            if ra < rb:
+                parent[rb] = ra
+            else:
+                parent[ra] = rb
+
+    for row in source_rows:
+        g_key = f"g:{row['group_id']}"
+        h_key = f"h:{str(row['image_sha256']).lower()}"
+        union(g_key, h_key)
+        norm_label = " ".join(unicodedata.normalize("NFC", str(row.get("label") or "")).lower().split())
+        if len(norm_label) >= 12:
+            t_key = f"t:{hashlib.sha256(norm_label.encode('utf-8')).hexdigest()}"
+            union(g_key, t_key)
+
+    # Determine canonical cluster key (smallest raw group_id in each connected component)
+    cluster_min_group: dict[str, str] = {}
+    for row in source_rows:
+        root = find(f"g:{row['group_id']}")
+        gid = str(row["group_id"])
+        if root not in cluster_min_group or gid < cluster_min_group[root]:
+            cluster_min_group[root] = gid
+
+    for row in source_rows:
+        root = find(f"g:{row['group_id']}")
+        canonical_group = cluster_min_group[root]
+        row["split"] = _verified_training_split(canonical_group)
+
+
 def _verified_snapshot_db_rows(dataset_id: UUID, source_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Map exactly the canonical source rows to immutable version-owned rows."""
     return [{
@@ -532,24 +578,65 @@ class VireadOcrTrainingService:
         flow2_train_count = 0
         flow2_validation_count = 0
         flow2_holdout_count = 0
+        flow2_pending_verification_count = 0
+        flow2_excluded_count = 0
         try:
             flow2_stats = await self.repo.one("""
-                SELECT count(DISTINCT image_sha256)::integer AS total_verified_count,
+                SELECT count(DISTINCT image_sha256) FILTER (
+                           WHERE COALESCE(to_jsonb(s)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
+                             AND provenance->>'verified_by_admin' = 'true'
+                             AND COALESCE(provenance->>'ai_review_required', 'false') <> 'true'
+                             AND COALESCE(provenance->>'verification_source', 'admin') = 'admin'
+                       )::integer AS total_verified_count,
                        count(DISTINCT image_sha256) FILTER (
-                           WHERE image_storage_path LIKE 'gdrive://%'
+                           WHERE COALESCE(to_jsonb(s)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
+                             AND provenance->>'verified_by_admin' = 'true'
+                             AND COALESCE(provenance->>'ai_review_required', 'false') <> 'true'
+                             AND COALESCE(provenance->>'verification_source', 'admin') = 'admin'
+                             AND image_storage_path LIKE 'gdrive://%'
                        )::integer AS drive_synced_count,
                        count(DISTINCT image_sha256) FILTER (
-                           WHERE image_storage_path NOT LIKE 'gdrive://%'
+                           WHERE COALESCE(to_jsonb(s)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
+                             AND provenance->>'verified_by_admin' = 'true'
+                             AND COALESCE(provenance->>'ai_review_required', 'false') <> 'true'
+                             AND COALESCE(provenance->>'verification_source', 'admin') = 'admin'
+                             AND image_storage_path NOT LIKE 'gdrive://%'
                        )::integer AS legacy_count,
-                       count(DISTINCT image_sha256) FILTER (WHERE split = 'train')::integer AS train_count,
-                       count(DISTINCT image_sha256) FILTER (WHERE split = 'validation')::integer AS validation_count,
-                       count(DISTINCT image_sha256) FILTER (WHERE split = 'holdout')::integer AS holdout_count
-                FROM public.viread_ocr_samples
-                WHERE source_flow = 'FLOW1_VERIFIED'
-                  AND dataset_version_id IS NULL
-                  AND provenance->>'verified_by_admin' = 'true'
-                  AND COALESCE(provenance->>'ai_review_required', 'false') <> 'true'
-                  AND COALESCE(provenance->>'verification_source', 'admin') = 'admin'
+                       count(DISTINCT image_sha256) FILTER (
+                           WHERE COALESCE(to_jsonb(s)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
+                             AND provenance->>'verified_by_admin' = 'true'
+                             AND COALESCE(provenance->>'ai_review_required', 'false') <> 'true'
+                             AND COALESCE(provenance->>'verification_source', 'admin') = 'admin'
+                             AND split = 'train'
+                       )::integer AS train_count,
+                       count(DISTINCT image_sha256) FILTER (
+                           WHERE COALESCE(to_jsonb(s)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
+                             AND provenance->>'verified_by_admin' = 'true'
+                             AND COALESCE(provenance->>'ai_review_required', 'false') <> 'true'
+                             AND COALESCE(provenance->>'verification_source', 'admin') = 'admin'
+                             AND split = 'validation'
+                       )::integer AS validation_count,
+                       count(DISTINCT image_sha256) FILTER (
+                           WHERE COALESCE(to_jsonb(s)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
+                             AND provenance->>'verified_by_admin' = 'true'
+                             AND COALESCE(provenance->>'ai_review_required', 'false') <> 'true'
+                             AND COALESCE(provenance->>'verification_source', 'admin') = 'admin'
+                             AND split = 'holdout'
+                       )::integer AS holdout_count,
+                       count(DISTINCT image_sha256) FILTER (
+                           WHERE COALESCE(to_jsonb(s)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
+                             AND NOT (
+                                 provenance->>'verified_by_admin' = 'true'
+                                 AND COALESCE(provenance->>'ai_review_required', 'false') <> 'true'
+                                 AND COALESCE(provenance->>'verification_source', 'admin') = 'admin'
+                             )
+                       )::integer AS pending_verification_count,
+                       count(DISTINCT image_sha256) FILTER (
+                           WHERE COALESCE(to_jsonb(s)->>'training_eligibility', 'ELIGIBLE') IN ('QUARANTINED', 'ARCHIVED')
+                       )::integer AS excluded_count
+                FROM public.viread_ocr_samples s
+                WHERE s.source_flow = 'FLOW1_VERIFIED'
+                  AND s.dataset_version_id IS NULL
             """)
             if flow2_stats:
                 flow2_total_count = int(flow2_stats.get("total_verified_count") or 0)
@@ -558,18 +645,43 @@ class VireadOcrTrainingService:
                 flow2_train_count = int(flow2_stats.get("train_count") or 0)
                 flow2_validation_count = int(flow2_stats.get("validation_count") or 0)
                 flow2_holdout_count = int(flow2_stats.get("holdout_count") or 0)
+                flow2_pending_verification_count = int(flow2_stats.get("pending_verification_count") or 0)
+                flow2_excluded_count = int(flow2_stats.get("excluded_count") or 0)
         except Exception as exc:
             logger.debug("Flow 2 storage summary query skipped: %s", type(exc).__name__)
+        parent_cand_counts: dict[str, int] = {}
+        try:
+            if hasattr(self.db, "begin_nested"):
+                async with self.db.begin_nested():
+                    cand_rows = await self.repo.all(
+                        "SELECT status, count(*)::integer AS count FROM public.parent_book_flow2_candidates GROUP BY status"
+                    )
+            else:
+                cand_rows = await self.repo.all(
+                    "SELECT status, count(*)::integer AS count FROM public.parent_book_flow2_candidates GROUP BY status"
+                )
+            for row in cand_rows:
+                parent_cand_counts[str(row["status"])] = int(row["count"] or 0)
+        except Exception as exc:
+            logger.debug("Parent Flow 2 candidate summary query skipped: %s", type(exc).__name__)
         outbox_map = {str(item["status"]): int(item["count"]) for item in outbox}
         storage_summary = {
             "flow2_write_provider": flow2_storage_provider_setting().value,
             "flow2_drive_synced_samples": flow2_drive_count,
             "flow2_legacy_samples": flow2_legacy_count,
             "flow2_verified_total_samples": flow2_total_count,
+            "flow2_pending_verification_samples": flow2_pending_verification_count,
+            "flow2_excluded_samples": flow2_excluded_count,
             "flow2_train_samples": flow2_train_count,
             "flow2_validation_samples": flow2_validation_count,
             "flow2_holdout_samples": flow2_holdout_count,
+            "flow2_parent_candidates_pending": parent_cand_counts.get("PENDING_VERIFICATION", 0),
+            "flow2_parent_candidates_sync_queued": parent_cand_counts.get("SYNC_QUEUED", 0) + parent_cand_counts.get("VERIFIED", 0),
+            "flow2_parent_candidates_synced": parent_cand_counts.get("SYNCED", 0),
+            "flow2_parent_candidates_rejected": parent_cand_counts.get("REJECTED", 0),
+            "flow2_parent_candidates_revoked": parent_cand_counts.get("REVOKED", 0),
             "dataset_ready_for_training": flow2_train_count > 0 and flow2_validation_count > 0,
+            "evaluation_ready_for_model_replacement": bool(locked_test and locked_test.get("status") == "READY"),
             "outbox_pending": outbox_map.get("PENDING", 0) + outbox_map.get("PROCESSING", 0),
             "outbox_retry": outbox_map.get("RETRY", 0),
             "outbox_dead": outbox_map.get("DEAD", 0),
@@ -823,11 +935,14 @@ class VireadOcrTrainingService:
                 WHERE sample.split='holdout'
                   AND sample.source_flow='FLOW1_VERIFIED'
                   AND sample.dataset_version_id IS NULL
+                  AND COALESCE(to_jsonb(sample)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
                   AND sample.source_page_id IS NOT NULL
                   AND sample.source_revision_id IS NOT NULL
                   AND sample.provenance->>'verified_by_admin'='true'
                   AND COALESCE(sample.provenance->>'ai_review_required', 'false') <> 'true'
                   AND COALESCE(sample.provenance->>'verification_source', 'admin') = 'admin'
+                  AND COALESCE(sample.provenance->>'source_origin', '') <> 'PARENT_PRIVATE_CONTRIBUTION'
+                  AND COALESCE(sample.provenance->>'eligible_for_locked_test', 'true') <> 'false'
                   AND EXISTS (
                       SELECT 1 FROM public.viread_ocr_outbox outbox
                       WHERE outbox.page_id=sample.source_page_id
@@ -954,11 +1069,15 @@ class VireadOcrTrainingService:
                 FROM public.viread_ocr_samples sample
                 LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
                 WHERE sample.split='holdout' AND sample.source_flow='FLOW1_VERIFIED'
-                  AND sample.dataset_version_id IS NULL AND sample.source_page_id IS NOT NULL
+                  AND sample.dataset_version_id IS NULL
+                  AND COALESCE(to_jsonb(sample)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
+                  AND sample.source_page_id IS NOT NULL
                   AND sample.source_revision_id IS NOT NULL
                   AND sample.provenance->>'verified_by_admin'='true'
                   AND COALESCE(sample.provenance->>'ai_review_required', 'false') <> 'true'
                   AND COALESCE(sample.provenance->>'verification_source', 'admin') = 'admin'
+                  AND COALESCE(sample.provenance->>'source_origin', '') <> 'PARENT_PRIVATE_CONTRIBUTION'
+                  AND COALESCE(sample.provenance->>'eligible_for_locked_test', 'true') <> 'false'
                   AND EXISTS (
                       SELECT 1 FROM public.viread_ocr_outbox outbox
                       WHERE outbox.page_id=sample.source_page_id
@@ -1131,11 +1250,14 @@ class VireadOcrTrainingService:
                 WHERE sample.split='holdout'
                   AND sample.source_flow='FLOW1_VERIFIED'
                   AND sample.dataset_version_id IS NULL
+                  AND COALESCE(to_jsonb(sample)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
                   AND sample.source_page_id IS NOT NULL
                   AND sample.source_revision_id IS NOT NULL
                   AND sample.provenance->>'verified_by_admin'='true'
                   AND COALESCE(sample.provenance->>'ai_review_required', 'false') <> 'true'
                   AND COALESCE(sample.provenance->>'verification_source', 'admin') = 'admin'
+                  AND COALESCE(sample.provenance->>'source_origin', '') <> 'PARENT_PRIVATE_CONTRIBUTION'
+                  AND COALESCE(sample.provenance->>'eligible_for_locked_test', 'true') <> 'false'
                   AND EXISTS (
                       SELECT 1 FROM public.viread_ocr_outbox outbox
                       WHERE outbox.page_id=sample.source_page_id
@@ -1294,6 +1416,7 @@ class VireadOcrTrainingService:
             LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
             WHERE sample.source_flow='FLOW1_VERIFIED'
               AND sample.split IN ('train','validation') AND sample.dataset_version_id IS NULL
+              AND COALESCE(to_jsonb(sample)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
               AND sample.provenance->>'verified_by_admin' = 'true'
               AND COALESCE(sample.provenance->>'ai_review_required', 'false') <> 'true'
               AND COALESCE(sample.provenance->>'verification_source', 'admin') = 'admin'
@@ -1325,10 +1448,90 @@ class VireadOcrTrainingService:
             and not row["provenance"].get("ai_review_required")
             and str(row["provenance"].get("verification_source") or "admin") == "admin"
         ]
-        # Historical rows were split by page. The new immutable snapshot reassigns
-        # only clean non-holdout documents as a whole; source rows stay untouched.
-        for sample in source_rows:
-            sample["split"] = _verified_training_split(str(sample["group_id"]))
+        # Recheck #3: for any parent-contributed sample, re-verify live consent, active book/page,
+        # and active revision right before snapshotting into a new manifest.
+        parent_contrib_rows = [
+            row for row in source_rows
+            if str((row.get("provenance") or {}).get("source_origin") or "") == "PARENT_PRIVATE_CONTRIBUTION"
+        ]
+        if parent_contrib_rows and hasattr(self.db, "execute"):
+            book_ids = sorted({
+                str(row["provenance"].get("book_id"))
+                for row in parent_contrib_rows
+                if row["provenance"].get("book_id")
+            })
+            live_states: dict[str, dict[str, Any]] = {}
+            live_pages: dict[str, dict[str, Any]] = {}
+            if book_ids:
+                try:
+                    book_rows = await self.repo.all(
+                        """
+                        SELECT b.id::text AS book_id,
+                               b.lifecyclestatus AS book_lifecycle,
+                               b.moderation_status AS book_moderation,
+                               cs.status AS consent_status,
+                               cs.rights_confirmed AS consent_rights_confirmed,
+                               cs.consent_version AS consent_version
+                        FROM public.books b
+                        LEFT JOIN public.parent_book_ocr_contribution_consents cs ON cs.book_id = b.id
+                        WHERE b.id = ANY(CAST(:book_ids AS uuid[]))
+                        """,
+                        {"book_ids": book_ids},
+                    )
+                    live_states = {str(r["book_id"]): r for r in book_rows}
+                    page_ids = sorted({
+                        str(row["source_page_id"])
+                        for row in parent_contrib_rows
+                        if row.get("source_page_id")
+                    })
+                    if page_ids:
+                        p_rows = await self.repo.all(
+                            """
+                            SELECT p.id::text AS page_id,
+                                   p.lifecyclestatus AS page_lifecycle,
+                                   p.currentverifiedrevisionid::text AS current_rev_id
+                            FROM public.bookpages p
+                            WHERE p.id = ANY(CAST(:page_ids AS uuid[]))
+                            """,
+                            {"page_ids": page_ids},
+                        )
+                        live_pages = {str(r["page_id"]): r for r in p_rows}
+                except Exception:
+                    live_states = {}
+                    live_pages = {}
+
+            def _parent_sample_still_valid(row: dict[str, Any]) -> bool:
+                prov = row.get("provenance") or {}
+                if str(prov.get("source_origin") or "") != "PARENT_PRIVATE_CONTRIBUTION":
+                    return True
+                b_id = str(prov.get("book_id") or "")
+                b_state = live_states.get(b_id)
+                if not b_state:
+                    return False
+                if (
+                    str(b_state.get("book_lifecycle") or "").upper() != "ACTIVE"
+                    or str(b_state.get("book_moderation") or "").upper() != "ACTIVE"
+                    or str(b_state.get("consent_status") or "").upper() != "OPTED_IN"
+                    or not bool(b_state.get("consent_rights_confirmed"))
+                ):
+                    return False
+                if int(b_state.get("consent_version") or 0) != int(prov.get("consent_version") or -1):
+                    return False
+                p_id = str(row.get("source_page_id") or "")
+                p_state = live_pages.get(p_id)
+                if not p_state:
+                    return False
+                if (
+                    str(p_state.get("page_lifecycle") or "").upper() != "ACTIVE"
+                    or str(p_state.get("current_rev_id") or "") != str(row.get("source_revision_id") or "")
+                ):
+                    return False
+                return True
+
+            source_rows = [row for row in source_rows if _parent_sample_still_valid(row)]
+
+        # Assign deterministic, cross-family duplicate-safe Train/Validation splits.
+        _assign_leak_safe_splits(source_rows)
         manifest, source_rows = _verified_snapshot(source_rows)
         version_sha = hashlib.sha256(_canonical(manifest)).hexdigest()
         if source_rows:
@@ -1339,8 +1542,11 @@ class VireadOcrTrainingService:
             """, {"version_sha": version_sha})
         else:
             dataset = await self.repo.one("""
-                SELECT id, version_sha256, manifest_storage_path, sample_count FROM public.viread_ocr_dataset_versions
-                WHERE source_flow='FLOW1_VERIFIED' ORDER BY created_at DESC LIMIT 1
+                SELECT id, version_sha256, manifest_storage_path, sample_count
+                FROM public.viread_ocr_dataset_versions dv
+                WHERE dv.source_flow='FLOW1_VERIFIED'
+                  AND COALESCE(to_jsonb(dv)->>'dataset_status', 'ACTIVE') = 'ACTIVE'
+                ORDER BY dv.created_at DESC LIMIT 1
             """)
             if dataset:
                 actual_count = await self.repo.one("""
@@ -1685,9 +1891,22 @@ class VireadOcrTrainingService:
 
     async def create_run(self, actor_id: UUID, payload: TrainingRunCreate) -> dict[str, Any]:
         await self._admin(actor_id)
-        dataset = await self.repo.one("SELECT id, source_flow, version_sha256, is_locked_test FROM public.viread_ocr_dataset_versions WHERE id=:id", {"id": payload.dataset_version_id})
+        dataset = await self.repo.one(
+            """
+            SELECT id, source_flow, version_sha256, is_locked_test,
+                   COALESCE(to_jsonb(viread_ocr_dataset_versions)->>'dataset_status', 'ACTIVE') AS dataset_status
+            FROM public.viread_ocr_dataset_versions
+            WHERE id=:id
+            """,
+            {"id": payload.dataset_version_id},
+        )
         if not dataset or dataset["is_locked_test"] or dataset["version_sha256"] != payload.manifest_sha256:
             raise HTTPException(status_code=422, detail="Training manifest version is unavailable or hash mismatched")
+        if str(dataset.get("dataset_status") or "ACTIVE").upper() != "ACTIVE":
+            raise HTTPException(
+                status_code=409,
+                detail="DATASET_CONSENT_REVOKED: Snapshot dataset này đã bị lưu trữ hoặc thu hồi quyền nên không thể khởi chạy huấn luyện mới.",
+            )
         profile_contract = TRAINING_PROFILES[payload.profile]
         if dataset["source_flow"] not in profile_contract["dataset_flows"]:
             raise HTTPException(status_code=422, detail="Training profile does not match its independent data flow")

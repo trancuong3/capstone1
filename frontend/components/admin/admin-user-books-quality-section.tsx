@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { AdminFlow2CandidatesPanel } from "@/components/admin/admin-flow2-candidates-panel";
 import { AuthenticatedImage } from "@/components/common/authenticated-image";
 import { Button } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
@@ -87,6 +88,9 @@ export function AdminUserBooksQualitySection({
   onPendingCountChange,
 }: AdminUserBooksQualitySectionProps) {
   const { bookContentQuality } = useAdminServices();
+  const [subTab, setSubTab] = useState<"moderation" | "flow2_candidates">(
+    "moderation",
+  );
 
   const [statusFilter, setStatusFilter] = useState<
     "" | AdminUserBookQueueFilter
@@ -329,6 +333,44 @@ export function AdminUserBooksQualitySection({
         </div>
       </div>
 
+      {/* Sub-tab switcher: Moderation vs Flow 2 OCR sample verification */}
+      <div
+        aria-label="Phân khu Sách người dùng"
+        className="flex flex-wrap gap-2"
+        role="tablist"
+      >
+        <button
+          aria-selected={subTab === "moderation"}
+          className={`rounded-full border px-4 py-2 text-xs font-extrabold transition ${
+            subTab === "moderation"
+              ? "border-primary bg-primary text-white"
+              : "border-border bg-white text-ink hover:bg-surface-subtle"
+          }`}
+          onClick={() => setSubTab("moderation")}
+          role="tab"
+          type="button"
+        >
+          Kiểm duyệt trang sách riêng
+        </button>
+        <button
+          aria-selected={subTab === "flow2_candidates"}
+          className={`rounded-full border px-4 py-2 text-xs font-extrabold transition ${
+            subTab === "flow2_candidates"
+              ? "border-primary bg-primary text-white"
+              : "border-border bg-white text-ink hover:bg-surface-subtle"
+          }`}
+          onClick={() => setSubTab("flow2_candidates")}
+          role="tab"
+          type="button"
+        >
+          Xác minh mẫu OCR (Flow 2)
+        </button>
+      </div>
+
+      {subTab === "flow2_candidates" ? (
+        <AdminFlow2CandidatesPanel />
+      ) : (
+        <>
       {/* Filters & Search */}
       <section className="rounded-card border border-border bg-white p-4 sm:p-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
@@ -889,6 +931,8 @@ export function AdminUserBooksQualitySection({
           )}
         </section>
       ) : null}
+        </>
+      )}
     </div>
   );
 }

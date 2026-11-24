@@ -8,6 +8,7 @@ from io import BytesIO
 import json
 import logging
 import math
+import os
 from typing import Any
 import unicodedata
 from uuid import NAMESPACE_URL, uuid5
@@ -15,8 +16,15 @@ from uuid import NAMESPACE_URL, uuid5
 from PIL import Image
 from sqlalchemy import text
 
+from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
 from app.database.session import AsyncSessionLocal
 from app.diagnostic_logging import log_diagnostic
+from app.services.parent_flow2_contribution_service import (
+    ALLOWED_TRAINING_RIGHTS,
+    detect_line_pii,
+    evaluate_line_crop_quality,
+    normalize_and_validate_ocr_label,
+)
 from app.services.storage_service import download_object
 from app.services.training_storage import (
     DriveAuthError,
@@ -58,6 +66,15 @@ class OutboxEventBlocked(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+def is_flow2_ingestion_paused() -> bool:
+    return os.getenv("VIREAD_FLOW2_INGESTION_PAUSED", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def normalize_verified_label(tokens: list[str]) -> str:
@@ -109,7 +126,9 @@ async def _claim_one() -> dict[str, Any] | None:
                 locked_at = now(), updated_at = now()
             FROM next_event
             WHERE outbox.id = next_event.id
-            RETURNING outbox.id, outbox.page_id, outbox.revision_id, outbox.actor_id, outbox.attempts
+            RETURNING outbox.id, outbox.event_type, outbox.page_id, outbox.revision_id,
+                      outbox.actor_id, outbox.attempts, outbox.payload,
+                      to_jsonb(outbox) ->> 'candidate_id' AS candidate_id
         """), {"max_attempts": MAX_ATTEMPTS})
         row = result.mappings().first()
         await db.commit()
@@ -217,9 +236,10 @@ async def _find_conflicting_labels(
         text(
             """
             SELECT image_sha256, label
-            FROM public.viread_ocr_samples
-            WHERE source_flow = 'FLOW1_VERIFIED'
-              AND image_sha256 = ANY(:hashes)
+            FROM public.viread_ocr_samples s
+            WHERE s.source_flow = 'FLOW1_VERIFIED'
+              AND COALESCE(to_jsonb(s)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
+              AND s.image_sha256 = ANY(:hashes)
             """
         ),
         {"hashes": hashes},
@@ -233,7 +253,406 @@ async def _find_conflicting_labels(
     return conflicts
 
 
+def _parent_contrib_split(group_id: str) -> str:
+    """Assign parent-contributed groups strictly to train/validation (never holdout / LOCKED_TEST)."""
+    value = int(
+        hashlib.sha256(f"viread-vietocr-v2-document-split-v1\0{group_id}".encode()).hexdigest()[:8],
+        16,
+    ) / 0xFFFFFFFF
+    return "train" if value < 0.80 else "validation"
+
+
+async def _load_live_parent_candidate_state(db, candidate_id: str) -> dict[str, Any] | None:
+    result = await db.execute(
+        text(
+            """
+            SELECT c.id AS candidate_id,
+                   c.book_id,
+                   c.owner_parent_id,
+                   c.page_id,
+                   c.revision_id,
+                   c.consent_version AS candidate_consent_version,
+                   c.line_index,
+                   c.source_image_path,
+                   c.source_content_hash,
+                   c.crop_box_json,
+                   c.image_sha256,
+                   c.verified_label,
+                   c.verified_label_sha256,
+                   c.rights_basis,
+                   c.pii_check_status,
+                   c.status AS candidate_status,
+                   c.verified_by,
+                   c.verified_at,
+                   b.visibility_scope,
+                   b.lifecyclestatus AS book_lifecycle_status,
+                   b.moderation_status AS book_moderation_status,
+                   b.owner_parent_id AS book_owner_parent_id,
+                   p.lifecyclestatus AS page_lifecycle_status,
+                   p.currentverifiedrevisionid AS page_current_revision_id,
+                   r.verificationstatus AS revision_verification_status,
+                   r.contenthash AS revision_content_hash,
+                   cs.status AS consent_status,
+                   cs.rights_confirmed AS consent_rights_confirmed,
+                   cs.consent_version AS live_consent_version,
+                   cs.notice_version AS consent_notice_version
+            FROM public.parent_book_flow2_candidates c
+            JOIN public.books b ON b.id = c.book_id
+            JOIN public.bookpages p ON p.id = c.page_id
+            JOIN public.pagerevisions r ON r.id = c.revision_id
+            LEFT JOIN public.parent_book_ocr_contribution_consents cs ON cs.book_id = c.book_id
+            WHERE c.id = CAST(:candidate_id AS uuid)
+            """
+        ),
+        {"candidate_id": candidate_id},
+    )
+    row = result.mappings().first()
+    return dict(row) if row else None
+
+
+def _check_live_parent_candidate_eligible(row: dict[str, Any] | None) -> tuple[bool, str | None]:
+    if row is None:
+        return False, "CANDIDATE_NOT_FOUND"
+    if str(row.get("visibility_scope") or "").upper() != "PARENT_PRIVATE":
+        return False, "NOT_PARENT_PRIVATE_BOOK"
+    if str(row.get("book_lifecycle_status") or "").upper() != "ACTIVE":
+        return False, "BOOK_NOT_ACTIVE"
+    if str(row.get("book_moderation_status") or "").upper() != "ACTIVE":
+        return False, "BOOK_SUSPENDED"
+    if str(row.get("owner_parent_id")) != str(row.get("book_owner_parent_id")):
+        return False, "OWNER_MISMATCH"
+    if str(row.get("consent_status") or "").upper() != "OPTED_IN":
+        return False, "CONSENT_NOT_OPTED_IN"
+    if not bool(row.get("consent_rights_confirmed")):
+        return False, "CONSENT_RIGHTS_NOT_CONFIRMED"
+    if int(row.get("live_consent_version") or 0) != int(row.get("candidate_consent_version") or -1):
+        return False, "CONSENT_VERSION_STALE"
+    if str(row.get("page_lifecycle_status") or "").upper() != "ACTIVE":
+        return False, "PAGE_NOT_ACTIVE"
+    if str(row.get("page_current_revision_id") or "") != str(row.get("revision_id") or ""):
+        return False, "REVISION_SUPERSEDED"
+    if str(row.get("revision_verification_status") or "").upper() != "VERIFIED":
+        return False, "REVISION_NOT_VERIFIED"
+    if str(row.get("revision_content_hash") or "") != str(row.get("source_content_hash") or ""):
+        return False, "REVISION_CONTENT_HASH_CHANGED"
+    if str(row.get("candidate_status") or "").upper() != "SYNC_QUEUED":
+        return False, f"CANDIDATE_STATUS_{row.get('candidate_status')}"
+    if not row.get("verified_by") or not row.get("verified_at") or not row.get("verified_label"):
+        return False, "ADMIN_LABEL_VERIFICATION_MISSING"
+    if str(row.get("pii_check_status") or "").upper() != "CLEAR":
+        return False, "PII_FLAGGED"
+    if str(row.get("rights_basis") or "") not in ALLOWED_TRAINING_RIGHTS:
+        return False, "RIGHTS_BASIS_INSUFFICIENT"
+    return True, None
+
+
+async def _mark_candidate_revoked_if_active(db, candidate_id: str, reason: str) -> None:
+    await db.execute(
+        text(
+            """
+            UPDATE public.parent_book_flow2_candidates
+            SET status = 'REVOKED',
+                revoked_at = now(),
+                revoke_reason = :reason,
+                updated_at = now()
+            WHERE id = CAST(:candidate_id AS uuid)
+              AND status IN ('PENDING_VERIFICATION', 'VERIFIED', 'SYNC_QUEUED')
+            """
+        ),
+        {"candidate_id": candidate_id, "reason": reason},
+    )
+
+
+async def _process_parent_contribution_candidate(event: dict[str, Any]) -> None:
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    candidate_id = str(event.get("candidate_id") or payload.get("candidate_id") or "").strip()
+    if not candidate_id:
+        raise OutboxEventSkipped(
+            "PARENT_CANDIDATE_ID_MISSING",
+            "Parent contribution outbox event is missing candidate_id",
+        )
+
+    # Recheck #1: Live ownership, consent version, active book/page/revision, Admin verification, rights, PII
+    async with AsyncSessionLocal() as db:
+        cand = await _load_live_parent_candidate_state(db, candidate_id)
+        ok, reject_code = _check_live_parent_candidate_eligible(cand)
+        if not ok or cand is None:
+            if cand is not None:
+                await _mark_candidate_revoked_if_active(db, candidate_id, reject_code or "CONSENT_REVOKED")
+                await db.commit()
+            raise OutboxEventSkipped(
+                reject_code or "CONSENT_REVOKED_OR_STALE_REVISION",
+                "Parent contribution candidate is no longer eligible for Flow 2 sync",
+            )
+
+    source_image_path = str(cand["source_image_path"])
+    crop_box = list(cand["crop_box_json"] or [])
+    if len(crop_box) != 4:
+        raise ValueError("Parent contribution candidate has invalid crop_box_json")
+
+    verified_label = normalize_and_validate_ocr_label(str(cand["verified_label"]))
+    if detect_line_pii(verified_label):
+        async with AsyncSessionLocal() as db:
+            await _mark_candidate_revoked_if_active(db, candidate_id, "PII_DETECTED_AT_SYNC")
+            await db.commit()
+        raise OutboxEventSkipped("PII_DETECTED_AT_SYNC", "Verified label flagged for PII before sync")
+
+    label_sha = hashlib.sha256(verified_label.encode("utf-8")).hexdigest()
+    if cand.get("verified_label_sha256") and label_sha != str(cand["verified_label_sha256"]):
+        raise ValueError("Verified label SHA-256 mismatch on parent contribution candidate")
+
+    page_bytes = await asyncio.to_thread(
+        download_object, source_image_path, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET
+    )
+
+    def _crop_and_verify() -> bytes:
+        with Image.open(BytesIO(page_bytes)) as src:
+            src.load()
+            rgb = src.convert("RGB")
+            cropped = rgb.crop((int(crop_box[0]), int(crop_box[1]), int(crop_box[2]), int(crop_box[3])))
+            q_ok, _metrics, q_reason = evaluate_line_crop_quality(cropped)
+            if not q_ok:
+                raise OutboxEventSkipped(
+                    f"CROP_QUALITY_FAILED:{q_reason}",
+                    f"Parent contribution crop failed quality gate: {q_reason}",
+                )
+            buf = BytesIO()
+            cropped.save(buf, format="PNG", optimize=True)
+            return buf.getvalue()
+
+    crop_bytes = await asyncio.to_thread(_crop_and_verify)
+    image_sha = hashlib.sha256(crop_bytes).hexdigest()
+    if image_sha != str(cand["image_sha256"]):
+        async with AsyncSessionLocal() as db:
+            await _mark_candidate_revoked_if_active(db, candidate_id, "STALE_IMAGE_HASH_MISMATCH")
+            await db.commit()
+        raise OutboxEventSkipped(
+            "STALE_IMAGE_HASH_MISMATCH",
+            "Source page image changed since candidate was verified",
+        )
+
+    line_index = int(cand["line_index"])
+    book_id = str(cand["book_id"])
+    group_id = f"parent-book:{book_id}"
+    split_value = _parent_contrib_split(group_id)
+    sample_id = deterministic_sample_id(cand["revision_id"], line_index, image_sha)
+    content_fingerprint = hashlib.sha256(verified_label.lower().encode("utf-8")).hexdigest()
+    verified_at_iso = (
+        cand["verified_at"].isoformat()
+        if isinstance(cand.get("verified_at"), datetime)
+        else (str(cand["verified_at"]) if cand.get("verified_at") else None)
+    )
+    verified_by_str = str(cand.get("verified_by") or event.get("actor_id") or "")
+
+    # Recheck #2 + conflict/quota check right before Drive upload
+    async with AsyncSessionLocal() as db:
+        live_cand = await _load_live_parent_candidate_state(db, candidate_id)
+        ok, reject_code = _check_live_parent_candidate_eligible(live_cand)
+        if not ok:
+            await _mark_candidate_revoked_if_active(db, candidate_id, reject_code or "CONSENT_REVOKED_MID_FLIGHT")
+            await db.commit()
+            raise OutboxEventSkipped(
+                reject_code or "CONSENT_REVOKED_MID_FLIGHT",
+                "Parent consent or revision changed before Drive upload",
+            )
+        conflicts = await _find_conflicting_labels(db, {image_sha: verified_label})
+        if conflicts:
+            raise OutboxEventBlocked(
+                "CONFLICTING_LABEL_FOR_IMAGE_HASH",
+                "Detected duplicate line image hash with conflicting verified label",
+            )
+        router = await _build_artifact_router(db)
+        total_db_bytes = len(verified_label.encode("utf-8")) + 2048
+        est_upload_bytes = len(crop_bytes) + len(verified_label.encode("utf-8")) + 512
+        await ensure_database_capacity(db, total_db_bytes)
+        if router.write_provider == StorageProvider.SUPABASE_LEGACY:
+            await ensure_storage_capacity(db, est_upload_bytes)
+        else:
+            quota = await asyncio.to_thread(router.quota_check, incoming_bytes=est_upload_bytes)
+            if not quota.can_accept_upload:
+                raise DriveQuotaExceededError(
+                    quota.detail or "Google Drive quota insufficient for parent contribution sample",
+                    required_bytes=est_upload_bytes,
+                    available_bytes=quota.available_bytes,
+                    limit_bytes=quota.limit_bytes,
+                    usage_bytes=quota.usage_bytes,
+                )
+
+    if router.write_provider == StorageProvider.GOOGLE_DRIVE:
+        image_logical = f"verified-samples/parent-contrib/{cand['revision_id']}/line-{line_index:04d}-{image_sha[:12]}.png"
+        label_logical = f"verified-samples/parent-contrib/{cand['revision_id']}/line-{line_index:04d}-{image_sha[:12]}.json"
+    else:
+        image_logical = f"ocr-training/flow2/parent-contrib/{cand['revision_id']}/{line_index:04d}-{image_sha[:12]}.png"
+        label_logical = f"ocr-training/flow2/parent-contrib/{cand['revision_id']}/{line_index:04d}-{image_sha[:12]}.json"
+
+    stored_image = await asyncio.to_thread(
+        router.put,
+        image_logical,
+        crop_bytes,
+        content_type="image/png",
+        expected_sha256=image_sha,
+        metadata={
+            "sample_id": sample_id,
+            "revision_id": str(cand["revision_id"]),
+            "line_index": str(line_index),
+            "source_origin": "PARENT_PRIVATE_CONTRIBUTION",
+        },
+    )
+    label_payload = {
+        "schema": "viread-flow2-sample-v1",
+        "source_origin": "PARENT_PRIVATE_CONTRIBUTION",
+        "sample_id": sample_id,
+        "book_id": book_id,
+        "page_id": str(cand["page_id"]),
+        "revision_id": str(cand["revision_id"]),
+        "candidate_id": candidate_id,
+        "consent_version": int(cand["candidate_consent_version"]),
+        "notice_version": cand.get("consent_notice_version"),
+        "rights_basis": cand["rights_basis"],
+        "line_index": line_index,
+        "group_id": group_id,
+        "image_reference": stored_image.reference,
+        "image_drive_file_id": stored_image.drive_file_id,
+        "image_sha256": image_sha,
+        "label": verified_label,
+        "label_sha256": label_sha,
+        "content_fingerprint": content_fingerprint,
+        "verified_at": verified_at_iso,
+        "verified_by": verified_by_str or None,
+        "eligible_for_locked_test": False,
+        "split": split_value,
+        "source_content_hash": cand["source_content_hash"],
+        "storage_provider": stored_image.provider.value,
+    }
+    label_bytes = json.dumps(label_payload, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8")
+    label_blob_sha = hashlib.sha256(label_bytes).hexdigest()
+    stored_label = await asyncio.to_thread(
+        router.put,
+        label_logical,
+        label_bytes,
+        content_type="application/json",
+        expected_sha256=label_blob_sha,
+        metadata={
+            "sample_id": sample_id,
+            "revision_id": str(cand["revision_id"]),
+            "line_index": str(line_index),
+            "source_origin": "PARENT_PRIVATE_CONTRIBUTION",
+        },
+    )
+
+    provenance_json = json.dumps(
+        {
+            "source_origin": "PARENT_PRIVATE_CONTRIBUTION",
+            "sample_id": sample_id,
+            "book_id": book_id,
+            "page_id": str(cand["page_id"]),
+            "revision_id": str(cand["revision_id"]),
+            "candidate_id": candidate_id,
+            "outbox_event_id": str(event["id"]),
+            "consent_version": int(cand["candidate_consent_version"]),
+            "notice_version": cand.get("consent_notice_version"),
+            "rights_basis": cand["rights_basis"],
+            "line_index": line_index,
+            "group_id": group_id,
+            "image_reference": stored_image.reference,
+            "label_reference": stored_label.reference,
+            "image_sha256": image_sha,
+            "label_sha256": label_sha,
+            "content_fingerprint": content_fingerprint,
+            "source_content_hash": cand["source_content_hash"],
+            "verified_by": verified_by_str or None,
+            "verified_at": verified_at_iso,
+            "verified_by_admin": True,
+            "ai_review_required": False,
+            "verification_source": "admin",
+            "eligible_for_locked_test": False,
+            "storage_provider": stored_image.provider.value,
+        },
+        ensure_ascii=False,
+    )
+
+    # Recheck #3 under advisory lock right before committing sample row!
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext('viread_ocr_sample_hash:' || :img_sha))"),
+            {"img_sha": image_sha},
+        )
+        final_cand = await _load_live_parent_candidate_state(db, candidate_id)
+        ok, reject_code = _check_live_parent_candidate_eligible(final_cand)
+        if not ok:
+            await _mark_candidate_revoked_if_active(db, candidate_id, reject_code or "CONSENT_REVOKED_BEFORE_COMMIT")
+            await db.commit()
+            for ref in (stored_image.reference, stored_label.reference):
+                try:
+                    await asyncio.to_thread(
+                        router.delete_if_unreferenced,
+                        ref,
+                        is_referenced_check=lambda _r: False,
+                    )
+                except Exception:
+                    pass
+            raise OutboxEventSkipped(
+                reject_code or "CONSENT_REVOKED_BEFORE_COMMIT",
+                "Parent consent or revision changed while uploading; discarded stale worker output",
+            )
+        final_conflicts = await _find_conflicting_labels(db, {image_sha: verified_label})
+        if final_conflicts:
+            await db.rollback()
+            raise OutboxEventBlocked(
+                "CONFLICTING_LABEL_FOR_IMAGE_HASH",
+                "Detected concurrent duplicate image hash conflict",
+            )
+        await db.execute(
+            text(
+                """
+                INSERT INTO public.viread_ocr_samples
+                    (id, source_flow, source_group_id, split, image_storage_path, image_sha256,
+                     label, source_page_id, source_revision_id, provenance,
+                     storage_provider, drive_file_id, label_storage_path,
+                     label_drive_file_id, label_sha256, sync_status, training_eligibility)
+                VALUES (CAST(:sample_id AS uuid), 'FLOW1_VERIFIED', :group_id, :split, :path,
+                        :image_sha, :label, :page_id, :revision_id, CAST(:provenance AS jsonb),
+                        :storage_provider, :drive_file_id, :label_storage_path,
+                        :label_drive_file_id, :label_sha256, 'SYNCED', 'ELIGIBLE')
+                ON CONFLICT DO NOTHING
+                """
+            ),
+            {
+                "sample_id": sample_id,
+                "group_id": group_id,
+                "split": split_value,
+                "path": stored_image.reference,
+                "image_sha": image_sha,
+                "label": verified_label,
+                "page_id": cand["page_id"],
+                "revision_id": cand["revision_id"],
+                "provenance": provenance_json,
+                "storage_provider": stored_image.provider.value,
+                "drive_file_id": stored_image.drive_file_id,
+                "label_storage_path": stored_label.reference,
+                "label_drive_file_id": stored_label.drive_file_id,
+                "label_sha256": label_sha,
+            },
+        )
+        await db.execute(
+            text(
+                """
+                UPDATE public.parent_book_flow2_candidates
+                SET status = 'SYNCED',
+                    sample_id = CAST(:sample_id AS uuid),
+                    updated_at = now()
+                WHERE id = CAST(:candidate_id AS uuid)
+                """
+            ),
+            {"sample_id": sample_id, "candidate_id": candidate_id},
+        )
+        await db.commit()
+
+
 async def _process(event: dict[str, Any]) -> None:
+    if str(event.get("event_type") or "").upper() == "PARENT_CONTRIBUTION_CANDIDATE":
+        await _process_parent_contribution_candidate(event)
+        return
     async with AsyncSessionLocal() as db:
         header_result = await db.execute(text("""
             SELECT COALESCE(NULLIF(r.processingmeta ->> 'source_image_path', ''), p.imagepath) AS imagepath,
@@ -641,6 +1060,9 @@ async def run_worker(stop: asyncio.Event, *, poll_seconds: int = POLL_SECONDS) -
     """Durable multi-process-safe outbox worker. Failed events retry and eventually dead-letter."""
     idle_streak = 0
     while not stop.is_set():
+        if is_flow2_ingestion_paused():
+            await _wait_for_stop_or_timeout(stop, poll_seconds)
+            continue
         try:
             event = await _claim_one()
         except asyncio.CancelledError:
@@ -782,3 +1204,51 @@ async def run_worker(stop: asyncio.Event, *, poll_seconds: int = POLL_SECONDS) -
             log_diagnostic(logger, logging.ERROR, event="viread_ocr_outbox_processing_failed",
                            stage="line_crop_materialization", exception=exc,
                            outbox_id=str(event["id"]), attempt=attempts, terminal=terminal)
+
+
+async def run_once() -> bool:
+    """Claim and process a single outbox event. Returns True if an event was claimed."""
+    if is_flow2_ingestion_paused():
+        return False
+    event = await _claim_one()
+    if event is None:
+        return False
+    attempts = int(event["attempts"])
+    try:
+        await _process_with_lease(event)
+        await _finish(event["id"], status="DONE", expected_attempts=attempts)
+    except OutboxEventSkipped as exc:
+        await _finish(
+            event["id"],
+            status="SKIPPED",
+            expected_attempts=attempts,
+            error_code=exc.code[:64],
+        )
+    except OutboxEventBlocked as exc:
+        await _finish(
+            event["id"],
+            status="BLOCKED",
+            expected_attempts=attempts,
+            error_code=exc.code[:64],
+        )
+    except OutboxLeaseLost:
+        await _release_claim_on_cancel(event["id"], expected_attempts=attempts)
+    except Exception as exc:
+        if isinstance(exc, (DriveAuthError,)) or (
+            isinstance(exc, TrainingStorageError) and exc.retryable
+        ):
+            terminal = False
+            delay = min(1800, 30 * (2 ** min(attempts, 6)))
+            error_code = exc.code[:64]
+        else:
+            terminal = attempts >= MAX_ATTEMPTS
+            delay = min(3600, 2 ** min(attempts, 10))
+            error_code = (exc.code if isinstance(exc, TrainingStorageError) else type(exc).__name__)[:64]
+        await _finish(
+            event["id"],
+            status="DEAD" if terminal else "RETRY",
+            expected_attempts=attempts,
+            error_code=error_code,
+            delay_seconds=delay,
+        )
+    return True
