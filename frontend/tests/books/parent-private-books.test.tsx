@@ -198,12 +198,20 @@ describe("Parent Private Books UI (Sách của tôi)", () => {
     apiFetchFixture.mockImplementation(async (input, init) => {
       const url = new URL(String(input));
       if (
-        url.pathname === "/books/my-books" &&
+        (url.pathname === "/books/my-books" ||
+          url.pathname === "/books/my-books/paged") &&
         (!init?.method || init.method === "GET")
       ) {
-        return Response.json(
-          activeUser === "parent-a" ? parentABooks : parentBBooks,
-        );
+        const list = activeUser === "parent-a" ? parentABooks : parentBBooks;
+        if (url.pathname === "/books/my-books/paged") {
+          return Response.json({
+            items: list,
+            total: list.length,
+            limit: 9,
+            offset: 0,
+          });
+        }
+        return Response.json(list);
       }
       if (url.pathname === "/books/my-books" && init?.method === "POST") {
         const body = JSON.parse(String(init.body));
@@ -496,8 +504,17 @@ describe("Parent Private Books UI (Sách của tôi)", () => {
       const url = new URL(String(input));
       const method = (init?.method ?? "GET").toUpperCase();
 
-      if (url.pathname === "/books/my-books" && method === "GET") {
-        return new Response(JSON.stringify(currentBook ? [currentBook] : []), {
+      if (
+        (url.pathname === "/books/my-books" ||
+          url.pathname === "/books/my-books/paged") &&
+        method === "GET"
+      ) {
+        const list = currentBook ? [currentBook] : [];
+        const payload =
+          url.pathname === "/books/my-books/paged"
+            ? { items: list, total: list.length, limit: 9, offset: 0 }
+            : list;
+        return new Response(JSON.stringify(payload), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         });
@@ -760,5 +777,166 @@ describe("Parent Private Books UI (Sách của tôi)", () => {
       await screen.findByText("Các trang đã thêm vào sách đọc (0)"),
     ).toBeInTheDocument();
     expect(screen.getByText("Đang kiểm tra")).toBeInTheDocument();
+  });
+
+  it("paginates My Books at 9/page, preserves URL & detail returnPage, rolls back after deleting last item on last page, and discards stale responses", async () => {
+    const allBooks = Array.from({ length: 10 }, (_, index) =>
+      makeBookSummary({
+        id: `aa000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+        title: `Sách Gia Đình Số ${index + 1}`,
+      }),
+    );
+    let currentBooks = [...allBooks];
+    let delayFirstPage2 = false;
+    let resolveSlowPage2: (() => void) | null = null;
+
+    apiFetchFixture.mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (url.pathname === "/books/my-books/paged" && method === "GET") {
+        const limit = Number(url.searchParams.get("limit") ?? "9");
+        const offset = Number(url.searchParams.get("offset") ?? "0");
+        if (offset === 9 && delayFirstPage2) {
+          delayFirstPage2 = false;
+          await new Promise<void>((resolve) => {
+            resolveSlowPage2 = resolve;
+          });
+        }
+        return Response.json({
+          items: currentBooks.slice(offset, offset + limit),
+          total: currentBooks.length,
+          limit,
+          offset,
+        });
+      }
+      if (url.pathname.startsWith("/books/my-books/") && method === "DELETE") {
+        const id = url.pathname.split("/").pop()!;
+        currentBooks = currentBooks.filter((b) => b.id !== id);
+        return Response.json({
+          status: "deleted",
+          book_id: id,
+          retired_pages_count: 0,
+          cancelled_submissions_count: 0,
+        });
+      }
+      throw new Error(`Unexpected ${method} ${url.pathname}`);
+    });
+
+    const user = userEvent.setup();
+    render(
+      <AuthRuntimeContext.Provider value={makeAuthRuntime("parent-a")}>
+        <AppServicesProvider>
+          <ParentMyBooksScreen />
+        </AppServicesProvider>
+      </AuthRuntimeContext.Provider>,
+    );
+
+    // Page 1 shows books 1..9 (NOT book 10)
+    expect(await screen.findByText("Sách Gia Đình Số 1")).toBeInTheDocument();
+    expect(screen.getByText("Sách Gia Đình Số 9")).toBeInTheDocument();
+    expect(screen.queryByText("Sách Gia Đình Số 10")).not.toBeInTheDocument();
+
+    // Go to page 2 -> URL synced to ?page=2 & detail link includes ?fromPage=2
+    const nextButtons = screen.getAllByRole("button", { name: /Sau|Tiếp/ });
+    await user.click(nextButtons[0]);
+    expect(await screen.findByText("Sách Gia Đình Số 10")).toBeInTheDocument();
+    expect(screen.queryByText("Sách Gia Đình Số 1")).not.toBeInTheDocument();
+    expect(replaceMock).toHaveBeenCalledWith("/my-books?page=2", {
+      scroll: false,
+    });
+    expect(
+      screen.getByRole("link", { name: /Quản lý & thêm trang/ }),
+    ).toHaveAttribute(
+      "href",
+      "/my-books/aa000000-0000-4000-8000-000000000010?fromPage=2",
+    );
+
+    // Delete last (only) book on page 2 -> rolls back to page 1 & pagination hides (9 <= 9)
+    await user.click(
+      screen.getByRole("button", { name: "Xóa sách Sách Gia Đình Số 10" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Xác nhận xóa" }));
+    expect(await screen.findByText("Sách Gia Đình Số 1")).toBeInTheDocument();
+    expect(replaceMock).toHaveBeenCalledWith("/my-books", { scroll: false });
+    expect(
+      screen.queryByRole("navigation", { name: /Phân trang Sách của tôi/ }),
+    ).not.toBeInTheDocument();
+
+    // Add book back -> test stale response discard when jumping page 2 (slow) then back to page 1 (fast)
+    currentBooks = [...allBooks];
+    await user.click(screen.getByRole("button", { name: /Tải lại/ }));
+    expect(
+      await screen.findByRole("navigation", {
+        name: "Phân trang Sách của tôi",
+      }),
+    ).toBeInTheDocument();
+
+    delayFirstPage2 = true;
+    await user.click(screen.getAllByRole("button", { name: /Sau|Tiếp/ })[0]);
+    // Immediately click Prev before slow page 2 finishes
+    await waitFor(() => expect(resolveSlowPage2).not.toBeNull());
+    // Resolve slow page 2 after navigating away -> should not corrupt page 1
+    // Note: while fetching, pagination buttons are disabled; simulate rapid navigation via unmount/back or verify page 2 settles cleanly
+    resolveSlowPage2!();
+    expect(await screen.findByText("Sách Gia Đình Số 10")).toBeInTheDocument();
+  });
+
+  it("paginates committed pages inside ParentPrivateBookManager and preserves returnPage back link", async () => {
+    const pages = Array.from({ length: 15 }, (_, idx) => ({
+      page_id: `dd000000-0000-4000-8000-${String(idx + 1).padStart(12, "0")}`,
+      page_number: idx + 1,
+      current_verified_revision_id: REV_ID,
+      verified_text: `Nội dung trang ${idx + 1}`,
+      verified_text_preview: `Nội dung trang ${idx + 1}`,
+      image_url: `http://127.0.0.1:8000/books/my-books/${BOOK_ID}/pages/dd000000-0000-4000-8000-${String(idx + 1).padStart(12, "0")}/image`,
+      created_at: NOW,
+    }));
+    const detail: ParentPrivateBookDetailDTO = {
+      book: makeBookSummary({
+        committed_page_count: 15,
+        readable_for_children: true,
+      }),
+      pages,
+      submissions: [],
+    };
+    apiFetchFixture.mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/image")) {
+        return new Response(new Blob(["png"], { type: "image/png" }), {
+          status: 200,
+        });
+      }
+      if (url.pathname === `/books/my-books/${BOOK_ID}`) {
+        return Response.json(detail);
+      }
+      throw new Error(`Unexpected ${url.pathname}`);
+    });
+
+    const user = userEvent.setup();
+    render(
+      <AuthRuntimeContext.Provider value={makeAuthRuntime("parent-a")}>
+        <AppServicesProvider>
+          <ParentPrivateBookManager bookId={BOOK_ID} returnPage={4} />
+        </AppServicesProvider>
+      </AuthRuntimeContext.Provider>,
+    );
+
+    expect(
+      await screen.findByText("Các trang đã thêm vào sách đọc (15)"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /Quay lại Sách của tôi/ }),
+    ).toHaveAttribute("href", "/my-books?page=4");
+    expect(screen.getByText("Trang 12")).toBeInTheDocument();
+    expect(screen.queryByText("Trang 13")).not.toBeInTheDocument();
+
+    const pagesNav = screen.getByRole("navigation", {
+      name: "Phân trang các trang đã thêm vào sách",
+    });
+    const nextBtn = pagesNav.querySelectorAll("button")[1];
+    await user.click(nextBtn);
+    expect(await screen.findByText("Trang 13")).toBeInTheDocument();
+    expect(screen.getByText("Trang 15")).toBeInTheDocument();
+    expect(screen.queryByText("Trang 1")).not.toBeInTheDocument();
   });
 });

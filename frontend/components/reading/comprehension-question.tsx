@@ -20,11 +20,13 @@ import { createSpeechService } from "@/lib/api/speech-service";
 import { resolveLocalFirstSpeechRecognitionConstructor } from "@/lib/reading/local-segment-speech-recognition";
 import { lockSessionVoice } from "@/lib/reading/session-voice-lock";
 import {
+  analyzeComprehensionVoiceInput,
   choiceLetterForSpeech,
-  matchComprehensionVoiceInput,
 } from "@/lib/reading/comprehension-voice-matcher";
 import { EchoGuard } from "@/lib/reading/echo-guard";
 import { InteractivePromptSelector } from "@/lib/reading/interactive-prompts";
+import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
+import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
 import type {
@@ -51,6 +53,10 @@ interface BrowserSpeechRecognitionAlternative {
 }
 interface BrowserSpeechRecognitionResult {
   readonly isFinal?: boolean;
+  readonly epoch?: number;
+  readonly onsetAt?: number | null;
+  readonly sessionId?: string | null;
+  readonly pageId?: string | null;
   readonly 0?: BrowserSpeechRecognitionAlternative;
 }
 interface BrowserSpeechRecognitionEvent {
@@ -81,6 +87,7 @@ function getSpeechRecognitionCtor(): BrowserSpeechRecognitionCtor | null {
 }
 
 const REMIND_SILENCE_MS = 10_000;
+const BARE_LETTER_SETTLE_MS = 850;
 
 export function ComprehensionQuestion({
   child,
@@ -107,6 +114,7 @@ export function ComprehensionQuestion({
     total?: number;
   }>({});
   const [readingChoiceId, setReadingChoiceId] = useState<string | null>(null);
+  const [previewChoiceId, setPreviewChoiceId] = useState<string | null>(null);
   const [voicePhase, setVoicePhase] = useState<VoicePhase>("idle");
   const [voicePausedByUser, setVoicePausedByUser] = useState(false);
   const [feedbackNote, setFeedbackNote] = useState<string | null>(null);
@@ -116,8 +124,10 @@ export function ComprehensionQuestion({
   const playbackSeqRef = useRef(0);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const remindTimerRef = useRef<number | null>(null);
+  const voiceSettleTimerRef = useRef<number | null>(null);
   const remindedForQuestionRef = useRef(false);
   const isSubmittingRef = useRef(false);
+  const solvedQuestionIdRef = useRef<string | null>(null);
   const voicePausedRef = useRef(false);
   const activeQuestionRef = useRef<ComprehensionQuestionViewModelUI | null>(
     null,
@@ -133,8 +143,16 @@ export function ComprehensionQuestion({
     }
   }, []);
 
+  const clearVoiceSettleTimer = useCallback(() => {
+    if (voiceSettleTimerRef.current !== null) {
+      window.clearTimeout(voiceSettleTimerRef.current);
+      voiceSettleTimerRef.current = null;
+    }
+  }, []);
+
   const stopVoiceRecognition = useCallback(() => {
     clearRemindTimer();
+    clearVoiceSettleTimer();
     const rec = recognitionRef.current;
     recognitionRef.current = null;
     if (rec) {
@@ -142,18 +160,23 @@ export function ComprehensionQuestion({
       rec.onerror = null;
       rec.onend = null;
       try {
-        rec.stop();
+        if (typeof rec.abort === "function") {
+          rec.abort();
+        } else {
+          rec.stop();
+        }
       } catch {
         // Already stopped
       }
     }
-  }, [clearRemindTimer]);
+  }, [clearRemindTimer, clearVoiceSettleTimer]);
 
   const stopAllVoice = useCallback(() => {
     flowGenRef.current += 1;
     stopVoiceRecognition();
     speechPlayerRef.current.stop();
     setReadingChoiceId(null);
+    setPreviewChoiceId(null);
   }, [stopVoiceRecognition]);
 
   useEffect(() => {
@@ -162,6 +185,7 @@ export function ComprehensionQuestion({
       mountedRef.current = false;
       flowGenRef.current += 1;
       clearRemindTimer();
+      clearVoiceSettleTimer();
       const rec = recognitionRef.current;
       recognitionRef.current = null;
       if (rec) {
@@ -169,22 +193,30 @@ export function ComprehensionQuestion({
         rec.onerror = null;
         rec.onend = null;
         try {
-          rec.stop();
+          if (typeof rec.abort === "function") {
+            rec.abort();
+          } else {
+            rec.stop();
+          }
         } catch {
           // ignore
         }
       }
       speechPlayerRef.current.stop();
     };
-  }, [clearRemindTimer]);
+  }, [clearRemindTimer, clearVoiceSettleTimer]);
 
   const speakGuarded = useCallback(
     async (text: string, gen: number): Promise<boolean> => {
       if (!mountedRef.current || gen !== flowGenRef.current) return false;
+      const personaText = adaptTextToTeacherPersona(
+        text,
+        getEffectiveTeacherPersona().gender,
+      );
       const id = `quiz-tts-${(playbackSeqRef.current += 1)}`;
-      echoGuard.playbackStarted(id, text, performance.now());
+      echoGuard.playbackStarted(id, personaText, performance.now());
       try {
-        await speechPlayerRef.current.play(text, { coaching: true });
+        await speechPlayerRef.current.play(personaText, { coaching: true });
         return mountedRef.current && gen === flowGenRef.current;
       } catch {
         return mountedRef.current && gen === flowGenRef.current;
@@ -209,6 +241,7 @@ export function ComprehensionQuestion({
       onCompleteRef.current();
       return;
     }
+    solvedQuestionIdRef.current = null;
     setSelectedAnswer(null);
     setResult(null);
     setFeedbackNote(null);
@@ -227,13 +260,21 @@ export function ComprehensionQuestion({
     async (answer: string, source: "click" | "voice" = "click") => {
       const activeValue = activeQuestionRef.current;
       if (!activeValue || isSubmittingRef.current) return;
-      if (result?.is_correct) return;
+      if (
+        result?.is_correct ||
+        solvedQuestionIdRef.current === activeValue.question.id
+      ) {
+        return;
+      }
 
-      // Any direct click cancels active TTS & voice listening immediately.
+      const submittedQuestionId = activeValue.question.id;
+      // Lock synchronously and cancel any active settle timer, STT, and TTS
+      // so simultaneous touch + STT cannot double-submit.
+      isSubmittingRef.current = true;
+      clearVoiceSettleTimer();
       stopAllVoice();
       const gen = flowGenRef.current;
 
-      isSubmittingRef.current = true;
       setSelectedAnswer(answer);
       setIsSubmitting(true);
       setResult(null);
@@ -243,10 +284,16 @@ export function ComprehensionQuestion({
       try {
         nextResult = await comprehensionService.submitAnswer(
           sessionId,
-          activeValue.question.id,
+          submittedQuestionId,
           answer,
         );
-        if (mountedRef.current) {
+        if (
+          mountedRef.current &&
+          activeQuestionRef.current?.question.id === submittedQuestionId
+        ) {
+          if (nextResult.is_correct) {
+            solvedQuestionIdRef.current = submittedQuestionId;
+          }
           setResult(nextResult);
         }
       } finally {
@@ -257,10 +304,25 @@ export function ComprehensionQuestion({
       if (
         !mountedRef.current ||
         !nextResult ||
-        source !== "voice" ||
-        gen !== flowGenRef.current ||
-        voicePausedRef.current
+        activeQuestionRef.current?.question.id !== submittedQuestionId
       ) {
+        return;
+      }
+
+      const storyHint = nextResult.story_hint?.trim() || null;
+      if (source !== "voice") {
+        if (!nextResult.is_correct && storyHint) {
+          setFeedbackNote(
+            adaptTextToTeacherPersona(
+              storyHint,
+              getEffectiveTeacherPersona().gender,
+            ),
+          );
+        }
+        return;
+      }
+
+      if (gen !== flowGenRef.current || voicePausedRef.current) {
         return;
       }
 
@@ -273,17 +335,34 @@ export function ComprehensionQuestion({
           advanceToNextQuestion();
         }
       } else {
-        const encourage = prompts.next("quizTryAgain");
+        const chosen = activeValue.choices.find((c) => c.value === answer);
+        const encourage = storyHint
+          ? adaptTextToTeacherPersona(
+              chosen ? `Con vừa chọn ${chosen.label}. ${storyHint}` : storyHint,
+              getEffectiveTeacherPersona().gender,
+            )
+          : chosen
+            ? adaptTextToTeacherPersona(
+                `Con vừa chọn ${chosen.label}. Chưa đúng rồi, mình nhớ lại chi tiết trong bài đọc rồi chọn lại nhé!`,
+                getEffectiveTeacherPersona().gender,
+              )
+            : prompts.next("quizTryAgain");
         setFeedbackNote(encourage);
         setVoicePhase("reading");
         const stillCurrent = await speakGuarded(encourage, gen);
-        if (stillCurrent && mountedRef.current && !voicePausedRef.current) {
+        if (
+          stillCurrent &&
+          mountedRef.current &&
+          !voicePausedRef.current &&
+          activeQuestionRef.current?.question.id === submittedQuestionId
+        ) {
           startVoiceListenRef.current(activeValue, gen);
         }
       }
     },
     [
       advanceToNextQuestion,
+      clearVoiceSettleTimer,
       comprehensionService,
       prompts,
       result?.is_correct,
@@ -302,6 +381,8 @@ export function ComprehensionQuestion({
       ) {
         return;
       }
+      const boundQuestionId = value.question.id;
+      const boundPageId = `quiz:${boundQuestionId}`;
       lockSessionVoice(sessionId);
       const Ctor = resolveLocalFirstSpeechRecognitionConstructor(
         window as unknown as {
@@ -311,7 +392,7 @@ export function ComprehensionQuestion({
           webkitAudioContext?: typeof AudioContext;
         },
         speechService,
-        () => ({ sessionId }),
+        () => ({ sessionId, pageId: boundPageId }),
       ) as BrowserSpeechRecognitionCtor | undefined;
       if (!Ctor) {
         setVoicePhase("idle");
@@ -335,6 +416,20 @@ export function ComprehensionQuestion({
       setVoicePhase("listening");
 
       let processedUpTo = -1;
+      let maxEpochSeen = -1;
+
+      const isItemFencedIn = (
+        item: BrowserSpeechRecognitionResult,
+      ): boolean => {
+        if (item.sessionId != null && item.sessionId !== sessionId)
+          return false;
+        if (item.pageId != null && item.pageId !== boundPageId) return false;
+        if (typeof item.epoch === "number") {
+          if (item.epoch < maxEpochSeen) return false;
+          maxEpochSeen = item.epoch;
+        }
+        return true;
+      };
 
       const armReminder = () => {
         clearRemindTimer();
@@ -344,7 +439,9 @@ export function ComprehensionQuestion({
             !mountedRef.current ||
             gen !== flowGenRef.current ||
             voicePausedRef.current ||
-            isSubmittingRef.current
+            isSubmittingRef.current ||
+            solvedQuestionIdRef.current === boundQuestionId ||
+            activeQuestionRef.current?.question.id !== boundQuestionId
           ) {
             return;
           }
@@ -352,7 +449,12 @@ export function ComprehensionQuestion({
           stopVoiceRecognition();
           setVoicePhase("reading");
           void speakGuarded(prompts.next("quizRemind"), gen).then((ok) => {
-            if (ok && mountedRef.current && !voicePausedRef.current) {
+            if (
+              ok &&
+              mountedRef.current &&
+              !voicePausedRef.current &&
+              activeQuestionRef.current?.question.id === boundQuestionId
+            ) {
               startVoiceListenRef.current(value, gen);
             }
           });
@@ -366,17 +468,47 @@ export function ComprehensionQuestion({
           !mountedRef.current ||
           gen !== flowGenRef.current ||
           recognitionRef.current !== rec ||
-          isSubmittingRef.current
+          isSubmittingRef.current ||
+          solvedQuestionIdRef.current === boundQuestionId ||
+          activeQuestionRef.current?.question.id !== boundQuestionId
         ) {
           return;
         }
+        // Check interim provisional highlight (only previews, NEVER submits!)
+        for (let idx = event.results.length - 1; idx >= 0; idx -= 1) {
+          const item = event.results[idx];
+          if (!item || item.isFinal) continue;
+          if (!isItemFencedIn(item)) continue;
+          const interimText = item[0]?.transcript?.trim() ?? "";
+          if (interimText) {
+            // Cancel any pending bare-letter settle timer as soon as the child speaks again
+            clearVoiceSettleTimer();
+            armReminder();
+            const interimAnalysis = analyzeComprehensionVoiceInput(
+              interimText,
+              value.choices,
+            );
+            setPreviewChoiceId(
+              interimAnalysis.type === "CHOICE"
+                ? interimAnalysis.choice.id
+                : null,
+            );
+          } else {
+            setPreviewChoiceId(null);
+          }
+          break;
+        }
+
         const start = Math.max(event.resultIndex ?? 0, processedUpTo + 1);
         for (let idx = start; idx < event.results.length; idx += 1) {
           const item = event.results[idx];
           if (!item?.isFinal) continue;
           processedUpTo = idx;
+          if (!isItemFencedIn(item)) continue;
+          clearVoiceSettleTimer();
           const transcript = item[0]?.transcript?.trim() ?? "";
           if (!transcript) continue;
+          armReminder();
           const confidence = item[0]?.confidence;
           if (
             typeof confidence === "number" &&
@@ -386,35 +518,89 @@ export function ComprehensionQuestion({
             continue;
           }
 
-          // Block echo from our own question / option TTS!
+          // Block echo from our own question / option TTS using real VAD onsetAt!
           if (
             !echoGuard.evaluate({
               text: transcript,
               receivedAt: performance.now(),
+              onsetAt: item.onsetAt ?? null,
             }).accept
           ) {
             continue;
           }
 
-          const matched = matchComprehensionVoiceInput(
+          const analysis = analyzeComprehensionVoiceInput(
             transcript,
             value.choices,
           );
-          if (matched.type === "STOP") {
+          if (analysis.type === "STOP") {
+            setPreviewChoiceId(null);
             voicePausedRef.current = true;
             setVoicePausedByUser(true);
             setVoicePhase("paused");
             stopAllVoice();
             return;
           }
-          if (matched.type === "REPLAY") {
+          if (analysis.type === "REPLAY") {
+            setPreviewChoiceId(null);
             void readQuestionAloudRef.current(value);
             return;
           }
-          if (matched.type === "CHOICE") {
-            void submitAnswer(matched.choice.value, "voice");
+          if (
+            analysis.type === "CONFLICT" ||
+            analysis.type === "AMBIGUOUS" ||
+            analysis.type === "NEGATED"
+          ) {
+            setPreviewChoiceId(null);
+            const promptMsg = adaptTextToTeacherPersona(
+              analysis.clarificationPrompt,
+              getEffectiveTeacherPersona().gender,
+            );
+            setFeedbackNote(promptMsg);
+            stopVoiceRecognition();
+            setVoicePhase("reading");
+            void speakGuarded(promptMsg, gen).then((ok) => {
+              if (
+                ok &&
+                mountedRef.current &&
+                !voicePausedRef.current &&
+                activeQuestionRef.current?.question.id === boundQuestionId
+              ) {
+                startVoiceListenRef.current(value, gen);
+              }
+            });
             return;
           }
+          if (analysis.type === "CHOICE") {
+            setPreviewChoiceId(analysis.choice.id);
+            const wordCount = transcript.split(/\s+/u).filter(Boolean).length;
+            // Bare single-letter utterance ("A") waits 850ms so cross-segment
+            // self-correction ("A" -> "à không, con chọn B") can retract cleanly.
+            const settleMs =
+              analysis.matchedBy === "letter" && wordCount === 1
+                ? BARE_LETTER_SETTLE_MS
+                : 0;
+            if (settleMs > 0) {
+              const targetVal = analysis.choice.value;
+              voiceSettleTimerRef.current = window.setTimeout(() => {
+                voiceSettleTimerRef.current = null;
+                if (
+                  !mountedRef.current ||
+                  gen !== flowGenRef.current ||
+                  isSubmittingRef.current ||
+                  solvedQuestionIdRef.current === boundQuestionId ||
+                  activeQuestionRef.current?.question.id !== boundQuestionId
+                ) {
+                  return;
+                }
+                void submitAnswer(targetVal, "voice");
+              }, settleMs);
+            } else {
+              void submitAnswer(analysis.choice.value, "voice");
+            }
+            return;
+          }
+          setPreviewChoiceId(null);
         }
       };
 
@@ -454,6 +640,7 @@ export function ComprehensionQuestion({
     },
     [
       clearRemindTimer,
+      clearVoiceSettleTimer,
       echoGuard,
       prompts,
       sessionId,
@@ -518,6 +705,7 @@ export function ComprehensionQuestion({
 
   useEffect(() => {
     let active = true;
+    solvedQuestionIdRef.current = null;
     void comprehensionService
       .getQuestion(sessionId)
       .then((value) => {
@@ -648,12 +836,15 @@ export function ComprehensionQuestion({
             <div className="space-y-3">
               {loadState.value.choices.map((choice) => {
                 const selected = selectedAnswer === choice.value;
+                const previewing =
+                  !selected && previewChoiceId === choice.id && !result;
                 const correct = selected && result?.is_correct === true;
                 const beingRead = readingChoiceId === choice.id;
                 return (
                   <button
                     aria-pressed={selected}
                     data-reading-choice={beingRead ? "true" : undefined}
+                    data-preview-choice={previewing ? "true" : undefined}
                     className={cn(
                       "flex min-h-18 w-full items-center gap-6 rounded-card border-2 p-4 text-left text-body font-semibold text-ink transition duration-150 ease-out focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
                       // Hover only applies to answers that can still be chosen.
@@ -661,9 +852,12 @@ export function ComprehensionQuestion({
                       !correct &&
                         !(selected && result) &&
                         !beingRead &&
+                        !previewing &&
                         "bg-white",
                       beingRead &&
                         "border-primary bg-sky/50 ring-2 ring-primary/40",
+                      previewing &&
+                        "border-dashed border-emerald-600 bg-emerald-50 ring-2 ring-emerald-400/50",
                       selected && "border-primary",
                       selected &&
                         result?.is_correct === false &&
@@ -698,10 +892,13 @@ export function ComprehensionQuestion({
 
             {result ? (
               <StatusMessage tone={result.is_correct ? "success" : "warning"}>
-                {feedbackNote ??
-                  (result.is_correct
-                    ? "Đúng rồi. Bé nhớ rất tốt."
-                    : "Gần đúng rồi, thử lại nhé.")}
+                {adaptTextToTeacherPersona(
+                  feedbackNote ??
+                    (result.is_correct
+                      ? "Đúng rồi. Bé nhớ rất tốt."
+                      : "Gần đúng rồi, thử lại nhé."),
+                  getEffectiveTeacherPersona().gender,
+                )}
               </StatusMessage>
             ) : (
               <p
@@ -709,11 +906,25 @@ export function ComprehensionQuestion({
                 aria-live="polite"
                 className="text-center text-body text-muted"
               >
-                {voicePhase === "reading"
-                  ? "Cô đang đọc câu hỏi và các đáp án cho bé nghe…"
-                  : voicePhase === "listening"
-                    ? "Bé nói đáp án A, B, C hoặc chạm vào lựa chọn bé thích nhé."
-                    : "Không cần vội. Bé cứ nghĩ một chút nhé."}
+                {feedbackNote
+                  ? adaptTextToTeacherPersona(
+                      feedbackNote,
+                      getEffectiveTeacherPersona().gender,
+                    )
+                  : voicePhase === "reading"
+                    ? adaptTextToTeacherPersona(
+                        "Cô đang đọc câu hỏi và các đáp án cho bé nghe…",
+                        getEffectiveTeacherPersona().gender,
+                      )
+                    : voicePhase === "listening"
+                      ? adaptTextToTeacherPersona(
+                          "Bé nói đáp án A, B, C hoặc chạm vào lựa chọn bé thích nhé.",
+                          getEffectiveTeacherPersona().gender,
+                        )
+                      : adaptTextToTeacherPersona(
+                          "Không cần vội. Bé cứ nghĩ một chút nhé.",
+                          getEffectiveTeacherPersona().gender,
+                        )}
               </p>
             )}
 

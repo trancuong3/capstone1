@@ -107,7 +107,6 @@ describe("AdminBookEditorScreen", () => {
       ...adminBookFixture,
       lifecycle_status: "RETIRED",
     });
-    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
     const user = userEvent.setup();
 
     render(
@@ -118,6 +117,9 @@ describe("AdminBookEditorScreen", () => {
     );
     await screen.findByRole("textbox", { name: "Tiêu đề sách *" });
     await user.click(screen.getByRole("button", { name: "Ngừng hoạt động" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Xác nhận ngừng hoạt động" }),
+    );
 
     await waitFor(() => {
       expect(services.books.updateStatus).toHaveBeenCalledWith(
@@ -148,7 +150,6 @@ describe("AdminBookEditorScreen", () => {
         retryable: false,
       }),
     );
-    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
     const user = userEvent.setup();
 
     render(
@@ -159,6 +160,9 @@ describe("AdminBookEditorScreen", () => {
     );
     await screen.findByRole("textbox", { name: "Tiêu đề sách *" });
     await user.click(screen.getByRole("button", { name: "Kích hoạt lại" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Xác nhận kích hoạt lại" }),
+    );
 
     expect(
       await screen.findByText(/Metadata hiện tại chưa hợp lệ/),

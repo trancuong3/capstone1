@@ -11,10 +11,14 @@ function notInTarget(spoken: string, target: string): boolean {
 // from a story, in which case the passage takes precedence.
 export function isWordHelpRequest(text: string, target: string): boolean {
   const spoken = normalizeVietnameseText(text);
+  if (!spoken || !notInTarget(spoken, target)) return false;
   return (
-    /^(?:(?:cô|thầy) ơi )?(?:con|bé|em) (?:không|chưa) biết(?: đọc)?(?: từ này| chữ này)?(?: ạ)?$/u.test(
+    /^(?:(?:cô|thầy) ơi )?(?:con|bé|em) (?:không|chưa) biết(?: đọc)?(?: từ này| chữ này| chỗ này)?(?: ạ)?$/u.test(
       spoken,
-    ) && notInTarget(spoken, target)
+    ) ||
+    /^(?:(?:cô|thầy) ơi )?(?:chữ này|từ này|chỗ này) (?:con|bé|em) (?:không|chưa) biết(?: đọc)?(?: ạ)?$/u.test(
+      spoken,
+    )
   );
 }
 

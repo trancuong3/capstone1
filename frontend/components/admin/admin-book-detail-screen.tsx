@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
+import { Modal } from "@/components/common/modal";
 import { StatusMessage } from "@/components/common/status-message";
 import { useSkippedAiPageIds } from "@/hooks/use-admin-ai-batch-skipped-pages";
 import { useAdminServices } from "@/hooks/use-admin-services";
@@ -42,59 +43,57 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     message: string;
   } | null>(null);
   const requestIdRef = useRef(0);
-  const load = useCallback(async () => {
-    const requestId = ++requestIdRef.current;
-    setPageNumber(1);
-    setError(null);
-    setBook(null);
-    setItems(null);
-    setPagesUnavailable(false);
-    try {
-      const bookPromise = books.get(bookId);
-      const pagesPromise = pages
-        .list(bookId)
-        .then((list) => ({ ok: true as const, list }))
-        .catch((cause: unknown) => ({ ok: false as const, cause }));
-
-      const nextBook = await bookPromise;
-      if (requestId !== requestIdRef.current) return;
-      setBook(nextBook);
-
-      const pagesOutcome = await pagesPromise;
-      if (requestId !== requestIdRef.current) return;
-      if (!pagesOutcome.ok) {
-        if (
-          isServiceError(pagesOutcome.cause) &&
-          [501, 503].includes(pagesOutcome.cause.status)
-        ) {
-          setPagesUnavailable(true);
-          setItems([]);
-          return;
+  const load = useCallback(
+    async (options?: { resetPage?: boolean }) => {
+      const requestId = ++requestIdRef.current;
+      if (options?.resetPage) setPageNumber(1);
+      setError(null);
+      setBook(null);
+      setItems(null);
+      setPagesUnavailable(false);
+      try {
+        const nextBook = await books.get(bookId);
+        if (requestId !== requestIdRef.current) return;
+        setBook(nextBook);
+        let nextPages: readonly AdminPageListItemUI[];
+        try {
+          nextPages = (await pages.list(bookId)).filter(
+            (item) => item.processing.lifecycle_status === "ACTIVE",
+          );
+        } catch (cause) {
+          if (isServiceError(cause) && [501, 503].includes(cause.status)) {
+            if (requestId !== requestIdRef.current) return;
+            setPagesUnavailable(true);
+            setItems([]);
+            return;
+          }
+          throw cause;
         }
-        throw pagesOutcome.cause;
+        if (requestId !== requestIdRef.current) return;
+        const maxPage = Math.max(1, Math.ceil(nextPages.length / pageSize));
+        setPageNumber((current) => Math.min(current, maxPage));
+        setBook(nextBook);
+        setItems(nextPages);
+      } catch (cause) {
+        if (requestId !== requestIdRef.current) return;
+        setError(
+          isServiceError(cause) && cause.code === "RESOURCE_NOT_FOUND"
+            ? "not-found"
+            : "safe",
+        );
+        setItems([]);
       }
-
-      const nextPages = pagesOutcome.list.filter(
-        (item) => item.processing.lifecycle_status === "ACTIVE",
-      );
-      setItems(nextPages);
-    } catch (cause) {
-      if (requestId !== requestIdRef.current) return;
-      setError(
-        isServiceError(cause) && cause.code === "RESOURCE_NOT_FOUND"
-          ? "not-found"
-          : "safe",
-      );
-      setItems([]);
-    }
-  }, [bookId, books, pages]);
+    },
+    [bookId, books, pageSize, pages],
+  );
   const refreshPages = useCallback(async () => {
     try {
       const nextPages = (await pages.list(bookId)).filter(
         (item) => item.processing.lifecycle_status === "ACTIVE",
       );
+      const maxPage = Math.max(1, Math.ceil(nextPages.length / pageSize));
+      setPageNumber((current) => Math.min(current, maxPage));
       setItems(nextPages);
-      setPageNumber(1);
     } catch {
       setPageActionNotice({
         tone: "error",
@@ -390,41 +389,54 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
           </div>
         )}
       </section>
-      {pendingRetire ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div
-            aria-labelledby="retire-page-title"
-            aria-modal="true"
-            className="w-full max-w-lg rounded-card bg-white p-6 shadow-2xl"
-            role="alertdialog"
-          >
-            <h2 className="text-xl font-black" id="retire-page-title">
-              Xóa Trang {pendingRetire.page_number}?
-            </h2>
-            <p className="mt-3 text-sm leading-6 text-muted">
-              Trang sẽ được ngừng sử dụng và không còn xuất hiện trong các lượt
-              đọc mới. Ảnh nguồn, các revision và lịch sử đọc cũ vẫn được giữ để
-              bảo toàn dữ liệu.
-            </p>
-            <div className="mt-6 flex flex-wrap justify-end gap-3">
-              <Button
-                disabled={retiringPageId !== null}
-                onClick={() => setPendingRetire(null)}
-                variant="secondary"
-              >
-                Hủy
-              </Button>
-              <Button
-                disabled={retiringPageId !== null}
-                isLoading={retiringPageId === pendingRetire.processing.page_id}
-                onClick={() => void retirePendingPage()}
-              >
-                Xóa trang
-              </Button>
-            </div>
+      <Modal
+        closeOnBackdropClick={retiringPageId === null}
+        closeOnEscape={retiringPageId === null}
+        footer={
+          <div className="flex flex-wrap justify-end gap-3">
+            <Button
+              disabled={retiringPageId !== null}
+              fullWidth={false}
+              onClick={() => setPendingRetire(null)}
+              type="button"
+              variant="secondary"
+            >
+              Hủy
+            </Button>
+            <Button
+              disabled={retiringPageId !== null}
+              fullWidth={false}
+              isLoading={
+                pendingRetire !== null &&
+                retiringPageId === pendingRetire.processing.page_id
+              }
+              onClick={() => void retirePendingPage()}
+              type="button"
+              variant="destructive"
+            >
+              Xóa trang
+            </Button>
           </div>
-        </div>
-      ) : null}
+        }
+        isOpen={pendingRetire !== null}
+        onClose={() => {
+          if (retiringPageId === null) setPendingRetire(null);
+        }}
+        role="alertdialog"
+        showCloseButton={retiringPageId === null}
+        title={
+          pendingRetire
+            ? `Xóa Trang ${pendingRetire.page_number}?`
+            : "Xóa trang"
+        }
+        tone="paper"
+      >
+        <p className="text-sm leading-6 text-muted">
+          Trang sẽ được ngừng sử dụng và không còn xuất hiện trong các lượt đọc
+          mới. Ảnh nguồn, các revision và lịch sử đọc cũ vẫn được giữ để bảo
+          toàn dữ liệu.
+        </p>
+      </Modal>
     </>
   );
 }

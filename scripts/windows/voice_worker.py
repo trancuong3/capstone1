@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import re
+import struct
 import time
 import unicodedata
 from collections import OrderedDict
@@ -38,7 +39,20 @@ import numpy as np
 from scipy import signal as scipy_signal
 import sherpa_onnx
 import soundfile as sf
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 VOICE_RUNTIME_ROOT = Path(
@@ -88,12 +102,6 @@ logger = logging.getLogger("viread.voice_worker")
 logger.addFilter(_RequestIdLogFilter())
 
 WORKER_VERSION = "1.1.0"
-STT_MODEL_VERSION = "sherpa-onnx-zipformer-vi-30m-int8-2026-02-09"
-TTS_PRECISION = os.environ.get("VIREAD_VOICE_TTS_PRECISION", "int8").strip().lower()
-if TTS_PRECISION not in ("fp32", "int8"):
-    TTS_PRECISION = "int8"
-TTS_MODEL_VERSION = f"vieneu-v3-turbo-onnx-{TTS_PRECISION}-3.8.5"
-
 SHERPA_MODEL_DIR = Path(
     os.environ.get(
         "VIREAD_SHERPA_MODEL_DIR",
@@ -104,6 +112,18 @@ SHERPA_MODEL_DIR = Path(
         ),
     )
 )
+STT_MODE = os.environ.get("VIREAD_STT_MODE", "ws").strip().lower()
+if STT_MODE not in ("ws", "http"):
+    STT_MODE = "ws"
+STT_MODEL_VERSION = (
+    os.environ.get("VIREAD_SHERPA_MODEL_VERSION", "").strip()
+    or SHERPA_MODEL_DIR.name.lower()
+)
+TTS_PRECISION = os.environ.get("VIREAD_VOICE_TTS_PRECISION", "hybrid").strip().lower()
+if TTS_PRECISION not in ("hybrid", "fp32", "int8"):
+    TTS_PRECISION = "hybrid"
+TTS_MODEL_VERSION = f"vieneu-v3-turbo-onnx-{TTS_PRECISION}-3.8.5"
+TTS_THREADS = int(os.environ.get("VIREAD_VOICE_TTS_THREADS", "6"))
 TTS_CACHE_DIR = Path(
     os.environ.get(
         "VIREAD_VOICE_TTS_CACHE_DIR", str(VOICE_RUNTIME_ROOT / "tts-cache")
@@ -117,6 +137,12 @@ QUEUE_WAIT_SECONDS = float(os.environ.get("VIREAD_VOICE_QUEUE_WAIT_SECONDS", "25
 STT_QUEUE_WAIT_SECONDS = float(os.environ.get("VIREAD_VOICE_STT_QUEUE_WAIT_SECONDS", "15.0"))
 TTS_MEM_CACHE_MAX_ENTRIES = 128
 _TTS_MEM_CACHE: OrderedDict[str, tuple[bytes, float]] = OrderedDict()
+# Precompute 80Hz high-pass SOS filter once instead of solving filter design per STT call.
+_HIGHPASS_80HZ_SOS = scipy_signal.butter(
+    2, 80.0, btype="highpass", fs=16000.0, output="sos"
+)
+_LATEST_INTERIM_SEQ_BY_SESSION: dict[str, int] = {}
+_INTERIM_COUNTER = 0
 
 
 def _mem_cache_get(key: str) -> tuple[bytes, float] | None:
@@ -250,58 +276,123 @@ class VoiceRuntimeEngine:
     def __init__(self) -> None:
         self.stt_recognizer: sherpa_onnx.OfflineRecognizer | None = None
         self.tts_engine: Any | None = None
+        self.tts_engine_fp32: Any | None = None
+        self.tts_engine_int8: Any | None = None
         self.stt_semaphore = asyncio.Semaphore(2)
         self.tts_semaphore = asyncio.Semaphore(1)
         self._load_lock = asyncio.Lock()
         self.active_stt_jobs = 0
         self.active_tts_jobs = 0
+        self._prewarm_task: asyncio.Task[None] | None = None
+
+    def select_tts_engine(
+        self,
+        *,
+        word_sample: bool = False,
+        is_phonics: bool = False,
+        word_count: int = 0,
+    ) -> tuple[Any, str]:
+        if TTS_PRECISION == "fp32":
+            assert self.tts_engine_fp32 is not None
+            return self.tts_engine_fp32, "fp32"
+        if TTS_PRECISION == "int8":
+            assert self.tts_engine_int8 is not None
+            return self.tts_engine_int8, "int8"
+        if is_phonics or word_sample or word_count <= 4:
+            if self.tts_engine_fp32 is not None:
+                return self.tts_engine_fp32, "fp32"
+        if self.tts_engine_int8 is not None:
+            return self.tts_engine_int8, "int8"
+        assert self.tts_engine is not None
+        return self.tts_engine, "fp32"
 
     def load_models_sync(self) -> None:
         if self.stt_recognizer is None:
-            if not (SHERPA_MODEL_DIR / "encoder.int8.onnx").is_file():
+            encoder_path = SHERPA_MODEL_DIR / "encoder.int8.onnx"
+            if not encoder_path.is_file():
+                encoder_path = SHERPA_MODEL_DIR / "encoder.onnx"
+            joiner_path = SHERPA_MODEL_DIR / "joiner.int8.onnx"
+            if not joiner_path.is_file():
+                joiner_path = SHERPA_MODEL_DIR / "joiner.onnx"
+            decoder_path = SHERPA_MODEL_DIR / "decoder.onnx"
+            if not decoder_path.is_file():
+                decoder_path = SHERPA_MODEL_DIR / "decoder.int8.onnx"
+            if not encoder_path.is_file() or not decoder_path.is_file():
                 raise RuntimeError(
                     f"Missing Sherpa-ONNX Vietnamese STT model at {SHERPA_MODEL_DIR}"
                 )
             t0 = time.perf_counter()
             self.stt_recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
-                encoder=str(SHERPA_MODEL_DIR / "encoder.int8.onnx"),
-                decoder=str(SHERPA_MODEL_DIR / "decoder.onnx"),
-                joiner=str(SHERPA_MODEL_DIR / "joiner.int8.onnx"),
+                encoder=str(encoder_path),
+                decoder=str(decoder_path),
+                joiner=str(joiner_path),
                 tokens=str(SHERPA_MODEL_DIR / "tokens.txt"),
                 num_threads=4,
                 sample_rate=16000,
                 feature_dim=80,
                 decoding_method="modified_beam_search",
-                max_active_paths=6,
+                max_active_paths=4,
                 blank_penalty=-0.05,
             )
             logger.info(
-                "Loaded STT (%s) in %.2fs",
+                "Loaded STT (%s, mode=%s) in %.2fs",
                 STT_MODEL_VERSION,
+                STT_MODE,
                 time.perf_counter() - t0,
             )
 
-        if self.tts_engine is None:
+        need_fp32 = TTS_PRECISION in ("hybrid", "fp32") and self.tts_engine_fp32 is None
+        need_int8 = TTS_PRECISION in ("hybrid", "int8") and self.tts_engine_int8 is None
+        if need_fp32:
             t0 = time.perf_counter()
-            self.tts_engine = Vieneu(
+            self.tts_engine_fp32 = Vieneu(
                 mode="v3turbo",
                 backend="onnx",
-                precision=TTS_PRECISION,
-                threads=4,
+                precision="fp32",
+                threads=TTS_THREADS,
             )
-            # Warm up once so first child utterance has zero JIT stall
-            _ = self.tts_engine.infer(
+            _ = self.tts_engine_fp32.infer(
                 "Xin chào.",
                 voice="Trúc Ly",
-                temperature=0.25,
+                temperature=0.22,
                 top_k=15,
                 apply_watermark=False,
             )
             logger.info(
-                "Loaded TTS (%s) in %.2fs",
-                TTS_MODEL_VERSION,
+                "Loaded TTS fp32 (threads=%d) in %.2fs",
+                TTS_THREADS,
                 time.perf_counter() - t0,
             )
+        if need_int8:
+            t0 = time.perf_counter()
+            self.tts_engine_int8 = Vieneu(
+                mode="v3turbo",
+                backend="onnx",
+                precision="int8",
+                threads=TTS_THREADS,
+                babble_retries=0,
+            )
+            _ = self.tts_engine_int8.infer(
+                "Xin chào.",
+                voice="Trúc Ly",
+                temperature=0.22,
+                top_k=15,
+                apply_watermark=False,
+            )
+            for _chunk in self.tts_engine_int8.infer_stream(
+                "Xin chào.",
+                voice="Trúc Ly",
+                temperature=0.22,
+                top_k=15,
+                apply_watermark=False,
+            ):
+                pass
+            logger.info(
+                "Loaded TTS int8 (threads=%d, babble_retries=0, stream warmed) in %.2fs",
+                TTS_THREADS,
+                time.perf_counter() - t0,
+            )
+        self.tts_engine = self.tts_engine_fp32 or self.tts_engine_int8
 
     async def ensure_loaded(self) -> None:
         if self.stt_recognizer is not None and self.tts_engine is not None:
@@ -310,6 +401,55 @@ class VoiceRuntimeEngine:
             if self.stt_recognizer is not None and self.tts_engine is not None:
                 return
             await asyncio.to_thread(self.load_models_sync)
+
+
+_PREWARM_COACHING_PHRASES: tuple[str, ...] = (
+    "Con đọc tốt lắm.",
+    "Mình cùng đọc tiếp nhé.",
+    "Bây giờ con nghe câu hỏi nhé.",
+    "Con trả lời đúng rồi, giỏi quá!",
+    "Con chọn lại câu trả lời khác nhé.",
+)
+
+
+async def _prewarm_coaching_phrases() -> None:
+    """Pre-warm top deterministic coaching/quiz phrases in background when idle."""
+    preset = VOICE_BY_ID[DEFAULT_VOICE_ID]
+    for phrase in _PREWARM_COACHING_PHRASES:
+        await asyncio.sleep(0.25)
+        if runtime.tts_engine is None:
+            return
+        while runtime.active_tts_jobs > 0:
+            await asyncio.sleep(0.3)
+        try:
+            await runtime.tts_semaphore.acquire()
+            try:
+                word_count = len(WORD_TOKEN_RE.findall(phrase))
+                engine, active_prec = runtime.select_tts_engine(
+                    word_sample=False, is_phonics=False, word_count=word_count
+                )
+                wav_bytes, duration_s = await asyncio.to_thread(
+                    synthesize_single_utterance_sync,
+                    engine,
+                    phrase,
+                    preset,
+                    1.0,
+                    False,
+                    active_prec,
+                )
+                cache_mode = "word" if word_count <= 3 else "sentence"
+                cache_key = make_cache_key(
+                    voice_id=preset.voice_id,
+                    speed=1.0,
+                    mode=cache_mode,
+                    payload=phrase,
+                    precision=active_prec,
+                )
+                _mem_cache_put(cache_key, (wav_bytes, duration_s))
+            finally:
+                runtime.tts_semaphore.release()
+        except Exception as exc:
+            logger.debug("TTS prewarm skipped: %s", type(exc).__name__)
 
 
 runtime = VoiceRuntimeEngine()
@@ -391,6 +531,8 @@ async def _startup() -> None:
     eager = os.environ.get("VIREAD_VOICE_EAGER_LOAD", "1").strip() != "0"
     if eager:
         await runtime.ensure_loaded()
+        if os.environ.get("VIREAD_VOICE_PREWARM", "1").strip() != "0":
+            runtime._prewarm_task = asyncio.create_task(_prewarm_coaching_phrases())
 
 
 def resolve_strict_voice(voice_id: str) -> LocalVoicePreset:
@@ -534,13 +676,16 @@ def make_cache_key(
     speed: float,
     mode: str,
     payload: str,
+    precision: str = TTS_PRECISION,
+    model_version: str = TTS_MODEL_VERSION,
 ) -> str:
     canonical = json.dumps(
         {
             "provider": "local",
             "voice_id": voice_id,
-            "model_version": TTS_MODEL_VERSION,
-            "norm_v": 2,
+            "model_version": model_version,
+            "precision": precision,
+            "norm_v": 4,
             "speed": normalize_speed(speed),
             "mode": mode,
             "payload": unicodedata.normalize("NFC", payload),
@@ -696,48 +841,95 @@ def decode_audio_bytes_to_16k_mono(
     raise last_exc
 
 
+def _estimate_word_end_seconds(
+    cur_start: float,
+    cur_last_tok: float,
+    next_start: float | None,
+    duration_s: float,
+    audio_16k: np.ndarray | None = None,
+) -> float:
+    """Bound word end by actual speech energy/duration rather than stretching across pauses."""
+    upper_bound = duration_s
+    if next_start is not None:
+        upper_bound = min(upper_bound, max(cur_start + 0.04, next_start))
+    min_end = min(upper_bound, max(cur_start + 0.04, cur_last_tok + 0.04))
+
+    if audio_16k is not None and audio_16k.size >= 160:
+        search_start = max(0, int(cur_last_tok * 16000))
+        search_limit = min(
+            audio_16k.size,
+            int(min(upper_bound, cur_last_tok + 0.42) * 16000),
+        )
+        if search_limit - search_start >= 160:
+            win = audio_16k[search_start:search_limit]
+            n_frames = win.size // 160
+            if n_frames > 0:
+                frames = win[: n_frames * 160].reshape(n_frames, 160)
+                rms = np.sqrt(np.mean(frames * frames, axis=1))
+                peak_rms = float(np.max(rms))
+                thresh = max(0.004, peak_rms * 0.14)
+                active_idxs = np.flatnonzero(rms >= thresh)
+                if active_idxs.size > 0:
+                    last_active_s = (
+                        search_start + (int(active_idxs[-1]) + 1) * 160
+                    ) / 16000.0 + 0.03
+                    return round(max(min_end, min(upper_bound, last_active_s)), 3)
+
+    # Without audio or when quiet, cap trailing syllable tail to ~0.18s (never across comma pauses).
+    heuristic_end = max(cur_last_tok + 0.18, cur_start + 0.22)
+    return round(max(min_end, min(upper_bound, heuristic_end)), 3)
+
+
 def build_stt_words_from_sherpa(
     tokens: list[str],
     timestamps: list[float],
     duration_s: float,
+    *,
+    audio_16k: np.ndarray | None = None,
 ) -> list[dict[str, Any]]:
     words: list[dict[str, Any]] = []
     cur_text = ""
     cur_start: float | None = None
-    cur_end: float = 0.0
+    cur_last_tok: float = 0.0
 
     for idx, raw_tok in enumerate(tokens):
-        ts = float(timestamps[idx]) if idx < len(timestamps) else cur_end
+        ts = float(timestamps[idx]) if idx < len(timestamps) else cur_last_tok
         starts_new = raw_tok.startswith(" ") or raw_tok.startswith("▁")
         piece = raw_tok.replace("▁", " ").strip()
         if not piece:
             continue
         if starts_new and cur_text:
-            end_val = max(cur_start or 0.0, min(duration_s, ts))
+            w_start = max(0.0, cur_start or 0.0)
+            w_end = _estimate_word_end_seconds(
+                w_start, cur_last_tok, ts, duration_s, audio_16k
+            )
             words.append(
                 {
                     "text": unicodedata.normalize("NFC", cur_text.lower()),
-                    "start": round(cur_start or 0.0, 3),
-                    "end": round(max((cur_start or 0.0) + 0.04, end_val), 3),
+                    "start": round(w_start, 3),
+                    "end": round(max(w_start + 0.04, w_end), 3),
                     "type": "word",
                 }
             )
             cur_text = piece
             cur_start = ts
-            cur_end = ts + 0.08
+            cur_last_tok = ts
         else:
             if cur_start is None:
                 cur_start = ts
             cur_text += piece
-            cur_end = max(cur_end, ts + 0.08)
+            cur_last_tok = max(cur_last_tok, ts)
 
     if cur_text:
-        end_val = min(duration_s, max(cur_end, (cur_start or 0.0) + 0.08))
+        w_start = max(0.0, cur_start or 0.0)
+        w_end = _estimate_word_end_seconds(
+            w_start, cur_last_tok, None, duration_s, audio_16k
+        )
         words.append(
             {
                 "text": unicodedata.normalize("NFC", cur_text.lower()),
-                "start": round(cur_start or 0.0, 3),
-                "end": round(max(cur_start or 0.0, end_val), 3),
+                "start": round(w_start, 3),
+                "end": round(max(w_start, w_end), 3),
                 "type": "word",
             }
         )
@@ -750,6 +942,7 @@ def synthesize_single_utterance_sync(
     preset: LocalVoicePreset,
     speed: float,
     word_sample: bool,
+    active_precision: str = TTS_PRECISION,
 ) -> tuple[bytes, float]:
     syllable_estimate = len(text_nfc.split())
     use_crisp_temp = word_sample or syllable_estimate <= 3
@@ -762,6 +955,7 @@ def synthesize_single_utterance_sync(
         speed=speed,
         mode=cache_mode,
         payload=text_nfc,
+        precision=active_precision,
     )
     wav_cache = TTS_CACHE_DIR / f"{key}.wav"
     meta_cache = TTS_CACHE_DIR / f"{key}.json"
@@ -806,12 +1000,14 @@ def synthesize_timed_passage_sync(
     text_nfc: str,
     preset: LocalVoicePreset,
     speed: float,
+    active_precision: str = TTS_PRECISION,
 ) -> dict[str, Any]:
     key = make_cache_key(
         voice_id=preset.voice_id,
         speed=speed,
         mode="timed_passage",
         payload=text_nfc,
+        precision=active_precision,
     )
     wav_cache = TTS_CACHE_DIR / f"{key}.wav"
     meta_cache = TTS_CACHE_DIR / f"{key}.json"
@@ -950,6 +1146,7 @@ def synthesize_phonics_steps_sync(
     steps: list[PhonicsStepRequestItem],
     preset: LocalVoicePreset,
     speed: float,
+    active_precision: str = TTS_PRECISION,
 ) -> dict[str, Any]:
     serialized_steps = json.dumps(
         [
@@ -967,6 +1164,7 @@ def synthesize_phonics_steps_sync(
         speed=speed,
         mode="phonics_steps",
         payload=serialized_steps,
+        precision=active_precision,
     )
     wav_cache = TTS_CACHE_DIR / f"{key}.wav"
     meta_cache = TTS_CACHE_DIR / f"{key}.json"
@@ -1062,6 +1260,8 @@ async def get_health() -> dict[str, Any]:
         "stt": {
             "ready": stt_ready,
             "model_version": STT_MODEL_VERSION,
+            "mode": STT_MODE,
+            "ws_stream_supported": STT_MODE == "ws",
             "active_jobs": runtime.active_stt_jobs,
         },
         "tts": {
@@ -1069,6 +1269,7 @@ async def get_health() -> dict[str, Any]:
             "model_version": TTS_MODEL_VERSION,
             "precision": TTS_PRECISION,
             "voices_count": len(CURATED_VOICES),
+            "active_voices": [v.voice_id for v in CURATED_VOICES],
             "regions": ["north", "central", "south"],
             "active_jobs": runtime.active_tts_jobs,
         },
@@ -1105,6 +1306,35 @@ async def list_voices() -> dict[str, Any]:
     }
 
 
+def _streaming_wav_header(sample_rate: int) -> bytes:
+    """Build a 44-byte PCM_16 mono WAV header with streaming placeholder sizes."""
+    data_size = 0x7FFFF000
+    riff_size = 36 + data_size
+    return struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF",
+        riff_size,
+        b"WAVE",
+        b"fmt ",
+        16,
+        1,
+        1,
+        sample_rate,
+        sample_rate * 2,
+        2,
+        16,
+        b"data",
+        data_size,
+    )
+
+
+def _float32_to_pcm16_bytes(wav: np.ndarray) -> bytes:
+    if wav.size == 0:
+        return b""
+    clipped = np.clip(wav.astype(np.float32, copy=False), -1.0, 1.0)
+    return (clipped * 32767.0).astype("<i2").tobytes()
+
+
 @app.post("/tts", dependencies=[Depends(require_voice_worker_token)])
 async def post_tts(req: TtsSynthesisRequest) -> Response:
     await _ensure_capability_loaded("tts")
@@ -1112,13 +1342,30 @@ async def post_tts(req: TtsSynthesisRequest) -> Response:
     text_nfc = normalize_nfc_text(req.text)
     speed = normalize_speed(req.speed)
     word_count = len(WORD_TOKEN_RE.findall(text_nfc))
-    cache_mode = "word" if (req.word_sample or word_count <= 3) else "sentence"
+    engine, active_precision = runtime.select_tts_engine(
+        word_sample=req.word_sample,
+        is_phonics=False,
+        word_count=word_count,
+    )
+    use_crisp_temp = req.word_sample or word_count <= 3
+    cache_mode = "word" if use_crisp_temp else "sentence"
     cache_key = make_cache_key(
         voice_id=preset.voice_id,
         speed=speed,
         mode=cache_mode,
         payload=text_nfc,
+        precision=active_precision,
     )
+    response_headers = {
+        "Cache-Control": "no-store",
+        "X-Voice-Provider": "local",
+        "X-Resolved-Voice-Id": preset.voice_id,
+        "X-Voice-Region": preset.region,
+        "X-Voice-Gender": preset.gender,
+        "X-Voice-Model-Version": TTS_MODEL_VERSION,
+        "X-Voice-Precision": active_precision,
+        "X-Voice-Fallback": "0",
+    }
 
     # Ultra-fast in-memory LRU cache (< 10ms TTFA, never blocks TTS semaphore)
     mem_hit = _mem_cache_get(cache_key)
@@ -1146,15 +1393,49 @@ async def post_tts(req: TtsSynthesisRequest) -> Response:
                 },
             ) from exc
 
+    wav_cache = TTS_CACHE_DIR / f"{cache_key}.wav"
+    meta_cache = TTS_CACHE_DIR / f"{cache_key}.json"
+    if wav_cache.is_file() and meta_cache.is_file():
+        meta = json.loads(meta_cache.read_text(encoding="utf-8"))
+        wav_bytes = wav_cache.read_bytes()
+        duration_s = float(meta["duration_seconds"])
+        _mem_cache_put(cache_key, (wav_bytes, duration_s))
+        return Response(
+            content=wav_bytes,
+            media_type="audio/wav",
+            headers={
+                **response_headers,
+                "X-Audio-Duration-Seconds": str(duration_s),
+            },
+        )
+
+    try:
+        await asyncio.wait_for(
+            runtime.tts_semaphore.acquire(), timeout=QUEUE_WAIT_SECONDS
+        )
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "VOICE_WORKER_BUSY",
+                "message": "Bộ đọc giọng nói trên máy đang bận xử lý câu trước.",
+            },
+        ) from exc
+
+    # Short crisp utterances (<= 4 words / word_sample) finish in ~450-1390ms in fp32;
+    # stream longer utterances (word_count > 4) for sub-second TTFA while still caching exact WAV.
+    should_stream = not req.word_sample and word_count > 4
+    if not should_stream:
         runtime.active_tts_jobs += 1
         try:
             wav_bytes, duration_s = await asyncio.to_thread(
                 synthesize_single_utterance_sync,
-                runtime.tts_engine,
+                engine,
                 text_nfc,
                 preset,
                 speed,
                 req.word_sample,
+                active_precision,
             )
         finally:
             runtime.active_tts_jobs -= 1
@@ -1169,18 +1450,119 @@ async def post_tts(req: TtsSynthesisRequest) -> Response:
             duration_s,
         )
 
-    return Response(
-        content=wav_bytes,
+    runtime.active_tts_jobs += 1
+    normalized_text = (
+        normalize_vietnamese_tts_text(text_nfc, expand_ranges_and_codes=True)
+        or text_nfc
+    )
+    spoken_input = (
+        normalized_text if normalized_text[-1] in ".!?" else f"{normalized_text}."
+    )
+    sr = int(engine.sample_rate)
+    loop = asyncio.get_running_loop()
+    chunk_queue: asyncio.Queue[np.ndarray | BaseException | None] = asyncio.Queue()
+
+    def _produce_chunks() -> None:
+        try:
+            if abs(speed - 1.0) < 0.01:
+                for sub in engine.infer_stream(
+                    spoken_input,
+                    voice=preset.preset_name,
+                    temperature=0.50,
+                    top_k=18,
+                    apply_watermark=False,
+                ):
+                    if sub is not None and len(sub) > 0:
+                        loop.call_soon_threadsafe(
+                            chunk_queue.put_nowait,
+                            np.asarray(sub, dtype=np.float32),
+                        )
+            else:
+                clauses, gaps = normalize_to_chunks_v3_with_gaps(
+                    spoken_input, max_chars=140
+                )
+                if not clauses:
+                    clauses = [spoken_input]
+                    gaps = []
+                silence_secs = gaps_to_silence(gaps) if gaps else []
+                for idx, clause in enumerate(clauses):
+                    raw_clause = engine.infer(
+                        clause,
+                        voice=preset.preset_name,
+                        temperature=0.50,
+                        top_k=18,
+                        apply_watermark=False,
+                    )
+                    stretched = apply_speed_preserve_pitch(raw_clause, speed)
+                    if stretched.size > 0:
+                        loop.call_soon_threadsafe(chunk_queue.put_nowait, stretched)
+                    if idx < len(silence_secs):
+                        gap_s = max(0.10, float(silence_secs[idx]) / max(speed, 0.7))
+                        loop.call_soon_threadsafe(
+                            chunk_queue.put_nowait,
+                            np.zeros(int(sr * gap_s), dtype=np.float32),
+                        )
+            loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
+        except BaseException as exc:
+            loop.call_soon_threadsafe(chunk_queue.put_nowait, exc)
+
+    async def _stream_audio_response():
+        worker_task = asyncio.create_task(asyncio.to_thread(_produce_chunks))
+        assembled_chunks: list[np.ndarray] = []
+        sent_header = False
+        lead_wav = np.zeros(int(sr * 0.07), dtype=np.float32)
+        tail_wav = np.zeros(int(sr * 0.16), dtype=np.float32)
+        try:
+            while True:
+                item = await chunk_queue.get()
+                if item is None:
+                    break
+                if isinstance(item, BaseException):
+                    raise item
+                if not sent_header:
+                    sent_header = True
+                    assembled_chunks.append(lead_wav)
+                    assembled_chunks.append(item)
+                    yield (
+                        _streaming_wav_header(sr)
+                        + _float32_to_pcm16_bytes(lead_wav)
+                        + _float32_to_pcm16_bytes(item)
+                    )
+                else:
+                    assembled_chunks.append(item)
+                    yield _float32_to_pcm16_bytes(item)
+
+            if not sent_header:
+                sent_header = True
+                assembled_chunks.append(lead_wav)
+                yield _streaming_wav_header(sr) + _float32_to_pcm16_bytes(lead_wav)
+
+            assembled_chunks.append(tail_wav)
+            yield _float32_to_pcm16_bytes(tail_wav)
+
+            await worker_task
+            full_wav = np.concatenate(assembled_chunks).astype(np.float32)
+            duration_s = round(float(len(full_wav) / sr), 3)
+            cached_wav_bytes = encode_wav_bytes(full_wav, sr)
+            wav_cache.write_bytes(cached_wav_bytes)
+            meta_cache.write_text(
+                json.dumps({"duration_seconds": duration_s}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            _mem_cache_put(cache_key, (cached_wav_bytes, duration_s))
+        finally:
+            if not worker_task.done():
+                worker_task.cancel()
+                await asyncio.gather(worker_task, return_exceptions=True)
+            runtime.active_tts_jobs -= 1
+            runtime.tts_semaphore.release()
+
+    return StreamingResponse(
+        _stream_audio_response(),
         media_type="audio/wav",
         headers={
-            "Cache-Control": "no-store",
-            "X-Voice-Provider": "local",
-            "X-Resolved-Voice-Id": preset.voice_id,
-            "X-Voice-Region": preset.region,
-            "X-Voice-Gender": preset.gender,
-            "X-Voice-Model-Version": TTS_MODEL_VERSION,
-            "X-Voice-Fallback": "0",
-            "X-Audio-Duration-Seconds": str(duration_s),
+            **response_headers,
+            "X-TTS-Streamed": "1",
         },
     )
 
@@ -1191,6 +1573,12 @@ async def post_tts_timed(req: TtsSynthesisRequest) -> dict[str, Any]:
     preset = resolve_strict_voice(req.voice_id)
     text_nfc = normalize_nfc_text(req.text)
     speed = normalize_speed(req.speed)
+    word_count = len(WORD_TOKEN_RE.findall(text_nfc))
+    engine, active_precision = runtime.select_tts_engine(
+        word_sample=False,
+        is_phonics=False,
+        word_count=word_count,
+    )
 
     try:
         await asyncio.wait_for(
@@ -1210,10 +1598,11 @@ async def post_tts_timed(req: TtsSynthesisRequest) -> dict[str, Any]:
     try:
         result = await asyncio.to_thread(
             synthesize_timed_passage_sync,
-            runtime.tts_engine,
+            engine,
             text_nfc,
             preset,
             speed,
+            active_precision,
         )
         logger.info(
             "tts_timed_ok voice=%s region=%s speed=%.2f words=%d duration_s=%.3f",
@@ -1234,6 +1623,11 @@ async def post_tts_phonics(req: PhonicsSynthesisRequest) -> dict[str, Any]:
     await _ensure_capability_loaded("tts")
     preset = resolve_strict_voice(req.voice_id)
     speed = normalize_speed(req.speed)
+    engine, active_precision = runtime.select_tts_engine(
+        word_sample=True,
+        is_phonics=True,
+        word_count=1,
+    )
 
     try:
         await asyncio.wait_for(
@@ -1253,10 +1647,11 @@ async def post_tts_phonics(req: PhonicsSynthesisRequest) -> dict[str, Any]:
     try:
         result = await asyncio.to_thread(
             synthesize_phonics_steps_sync,
-            runtime.tts_engine,
+            engine,
             req.steps,
             preset,
             speed,
+            active_precision,
         )
         logger.info(
             "tts_phonics_ok voice=%s region=%s speed=%.2f steps=%d duration_s=%.3f",
@@ -1272,12 +1667,90 @@ async def post_tts_phonics(req: PhonicsSynthesisRequest) -> dict[str, Any]:
         runtime.tts_semaphore.release()
 
 
+def preprocess_audio_for_stt(samples16: np.ndarray) -> np.ndarray:
+    """Apply DC offset removal, 80Hz high-pass filter, and gentle child-voice AGC."""
+    arr = samples16.astype(np.float32, copy=True)
+    if arr.size == 0:
+        return arr
+    arr = arr - float(np.mean(arr))
+    if arr.size > 32:
+        arr = scipy_signal.sosfilt(_HIGHPASS_80HZ_SOS, arr).astype(np.float32)
+
+    frame_len = 320
+    n_frames = arr.size // frame_len
+    if n_frames > 0:
+        frames = arr[: n_frames * frame_len].reshape(n_frames, frame_len)
+        frame_rms = np.sqrt(np.mean(frames * frames, axis=1))
+        max_frame_rms = float(np.max(frame_rms))
+        active_thresh = max(0.002, max_frame_rms * 0.2)
+        active_frames = frame_rms[frame_rms >= active_thresh]
+        rms = (
+            float(np.sqrt(np.mean(active_frames * active_frames)))
+            if active_frames.size > 0
+            else float(np.sqrt(np.mean(arr * arr)))
+        )
+    else:
+        rms = float(np.sqrt(np.mean(arr * arr)))
+    peak = float(np.max(np.abs(arr)))
+    if rms > 0.0004 and peak > 0.0015:
+        gain_rms = 0.08 / rms
+        gain_peak = 0.92 / peak
+        gain = min(15.0, gain_rms, gain_peak)
+        if gain > 1.0:
+            arr = np.clip(arr * gain, -0.98, 0.98).astype(np.float32)
+    return arr
+
+
+def decode_stt_window_sync(
+    samples16: np.ndarray,
+    *,
+    lead_pad_s: float = 0.20,
+    trail_pad_s: float = 0.24,
+) -> tuple[str, list[dict[str, Any]], float]:
+    """Decode one 16kHz float32 audio window using Sherpa-ONNX Zipformer."""
+    assert runtime.stt_recognizer is not None
+    t_d0 = time.perf_counter()
+    if samples16.size < 400:
+        return "", [], (time.perf_counter() - t_d0) * 1000.0
+    duration_s = float(samples16.size / 16000.0)
+    arr = preprocess_audio_for_stt(samples16)
+    padded = np.concatenate(
+        [
+            np.zeros(int(16000 * lead_pad_s), dtype=np.float32),
+            arr,
+            np.zeros(int(16000 * trail_pad_s), dtype=np.float32),
+        ]
+    )
+    stream = runtime.stt_recognizer.create_stream()
+    stream.accept_waveform(16000, padded)
+    runtime.stt_recognizer.decode_stream(stream)
+    res = stream.result
+    txt = unicodedata.normalize("NFC", res.text.strip().lower())
+    adjusted_timestamps = [
+        max(0.0, float(t) - lead_pad_s) for t in list(res.timestamps)
+    ]
+    words = build_stt_words_from_sherpa(
+        list(res.tokens),
+        adjusted_timestamps,
+        duration_s,
+        audio_16k=arr,
+    )
+    return txt, words, (time.perf_counter() - t_d0) * 1000.0
+
+
 @app.post("/stt", dependencies=[Depends(require_voice_worker_token)])
 async def post_stt(
+    request: Request,
+    response: Response,
     audio_file: UploadFile = File(...),
     language: str = Form(default="vi"),
+    source: str = Form(default=""),
+    session_id: str = Form(default=""),
+    turn_id: str = Form(default=""),
 ) -> dict[str, Any]:
-    del language
+    del language, turn_id
+    global _INTERIM_COUNTER
+    t_req_start = time.perf_counter()
     await _ensure_capability_loaded("stt")
     raw = await audio_file.read(MAX_AUDIO_BYTES + 1)
     if not raw:
@@ -1297,6 +1770,15 @@ async def post_stt(
             },
         )
 
+    is_interim = source.strip() == "local_live_interim"
+    session_key = session_id.strip()[:80] if session_id else ""
+    my_interim_seq = 0
+    if is_interim and session_key:
+        _INTERIM_COUNTER += 1
+        my_interim_seq = _INTERIM_COUNTER
+        _LATEST_INTERIM_SEQ_BY_SESSION[session_key] = my_interim_seq
+
+    t_q0 = time.perf_counter()
     try:
         await asyncio.wait_for(
             runtime.stt_semaphore.acquire(), timeout=STT_QUEUE_WAIT_SECONDS
@@ -1310,9 +1792,26 @@ async def post_stt(
                 "message": "Bộ nhận diện giọng nói trên máy đang bận.",
             },
         ) from exc
+    queue_ms = (time.perf_counter() - t_q0) * 1000.0
 
     runtime.active_stt_jobs += 1
     try:
+        if is_interim:
+            if await request.is_disconnected() or (
+                session_key
+                and my_interim_seq < _LATEST_INTERIM_SEQ_BY_SESSION.get(session_key, 0)
+            ):
+                return {
+                    "text": "",
+                    "words": [],
+                    "language_code": "vi",
+                    "language_probability": None,
+                    "duration_seconds": 0.0,
+                    "provider": "local",
+                    "model_version": STT_MODEL_VERSION,
+                    "fallback_used": False,
+                    "superseded": True,
+                }
         try:
             samples16, duration_s = await asyncio.to_thread(
                 decode_audio_bytes_to_16k_mono,
@@ -1347,58 +1846,16 @@ async def post_stt(
                 "fallback_used": False,
             }
 
-        def _decode_sync() -> tuple[str, list[dict[str, Any]]]:
-            assert runtime.stt_recognizer is not None
-            # Child-voice acoustic preprocessing:
-            # 1) Remove DC offset + 80Hz Butterworth high-pass filter (strips laptop fan & 50/60Hz hum)
-            # 2) RMS-aware gentle AGC so soft-spoken children reach clean speech loudness without clipping
-            # 3) Pad 250ms leading + 350ms trailing silence so Zipformer never drops initial/final syllables
-            arr = samples16.astype(np.float32, copy=True)
-            arr = arr - float(np.mean(arr))
-            if arr.size > 32:
-                sos = scipy_signal.butter(
-                    2, 80.0, btype="highpass", fs=16000.0, output="sos"
-                )
-                arr = scipy_signal.sosfilt(sos, arr).astype(np.float32)
-
-            rms = float(np.sqrt(np.mean(arr * arr))) if arr.size > 0 else 0.0
-            peak = float(np.max(np.abs(arr))) if arr.size > 0 else 0.0
-            if rms > 0.0004 and peak > 0.0015:
-                gain_rms = 0.08 / rms
-                gain_peak = 0.92 / peak
-                gain = min(15.0, gain_rms, gain_peak)
-                if gain > 1.0:
-                    arr = np.clip(arr * gain, -0.98, 0.98).astype(np.float32)
-
-            lead_pad_s = 0.25
-            trail_pad_s = 0.35
-            padded = np.concatenate(
-                [
-                    np.zeros(int(16000 * lead_pad_s), dtype=np.float32),
-                    arr,
-                    np.zeros(int(16000 * trail_pad_s), dtype=np.float32),
-                ]
-            )
-            stream = runtime.stt_recognizer.create_stream()
-            stream.accept_waveform(16000, padded)
-            runtime.stt_recognizer.decode_stream(stream)
-            res = stream.result
-            txt = unicodedata.normalize("NFC", res.text.strip().lower())
-            adjusted_timestamps = [
-                max(0.0, float(t) - lead_pad_s) for t in list(res.timestamps)
-            ]
-            words = build_stt_words_from_sherpa(
-                list(res.tokens), adjusted_timestamps, duration_s
-            )
-            return txt, words
-
-        text_out, words_out = await asyncio.to_thread(_decode_sync)
-        logger.info(
-            "stt_ok audio_bytes=%d duration_s=%.3f word_count=%d",
-            len(raw),
-            duration_s,
-            len(words_out),
+        text_out, words_out, decode_ms = await asyncio.to_thread(
+            decode_stt_window_sync,
+            samples16,
+            lead_pad_s=0.25,
+            trail_pad_s=0.35,
         )
+        total_ms = (time.perf_counter() - t_req_start) * 1000.0
+        response.headers["X-STT-Queue-Ms"] = f"{queue_ms:.2f}"
+        response.headers["X-STT-Decode-Ms"] = f"{decode_ms:.2f}"
+        response.headers["X-STT-Total-Ms"] = f"{total_ms:.2f}"
         return {
             "text": text_out,
             "words": words_out,
@@ -1412,6 +1869,615 @@ async def post_stt(
     finally:
         runtime.active_stt_jobs -= 1
         runtime.stt_semaphore.release()
+
+
+_WS_TARGET_SR = 16000
+_WS_PRE_ROLL_SAMPLES = int(_WS_TARGET_SR * 0.32)
+_WS_MAX_ACTIVE_WINDOW_SAMPLES = int(_WS_TARGET_SR * 1.7)
+_WS_ADVANCE_TRIGGER_SAMPLES = int(_WS_TARGET_SR * 1.35)
+_WS_ACOUSTIC_OVERLAP_SAMPLES = int(_WS_TARGET_SR * 0.24)
+_WS_INTERIM_MIN_SPEECH_SAMPLES = int(_WS_TARGET_SR * 0.12)
+_WS_INTERIM_STEP_SAMPLES = int(_WS_TARGET_SR * 0.12)
+_WS_SILENCE_FLUSH_SAMPLES = int(_WS_TARGET_SR * 0.42)
+_WS_MIN_FLUSH_SAMPLES = int(_WS_TARGET_SR * 0.12)
+
+
+def _merge_window_words(
+    committed_words: list[dict[str, Any]],
+    window_words: list[dict[str, Any]],
+    window_origin_s: float,
+    last_committed_end_s: float,
+) -> list[dict[str, Any]]:
+    """Merge prefix committed words with newly decoded active-window words without overlap duplicates."""
+    merged = list(committed_words)
+    shifted: list[dict[str, Any]] = []
+    for item in window_words:
+        w_start = round(window_origin_s + float(item["start"]), 3)
+        w_end = round(max(w_start + 0.04, window_origin_s + float(item["end"])), 3)
+        shifted.append(
+            {
+                "text": item["text"],
+                "start": w_start,
+                "end": w_end,
+                "type": item.get("type", "word"),
+            }
+        )
+
+    if not merged:
+        return shifted
+
+    tail_text = merged[-1]["text"]
+    for idx, w in enumerate(shifted):
+        midpoint = (w["start"] + w["end"]) * 0.5
+        if w["end"] <= last_committed_end_s + 0.03 or midpoint <= last_committed_end_s + 0.01:
+            continue
+        if idx == 0 and w["text"] == tail_text and w["start"] <= last_committed_end_s + 0.08:
+            continue
+        merged.append(w)
+    return merged
+
+
+def _advance_bounded_window(
+    *,
+    seg_total_samples: int,
+    window_origin_sample: int,
+    committed_words: list[dict[str, Any]],
+    window_words: list[dict[str, Any]],
+    last_committed_end_s: float,
+) -> tuple[list[dict[str, Any]], int, float]:
+    """Advance active decode window origin so decode cost stays O(1) even on 15s utterances."""
+    window_origin_s = window_origin_sample / float(_WS_TARGET_SR)
+    merged = _merge_window_words(
+        committed_words, window_words, window_origin_s, last_committed_end_s
+    )
+    active_samples = seg_total_samples - window_origin_sample
+    if active_samples <= _WS_ADVANCE_TRIGGER_SAMPLES or len(merged) < 3:
+        return merged, window_origin_sample, last_committed_end_s
+
+    # Prefer splitting at a natural micro-pause (>= 120ms) inside the active window,
+    # otherwise commit all words except the trailing 2 words so acoustic boundaries stay intact.
+    split_idx = len(merged) - 2
+    for idx in range(len(committed_words) + 1, len(merged) - 1):
+        gap = float(merged[idx]["start"]) - float(merged[idx - 1]["end"])
+        if gap >= 0.12 and (float(merged[idx - 1]["end"]) - window_origin_s) >= 0.6:
+            split_idx = idx
+            break
+
+    if split_idx <= len(committed_words):
+        # Fallback if window still exceeds hard cap (~1.9s) without enough words
+        if active_samples > _WS_MAX_ACTIVE_WINDOW_SAMPLES:
+            new_origin = max(
+                window_origin_sample,
+                seg_total_samples - _WS_ADVANCE_TRIGGER_SAMPLES,
+            )
+            return merged, new_origin, last_committed_end_s
+        return merged, window_origin_sample, last_committed_end_s
+
+    new_committed = merged[:split_idx]
+    new_last_end_s = float(new_committed[-1]["end"])
+    new_origin = max(
+        window_origin_sample,
+        int(new_last_end_s * _WS_TARGET_SR) - _WS_ACOUSTIC_OVERLAP_SAMPLES,
+    )
+    # Guarantee active tail stays bounded <= _WS_MAX_ACTIVE_WINDOW_SAMPLES
+    min_bounded_origin = max(0, seg_total_samples - _WS_MAX_ACTIVE_WINDOW_SAMPLES)
+    if new_origin < min_bounded_origin:
+        new_origin = min_bounded_origin
+    return new_committed, new_origin, new_last_end_s
+
+
+@dataclass
+class _PendingFlushJob:
+    audio_window: np.ndarray
+    window_origin_sample: int
+    committed_words: list[dict[str, Any]]
+    last_committed_end_s: float
+    segment_id: str
+    turn_id: str
+    session_id: str
+    page_id: str
+    audio_ended_ms: int
+    audio_quality: dict[str, Any]
+
+
+class _WsSttSession:
+    def __init__(self) -> None:
+        self.session_id: str = ""
+        self.page_id: str = ""
+        self.turn_id: str = ""
+        self.sample_rate: int = _WS_TARGET_SR
+        self.language: str = "vi"
+        self.total_samples_received: int = 0
+        self.noise_floor: float = 0.0018
+        self.pre_roll: np.ndarray = np.zeros(0, dtype=np.float32)
+
+        self.in_speech: bool = False
+        self.seg_seq: int = 0
+        self.segment_id: str = "ws:seg_0"
+        self.seg_chunks: list[np.ndarray] = []
+        self.seg_total_samples: int = 0
+        self.silence_samples: int = 0
+        self.quiet_streak: int = 0
+        self.voiced_samples: int = 0
+        self.sum_sq: float = 0.0
+        self.peak: float = 0.0
+
+        self.window_origin_sample: int = 0
+        self.committed_words: list[dict[str, Any]] = []
+        self.last_committed_end_s: float = 0.0
+        self.last_interim_sample: int = 0
+        self.latest_interim_seq: int = 0
+        self.last_decoded_interim_seq: int = 0
+        self.pending_flushes: list[_PendingFlushJob] = []
+        self.decode_event = asyncio.Event()
+        self.stopped: bool = False
+
+    def _build_quality(self) -> dict[str, Any]:
+        active_ms = round(
+            max(0.0, (self.seg_total_samples - self.silence_samples) / _WS_TARGET_SR * 1000.0)
+        )
+        rms = float(np.sqrt(self.sum_sq / max(1, self.seg_total_samples)))
+        status = "OK"
+        if active_ms < 80:
+            status = "AUDIO_TOO_SHORT"
+        elif self.peak >= 0.99:
+            status = "CLIPPING"
+        elif rms < 0.002 and self.peak < 0.01:
+            status = "LOW_VOLUME"
+        return {
+            "status": status,
+            "rms": round(rms, 5),
+            "peak": round(float(self.peak), 4),
+            "speech_duration_ms": active_ms,
+        }
+
+    def reset_segment(self, keep_pre_roll: np.ndarray | None = None) -> None:
+        self.in_speech = False
+        self.seg_chunks = []
+        self.seg_total_samples = 0
+        self.silence_samples = 0
+        self.quiet_streak = 0
+        self.voiced_samples = 0
+        self.sum_sq = 0.0
+        self.peak = 0.0
+        self.window_origin_sample = 0
+        self.committed_words = []
+        self.last_committed_end_s = 0.0
+        self.last_interim_sample = 0
+        self.pre_roll = (
+            keep_pre_roll[-_WS_PRE_ROLL_SAMPLES:]
+            if keep_pre_roll is not None and keep_pre_roll.size > 0
+            else np.zeros(0, dtype=np.float32)
+        )
+
+    def _snapshot_window(self) -> tuple[np.ndarray, int, list[dict[str, Any]], float]:
+        if not self.seg_chunks:
+            return np.zeros(0, dtype=np.float32), 0, [], 0.0
+        full = (
+            self.seg_chunks[0]
+            if len(self.seg_chunks) == 1
+            else np.concatenate(self.seg_chunks)
+        )
+        self.seg_chunks = [full]
+        origin = min(self.window_origin_sample, full.size)
+        return (
+            full[origin:].copy(),
+            origin,
+            list(self.committed_words),
+            self.last_committed_end_s,
+        )
+
+    def enqueue_flush(self, *, carry_tail: bool) -> None:
+        if not self.in_speech or self.seg_total_samples < _WS_MIN_FLUSH_SAMPLES:
+            self.reset_segment()
+            return
+        win_audio, origin, committed, last_end = self._snapshot_window()
+        full_tail = (
+            self.seg_chunks[0][-min(self.silence_samples, _WS_PRE_ROLL_SAMPLES) :]
+            if carry_tail and self.seg_chunks and self.silence_samples > 0
+            else None
+        )
+        job = _PendingFlushJob(
+            audio_window=win_audio,
+            window_origin_sample=origin,
+            committed_words=committed,
+            last_committed_end_s=last_end,
+            segment_id=self.segment_id,
+            turn_id=self.turn_id,
+            session_id=self.session_id,
+            page_id=self.page_id,
+            audio_ended_ms=round(self.total_samples_received / _WS_TARGET_SR * 1000.0),
+            audio_quality=self._build_quality(),
+        )
+        self.pending_flushes.append(job)
+        self.latest_interim_seq += 1  # Supersede any in-flight interim for this segment
+        self.reset_segment(full_tail)
+        self.decode_event.set()
+
+    def push_pcm16k(self, chunk: np.ndarray) -> None:
+        if chunk.size == 0:
+            return
+        self.total_samples_received += int(chunk.size)
+        sum_sq = float(np.sum(chunk * chunk))
+        rms = float(np.sqrt(sum_sq / chunk.size))
+        peak = float(np.max(np.abs(chunk)))
+        onset_thresh = max(0.0028, self.noise_floor * 2.0)
+        hold_thresh = max(0.0016, self.noise_floor * 1.4)
+        is_onset = rms >= onset_thresh or peak >= onset_thresh * 3.0
+        is_voiced = rms >= hold_thresh or peak >= hold_thresh * 3.0
+
+        if not self.in_speech:
+            if is_onset:
+                self.in_speech = True
+                self.seg_seq += 1
+                prefix = self.session_id or "ws"
+                self.segment_id = f"{prefix}:seg_{self.seg_seq}"
+                self.silence_samples = 0
+                self.quiet_streak = 0
+                self.sum_sq = sum_sq
+                self.peak = peak
+                if self.pre_roll.size > 0:
+                    self.seg_chunks.append(self.pre_roll)
+                    self.seg_total_samples += int(self.pre_roll.size)
+                    self.pre_roll = np.zeros(0, dtype=np.float32)
+                self.seg_chunks.append(chunk)
+                self.seg_total_samples += int(chunk.size)
+                self.voiced_samples += int(chunk.size)
+            else:
+                self.noise_floor = min(
+                    0.0055, max(0.0009, self.noise_floor * 0.95 + rms * 0.05)
+                )
+                if self.pre_roll.size == 0:
+                    self.pre_roll = chunk[-_WS_PRE_ROLL_SAMPLES:]
+                else:
+                    merged = np.concatenate([self.pre_roll, chunk])
+                    self.pre_roll = merged[-_WS_PRE_ROLL_SAMPLES:]
+            return
+
+        self.seg_chunks.append(chunk)
+        self.seg_total_samples += int(chunk.size)
+        if not is_voiced:
+            self.quiet_streak += 1
+            if self.quiet_streak >= 2:
+                self.silence_samples += int(chunk.size)
+        else:
+            self.quiet_streak = 0
+            self.silence_samples = 0
+            self.voiced_samples += int(chunk.size)
+            self.sum_sq += sum_sq
+            if peak > self.peak:
+                self.peak = peak
+
+        if (
+            self.silence_samples >= _WS_SILENCE_FLUSH_SAMPLES
+            and self.seg_total_samples >= _WS_MIN_FLUSH_SAMPLES
+        ):
+            self.enqueue_flush(carry_tail=True)
+            return
+
+        active_samples = self.seg_total_samples - self.silence_samples
+        delta_samples = self.seg_total_samples - self.last_interim_sample
+        is_pause_trigger = (
+            self.silence_samples >= int(_WS_TARGET_SR * 0.06)
+            and active_samples >= _WS_INTERIM_MIN_SPEECH_SAMPLES
+            and delta_samples >= int(_WS_TARGET_SR * 0.06)
+        )
+        is_step_trigger = (
+            active_samples >= _WS_INTERIM_MIN_SPEECH_SAMPLES
+            and delta_samples >= _WS_INTERIM_STEP_SAMPLES
+        )
+        if is_pause_trigger or is_step_trigger:
+            self.last_interim_sample = self.seg_total_samples
+            self.latest_interim_seq += 1
+            self.decode_event.set()
+
+
+@app.websocket("/stt/stream")
+async def stt_stream(websocket: WebSocket) -> None:
+    """True WebSocket streaming STT with O(1) bounded sliding-window decode."""
+    expected = _expected_voice_token()
+    provided = websocket.headers.get("X-ViRead-Voice-Token", "").strip()
+    if expected and not hmac.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
+        await websocket.close(code=1008)
+        return
+    await websocket.accept()
+    if STT_MODE == "http":
+        await websocket.send_json(
+            {
+                "type": "error",
+                "code": "STT_WS_DISABLED",
+                "message": "Streaming WebSocket STT is disabled by VIREAD_STT_MODE=http.",
+                "retryable": True,
+            }
+        )
+        await websocket.close(code=4503)
+        return
+
+    await runtime.ensure_loaded()
+    session = _WsSttSession()
+
+    async def _decode_and_emit_loop() -> None:
+        while not session.stopped or session.pending_flushes:
+            await session.decode_event.wait()
+            session.decode_event.clear()
+
+            # 1. Drain all finalized segment flushes in order
+            while session.pending_flushes:
+                job = session.pending_flushes.pop(0)
+                committed = list(job.committed_words)
+                last_end = job.last_committed_end_s
+                origin = job.window_origin_sample
+                full_tail = job.audio_window
+                total_decode_ms = 0.0
+                max_step_decode_ms = 0.0
+
+                # Bound every Sherpa decode call to <= ~1.9s even if a client bursts audio
+                # faster than real-time before interim ticks advance the window.
+                step_offset = 0
+                while True:
+                    remaining = full_tail.size - step_offset
+                    if remaining <= _WS_MAX_ACTIVE_WINDOW_SAMPLES:
+                        chunk_audio = full_tail[step_offset:]
+                        is_last_slice = True
+                    else:
+                        chunk_audio = full_tail[
+                            step_offset : step_offset + _WS_ADVANCE_TRIGGER_SAMPLES
+                        ]
+                        is_last_slice = False
+
+                    await runtime.stt_semaphore.acquire()
+                    runtime.active_stt_jobs += 1
+                    try:
+                        _txt, win_words, step_decode_ms = await asyncio.to_thread(
+                            decode_stt_window_sync,
+                            chunk_audio,
+                            lead_pad_s=0.18,
+                            trail_pad_s=0.22,
+                        )
+                    finally:
+                        runtime.active_stt_jobs -= 1
+                        runtime.stt_semaphore.release()
+
+                    total_decode_ms += step_decode_ms
+                    if step_decode_ms > max_step_decode_ms:
+                        max_step_decode_ms = step_decode_ms
+                    slice_origin_sample = origin + step_offset
+                    slice_origin_s = slice_origin_sample / float(_WS_TARGET_SR)
+                    merged = _merge_window_words(
+                        committed, win_words, slice_origin_s, last_end
+                    )
+                    if is_last_slice:
+                        final_words = merged
+                        break
+
+                    if len(merged) > len(committed) + 1:
+                        committed = merged[:-1]
+                    else:
+                        committed = merged
+                    if committed:
+                        last_end = float(committed[-1]["end"])
+                    next_offset = max(
+                        step_offset + _WS_TARGET_SR,
+                        int(last_end * _WS_TARGET_SR) - origin - _WS_ACOUSTIC_OVERLAP_SAMPLES,
+                    )
+                    if next_offset <= step_offset:
+                        next_offset = step_offset + _WS_ADVANCE_TRIGGER_SAMPLES - _WS_ACOUSTIC_OVERLAP_SAMPLES
+                    step_offset = next_offset
+
+                final_text = unicodedata.normalize(
+                    "NFC", " ".join(w["text"] for w in final_words).strip()
+                )
+                if not final_text and _txt and not job.committed_words:
+                    final_text = _txt
+                await websocket.send_json(
+                    {
+                        "type": "final",
+                        "text": final_text,
+                        "words": final_words,
+                        "segment_id": job.segment_id,
+                        "turn_id": job.turn_id,
+                        "session_id": job.session_id,
+                        "page_id": job.page_id,
+                        "epoch_ms": int(time.time() * 1000),
+                        "audio_ended_ms": job.audio_ended_ms,
+                        "decode_ms": round(max_step_decode_ms, 2),
+                        "provider": "local",
+                        "model_version": STT_MODEL_VERSION,
+                        "audio_quality": job.audio_quality,
+                    }
+                )
+
+            if session.stopped:
+                break
+
+            # 2. Decode latest rolling interim (coalesced; stale interims superseded automatically)
+            target_seq = session.latest_interim_seq
+            if (
+                target_seq > session.last_decoded_interim_seq
+                and session.in_speech
+                and session.seg_total_samples >= _WS_INTERIM_MIN_SPEECH_SAMPLES
+            ):
+                session.last_decoded_interim_seq = target_seq
+                win_audio, origin_sample, committed, last_end = session._snapshot_window()
+                seg_id = session.segment_id
+                turn_id = session.turn_id
+                sess_id = session.session_id
+                page_id = session.page_id
+                total_seg_samples = session.seg_total_samples
+                audio_ended_ms = round(
+                    session.total_samples_received / _WS_TARGET_SR * 1000.0
+                )
+                quality = session._build_quality()
+
+                await runtime.stt_semaphore.acquire()
+                runtime.active_stt_jobs += 1
+                try:
+                    _txt, win_words, decode_ms = await asyncio.to_thread(
+                        decode_stt_window_sync,
+                        win_audio,
+                        lead_pad_s=0.12,
+                        trail_pad_s=0.12,
+                    )
+                finally:
+                    runtime.active_stt_jobs -= 1
+                    runtime.stt_semaphore.release()
+
+                # Only discard if the segment already flushed/ended before this decode finished.
+                # Never discard a completed interim just because newer audio arrived mid-decode
+                # (otherwise continuous speech starves interims until final flush!).
+                if (
+                    not session.in_speech
+                    or session.segment_id != seg_id
+                    or any(j.segment_id == seg_id for j in session.pending_flushes)
+                ):
+                    continue
+
+                # Advance active window origin in O(1) while still on the same active segment
+                new_committed, new_origin, new_last_end = _advance_bounded_window(
+                    seg_total_samples=total_seg_samples,
+                    window_origin_sample=origin_sample,
+                    committed_words=committed,
+                    window_words=win_words,
+                    last_committed_end_s=last_end,
+                )
+                if new_origin > session.window_origin_sample:
+                    session.committed_words = new_committed
+                    session.window_origin_sample = new_origin
+                    session.last_committed_end_s = new_last_end
+
+                interim_words = _merge_window_words(
+                    committed,
+                    win_words,
+                    origin_sample / float(_WS_TARGET_SR),
+                    last_end,
+                )
+                interim_text = unicodedata.normalize(
+                    "NFC", " ".join(w["text"] for w in interim_words).strip()
+                )
+                await websocket.send_json(
+                    {
+                        "type": "interim",
+                        "text": interim_text,
+                        "words": interim_words,
+                        "segment_id": seg_id,
+                        "turn_id": turn_id,
+                        "session_id": sess_id,
+                        "page_id": page_id,
+                        "epoch_ms": int(time.time() * 1000),
+                        "audio_ended_ms": audio_ended_ms,
+                        "decode_ms": round(decode_ms, 2),
+                        "provider": "local",
+                        "model_version": STT_MODEL_VERSION,
+                        "audio_quality": quality,
+                    }
+                )
+
+    decode_task = asyncio.create_task(_decode_and_emit_loop())
+    try:
+        while True:
+            msg = await websocket.receive()
+            msg_type = msg.get("type")
+            if msg_type == "websocket.disconnect":
+                session.enqueue_flush(carry_tail=False)
+                session.stopped = True
+                session.decode_event.set()
+                break
+
+            raw_bytes = msg.get("bytes")
+            if raw_bytes is not None:
+                usable_len = len(raw_bytes) - (len(raw_bytes) % 2)
+                if usable_len > 0:
+                    pcm = (
+                        np.frombuffer(raw_bytes[:usable_len], dtype="<i2").astype(
+                            np.float32
+                        )
+                        / 32768.0
+                    )
+                    if session.sample_rate != _WS_TARGET_SR and pcm.size > 0:
+                        pcm = await asyncio.to_thread(
+                            librosa.resample,
+                            pcm,
+                            orig_sr=session.sample_rate,
+                            target_sr=_WS_TARGET_SR,
+                        )
+                    session.push_pcm16k(pcm.astype(np.float32, copy=False))
+                continue
+
+            raw_text = msg.get("text")
+            if raw_text is not None:
+                try:
+                    ctrl = json.loads(raw_text)
+                except Exception:
+                    await websocket.send_json(
+                        {
+                            "type": "error",
+                            "code": "INVALID_CONTROL_MESSAGE",
+                            "message": "Invalid JSON control frame.",
+                            "retryable": False,
+                        }
+                    )
+                    continue
+
+                if not isinstance(ctrl, dict):
+                    continue
+                action = str(ctrl.get("type") or "").strip().lower()
+                if action == "start":
+                    new_sess = str(ctrl.get("session_id") or "").strip()[:80]
+                    new_page = str(ctrl.get("page_id") or "").strip()[:80]
+                    new_turn = str(ctrl.get("turn_id") or "").strip()[:80]
+                    if (
+                        session.in_speech
+                        and (new_sess != session.session_id or new_page != session.page_id)
+                    ):
+                        session.reset_segment()
+                    session.session_id = new_sess or session.session_id
+                    session.page_id = new_page or session.page_id
+                    session.turn_id = new_turn or session.turn_id
+                    sr_val = ctrl.get("sample_rate")
+                    if isinstance(sr_val, int) and 8000 <= sr_val <= 96000:
+                        session.sample_rate = sr_val
+                    lang_val = ctrl.get("language")
+                    if isinstance(lang_val, str) and lang_val.strip():
+                        session.language = lang_val.strip()[:8]
+                    await websocket.send_json(
+                        {
+                            "type": "ready",
+                            "session_id": session.session_id,
+                            "page_id": session.page_id,
+                            "turn_id": session.turn_id,
+                            "sample_rate": _WS_TARGET_SR,
+                            "model_version": STT_MODEL_VERSION,
+                            "stt_mode": STT_MODE,
+                        }
+                    )
+                elif action == "flush":
+                    next_turn = str(ctrl.get("turn_id") or "").strip()[:80]
+                    session.enqueue_flush(carry_tail=True)
+                    if next_turn:
+                        session.turn_id = next_turn
+                elif action == "stop":
+                    session.enqueue_flush(carry_tail=False)
+                    session.stopped = True
+                    session.decode_event.set()
+                    break
+                elif action == "ping":
+                    await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        session.stopped = True
+        session.decode_event.set()
+    finally:
+        session.stopped = True
+        session.decode_event.set()
+        try:
+            await asyncio.wait_for(decode_task, timeout=10.0)
+        except Exception:
+            if not decode_task.done():
+                decode_task.cancel()
+                await asyncio.gather(decode_task, return_exceptions=True)
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

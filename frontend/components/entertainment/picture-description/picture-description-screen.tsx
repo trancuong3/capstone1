@@ -40,6 +40,7 @@ import {
 import { BookChildHeader } from "@/components/books/book-child-header";
 import { Button } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { isInjectedTestSpeechRecognition } from "@/lib/reading/local-segment-speech-recognition";
@@ -288,6 +289,10 @@ export function PictureDescriptionScreen() {
   );
   const [showHints, setShowHints] = useState(false);
   const [showSampleSentences, setShowSampleSentences] = useState(false);
+  const [samplesPage, setSamplesPage] = useState(1);
+  const [bookPagesPage, setBookPagesPage] = useState(1);
+  const [sessionsPage, setSessionsPage] = useState(1);
+  const PICTURE_GRID_PAGE_SIZE = 6;
 
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadPreviewUrl, setUploadPreviewUrl] = useState<string | null>(null);
@@ -1030,71 +1035,92 @@ export function PictureDescriptionScreen() {
             ) : (
               <div className="mt-6">
                 {activeTab === "SAMPLE" ? (
-                  <div className="grid gap-5 md:grid-cols-3">
-                    {catalogState.catalog.samples.map((sample) => {
-                      const existing = sampleSessionMap.get(sample.sample_key);
-                      const hasPriorAttempt = Boolean(
-                        existing && existing.attempts_count > 0,
-                      );
-                      return (
-                        <article
-                          className="flex flex-col overflow-hidden rounded-card border border-border bg-white shadow-sm transition-transform hover:-translate-y-0.5"
-                          key={sample.sample_key}
-                        >
-                          <div className="relative aspect-[4/3] w-full overflow-hidden bg-sky/40">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              alt={sample.title}
-                              className="h-full w-full object-cover"
-                              src={sample.image_url}
-                            />
-                            <span className="absolute left-3 top-3 rounded-full bg-white/95 px-3 py-1 text-xs font-extrabold text-primary shadow-sm">
-                              {sample.theme}
-                            </span>
-                            {hasPriorAttempt && existing ? (
-                              <span className="absolute right-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-xs font-extrabold text-success-ink shadow-sm">
-                                {existing.best_stars}/3 sao
-                              </span>
-                            ) : null}
-                          </div>
-                          <div className="flex flex-1 flex-col justify-between gap-4 p-4">
-                            <div>
-                              <h2 className="text-lg font-extrabold text-ink">
-                                {sample.title}
-                              </h2>
-                              <p className="mt-1 text-sm text-muted">
-                                {hasPriorAttempt && existing
-                                  ? `Bé đã kể ${existing.attempts_count} lượt (cao nhất ${existing.best_score}/10).`
-                                  : "Quan sát tranh và kể lại theo cách nghĩ của bé."}
-                              </p>
-                            </div>
-                            <div className="flex flex-col gap-2">
-                              <Button
-                                onClick={() => void handleStartSample(sample)}
-                                type="button"
-                              >
-                                {hasPriorAttempt
-                                  ? "Xem kết quả & Kể tiếp"
-                                  : "Khám phá tranh này"}
-                              </Button>
-                              {hasPriorAttempt ? (
-                                <Button
-                                  onClick={() =>
-                                    void handleCreateSampleSession(sample)
-                                  }
-                                  size="compact"
-                                  type="button"
-                                  variant="secondary"
-                                >
-                                  Tạo bộ gợi ý mới
-                                </Button>
-                              ) : null}
-                            </div>
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
+                  <>
+                    <div className="grid gap-5 md:grid-cols-3">
+                      {catalogState.catalog.samples
+                        .slice(
+                          (samplesPage - 1) * PICTURE_GRID_PAGE_SIZE,
+                          samplesPage * PICTURE_GRID_PAGE_SIZE,
+                        )
+                        .map((sample) => {
+                          const existing = sampleSessionMap.get(
+                            sample.sample_key,
+                          );
+                          const hasPriorAttempt = Boolean(
+                            existing && existing.attempts_count > 0,
+                          );
+                          return (
+                            <article
+                              className="flex flex-col overflow-hidden rounded-card border border-border bg-white shadow-sm transition-transform hover:-translate-y-0.5"
+                              key={sample.sample_key}
+                            >
+                              <div className="relative aspect-[4/3] w-full overflow-hidden bg-sky/40">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img
+                                  alt={sample.title}
+                                  className="h-full w-full object-cover"
+                                  src={sample.image_url}
+                                />
+                                <span className="absolute left-3 top-3 rounded-full bg-white/95 px-3 py-1 text-xs font-extrabold text-primary shadow-sm">
+                                  {sample.theme}
+                                </span>
+                                {hasPriorAttempt && existing ? (
+                                  <span className="absolute right-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-xs font-extrabold text-success-ink shadow-sm">
+                                    {existing.best_stars}/3 sao
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="flex flex-1 flex-col justify-between gap-4 p-4">
+                                <div>
+                                  <h2 className="text-lg font-extrabold text-ink">
+                                    {sample.title}
+                                  </h2>
+                                  <p className="mt-1 text-sm text-muted">
+                                    {hasPriorAttempt && existing
+                                      ? `Bé đã kể ${existing.attempts_count} lượt (cao nhất ${existing.best_score}/10).`
+                                      : "Quan sát tranh và kể lại theo cách nghĩ của bé."}
+                                  </p>
+                                </div>
+                                <div className="flex flex-col gap-2">
+                                  <Button
+                                    onClick={() =>
+                                      void handleStartSample(sample)
+                                    }
+                                    type="button"
+                                  >
+                                    {hasPriorAttempt
+                                      ? "Xem kết quả & Kể tiếp"
+                                      : "Khám phá tranh này"}
+                                  </Button>
+                                  {hasPriorAttempt ? (
+                                    <Button
+                                      onClick={() =>
+                                        void handleCreateSampleSession(sample)
+                                      }
+                                      size="compact"
+                                      type="button"
+                                      variant="secondary"
+                                    >
+                                      Tạo bộ gợi ý mới
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              </div>
+                            </article>
+                          );
+                        })}
+                    </div>
+                    <PaginationBar
+                      ariaLabel="Phân trang tranh chủ đề"
+                      className="mt-4"
+                      compact
+                      itemLabel="tranh"
+                      onPageChange={setSamplesPage}
+                      page={samplesPage}
+                      pageSize={PICTURE_GRID_PAGE_SIZE}
+                      total={catalogState.catalog.samples.length}
+                    />
+                  </>
                 ) : null}
 
                 {activeTab === "CUSTOM_UPLOAD" ? (
@@ -1177,69 +1203,90 @@ export function PictureDescriptionScreen() {
 
                 {activeTab === "BOOK_PAGE" ? (
                   catalogState.catalog.book_pages.length > 0 ? (
-                    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                      {catalogState.catalog.book_pages.map((page) => {
-                        const existing = bookPageSessionMap.get(page.page_id);
-                        const hasPriorAttempt = Boolean(
-                          existing && existing.attempts_count > 0,
-                        );
-                        return (
-                          <article
-                            className="flex flex-col overflow-hidden rounded-card border border-border bg-white shadow-sm"
-                            key={page.page_id}
-                          >
-                            <div className="relative aspect-[4/3] w-full overflow-hidden bg-sky/30">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                alt={`${page.book_title} - Trang ${page.page_number}`}
-                                className="h-full w-full object-cover"
-                                src={page.image_url}
-                              />
-                              {hasPriorAttempt && existing ? (
-                                <span className="absolute right-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-xs font-extrabold text-success-ink shadow-sm">
-                                  {existing.best_stars}/3 sao
-                                </span>
-                              ) : null}
-                            </div>
-                            <div className="flex flex-1 flex-col justify-between gap-3 p-4">
-                              <div>
-                                <h2 className="line-clamp-1 text-base font-extrabold text-ink">
-                                  {page.book_title}
-                                </h2>
-                                <p className="text-sm font-semibold text-muted">
-                                  Trang {page.page_number}
-                                  {hasPriorAttempt && existing
-                                    ? ` • Đã kể ${existing.attempts_count} lượt`
-                                    : ""}
-                                </p>
-                              </div>
-                              <div className="flex flex-col gap-2">
-                                <Button
-                                  onClick={() => void handleStartBookPage(page)}
-                                  type="button"
-                                >
-                                  {hasPriorAttempt
-                                    ? "Xem kết quả & Kể tiếp"
-                                    : "Mô tả trang này"}
-                                </Button>
-                                {hasPriorAttempt ? (
-                                  <Button
-                                    onClick={() =>
-                                      void handleCreateBookPageSession(page)
-                                    }
-                                    size="compact"
-                                    type="button"
-                                    variant="secondary"
-                                  >
-                                    Tạo bộ gợi ý mới
-                                  </Button>
-                                ) : null}
-                              </div>
-                            </div>
-                          </article>
-                        );
-                      })}
-                    </div>
+                    <>
+                      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                        {catalogState.catalog.book_pages
+                          .slice(
+                            (bookPagesPage - 1) * PICTURE_GRID_PAGE_SIZE,
+                            bookPagesPage * PICTURE_GRID_PAGE_SIZE,
+                          )
+                          .map((page) => {
+                            const existing = bookPageSessionMap.get(
+                              page.page_id,
+                            );
+                            const hasPriorAttempt = Boolean(
+                              existing && existing.attempts_count > 0,
+                            );
+                            return (
+                              <article
+                                className="flex flex-col overflow-hidden rounded-card border border-border bg-white shadow-sm"
+                                key={page.page_id}
+                              >
+                                <div className="relative aspect-[4/3] w-full overflow-hidden bg-sky/30">
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    alt={`${page.book_title} - Trang ${page.page_number}`}
+                                    className="h-full w-full object-cover"
+                                    src={page.image_url}
+                                  />
+                                  {hasPriorAttempt && existing ? (
+                                    <span className="absolute right-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-xs font-extrabold text-success-ink shadow-sm">
+                                      {existing.best_stars}/3 sao
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <div className="flex flex-1 flex-col justify-between gap-3 p-4">
+                                  <div>
+                                    <h2 className="line-clamp-1 text-base font-extrabold text-ink">
+                                      {page.book_title}
+                                    </h2>
+                                    <p className="text-sm font-semibold text-muted">
+                                      Trang {page.page_number}
+                                      {hasPriorAttempt && existing
+                                        ? ` • Đã kể ${existing.attempts_count} lượt`
+                                        : ""}
+                                    </p>
+                                  </div>
+                                  <div className="flex flex-col gap-2">
+                                    <Button
+                                      onClick={() =>
+                                        void handleStartBookPage(page)
+                                      }
+                                      type="button"
+                                    >
+                                      {hasPriorAttempt
+                                        ? "Xem kết quả & Kể tiếp"
+                                        : "Mô tả trang này"}
+                                    </Button>
+                                    {hasPriorAttempt ? (
+                                      <Button
+                                        onClick={() =>
+                                          void handleCreateBookPageSession(page)
+                                        }
+                                        size="compact"
+                                        type="button"
+                                        variant="secondary"
+                                      >
+                                        Tạo bộ gợi ý mới
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              </article>
+                            );
+                          })}
+                      </div>
+                      <PaginationBar
+                        ariaLabel="Phân trang tranh từ sách"
+                        className="mt-4"
+                        compact
+                        itemLabel="trang"
+                        onPageChange={setBookPagesPage}
+                        page={bookPagesPage}
+                        pageSize={PICTURE_GRID_PAGE_SIZE}
+                        total={catalogState.catalog.book_pages.length}
+                      />
+                    </>
                   ) : (
                     <EmptyState
                       description="Hiện chưa có trang sách có tranh cho khối lớp này. Bé hãy thử chọn Tranh chủ đề ViRead hoặc Tải ảnh từ máy nhé!"
@@ -1259,45 +1306,60 @@ export function PictureDescriptionScreen() {
                 Những bức tranh bé đã kể gần đây
               </h2>
               <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {catalogState.sessions.map((item) => (
-                  <button
-                    className="flex items-center gap-3 rounded-control border border-border bg-white p-3 text-left transition-colors hover:border-primary hover:bg-sky/20 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                    key={item.session_id}
-                    onClick={() => void handleResumeSession(item.session_id)}
-                    type="button"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      alt={item.scene_title}
-                      className="size-16 shrink-0 rounded-control object-cover"
-                      src={item.image_url}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-extrabold text-ink">
-                        {item.scene_title}
-                      </p>
-                      <p className="text-xs font-semibold text-muted">
-                        {sourceLabel(item.source_type)} •{" "}
-                        {item.attempts_count > 0
-                          ? `${item.attempts_count} lượt kể`
-                          : "Chưa gửi lượt kể"}
-                      </p>
-                      <div className="mt-1 flex items-center gap-2">
-                        {renderStars(item.best_stars)}
-                        {item.best_score > 0 ? (
-                          <span className="text-xs font-extrabold text-primary">
-                            {item.best_score}/10 điểm
-                          </span>
-                        ) : (
-                          <span className="text-xs font-semibold text-muted">
-                            Đang mở
-                          </span>
-                        )}
+                {catalogState.sessions
+                  .slice(
+                    (sessionsPage - 1) * PICTURE_GRID_PAGE_SIZE,
+                    sessionsPage * PICTURE_GRID_PAGE_SIZE,
+                  )
+                  .map((item) => (
+                    <button
+                      className="flex items-center gap-3 rounded-control border border-border bg-white p-3 text-left transition-colors hover:border-primary hover:bg-sky/20 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                      key={item.session_id}
+                      onClick={() => void handleResumeSession(item.session_id)}
+                      type="button"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        alt={item.scene_title}
+                        className="size-16 shrink-0 rounded-control object-cover"
+                        src={item.image_url}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-extrabold text-ink">
+                          {item.scene_title}
+                        </p>
+                        <p className="text-xs font-semibold text-muted">
+                          {sourceLabel(item.source_type)} •{" "}
+                          {item.attempts_count > 0
+                            ? `${item.attempts_count} lượt kể`
+                            : "Chưa gửi lượt kể"}
+                        </p>
+                        <div className="mt-1 flex items-center gap-2">
+                          {renderStars(item.best_stars)}
+                          {item.best_score > 0 ? (
+                            <span className="text-xs font-extrabold text-primary">
+                              {item.best_score}/10 điểm
+                            </span>
+                          ) : (
+                            <span className="text-xs font-semibold text-muted">
+                              Đang mở
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </button>
-                ))}
+                    </button>
+                  ))}
               </div>
+              <PaginationBar
+                ariaLabel="Phân trang tranh bé đã kể gần đây"
+                className="mt-4"
+                compact
+                itemLabel="phiên"
+                onPageChange={setSessionsPage}
+                page={sessionsPage}
+                pageSize={PICTURE_GRID_PAGE_SIZE}
+                total={catalogState.sessions.length}
+              />
             </section>
           ) : null}
         </>

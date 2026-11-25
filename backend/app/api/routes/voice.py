@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import inspect
+import json
+import logging
+import os
 from typing import Annotated, Any
 from uuid import UUID
 
+import websockets
 from fastapi import (
     APIRouter,
     Depends,
@@ -14,13 +20,20 @@ from fastapi import (
     HTTPException,
     Response,
     UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+    WebSocketException,
     status,
 )
+from fastapi.security import HTTPAuthorizationCredentials
 
 from app.api.deps import get_current_parent_id
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
 from app.providers.google_voice_provider import GOOGLE_VOICE_BY_ID
-from app.providers.local_voice_provider import STATIC_LOCAL_VOICES
+from app.providers.local_voice_provider import (
+    STATIC_LOCAL_VOICES,
+    resolve_local_stt_mode,
+)
 from app.schemas.voice import (
     PhonicsSpeechRead,
     PhonicsSpeechRequest,
@@ -30,6 +43,8 @@ from app.schemas.voice import (
     VoiceProviderMode,
 )
 from app.services.voice_orchestrator import VoiceOrchestrator, VoicePolicyContext
+
+logger = logging.getLogger("viread.voice_routes")
 
 router = APIRouter()
 
@@ -70,8 +85,25 @@ def _resolve_audio_content_type(raw_content_type: str | None, filename: str) -> 
     return "audio/webm"
 
 
+_DEFAULT_ORCHESTRATORS: dict[tuple[str, str], VoiceOrchestrator] = {}
+
+
+def clear_default_voice_orchestrators() -> None:
+    """Reset pooled VoiceOrchestrator instances (used by tests)."""
+    _DEFAULT_ORCHESTRATORS.clear()
+
+
 def get_voice_orchestrator() -> VoiceOrchestrator:
-    return VoiceOrchestrator()
+    worker_url = (
+        os.getenv("VIREAD_LOCAL_VOICE_WORKER_URL") or "http://127.0.0.1:8010"
+    ).strip().rstrip("/") or "http://127.0.0.1:8010"
+    worker_token = (os.getenv("VIREAD_LOCAL_VOICE_WORKER_TOKEN") or "").strip()
+    key = (worker_url, worker_token)
+    cached = _DEFAULT_ORCHESTRATORS.get(key)
+    if cached is None:
+        cached = VoiceOrchestrator()
+        _DEFAULT_ORCHESTRATORS[key] = cached
+    return cached
 
 
 def provider_http_exception(error: VoiceProviderError) -> HTTPException:
@@ -288,3 +320,222 @@ async def speech_to_text(
         language_probability=transcription.language_probability,
         words=transcription.words,
     )
+
+
+def _extract_ws_handshake_auth(websocket: WebSocket) -> tuple[str | None, str | None]:
+    """Extract Bearer token and accepted subprotocol from WebSocket handshake headers."""
+    auth_header = (websocket.headers.get("authorization") or "").strip()
+    token: str | None = None
+    if auth_header.lower().startswith("bearer "):
+        candidate = auth_header[7:].strip()
+        if candidate:
+            token = candidate
+
+    accepted_subprotocol: str | None = None
+    raw_protocols = websocket.headers.get("sec-websocket-protocol") or ""
+    for item in raw_protocols.split(","):
+        proto = item.strip()
+        if not proto:
+            continue
+        if proto == "viread-stt-v1":
+            accepted_subprotocol = "viread-stt-v1"
+        elif proto.startswith("bearer.") and token is None:
+            candidate = proto[len("bearer.") :].strip()
+            if candidate:
+                token = candidate
+
+    return token, accepted_subprotocol
+
+
+async def _verify_ws_parent_id(
+    websocket: WebSocket,
+    *,
+    token: str | None,
+) -> UUID:
+    override = websocket.app.dependency_overrides.get(get_current_parent_id)
+    if override is not None:
+        result = override()
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+        )
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+    return await asyncio.to_thread(get_current_parent_id, credentials)
+
+
+def open_local_stt_ws(url: str, headers: dict[str, str]):
+    """Open an upstream WebSocket connection to the local voice worker."""
+    return websockets.connect(
+        url,
+        additional_headers=headers or None,
+        open_timeout=3.0,
+        ping_interval=20.0,
+        ping_timeout=20.0,
+        close_timeout=2.0,
+        max_size=4 * 1024 * 1024,
+    )
+
+
+@router.websocket("/stt-stream")
+async def speech_to_text_stream(websocket: WebSocket) -> None:
+    """Authenticated WebSocket proxy to the local streaming STT worker (zero audio/text logs)."""
+    handshake_token, accepted_subprotocol = _extract_ws_handshake_auth(websocket)
+    has_override = get_current_parent_id in websocket.app.dependency_overrides
+
+    pending_start_payload: dict[str, Any] | None = None
+    if has_override or handshake_token is not None:
+        try:
+            await _verify_ws_parent_id(websocket, token=handshake_token)
+        except HTTPException:
+            raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION) from None
+        await websocket.accept(subprotocol=accepted_subprotocol)
+    else:
+        await websocket.accept(subprotocol=accepted_subprotocol)
+        try:
+            raw_first = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+            first_msg = json.loads(raw_first)
+        except Exception:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "code": "UNAUTHORIZED",
+                    "message": "Authentication required",
+                    "retryable": False,
+                }
+            )
+            await websocket.close(code=4401)
+            return
+
+        if not isinstance(first_msg, dict):
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "code": "UNAUTHORIZED",
+                    "message": "Authentication required",
+                    "retryable": False,
+                }
+            )
+            await websocket.close(code=4401)
+            return
+
+        raw_tok = first_msg.get("token")
+        first_token = raw_tok.strip() if isinstance(raw_tok, str) and raw_tok.strip() else None
+        try:
+            await _verify_ws_parent_id(websocket, token=first_token)
+        except HTTPException:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "code": "UNAUTHORIZED",
+                    "message": "Invalid authentication credentials",
+                    "retryable": False,
+                }
+            )
+            await websocket.close(code=4401)
+            return
+
+        msg_type = str(first_msg.get("type") or "").strip().lower()
+        if msg_type == "start":
+            sanitized = {k: v for k, v in first_msg.items() if k != "token"}
+            pending_start_payload = sanitized
+
+    if resolve_local_stt_mode() == "http":
+        await websocket.send_json(
+            {
+                "type": "error",
+                "code": "STT_WS_DISABLED",
+                "message": "Streaming WebSocket STT is disabled by configuration.",
+                "retryable": True,
+            }
+        )
+        await websocket.close(code=4503)
+        return
+
+    orchestrator = get_voice_orchestrator()
+    worker_ws_url = orchestrator.local.get_ws_stt_url()
+    worker_headers = orchestrator.local.get_ws_auth_headers()
+
+    try:
+        async with open_local_stt_ws(worker_ws_url, worker_headers) as worker_ws:
+            if pending_start_payload is not None:
+                await worker_ws.send(json.dumps(pending_start_payload, ensure_ascii=False))
+
+            async def _pump_client_to_worker() -> None:
+                while True:
+                    message = await websocket.receive()
+                    msg_type = message.get("type")
+                    if msg_type == "websocket.disconnect":
+                        break
+                    raw_bytes = message.get("bytes")
+                    if raw_bytes is not None:
+                        await worker_ws.send(raw_bytes)
+                        continue
+                    raw_text = message.get("text")
+                    if raw_text is not None:
+                        # Strip any accidental token field before forwarding to local worker.
+                        try:
+                            parsed = json.loads(raw_text)
+                            if isinstance(parsed, dict) and "token" in parsed:
+                                parsed = {k: v for k, v in parsed.items() if k != "token"}
+                                raw_text = json.dumps(parsed, ensure_ascii=False)
+                        except Exception:
+                            pass
+                        await worker_ws.send(raw_text)
+
+            async def _pump_worker_to_client() -> None:
+                async for worker_msg in worker_ws:
+                    if isinstance(worker_msg, (bytes, bytearray)):
+                        await websocket.send_bytes(bytes(worker_msg))
+                    else:
+                        await websocket.send_text(str(worker_msg))
+
+            client_task = asyncio.create_task(_pump_client_to_worker())
+            worker_task = asyncio.create_task(_pump_worker_to_client())
+            try:
+                _done, pending = await asyncio.wait(
+                    {client_task, worker_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+                for task in _done:
+                    exc = task.exception()
+                    if exc is not None and not isinstance(
+                        exc, (WebSocketDisconnect, websockets.exceptions.ConnectionClosed)
+                    ):
+                        logger.warning(
+                            "stt_stream_proxy_error type=%s", type(exc).__name__
+                        )
+            finally:
+                for task in (client_task, worker_task):
+                    if not task.done():
+                        task.cancel()
+                        await asyncio.gather(task, return_exceptions=True)
+    except WebSocketDisconnect:
+        return
+    except Exception as exc:
+        logger.warning("stt_stream_worker_unavailable type=%s", type(exc).__name__)
+        orchestrator.local._schedule_background_recovery()
+        try:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "code": "LOCAL_STT_UNAVAILABLE",
+                    "message": "Local voice worker unavailable.",
+                    "retryable": True,
+                }
+            )
+            await websocket.close(code=4503)
+        except Exception:
+            pass
+    else:
+        try:
+            await websocket.close()
+        except Exception:
+            pass

@@ -2,6 +2,11 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
+import {
+  resetVoiceLockAndPolicyForTests,
+  setVoicePolicyPreferences,
+} from "@/lib/reading/session-voice-lock";
+import { resetVoiceEngineStatus } from "@/lib/reading/voice-engine-status";
 
 const { speechServiceMock } = vi.hoisted(() => ({
   speechServiceMock: {
@@ -79,6 +84,10 @@ const speechSynthesisMock = {
 };
 
 beforeEach(() => {
+  window.localStorage.clear();
+  window.sessionStorage.clear();
+  resetVoiceLockAndPolicyForTests();
+  resetVoiceEngineStatus();
   FakeAudio.instances = [];
   FakeAudio.rejectNextPlay = null;
   speechServiceMock.synthesize
@@ -204,7 +213,12 @@ describe("useSpeechPlayer", () => {
     expect(speechSynthesisMock.speak).not.toHaveBeenCalled();
   });
 
-  it("never falls back to OS speechSynthesis when server TTS is unavailable and surfaces fallbackNotice", async () => {
+  it("never falls back to OS speechSynthesis in local_only mode when server TTS is unavailable and surfaces fallbackNotice", async () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_only",
+      allowGoogleSttFallback: false,
+      allowGoogleTtsFallback: false,
+    });
     speechServiceMock.synthesize.mockRejectedValueOnce(
       new Error("503 LOCAL_TTS_UNAVAILABLE"),
     );
@@ -227,7 +241,12 @@ describe("useSpeechPlayer", () => {
     expect(result.current.isPlaying).toBe(false);
   });
 
-  it("retries server TTS on the next play call instead of locking onto OS voice", async () => {
+  it("retries server TTS on the next play call in local_only mode instead of locking onto OS voice", async () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_only",
+      allowGoogleSttFallback: false,
+      allowGoogleTtsFallback: false,
+    });
     speechServiceMock.synthesize
       .mockRejectedValueOnce(new Error("502 TTS unavailable"))
       .mockResolvedValueOnce(

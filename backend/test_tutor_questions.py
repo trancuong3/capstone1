@@ -369,6 +369,8 @@ class FakeRepository:
     async def question(self, session_id, question_id):
         return next((q for q in self.question_rows if q.Id == question_id), None)
 
+    question_for_update = question
+
     async def answers(self, question_ids):
         return [a for a in self.answer_rows if a.QuestionId in question_ids]
 
@@ -454,17 +456,67 @@ class ServiceTests(unittest.TestCase):
             miss = run(service.submit_answer(repo.session.Id, nxt.question.id, PARENT_ID, wrong))
             self.assertFalse(miss.is_correct)
             self.assertEqual(miss.feedback_code, "TRY_AGAIN")
+            self.assertNotIn(normalize_text(question.ExpectedAnswer), normalize_text(miss.story_hint or ""))
             # A wrong answer keeps the same question as the next one.
             self.assertEqual(run(service.next_question(repo.session.Id, PARENT_ID)).question.id, nxt.question.id)
             hit = run(service.submit_answer(repo.session.Id, nxt.question.id, PARENT_ID, question.ExpectedAnswer.upper()))
             self.assertTrue(hit.is_correct)
             self.assertEqual(hit.score, 1.0)
+            self.assertIsNone(hit.story_hint)
 
         self.assertEqual(seen, total)
         again = run(service.submit_answer(repo.session.Id, repo.question_rows[0].Id, PARENT_ID, "anything"))
         self.assertTrue(again.is_correct)  # idempotent after success
         correct_rows = [a for a in repo.answer_rows if a.IsCorrect]
         self.assertEqual(len(correct_rows), total)
+
+    def test_submit_answer_uses_row_lock_deduplicates_retries_and_returns_safe_story_hint(self):
+        repo = FakeRepository()
+        lock_calls = []
+
+        async def tracked_question_for_update(session_id, question_id):
+            lock_calls.append((session_id, question_id))
+            return await repo.question(session_id, question_id)
+
+        repo.question_for_update = tracked_question_for_update
+        service = make_service(repo)
+        # Seed a FACTUAL question whose SourceSpan contains ExpectedAnswer ("Bên cửa sổ").
+        q_id = uuid4()
+        repo.question_rows.append(
+            ComprehensionQuestion(
+                Id=q_id,
+                SessionId=repo.session.Id,
+                PageId=repo.page.page_id,
+                PageRevisionId=repo.page.revision_id,
+                Type="FACTUAL",
+                Prompt="Chú mèo thích nằm ở đâu?",
+                ExpectedAnswer="Bên cửa sổ",
+                AcceptedAnswers=["bên cửa sổ"],
+                SourceSpan={
+                    "start_word_index": 7,
+                    "end_word_index_exclusive": 14,
+                    "sentence_index": None,
+                    "choices": ["Bên cửa sổ", "Trên mái nhà", "Dưới gầm bàn"],
+                },
+                Difficulty="EASY",
+            )
+        )
+
+        # Duplicate wrong retries / concurrent tap+STT submit only 1 row and never leak ExpectedAnswer
+        first_wrong = run(service.submit_answer(repo.session.Id, q_id, PARENT_ID, "Trên mái nhà"))
+        second_wrong = run(service.submit_answer(repo.session.Id, q_id, PARENT_ID, "trên mái nhà"))
+        self.assertEqual(first_wrong.answer_id, second_wrong.answer_id)
+        self.assertEqual(len(repo.answer_rows), 1)
+        self.assertEqual(len(lock_calls), 2)
+        self.assertIsNotNone(first_wrong.story_hint)
+        self.assertIn("Chú mèo thích nằm", first_wrong.story_hint)
+        self.assertNotIn("cửa sổ", normalize_text(first_wrong.story_hint))
+
+        # Correct answer clears story_hint and locks subsequent retries
+        right = run(service.submit_answer(repo.session.Id, q_id, PARENT_ID, "Bên cửa sổ"))
+        self.assertTrue(right.is_correct)
+        self.assertIsNone(right.story_hint)
+        self.assertEqual(len(repo.answer_rows), 2)
 
     def test_legacy_questions_without_choices_are_ignored(self):
         repo = FakeRepository()

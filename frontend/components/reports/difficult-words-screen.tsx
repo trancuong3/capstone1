@@ -1,10 +1,11 @@
 "use client";
 
 import { ArrowLeft, Mic, RefreshCw, Sparkles, Volume2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { SelectField } from "@/components/common/select-field";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
@@ -55,6 +56,10 @@ export function DifficultWordsScreen({
     DIFFICULT_WORD_DEFAULT_DAYS,
   );
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>("ALL");
+  const [bookGroupPage, setBookGroupPage] = useState(1);
+  const BOOK_GROUPS_PAGE_SIZE = 6;
+  const loadRequestIdRef = useRef(0);
+  const mountedRef = useRef(true);
   const routeSelectionKey = `${requestedChildId ?? ""}|${requestedPracticeWord ?? ""}`;
   const [practiceSelection, setPracticeSelection] = useState<{
     readonly routeKey: string;
@@ -105,13 +110,23 @@ export function DifficultWordsScreen({
   const [state, setState] = useState<WordsState>({ status: "loading" });
 
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      loadRequestIdRef.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
     let active = true;
+    const requestId = ++loadRequestIdRef.current;
     async function load(): Promise<void> {
       setState({ status: "loading" });
       try {
         const children = await childService.list();
         if (children.length === 0) {
-          if (active) setState({ status: "no-children" });
+          if (active && requestId === loadRequestIdRef.current)
+            setState({ status: "no-children" });
           return;
         }
         const child = requestedChildId
@@ -121,9 +136,12 @@ export function DifficultWordsScreen({
           child.id,
           createCalendarWindow(currentDateInReportTimezone(), periodDays),
         );
-        if (active) setState({ status: "ready", children, child, words });
+        if (active && requestId === loadRequestIdRef.current) {
+          setBookGroupPage(1);
+          setState({ status: "ready", children, child, words });
+        }
       } catch (error) {
-        if (active)
+        if (active && requestId === loadRequestIdRef.current)
           setState({
             status:
               isServiceError(error) && error.status === 404
@@ -138,6 +156,7 @@ export function DifficultWordsScreen({
     void load();
     return () => {
       active = false;
+      loadRequestIdRef.current += 1;
     };
   }, [
     childService,
@@ -182,13 +201,18 @@ export function DifficultWordsScreen({
 
   const refreshWordsSilently = useCallback(async () => {
     if (state.status !== "ready") return;
+    const childId = state.child.id;
+    const requestId = ++loadRequestIdRef.current;
     try {
       const words = await difficultWordService.list(
-        state.child.id,
+        childId,
         createCalendarWindow(currentDateInReportTimezone(), periodDays),
       );
+      if (!mountedRef.current || requestId !== loadRequestIdRef.current) return;
       setState((current) =>
-        current.status === "ready" ? { ...current, words } : current,
+        current.status === "ready" && current.child.id === childId
+          ? { ...current, words }
+          : current,
       );
     } catch {
       // Giữ nguyên state hiện tại nếu background refresh tạm gián đoạn.
@@ -400,9 +424,10 @@ export function DifficultWordsScreen({
             <SelectField
               aria-label="Lọc theo trạng thái luyện"
               label="Trạng thái luyện"
-              onChange={(event) =>
-                setStatusFilter(event.target.value as StatusFilterValue)
-              }
+              onChange={(event) => {
+                setStatusFilter(event.target.value as StatusFilterValue);
+                setBookGroupPage(1);
+              }}
               value={statusFilter}
             >
               <option value="ALL">Tất cả trạng thái</option>
@@ -482,20 +507,43 @@ export function DifficultWordsScreen({
               title="Không có từ phù hợp bộ lọc"
             />
           ) : (
-            <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-              {bookGroups.map((group) => (
-                <DifficultWordBookCard
-                  group={group}
-                  key={group.key}
-                  onSelectWord={(target) =>
-                    openPracticeSession(target.normalized_word, group.key, true)
-                  }
-                  onStartBookPractice={(target) =>
-                    openPracticeSession(target.normalized_word, group.key, true)
-                  }
-                />
-              ))}
-            </div>
+            <>
+              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                {bookGroups
+                  .slice(
+                    (bookGroupPage - 1) * BOOK_GROUPS_PAGE_SIZE,
+                    bookGroupPage * BOOK_GROUPS_PAGE_SIZE,
+                  )
+                  .map((group) => (
+                    <DifficultWordBookCard
+                      group={group}
+                      key={group.key}
+                      onSelectWord={(target) =>
+                        openPracticeSession(
+                          target.normalized_word,
+                          group.key,
+                          true,
+                        )
+                      }
+                      onStartBookPractice={(target) =>
+                        openPracticeSession(
+                          target.normalized_word,
+                          group.key,
+                          true,
+                        )
+                      }
+                    />
+                  ))}
+              </div>
+              <PaginationBar
+                ariaLabel="Phân trang nhóm sách từ cần luyện"
+                itemLabel="cuốn sách"
+                onPageChange={setBookGroupPage}
+                page={bookGroupPage}
+                pageSize={BOOK_GROUPS_PAGE_SIZE}
+                total={bookGroups.length}
+              />
+            </>
           )}
         </>
       )}

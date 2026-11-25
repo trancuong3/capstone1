@@ -17,6 +17,7 @@ import { BookPageThumbnail } from "@/components/books/book-page-thumbnail";
 import { BookContentReportDialog } from "@/components/books/book-content-report-dialog";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
@@ -79,6 +80,8 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
     pageId: string | null;
     pageNumber: number | null;
   } | null>(null);
+  const [thumbnailPage, setThumbnailPage] = useState(1);
+  const THUMBNAILS_PER_PAGE = 24;
 
   useEffect(() => {
     let isActive = true;
@@ -135,6 +138,18 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
             ? (matchedPage ?? null)
             : (pages[0] ?? null);
           setSelectedPage(startPage);
+          if (startPage) {
+            const startIdx = pages.findIndex(
+              (p) => p.page_id === startPage.page_id,
+            );
+            setThumbnailPage(
+              startIdx >= 0
+                ? Math.floor(startIdx / THUMBNAILS_PER_PAGE) + 1
+                : 1,
+            );
+          } else {
+            setThumbnailPage(1);
+          }
           setSelectedEndPageId(
             pages[pages.length - 1]?.page_id ?? startPage?.page_id ?? null,
           );
@@ -181,7 +196,14 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
     }
     const btn = document.getElementById("start-reading-button");
     if (btn) {
-      btn.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      const prefersReducedMotion =
+        typeof window !== "undefined" &&
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      btn.scrollIntoView?.({
+        behavior: prefersReducedMotion ? "auto" : "smooth",
+        block: "center",
+      });
       btn.focus();
     }
   }, [state, targetPageId]);
@@ -387,7 +409,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
               </span>
             </div>
           ) : null}
-          <h1 className="text-heading font-extrabold leading-tight text-ink sm:text-4xl">
+          <h1 className="break-words text-heading font-extrabold leading-tight text-ink sm:text-4xl">
             {book.title}
           </h1>
           {targetPageId &&
@@ -577,27 +599,44 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
               aria-label="Các trang sách có thể xem trước"
               className="flex gap-4 overflow-x-auto pb-1"
             >
-              {pages.map((page) => (
-                <BookPageThumbnail
-                  isSelected={selectedPage?.page_id === page.page_id}
-                  key={page.page_id}
-                  onSelect={(nextPage) => {
-                    setSelectedPage(nextPage);
-                    setSelectedEndPageId((currentEndId) => {
-                      const currentEnd = pages.find(
-                        (candidate) => candidate.page_id === currentEndId,
-                      );
-                      return !currentEnd ||
-                        currentEnd.page_number < nextPage.page_number
-                        ? nextPage.page_id
-                        : currentEnd.page_id;
-                    });
-                    setStartState("idle");
-                  }}
-                  page={page}
-                />
-              ))}
+              {pages
+                .slice(
+                  (thumbnailPage - 1) * THUMBNAILS_PER_PAGE,
+                  thumbnailPage * THUMBNAILS_PER_PAGE,
+                )
+                .map((page) => (
+                  <BookPageThumbnail
+                    isSelected={selectedPage?.page_id === page.page_id}
+                    key={page.page_id}
+                    onSelect={(nextPage) => {
+                      setSelectedPage(nextPage);
+                      setSelectedEndPageId((currentEndId) => {
+                        const currentEnd = pages.find(
+                          (candidate) => candidate.page_id === currentEndId,
+                        );
+                        return !currentEnd ||
+                          currentEnd.page_number < nextPage.page_number
+                          ? nextPage.page_id
+                          : currentEnd.page_id;
+                      });
+                      setStartState("idle");
+                    }}
+                    page={page}
+                  />
+                ))}
             </div>
+            {pages.length > THUMBNAILS_PER_PAGE ? (
+              <PaginationBar
+                ariaLabel="Phân trang danh sách trang xem trước"
+                className="mt-3"
+                compact
+                itemLabel="trang"
+                onPageChange={setThumbnailPage}
+                page={thumbnailPage}
+                pageSize={THUMBNAILS_PER_PAGE}
+                total={pages.length}
+              />
+            ) : null}
           </div>
         </div>
       </div>

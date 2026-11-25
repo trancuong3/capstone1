@@ -4,7 +4,9 @@ param(
     [string]$BindHost = "127.0.0.1",
     [int]$Port = 8010,
     [string]$TtsPrecision = "int8",
-    [int]$StartupTimeoutSeconds = 90,
+    [string]$SttMode = "ws",
+    [int]$StartupTimeoutSeconds = 120,
+    [switch]$ReplaceIncompatibleWorker,
     [string]$VoiceWorkerToken = "",
     [ValidateSet("AboveNormal", "High", "Normal")]
     [string]$Priority = "AboveNormal"
@@ -71,27 +73,85 @@ function Resolve-VoiceWorkerToken([string]$explicitToken) {
 
 $effectiveToken = Resolve-VoiceWorkerToken $VoiceWorkerToken
 
-# Idempotent check
-try {
-    $health = Invoke-RestMethod -Uri "http://${BindHost}:${Port}/health" -TimeoutSec 3
-    if ($health -and $health.status -eq "ok") {
-        $existingConn = Test-PortListening $Port
-        if ($existingConn) {
-            Set-ProcessTreePriority ([int]$existingConn.OwningProcess) $Priority
+function Get-ProcessCommandLine([int]$pidNum) {
+    try {
+        $cim = Get-CimInstance Win32_Process -Filter "ProcessId = $pidNum" -ErrorAction SilentlyContinue
+        if ($cim -and $cim.CommandLine) {
+            return [string]$cim.CommandLine
         }
-        Write-Host "ViRead Local Voice Worker is already healthy on http://${BindHost}:${Port} (priority=$Priority)"
-        exit 0
+    } catch { }
+    return "(unknown command line)"
+}
+
+$workerToken = $effectiveToken
+$healthHeaders = @{}
+if ($workerToken) {
+    $healthHeaders["Authorization"] = "Bearer $workerToken"
+    $healthHeaders["X-ViRead-Worker-Token"] = $workerToken
+}
+
+# Idempotent check (rejects incompatible auth-gated foreign workers when no token is configured)
+$incompatibleWorker = $false
+try {
+    $health = Invoke-RestMethod -Uri "http://${BindHost}:${Port}/health" -Headers $healthHeaders -TimeoutSec 3
+    if ($health -and $health.status -eq "ok") {
+        $authRequired = [bool]($health.PSObject.Properties["auth_required"] -and $health.auth_required)
+        if ($authRequired -and (-not $workerToken)) {
+            $incompatibleWorker = $true
+        } else {
+            $existingConn = Test-PortListening $Port
+            if ($existingConn) { Set-ProcessTreePriority ([int]$existingConn.OwningProcess) $Priority }
+            Write-Host "ViRead Local Voice Worker is already healthy on http://${BindHost}:${Port}"
+            exit 0
+        }
     }
 } catch { }
 
 $existing = Test-PortListening $Port
 if ($existing) {
-    [Console]::Error.WriteLine("Port conflict: Voice worker port $Port is already in use by PID $($existing.OwningProcess).")
-    exit 4
+    $ownerPid = [int]$existing.OwningProcess
+    $ownerCmd = Get-ProcessCommandLine $ownerPid
+    if ($incompatibleWorker) {
+        [Console]::Error.WriteLine("Incompatible voice worker detected on port $Port (auth_required=true without VIREAD_LOCAL_VOICE_WORKER_TOKEN). Owning PID=${ownerPid}, CommandLine=${ownerCmd}")
+        if ($ReplaceIncompatibleWorker) {
+            Write-Host "Stopping incompatible worker PID=${ownerPid} (-ReplaceIncompatibleWorker specified)..."
+            Stop-Process -Id $ownerPid -Force -ErrorAction SilentlyContinue
+            $freeDeadline = (Get-Date).AddSeconds(5)
+            while ((Get-Date) -lt $freeDeadline) {
+                if (-not (Test-PortListening $Port)) { break }
+                Start-Sleep -Milliseconds 250
+            }
+            if (Test-PortListening $Port) {
+                [Console]::Error.WriteLine("Port $Port is still occupied after stopping PID=${ownerPid}.")
+                exit 4
+            }
+        } else {
+            [Console]::Error.WriteLine("Re-run with -ReplaceIncompatibleWorker to replace it, or stop PID=${ownerPid} / configure VIREAD_LOCAL_VOICE_WORKER_TOKEN.")
+            exit 4
+        }
+    } else {
+        [Console]::Error.WriteLine("Port conflict: Voice worker port $Port is already in use by PID=${ownerPid}, CommandLine=${ownerCmd}")
+        exit 4
+    }
 }
 
 $stdoutLog = Join-Path $logsDir "voice-worker.stdout.log"
 $stderrLog = Join-Path $logsDir "voice-worker.stderr.log"
+
+$effectiveTtsPrecision = if ($PSBoundParameters.ContainsKey("TtsPrecision")) {
+    $TtsPrecision
+} elseif ($env:VIREAD_VOICE_TTS_PRECISION) {
+    $env:VIREAD_VOICE_TTS_PRECISION
+} else {
+    $TtsPrecision
+}
+$effectiveSttMode = if ($PSBoundParameters.ContainsKey("SttMode")) {
+    $SttMode
+} elseif ($env:VIREAD_STT_MODE) {
+    $env:VIREAD_STT_MODE
+} else {
+    $SttMode
+}
 
 $savedEnv = @{
     "VIREAD_VOICE_RUNTIME_DIR"   = [Environment]::GetEnvironmentVariable("VIREAD_VOICE_RUNTIME_DIR", "Process")
@@ -99,6 +159,7 @@ $savedEnv = @{
     "VIREAD_VOICE_WORKER_PORT"   = [Environment]::GetEnvironmentVariable("VIREAD_VOICE_WORKER_PORT", "Process")
     "VIREAD_VOICE_TTS_PRECISION" = [Environment]::GetEnvironmentVariable("VIREAD_VOICE_TTS_PRECISION", "Process")
     "VIREAD_VOICE_WORKER_TOKEN"  = [Environment]::GetEnvironmentVariable("VIREAD_VOICE_WORKER_TOKEN", "Process")
+    "VIREAD_STT_MODE"            = [Environment]::GetEnvironmentVariable("VIREAD_STT_MODE", "Process")
     "HF_HOME"                    = [Environment]::GetEnvironmentVariable("HF_HOME", "Process")
 }
 
@@ -106,7 +167,8 @@ try {
     [Environment]::SetEnvironmentVariable("VIREAD_VOICE_RUNTIME_DIR", $VoiceRuntimeDir, "Process")
     [Environment]::SetEnvironmentVariable("VIREAD_VOICE_WORKER_HOST", $BindHost, "Process")
     [Environment]::SetEnvironmentVariable("VIREAD_VOICE_WORKER_PORT", "$Port", "Process")
-    [Environment]::SetEnvironmentVariable("VIREAD_VOICE_TTS_PRECISION", $TtsPrecision, "Process")
+    [Environment]::SetEnvironmentVariable("VIREAD_VOICE_TTS_PRECISION", $effectiveTtsPrecision, "Process")
+    [Environment]::SetEnvironmentVariable("VIREAD_STT_MODE", $effectiveSttMode, "Process")
     [Environment]::SetEnvironmentVariable("VIREAD_VOICE_WORKER_TOKEN", $effectiveToken, "Process")
     [Environment]::SetEnvironmentVariable("HF_HOME", (Join-Path $VoiceRuntimeDir "hf-cache"), "Process")
 

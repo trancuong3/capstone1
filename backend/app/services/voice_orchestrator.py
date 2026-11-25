@@ -17,7 +17,7 @@ import asyncio
 import logging
 import time
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 from uuid import UUID
 
@@ -25,12 +25,15 @@ from app.providers.elevenlabs_voice_provider import VoiceProviderError
 from app.providers.google_voice_provider import GoogleCloudVoiceProvider
 from app.providers.local_voice_provider import (
     DEFAULT_LOCAL_VOICE_ID,
+    STATIC_LOCAL_VOICES,
     LocalPhonicsSpeech,
     LocalSynthesizedAudio,
     LocalTimedSpeech,
     LocalTranscription,
     LocalVoiceProvider,
     LocalVoiceTechnicalError,
+    resolve_local_stt_mode,
+    resolve_local_tts_precision,
 )
 from app.request_context import get_request_id
 
@@ -75,6 +78,39 @@ def _prune_turn_cache(now: float) -> None:
         _turn_results.popitem(last=False)
 
 
+def _map_local_voice_to_google_backup(voice_id: str) -> str:
+    region = "north"
+    gender = "female"
+    for item in STATIC_LOCAL_VOICES:
+        if item.get("voice_id") == voice_id:
+            region = str(item.get("region") or "north")
+            gender = str(item.get("gender") or "female")
+            break
+    else:
+        lower = voice_id.lower()
+        if "south" in lower or "nam" in lower:
+            region = "south"
+        elif "central" in lower or "trung" in lower:
+            region = "central"
+        if any(
+            marker in lower
+            for marker in ("thien_minh", "quang_son", "thai_son", "_male")
+        ):
+            gender = "male"
+
+    if region == "south":
+        return (
+            "google_vi_vn_wavenet_b"
+            if gender == "male"
+            else "google_vi_vn_wavenet_c"
+        )
+    return (
+        "google_vi_vn_neural2_d"
+        if gender == "male"
+        else "google_vi_vn_neural2_a"
+    )
+
+
 class VoiceOrchestrator:
     def __init__(
         self,
@@ -117,7 +153,12 @@ class VoiceOrchestrator:
                 "worker_version": local_health.get("worker_version"),
                 "latency_ms": local_health.get("latency_ms"),
                 "stt_model_version": local_health.get("stt_model_version"),
+                "stt_mode": local_health.get("stt_mode") or resolve_local_stt_mode(),
                 "tts_model_version": local_health.get("tts_model_version"),
+                "tts_precision": local_health.get("tts_precision")
+                or resolve_local_tts_precision(),
+                "active_voices": local_health.get("active_voices")
+                or [v["voice_id"] for v in STATIC_LOCAL_VOICES],
             },
             "google": {
                 "stt_configured": self.google.is_stt_configured(),
@@ -158,6 +199,15 @@ class VoiceOrchestrator:
             raise VoiceProviderError(
                 status_code=503, code="GOOGLE_TTS_UNCONFIGURED"
             )
+
+    def _can_fallback_unlocked_tts(self, policy: VoicePolicyContext) -> bool:
+        return (
+            not policy.session_id
+            and policy.provider_mode == "local_with_google_fallback"
+            and policy.allow_google_tts
+            and self.google.is_tts_configured()
+            and not self.google.is_tts_in_cooldown()
+        )
 
     async def synthesize(
         self,
@@ -392,6 +442,9 @@ class VoiceOrchestrator:
                 filename=filename,
                 content_type=content_type,
                 language_code=language_code,
+                source=ctx.source,
+                session_id=ctx.session_id,
+                turn_id=ctx.turn_id,
             )
             logger.info(
                 "stt_ok provider=local fallback=0 ms=%.1f session=%s page=%s turn=%s request_id=%s",

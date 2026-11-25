@@ -50,6 +50,7 @@ from app.schemas.parent_private_book import (
     ParentPageSubmissionRead,
     ParentPrivateBookCreate,
     ParentPrivateBookDetailRead,
+    ParentPrivateBookPageRead,
     ParentPrivateBookSummaryRead,
     ParentPrivateBookUpdate,
     ParentPrivatePageEditRequest,
@@ -592,11 +593,13 @@ class ParentPrivateBookService:
             ocr_contribution=contrib_map.get(book.Id),
         )
 
-    async def list_books(
-        self, actor_id: UUID, *, ready_only: bool = False
+    async def _serialize_book_summaries(
+        self,
+        actor_id: UUID,
+        books: list[Book],
+        *,
+        ready_only: bool = False,
     ) -> list[ParentPrivateBookSummaryRead]:
-        await self._require_parent(actor_id)
-        books = await self.repo.list_owned_private_books(actor_id, ready_only=ready_only)
         if not books:
             return []
         book_ids = [b.Id for b in books]
@@ -624,6 +627,42 @@ class ParentPrivateBookService:
                 )
             )
         return results
+
+    async def list_books(
+        self, actor_id: UUID, *, ready_only: bool = False
+    ) -> list[ParentPrivateBookSummaryRead]:
+        await self._require_parent(actor_id)
+        books = await self.repo.list_owned_private_books(actor_id, ready_only=ready_only)
+        return await self._serialize_book_summaries(
+            actor_id, books, ready_only=ready_only
+        )
+
+    async def list_books_paged(
+        self,
+        actor_id: UUID,
+        *,
+        ready_only: bool = False,
+        search: str | None = None,
+        limit: int = 9,
+        offset: int = 0,
+    ) -> ParentPrivateBookPageRead:
+        await self._require_parent(actor_id)
+        books, total = await self.repo.list_owned_private_books_paged(
+            actor_id,
+            ready_only=ready_only,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+        items = await self._serialize_book_summaries(
+            actor_id, books, ready_only=ready_only
+        )
+        return ParentPrivateBookPageRead(
+            items=items,
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
 
     async def get_book(
         self, actor_id: UUID, book_id: UUID, *, base_url: str | None = None

@@ -21,10 +21,15 @@ from app.providers.elevenlabs_voice_provider import VoiceProviderError
 from app.request_context import get_request_id
 
 logger = logging.getLogger(__name__)
+from app.services.local_voice_worker_bootstrap import (
+    ensure_local_voice_worker_running,
+    is_local_voice_worker_autostart_armed,
+)
 
 DEFAULT_LOCAL_VOICE_WORKER_URL = "http://127.0.0.1:8010"
 DEFAULT_LOCAL_VOICE_ID = "local_north_truc_ly"
-LOCAL_TTS_MODEL_VERSION = "vieneu-v3-turbo-onnx-fp32-3.8.5"
+DEFAULT_LOCAL_TTS_PRECISION = "hybrid"
+DEFAULT_LOCAL_STT_MODE = "ws"
 LOCAL_STT_MODEL_VERSION = "sherpa-onnx-zipformer-vi-30m-int8-2026-02-09"
 CONNECT_TIMEOUT_SECONDS = 5.0
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
@@ -34,6 +39,28 @@ _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 _LOOP_CLIENTS: weakref.WeakKeyDictionary[
     asyncio.AbstractEventLoop, dict[str, httpx.AsyncClient]
 ] = weakref.WeakKeyDictionary()
+
+
+def resolve_local_tts_precision() -> str:
+    raw = (os.getenv("VIREAD_VOICE_TTS_PRECISION") or DEFAULT_LOCAL_TTS_PRECISION).strip().lower()
+    return raw if raw in ("hybrid", "fp32", "int8") else DEFAULT_LOCAL_TTS_PRECISION
+
+
+def resolve_local_stt_mode() -> str:
+    raw = (os.getenv("VIREAD_STT_MODE") or DEFAULT_LOCAL_STT_MODE).strip().lower()
+    return raw if raw in ("ws", "http") else DEFAULT_LOCAL_STT_MODE
+
+
+def build_local_tts_model_version(precision: str | None = None) -> str:
+    prec = (precision or resolve_local_tts_precision()).strip().lower()
+    if prec not in ("hybrid", "fp32", "int8"):
+        prec = DEFAULT_LOCAL_TTS_PRECISION
+    return f"vieneu-v3-turbo-onnx-{prec}-3.8.5"
+
+
+LOCAL_TTS_PRECISION = resolve_local_tts_precision()
+LOCAL_STT_MODE = resolve_local_stt_mode()
+LOCAL_TTS_MODEL_VERSION = build_local_tts_model_version(LOCAL_TTS_PRECISION)
 
 # Static non-secret metadata catalog of the 8 curated regional presets so UI can
 # display Bắc · Trung · Nam options deterministically even before worker warmup.
@@ -338,6 +365,45 @@ class LocalVoiceProvider:
             not in {"1", "true", "yes", "on"}
         )
         self._client: httpx.AsyncClient | None = None
+        self._recovery_task: asyncio.Task[bool] | None = None
+
+    def _schedule_background_recovery(self) -> None:
+        if not is_local_voice_worker_autostart_armed():
+            return
+        if self._recovery_task is not None and not self._recovery_task.done():
+            return
+        try:
+            task = asyncio.create_task(
+                ensure_local_voice_worker_running(base_url=self.base_url)
+            )
+        except RuntimeError:
+            return
+        self._recovery_task = task
+
+        def _on_done(done_task: asyncio.Task[bool]) -> None:
+            if self._recovery_task is done_task:
+                self._recovery_task = None
+            if not done_task.cancelled():
+                try:
+                    done_task.exception()
+                except Exception:
+                    pass
+
+        task.add_done_callback(_on_done)
+
+    def get_ws_stt_url(self) -> str:
+        """Build the loopback worker WebSocket URL for streaming STT."""
+        if self.base_url.startswith("https://"):
+            ws_base = "wss://" + self.base_url[len("https://") :]
+        elif self.base_url.startswith("http://"):
+            ws_base = "ws://" + self.base_url[len("http://") :]
+        else:
+            ws_base = self.base_url
+        return f"{ws_base.rstrip('/')}/stt/stream"
+
+    def get_ws_auth_headers(self) -> dict[str, str]:
+        """Return loopback worker authentication headers for WebSocket handshake."""
+        return self._request_headers(include_auth=True)
 
     def is_configured(self) -> bool:
         return bool(self.base_url)
@@ -406,7 +472,6 @@ class LocalVoiceProvider:
         if self._client is not None and not self._client.is_closed:
             await self._client.aclose()
             self._client = None
-
     async def _post_with_retry(
         self,
         path: str,
@@ -424,7 +489,7 @@ class LocalVoiceProvider:
         headers = self._request_headers(include_auth=True)
         http_timeout = self._make_timeout(timeout)
         last_exc: Exception | None = None
-        for attempt in range(2):
+        for attempt in range(3):
             client = self._get_client()
             try:
                 resp = await client.post(
@@ -504,6 +569,15 @@ class LocalVoiceProvider:
                     "latency_ms": latency_ms,
                 }
             data = resp.json()
+            if bool(data.get("auth_required")) and not self._get_token():
+                self._schedule_background_recovery()
+                return {
+                    "available": False,
+                    "stt_ready": False,
+                    "tts_ready": False,
+                    "stt_model_version": None,
+                    "tts_model_version": None,
+                }
             stt = data.get("stt") or {}
             tts = data.get("tts") or {}
             stt_ready = bool(stt.get("ready"))
@@ -517,6 +591,8 @@ class LocalVoiceProvider:
                 err_code = "LOCAL_STT_UNAVAILABLE"
             else:
                 err_code = "LOCAL_VOICE_UNAVAILABLE"
+            active_precision = tts.get("precision") or resolve_local_tts_precision()
+            active_stt_mode = stt.get("mode") or resolve_local_stt_mode()
             return {
                 "configured": True,
                 "available": data.get("status") == "ok",
@@ -540,7 +616,12 @@ class LocalVoiceProvider:
                 "stt_error_code": "LOCAL_VOICE_TIMEOUT",
                 "tts_error_code": "LOCAL_VOICE_TIMEOUT",
                 "latency_ms": int((time.perf_counter() - started) * 1000),
+                "stt_mode": active_stt_mode,
+                "tts_precision": active_precision,
             }
+        except httpx.ConnectError:
+            self._schedule_background_recovery()
+            return {"available": False, "stt_ready": False, "tts_ready": False}
         except Exception:
             return {
                 "configured": True,
@@ -848,12 +929,24 @@ class LocalVoiceProvider:
         filename: str,
         content_type: str,
         language_code: str | None = "vi",
+        source: str | None = None,
+        session_id: str | None = None,
+        turn_id: str | None = None,
     ) -> LocalTranscription:
+        form_data: dict[str, Any] = {
+            "language": (language_code or "vi").strip() or "vi",
+        }
+        if source:
+            form_data["source"] = source.strip()[:40]
+        if session_id:
+            form_data["session_id"] = session_id.strip()[:80]
+        if turn_id:
+            form_data["turn_id"] = turn_id.strip()[:80]
         try:
             resp = await self._post_with_retry(
                 "/stt",
                 timeout=18.0,
-                data={"language": (language_code or "vi").strip() or "vi"},
+                data=form_data,
                 files={"audio_file": (filename, audio, content_type)},
             )
         except LocalVoiceTechnicalError:
