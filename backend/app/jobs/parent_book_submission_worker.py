@@ -6,14 +6,18 @@ import logging
 import os
 import socket
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
 from app.database.session import AsyncSessionLocal
 from app.diagnostic_logging import log_diagnostic
 from app.repositories.parent_private_book_repository import ParentPrivateBookRepository
-from app.services.parent_private_book_pipeline import PipelineHooks, process_submission_stages
+from app.services.ocr_inference_job_service import is_heavy_workers_disabled, is_remote_ocr_mode
 from app.services.storage_service import delete_object
+
+if TYPE_CHECKING:
+    from app.services.parent_private_book_pipeline import PipelineHooks
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +79,13 @@ async def cleanup_expired_temp_submissions(*, now: datetime | None = None, limit
 async def run_once(
     worker_id: str | None = None,
     *,
-    hooks: PipelineHooks | None = None,
+    hooks: "PipelineHooks | None" = None,
 ) -> bool:
     """Claim and process a single queued Parent Private Book submission. Returns True if work ran."""
+    if is_heavy_workers_disabled() or is_remote_ocr_mode():
+        return False
+    from app.services.parent_private_book_pipeline import process_submission_stages
+
     worker_name = worker_id or f"parent-book-worker-{socket.gethostname()}-{uuid4().hex[:8]}"
     async with AsyncSessionLocal() as db:
         repo = ParentPrivateBookRepository(db)
@@ -94,8 +102,10 @@ async def run_once(
 async def run_worker(
     stop_event: asyncio.Event,
     *,
-    hooks: PipelineHooks | None = None,
+    hooks: "PipelineHooks | None" = None,
 ) -> None:
+    if is_heavy_workers_disabled() or is_remote_ocr_mode():
+        return
     worker_id = f"parent-book-worker-{socket.gethostname()}-{uuid4().hex[:8]}"
     poll_seconds = _poll_seconds()
     cleanup_ticks = 0

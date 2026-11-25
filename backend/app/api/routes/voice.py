@@ -38,12 +38,36 @@ ALLOWED_AUDIO_PREFIXES = ("audio/", "video/", "application/octet-stream")
 ALLOWED_AUDIO_EXTENSIONS = (
     ".webm",
     ".ogg",
+    ".oga",
     ".mp3",
     ".wav",
+    ".mp4",
     ".m4a",
     ".aac",
     ".flac",
 )
+
+_EXTENSION_CONTENT_TYPES = {
+    ".webm": "audio/webm",
+    ".ogg": "audio/ogg",
+    ".oga": "audio/ogg",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".mp4": "audio/mp4",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+}
+
+
+def _resolve_audio_content_type(raw_content_type: str | None, filename: str) -> str:
+    if raw_content_type and raw_content_type != "application/octet-stream":
+        return raw_content_type
+    lower_name = (filename or "").lower()
+    for ext, mime in _EXTENSION_CONTENT_TYPES.items():
+        if lower_name.endswith(ext):
+            return mime
+    return "audio/webm"
 
 
 def get_voice_orchestrator() -> VoiceOrchestrator:
@@ -75,10 +99,12 @@ def _parse_bool_form(raw: str | bool | None) -> bool:
 
 @router.get("/status")
 async def voice_status(
+    response: Response,
     _actor_id: UUID = Depends(get_current_parent_id),
 ) -> dict[str, Any]:
     """Report safe local worker & Google backup readiness without secrets."""
 
+    response.headers["Cache-Control"] = "no-store"
     return await get_voice_orchestrator().get_status()
 
 
@@ -224,9 +250,7 @@ async def speech_to_text(
             detail={"code": "AUDIO_TOO_LARGE"},
         )
 
-    content_type = file.content_type
-    if not content_type or content_type == "application/octet-stream":
-        content_type = "audio/webm"
+    content_type = _resolve_audio_content_type(file.content_type, filename)
 
     policy = VoicePolicyContext(
         provider_mode=_parse_provider_mode(provider_mode),

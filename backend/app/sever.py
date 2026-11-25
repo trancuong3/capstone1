@@ -42,12 +42,46 @@ from app.database.session import (
 )
 from app.diagnostic_logging import log_diagnostic
 from app.request_context import request_id_context
-from app.services.ocr_engine import run_active_viread_model_worker, warmup_ocr_engines
 from app.services.local_voice_worker_bootstrap import (
     arm_local_voice_worker_autostart,
     ensure_local_voice_worker_running,
 )
-from app.services.runtime_diagnostics import collect_ocr_health
+from app.services.ocr_inference_job_service import (
+    get_ocr_mode,
+    is_heavy_workers_disabled,
+    is_remote_ocr_mode,
+    shutdown_post_ocr_tasks,
+)
+from app.services.runtime_diagnostics import (
+    collect_ocr_health,
+    collect_remote_ocr_health,
+    is_ocr_engine_ready_status,
+)
+
+
+def get_viread_app_version() -> str:
+    """Return non-empty service build/version identifier for X-ViRead-Version."""
+    explicit = (os.getenv("VIREAD_APP_VERSION") or "").strip()
+    if explicit:
+        return explicit[:64]
+    git_sha = (os.getenv("RENDER_GIT_COMMIT") or os.getenv("GIT_SHA") or "").strip()
+    if git_sha:
+        return f"1.0.0+{git_sha[:12]}"
+    return "1.0.0"
+
+
+def warmup_ocr_engines():
+    """Lazy wrapper so remote_worker web startup never imports torch/paddle/ocr_engine."""
+    from app.services.ocr_engine import warmup_ocr_engines as _warmup_ocr_engines
+
+    return _warmup_ocr_engines()
+
+
+def run_active_viread_model_worker(stop_event: threading.Event):
+    """Lazy wrapper preserving test patchability without importing ocr_engine at startup."""
+    from app.services.ocr_engine import run_active_viread_model_worker as _run_worker
+
+    return _run_worker(stop_event)
 from app.services.admin_ocr_jobs import admin_ocr_correction_jobs
 from app.jobs.book_quality_worker import run_worker as run_book_quality_worker
 from app.jobs.admin_ai_workflow_worker import run_worker as run_admin_ai_workflow_worker
@@ -192,9 +226,12 @@ async def lifespan(_app: FastAPI):
             database_error_type=db_probe["error_type"],
         )
 
-    warmup_enabled = os.getenv("VIREAD_OCR_WARMUP_ENABLED", "false").strip().lower() in {
-        "1", "true", "yes", "on",
-    }
+    warmup_enabled = (
+        not is_remote_ocr_mode()
+        and not is_heavy_workers_disabled()
+        and os.getenv("VIREAD_OCR_WARMUP_ENABLED", "false").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
     if warmup_enabled:
         threading.Thread(
             target=warmup_ocr_engines,
@@ -204,7 +241,11 @@ async def lifespan(_app: FastAPI):
 
     stop_active_model_worker = threading.Event()
     active_model_worker = None
-    if APP_ENVIRONMENT != "test":
+    if (
+        APP_ENVIRONMENT != "test"
+        and not is_remote_ocr_mode()
+        and not is_heavy_workers_disabled()
+    ):
         active_model_worker = threading.Thread(
             target=run_active_viread_model_worker,
             args=(stop_active_model_worker,),
@@ -244,9 +285,11 @@ async def lifespan(_app: FastAPI):
             ),
             name="admin_ai_workflow_worker",
         )
-    parent_book_worker_enabled = os.getenv(
-        "PARENT_BOOK_WORKER_ENABLED", "true"
-    ).strip().lower() not in {"0", "false", "no", "off"}
+    parent_book_worker_enabled = (
+        not is_heavy_workers_disabled()
+        and os.getenv("PARENT_BOOK_WORKER_ENABLED", "true").strip().lower()
+        not in {"0", "false", "no", "off"}
+    )
     if APP_ENVIRONMENT != "test" and parent_book_worker_enabled:
         parent_book_task = asyncio.create_task(
             _run_worker_with_startup_delay(
@@ -256,7 +299,12 @@ async def lifespan(_app: FastAPI):
             ),
             name="parent_book_submission_worker",
         )
-    ocr_outbox_enabled = os.getenv("VIREAD_OCR_OUTBOX_WORKER_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
+    ocr_outbox_enabled = (
+        not is_remote_ocr_mode()
+        and not is_heavy_workers_disabled()
+        and os.getenv("VIREAD_OCR_OUTBOX_WORKER_ENABLED", "true").strip().lower()
+        not in {"0", "false", "no", "off"}
+    )
     stop_viread_ocr_outbox = asyncio.Event()
     if APP_ENVIRONMENT != "test" and ocr_outbox_enabled:
         viread_outbox_task = asyncio.create_task(
@@ -267,9 +315,12 @@ async def lifespan(_app: FastAPI):
             ),
             name="viread_ocr_verified_outbox_worker",
         )
-    training_worker_enabled = os.getenv(
-        "VIREAD_OCR_AUTO_TRAINING_WORKER_ENABLED", "true"
-    ).strip().lower() not in {"0", "false", "no", "off"}
+    training_worker_enabled = (
+        not is_remote_ocr_mode()
+        and not is_heavy_workers_disabled()
+        and os.getenv("VIREAD_OCR_AUTO_TRAINING_WORKER_ENABLED", "true").strip().lower()
+        not in {"0", "false", "no", "off"}
+    )
     stop_viread_training = asyncio.Event()
     if APP_ENVIRONMENT != "test" and training_worker_enabled:
         viread_training_task = asyncio.create_task(
@@ -283,9 +334,12 @@ async def lifespan(_app: FastAPI):
     local_trainer_process = None
     # Dedicated training is opt-in. The subprocess itself defaults to disabled;
     # starting it without an explicit opt-in wastes memory and fails on Render.
-    local_training_enabled = os.getenv(
-        "VIREAD_LOCAL_TRAINING_ENABLED", "false"
-    ).strip().lower() in {"1", "true", "yes", "on"}
+    local_training_enabled = (
+        not is_remote_ocr_mode()
+        and not is_heavy_workers_disabled()
+        and os.getenv("VIREAD_LOCAL_TRAINING_ENABLED", "false").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
     local_autostart_enabled = os.getenv(
         "VIREAD_LOCAL_TRAINING_WORKER_AUTOSTART", "false"
     ).strip().lower() in {"1", "true", "yes", "on"}
@@ -354,6 +408,7 @@ async def lifespan(_app: FastAPI):
                     stop_local_voice_bootstrap,
                     timeout=2.0,
                 ),
+                shutdown_post_ocr_tasks(),
                 _shutdown_worker_task(viread_outbox_task, stop_viread_ocr_outbox),
                 _shutdown_worker_task(viread_training_task, stop_viread_training),
                 _shutdown_worker_task(book_quality_task, stop_book_quality_worker),
@@ -451,6 +506,7 @@ async def request_diagnostic_middleware(request: Request, call_next):
     try:
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
+        response.headers["X-ViRead-Version"] = get_viread_app_version()
         log_diagnostic(
             logger,
             logging.INFO if response.status_code < 500 else logging.ERROR,
@@ -554,7 +610,10 @@ async def database_connection_exception_handler(
             "detail": "Database temporarily unavailable",
             "request_id": request_id,
         },
-        headers={"X-Request-ID": request_id},
+        headers={
+            "X-Request-ID": request_id,
+            "X-ViRead-Version": get_viread_app_version(),
+        },
     )
 
 
@@ -576,7 +635,10 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error", "request_id": request_id},
-        headers={"X-Request-ID": request_id},
+        headers={
+            "X-Request-ID": request_id,
+            "X-ViRead-Version": get_viread_app_version(),
+        },
     )
 
 
@@ -626,6 +688,7 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=[
         "X-Request-ID",
+        "X-ViRead-Version",
         "X-Resolved-Voice-Id",
         "X-Voice-Provider",
         "X-Voice-Region",
@@ -660,26 +723,63 @@ async def get_health(request: Request) -> dict[str, object]:
             else ("running" if local_trainer.returncode is None else "stopped")
         ),
     }
-    try:
-        ocr_items = await asyncio.wait_for(asyncio.to_thread(collect_ocr_health), timeout=2.5)
-        ocr_engines = {
-            item["id"]: {
-                "status": item["status"],
-                "detail_status": item["detail_status"],
+    ocr_payload: dict[str, object]
+    if is_remote_ocr_mode():
+        try:
+            remote_info = await asyncio.wait_for(collect_remote_ocr_health(), timeout=2.5)
+            ocr_payload = {
+                "mode": "remote_worker",
+                "ready": bool(remote_info.get("ready", False)),
+                "engines": remote_info.get("engines", {}),
+                "workers": remote_info.get("workers", []),
+                "queue": remote_info.get("queue", {}),
+                "heartbeat_ttl_seconds": remote_info.get("heartbeat_ttl_seconds", 45),
             }
-            for item in ocr_items
+        except Exception:
+            ocr_payload = {
+                "mode": "remote_worker",
+                "ready": False,
+                "engines": {},
+                "workers": [],
+                "queue": {},
+            }
+    else:
+        try:
+            ocr_items = await asyncio.wait_for(asyncio.to_thread(collect_ocr_health), timeout=2.5)
+            ocr_engines = {
+                item["id"]: {
+                    "status": item["status"],
+                    "detail_status": item["detail_status"],
+                }
+                for item in ocr_items
+            }
+            core_engines = [
+                item for item in ocr_items if item["id"] in {"paddleocr", "vietocr"}
+            ]
+            if core_engines:
+                ocr_ready = any(
+                    is_ocr_engine_ready_status(item["detail_status"])
+                    for item in core_engines
+                )
+            else:
+                ocr_ready = any(
+                    is_ocr_engine_ready_status(item["detail_status"])
+                    for item in ocr_items
+                    if item["id"] in {"paddleocr", "vietocr", "tesseract_vie"}
+                )
+        except Exception:
+            ocr_engines = {}
+            ocr_ready = False
+        ocr_payload = {
+            "mode": "local_inprocess",
+            "ready": ocr_ready,
+            "engines": ocr_engines,
         }
-        ocr_ready = any(
-            item["detail_status"] in {"loaded", "installed", "healthy"}
-            for item in ocr_items
-            if item["id"] in {"paddleocr", "vietocr", "tesseract_vie"}
-        )
-    except Exception:
-        ocr_engines = {}
-        ocr_ready = False
 
     return {
         "status": "ok" if db_probe["ok"] else "degraded",
+        "version": get_viread_app_version(),
+        "ocr_mode": get_ocr_mode(),
         "database": {
             "status": "healthy" if db_probe["ok"] else "unavailable",
             "dns_resolved": db_probe["dns_resolved"],
@@ -688,10 +788,7 @@ async def get_health(request: Request) -> dict[str, object]:
             "pooler_mode": db_probe["pooler_mode"],
             "latency_ms": db_probe["latency_ms"],
         },
-        "ocr": {
-            "ready": ocr_ready,
-            "engines": ocr_engines,
-        },
+        "ocr": ocr_payload,
         "workers": worker_states,
     }
 

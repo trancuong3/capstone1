@@ -25,6 +25,7 @@ from app.models import (
     AuditLog,
     BookPage,
     BookRightsEvidence,
+    OcrInferenceJob,
     PageRevision,
     PageRevisionWord,
     ParentBookPageSubmission,
@@ -192,6 +193,7 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await connection.run_sync(
                 lambda sync_connection: ParentBookPageSubmission.__table__.create(sync_connection)
             )
+            await connection.run_sync(OcrInferenceJob.__table__.create)
             await connection.execute(
                 text("INSERT INTO profiles (id, role) VALUES (:id, 'admin')"),
                 {"id": ACTOR},
@@ -407,6 +409,19 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(revision_count, 1)
             self.assertEqual(word_count, 0)
 
+        job_id = uuid4()
+        async with self.sessions() as session:
+            session.add(
+                OcrInferenceJob(
+                    Id=job_id,
+                    JobKind="ADMIN_PAGE_REPROCESS",
+                    PageId=PAGE_ID,
+                    ImagePath="source/page.png",
+                    ImageSha256="a" * 64,
+                )
+            )
+            await session.commit()
+
         app = self._test_app()
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
@@ -415,6 +430,11 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 json={"expected_source_revision_id": str(R1_ID)},
             )
             self.assertEqual(draft.status_code, 201, draft.text)
+            async with self.sessions() as session:
+                job = await session.get(OcrInferenceJob, job_id)
+                self.assertIsNotNone(job)
+                self.assertEqual(job.Status, "CANCELLED")
+                self.assertEqual(job.CancelledReason, "SUPERSEDED_BY_ADMIN_EDIT_DRAFT")
             r2 = draft.json()
             self.assertEqual(r2["revision_no"], 2)
             self.assertEqual(r2["verification_status"], "NEEDS_REVIEW")

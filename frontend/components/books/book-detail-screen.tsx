@@ -96,20 +96,29 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
       const selectedChild = childState.child;
 
       try {
-        const book = await bookService.get(bookId);
+        const bookPromise = bookService.get(bookId);
+        const pagesPromise = bookService
+          .listPages(bookId)
+          .then((result) => ({ ok: true as const, pages: result }))
+          .catch((error: unknown) => ({ ok: false as const, error }));
+
+        const book = await bookPromise;
 
         let pages: BookPagePreviewDTO[] = [];
         let previewUnavailable = false;
-        try {
-          pages = await bookService.listPages(bookId);
-          pages.sort((left, right) => left.page_number - right.page_number);
+        const pagesOutcome = await pagesPromise;
+        if (pagesOutcome.ok) {
+          pages = [...pagesOutcome.pages].sort(
+            (left, right) => left.page_number - right.page_number,
+          );
           previewUnavailable = pages.length === 0;
-        } catch (error) {
-          if (isServiceError(error) && error.status === 503) {
-            previewUnavailable = true;
-          } else {
-            throw error;
-          }
+        } else if (
+          isServiceError(pagesOutcome.error) &&
+          pagesOutcome.error.status === 503
+        ) {
+          previewUnavailable = true;
+        } else {
+          throw pagesOutcome.error;
         }
 
         if (isActive) {

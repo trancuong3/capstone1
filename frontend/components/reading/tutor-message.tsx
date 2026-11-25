@@ -4,6 +4,7 @@ import { ReadingStatusDialog } from "@/components/reading/reading-status-dialog"
 
 interface TutorMessageProps {
   action: TutorAction | null;
+  errorMessage?: string | null;
   isPlaying?: boolean;
   isRetrying: boolean;
   onClose: () => void;
@@ -14,6 +15,7 @@ interface TutorMessageProps {
 
 export function TutorMessage({
   action,
+  errorMessage = null,
   isPlaying = false,
   isRetrying,
   onClose,
@@ -28,7 +30,8 @@ export function TutorMessage({
           <p className="text-[32px] font-semibold text-primary">{word}</p>
           <p>
             {ttsFailed
-              ? "Mình chưa phát được âm thanh. Bé vẫn có thể nhìn chữ và đọc tiếp nhé."
+              ? (errorMessage ??
+                "Mình chưa phát được âm thanh. Bé vẫn có thể nhìn chữ và đọc tiếp nhé.")
               : isPlaying
                 ? "Mình đang phát âm thanh mẫu. Bé lắng nghe nhé."
                 : "Bé có thể nhấn Nghe mẫu để nghe lại từ này."}

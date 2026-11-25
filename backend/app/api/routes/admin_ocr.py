@@ -234,6 +234,89 @@ async def reprocess_admin_page(
     return await AdminOcrService(db).reprocess(actor_id, page_id)
 
 
+@router.post("/admin/catalog/{book_id}/pages/jobs", status_code=202)
+async def enqueue_admin_page_ocr_job(
+    book_id: UUID,
+    image: UploadFile = File(...),
+    upload_id: UUID | None = Form(default=None),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminOcrService(db).enqueue_upload_page_job(
+        actor_id, book_id, image, upload_id=upload_id
+    )
+
+
+@router.post("/admin/pages/{page_id}/reupload-ocr/jobs", status_code=202)
+async def enqueue_admin_reupload_ocr_job(
+    page_id: UUID,
+    image: UploadFile = File(...),
+    upload_id: UUID | None = Form(default=None),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminOcrService(db).enqueue_reupload_ocr_job(
+        actor_id, page_id, image, upload_id=upload_id
+    )
+
+
+@router.post("/admin/pages/{page_id}/reprocess/jobs", status_code=202)
+async def enqueue_admin_reprocess_ocr_job(
+    page_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminOcrService(db).enqueue_reprocess_job(actor_id, page_id)
+
+
+@router.get("/admin/ocr-jobs/{job_id}")
+async def get_admin_ocr_job_status(
+    job_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.ocr_inference_job_service import OcrInferenceJobService
+
+    await AdminOcrService(db).require_admin(actor_id)
+    return await OcrInferenceJobService(db).get_job_status_payload(job_id)
+
+
+@router.get("/admin/catalog/{book_id}/ocr-jobs")
+async def list_admin_book_ocr_jobs(
+    book_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.ocr_inference_job_service import OcrInferenceJobService
+
+    await AdminOcrService(db).require_admin(actor_id)
+    return await OcrInferenceJobService(db).list_book_jobs_payload(book_id)
+
+
+@router.post("/admin/ocr-jobs/{job_id}/retry")
+async def retry_admin_ocr_job(
+    job_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.ocr_inference_job_service import OcrInferenceJobService
+
+    await AdminOcrService(db).require_admin(actor_id)
+    return await OcrInferenceJobService(db).retry_job(job_id)
+
+
+@router.delete("/admin/ocr-jobs/{job_id}")
+async def cancel_admin_ocr_job(
+    job_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.ocr_inference_job_service import OcrInferenceJobService
+
+    await AdminOcrService(db).require_admin(actor_id)
+    return await OcrInferenceJobService(db).cancel_job(job_id)
+
+
 @router.post(
     "/admin/pages/{page_id}/ai-correct",
     response_model=AdminOcrAiCorrectResponse,

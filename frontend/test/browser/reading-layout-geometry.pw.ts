@@ -422,6 +422,43 @@ async function installLongReadingSession(
       value: FakeSpeechRecognition,
     });
 
+    class FakeSpeechSynthesisUtterance {
+      onstart: (() => void) | null = null;
+      onend: (() => void) | null = null;
+
+      constructor(readonly text: string) {}
+    }
+    Object.defineProperty(window, "SpeechSynthesisUtterance", {
+      configurable: true,
+      value: FakeSpeechSynthesisUtterance,
+    });
+    const spokenSamples: string[] = [];
+    const voice = {
+      lang: "vi-VN",
+      name: "Fixture Vietnamese",
+      localService: false,
+      default: true,
+      voiceURI: "fixture-vi",
+    } satisfies SpeechSynthesisVoice;
+    Object.defineProperty(window, "speechSynthesis", {
+      configurable: true,
+      value: {
+        getVoices: () => [voice],
+        speak: (utterance: FakeSpeechSynthesisUtterance) => {
+          spokenSamples.push(utterance.text);
+          queueMicrotask(() => {
+            utterance.onstart?.();
+            utterance.onend?.();
+          });
+        },
+        cancel: () => {},
+        pause: () => {},
+        resume: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      },
+    });
+
     let activeGainNode: GainNode | null = null;
     let speechPulseTimer: ReturnType<typeof setTimeout> | null = null;
     Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
@@ -465,6 +502,7 @@ async function installLongReadingSession(
 
     Object.assign(window, {
       __geomSpeech: {
+        spoken: () => [...spokenSamples],
         count: () => instances.length,
         say: (transcript: string, confidence = 0.95) => {
           const active = instances[instances.length - 1];
@@ -934,7 +972,15 @@ test.describe("Reading screen viewport-bounded layout & scroll geometry", () => 
 
     // Clicking a word to hear sample audio should use browser fallback with zero 503 backend spam
     await page.getByRole("button", { name: "Sáng" }).first().click();
-    await page.waitForTimeout(250);
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (
+            window as unknown as { __geomSpeech: { spoken: () => string[] } }
+          ).__geomSpeech.spoken(),
+        ),
+      )
+      .toContain("sáng");
     expect(voice503Counts.tts).toBe(0);
     expect(voice503Counts.stt).toBe(0);
   });

@@ -47,7 +47,20 @@ class LocalOcrConfig:
     total_timeout_seconds: int = 7200
     num_ctx: int = 4096
     num_predict: int = 1024
+    keep_alive: str = "2m"
+    num_thread: int | None = None
     chunking: ChunkingConfig = field(default_factory=ChunkingConfig)
+
+    def build_ollama_options(self, *, num_predict: int | None = None) -> dict[str, int]:
+        """Build deterministic Ollama generation options with optional thread cap."""
+        options: dict[str, int] = {
+            "temperature": 0,
+            "num_ctx": self.num_ctx,
+            "num_predict": self.num_predict if num_predict is None else num_predict,
+        }
+        if self.num_thread is not None:
+            options["num_thread"] = self.num_thread
+        return options
 
     @classmethod
     def from_environment(cls) -> "LocalOcrConfig":
@@ -72,6 +85,8 @@ class LocalOcrConfig:
             ),
             num_ctx=_read_int("LOCAL_OCR_NUM_CTX", 4096, 2048, 32768),
             num_predict=_read_int("LOCAL_OCR_NUM_PREDICT", 1024, 256, 8192),
+            keep_alive=_read_keep_alive("LOCAL_OCR_KEEP_ALIVE", "2m"),
+            num_thread=_read_optional_int("LOCAL_OCR_NUM_THREAD", 1, 32),
             chunking=chunking,
         )
 
@@ -87,6 +102,28 @@ def _read_int(name: str, default: int, minimum: int, maximum: int) -> int:
     if not minimum <= value <= maximum:
         raise LocalCorrectionError(500, "Cấu hình AI OCR cục bộ không hợp lệ.")
     return value
+
+
+def _read_optional_int(name: str, minimum: int, maximum: int) -> int | None:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise LocalCorrectionError(500, "Cấu hình AI OCR cục bộ không hợp lệ.") from exc
+    if not minimum <= value <= maximum:
+        raise LocalCorrectionError(500, "Cấu hình AI OCR cục bộ không hợp lệ.")
+    return value
+
+
+def _read_keep_alive(name: str, default: str) -> str:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    if not re.fullmatch(r"(0|[1-9][0-9]{0,5}(ns|us|µs|ms|s|m|h))", raw):
+        raise LocalCorrectionError(500, "Cấu hình AI OCR cục bộ không hợp lệ.")
+    return raw
 
 
 def _validate_loopback_url(value: str) -> str:
@@ -304,20 +341,19 @@ class LocalOcrCorrector:
                         "model": self.config.model,
                         "stream": False,
                         "think": False,
+                        "keep_alive": self.config.keep_alive,
                         "format": _response_schema(chunk.expected_word_count),
                         "messages": [{
                             "role": "user",
                             "content": _prompt(chunk),
                             "images": [base64.b64encode(crop).decode("ascii")],
                         }],
-                        "options": {
-                            "temperature": 0,
-                            "num_ctx": self.config.num_ctx,
-                            "num_predict": min(
+                        "options": self.config.build_ollama_options(
+                            num_predict=min(
                                 self.config.num_predict,
                                 max(256, 128 + chunk.expected_word_count * 16),
                             ),
-                        },
+                        ),
                     }
                     try:
                         response = await client.post("api/chat", json=request_payload)

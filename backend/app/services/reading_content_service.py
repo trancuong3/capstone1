@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import math
 from datetime import datetime, timezone
 from uuid import UUID
@@ -404,117 +405,256 @@ class ReadingContentService:
                 status_code=422,
                 detail="ChildId and BookId are required",
             )
-        await self.require_owned_child(child_id, actor_id)
-        if not await self._repo_book_is_eligible(book_id, actor_id):
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "BOOK_BLOCKED_BY_CHILD_SAFETY",
-                    "message": "Sách chưa được phép sử dụng cho trẻ; OCR hoặc Child Safety chưa hoàn tất trên toàn bộ nội dung hiện tại.",
-                },
-            )
-
         page_id = payload.SelectedPageId or payload.selected_page_id
         requested_revision_id = (
             payload.SelectedPageRevisionId or payload.selected_page_revision_id
         )
-        if page_id is not None:
-            page = await self._repo_verified_page(page_id, book_id, actor_id)
-            if page is None:
-                raise HTTPException(
-                    status_code=409,
-                    detail={
-                        "code": "CONTENT_NOT_READY",
-                        "message": "Trang bắt đầu không còn ACTIVE và VERIFIED để đọc.",
-                    },
-                )
-        else:
-            page = await self._repo_first_verified_page(book_id, actor_id)
-            if page is None:
-                raise HTTPException(
-                    status_code=409,
-                    detail={
-                        "code": "CONTENT_NOT_READY",
-                        "message": "Sách chưa có trang ACTIVE và VERIFIED để đọc.",
-                    },
-                )
-
         end_page_id = payload.EndPageId or payload.end_page_id
-        end_page = (
-            await self._repo_verified_page(end_page_id, book_id, actor_id)
-            if end_page_id is not None
-            else page
-        )
-        if end_page is None:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "CONTENT_NOT_READY",
-                    "message": "Trang kết thúc không thuộc sách hoặc chưa ACTIVE và VERIFIED.",
-                },
-            )
-        if end_page.PageNumber < page.PageNumber:
-            raise HTTPException(status_code=422, detail="Trang kết thúc không được đứng trước trang bắt đầu.")
 
-        # A selected range must be complete. Do not silently skip missing,
-        # retired, unverified, or duplicate-numbered pages in the middle.
-        raw_pages = await self.repository.all_pages_between_numbers(
-            book_id, page.PageNumber, end_page.PageNumber
-        )
-        eligible_pages = await self._repo_verified_pages_between(
-            book_id, page.PageNumber, end_page.PageNumber, actor_id
-        )
-        expected_numbers = list(range(page.PageNumber, end_page.PageNumber + 1))
-        raw_numbers = [row.PageNumber for row in raw_pages]
-        eligible_numbers = [row.PageNumber for row in eligible_pages]
-        if raw_numbers != expected_numbers or eligible_numbers != expected_numbers:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "READING_RANGE_NOT_CONTIGUOUS",
-                    "message": "Khoảng trang có trang bị thiếu, ngừng hoạt động hoặc chưa được quản trị viên xác minh. Vui lòng chọn lại phạm vi.",
-                },
+        if isinstance(self.repository, ReadingContentRepository):
+            child_owned, book_row, is_readable = await self.repository.session_start_context(
+                child_id, book_id, actor_id
             )
+            if not child_owned:
+                raise HTTPException(status_code=404, detail="Child profile not found")
+            if (
+                book_row is not None
+                and is_book_private(book_row)
+                and getattr(book_row, "OwnerParentId", None) != actor_id
+            ):
+                raise HTTPException(status_code=404, detail="Resource not found")
+            if not is_readable or book_row is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "BOOK_BLOCKED_BY_CHILD_SAFETY",
+                        "message": "Sách chưa được phép sử dụng cho trẻ; OCR hoặc Child Safety chưa hoàn tất trên toàn bộ nội dung hiện tại.",
+                    },
+                )
 
-        verified_snapshots: list[tuple[BookPage, object]] = []
-        for index, candidate_page in enumerate(eligible_pages):
-            current_revision_id = candidate_page.CurrentVerifiedRevisionId
-            if current_revision_id is None or (
-                index == 0
-                and requested_revision_id is not None
-                and requested_revision_id != current_revision_id
-            ):
-                raise HTTPException(
-                    status_code=409,
-                    detail={
-                        "code": "CONTENT_NOT_READY",
-                        "message": "Revision của một trang trong phạm vi không còn là revision VERIFIED hiện tại.",
-                    },
-                )
-            revision = await self.repository.verified_revision(
-                candidate_page.Id, current_revision_id
+            page_tuples = await self.repository.active_book_pages_with_revisions(
+                book_id,
+                include_private_batch_check=is_book_private(book_row),
             )
-            if revision is None or not (revision.VerifiedText or "").strip():
+            eligible_entries = [
+                (p, rev) for p, rev, is_elig in page_tuples if is_elig and rev is not None
+            ]
+            eligible_by_id = {p.Id: (p, rev) for p, rev in eligible_entries}
+
+            if page_id is not None:
+                start_entry = eligible_by_id.get(page_id)
+                if start_entry is None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "CONTENT_NOT_READY",
+                            "message": "Trang bắt đầu không còn ACTIVE và VERIFIED để đọc.",
+                        },
+                    )
+                page = start_entry[0]
+            else:
+                if not eligible_entries:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "CONTENT_NOT_READY",
+                            "message": "Sách chưa có trang ACTIVE và VERIFIED để đọc.",
+                        },
+                    )
+                page = eligible_entries[0][0]
+
+            if end_page_id is not None:
+                end_entry = eligible_by_id.get(end_page_id)
+                if end_entry is None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "CONTENT_NOT_READY",
+                            "message": "Trang kết thúc không thuộc sách hoặc chưa ACTIVE và VERIFIED.",
+                        },
+                    )
+                end_page = end_entry[0]
+            else:
+                end_page = page
+
+            if end_page.PageNumber < page.PageNumber:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Trang kết thúc không được đứng trước trang bắt đầu.",
+                )
+
+            raw_numbers = [
+                p.PageNumber
+                for p, _, _ in page_tuples
+                if page.PageNumber <= p.PageNumber <= end_page.PageNumber
+            ]
+            range_entries = [
+                (p, rev)
+                for p, rev in eligible_entries
+                if page.PageNumber <= p.PageNumber <= end_page.PageNumber
+            ]
+            eligible_numbers = [p.PageNumber for p, _ in range_entries]
+            expected_numbers = list(range(page.PageNumber, end_page.PageNumber + 1))
+            if raw_numbers != expected_numbers or eligible_numbers != expected_numbers:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "READING_RANGE_NOT_CONTIGUOUS",
+                        "message": "Khoảng trang có trang bị thiếu, ngừng hoạt động hoặc chưa được quản trị viên xác minh. Vui lòng chọn lại phạm vi.",
+                    },
+                )
+
+            verified_snapshots: list[tuple[BookPage, object]] = []
+            for index, (candidate_page, revision) in enumerate(range_entries):
+                current_revision_id = candidate_page.CurrentVerifiedRevisionId
+                if current_revision_id is None or (
+                    index == 0
+                    and requested_revision_id is not None
+                    and requested_revision_id != current_revision_id
+                ):
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "CONTENT_NOT_READY",
+                            "message": "Revision của một trang trong phạm vi không còn là revision VERIFIED hiện tại.",
+                        },
+                    )
+                if revision is None or not (revision.VerifiedText or "").strip():
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "CONTENT_NOT_READY",
+                            "message": f"Trang {candidate_page.PageNumber} không có nội dung đã xác minh để đọc.",
+                        },
+                    )
+                verified_snapshots.append((candidate_page, revision))
+
+            word_rows = await self.repository.revision_word_validation_rows(
+                [rev.Id for _, rev in verified_snapshots]
+            )
+            valid_revision_ids: set[UUID] = set()
+            for rev_id, word_text, bbox in word_rows:
+                if rev_id in valid_revision_ids:
+                    continue
+                if isinstance(word_text, str) and word_text.strip() and self._valid_bbox(bbox) is not None:
+                    valid_revision_ids.add(rev_id)
+
+            for candidate_page, revision in verified_snapshots:
+                if revision.Id not in valid_revision_ids:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "CONTENT_NOT_READY",
+                            "message": f"Trang {candidate_page.PageNumber} không có dữ liệu từ và vị trí hợp lệ.",
+                        },
+                    )
+        else:
+            await self.require_owned_child(child_id, actor_id)
+            if not await self._repo_book_is_eligible(book_id, actor_id):
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "BOOK_BLOCKED_BY_CHILD_SAFETY",
+                        "message": "Sách chưa được phép sử dụng cho trẻ; OCR hoặc Child Safety chưa hoàn tất trên toàn bộ nội dung hiện tại.",
+                    },
+                )
+
+            if page_id is not None:
+                page = await self._repo_verified_page(page_id, book_id, actor_id)
+                if page is None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "CONTENT_NOT_READY",
+                            "message": "Trang bắt đầu không còn ACTIVE và VERIFIED để đọc.",
+                        },
+                    )
+            else:
+                page = await self._repo_first_verified_page(book_id, actor_id)
+                if page is None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "CONTENT_NOT_READY",
+                            "message": "Sách chưa có trang ACTIVE và VERIFIED để đọc.",
+                        },
+                    )
+
+            end_page = (
+                await self._repo_verified_page(end_page_id, book_id, actor_id)
+                if end_page_id is not None
+                else page
+            )
+            if end_page is None:
                 raise HTTPException(
                     status_code=409,
                     detail={
                         "code": "CONTENT_NOT_READY",
-                        "message": f"Trang {candidate_page.PageNumber} không có nội dung đã xác minh để đọc.",
+                        "message": "Trang kết thúc không thuộc sách hoặc chưa ACTIVE và VERIFIED.",
                     },
                 )
-            revision_words = await self.repository.revision_words(revision.Id)
-            if not any(
-                row.Text.strip() and self._valid_bbox(row.BoundingBox) is not None
-                for row in revision_words
-            ):
+            if end_page.PageNumber < page.PageNumber:
+                raise HTTPException(status_code=422, detail="Trang kết thúc không được đứng trước trang bắt đầu.")
+
+            # A selected range must be complete. Do not silently skip missing,
+            # retired, unverified, or duplicate-numbered pages in the middle.
+            raw_pages = await self.repository.all_pages_between_numbers(
+                book_id, page.PageNumber, end_page.PageNumber
+            )
+            eligible_pages = await self._repo_verified_pages_between(
+                book_id, page.PageNumber, end_page.PageNumber, actor_id
+            )
+            expected_numbers = list(range(page.PageNumber, end_page.PageNumber + 1))
+            raw_numbers = [row.PageNumber for row in raw_pages]
+            eligible_numbers = [row.PageNumber for row in eligible_pages]
+            if raw_numbers != expected_numbers or eligible_numbers != expected_numbers:
                 raise HTTPException(
                     status_code=409,
                     detail={
-                        "code": "CONTENT_NOT_READY",
-                        "message": f"Trang {candidate_page.PageNumber} không có dữ liệu từ và vị trí hợp lệ.",
+                        "code": "READING_RANGE_NOT_CONTIGUOUS",
+                        "message": "Khoảng trang có trang bị thiếu, ngừng hoạt động hoặc chưa được quản trị viên xác minh. Vui lòng chọn lại phạm vi.",
                     },
                 )
-            verified_snapshots.append((candidate_page, revision))
+
+            verified_snapshots = []
+            for index, candidate_page in enumerate(eligible_pages):
+                current_revision_id = candidate_page.CurrentVerifiedRevisionId
+                if current_revision_id is None or (
+                    index == 0
+                    and requested_revision_id is not None
+                    and requested_revision_id != current_revision_id
+                ):
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "CONTENT_NOT_READY",
+                            "message": "Revision của một trang trong phạm vi không còn là revision VERIFIED hiện tại.",
+                        },
+                    )
+                revision = await self.repository.verified_revision(
+                    candidate_page.Id, current_revision_id
+                )
+                if revision is None or not (revision.VerifiedText or "").strip():
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "CONTENT_NOT_READY",
+                            "message": f"Trang {candidate_page.PageNumber} không có nội dung đã xác minh để đọc.",
+                        },
+                    )
+                revision_words = await self.repository.revision_words(revision.Id)
+                if not any(
+                    row.Text.strip() and self._valid_bbox(row.BoundingBox) is not None
+                    for row in revision_words
+                ):
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "CONTENT_NOT_READY",
+                            "message": f"Trang {candidate_page.PageNumber} không có dữ liệu từ và vị trí hợp lệ.",
+                        },
+                    )
+                verified_snapshots.append((candidate_page, revision))
 
         state = payload.state or payload.State or "CREATED"
         state_mapping = {
@@ -633,27 +773,64 @@ class ReadingContentService:
         self, session_id: UUID, actor_id: UUID, *, base_url: str | None = None
     ) -> ReadingPageDTO:
         await self.require_parent(actor_id)
-        session = await self._repo_session(session_id, actor_id)
-        if session is None:
-            raise HTTPException(status_code=404, detail="Reading session not found")
-        await self.require_owned_child(session.ChildId, actor_id)
+        known_book_is_private: bool | None = None
+        if isinstance(self.repository, ReadingContentRepository):
+            ctx = await self.repository.session_with_ownership_and_book(
+                session_id, actor_id
+            )
+            if ctx is None:
+                raise HTTPException(status_code=404, detail="Reading session not found")
+            session, book_row, child_owned = ctx
+            if not child_owned:
+                raise HTTPException(status_code=404, detail="Child profile not found")
+            known_book_is_private = is_book_private(book_row)
 
-        page_rows = await self.repository.session_page_rows(session.Id)
-        if page_rows:
-            current_id = session.CurrentPageId or next(
-                (row.PageId for row in page_rows if row.Status == "IN_PROGRESS"),
-                page_rows[0].PageId,
-            )
-            snapshot = next((row for row in page_rows if row.PageId == current_id), None)
-            if snapshot is None:
-                raise HTTPException(status_code=409, detail="Current page is not part of this session's range")
-            page = await self.repository.page_by_id(snapshot.PageId)
-            revision = await self.repository.revision_snapshot(
-                snapshot.PageId, snapshot.PageRevisionId
-            )
-            if page is None or revision is None or page.BookId != session.BookId:
-                raise HTTPException(status_code=409, detail="Saved page snapshot is unavailable")
-            return await self._build_page_dto(page, revision, base_url=base_url)
+            content_rows = await self.repository.session_pages_with_content(session.Id)
+            if content_rows:
+                current_id = session.CurrentPageId or next(
+                    (row.PageId for row, _, _ in content_rows if row.Status == "IN_PROGRESS"),
+                    content_rows[0][0].PageId,
+                )
+                selected_tuple = next(
+                    (item for item in content_rows if item[0].PageId == current_id),
+                    None,
+                )
+                if selected_tuple is None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Current page is not part of this session's range",
+                    )
+                _, page, revision = selected_tuple
+                if page is None or revision is None or page.BookId != session.BookId:
+                    raise HTTPException(status_code=409, detail="Saved page snapshot is unavailable")
+                return await self._build_page_dto(
+                    page,
+                    revision,
+                    base_url=base_url,
+                    book_is_private=known_book_is_private,
+                )
+        else:
+            session = await self._repo_session(session_id, actor_id)
+            if session is None:
+                raise HTTPException(status_code=404, detail="Reading session not found")
+            await self.require_owned_child(session.ChildId, actor_id)
+
+            page_rows = await self.repository.session_page_rows(session.Id)
+            if page_rows:
+                current_id = session.CurrentPageId or next(
+                    (row.PageId for row in page_rows if row.Status == "IN_PROGRESS"),
+                    page_rows[0].PageId,
+                )
+                snapshot = next((row for row in page_rows if row.PageId == current_id), None)
+                if snapshot is None:
+                    raise HTTPException(status_code=409, detail="Current page is not part of this session's range")
+                page = await self.repository.page_by_id(snapshot.PageId)
+                revision = await self.repository.revision_snapshot(
+                    snapshot.PageId, snapshot.PageRevisionId
+                )
+                if page is None or revision is None or page.BookId != session.BookId:
+                    raise HTTPException(status_code=409, detail="Saved page snapshot is unavailable")
+                return await self._build_page_dto(page, revision, base_url=base_url)
 
         # Legacy sessions created before range persistence continue to use the
         # original one-page selection and current verified-revision contract.
@@ -692,7 +869,12 @@ class ReadingContentService:
                     "message": "The reading session does not reference a verified page revision.",
                 },
             )
-        return await self._build_page_dto(page, revision, base_url=base_url)
+        return await self._build_page_dto(
+            page,
+            revision,
+            base_url=base_url,
+            book_is_private=known_book_is_private,
+        )
 
     async def get_page(
         self,
@@ -704,40 +886,77 @@ class ReadingContentService:
         base_url: str | None = None,
     ) -> ReadingPageDTO:
         await self.require_parent(actor_id)
-
-        session = await self._repo_session(session_id, actor_id)
-        if session is None:
-            raise HTTPException(status_code=404, detail="Reading session not found")
-
-        await self.require_owned_child(session.ChildId, actor_id)
-
-        session_rows = await self.repository.session_page_rows(session.Id)
-
-        if session_rows:
-            snapshot = await self.repository.session_page(session.Id, page_id)
-
-            if snapshot is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Page is outside this reading session's selected range",
-                )
-
-            if revision_id is not None and snapshot.PageRevisionId != revision_id:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Requested revision does not match the reading session snapshot",
-                )
-
-            page = await self.repository.page_by_id(snapshot.PageId)
-            revision = await self.repository.revision_snapshot(
-                snapshot.PageId,
-                snapshot.PageRevisionId,
+        known_book_is_private: bool | None = None
+        if isinstance(self.repository, ReadingContentRepository):
+            ctx = await self.repository.session_with_ownership_and_book(
+                session_id, actor_id
             )
+            if ctx is None:
+                raise HTTPException(status_code=404, detail="Reading session not found")
+            session, book_row, child_owned = ctx
+            if not child_owned:
+                raise HTTPException(status_code=404, detail="Child profile not found")
+            known_book_is_private = is_book_private(book_row)
 
-            if page is None or revision is None or page.BookId != session.BookId:
-                raise HTTPException(status_code=409, detail="Saved page snapshot is unavailable")
+            content_rows = await self.repository.session_pages_with_content(session.Id)
+            if content_rows:
+                selected_tuple = next(
+                    (item for item in content_rows if item[0].PageId == page_id),
+                    None,
+                )
+                if selected_tuple is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Page is outside this reading session's selected range",
+                    )
+                snapshot, page, revision = selected_tuple
+                if revision_id is not None and snapshot.PageRevisionId != revision_id:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Requested revision does not match the reading session snapshot",
+                    )
+                if page is None or revision is None or page.BookId != session.BookId:
+                    raise HTTPException(status_code=409, detail="Saved page snapshot is unavailable")
+                return await self._build_page_dto(
+                    page,
+                    revision,
+                    base_url=base_url,
+                    book_is_private=known_book_is_private,
+                )
+        else:
+            session = await self._repo_session(session_id, actor_id)
+            if session is None:
+                raise HTTPException(status_code=404, detail="Reading session not found")
 
-            return await self._build_page_dto(page, revision, base_url=base_url)
+            await self.require_owned_child(session.ChildId, actor_id)
+
+            session_rows = await self.repository.session_page_rows(session.Id)
+
+            if session_rows:
+                snapshot = await self.repository.session_page(session.Id, page_id)
+
+                if snapshot is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Page is outside this reading session's selected range",
+                    )
+
+                if revision_id is not None and snapshot.PageRevisionId != revision_id:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Requested revision does not match the reading session snapshot",
+                    )
+
+                page = await self.repository.page_by_id(snapshot.PageId)
+                revision = await self.repository.revision_snapshot(
+                    snapshot.PageId,
+                    snapshot.PageRevisionId,
+                )
+
+                if page is None or revision is None or page.BookId != session.BookId:
+                    raise HTTPException(status_code=409, detail="Saved page snapshot is unavailable")
+
+                return await self._build_page_dto(page, revision, base_url=base_url)
 
         # Legacy session
         page = await self._repo_verified_page(page_id, session.BookId, actor_id)
@@ -759,7 +978,12 @@ class ReadingContentService:
         if revision is None:
             raise HTTPException(status_code=409, detail="Page revision is unavailable")
 
-        return await self._build_page_dto(page, revision, base_url=base_url)
+        return await self._build_page_dto(
+            page,
+            revision,
+            base_url=base_url,
+            book_is_private=known_book_is_private,
+        )
 
     async def get_session_progress(
         self, session_id: UUID, actor_id: UUID
@@ -922,7 +1146,12 @@ class ReadingContentService:
         return await self.get_session_progress(session_id, actor_id)
 
     async def _build_page_dto(
-        self, page: BookPage, revision, *, base_url: str | None = None
+        self,
+        page: BookPage,
+        revision,
+        *,
+        base_url: str | None = None,
+        book_is_private: bool | None = None,
     ) -> ReadingPageDTO:
         text_content = (revision.VerifiedText or "").strip()
         if not text_content:
@@ -1000,10 +1229,11 @@ class ReadingContentService:
             image_path = page.ImagePath
 
         book_id_value = getattr(page, "BookId", None)
-        book_is_private = False
-        if book_id_value is not None and isinstance(self.repository, ReadingContentRepository):
-            book_row = await self.repository.book_by_id(book_id_value)
-            book_is_private = book_row is not None and is_book_private(book_row)
+        if book_is_private is None:
+            book_is_private = False
+            if book_id_value is not None and isinstance(self.repository, ReadingContentRepository):
+                book_row = await self.repository.book_by_id(book_id_value)
+                book_is_private = book_row is not None and is_book_private(book_row)
 
         await self.repository.db.rollback()
 
@@ -1017,7 +1247,7 @@ class ReadingContentService:
             )
         elif image_path:
             try:
-                image_url = create_signed_image_url(image_path)
+                image_url = await asyncio.to_thread(create_signed_image_url, image_path)
             except Exception:
                 # Keep reading text available if Storage preview URLs are temporarily unavailable.
                 image_url = None

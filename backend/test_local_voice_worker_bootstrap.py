@@ -342,10 +342,7 @@ class LocalVoiceWorkerBootstrapTests(unittest.IsolatedAsyncioTestCase):
 
         # 1. ConnectError fires background recovery without blocking get_health()
         with (
-            patch(
-                "app.providers.local_voice_provider.httpx.AsyncClient",
-                ConnectErrorClient,
-            ),
+            patch.object(provider, "_get_client", return_value=ConnectErrorClient()),
             patch(
                 "app.providers.local_voice_provider.ensure_local_voice_worker_running",
                 new=AsyncMock(side_effect=RuntimeError("boom")),
@@ -363,10 +360,7 @@ class LocalVoiceWorkerBootstrapTests(unittest.IsolatedAsyncioTestCase):
 
         # 2. auth_required mismatch also fires background recovery when armed
         with (
-            patch(
-                "app.providers.local_voice_provider.httpx.AsyncClient",
-                AuthMismatchHealthClient,
-            ),
+            patch.object(provider, "_get_client", return_value=AuthMismatchHealthClient()),
             patch(
                 "app.providers.local_voice_provider.ensure_local_voice_worker_running",
                 new=AsyncMock(return_value=True),

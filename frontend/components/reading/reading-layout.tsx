@@ -81,6 +81,7 @@ interface ReadingLayoutProps {
   sentenceReinforcementPanel?: ReactNode;
   onToggleListening?: () => void;
   onWordClick?: (word: ReadingPageWordDTO) => void;
+  onRefreshPageImage?: (pageId: string) => Promise<string | null | undefined>;
   page: ReadingPageDTO;
   comparisonResult?: ComparisonResult | null;
   spokenWords?: Set<string>;
@@ -142,6 +143,7 @@ export function ReadingLayout({
   sentenceReinforcementPanel,
   onToggleListening,
   onWordClick,
+  onRefreshPageImage,
   page,
   comparisonResult,
   spokenWords,
@@ -260,6 +262,7 @@ export function ReadingLayout({
           currentWordId={currentWordId}
           isTransitioning={isPageTransitioning}
           mispronouncedWordIds={mispronouncedWordIds}
+          onRefreshImageUrl={onRefreshPageImage}
           onWordClick={onWordClick}
           page={page}
           previewSnapshot={previewSnapshot}

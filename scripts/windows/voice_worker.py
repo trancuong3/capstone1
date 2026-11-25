@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import hmac
 import io
 import json
 import logging
@@ -25,9 +26,11 @@ import re
 import time
 import unicodedata
 from collections import OrderedDict
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
+from uuid import uuid4
 
 import av
 import librosa
@@ -35,7 +38,7 @@ import numpy as np
 from scipy import signal as scipy_signal
 import sherpa_onnx
 import soundfile as sf
-from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 
 VOICE_RUNTIME_ROOT = Path(
@@ -54,12 +57,37 @@ from vieneu import Vieneu  # noqa: E402
 from vieneu_utils.core_utils import gaps_to_silence  # noqa: E402
 from vieneu_utils.phonemize_text import normalize_to_chunks_v3_with_gaps  # noqa: E402
 
+_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+_request_id_ctx: ContextVar[str] = ContextVar("viread_voice_request_id", default="-")
+
+
+def _sanitize_request_id(raw: str | None) -> str:
+    candidate = (raw or "").strip()
+    if candidate and _REQUEST_ID_RE.fullmatch(candidate):
+        return candidate
+    return uuid4().hex
+
+
+def get_voice_request_id() -> str:
+    return _request_id_ctx.get()
+
+
+class _RequestIdLogFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = _request_id_ctx.get()
+        return True
+
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s %(levelname)s [voice_worker] %(message)s",
+    format="%(asctime)s %(levelname)s [voice_worker] [rid=%(request_id)s] %(message)s",
 )
+for _handler in logging.getLogger().handlers:
+    _handler.addFilter(_RequestIdLogFilter())
 logger = logging.getLogger("viread.voice_worker")
+logger.addFilter(_RequestIdLogFilter())
 
+WORKER_VERSION = "1.1.0"
 STT_MODEL_VERSION = "sherpa-onnx-zipformer-vi-30m-int8-2026-02-09"
 TTS_PRECISION = os.environ.get("VIREAD_VOICE_TTS_PRECISION", "int8").strip().lower()
 if TTS_PRECISION not in ("fp32", "int8"):
@@ -85,7 +113,8 @@ TTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_AUDIO_BYTES = 15 * 1024 * 1024
 MAX_TEXT_CHARS = 5000
-QUEUE_WAIT_SECONDS = 40.0
+QUEUE_WAIT_SECONDS = float(os.environ.get("VIREAD_VOICE_QUEUE_WAIT_SECONDS", "25.0"))
+STT_QUEUE_WAIT_SECONDS = float(os.environ.get("VIREAD_VOICE_STT_QUEUE_WAIT_SECONDS", "15.0"))
 TTS_MEM_CACHE_MAX_ENTRIES = 128
 _TTS_MEM_CACHE: OrderedDict[str, tuple[bytes, float]] = OrderedDict()
 
@@ -284,7 +313,77 @@ class VoiceRuntimeEngine:
 
 
 runtime = VoiceRuntimeEngine()
-app = FastAPI(title="ViRead Local Voice Worker", version="1.0.0")
+
+
+async def _ensure_capability_loaded(capability: Literal["tts", "stt"]) -> None:
+    try:
+        await runtime.ensure_loaded()
+    except Exception as exc:
+        logger.error("worker_model_load_failed capability=%s error_type=%s", capability, type(exc).__name__)
+        code = "LOCAL_TTS_UNAVAILABLE" if capability == "tts" else "LOCAL_STT_UNAVAILABLE"
+        msg = (
+            "Bộ đọc giọng nói trên máy chưa sẵn sàng."
+            if capability == "tts"
+            else "Bộ nhận diện giọng nói trên máy chưa sẵn sàng."
+        )
+        raise HTTPException(
+            status_code=503,
+            detail={"code": code, "message": msg},
+        ) from None
+app = FastAPI(title="ViRead Local Voice Worker", version=WORKER_VERSION)
+
+
+def _expected_voice_token() -> str:
+    return os.environ.get("VIREAD_VOICE_WORKER_TOKEN", "").strip()
+
+
+async def require_voice_worker_token(
+    x_viread_voice_token: str | None = Header(default=None, alias="X-ViRead-Voice-Token"),
+) -> None:
+    expected = _expected_voice_token()
+    if not expected:
+        return
+    provided = (x_viread_voice_token or "").strip()
+    if not provided or not hmac.compare_digest(
+        provided.encode("utf-8"), expected.encode("utf-8")
+    ):
+        logger.warning("voice_auth_rejected")
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "VOICE_WORKER_UNAUTHORIZED",
+                "message": "Không được phép truy cập dịch vụ giọng nói.",
+            },
+        )
+
+
+@app.middleware("http")
+async def _request_context_middleware(request: Request, call_next):
+    req_id = _sanitize_request_id(request.headers.get("X-Request-ID"))
+    token = _request_id_ctx.set(req_id)
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = req_id
+        if request.url.path != "/health":
+            logger.info(
+                "http_done method=%s path=%s status=%d ms=%.1f",
+                request.method,
+                request.url.path,
+                response.status_code,
+                (time.perf_counter() - started) * 1000.0,
+            )
+        return response
+    except Exception:
+        logger.warning(
+            "http_unhandled method=%s path=%s ms=%.1f",
+            request.method,
+            request.url.path,
+            (time.perf_counter() - started) * 1000.0,
+        )
+        raise
+    finally:
+        _request_id_ctx.reset(token)
 
 
 @app.on_event("startup")
@@ -477,7 +576,55 @@ def encode_wav_bytes(wav: np.ndarray, sr: int) -> bytes:
     return buf.getvalue()
 
 
-def decode_audio_bytes_to_16k_mono(raw_bytes: bytes) -> tuple[np.ndarray, float]:
+def _guess_av_format_hints(
+    raw_bytes: bytes,
+    *,
+    filename: str = "",
+    content_type: str = "",
+) -> list[str | None]:
+    hints: list[str | None] = [None]
+    candidates: list[str] = []
+
+    if raw_bytes.startswith(b"RIFF") and raw_bytes[8:12] == b"WAVE":
+        candidates.append("wav")
+    elif raw_bytes.startswith(b"OggS"):
+        candidates.append("ogg")
+    elif raw_bytes.startswith(b"\x1a\x45\xdf\xa3"):
+        candidates.extend(["webm", "matroska"])
+    elif len(raw_bytes) >= 12 and raw_bytes[4:8] == b"ftyp":
+        candidates.extend(["mp4", "mov"])
+    elif raw_bytes.startswith(b"ID3") or (len(raw_bytes) >= 2 and raw_bytes[0] == 0xFF and (raw_bytes[1] & 0xE0) == 0xE0):
+        candidates.append("mp3")
+
+    lower_name = (filename or "").lower()
+    lower_ct = (content_type or "").lower()
+    ext_map = (
+        (".webm", "webm"),
+        (".ogg", "ogg"),
+        (".oga", "ogg"),
+        (".mp4", "mp4"),
+        (".m4a", "mp4"),
+        (".aac", "aac"),
+        (".wav", "wav"),
+        (".mp3", "mp3"),
+        (".flac", "flac"),
+    )
+    for ext, fmt in ext_map:
+        if lower_name.endswith(ext) or ext.lstrip(".") in lower_ct:
+            candidates.append(fmt)
+
+    for c in candidates:
+        if c not in hints:
+            hints.append(c)
+    return hints
+
+
+def decode_audio_bytes_to_16k_mono(
+    raw_bytes: bytes,
+    *,
+    filename: str = "",
+    content_type: str = "",
+) -> tuple[np.ndarray, float]:
     if not raw_bytes:
         raise ValueError("Empty audio file")
 
@@ -487,34 +634,66 @@ def decode_audio_bytes_to_16k_mono(raw_bytes: bytes) -> tuple[np.ndarray, float]
         arr = np.asarray(wav, dtype=np.float32)
         if arr.ndim > 1:
             arr = arr.mean(axis=1)
-        if arr.size > 0:
+        if arr.size > 0 and sr > 0:
+            arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
             if sr != 16000:
                 arr = librosa.resample(arr, orig_sr=sr, target_sr=16000)
-            return arr.astype(np.float32), float(len(arr) / 16000.0)
+            arr = np.clip(arr, -1.0, 1.0).astype(np.float32)
+            return arr, float(len(arr) / 16000.0)
     except Exception:
         pass
 
-    # Container path (.webm / .ogg Opus / .mp4 / .m4a / .mp3) via PyAV (without metadata_errors)
-    container = av.open(io.BytesIO(raw_bytes), mode="r")
-    try:
-        audio_streams = [s for s in container.streams if s.type == "audio"]
-        if not audio_streams:
-            raise ValueError("No audio stream found")
-        resampler = av.AudioResampler(format="fltp", layout="mono", rate=16000)
-        chunks: list[np.ndarray] = []
-        for frame in container.decode(audio_streams[0]):
-            for out_frame in resampler.resample(frame):
-                plane = out_frame.to_ndarray()
-                chunks.append(np.asarray(plane[0], dtype=np.float32))
-        for out_frame in resampler.resample(None):
-            plane = out_frame.to_ndarray()
-            chunks.append(np.asarray(plane[0], dtype=np.float32))
-        if not chunks:
-            return np.zeros(0, dtype=np.float32), 0.0
-        merged = np.concatenate(chunks).astype(np.float32)
-        return merged, float(len(merged) / 16000.0)
-    finally:
-        container.close()
+    # Container path (.webm / .ogg Opus / .mp4 / .m4a / .aac / .mp3 / .wav) via PyAV
+    last_exc: Exception | None = None
+    for fmt_hint in _guess_av_format_hints(
+        raw_bytes, filename=filename, content_type=content_type
+    ):
+        container = None
+        try:
+            open_kwargs: dict[str, Any] = {"mode": "r"}
+            if fmt_hint is not None:
+                open_kwargs["format"] = fmt_hint
+            container = av.open(io.BytesIO(raw_bytes), **open_kwargs)
+            audio_streams = [s for s in container.streams if s.type == "audio"]
+            if not audio_streams:
+                raise ValueError("No audio stream found")
+            resampler = av.AudioResampler(format="fltp", layout="mono", rate=16000)
+            chunks: list[np.ndarray] = []
+            try:
+                for frame in container.decode(audio_streams[0]):
+                    for out_frame in resampler.resample(frame):
+                        plane = out_frame.to_ndarray()
+                        mono = plane[0] if plane.ndim > 1 else plane
+                        if mono.size > 0:
+                            chunks.append(np.asarray(mono, dtype=np.float32))
+            except (av.error.EOFError, av.error.InvalidDataError) as decode_err:
+                if not chunks:
+                    raise decode_err
+            try:
+                for out_frame in resampler.resample(None):
+                    plane = out_frame.to_ndarray()
+                    mono = plane[0] if plane.ndim > 1 else plane
+                    if mono.size > 0:
+                        chunks.append(np.asarray(mono, dtype=np.float32))
+            except Exception:
+                pass
+            if not chunks:
+                return np.zeros(0, dtype=np.float32), 0.0
+            merged = np.concatenate(chunks).astype(np.float32)
+            merged = np.nan_to_num(merged, nan=0.0, posinf=0.0, neginf=0.0)
+            merged = np.clip(merged, -1.0, 1.0).astype(np.float32)
+            return merged, float(len(merged) / 16000.0)
+        except Exception as exc:
+            last_exc = exc
+        finally:
+            if container is not None:
+                try:
+                    container.close()
+                except Exception:
+                    pass
+
+    assert last_exc is not None
+    raise last_exc
 
 
 def build_stt_words_from_sherpa(
@@ -877,7 +1056,9 @@ async def get_health() -> dict[str, Any]:
     tts_ready = runtime.tts_engine is not None
     return {
         "status": "ok" if (stt_ready and tts_ready) else "initializing",
+        "version": WORKER_VERSION,
         "provider": "local",
+        "auth_required": bool(_expected_voice_token()),
         "stt": {
             "ready": stt_ready,
             "model_version": STT_MODEL_VERSION,
@@ -894,7 +1075,7 @@ async def get_health() -> dict[str, Any]:
     }
 
 
-@app.get("/voices")
+@app.get("/voices", dependencies=[Depends(require_voice_worker_token)])
 async def list_voices() -> dict[str, Any]:
     return {
         "provider": "local",
@@ -924,9 +1105,9 @@ async def list_voices() -> dict[str, Any]:
     }
 
 
-@app.post("/tts")
+@app.post("/tts", dependencies=[Depends(require_voice_worker_token)])
 async def post_tts(req: TtsSynthesisRequest) -> Response:
-    await runtime.ensure_loaded()
+    await _ensure_capability_loaded("tts")
     preset = resolve_strict_voice(req.voice_id)
     text_nfc = normalize_nfc_text(req.text)
     speed = normalize_speed(req.speed)
@@ -943,12 +1124,20 @@ async def post_tts(req: TtsSynthesisRequest) -> Response:
     mem_hit = _mem_cache_get(cache_key)
     if mem_hit is not None:
         wav_bytes, duration_s = mem_hit
+        logger.info(
+            "tts_cache_hit voice=%s region=%s speed=%.2f duration_s=%.3f",
+            preset.voice_id,
+            preset.region,
+            speed,
+            duration_s,
+        )
     else:
         try:
             await asyncio.wait_for(
                 runtime.tts_semaphore.acquire(), timeout=QUEUE_WAIT_SECONDS
             )
         except TimeoutError as exc:
+            logger.warning("tts_busy voice=%s region=%s", preset.voice_id, preset.region)
             raise HTTPException(
                 status_code=503,
                 detail={
@@ -971,6 +1160,14 @@ async def post_tts(req: TtsSynthesisRequest) -> Response:
             runtime.active_tts_jobs -= 1
             runtime.tts_semaphore.release()
         _mem_cache_put(cache_key, (wav_bytes, duration_s))
+        logger.info(
+            "tts_ok voice=%s region=%s speed=%.2f words=%d duration_s=%.3f",
+            preset.voice_id,
+            preset.region,
+            speed,
+            word_count,
+            duration_s,
+        )
 
     return Response(
         content=wav_bytes,
@@ -988,9 +1185,9 @@ async def post_tts(req: TtsSynthesisRequest) -> Response:
     )
 
 
-@app.post("/tts/timed")
+@app.post("/tts/timed", dependencies=[Depends(require_voice_worker_token)])
 async def post_tts_timed(req: TtsSynthesisRequest) -> dict[str, Any]:
-    await runtime.ensure_loaded()
+    await _ensure_capability_loaded("tts")
     preset = resolve_strict_voice(req.voice_id)
     text_nfc = normalize_nfc_text(req.text)
     speed = normalize_speed(req.speed)
@@ -1000,6 +1197,7 @@ async def post_tts_timed(req: TtsSynthesisRequest) -> dict[str, Any]:
             runtime.tts_semaphore.acquire(), timeout=QUEUE_WAIT_SECONDS
         )
     except TimeoutError as exc:
+        logger.warning("tts_timed_busy voice=%s region=%s", preset.voice_id, preset.region)
         raise HTTPException(
             status_code=503,
             detail={
@@ -1010,21 +1208,30 @@ async def post_tts_timed(req: TtsSynthesisRequest) -> dict[str, Any]:
 
     runtime.active_tts_jobs += 1
     try:
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             synthesize_timed_passage_sync,
             runtime.tts_engine,
             text_nfc,
             preset,
             speed,
         )
+        logger.info(
+            "tts_timed_ok voice=%s region=%s speed=%.2f words=%d duration_s=%.3f",
+            preset.voice_id,
+            preset.region,
+            speed,
+            len(result.get("words") or []),
+            float(result.get("duration_seconds") or 0.0),
+        )
+        return result
     finally:
         runtime.active_tts_jobs -= 1
         runtime.tts_semaphore.release()
 
 
-@app.post("/tts/phonics")
+@app.post("/tts/phonics", dependencies=[Depends(require_voice_worker_token)])
 async def post_tts_phonics(req: PhonicsSynthesisRequest) -> dict[str, Any]:
-    await runtime.ensure_loaded()
+    await _ensure_capability_loaded("tts")
     preset = resolve_strict_voice(req.voice_id)
     speed = normalize_speed(req.speed)
 
@@ -1033,6 +1240,7 @@ async def post_tts_phonics(req: PhonicsSynthesisRequest) -> dict[str, Any]:
             runtime.tts_semaphore.acquire(), timeout=QUEUE_WAIT_SECONDS
         )
     except TimeoutError as exc:
+        logger.warning("tts_phonics_busy voice=%s region=%s", preset.voice_id, preset.region)
         raise HTTPException(
             status_code=503,
             detail={
@@ -1043,25 +1251,34 @@ async def post_tts_phonics(req: PhonicsSynthesisRequest) -> dict[str, Any]:
 
     runtime.active_tts_jobs += 1
     try:
-        return await asyncio.to_thread(
+        result = await asyncio.to_thread(
             synthesize_phonics_steps_sync,
             runtime.tts_engine,
             req.steps,
             preset,
             speed,
         )
+        logger.info(
+            "tts_phonics_ok voice=%s region=%s speed=%.2f steps=%d duration_s=%.3f",
+            preset.voice_id,
+            preset.region,
+            speed,
+            len(req.steps),
+            float(result.get("duration_seconds") or 0.0),
+        )
+        return result
     finally:
         runtime.active_tts_jobs -= 1
         runtime.tts_semaphore.release()
 
 
-@app.post("/stt")
+@app.post("/stt", dependencies=[Depends(require_voice_worker_token)])
 async def post_stt(
     audio_file: UploadFile = File(...),
     language: str = Form(default="vi"),
 ) -> dict[str, Any]:
     del language
-    await runtime.ensure_loaded()
+    await _ensure_capability_loaded("stt")
     raw = await audio_file.read(MAX_AUDIO_BYTES + 1)
     if not raw:
         raise HTTPException(
@@ -1082,9 +1299,10 @@ async def post_stt(
 
     try:
         await asyncio.wait_for(
-            runtime.stt_semaphore.acquire(), timeout=QUEUE_WAIT_SECONDS
+            runtime.stt_semaphore.acquire(), timeout=STT_QUEUE_WAIT_SECONDS
         )
     except TimeoutError as exc:
+        logger.warning("stt_busy audio_bytes=%d", len(raw))
         raise HTTPException(
             status_code=503,
             detail={
@@ -1097,9 +1315,17 @@ async def post_stt(
     try:
         try:
             samples16, duration_s = await asyncio.to_thread(
-                decode_audio_bytes_to_16k_mono, raw
+                decode_audio_bytes_to_16k_mono,
+                raw,
+                filename=audio_file.filename or "",
+                content_type=audio_file.content_type or "",
             )
         except Exception as exc:
+            logger.warning(
+                "stt_decode_failed audio_bytes=%d error_type=%s",
+                len(raw),
+                type(exc).__name__,
+            )
             raise HTTPException(
                 status_code=422,
                 detail={
@@ -1109,6 +1335,7 @@ async def post_stt(
             ) from exc
 
         if samples16.size < 400:
+            logger.info("stt_short_audio audio_bytes=%d duration_s=%.3f", len(raw), duration_s)
             return {
                 "text": "",
                 "words": [],
@@ -1182,6 +1409,12 @@ async def post_stt(
             return txt, words
 
         text_out, words_out = await asyncio.to_thread(_decode_sync)
+        logger.info(
+            "stt_ok audio_bytes=%d duration_s=%.3f word_count=%d",
+            len(raw),
+            duration_s,
+            len(words_out),
+        )
         return {
             "text": text_out,
             "words": words_out,
@@ -1202,4 +1435,4 @@ if __name__ == "__main__":
 
     host = os.environ.get("VIREAD_VOICE_WORKER_HOST", "127.0.0.1")
     port = int(os.environ.get("VIREAD_VOICE_WORKER_PORT", "8010"))
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    uvicorn.run(app, host=host, port=port, log_level="info", timeout_keep_alive=65)

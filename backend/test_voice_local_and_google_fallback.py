@@ -647,8 +647,7 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
         self.assertEqual(
             recorded_headers[-1],
             {
-                "Authorization": "Bearer secret-worker-tok",
-                "X-ViRead-Worker-Token": "secret-worker-tok",
+                "X-ViRead-Voice-Token": "secret-worker-tok",
             },
         )
 

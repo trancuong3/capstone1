@@ -710,6 +710,15 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
   test("G4 + G9: Voice help plays sample, blocks immediate echo, then marks imitated word assisted (not green, with non-color cue)", async ({
     page,
   }, testInfo) => {
+    // Exercise final Web Speech results without depending on the host's
+    // MediaRecorder signal levels. Audio quality is covered by separate tests.
+    await page.addInitScript(() => {
+      Object.defineProperty(window, "MediaRecorder", {
+        configurable: true,
+        value: undefined,
+      });
+    });
+    await page.clock.install();
     mkdirSync(EVIDENCE_DIR, { recursive: true });
     const harness = await installAutopilotSession(page, {
       initialState: "reading",
@@ -797,8 +806,8 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
       "assisted",
     );
 
-    // Wait past the 1.5s echo tail guard, then child imitates "nhỏ"
-    await page.waitForTimeout(1700);
+    // Advance beyond the 1.5s echo guard before the child imitates the sample.
+    await page.clock.runFor(1700);
     await page.evaluate(() =>
       (
         window as unknown as {

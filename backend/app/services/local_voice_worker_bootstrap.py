@@ -151,11 +151,15 @@ def should_autostart_local_voice_worker(
 
 
 async def _is_worker_healthy(base_url: str) -> bool:
-    worker_token = (os.getenv("VIREAD_LOCAL_VOICE_WORKER_TOKEN") or "").strip()
+    worker_token = (
+        os.getenv("VIREAD_VOICE_WORKER_TOKEN")
+        or os.getenv("VIREAD_LOCAL_VOICE_WORKER_TOKEN")
+        or ""
+    ).strip()
     headers = (
         {
             "Authorization": f"Bearer {worker_token}",
-            "X-ViRead-Worker-Token": worker_token,
+            "X-ViRead-Voice-Token": worker_token,
         }
         if worker_token
         else None

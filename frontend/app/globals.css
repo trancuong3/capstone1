@@ -963,3 +963,26 @@ button:disabled {
     transition-duration: 0.01ms !important;
   }
 }
+
+@keyframes viread-nav-progress {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}
+
+.viread-nav-progress-bar {
+  animation: viread-nav-progress 1s ease-in-out infinite;
+}
+
+a[href]:active,
+button:not(:disabled):active {
+  transform: scale(0.985);
+}
+
+a[data-nav-pending="true"] {
+  opacity: 0.72;
+  cursor: progress;
+}
