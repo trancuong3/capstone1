@@ -235,7 +235,11 @@ export function ReadingLayout({
         </button>
       </header>
 
-      {topBar ? <div className="shrink-0">{topBar}</div> : null}
+      {topBar ? (
+        <div data-reading-topbar="true" className="shrink-0">
+          {topBar}
+        </div>
+      ) : null}
 
       <section
         aria-label="Nội dung trang sách"
@@ -400,8 +404,8 @@ export function ReadingLayout({
                 </span>
               </div>
             ) : isPlayingSample ? (
-              <div className="mx-auto flex w-full max-w-[1008px] flex-wrap items-center justify-between gap-2 rounded-card border border-border bg-white px-4 py-2.5">
-                <div className="flex min-w-0 flex-1 items-center gap-2">
+              <div className="mx-auto flex w-full max-w-[1008px] flex-wrap items-center justify-between gap-2.5 rounded-card border border-border bg-white px-3 py-2 sm:px-4 sm:py-2.5">
+                <div className="flex min-w-0 basis-full items-center gap-2 min-[520px]:basis-auto min-[520px]:flex-1">
                   <Volume2
                     aria-hidden="true"
                     className="size-4 shrink-0 text-primary"
@@ -409,13 +413,13 @@ export function ReadingLayout({
                   <span className="shrink-0 text-sm font-semibold text-ink">
                     Đọc mẫu
                   </span>
-                  <span className="truncate text-sm text-muted">
+                  <span className="min-w-0 truncate text-sm text-muted">
                     {isSamplePaused
                       ? "Đã tạm dừng đọc mẫu."
                       : "Đang phát âm toàn bộ trang sách theo giọng mẫu..."}
                   </span>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
                   {onToggleSamplePause ? (
                     <button
                       type="button"
@@ -527,7 +531,10 @@ export function ReadingLayout({
           onChoosePage={onChoosePage}
         />
 
-        <div className="mt-1 [&>div]:flex [&>div]:flex-wrap [&>div]:items-center [&>div]:justify-between [&>div]:gap-x-2 [&>div]:gap-y-0.5 [&>div]:pt-1 [&>div]:text-xs sm:[&>div]:text-sm">
+        <div
+          data-reading-progress-wrap="true"
+          className="mt-1 [&>div]:flex [&>div]:flex-wrap [&>div]:items-center [&>div]:justify-between [&>div]:gap-x-2 [&>div]:gap-y-0.5 [&>div]:pt-1 [&>div]:text-xs sm:[&>div]:text-sm"
+        >
           <ReadingProgress
             isListening={isListening}
             pageNumber={page.page_number}

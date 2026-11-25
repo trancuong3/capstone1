@@ -10,7 +10,11 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
 export type VoiceEngineTier =
-  "local_offline" | "google_cloud" | "browser_default" | "idle";
+  | "local_offline"
+  | "browser_wasm"
+  | "google_cloud"
+  | "browser_default"
+  | "idle";
 
 export interface VoiceEngineHealthSnapshot {
   readonly default_mode: string;
@@ -95,7 +99,15 @@ export function mapProviderToEngineSnapshot(input: {
   let engineLabel = isStt ? "Offline (Sherpa-ONNX)" : "Offline (VieNeu-TTS)";
   let shortLabel = "Offline";
 
-  if (normalized === "google" || normalized.startsWith("google")) {
+  if (normalized === "wasm" || normalized === "browser_wasm") {
+    tier = "browser_wasm";
+    engineLabel = "Offline (WASM trên máy)";
+    shortLabel = "Offline (WASM)";
+  } else if (normalized === "precomputed_cache") {
+    tier = "local_offline";
+    engineLabel = "Offline (Precomputed Cache)";
+    shortLabel = "Offline (Cache)";
+  } else if (normalized === "google" || normalized.startsWith("google")) {
     tier = "google_cloud";
     engineLabel = "Google Cloud API";
     shortLabel = "Online (Google API)";

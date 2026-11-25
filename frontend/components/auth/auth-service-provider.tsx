@@ -19,6 +19,7 @@ import type { AuthSessionSnapshot, AuthStateEvent } from "@/types/auth";
 export const AuthServiceContext = createContext<AuthService | null>(null);
 
 export interface AuthRuntimeState {
+  hasProvider?: boolean;
   initializationFailure: AuthFailureReason | null;
   isPasswordRecovery: boolean;
   lastEvent: AuthStateEvent | null;
@@ -28,6 +29,7 @@ export interface AuthRuntimeState {
 }
 
 const defaultAuthRuntimeState: AuthRuntimeState = {
+  hasProvider: false,
   initializationFailure: null,
   isPasswordRecovery: false,
   lastEvent: null,
@@ -59,6 +61,7 @@ export function AuthServiceProvider({ children }: AuthServiceProviderProps) {
 
   const [runtime, setRuntime] = useState<AuthRuntimeState>(() => ({
     ...defaultAuthRuntimeState,
+    hasProvider: true,
     mode: "supabase",
     status: "initializing",
   }));

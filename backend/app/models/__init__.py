@@ -25,6 +25,7 @@ from .picture_description import PictureDescriptionAttempt, PictureDescriptionSe
 from .admin_ai_workflow import AdminAiWorkflow
 from .difficult_word_practice import DifficultWordPracticeAttempt
 from .ocr_inference_job import OcrInferenceJob, OcrWorkerHeartbeat
+from .tts_audio_cache import TtsAudioCacheDailyUsage, TtsAudioCacheEntry
 from .parent_private_book import (
     ParentBookFlow2Candidate,
     ParentBookModerationRequest,

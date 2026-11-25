@@ -163,7 +163,19 @@ class DocumentRasterizerTests(unittest.TestCase):
         )
         self.assertEqual(bmp_bundle.source_format, "BMP")
         self.assertEqual(len(bmp_bundle.pages), 1)
-        self.assertEqual(bmp_bundle.pages[0].content_type, "image/png")
+        self.assertEqual(bmp_bundle.pages[0].content_type, "image/jpeg")
+        self.assertEqual(bmp_bundle.pages[0].extension, "jpg")
+        self.assertTrue(bmp_bundle.pages[0].image_bytes.startswith(b"\xff\xd8\xff"))
+
+        with patch.dict(os.environ, {"VIREAD_RASTERIZER_FORMAT": "png"}):
+            png_override_bundle = rasterize_uploaded_document(
+                filename="scan.bmp",
+                content_type="application/octet-stream",
+                data=_make_bmp_bytes(),
+            )
+        self.assertEqual(png_override_bundle.pages[0].content_type, "image/png")
+        self.assertEqual(png_override_bundle.pages[0].extension, "png")
+        self.assertTrue(png_override_bundle.pages[0].image_bytes.startswith(b"\x89PNG\r\n\x1a\n"))
 
         tiff_bundle = rasterize_uploaded_document(
             filename="scan-multi.tiff",

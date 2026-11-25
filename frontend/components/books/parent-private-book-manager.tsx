@@ -141,6 +141,38 @@ function describeToolCheckScope(scope: ToolCheckScopeDTO): string {
   return `${parts.join("; ")}.`;
 }
 
+function lockReasonForSubmission(sub: ParentPageSubmissionDTO): string | null {
+  if (sub.can_add_to_book) return null;
+  if (sub.workflow_status === "ADDED_TO_BOOK") {
+    return "Trang này đã được thêm vào sách đọc.";
+  }
+  if (sub.tool_check_policy_blocked) {
+    return "Nội dung vi phạm mức chặn an toàn trẻ em. Hãy sửa nội dung hoặc thay ảnh trang khác.";
+  }
+  if (sub.workflow_status === "CHECKING") {
+    return "Đang chạy OCR, rà chính tả và kiểm tra an toàn.";
+  }
+  if (sub.workflow_status === "NEEDS_ADMIN_REVIEW") {
+    return "Tool Check đã gắn cờ hoặc trang cần người xem xét. Phải gửi Admin duyệt đúng phiên bản này trước khi thêm vào sách.";
+  }
+  if (sub.workflow_status === "PENDING_ADMIN") {
+    return "Đang chờ Admin duyệt đúng phiên bản này.";
+  }
+  if (sub.workflow_status === "REJECTED") {
+    return "Admin đã từ chối phiên bản này. Hãy sửa nội dung hoặc tải lại trang khác.";
+  }
+  if (sub.workflow_status === "CHECK_FAILED") {
+    return "Bước kiểm tra gặp lỗi. Hãy bấm Thử lại kiểm tra trước khi thêm trang.";
+  }
+  if (sub.workflow_status === "NEEDS_RECHECK") {
+    return "Nội dung đã thay đổi và cần kiểm tra lại trước khi thêm vào sách.";
+  }
+  if (sub.proofread_suggestions.length > 0 && !sub.spelling_accepted) {
+    return "Vui lòng xem và chấp nhận đề xuất chính tả trước khi thêm vào sách.";
+  }
+  return "Trang chưa đủ điều kiện để thêm vào sách đọc.";
+}
+
 type SubmissionFilterGroup =
   "ALL" | "CHECKING" | "READY" | "ADMIN" | "FAILED" | "ADDED";
 
@@ -197,38 +229,6 @@ function describeStageErrorHint(
   return null;
 }
 
-function lockReasonForSubmission(sub: ParentPageSubmissionDTO): string | null {
-  if (sub.can_add_to_book) return null;
-  if (sub.workflow_status === "ADDED_TO_BOOK") {
-    return "Trang này đã được thêm vào sách đọc.";
-  }
-  if (sub.tool_check_policy_blocked) {
-    return "Nội dung vi phạm mức chặn an toàn trẻ em. Hãy sửa nội dung hoặc thay ảnh trang khác.";
-  }
-  if (sub.workflow_status === "CHECKING") {
-    return "Đang chạy OCR, rà chính tả và kiểm tra an toàn.";
-  }
-  if (sub.workflow_status === "NEEDS_ADMIN_REVIEW") {
-    return "Tool Check đã gắn cờ hoặc trang cần người xem xét. Phải gửi Admin duyệt đúng phiên bản này trước khi thêm vào sách.";
-  }
-  if (sub.workflow_status === "PENDING_ADMIN") {
-    return "Đang chờ Admin duyệt đúng phiên bản này.";
-  }
-  if (sub.workflow_status === "REJECTED") {
-    return "Admin đã từ chối phiên bản này. Hãy sửa nội dung hoặc tải lại trang khác.";
-  }
-  if (sub.workflow_status === "CHECK_FAILED") {
-    return "Bước kiểm tra gặp lỗi. Hãy bấm Thử lại kiểm tra trước khi thêm trang.";
-  }
-  if (sub.workflow_status === "NEEDS_RECHECK") {
-    return "Nội dung đã thay đổi và cần kiểm tra lại trước khi thêm vào sách.";
-  }
-  if (sub.proofread_suggestions.length > 0 && !sub.spelling_accepted) {
-    return "Vui lòng xem và chấp nhận đề xuất chính tả trước khi thêm vào sách.";
-  }
-  return "Trang chưa đủ điều kiện để thêm vào sách đọc.";
-}
-
 const SUBMISSIONS_PAGE_SIZE = 10;
 const COMMITTED_PAGES_PAGE_SIZE = 12;
 
@@ -272,6 +272,8 @@ function ParentPrivateBookManagerContent({
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] =
+    useState<SubmissionFilterGroup>("ALL");
   const [submissionsPage, setSubmissionsPage] = useState(1);
   const [committedPage, setCommittedPage] = useState(1);
 
@@ -287,8 +289,6 @@ function ParentPrivateBookManagerContent({
   const [uploading, setUploading] = useState(false);
 
   // Per-submission UI state
-  const [statusFilter, setStatusFilter] =
-    useState<SubmissionFilterGroup>("ALL");
   const [editingSubId, setEditingSubId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [editSourceType, setEditSourceType] = useState<SourceUsageType>(
@@ -344,13 +344,6 @@ function ParentPrivateBookManagerContent({
         if (isServiceError(error) && error.status === 404) {
           setDetail(null);
           setNotFound(true);
-        } else if (silent) {
-          setActionError(
-            errorText(
-              error,
-              "Không thể cập nhật tiến trình mới nhất lúc này; trạng thái hiện tại vẫn được giữ nguyên.",
-            ),
-          );
         } else {
           setLoadError(
             errorText(
@@ -856,13 +849,6 @@ function ParentPrivateBookManagerContent({
     },
     { CHECKING: 0, READY: 0, ADMIN: 0, FAILED: 0, ADDED: 0 },
   );
-  const workerFailureCount = activeSubmissions.filter(
-    (item) =>
-      Boolean(item.ocr_error_code) ||
-      Boolean(item.proofread_error_code) ||
-      Boolean(item.tool_check_error_code) ||
-      item.workflow_status === "CHECK_FAILED",
-  ).length;
   const filteredSubmissions =
     statusFilter === "ALL"
       ? activeSubmissions
@@ -1292,8 +1278,13 @@ function ParentPrivateBookManagerContent({
           Các trang đang kiểm tra & duyệt ({activeSubmissions.length})
         </h2>
 
-        {activeSubmissions.length > 0 ? (
-          <div className="flex flex-col gap-3 rounded-card border border-border bg-white p-4">
+        {activeSubmissions.length === 0 ? (
+          <div className="rounded-card border border-dashed border-border bg-white p-6 text-center text-sm text-muted">
+            Chưa có trang nào được tải lên. Hãy chọn ảnh hoặc tệp PDF/DOCX ở
+            trên để bắt đầu chạy OCR, rà chính tả và kiểm tra an toàn.
+          </div>
+        ) : (
+          <>
             <div
               aria-label="Lọc trạng thái từng trang"
               className="flex flex-wrap items-center gap-2"
@@ -1348,80 +1339,6 @@ function ParentPrivateBookManagerContent({
                 );
               })}
             </div>
-
-            {activeSubmissions.length > 1 ? (
-              <div
-                aria-label="Tổng quan nhanh trạng thái các trang"
-                className="flex flex-wrap gap-1.5 border-t border-border pt-3"
-              >
-                {activeSubmissions.map((sub, index) => {
-                  const chipStyle =
-                    WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
-                    "border-border bg-canvas text-ink";
-                  return (
-                    <button
-                      key={`map-${sub.id}`}
-                      className={`inline-flex items-center gap-1 rounded-control border px-2 py-1 text-[11px] font-bold ${chipStyle}`}
-                      onClick={() => {
-                        setStatusFilter("ALL");
-                        setSubmissionsPage(
-                          Math.floor(index / SUBMISSIONS_PAGE_SIZE) + 1,
-                        );
-                        requestAnimationFrame(() => {
-                          const target = document.querySelector(
-                            `[data-submission-id="${sub.id}"]`,
-                          );
-                          target?.scrollIntoView?.({
-                            behavior: "smooth",
-                            block: "nearest",
-                          });
-                        });
-                      }}
-                      title={`Trang nguồn ${sub.source_page_number}: ${sub.workflow_status_label}`}
-                      type="button"
-                    >
-                      <span>Tr.{sub.source_page_number}</span>
-                      <span className="font-normal">
-                        · {sub.workflow_status_label}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-
-            {workerFailureCount > 0 || submissionCounts.CHECKING > 0 ? (
-              <div className="rounded-control border border-amber-300 bg-amber-50/80 px-3 py-2 text-xs text-amber-950">
-                {workerFailureCount > 0 ? (
-                  <p className="font-semibold">
-                    Có {workerFailureCount} trang gặp lỗi OCR/AI (dịch vụ kiểm
-                    tra có thể đang bận hoặc tạm ngắt). Các trang đạt chuẩn hoặc
-                    chờ Admin bên cạnh không bị ảnh hưởng — hãy bấm «Thử lại
-                    kiểm tra» ở từng trang bị lỗi.
-                  </p>
-                ) : (
-                  <p className="font-semibold">
-                    Đang xử lý song song {submissionCounts.CHECKING} trang ở chế
-                    độ nền. Các trang đã kiểm tra xong vẫn hiển thị đầy đủ để
-                    bạn thao tác ngay.
-                  </p>
-                )}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        {activeSubmissions.length === 0 ? (
-          <div className="rounded-card border border-dashed border-border bg-white p-6 text-center text-sm text-muted">
-            Chưa có trang nào được tải lên. Hãy chọn ảnh hoặc tệp PDF/DOCX ở
-            trên để bắt đầu chạy OCR, rà chính tả và kiểm tra an toàn.
-          </div>
-        ) : visibleSubmissions.length === 0 ? (
-          <div className="rounded-card border border-dashed border-border bg-white p-6 text-center text-sm text-muted">
-            Không có trang nào thuộc nhóm trạng thái đang lọc.
-          </div>
-        ) : (
-          <>
             <div className="flex flex-col gap-4">
               {visibleSubmissions.map((sub) => {
                 const badgeStyle =
@@ -1968,7 +1885,7 @@ function ParentPrivateBookManagerContent({
               onPageChange={setSubmissionsPage}
               page={safeSubmissionsPage}
               pageSize={SUBMISSIONS_PAGE_SIZE}
-              total={activeSubmissions.length}
+              total={filteredSubmissions.length}
             />
           </>
         )}

@@ -43,6 +43,7 @@ from app.services.document_rasterizer_service import (
     rasterize_uploaded_document,
 )
 from app.services.ocr_adjudication import adjudicate_word
+from app.services.tts_audio_cache_service import invalidate_tts_cache_best_effort
 from app.services.ocr_punctuation import punctuation_status
 from app.services.ocr_evidence import (
     HYBRID_OCR_EVIDENCE_CONTRACT,
@@ -1352,7 +1353,13 @@ class AdminOcrService:
         return changed
 
     async def upload_page(
-        self, actor_id: UUID, book_id: UUID, file: UploadFile, *, upload_id: UUID | None = None,
+        self,
+        actor_id: UUID,
+        book_id: UUID,
+        file: UploadFile,
+        *,
+        upload_id: UUID | None = None,
+        page_number: int | None = None,
     ) -> AdminRevisionDetailRead:
         started_at = time.perf_counter()
         log_diagnostic(
@@ -1375,6 +1382,7 @@ class AdminOcrService:
             width=width,
             height=height,
             upload_id=upload_id,
+            page_number=page_number,
             started_at=started_at,
         )
         return result
@@ -1390,6 +1398,7 @@ class AdminOcrService:
         width: int,
         height: int,
         upload_id: UUID | None = None,
+        page_number: int | None = None,
         started_at: float | None = None,
     ) -> tuple[int, AdminRevisionDetailRead]:
         started_at = started_at if started_at is not None else time.perf_counter()
@@ -1420,18 +1429,32 @@ class AdminOcrService:
                         raise HTTPException(status_code=409, detail="Upload outcome requires review; reload before retrying")
                     return int(existing.PageNumber), await self.revision_detail(existing, saved_revision)
 
-            await self._renumber_active_pages(book_id, lock=True)
-            page_number = await self.repo.next_active_page_number(book_id)
-            if page_number > 32767:
-                raise HTTPException(
-                    status_code=422,
-                    detail="The book has reached the maximum number of pages",
-                )
+            if page_number is not None:
+                if page_number < 1 or page_number > 32767:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Page number must be between 1 and 32767",
+                    )
+                existing_pages = await self.repo.active_pages_for_renumber(book_id, lock=True)
+                if any(p.PageNumber == page_number for p in existing_pages):
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Page number {page_number} already exists",
+                    )
+                resolved_page_number = page_number
+            else:
+                await self._renumber_active_pages(book_id, lock=True)
+                resolved_page_number = await self.repo.next_active_page_number(book_id)
+                if resolved_page_number > 32767:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="The book has reached the maximum number of pages",
+                    )
 
             page = BookPage(
                 Id=page_id,
                 BookId=book_id,
-                PageNumber=page_number,
+                PageNumber=resolved_page_number,
                 ImagePath=object_path,
                 Width=width,
                 Height=height,
@@ -2848,7 +2871,9 @@ class AdminOcrService:
                         (event_type, page_id, revision_id, actor_id, payload)
                     VALUES ('VERIFIED_REVISION', :page_id, :revision_id, :actor_id,
                             CAST(:payload AS jsonb))
-                    ON CONFLICT (event_type, revision_id) DO NOTHING
+                    ON CONFLICT (event_type, revision_id)
+                        WHERE event_type = 'VERIFIED_REVISION'
+                    DO NOTHING
                 """),
                 {
                     "page_id": page.Id,
@@ -2871,7 +2896,9 @@ class AdminOcrService:
         )
         if response_page is None or response_revision is None:
             raise RuntimeError("Verified OCR revision disappeared before response serialization")
-        return await self.revision_detail(response_page, response_revision)
+        detail = await self.revision_detail(response_page, response_revision)
+        await invalidate_tts_cache_best_effort(self.db, page_id=response_page_id, commit=True)
+        return detail
 
     async def _verified_retry_response(
         self,
@@ -3477,12 +3504,14 @@ class AdminOcrService:
         except Exception:
             await self.db.rollback()
             raise
-        return AdminPageLifecycleRead(
+        resp = AdminPageLifecycleRead(
             page_id=page.Id,
             book_id=page.BookId,
             page_number=page.PageNumber,
             lifecycle_status="RETIRED",
         )
+        await invalidate_tts_cache_best_effort(self.db, page_id=page_id, commit=True)
+        return resp
 
     async def ai_correct_text(
         self,

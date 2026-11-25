@@ -41,8 +41,12 @@ export function BookLibraryScreen() {
   });
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const effectiveSearch = search.trim() ? debouncedSearch : "";
   const [page, setPage] = useState(1);
-  const knownNonEmptyCatalogRef = useRef(false);
+  const knownNonEmptyCatalogRef = useRef<{
+    scopeKey: string;
+    nonEmpty: boolean;
+  }>({ scopeKey: "", nonEmpty: false });
   const [gradeSelection, setGradeSelection] = useState<{
     childId: string;
     grade: number | null;
@@ -68,12 +72,14 @@ export function BookLibraryScreen() {
     savedCollectionOwner === selectedChildId ? savedCollections : [];
 
   useEffect(() => {
-    const delay = search.trim() ? 250 : 0;
+    if (!search.trim() || debouncedSearch === search) {
+      return;
+    }
     const timer = globalThis.setTimeout(() => {
       setDebouncedSearch(search);
-    }, delay);
+    }, 250);
     return () => globalThis.clearTimeout(timer);
-  }, [search]);
+  }, [debouncedSearch, search]);
 
   useEffect(() => {
     if (!selectedChildId) {
@@ -157,26 +163,34 @@ export function BookLibraryScreen() {
       return;
     }
 
+    const scopeKey = `${currentUserId}:${selectedChildId}`;
+    if (knownNonEmptyCatalogRef.current.scopeKey !== scopeKey) {
+      knownNonEmptyCatalogRef.current = { scopeKey, nonEmpty: false };
+    }
     let isActive = true;
 
     async function loadCatalog() {
-      setCatalogState({ status: "loading" });
+      setCatalogState((current) =>
+        current.status === "loading" ? current : { status: "loading" },
+      );
 
       try {
         const books = await bookService.list({
           grade: selectedGrade ?? undefined,
-          search: debouncedSearch,
+          search: effectiveSearch,
           include_private: true,
         });
-        const hasFilters =
-          selectedGrade !== null || debouncedSearch.trim().length > 0;
-        if (books.length > 0) {
-          knownNonEmptyCatalogRef.current = true;
+        if (!isActive) return;
+        const hasFilters = selectedGrade !== null || effectiveSearch.length > 0;
+        let hasCatalog = books.length > 0;
+        if (!hasCatalog && hasFilters) {
+          hasCatalog =
+            knownNonEmptyCatalogRef.current.nonEmpty ||
+            (await bookService.list({ include_private: true })).length > 0;
         }
-        const hasCatalog =
-          books.length > 0 || (hasFilters && knownNonEmptyCatalogRef.current);
 
         if (isActive) {
+          knownNonEmptyCatalogRef.current = { scopeKey, nonEmpty: hasCatalog };
           setPage(1);
           setCatalogState({
             status: "ready",
@@ -199,7 +213,7 @@ export function BookLibraryScreen() {
     bookService,
     childState.status,
     currentUserId,
-    debouncedSearch,
+    effectiveSearch,
     requestKey,
     selectedChildId,
     selectedGrade,

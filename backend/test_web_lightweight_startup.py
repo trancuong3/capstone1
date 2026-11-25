@@ -87,15 +87,20 @@ print(json.dumps({"forbidden_loaded": forbidden}))
         self.assertEqual(data["forbidden_loaded"], [])
 
     def test_parent_book_worker_respects_disable_heavy_workers_flag(self):
-        from app.jobs.parent_book_submission_worker import run_once
+        from unittest.mock import AsyncMock, MagicMock
+        from app.jobs import parent_book_submission_worker as worker
 
-        with patch.dict(
-            os.environ,
-            {"VIREAD_WEB_DISABLE_HEAVY_WORKERS": "true"},
-            clear=False,
+        session = MagicMock()
+        session.__aenter__ = AsyncMock(return_value=object())
+        session.__aexit__ = AsyncMock(return_value=None)
+        claim = AsyncMock(return_value=None)
+        with (
+            patch.dict(os.environ, {"VIREAD_WEB_DISABLE_HEAVY_WORKERS": "true"}),
+            patch.object(worker, "AsyncSessionLocal", return_value=session),
+            patch.object(worker.ParentPrivateBookRepository, "claim_next_checking_submission", claim),
         ):
-            did_work = asyncio.run(run_once())
-            self.assertFalse(did_work)
+            self.assertFalse(asyncio.run(worker.run_once()))
+        self.assertTrue(claim.await_args.kwargs["only_post_ocr"])
 
     def test_lifespan_skips_heavy_ocr_and_parent_workers_in_remote_mode(self):
         import app.sever as sever_mod

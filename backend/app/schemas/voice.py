@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import unicodedata
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
 VoiceProviderMode = Literal["local_only", "local_with_google_fallback"]
+AudioFormatPreference = Literal["wav", "mp3", "ogg"]
+TtsCacheScope = Literal["CATALOG", "PRIVATE", "COACHING"]
 
 
 def _validate_safe_id(value: str | None, *, max_len: int = 100) -> str | None:
@@ -33,6 +36,11 @@ class TextToSpeechRequest(BaseModel):
     provider_mode: VoiceProviderMode = "local_only"
     allow_google_tts: bool = False
     session_id: str | None = Field(default=None, max_length=80)
+    audio_format: AudioFormatPreference | None = None
+    book_id: UUID | None = None
+    page_id: UUID | None = None
+    page_revision_id: UUID | None = None
+    cache_scope: TtsCacheScope | None = None
 
     @field_validator("text")
     @classmethod
@@ -82,6 +90,11 @@ class PhonicsSpeechRequest(BaseModel):
     provider_mode: VoiceProviderMode = "local_only"
     allow_google_tts: bool = False
     session_id: str | None = Field(default=None, max_length=80)
+    audio_format: AudioFormatPreference | None = None
+    book_id: UUID | None = None
+    page_id: UUID | None = None
+    page_revision_id: UUID | None = None
+    cache_scope: TtsCacheScope | None = None
 
     @field_validator("voice_id")
     @classmethod

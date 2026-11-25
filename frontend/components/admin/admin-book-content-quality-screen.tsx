@@ -388,20 +388,44 @@ export function AdminBookContentQualityScreen() {
   ]);
 
   useEffect(() => {
+    if (activeTab !== "catalog") return;
+    const requestId = reportRequestId;
+    if (!search.trim()) {
+      let cancelled = false;
+      void Promise.resolve().then(() => {
+        if (!cancelled) void loadReports();
+      });
+      return () => {
+        cancelled = true;
+        requestId.current += 1;
+      };
+    }
     const timeout = globalThis.setTimeout(() => void loadReports(), 180);
     return () => {
       globalThis.clearTimeout(timeout);
-      reportRequestId.current += 1;
+      requestId.current += 1;
     };
-  }, [loadReports]);
+  }, [activeTab, loadReports, search]);
 
   useEffect(() => {
+    if (activeTab !== "catalog") return;
+    const requestId = bookRequestId;
+    if (!bookSearch.trim()) {
+      let cancelled = false;
+      void Promise.resolve().then(() => {
+        if (!cancelled) void loadBooks();
+      });
+      return () => {
+        cancelled = true;
+        requestId.current += 1;
+      };
+    }
     const timeout = globalThis.setTimeout(() => void loadBooks(), 180);
     return () => {
       globalThis.clearTimeout(timeout);
-      bookRequestId.current += 1;
+      requestId.current += 1;
     };
-  }, [loadBooks]);
+  }, [activeTab, bookSearch, loadBooks]);
 
   const refreshSelectedBook = useCallback(
     async (bookId: string) => {

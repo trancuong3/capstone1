@@ -8,6 +8,7 @@ import json
 from uuid import UUID, uuid4
 from unittest.mock import patch
 
+os.environ.setdefault("APP_ENVIRONMENT", "test")
 os.environ["DATABASE_URL"] = "postgresql+asyncpg://test:test@127.0.0.1:1/test"
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
@@ -54,27 +55,77 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.admin_engine = create_async_engine(
             POSTGRES_TEST_DATABASE_URL, poolclass=NullPool
         )
+        self._seeded_full_public_stub = False
+        self._seeded_auth_user = False
         async with self.admin_engine.begin() as connection:
             await connection.execute(text(f'CREATE SCHEMA "{self.schema}"'))
+            has_auth_users = await connection.scalar(
+                text("SELECT to_regclass('auth.users')::text")
+            )
+            if has_auth_users:
+                await connection.execute(
+                    text(
+                        "INSERT INTO auth.users (id, email, raw_user_meta_data) "
+                        "VALUES (:id, 'admin-ocr-test@example.invalid', '{}'::jsonb) "
+                        "ON CONFLICT (id) DO NOTHING"
+                    ),
+                    {"id": ACTOR},
+                )
+                self._seeded_auth_user = True
             await connection.execute(
                 text(
                     "INSERT INTO public.profiles (id) VALUES (:id) ON CONFLICT DO NOTHING"
                 ),
                 {"id": ACTOR},
             )
-            await connection.execute(
+            has_bookid_col = await connection.scalar(
                 text(
-                    "INSERT INTO public.bookpages (id) VALUES (:id) ON CONFLICT DO NOTHING"
-                ),
-                {"id": PAGE_ID},
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = 'bookpages' "
+                    "AND column_name = 'bookid'"
+                )
             )
-            await connection.execute(
-                text(
-                    "INSERT INTO public.pagerevisions (id, pageid) "
-                    "VALUES (:id, :page) ON CONFLICT DO NOTHING"
-                ),
-                {"id": R1_ID, "page": PAGE_ID},
-            )
+            if has_bookid_col:
+                self._seeded_full_public_stub = True
+                await connection.execute(
+                    text(
+                        "INSERT INTO public.books (id, title, mingrade, maxgrade, lifecyclestatus) "
+                        "VALUES (:id, 'Stub Book', 1, 3, 'ACTIVE') ON CONFLICT DO NOTHING"
+                    ),
+                    {"id": BOOK_ID},
+                )
+                await connection.execute(
+                    text(
+                        "INSERT INTO public.bookpages "
+                        "(id, bookid, pagenumber, imagepath, width, height, lifecyclestatus) "
+                        "VALUES (:id, :book, 1, 'stub/page.png', 100, 100, 'ACTIVE') "
+                        "ON CONFLICT DO NOTHING"
+                    ),
+                    {"id": PAGE_ID, "book": BOOK_ID},
+                )
+                await connection.execute(
+                    text(
+                        "INSERT INTO public.pagerevisions "
+                        "(id, pageid, revisionno, verificationstatus, contenthash) "
+                        "VALUES (:id, :page, '1', 'VERIFIED', 'stub-hash') "
+                        "ON CONFLICT DO NOTHING"
+                    ),
+                    {"id": R1_ID, "page": PAGE_ID},
+                )
+            else:
+                await connection.execute(
+                    text(
+                        "INSERT INTO public.bookpages (id) VALUES (:id) ON CONFLICT DO NOTHING"
+                    ),
+                    {"id": PAGE_ID},
+                )
+                await connection.execute(
+                    text(
+                        "INSERT INTO public.pagerevisions (id, pageid) "
+                        "VALUES (:id, :page) ON CONFLICT DO NOTHING"
+                    ),
+                    {"id": R1_ID, "page": PAGE_ID},
+                )
 
         self.engine = create_async_engine(
             POSTGRES_TEST_DATABASE_URL,
@@ -340,22 +391,43 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 text("DELETE FROM public.bookpages WHERE id = :page"),
                 {"page": PAGE_ID},
             )
+            if self._seeded_full_public_stub:
+                await connection.execute(
+                    text("DELETE FROM public.books WHERE id = :book"),
+                    {"book": BOOK_ID},
+                )
             await connection.execute(
                 text("DELETE FROM public.profiles WHERE id = :actor"),
                 {"actor": ACTOR},
             )
+            if self._seeded_auth_user:
+                await connection.execute(
+                    text("DELETE FROM auth.users WHERE id = :actor"),
+                    {"actor": ACTOR},
+                )
         await self.admin_engine.dispose()
 
     async def _seed_public_revision_reference(self, revision_id: UUID) -> None:
         """Mirror the isolated-schema revision IDs required by public FK constraints."""
         async with self.admin_engine.begin() as connection:
-            await connection.execute(
-                text(
-                    "INSERT INTO public.pagerevisions (id, pageid) "
-                    "VALUES (:id, :page) ON CONFLICT DO NOTHING"
-                ),
-                {"id": revision_id, "page": PAGE_ID},
-            )
+            if self._seeded_full_public_stub:
+                await connection.execute(
+                    text(
+                        "INSERT INTO public.pagerevisions "
+                        "(id, pageid, revisionno, verificationstatus, contenthash) "
+                        "VALUES (:id, :page, :rev_no, 'VERIFIED', 'stub-hash') "
+                        "ON CONFLICT DO NOTHING"
+                    ),
+                    {"id": revision_id, "page": PAGE_ID, "rev_no": str(revision_id)[:12]},
+                )
+            else:
+                await connection.execute(
+                    text(
+                        "INSERT INTO public.pagerevisions (id, pageid) "
+                        "VALUES (:id, :page) ON CONFLICT DO NOTHING"
+                    ),
+                    {"id": revision_id, "page": PAGE_ID},
+                )
 
     def _test_app(self):
         app = FastAPI()

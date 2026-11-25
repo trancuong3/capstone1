@@ -516,6 +516,13 @@ test("Phase 3: unavailable TTS produces a safe recoverable error with zero OS vo
   );
   expect(fixture.requests).toHaveLength(1);
   expect(fixture.prompts).toHaveLength(1);
+  expect(await page.evaluate(() => window.__ttsProbe.microphoneRequests)).toBe(
+    0,
+  );
+  await page.getByRole("button", { name: "Đọc tiếp", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Nghe đọc mẫu cả trang" }),
+  ).toBeEnabled();
   expect(fixture.unexpected).toEqual([]);
   expect(fixture.writes).toEqual([]);
 });

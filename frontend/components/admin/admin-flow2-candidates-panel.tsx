@@ -62,14 +62,18 @@ export function AdminFlow2CandidatesPanel() {
     page?.items[0] ??
     null;
 
-  const selectCandidate = useCallback((item: AdminFlow2CandidateDTO | null) => {
-    setSelectedId(item?.id ?? null);
-    if (item) {
-      setLabelDraft(item.verified_label ?? item.proposed_label);
-      setRejectionReason("");
-      setActionError(null);
-    }
-  }, []);
+  const selectCandidate = useCallback(
+    (item: AdminFlow2CandidateDTO | null) => {
+      if (item?.id === selectedId) return;
+      setSelectedId(item?.id ?? null);
+      if (item) {
+        setLabelDraft(item.verified_label ?? item.proposed_label);
+        setRejectionReason("");
+        setActionError(null);
+      }
+    },
+    [selectedId],
+  );
 
   const reload = useCallback(() => {
     setLoading(true);
@@ -257,9 +261,7 @@ export function AdminFlow2CandidatesPanel() {
                         ? "border-primary bg-sky/40"
                         : "border-border bg-white hover:bg-surface-subtle"
                     }`}
-                    onClick={() => {
-                      if (!isSelected) selectCandidate(item);
-                    }}
+                    onClick={() => selectCandidate(item)}
                     type="button"
                   >
                     <div className="flex w-full items-center justify-between gap-2">

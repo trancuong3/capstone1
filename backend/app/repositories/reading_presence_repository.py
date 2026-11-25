@@ -6,7 +6,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import ChildProfile, ReadingSession
+from app.models import ChildProfile, Profile, ReadingSession
 from app.models.reading_presence import ReadingPresenceAlert, ReadingPresenceSetting
 
 
@@ -31,9 +31,12 @@ class ReadingPresenceRepository:
             await self.db.execute(
                 select(ReadingSession, ChildProfile)
                 .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
+                .join(Profile, Profile.Id == ChildProfile.ParentId)
                 .where(
                     ReadingSession.Id == session_id,
                     ChildProfile.ParentId == parent_id,
+                    Profile.Active == 1,
+                    Profile.Role == "parent",
                 )
             )
         ).first()

@@ -6,7 +6,14 @@ import { normalizeVietnameseText } from "@/lib/reading/vietnamese-text";
  * khi cụm lệnh trùng với đoạn bé sắp đọc.
  */
 export type VoiceIntentType =
-  "HELP" | "SPELL" | "REPLAY" | "WAIT" | "STOP" | "RESUME" | "NONE";
+  | "HELP"
+  | "SPELL"
+  | "REPLAY"
+  | "WAIT"
+  | "STOP"
+  | "RESUME"
+  | "TRY_MORE"
+  | "NONE";
 
 export interface VoiceIntent {
   readonly type: VoiceIntentType;
@@ -44,10 +51,11 @@ const COMMANDS: readonly {
     type: "HELP",
     patterns: [
       /^(?:con|bé|em) (?:không|chưa) biết(?: đọc)?(?: từ này| chữ này| chỗ này)?$/u,
+      /^(?:chữ này|từ này|chỗ này) (?:con|bé|em) (?:không|chưa) biết(?: đọc)?$/u,
       /^(?:cô |thầy )?đọc mẫu(?: giúp| cho| hộ)?(?: con| bé| em)?$/u,
       /^(?:cô |thầy )?đọc(?: giúp| cho| hộ) (?:con|bé|em)$/u,
       /^(?:cô |thầy )?giúp (?:con|bé|em) đọc(?: từ này| chữ này)?$/u,
-      /^(?:con|bé|em) cần (?:cô )?(?:giúp|đọc mẫu)$/u,
+      /^(?:con|bé|em) cần (?:cô |thầy )?(?:giúp|đọc mẫu)$/u,
     ],
   },
   {
@@ -58,9 +66,17 @@ const COMMANDS: readonly {
     ],
   },
   {
+    type: "TRY_MORE",
+    patterns: [
+      /^(?:cho )?(?:con|bé|em) (?:thử|đọc) thêm(?: lần nữa| một lần nữa)?$/u,
+      /^(?:con|bé|em) (?:muốn )?(?:thử|đọc) thêm$/u,
+    ],
+  },
+  {
     type: "WAIT",
     patterns: [
-      /^(?:đợi|chờ)(?: con| bé| em)?$/u,
+      /^(?:đợi|chờ)(?: con| bé| em)?(?: suy nghĩ| đọc)?$/u,
+      /^(?:để|cho) (?:con|bé|em) tự đọc$/u,
       /^(?:con|bé|em) (?:đang )?(?:nghĩ|suy nghĩ)$/u,
     ],
   },
@@ -68,6 +84,7 @@ const COMMANDS: readonly {
     type: "STOP",
     patterns: [
       /^(?:con |bé |em )?(?:dừng|tạm dừng|ngừng)(?: lại| đọc| nghe)?$/u,
+      /^(?:con |bé |em )?(?:nghỉ|tạm nghỉ)(?: hôm nay)?$/u,
       /^(?:con |bé |em )?(?:không|thôi) đọc nữa$/u,
     ],
   },

@@ -22,6 +22,7 @@ from app.services.karaoke_media_service import inspect_audio
 from app.services.karaoke_processing_pipeline import KaraokeProcessingPipeline, MediaAsset
 from app.services.karaoke_processing_review import fingerprint, snapshot_matches
 from app.services.karaoke_storage_service import KaraokeStorage
+from app.services.worker_telemetry import record_worker_error, record_worker_success
 
 logger = logging.getLogger(__name__)
 LOCAL_PROOF = {"execution": "OFFLINE_LOCAL_V1", "external_charge_possible": False}
@@ -307,8 +308,10 @@ class KaraokeProcessingWorker:
             async with repo.write():
                 job = await repo.claim(self.config)
         if job is None:
+            record_worker_success("karaoke_processing")
             return False
         await self.process(job, shutdown)
+        record_worker_success("karaoke_processing")
         return True
 
     async def run(self, shutdown):
@@ -316,7 +319,8 @@ class KaraokeProcessingWorker:
             while not shutdown.is_set():
                 try:
                     worked = await self.run_once(shutdown)
-                except Exception:
+                except Exception as exc:
+                    record_worker_error("karaoke_processing", exc)
                     logger.warning("karaoke_worker_poll_unavailable")
                     worked = False
                 if not worked:

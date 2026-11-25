@@ -25,6 +25,7 @@ from app.services.book_quality_analyzer import (
     page_gap_finding,
 )
 from app.services.book_quality_ollama import analyse_with_ollama
+from app.services.worker_telemetry import record_worker_error, record_worker_success
 
 logger = logging.getLogger(__name__)
 
@@ -652,12 +653,15 @@ async def run_worker(stop_event: asyncio.Event | None = None) -> None:
     local_stop = stop_event or asyncio.Event()
     while not local_stop.is_set():
         run = None
+        claim_ok = False
         try:
             async with AsyncSessionLocal() as session:
                 run = await BookContentQualityRepository(session).claim_next_scan(
                     worker_id, lease_seconds=LEASE_SECONDS
                 )
-        except Exception:
+            claim_ok = True
+        except Exception as exc:
+            record_worker_error("book_quality", exc)
             log_diagnostic(
                 logger,
                 logging.ERROR,
@@ -667,7 +671,10 @@ async def run_worker(stop_event: asyncio.Event | None = None) -> None:
             )
         if run is not None:
             await _process_claimed_scan(run.Id, worker_id)
+            record_worker_success("book_quality")
             continue
+        if claim_ok:
+            record_worker_success("book_quality")
         try:
             await asyncio.wait_for(local_stop.wait(), timeout=POLL_SECONDS)
         except TimeoutError:

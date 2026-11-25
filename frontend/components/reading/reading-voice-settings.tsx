@@ -42,6 +42,10 @@ import {
   fetchVoiceEngineHealth,
   type VoiceEngineHealthSnapshot,
 } from "@/lib/reading/voice-engine-status";
+import {
+  adaptTextToTeacherPersona,
+  resolveVoiceGender,
+} from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 
 const PREVIEW_TEXT =
@@ -374,12 +378,15 @@ export function ReadingVoiceSettings({
     <>
       <Button
         aria-haspopup="dialog"
-        className="min-h-14 min-w-0 gap-2 px-3 text-base"
+        className="min-h-11 min-w-0 gap-2 px-2.5 py-1.5 text-sm sm:min-h-14 sm:px-3 sm:py-2 sm:text-button"
         disabled={disabled}
         onClick={open}
         variant="quiet"
       >
-        <SlidersHorizontal aria-hidden="true" className="size-6 shrink-0" />
+        <SlidersHorizontal
+          aria-hidden="true"
+          className="size-5 shrink-0 sm:size-6"
+        />
         <span className="max-w-full text-center whitespace-normal break-words">
           Giọng đọc
         </span>
@@ -689,7 +696,7 @@ export function ReadingVoiceSettings({
                       : "text-muted",
                   )}
                 >
-                  Chạy 100% local, không gọi Google
+                  Chạy 100% nội bộ (máy chủ + trình duyệt), không gọi Google
                 </span>
               </button>
               <button
@@ -791,8 +798,12 @@ export function ReadingVoiceSettings({
                   return;
                 }
                 setPreviewError(false);
+                const previewText = adaptTextToTeacherPersona(
+                  PREVIEW_TEXT,
+                  resolveVoiceGender(selectedVoiceId, selectedVoice?.gender),
+                );
                 void Promise.resolve()
-                  .then(() => onPreview(PREVIEW_TEXT))
+                  .then(() => onPreview(previewText))
                   .catch((error: unknown) => {
                     if (
                       mountedRef.current &&

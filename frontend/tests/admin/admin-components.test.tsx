@@ -77,6 +77,55 @@ describe("admin components", () => {
     expect(navigationMock.push).not.toHaveBeenCalled();
   });
 
+  it("returns to a safe admin deep link after login and blocks unsafe or cross-role next targets", async () => {
+    const services = createAdminServiceFixture();
+    const user = userEvent.setup();
+    const { unmount } = render(
+      withAdminFixture(
+        <AdminLoginScreen
+          nextPath="/admin/parents?page=3"
+          scenario="default"
+        />,
+        services,
+      ),
+    );
+    await user.type(screen.getByLabelText("Mật khẩu"), "matkhau123");
+    await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
+    await waitFor(() =>
+      expect(navigationMock.replace).toHaveBeenCalledWith(
+        "/admin/parents?page=3",
+      ),
+    );
+    unmount();
+
+    navigationMock.replace.mockClear();
+    const second = render(
+      withAdminFixture(
+        <AdminLoginScreen nextPath="/dashboard" scenario="default" />,
+        services,
+      ),
+    );
+    await user.type(screen.getByLabelText("Mật khẩu"), "matkhau123");
+    await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
+    await waitFor(() =>
+      expect(navigationMock.replace).toHaveBeenCalledWith("/admin/books"),
+    );
+    second.unmount();
+
+    navigationMock.replace.mockClear();
+    render(
+      withAdminFixture(
+        <AdminLoginScreen nextPath="//evil.example/admin" scenario="default" />,
+        services,
+      ),
+    );
+    await user.type(screen.getByLabelText("Mật khẩu"), "matkhau123");
+    await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
+    await waitFor(() =>
+      expect(navigationMock.replace).toHaveBeenCalledWith("/admin/books"),
+    );
+  });
+
   it("awaits admin sign-out, blocks repeats, and replaces the protected route", async () => {
     const services = createAdminServiceFixture();
     let completeSignOut: () => void = () => undefined;

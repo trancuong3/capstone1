@@ -114,6 +114,11 @@ class AvatarService:
         profile = await self.profile_repository.get_by_id(parent_id)
         if profile is None:
             raise AvatarResourceNotFoundError()
+        if getattr(profile, "Active", 1) in (0, False):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied",
+            )
 
         normalized_image = normalize_avatar_image(data, content_type)
         path = f"profiles/{parent_id}/avatar/{uuid4().hex}.webp"
@@ -132,6 +137,11 @@ class AvatarService:
         profile = await self.profile_repository.get_by_id(parent_id)
         if profile is None:
             raise AvatarResourceNotFoundError()
+        if getattr(profile, "Active", 1) in (0, False):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied",
+            )
 
         old_path = getattr(profile, "AvatarPath", None)
         try:

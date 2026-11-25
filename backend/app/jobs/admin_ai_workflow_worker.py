@@ -30,6 +30,7 @@ from app.services.ocr_ai.child_safety import (
 )
 from app.services.ocr_ai.config import OcrCorrectionConfig
 from app.services.ocr_ai.exceptions import OcrConfigurationError, OcrOrchestrationError
+from app.services.worker_telemetry import record_worker_error, record_worker_success
 
 
 logger = logging.getLogger(__name__)
@@ -594,7 +595,9 @@ async def run_worker(stop_event: asyncio.Event | None = None, *, poll_seconds: i
                     workflow_id = await AdminAiWorkflowRepository(session).claim_next(
                         worker_id, lease_seconds=LEASE_SECONDS
                     )
+                record_worker_success("admin_ai_workflow")
             except Exception as exc:
+                record_worker_error("admin_ai_workflow", exc)
                 log_diagnostic(
                     logger,
                     logging.ERROR,

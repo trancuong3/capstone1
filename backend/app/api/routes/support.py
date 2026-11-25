@@ -7,12 +7,13 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict
 
-from app.api.deps import get_current_parent_id
+from app.api.deps import require_parent_id
 from app.providers.support_email_provider import (
     SupportEmailDeliveryError,
     SupportEmailNotConfiguredError,
 )
 from app.schemas.support import SupportFeedbackRequest
+from app.services.rate_limiter import rate_limit
 from app.services.support_service import SupportService
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,10 @@ class SupportFeedbackResponse(BaseModel):
 )
 async def submit_support_feedback(
     request: SupportFeedbackRequest,
-    _parent_id: UUID = Depends(get_current_parent_id),
+    _parent_id: UUID = Depends(require_parent_id),
+    _rate_limited: None = Depends(
+        rate_limit("support_feedback", default_max=10, default_window=300.0, actor_dependency=require_parent_id)
+    ),
 ) -> SupportFeedbackResponse:
     """Send authenticated parent feedback to the backend-configured inbox."""
     try:

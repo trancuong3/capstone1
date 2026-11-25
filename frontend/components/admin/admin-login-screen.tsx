@@ -14,6 +14,7 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { isAdminAuthError } from "@/lib/api/admin-auth-service";
+import { sanitizeNextPath } from "@/lib/auth/route-policy";
 import type { AdminLoginRequest, AdminMockScenario } from "@/types/admin";
 
 const schema = z.object({
@@ -26,8 +27,10 @@ const schema = z.object({
 });
 
 export function AdminLoginScreen({
+  nextPath = null,
   scenario,
 }: {
+  nextPath?: string | null;
   scenario: AdminMockScenario;
 }) {
   const { auth } = useAdminServices();
@@ -51,7 +54,7 @@ export function AdminLoginScreen({
     setNotice(null);
     try {
       await auth.signIn(values);
-      replace("/admin/parents");
+      replace(sanitizeNextPath(nextPath, "admin"));
       refresh();
     } catch (error) {
       setNotice(

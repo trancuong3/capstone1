@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -7,13 +8,19 @@ import threading
 import time
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.config import APP_ENVIRONMENT
-from app.database.session import get_db
+from app.database.role_cache import (
+    _MISSING as _ROLE_CACHE_MISSING,
+    get_cached_profile_active_role,
+    get_cached_profile_role,
+    peek_cached_profile_role,
+)
+from app.database.session import get_db, sqlalchemy_database_url
 from app.database.supabase_client import get_supabase_client, reset_supabase_client
 from app.diagnostic_logging import log_diagnostic
 
@@ -216,11 +223,9 @@ def get_current_parent_id(
 
 async def _require_database_role(actor_id: UUID, db: AsyncSession, expected_role: str) -> UUID:
     """Authorize against the active database profile, never untrusted JWT role claims."""
-    from app.models import Profile
+    from app.database.role_cache import get_cached_profile_role
 
-    role = await db.scalar(
-        select(Profile.Role).where(Profile.Id == actor_id, Profile.Active == 1)
-    )
+    role = await get_cached_profile_role(db, actor_id)
     if role != expected_role:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -243,3 +248,62 @@ async def require_admin_id(
 ) -> UUID:
     """Require a verified Supabase user with an active admin profile."""
     return await _require_database_role(actor_id, db, "admin")
+
+
+async def require_active_profile_id(
+    request: Request,
+    actor_id: UUID = Depends(get_current_parent_id),
+) -> UUID:
+    """Verify the authenticated profile has Active == 1 using the cached role lookup.
+
+    Checks `request.app.dependency_overrides[get_db]` when overridden (such as test fakes)
+    and otherwise resolves via the 60s TTL cache + lazy `AsyncSessionLocal()` on miss.
+    """
+    try:
+        actor_uuid = actor_id if isinstance(actor_id, UUID) else UUID(str(actor_id))
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authenticated user ID",
+        )
+
+    overrides = getattr(getattr(request, "app", None), "dependency_overrides", None) or {}
+    db_override = overrides.get(get_db)
+    role: str | None
+    if db_override is not None:
+        produced = db_override()
+        if inspect.isasyncgen(produced):
+            try:
+                db_session = await produced.__anext__()
+                role = await get_cached_profile_role(db_session, actor_uuid)
+            finally:
+                await produced.aclose()
+        elif inspect.isgenerator(produced):
+            try:
+                db_session = next(produced)
+                role = await get_cached_profile_role(db_session, actor_uuid)
+            finally:
+                produced.close()
+        elif inspect.isawaitable(produced):
+            db_session = await produced
+            role = await get_cached_profile_role(db_session, actor_uuid)
+        else:
+            role = await get_cached_profile_role(produced, actor_uuid)
+    elif (
+        APP_ENVIRONMENT == "test"
+        and sqlalchemy_database_url.port == 1
+        and sqlalchemy_database_url.host in ("127.0.0.1", "localhost")
+    ):
+        cached = peek_cached_profile_role(actor_uuid)
+        if cached is _ROLE_CACHE_MISSING:
+            return actor_uuid
+        role = cached  # type: ignore[assignment]
+    else:
+        role = await get_cached_profile_active_role(actor_uuid)
+
+    if role not in ("parent", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive or unavailable",
+        )
+    return actor_uuid

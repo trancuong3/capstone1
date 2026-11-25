@@ -7,6 +7,7 @@ import {
   AppStoreProvider,
   useAppStore,
 } from "@/components/providers/app-store-provider";
+import { clearApiReadCache, runCoalescedApiGet } from "@/lib/api/read-cache";
 
 function StoreControls() {
   const { selectedChildId, selectChild, clearSelectedChild } = useAppStore();
@@ -40,6 +41,44 @@ function NavigationHarness() {
 }
 
 describe("AppStoreProvider", () => {
+  it("does not abort an in-flight API read on initial provider mount", async () => {
+    let sharedSignal: AbortSignal | undefined;
+    let finishRead!: (value: string) => void;
+    const read = runCoalescedApiGet(
+      "/reading/sessions/test",
+      "test-token",
+      undefined,
+      (signal) => {
+        sharedSignal = signal;
+        return new Promise<string>((resolve, reject) => {
+          finishRead = resolve;
+          signal.addEventListener(
+            "abort",
+            () => reject(new Error("Read aborted")),
+            { once: true },
+          );
+        });
+      },
+    ).then(
+      (value) => ({ value }),
+      (error: unknown) => ({ error }),
+    );
+
+    try {
+      render(
+        <AppStoreProvider>
+          <StoreControls />
+        </AppStoreProvider>,
+      );
+      expect(sharedSignal?.aborted).toBe(false);
+      finishRead("loaded");
+      await expect(read).resolves.toEqual({ value: "loaded" });
+    } finally {
+      clearApiReadCache();
+      await read;
+    }
+  });
+
   it("starts empty, selects one child at a time, and clears the selection", async () => {
     const user = userEvent.setup();
     render(

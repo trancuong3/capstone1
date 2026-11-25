@@ -1,5 +1,7 @@
 import type { ComparisonResult } from "@/lib/api/comparison-service";
 import type { RealtimeAlignmentSnapshot } from "@/lib/reading/realtime-alignment";
+import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
+import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
 
 export type WordPresentationState =
@@ -33,9 +35,12 @@ export const wordPresentationLabels: Record<WordPresentationState, string> = {
 
 export const wordPresentationClasses: Record<WordPresentationState, string> = {
   unread: "",
-  current: "bg-yellow-200/50 ring-2 ring-yellow-500",
-  "preview-correct": "bg-success-surface/60 text-success-ink",
-  correct: "bg-success-surface text-success-ink",
+  current:
+    "bg-yellow-200/60 ring-2 ring-yellow-500 border-b-4 border-amber-600 font-semibold",
+  "preview-correct":
+    "bg-emerald-50 text-emerald-950 border-b-2 border-dashed border-emerald-500",
+  correct:
+    "bg-success-surface text-success-ink border-b-2 border-solid border-emerald-700/60",
   incorrect: "bg-red-200 text-red-900 ring-1 ring-red-500",
   omission: "bg-red-200 text-red-900 ring-1 ring-red-500",
   repeated: "bg-purple-200 text-purple-900 ring-1 ring-purple-500",
@@ -48,6 +53,30 @@ export const wordPresentationClasses: Record<WordPresentationState, string> = {
     "bg-sky text-primary underline decoration-dotted decoration-2 underline-offset-4",
   uncertain: "bg-slate-100 text-slate-700 ring-1 ring-slate-400",
 };
+
+export function getWordPresentationLabel(state: WordPresentationState): string {
+  const base = wordPresentationLabels[state];
+  if (state === "assisted") {
+    return adaptTextToTeacherPersona(base, getEffectiveTeacherPersona().gender);
+  }
+  return base;
+}
+
+export function getWordHighlightTier(
+  state: WordPresentationState,
+  isCurrent: boolean,
+): "interim" | "confirmed" | "upcoming" | undefined {
+  if (state === "preview-correct") return "interim";
+  if (
+    state === "correct" ||
+    state === "self-corrected" ||
+    state === "assisted"
+  ) {
+    return "confirmed";
+  }
+  if (isCurrent || state === "current") return "upcoming";
+  return undefined;
+}
 
 export interface PageWordEvidence {
   page: ReadingPageDTO;
@@ -70,6 +99,42 @@ export interface PageWordEvidence {
   > | null;
 }
 
+interface ComparisonWordLookups {
+  readonly saved: ReadonlyMap<
+    string,
+    "CORRECT" | "MISPRONUNCIATION" | "OMISSION" | "UNCERTAIN"
+  >;
+  readonly aligned: ReadonlyMap<number | null, string>;
+  readonly repeats: ReadonlySet<number>;
+  readonly pauses: ReadonlySet<number | null | undefined>;
+}
+
+const comparisonLookupCache = new WeakMap<object, ComparisonWordLookups>();
+
+function getComparisonLookups(
+  comparison: NonNullable<PageWordEvidence["comparisonResult"]>,
+): ComparisonWordLookups {
+  const cached = comparisonLookupCache.get(comparison);
+  if (cached) return cached;
+  const lookups: ComparisonWordLookups = {
+    saved: new Map(
+      comparison.summary.initial_assessment?.map((word) => [
+        word.word_id,
+        word.status,
+      ]),
+    ),
+    aligned: new Map(
+      comparison.alignment.map((item) => [item.book_index, item.status]),
+    ),
+    repeats: new Set(comparison.summary.repeated_book_indices),
+    pauses: new Set(
+      comparison.summary.hesitations.map((pause) => pause.before_book_index),
+    ),
+  };
+  comparisonLookupCache.set(comparison, lookups);
+  return lookups;
+}
+
 export function wordStateForPage(props: PageWordEvidence) {
   const { page, comparisonResult, previewSnapshot } = props;
   const comparison =
@@ -77,19 +142,7 @@ export function wordStateForPage(props: PageWordEvidence) {
     comparisonResult.page_revision_id === page.page_revision_id
       ? comparisonResult
       : null;
-  const saved = new Map(
-    comparison?.summary.initial_assessment?.map((word) => [
-      word.word_id,
-      word.status,
-    ]),
-  );
-  const aligned = new Map(
-    comparison?.alignment.map((item) => [item.book_index, item.status]),
-  );
-  const repeats = new Set(comparison?.summary.repeated_book_indices);
-  const pauses = new Set(
-    comparison?.summary.hesitations.map((pause) => pause.before_book_index),
-  );
+  const lookups = comparison ? getComparisonLookups(comparison) : null;
   const activeId = previewSnapshot
     ? previewSnapshot.currentWordId
     : props.currentWordId;
@@ -102,7 +155,7 @@ export function wordStateForPage(props: PageWordEvidence) {
     if (props.assistedWordIds?.has(id)) return "assisted";
     // The saved first pass wins over transcript re-alignment. Older reports
     // only have alignment entries, whose indices refer to token positions.
-    const status = saved.get(id) ?? aligned.get(index);
+    const status = lookups?.saved.get(id) ?? lookups?.aligned.get(index);
     if (
       status === "MISPRONUNCIATION" ||
       status === "SUBSTITUTE" ||
@@ -117,8 +170,9 @@ export function wordStateForPage(props: PageWordEvidence) {
       return "omission";
     if (status === "UNCERTAIN" && props.uncertainWordIds?.has(id))
       return "uncertain";
-    if (props.repeatedWordIds?.has(id) || repeats.has(index)) return "repeated";
-    if (props.hesitationWordIds?.has(id) || pauses.has(index))
+    if (props.repeatedWordIds?.has(id) || lookups?.repeats.has(index))
+      return "repeated";
+    if (props.hesitationWordIds?.has(id) || lookups?.pauses.has(index))
       return "hesitation";
     if (
       status === "CORRECT" ||

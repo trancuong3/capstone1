@@ -73,7 +73,10 @@ class ServerLifespanShutdownTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch.dict(
                 os.environ,
-                {"VIREAD_LOCAL_TRAINING_WORKER_AUTOSTART": "false"},
+                {
+                    "VIREAD_LOCAL_TRAINING_WORKER_AUTOSTART": "false",
+                    "VIREAD_LOCAL_VOICE_WORKER_AUTOSTART": "false",
+                },
                 clear=False,
             ),
             patch(
@@ -91,6 +94,10 @@ class ServerLifespanShutdownTests(unittest.IsolatedAsyncioTestCase):
             patch(
                 "app.sever.run_book_quality_worker",
                 side_effect=stuck_in_network_io,
+            ),
+            patch(
+                "app.sever.ensure_local_voice_worker_running",
+                new=AsyncMock(return_value=False),
             ),
             patch(
                 "app.sever.admin_ocr_correction_jobs.shutdown",
@@ -154,7 +161,10 @@ class ServerLifespanShutdownTests(unittest.IsolatedAsyncioTestCase):
             ),
             patch.dict(
                 os.environ,
-                {"VIREAD_LOCAL_TRAINING_WORKER_AUTOSTART": "false"},
+                {
+                    "VIREAD_LOCAL_TRAINING_WORKER_AUTOSTART": "false",
+                    "VIREAD_LOCAL_VOICE_WORKER_AUTOSTART": "false",
+                },
                 clear=False,
             ),
             patch(
@@ -172,6 +182,10 @@ class ServerLifespanShutdownTests(unittest.IsolatedAsyncioTestCase):
             patch(
                 "app.sever.run_book_quality_worker",
                 side_effect=unresponsive_worker,
+            ),
+            patch(
+                "app.sever.ensure_local_voice_worker_running",
+                new=AsyncMock(return_value=False),
             ),
             patch(
                 "app.sever.admin_ocr_correction_jobs.shutdown",
@@ -193,6 +207,10 @@ class ServerLifespanShutdownTests(unittest.IsolatedAsyncioTestCase):
     async def test_non_cancellation_errors_still_propagate_from_lifespan_body(self):
         fake_engine = SimpleNamespace(dispose=AsyncMock())
         with (
+            patch(
+                "app.sever.ensure_local_voice_worker_running",
+                new=AsyncMock(return_value=False),
+            ),
             patch(
                 "app.sever.admin_ocr_correction_jobs.shutdown",
                 new_callable=AsyncMock,
@@ -299,6 +317,10 @@ class LocalTrainingOptInTests(unittest.IsolatedAsyncioTestCase):
             patch(
                 "app.sever.asyncio.create_subprocess_exec",
                 new=subprocess_mock,
+            ),
+            patch(
+                "app.sever.ensure_local_voice_worker_running",
+                new=AsyncMock(return_value=False),
             ),
             patch(
                 "app.sever.admin_ocr_correction_jobs.shutdown",

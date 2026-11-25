@@ -366,17 +366,24 @@ def _normalize_signed_url(signed: object) -> str:
     return f"{SUPABASE_URL.rstrip('/')}/storage/v1{signed if signed.startswith('/') else '/' + signed}"
 
 
+def is_local_storage_enabled() -> bool:
+    """Return True when local disk storage is enabled outside production."""
+    return APP_ENVIRONMENT != "production" and bool((os.getenv("VIREAD_LOCAL_STORAGE_DIR") or "").strip())
+
+
 def create_signed_image_url(
     image_path: str | None,
     *,
     bucket_name: str | None = None,
+    ttl_seconds: int | None = None,
 ) -> str:
     is_external, validated = _validate_image_reference(image_path)
     if is_external:
         return validated
+    effective_ttl = max(30, int(ttl_seconds if ttl_seconds is not None else SIGNED_URL_TTL_SECONDS))
     try:
         bucket = _storage_bucket() if bucket_name is None else _storage_bucket(bucket_name)
-        result = bucket.create_signed_url(validated, SIGNED_URL_TTL_SECONDS)
+        result = bucket.create_signed_url(validated, effective_ttl)
         signed = result.get("signedURL") or result.get("signedUrl") or result.get("signed_url")
         return _normalize_signed_url(signed)
     except HTTPException:
@@ -400,11 +407,13 @@ def create_signed_image_urls(
     *,
     bucket_name: str | None = None,
     max_workers: int = 8,
+    ttl_seconds: int | None = None,
 ) -> list[str]:
     """Batch-sign Storage image paths in order, avoiding N sequential HTTP round-trips."""
     if not image_paths:
         return []
 
+    effective_ttl = max(30, int(ttl_seconds if ttl_seconds is not None else SIGNED_URL_TTL_SECONDS))
     validated_refs = [_validate_image_reference(path) for path in image_paths]
     unique_relative_paths = list(
         dict.fromkeys(ref for is_ext, ref in validated_refs if not is_ext)
@@ -417,7 +426,7 @@ def create_signed_image_urls(
         signed_by_path: dict[str, str] = {}
 
         def _sign_single(path: str) -> tuple[str, str]:
-            result = bucket.create_signed_url(path, SIGNED_URL_TTL_SECONDS)
+            result = bucket.create_signed_url(path, effective_ttl)
             signed = (
                 result.get("signedURL")
                 or result.get("signedUrl")
@@ -430,7 +439,7 @@ def create_signed_image_urls(
             batch_fn = getattr(bucket, "create_signed_urls", None)
             if callable(batch_fn):
                 try:
-                    batch_res = batch_fn(chunk, SIGNED_URL_TTL_SECONDS)
+                    batch_res = batch_fn(chunk, effective_ttl)
                     if isinstance(batch_res, list):
                         for idx, item in enumerate(batch_res):
                             if not isinstance(item, dict) or item.get("error"):
