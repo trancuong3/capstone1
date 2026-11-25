@@ -20,6 +20,9 @@ let activeActorScope = "anon";
 let crossRequestCacheEnabled = false;
 
 const NON_CACHEABLE_PATH_PATTERNS = [
+  // Catalog availability, draft revisions and signed playback can change externally.
+  /^\/books\/catalog(?:\?|$)/,
+  /^\/karaoke(?:\/|\?|$)/,
   /\/health(?:\?|$)/,
   /\/ocr(?:\/|\?|$)/,
   /\/workflows(?:\/|\?|$)/,

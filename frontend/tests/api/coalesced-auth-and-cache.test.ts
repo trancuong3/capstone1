@@ -113,6 +113,30 @@ describe("coalesced browser auth and bounded user-scoped read cache", () => {
     clearApiReadCache();
   });
 
+  it.each([
+    "/books/catalog?include_private=true",
+    "/karaoke/songs?child_id=child-a",
+    "/karaoke/admin/songs/song-a",
+    "/karaoke/admin/songs/song-a/draft/reference-preview",
+  ])("refreshes mutable catalog and playback reads for %s", async (path) => {
+    setApiReadCacheEnabled(true);
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "1", title: "Before" })),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "1", title: "After" })),
+      );
+
+    await expect(requestApi(path, itemSchema)).resolves.toMatchObject({
+      title: "Before",
+    });
+    await expect(requestApi(path, itemSchema)).resolves.toMatchObject({
+      title: "After",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("maps LOCAL_TTS_*, LOCAL_STT_*, and GOOGLE_* errors to concise Vietnamese with X-Request-ID", async () => {
     const cases = [
       {
