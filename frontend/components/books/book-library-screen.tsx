@@ -180,16 +180,17 @@ export function BookLibraryScreen() {
           search: effectiveSearch,
           include_private: true,
         });
-        // Only issue the unfiltered probe when the filtered list is empty so
-        // normal grade-filtered loads execute a single request.
-        const hasFilters = selectedGrade !== null || search.trim().length > 0;
-        const hasCatalog =
-          books.length > 0 ||
-          (hasFilters &&
-            knownNonEmptyCatalogRef.current.scopeKey === scopeKey &&
-            knownNonEmptyCatalogRef.current.nonEmpty);
+        if (!isActive) return;
+        const hasFilters = selectedGrade !== null || effectiveSearch.length > 0;
+        let hasCatalog = books.length > 0;
+        if (!hasCatalog && hasFilters) {
+          hasCatalog =
+            knownNonEmptyCatalogRef.current.nonEmpty ||
+            (await bookService.list({ include_private: true })).length > 0;
+        }
 
         if (isActive) {
+          knownNonEmptyCatalogRef.current = { scopeKey, nonEmpty: hasCatalog };
           setPage(1);
           setCatalogState({
             status: "ready",
