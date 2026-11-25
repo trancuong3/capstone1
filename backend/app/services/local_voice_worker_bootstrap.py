@@ -155,7 +155,7 @@ async def _is_worker_healthy(base_url: str) -> bool:
     headers = (
         {
             "Authorization": f"Bearer {worker_token}",
-            "X-ViRead-Worker-Token": worker_token,
+            "X-ViRead-Voice-Token": worker_token,
         }
         if worker_token
         else None

@@ -87,7 +87,7 @@ $workerToken = $effectiveToken
 $healthHeaders = @{}
 if ($workerToken) {
     $healthHeaders["Authorization"] = "Bearer $workerToken"
-    $healthHeaders["X-ViRead-Worker-Token"] = $workerToken
+    $healthHeaders["X-ViRead-Voice-Token"] = $workerToken
 }
 
 # Idempotent check (rejects incompatible auth-gated foreign workers when no token is configured)
