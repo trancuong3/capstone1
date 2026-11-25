@@ -8,6 +8,13 @@ import {
   useState,
 } from "react";
 
+const ALLOWED_RATES = [0.75, 0.85, 1] as const;
+// Throttle React tree state updates during continuous 60fps rAF playback (~15 Hz)
+// while ref-based clock subscribers still run at full 60fps for smooth lyric fill.
+const REACT_CLOCK_COMMIT_INTERVAL_MS = 65;
+
+export type ClockListener = (ms: number) => void;
+
 /** One audio element and one clock: never advance lyrics using elapsed wall time. */
 export function useKaraokePlayer(
   url: string,
@@ -20,6 +27,9 @@ export function useKaraokePlayer(
   const segmentEnd = useRef<number | null>(null);
   const segmentLoop = useRef<number | null>(null);
   const operation = useRef(0);
+  const clockListeners = useRef(new Set<ClockListener>());
+  const lastCommittedMs = useRef(0);
+  const lastCommitWall = useRef(0);
   const invalidate = useCallback(() => {
     operation.current++;
   }, []);
@@ -36,17 +46,34 @@ export function useKaraokePlayer(
   const [volume, setVolumeState] = useState(0.6);
   const [rate, setRateState] = useState(1);
 
+  const emitClock = useCallback((ms: number) => {
+    for (const listener of clockListeners.current) {
+      listener(ms);
+    }
+  }, []);
+
+  const subscribeClock = useCallback((listener: ClockListener) => {
+    clockListeners.current.add(listener);
+    return () => {
+      clockListeners.current.delete(listener);
+    };
+  }, []);
+
   useEffect(() => {
     const audio = new Audio();
     audio.preload = "metadata";
     audio.volume = 0.6;
     audioRef.current = audio;
+    lastCommittedMs.current = 0;
+    lastCommitWall.current = 0;
     let disposed = false;
     let frame = 0;
-    function sync() {
+    function sync(forceReactCommit = true) {
       if (disposed) return;
       const time = Math.round(audio.currentTime * 1000);
+      let loopedOrStopped = false;
       if (segmentEnd.current !== null && time >= segmentEnd.current) {
+        loopedOrStopped = true;
         if (segmentLoop.current !== null) {
           audio.currentTime = segmentLoop.current / 1000;
           setLoopPass((previous) => previous + 1);
@@ -56,12 +83,36 @@ export function useKaraokePlayer(
           audio.pause();
         }
       }
-      setCurrentMs(
-        Math.min(durationMs, Math.max(0, Math.round(audio.currentTime * 1000))),
+      const clamped = Math.min(
+        durationMs,
+        Math.max(0, Math.round(audio.currentTime * 1000)),
       );
+      emitClock(clamped);
+
+      const now =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
+      const shouldCommit =
+        forceReactCommit ||
+        loopedOrStopped ||
+        clamped === 0 ||
+        clamped >= durationMs ||
+        Math.abs(clamped - lastCommittedMs.current) >=
+          REACT_CLOCK_COMMIT_INTERVAL_MS ||
+        now - lastCommitWall.current >= REACT_CLOCK_COMMIT_INTERVAL_MS;
+
+      if (shouldCommit && clamped !== lastCommittedMs.current) {
+        lastCommittedMs.current = clamped;
+        lastCommitWall.current = now;
+        setCurrentMs(clamped);
+      } else if (forceReactCommit && clamped === lastCommittedMs.current) {
+        setCurrentMs(clamped);
+      }
+    }
+    function syncForced() {
+      sync(true);
     }
     function tick() {
-      sync();
+      sync(false);
       if (!disposed && !audio.paused && !audio.ended)
         frame = requestAnimationFrame(tick);
     }
@@ -70,7 +121,9 @@ export function useKaraokePlayer(
       setWaiting(false);
       notifyStarted();
       cancelAnimationFrame(frame);
-      tick();
+      sync(true);
+      if (!disposed && !audio.paused && !audio.ended)
+        frame = requestAnimationFrame(tick);
     }
     function onPause() {
       invalidate();
@@ -80,11 +133,11 @@ export function useKaraokePlayer(
       setPlaying(false);
       setWaiting(false);
       cancelAnimationFrame(frame);
-      sync();
+      sync(true);
     }
     function onWaiting() {
       setWaiting(true);
-      sync();
+      sync(true);
     }
     function onEnded() {
       const start = segmentLoop.current;
@@ -143,9 +196,9 @@ export function useKaraokePlayer(
       ["pause", onPause],
       ["ended", onEnded],
       ["waiting", onWaiting],
-      ["timeupdate", sync],
-      ["seeking", sync],
-      ["seeked", sync],
+      ["timeupdate", syncForced],
+      ["seeking", syncForced],
+      ["seeked", syncForced],
       ["error", onError],
     ];
     listeners.forEach(([event, listener]) =>
@@ -176,7 +229,7 @@ export function useKaraokePlayer(
       audio.load();
       audioRef.current = null;
     };
-  }, [url, durationMs, invalidate]);
+  }, [url, durationMs, invalidate, emitClock]);
 
   const pause = useCallback(() => {
     operation.current++;
@@ -193,11 +246,14 @@ export function useKaraokePlayer(
       segmentLoop.current = null;
       setEnded(false);
       setSegmentFinished(false);
-      audioRef.current.currentTime =
-        Math.max(0, Math.min(durationMs, ms)) / 1000;
-      setCurrentMs(Math.round(audioRef.current.currentTime * 1000));
+      const clamped = Math.max(0, Math.min(durationMs, ms));
+      audioRef.current.currentTime = clamped / 1000;
+      const rounded = Math.round(audioRef.current.currentTime * 1000);
+      lastCommittedMs.current = rounded;
+      emitClock(rounded);
+      setCurrentMs(rounded);
     },
-    [durationMs],
+    [durationMs, emitClock],
   );
   const play = useCallback(
     async (
@@ -256,7 +312,7 @@ export function useKaraokePlayer(
     if (audioRef.current) audioRef.current.muted = value;
   }, []);
   const setRate = useCallback((value: number) => {
-    if (![0.75, 1].includes(value)) return;
+    if (!(ALLOWED_RATES as readonly number[]).includes(value)) return;
     if (audioRef.current) {
       audioRef.current.playbackRate = value;
       audioRef.current.preservesPitch = true;
@@ -287,6 +343,7 @@ export function useKaraokePlayer(
     setMuted,
     setRate,
     getCurrentMs,
+    subscribeClock,
   };
 }
 export type KaraokePlayerController = ReturnType<typeof useKaraokePlayer>;
