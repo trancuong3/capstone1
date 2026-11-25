@@ -13,11 +13,16 @@ MIGRATION = ROOT / "supabase" / "migrations" / "20261112110945_viread_vietocr_v2
 DUAL_FLOW_MIGRATION = ROOT / "supabase" / "migrations" / "20261112123000_viread_dual_training_profiles.sql"
 ADMIN_AI_WORKFLOW_MIGRATION = ROOT / "supabase" / "migrations" / "20261116110000_admin_ai_workflows.sql"
 ADMIN_AI_SAFETY_HISTORY_MIGRATION = ROOT / "supabase" / "migrations" / "20261116120000_admin_ai_workflow_safety_history.sql"
+SOFT_DELETE_BOOKS_MIGRATION = (
+    ROOT / "supabase" / "migrations"
+    / "20261124120000_soft_delete_catalog_books.sql"
+)
 MIGRATIONS = (
     MIGRATION,
     DUAL_FLOW_MIGRATION,
     ADMIN_AI_WORKFLOW_MIGRATION,
     ADMIN_AI_SAFETY_HISTORY_MIGRATION,
+    SOFT_DELETE_BOOKS_MIGRATION,
 )
 ALLOWED_DATABASE = "test"
 ALLOWED_HOSTS = {"localhost", "127.0.0.1", "::1"}
@@ -89,10 +94,32 @@ async def prepare() -> None:
         )
         for migration in MIGRATIONS:
             await connection.execute(migration.read_text(encoding="utf-8"))
+                    # Verify that the book soft-delete migration was applied successfully.
+        for column in ("is_deleted", "deleted_at", "deleted_by"):
+            exists = await connection.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'books'
+                      AND column_name = $1
+                )
+                """,
+                column,
+            )
+            if not exists:
+                raise RuntimeError(
+                    f"Soft-delete migration did not create public.books.{column}"
+                )
     finally:
         await connection.close()
 
 
 if __name__ == "__main__":
     asyncio.run(prepare())
-    print("Applied the VietOCR V2, dual-flow, and Admin AI workflow migrations to the disposable loopback PostgreSQL test database.")
+    print(
+    "Applied the VietOCR V2, dual-flow, Admin AI workflow, "
+    "and soft-delete catalog books migrations to the disposable "
+    "loopback PostgreSQL test database."
+    )

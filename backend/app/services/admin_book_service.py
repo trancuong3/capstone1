@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.repositories.admin_book_repository import AdminBookRepository
-from app.schemas.admin_book import AdminBookWriteRequest
+from app.schemas.admin_book import AdminBookSoftDeleteResponse, AdminBookWriteRequest
 from app.schemas.book import AdminBookMetadataResponse
 
 
@@ -120,4 +120,21 @@ class AdminBookService:
             raise HTTPException(
                 status_code=500,
                 detail="Không thể cập nhật trạng thái sách lúc này. Vui lòng thử lại.",
+            ) from None
+
+    async def soft_delete(
+        self, actor_id: UUID, book_id: UUID
+    ) -> AdminBookSoftDeleteResponse:
+        await self.require_admin(actor_id)
+        try:
+            deleted = await self.repository.soft_delete(book_id, actor_id=actor_id)
+            if not deleted:
+                raise HTTPException(status_code=404, detail="Resource not found")
+            return AdminBookSoftDeleteResponse(book_id=book_id, is_deleted=True)
+        except HTTPException:
+            raise
+        except SQLAlchemyError:
+            raise HTTPException(
+                status_code=500,
+                detail="Không thể xóa sách lúc này. Vui lòng thử lại.",
             ) from None

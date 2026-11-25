@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, SmallInteger, Integer, ForeignKey, DateTime, Float, text
+from sqlalchemy import Column, String, SmallInteger, Integer, ForeignKey, DateTime, Float, Boolean, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -22,6 +22,9 @@ class Book(Base):
     SuspendedAt = Column("suspended_at", DateTime(timezone=True), nullable=True)
     SuspendedBy = Column("suspended_by", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
     SuspendedReason = Column("suspended_reason", String, nullable=True)
+    IsDeleted = Column("is_deleted", Boolean, nullable=False, default=False, server_default=text("false"))
+    DeletedAt = Column("deleted_at", DateTime(timezone=True), nullable=True)
+    DeletedBy = Column("deleted_by", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
     SourceDeclaration = Column("source_declaration", String, nullable=True)
     CreatedAt = Column("createdat", DateTime(timezone=True), server_default=func.now(), nullable=False)
 

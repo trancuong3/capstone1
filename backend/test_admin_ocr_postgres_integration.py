@@ -108,7 +108,21 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     suspended_by uuid,
                     suspended_reason text,
                     source_declaration text,
-                    createdat timestamptz NOT NULL DEFAULT now()
+                    createdat timestamptz NOT NULL DEFAULT now(),
+                    is_deleted boolean NOT NULL DEFAULT false,
+                    deleted_at timestamptz,
+                    deleted_by uuid,
+
+                    CONSTRAINT books_deleted_by_fkey
+                        FOREIGN KEY (deleted_by)
+                        REFERENCES profiles(id)
+                        ON DELETE SET NULL,
+
+                    CONSTRAINT books_soft_delete_metadata_check
+                        CHECK (
+                            (is_deleted = false AND deleted_at IS NULL AND deleted_by IS NULL)
+                            OR (is_deleted = true AND deleted_at IS NOT NULL)
+                        )
                 )
                 """,
                 """
