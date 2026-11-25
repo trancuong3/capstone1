@@ -75,8 +75,8 @@ public final class MainActivity extends Activity {
     static final int FILE_CHOOSER_CODE = 152;
     static final int CAMERA_CHOOSER_PERMISSION_CODE = 153;
 
-    private static final long COLD_START_HINT_MS = 8_000L;
-    private static final long LOAD_TIMEOUT_MS = 25_000L;
+    // Render.com free tier cold start can take 30-60 s; keep timeouts generous.
+    private static final long LOAD_TIMEOUT_MS = 60_000L;
     private static final long BACK_EXIT_WINDOW_MS = 2_000L;
     static final String VIREAD_ANDROID_UA_MARKER = "ViReadAndroid/1.0";
 
@@ -113,16 +113,28 @@ public final class MainActivity extends Activity {
     private long lastBackPressMs;
     private OnBackInvokedCallback backInvokedCallback;
 
-    private final Runnable coldStartHintRunnable = () -> {
+    // Multi-stage loading hints matched to Render.com cold-start timeline:
+    // Stage 1 (0-8s): "Đang tải ViRead..."  — shown immediately via loading_subtitle
+    // Stage 2 (8s):  "Đang kết nối máy chủ..."
+    // Stage 3 (20s): "Máy chủ đang khởi động, vui lòng đợi..."
+    private static final long HINT_STAGE2_MS = 8_000L;
+    private static final long HINT_STAGE3_MS = 20_000L;
+
+    private final Runnable coldStartHintStage2Runnable = () -> {
         if (!hasLoadedCleanPage && !mainFrameHasError && startupSubtitleView != null) {
-            startupSubtitleView.setText(R.string.loading_cold_start_hint);
+            startupSubtitleView.setText(R.string.loading_hint_stage2);
+        }
+    };
+    private final Runnable coldStartHintStage3Runnable = () -> {
+        if (!hasLoadedCleanPage && !mainFrameHasError && startupSubtitleView != null) {
+            startupSubtitleView.setText(R.string.loading_hint_stage3);
         }
     };
     private final Runnable loadTimeoutRunnable = () -> {
         if (!hasLoadedCleanPage && !mainFrameHasError) {
             onMainFrameFailure(
                     activeTargetUrl,
-                    getString(R.string.error_title_server),
+                    getString(R.string.error_title_timeout),
                     getString(R.string.timeout_message),
                     "LOAD_TIMEOUT");
         }
@@ -439,12 +451,18 @@ public final class MainActivity extends Activity {
 
     private void scheduleLoadWatchdog() {
         cancelLoadWatchdog();
-        mainHandler.postDelayed(coldStartHintRunnable, COLD_START_HINT_MS);
+        // Reset stage 1 message so a retry always starts from "Đang tải ViRead..."
+        if (startupSubtitleView != null) {
+            startupSubtitleView.setText(R.string.loading_subtitle);
+        }
+        mainHandler.postDelayed(coldStartHintStage2Runnable, HINT_STAGE2_MS);
+        mainHandler.postDelayed(coldStartHintStage3Runnable, HINT_STAGE3_MS);
         mainHandler.postDelayed(loadTimeoutRunnable, LOAD_TIMEOUT_MS);
     }
 
     private void cancelLoadWatchdog() {
-        mainHandler.removeCallbacks(coldStartHintRunnable);
+        mainHandler.removeCallbacks(coldStartHintStage2Runnable);
+        mainHandler.removeCallbacks(coldStartHintStage3Runnable);
         mainHandler.removeCallbacks(loadTimeoutRunnable);
     }
 
