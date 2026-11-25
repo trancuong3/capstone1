@@ -7,8 +7,8 @@
  * - Model weights fetched on-demand from verified CORS-safe Hugging Face Hub,
  *   verified with SHA-256 before caching in IndexedDB (`0` Supabase/Vercel egress).
  * - NEVER receives or injects expected book text into the recognizer.
- * - Conditionally appends 0.35s (5,600 zero Float32 samples at 16 kHz) trailing
- *   silence ONLY when input length >= 1.2s (19,200 samples); shorter isolated words
+ * - Conditionally appends 0.35s trailing silence ONLY when clip duration >= 1.2s
+ *   (computed dynamically from the actual input sample rate); shorter isolated words
  *   stay unpadded to avoid OfflineRecognizer trailing collocation hallucinations.
  */
 
