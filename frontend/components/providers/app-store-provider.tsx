@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { clearApiReadCache } from "@/lib/api/read-cache";
 import type { ChildProfileDTO } from "@/types/child";
 
@@ -239,19 +240,28 @@ export function AppStoreProvider({
     return { childId: null, child: null };
   }, [activeUserId, selection.child, selection.childId, selection.userId]);
 
-  const selectChild = useCallback((childId: string) => {
-    if (!childId) return;
-    setSelection((current) => {
-      if (current.childId === childId) return current;
-      clearApiReadCache();
-      return { childId, child: null };
-    });
-  }, []);
+  useEffect(() => {
+    clearApiReadCache();
+  }, [activeUserId, selection.childId]);
+
+  const selectChild = useCallback(
+    (childId: string) => {
+      const normalized = normalizeChildId(childId);
+      if (!normalized) return;
+      broadcastChildSelection(activeUserId, normalized, syncChannelRef.current);
+      setSelection((current) =>
+        current.userId === activeUserId && current.childId === normalized
+          ? current
+          : { userId: activeUserId, childId: normalized, child: null },
+      );
+    },
+    [activeUserId],
+  );
 
   const clearSelectedChild = useCallback(() => {
-    clearApiReadCache();
-    setSelection({ childId: null, child: null });
-  }, []);
+    broadcastChildSelection(activeUserId, null, syncChannelRef.current);
+    setSelection({ userId: activeUserId, childId: null, child: null });
+  }, [activeUserId]);
 
   const setValidatedSelectedChild = useCallback(
     (child: ChildProfileDTO) => {

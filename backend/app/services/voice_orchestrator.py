@@ -32,8 +32,6 @@ from app.providers.local_voice_provider import (
     LocalTranscription,
     LocalVoiceProvider,
     LocalVoiceTechnicalError,
-    resolve_local_stt_mode,
-    resolve_local_tts_precision,
 )
 from app.request_context import get_request_id
 
@@ -155,12 +153,7 @@ class VoiceOrchestrator:
                 "worker_version": local_health.get("worker_version"),
                 "latency_ms": local_health.get("latency_ms"),
                 "stt_model_version": local_health.get("stt_model_version"),
-                "stt_mode": local_health.get("stt_mode") or resolve_local_stt_mode(),
                 "tts_model_version": local_health.get("tts_model_version"),
-                "tts_precision": local_health.get("tts_precision")
-                or resolve_local_tts_precision(),
-                "active_voices": local_health.get("active_voices")
-                or [v["voice_id"] for v in STATIC_LOCAL_VOICES],
             },
             "google": {
                 "stt_configured": self.google.is_stt_configured(),
@@ -201,6 +194,15 @@ class VoiceOrchestrator:
             raise VoiceProviderError(
                 status_code=503, code="GOOGLE_TTS_UNCONFIGURED"
             )
+
+    @staticmethod
+    def _audio_negotiation_kwargs(ctx: VoicePolicyContext) -> dict[str, str]:
+        extra: dict[str, str] = {}
+        if ctx.accept:
+            extra["accept"] = ctx.accept
+        if ctx.audio_format:
+            extra["audio_format"] = ctx.audio_format
+        return extra
 
     def _can_fallback_unlocked_tts(self, policy: VoicePolicyContext) -> bool:
         return (
@@ -245,25 +247,41 @@ class VoiceOrchestrator:
                 voice_id=voice_id,
                 speed=speed,
                 word_sample=word_sample,
+                **self._audio_negotiation_kwargs(ctx),
             )
-        except LocalVoiceTechnicalError as local_err:
-            logger.warning(
-                "tts_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
-                local_err.code,
-                voice_id,
+            logger.info(
+                "tts_ok provider=local voice=%s ms=%.1f session=%s request_id=%s",
+                audio.resolved_voice_id,
                 (time.perf_counter() - t0) * 1000,
                 ctx.session_id or "-",
                 get_request_id(),
             )
-            raise
-        logger.info(
-            "tts_ok provider=local voice=%s ms=%.1f session=%s request_id=%s",
-            audio.resolved_voice_id,
-            (time.perf_counter() - t0) * 1000,
-            ctx.session_id or "-",
-            get_request_id(),
-        )
-        return audio
+            return audio
+        except LocalVoiceTechnicalError as local_err:
+            if not self._can_fallback_unlocked_tts(ctx):
+                logger.warning(
+                    "tts_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
+                    local_err.code,
+                    voice_id,
+                    (time.perf_counter() - t0) * 1000,
+                    ctx.session_id or "-",
+                    get_request_id(),
+                )
+                raise
+            backup_voice_id = _map_local_voice_to_google_backup(voice_id)
+            t_google = time.perf_counter()
+            audio = await self.google.synthesize(
+                text=text, voice_id=backup_voice_id, speed=speed
+            )
+            fallback_audio = replace(audio, used_fallback_voice=True)
+            logger.info(
+                "tts_ok provider=google fallback=1 reason=%s voice=%s ms=%.1f session=- request_id=%s",
+                local_err.code,
+                fallback_audio.resolved_voice_id,
+                (time.perf_counter() - t_google) * 1000,
+                get_request_id(),
+            )
+            return fallback_audio
 
     async def synthesize_timed(
         self,
@@ -294,27 +312,42 @@ class VoiceOrchestrator:
 
         try:
             speech = await self.local.synthesize_timed(
-                words=words, voice_id=voice_id, speed=speed
+                words=words,
+                voice_id=voice_id,
+                speed=speed,
+                **self._audio_negotiation_kwargs(ctx),
             )
-        except LocalVoiceTechnicalError as local_err:
-            logger.warning(
-                "tts_timed_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
-                local_err.code,
-                voice_id,
+            logger.info(
+                "tts_timed_ok provider=local voice=%s words=%d ms=%.1f session=%s request_id=%s",
+                speech.resolved_voice_id,
+                len(words),
                 (time.perf_counter() - t0) * 1000,
                 ctx.session_id or "-",
                 get_request_id(),
             )
-            raise
-        logger.info(
-            "tts_timed_ok provider=local voice=%s words=%d ms=%.1f session=%s request_id=%s",
-            speech.resolved_voice_id,
-            len(words),
-            (time.perf_counter() - t0) * 1000,
-            ctx.session_id or "-",
-            get_request_id(),
-        )
-        return speech
+            return speech
+        except LocalVoiceTechnicalError as local_err:
+            if not self._can_fallback_unlocked_tts(ctx):
+                logger.warning(
+                    "tts_timed_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
+                    local_err.code,
+                    voice_id,
+                    (time.perf_counter() - t0) * 1000,
+                    ctx.session_id or "-",
+                    get_request_id(),
+                )
+                raise
+            backup_voice_id = _map_local_voice_to_google_backup(voice_id)
+            timed = await self.google.synthesize_timed(
+                words=words, voice_id=backup_voice_id, speed=speed
+            )
+            logger.info(
+                "tts_timed_ok provider=google fallback=1 reason=%s voice=%s session=- request_id=%s",
+                local_err.code,
+                timed.resolved_voice_id,
+                get_request_id(),
+            )
+            return replace(timed, used_fallback_voice=True)
 
     async def synthesize_phonics(
         self,
@@ -345,27 +378,42 @@ class VoiceOrchestrator:
 
         try:
             speech = await self.local.synthesize_phonics(
-                steps=steps, voice_id=voice_id, speed=speed
+                steps=steps,
+                voice_id=voice_id,
+                speed=speed,
+                **self._audio_negotiation_kwargs(ctx),
             )
-        except LocalVoiceTechnicalError as local_err:
-            logger.warning(
-                "tts_phonics_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
-                local_err.code,
-                voice_id,
+            logger.info(
+                "tts_phonics_ok provider=local voice=%s steps=%d ms=%.1f session=%s request_id=%s",
+                speech.resolved_voice_id,
+                len(steps),
                 (time.perf_counter() - t0) * 1000,
                 ctx.session_id or "-",
                 get_request_id(),
             )
-            raise
-        logger.info(
-            "tts_phonics_ok provider=local voice=%s steps=%d ms=%.1f session=%s request_id=%s",
-            speech.resolved_voice_id,
-            len(steps),
-            (time.perf_counter() - t0) * 1000,
-            ctx.session_id or "-",
-            get_request_id(),
-        )
-        return speech
+            return speech
+        except LocalVoiceTechnicalError as local_err:
+            if not self._can_fallback_unlocked_tts(ctx):
+                logger.warning(
+                    "tts_phonics_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
+                    local_err.code,
+                    voice_id,
+                    (time.perf_counter() - t0) * 1000,
+                    ctx.session_id or "-",
+                    get_request_id(),
+                )
+                raise
+            backup_voice_id = _map_local_voice_to_google_backup(voice_id)
+            phonics = await self.google.synthesize_phonics(
+                steps=steps, voice_id=backup_voice_id, speed=speed
+            )
+            logger.info(
+                "tts_phonics_ok provider=google fallback=1 reason=%s voice=%s session=- request_id=%s",
+                local_err.code,
+                phonics.resolved_voice_id,
+                get_request_id(),
+            )
+            return phonics
 
     async def transcribe(
         self,

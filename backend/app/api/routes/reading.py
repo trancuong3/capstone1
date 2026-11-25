@@ -1,13 +1,13 @@
+import asyncio
+from io import BytesIO
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, or_, select
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from PIL import Image, UnidentifiedImageError
-from sqlalchemy import and_, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_parent_id, get_db
 from app.models import (
@@ -205,7 +205,7 @@ async def create_fluency_assessment(
 import re
 from math import isfinite
 from pydantic import ValidationError
-from app.models import Book, ChildProfile, Profile, ComprehensionQuestion, ComprehensionAnswer
+from app.models import ChildProfile, Profile, ComprehensionQuestion, ComprehensionAnswer
 from app.schemas.book import CatalogBookResponse
 from app.schemas.reading import (
     HistorySessionSummaryRead, SessionHistoryRead, SessionDetailRead, HistoryEventRead,
@@ -592,7 +592,7 @@ async def delete_reading_report(
 
 #Kadepham
 from fastapi import UploadFile, File
-from app.models.book import BookPage, PageRevision, PageRevisionWord
+from app.models.book import PageRevisionWord
 from app.schemas.reading import CameraPageMatchRead, ReadingPageRead, ReadingPageWordRead
 from app.services.storage_service import download_object
 from app.services.vision_page_matcher import vision_page_matcher

@@ -28,6 +28,7 @@ from app.services.runtime_diagnostics import (
     is_ocr_engine_ready_status,
     probe_storage_health,
 )
+from app.services.worker_telemetry import get_worker_telemetry
 from app.services.voice_orchestrator import VoiceOrchestrator
 from app.services.difficult_words_service import (
     DifficultWordsService,
@@ -281,64 +282,25 @@ class ProgressRepository:
         self.db = db
 
     async def period_assessment(self, child_id, actor_id, start, end, generated_at):
-        from app.models import ReadingComparisonReport, ReadingEvent, ReadingSession
+        from app.models import ReadingSession
+        from app.repositories.reading_content_repository import ReadingContentRepository
         from app.services.reading_assessment import aggregate_period_assessment
-
         local_tz = timezone(timedelta(hours=7))
         begin = datetime.combine(start, datetime.min.time(), tzinfo=local_tz)
         finish = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=local_tz)
         rows = await self.db.execute(
             select(ReadingSession)
             .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
-            .where(
-                ChildProfile.ParentId == actor_id,
-                ReadingSession.ChildId == child_id,
-                ReadingSession.State == "COMPLETED",
-                ReadingSession.StartedAt >= begin,
-                ReadingSession.StartedAt < finish,
-                ReadingSession.EndedAt <= generated_at,
-            )
+            .where(ChildProfile.ParentId == actor_id, ReadingSession.ChildId == child_id,
+                   ReadingSession.State == "COMPLETED", ReadingSession.StartedAt >= begin,
+                   ReadingSession.StartedAt < finish, ReadingSession.EndedAt <= generated_at)
             .order_by(ReadingSession.StartedAt, ReadingSession.Id)
         )
-        sessions = list(rows.scalars().all())
-        if not sessions:
-            return aggregate_period_assessment([])
-
-        session_ids = [session.Id for session in sessions]
-        report_rows = await self.db.execute(
-            select(ReadingComparisonReport)
-            .where(ReadingComparisonReport.SessionId.in_(session_ids))
-            .order_by(
-                ReadingComparisonReport.SessionId,
-                ReadingComparisonReport.CreatedAt.desc(),
-                ReadingComparisonReport.Id.desc(),
-            )
-        )
-        reports_by_session: dict[UUID, list[ReadingComparisonReport]] = {}
-        for report in report_rows.scalars().all():
-            reports_by_session.setdefault(report.SessionId, []).append(report)
-
-        event_rows = await self.db.execute(
-            select(ReadingEvent)
-            .where(ReadingEvent.SessionId.in_(session_ids))
-            .order_by(
-                ReadingEvent.SessionId,
-                ReadingEvent.StartMs,
-                ReadingEvent.Id,
-            )
-        )
-        events_by_session: dict[UUID, list[ReadingEvent]] = {}
-        for event in event_rows.scalars().all():
-            events_by_session.setdefault(event.SessionId, []).append(event)
-
-        evidence = [
-            (
-                session.Id,
-                reports_by_session.get(session.Id, []),
-                events_by_session.get(session.Id, []),
-            )
-            for session in sessions
-        ]
+        repository = ReadingContentRepository(self.db)
+        evidence = []
+        for session in rows.scalars().all():
+            evidence.append((session.Id, await repository.comparison_reports(session.Id),
+                             await repository.events_for_session(session.Id)))
         return aggregate_period_assessment(evidence)
 
     async def report(self, child_id: UUID, period_start: date, period_end: date, actor_id: UUID):
@@ -1004,7 +966,127 @@ class AdminSystemService:
             except Exception:
                 return "UNAVAILABLE", "Không thể kiểm tra AI OCR cục bộ."
 
+        remote_ocr_mode = is_remote_ocr_mode()
+        remote_worker_desc = "remote_worker"
+        remote_ocr_ready = False
+        remote_snapshot: dict[str, object] = {}
+
+        def _build_remote_ocr_items(remote_info: dict[str, object]) -> list[dict[str, str]]:
+            nonlocal remote_worker_desc, remote_ocr_ready, remote_snapshot
+            remote_snapshot = remote_info
+            workers_list = list(remote_info.get("workers") or [])
+            online_workers = [w for w in workers_list if isinstance(w, dict) and w.get("online")]
+            primary = online_workers[0] if online_workers else (workers_list[0] if workers_list and isinstance(workers_list[0], dict) else None)
+            if primary:
+                wid = str(primary.get("worker_id") or "ocr-worker")
+                profile = str(primary.get("model_profile") or "").strip()
+                remote_worker_desc = f"{wid} ({profile})" if profile else wid
+            engines_map = dict(remote_info.get("engines") or (primary.get("engines") if primary else {}) or {})
+            remote_ocr_ready = bool(remote_info.get("ready", False))
+
+            items_out: list[dict[str, str]] = []
+            for key, label in (
+                ("paddleocr", "PaddleOCR"),
+                ("vietocr", "VietOCR"),
+                ("tesseract_vie", "Tesseract tiếng Việt"),
+            ):
+                eng = engines_map.get(key)
+                if isinstance(eng, dict) and online_workers:
+                    verified = bool(eng.get("inference_verified", False))
+                    loaded = bool(eng.get("loaded", False))
+                    installed = bool(eng.get("installed", False))
+                    raw_detail = str(eng.get("detail_status") or "")
+                    if verified or raw_detail == "healthy":
+                        items_out.append(
+                            dict(
+                                id=key,
+                                label=label,
+                                status="HEALTHY",
+                                detail_status="healthy",
+                                safe_message=f"Đã xác minh suy luận trên OCR worker độc lập {remote_worker_desc} (inference_verified).",
+                            )
+                        )
+                    elif loaded:
+                        items_out.append(
+                            dict(
+                                id=key,
+                                label=label,
+                                status="HEALTHY" if key == "tesseract_vie" else "DEGRADED",
+                                detail_status="loaded",
+                                safe_message=f"Đã nạp model trên OCR worker {remote_worker_desc}.",
+                            )
+                        )
+                    elif installed:
+                        items_out.append(
+                            dict(
+                                id=key,
+                                label=label,
+                                status="DEGRADED",
+                                detail_status="installed",
+                                safe_message=f"OCR worker {remote_worker_desc} đã cài thư viện nhưng chưa xác minh suy luận.",
+                            )
+                        )
+                    else:
+                        items_out.append(
+                            dict(
+                                id=key,
+                                label=label,
+                                status="DEGRADED",
+                                detail_status="unknown",
+                                safe_message=f"OCR worker {remote_worker_desc} chưa báo cáo trạng thái engine.",
+                            )
+                        )
+                else:
+                    items_out.append(
+                        dict(
+                            id=key,
+                            label=label,
+                            status="DEGRADED",
+                            detail_status="unknown",
+                            safe_message="Chưa có OCR worker độc lập online báo cáo engine này.",
+                        )
+                    )
+            vie_item = next((x for x in items_out if x["id"] == "tesseract_vie"), None)
+            if vie_item and vie_item["status"] == "HEALTHY":
+                tess_item = dict(
+                    id="tesseract",
+                    label="Tesseract",
+                    status="HEALTHY",
+                    detail_status="healthy",
+                    safe_message=f"Binary Tesseract sẵn sàng trên OCR worker độc lập {remote_worker_desc}.",
+                )
+            else:
+                tess_item = dict(
+                    id="tesseract",
+                    label="Tesseract",
+                    status="DEGRADED",
+                    detail_status="unknown",
+                    safe_message="Chưa xác minh binary Tesseract trên OCR worker độc lập.",
+                )
+            items_out.insert(2, tess_item)
+            return items_out
+
         async def _probe_ocr_engines():
+            if remote_ocr_mode:
+                try:
+                    remote_info = await asyncio.wait_for(collect_remote_ocr_health(), timeout=3)
+                    return _build_remote_ocr_items(remote_info)
+                except Exception:
+                    return [
+                        dict(
+                            id=key,
+                            label=label,
+                            status="DEGRADED",
+                            detail_status="unknown",
+                            safe_message="Chưa xác minh được trạng thái OCR worker độc lập.",
+                        )
+                        for key, label in (
+                            ("paddleocr", "PaddleOCR"),
+                            ("vietocr", "VietOCR"),
+                            ("tesseract", "Tesseract"),
+                            ("tesseract_vie", "Tesseract tiếng Việt"),
+                        )
+                    ]
             try:
                 return await asyncio.wait_for(asyncio.to_thread(collect_ocr_health), timeout=3)
             except Exception:

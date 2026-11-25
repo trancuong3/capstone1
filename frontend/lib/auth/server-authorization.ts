@@ -5,7 +5,7 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { readPlaywrightAuthFixture } from "@/lib/auth/playwright-auth-fixture";
-import { getRoleHome } from "@/lib/auth/route-policy";
+import { buildLoginRedirectPath, getRoleHome } from "@/lib/auth/route-policy";
 import {
   computeSupabaseAuthCookieFingerprint,
   readProfileRole,

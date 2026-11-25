@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 
 from app.api.deps import require_active_profile_id
 from app.api.routes.voice import _extract_audio_accept, get_voice_orchestrator, provider_http_exception
@@ -58,8 +58,12 @@ async def list_voices(
 @router.post("/text-to-speech/timed", response_model=TimedSpeechRead)
 async def timed_text_to_speech(
     payload: TimedSpeechRequest,
+    request: Request,
     response: Response,
-    _actor_id: UUID = Depends(get_current_parent_id),
+    _actor_id: UUID = Depends(require_active_profile_id),
+    _rate_limited: None = Depends(
+        rate_limit("voice_tts", default_max=60, default_window=60.0)
+    ),
 ) -> TimedSpeechRead:
     """Synthesize a page in the locked voice and return per-word start/end times."""
 

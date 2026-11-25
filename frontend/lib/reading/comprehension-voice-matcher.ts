@@ -274,35 +274,65 @@ function extractSelfCorrectedTail(normalized: string): {
   return { clause: normalized, hadRevision: false };
 }
 
-/**
- * When the child self-corrects mid-turn (e.g. "A… à không, con chọn B" or
- * "không phải Lan, mà là bạn An"), discard the retracted clause before the pivot
- * and keep only the final committed clause.
- */
-function extractSelfCorrectedTail(normalized: string): {
-  readonly clause: string;
-  readonly hadRevision: boolean;
-} {
-  let latestEnd = -1;
-  for (const pivot of CORRECTION_PIVOTS) {
-    const idx = normalized.lastIndexOf(pivot);
-    if (idx !== -1) {
-      const end = idx + pivot.length;
-      if (end > latestEnd) latestEnd = end;
+function collectVisibleChoiceTokens(
+  choices: readonly ComprehensionChoiceUI[],
+): Set<string> {
+  const tokens = new Set<string>();
+  for (const choice of choices) {
+    for (const token of tokenizeVietnameseText(choice.label)) {
+      tokens.add(token);
     }
   }
-  if (latestEnd !== -1) {
-    const tail = normalized.slice(latestEnd).trim();
-    if (tail) return { clause: tail, hadRevision: true };
+  return tokens;
+}
+
+function hasExplicitChoiceMarkerBefore(
+  tokens: readonly string[],
+  index: number,
+): boolean {
+  let cursor = index - 1;
+  if (cursor >= 0 && tokens[cursor] === "là") {
+    cursor -= 1;
   }
-  // Pattern: "không phải <X> con chọn <Y>"
-  const notMatch = /^(?:con |bé |em )?không\s+(?:chọn|phải)\s+.+?\s+(?:con\s+|bé\s+|em\s+)?(?:chọn|là)\s+(.+)$/u.exec(
-    normalized,
+  if (cursor < 0) return false;
+  if (SINGLE_TOKEN_EXPLICIT_MARKERS.has(tokens[cursor])) {
+    return true;
+  }
+  return (
+    cursor >= 1 &&
+    tokens[cursor] === "án" &&
+    (tokens[cursor - 1] === "đáp" || tokens[cursor - 1] === "phương")
   );
-  if (notMatch?.[1]) {
-    return { clause: notMatch[1].trim(), hadRevision: true };
+}
+
+function resolveLetterIndexAt(
+  tokens: readonly string[],
+  tokenIndex: number,
+  choicesLength: number,
+  visibleChoiceTokens: ReadonlySet<string>,
+): number {
+  const token = tokens[tokenIndex];
+  if (!token || visibleChoiceTokens.has(token)) {
+    return -1;
   }
-  return { clause: normalized, hadRevision: false };
+  const limit = Math.min(choicesLength, PRIMARY_LETTER_ALIASES.length);
+  for (let idx = 0; idx < limit; idx += 1) {
+    if (PRIMARY_LETTER_ALIASES[idx].includes(token)) {
+      return idx;
+    }
+  }
+  if (hasExplicitChoiceMarkerBefore(tokens, tokenIndex)) {
+    const homophoneLimit = Math.min(
+      choicesLength,
+      HOMOPHONE_LETTER_ALIASES.length,
+    );
+    for (let idx = 0; idx < homophoneLimit; idx += 1) {
+      if (HOMOPHONE_LETTER_ALIASES[idx].includes(token)) {
+        return idx;
+      }
+    }
+  }
+  return -1;
 }
 
 function matchLetterIndex(

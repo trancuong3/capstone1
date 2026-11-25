@@ -24,6 +24,7 @@ import logging
 import os
 import re
 import struct
+import threading
 import time
 import unicodedata
 from collections import OrderedDict
@@ -123,6 +124,12 @@ TTS_PRECISION = os.environ.get("VIREAD_VOICE_TTS_PRECISION", "hybrid").strip().l
 if TTS_PRECISION not in ("hybrid", "fp32", "int8"):
     TTS_PRECISION = "hybrid"
 TTS_MODEL_VERSION = f"vieneu-v3-turbo-onnx-{TTS_PRECISION}-3.8.5"
+TTS_HYBRID_WORD_FP32 = os.environ.get("VIREAD_VOICE_HYBRID_WORD_FP32", "false").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 TTS_THREADS = int(os.environ.get("VIREAD_VOICE_TTS_THREADS", "6"))
 TTS_CACHE_DIR = Path(
     os.environ.get(
@@ -817,6 +824,157 @@ def encode_wav_bytes(wav: np.ndarray, sr: int) -> bytes:
     return buf.getvalue()
 
 
+_AUDIO_FORMAT_ALIAS_TO_MIME = {
+    "wav": "audio/wav",
+    "mp3": "audio/mpeg",
+    "ogg": "audio/ogg",
+}
+
+
+def resolve_preferred_audio_media_type(
+    accept_header: str | None = None,
+    audio_format: str | None = None,
+) -> str:
+    """Resolve desired TTS output MIME from Accept header (priority) or body audio_format."""
+    if isinstance(accept_header, str) and accept_header.strip():
+        candidates: list[tuple[float, int, str]] = []
+        for idx, part in enumerate(accept_header.split(",")):
+            raw_item = part.strip()
+            if not raw_item:
+                continue
+            pieces = [seg.strip() for seg in raw_item.split(";")]
+            mime = pieces[0].lower()
+            q = 1.0
+            for param in pieces[1:]:
+                if param.startswith("q="):
+                    try:
+                        q = float(param[2:])
+                    except ValueError:
+                        q = 0.0
+            if q <= 0:
+                continue
+            if mime in ("audio/mpeg", "audio/mp3"):
+                candidates.append((q, -idx, "audio/mpeg"))
+            elif mime in ("audio/ogg", "audio/opus"):
+                candidates.append((q, -idx, "audio/ogg"))
+            elif mime in ("audio/wav", "audio/x-wav", "audio/wave"):
+                candidates.append((q, -idx, "audio/wav"))
+        if candidates:
+            candidates.sort(reverse=True)
+            return candidates[0][2]
+
+    if isinstance(audio_format, str):
+        mapped = _AUDIO_FORMAT_ALIAS_TO_MIME.get(audio_format.strip().lower())
+        if mapped:
+            return mapped
+    return "audio/wav"
+
+
+def _encode_via_pyav(wav: np.ndarray, sr: int, *, fmt: str, codecs: tuple[str, ...], target_sr: int | None = None) -> bytes:
+    arr = np.asarray(wav, dtype=np.float32)
+    if arr.ndim > 1:
+        arr = arr.mean(axis=1)
+    if arr.size == 0:
+        raise ValueError("Empty PCM buffer")
+    out_sr = target_sr or sr
+    if out_sr != sr:
+        arr = librosa.resample(arr, orig_sr=sr, target_sr=out_sr).astype(np.float32)
+    arr = np.clip(arr, -1.0, 1.0).astype(np.float32)
+    pcm_2d = arr.reshape(1, -1)
+
+    last_exc: Exception | None = None
+    for codec_name in codecs:
+        buf = io.BytesIO()
+        container = None
+        try:
+            container = av.open(buf, mode="w", format=fmt)
+            stream = container.add_stream(codec_name, rate=out_sr, layout="mono")
+            resampler = av.AudioResampler(
+                format=stream.format.name,
+                layout="mono",
+                rate=out_sr,
+            )
+            frame_size = int(getattr(stream, "frame_size", 0) or 1024)
+            for offset in range(0, pcm_2d.shape[1], frame_size):
+                chunk = pcm_2d[:, offset : offset + frame_size]
+                frame = av.AudioFrame.from_ndarray(chunk, format="fltp", layout="mono")
+                frame.rate = out_sr
+                for resampled in resampler.resample(frame):
+                    for packet in stream.encode(resampled):
+                        container.mux(packet)
+            for resampled in resampler.resample(None):
+                for packet in stream.encode(resampled):
+                    container.mux(packet)
+            for packet in stream.encode(None):
+                container.mux(packet)
+            container.close()
+            container = None
+            encoded = buf.getvalue()
+            if encoded:
+                return encoded
+        except Exception as exc:
+            last_exc = exc
+        finally:
+            if container is not None:
+                try:
+                    container.close()
+                except Exception:
+                    pass
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError(f"Failed to encode {fmt}")
+
+
+def encode_audio_bytes_for_media_type(
+    wav_bytes: bytes,
+    preferred_media_type: str,
+) -> tuple[bytes, str]:
+    """Transcode cached WAV bytes to audio/mpeg or audio/ogg with safe WAV fallback."""
+    if preferred_media_type not in ("audio/mpeg", "audio/ogg"):
+        return wav_bytes, "audio/wav"
+    try:
+        arr, sr = sf.read(io.BytesIO(wav_bytes), dtype="float32", always_2d=False)
+        sr_int = int(sr)
+        if preferred_media_type == "audio/mpeg":
+            encoded = _encode_via_pyav(
+                np.asarray(arr, dtype=np.float32),
+                sr_int,
+                fmt="mp3",
+                codecs=("libmp3lame", "mp3"),
+            )
+            return encoded, "audio/mpeg"
+
+        try:
+            encoded = _encode_via_pyav(
+                np.asarray(arr, dtype=np.float32),
+                sr_int,
+                fmt="ogg",
+                codecs=("libopus",),
+                target_sr=48000,
+            )
+            return encoded, "audio/ogg"
+        except Exception:
+            try:
+                encoded = _encode_via_pyav(
+                    np.asarray(arr, dtype=np.float32),
+                    sr_int,
+                    fmt="ogg",
+                    codecs=("libvorbis",),
+                )
+                return encoded, "audio/ogg"
+            except Exception:
+                ogg_buf = io.BytesIO()
+                sf.write(ogg_buf, arr, sr_int, format="OGG", subtype="VORBIS")
+                return ogg_buf.getvalue(), "audio/ogg"
+    except Exception as exc:
+        logger.warning(
+            "tts_audio_transcode_fallback_wav target=%s error_type=%s",
+            preferred_media_type,
+            type(exc).__name__,
+        )
+        return wav_bytes, "audio/wav"
+
+
 def _guess_av_format_hints(
     raw_bytes: bytes,
     *,
@@ -1038,7 +1196,8 @@ def synthesize_single_utterance_sync(
     preset: LocalVoicePreset,
     speed: float,
     word_sample: bool,
-    active_precision: str = TTS_PRECISION,
+    *,
+    precision_override: str | None = None,
 ) -> tuple[bytes, float]:
     syllable_estimate = len(text_nfc.split())
     use_crisp_temp = word_sample or syllable_estimate <= 3
@@ -1052,7 +1211,7 @@ def synthesize_single_utterance_sync(
         speed=speed,
         mode=cache_mode,
         payload=text_nfc,
-        precision=active_precision,
+        precision=precision,
     )
     wav_cache = TTS_CACHE_DIR / f"{key}.wav"
     meta_cache = TTS_CACHE_DIR / f"{key}.json"
@@ -1099,14 +1258,14 @@ def synthesize_timed_passage_sync(
     text_nfc: str,
     preset: LocalVoicePreset,
     speed: float,
-    active_precision: str = TTS_PRECISION,
+    *,
+    preferred_media_type: str = "audio/wav",
 ) -> dict[str, Any]:
     key = make_cache_key(
         voice_id=preset.voice_id,
         speed=speed,
         mode="timed_passage",
         payload=text_nfc,
-        precision=active_precision,
     )
     wav_cache = TTS_CACHE_DIR / f"{key}.wav"
     meta_cache = TTS_CACHE_DIR / f"{key}.json"
@@ -1253,7 +1412,9 @@ def synthesize_phonics_steps_sync(
     steps: list[PhonicsStepRequestItem],
     preset: LocalVoicePreset,
     speed: float,
-    active_precision: str = TTS_PRECISION,
+    *,
+    precision_override: str | None = None,
+    preferred_media_type: str = "audio/wav",
 ) -> dict[str, Any]:
     serialized_steps = json.dumps(
         [
@@ -1272,7 +1433,7 @@ def synthesize_phonics_steps_sync(
         speed=speed,
         mode="phonics_steps",
         payload=serialized_steps,
-        precision=active_precision,
+        precision=precision,
     )
     wav_cache = TTS_CACHE_DIR / f"{key}.wav"
     meta_cache = TTS_CACHE_DIR / f"{key}.json"
@@ -1454,36 +1615,25 @@ def _float32_to_pcm16_bytes(wav: np.ndarray) -> bytes:
 
 
 @app.post("/tts", dependencies=[Depends(require_voice_worker_token)])
-async def post_tts(req: TtsSynthesisRequest) -> Response:
+async def post_tts(req: TtsSynthesisRequest, request: Request) -> Response:
     await _ensure_capability_loaded("tts")
     preset = resolve_strict_voice(req.voice_id)
     text_nfc = normalize_nfc_text(req.text)
     speed = normalize_speed(req.speed)
     word_count = len(WORD_TOKEN_RE.findall(text_nfc))
-    engine, active_precision = runtime.select_tts_engine(
-        word_sample=req.word_sample,
-        is_phonics=False,
-        word_count=word_count,
-    )
-    use_crisp_temp = req.word_sample or word_count <= 3
+    use_crisp_temp = bool(req.word_sample or word_count <= 3)
     cache_mode = "word" if use_crisp_temp else "sentence"
+    tts_engine, used_precision = runtime.get_tts_engine_for_mode(crisp=use_crisp_temp)
+    preferred_media_type = resolve_preferred_audio_media_type(
+        request.headers.get("accept"), req.audio_format
+    )
     cache_key = make_cache_key(
         voice_id=preset.voice_id,
         speed=speed,
         mode=cache_mode,
         payload=text_nfc,
-        precision=active_precision,
+        precision=used_precision,
     )
-    response_headers = {
-        "Cache-Control": "no-store",
-        "X-Voice-Provider": "local",
-        "X-Resolved-Voice-Id": preset.voice_id,
-        "X-Voice-Region": preset.region,
-        "X-Voice-Gender": preset.gender,
-        "X-Voice-Model-Version": TTS_MODEL_VERSION,
-        "X-Voice-Precision": active_precision,
-        "X-Voice-Fallback": "0",
-    }
 
     # Ultra-fast in-memory LRU cache (< 10ms TTFA, never blocks TTS semaphore)
     mem_hit = _mem_cache_get(cache_key)
@@ -1511,50 +1661,16 @@ async def post_tts(req: TtsSynthesisRequest) -> Response:
                 },
             ) from exc
 
-    wav_cache = TTS_CACHE_DIR / f"{cache_key}.wav"
-    meta_cache = TTS_CACHE_DIR / f"{cache_key}.json"
-    if wav_cache.is_file() and meta_cache.is_file():
-        meta = json.loads(meta_cache.read_text(encoding="utf-8"))
-        wav_bytes = wav_cache.read_bytes()
-        duration_s = float(meta["duration_seconds"])
-        _mem_cache_put(cache_key, (wav_bytes, duration_s))
-        return Response(
-            content=wav_bytes,
-            media_type="audio/wav",
-            headers={
-                **response_headers,
-                "X-Audio-Duration-Seconds": str(duration_s),
-            },
-        )
-
-    try:
-        await asyncio.wait_for(
-            runtime.tts_semaphore.acquire(), timeout=QUEUE_WAIT_SECONDS
-        )
-    except TimeoutError as exc:
-        logger.warning("tts_timed_busy voice=%s region=%s", preset.voice_id, preset.region)
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "VOICE_WORKER_BUSY",
-                "message": "Bộ đọc giọng nói trên máy đang bận xử lý câu trước.",
-            },
-        ) from exc
-
-    # Short crisp utterances (<= 4 words / word_sample) finish in ~450-1390ms in fp32;
-    # stream longer utterances (word_count > 4) for sub-second TTFA while still caching exact WAV.
-    should_stream = not req.word_sample and word_count > 4
-    if not should_stream:
         runtime.active_tts_jobs += 1
         try:
             wav_bytes, duration_s = await asyncio.to_thread(
                 synthesize_single_utterance_sync,
-                engine,
+                tts_engine,
                 text_nfc,
                 preset,
                 speed,
                 req.word_sample,
-                active_precision,
+                precision_override=used_precision,
             )
         finally:
             runtime.active_tts_jobs -= 1
@@ -1569,134 +1685,34 @@ async def post_tts(req: TtsSynthesisRequest) -> Response:
             duration_s,
         )
 
-    runtime.active_tts_jobs += 1
-    normalized_text = (
-        normalize_vietnamese_tts_text(text_nfc, expand_ranges_and_codes=True)
-        or text_nfc
+    out_bytes, out_media_type = await asyncio.to_thread(
+        encode_audio_bytes_for_media_type, wav_bytes, preferred_media_type
     )
-    spoken_input = (
-        normalized_text if normalized_text[-1] in ".!?" else f"{normalized_text}."
-    )
-    sr = int(engine.sample_rate)
-    loop = asyncio.get_running_loop()
-    chunk_queue: asyncio.Queue[np.ndarray | BaseException | None] = asyncio.Queue()
-
-    def _produce_chunks() -> None:
-        try:
-            if abs(speed - 1.0) < 0.01:
-                for sub in engine.infer_stream(
-                    spoken_input,
-                    voice=preset.preset_name,
-                    temperature=0.50,
-                    top_k=18,
-                    apply_watermark=False,
-                ):
-                    if sub is not None and len(sub) > 0:
-                        loop.call_soon_threadsafe(
-                            chunk_queue.put_nowait,
-                            np.asarray(sub, dtype=np.float32),
-                        )
-            else:
-                clauses, gaps = normalize_to_chunks_v3_with_gaps(
-                    spoken_input, max_chars=140
-                )
-                if not clauses:
-                    clauses = [spoken_input]
-                    gaps = []
-                silence_secs = gaps_to_silence(gaps) if gaps else []
-                for idx, clause in enumerate(clauses):
-                    raw_clause = engine.infer(
-                        clause,
-                        voice=preset.preset_name,
-                        temperature=0.50,
-                        top_k=18,
-                        apply_watermark=False,
-                    )
-                    stretched = apply_speed_preserve_pitch(raw_clause, speed)
-                    if stretched.size > 0:
-                        loop.call_soon_threadsafe(chunk_queue.put_nowait, stretched)
-                    if idx < len(silence_secs):
-                        gap_s = max(0.10, float(silence_secs[idx]) / max(speed, 0.7))
-                        loop.call_soon_threadsafe(
-                            chunk_queue.put_nowait,
-                            np.zeros(int(sr * gap_s), dtype=np.float32),
-                        )
-            loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
-        except BaseException as exc:
-            loop.call_soon_threadsafe(chunk_queue.put_nowait, exc)
-
-    async def _stream_audio_response():
-        worker_task = asyncio.create_task(asyncio.to_thread(_produce_chunks))
-        assembled_chunks: list[np.ndarray] = []
-        sent_header = False
-        lead_wav = np.zeros(int(sr * 0.07), dtype=np.float32)
-        tail_wav = np.zeros(int(sr * 0.16), dtype=np.float32)
-        try:
-            while True:
-                item = await chunk_queue.get()
-                if item is None:
-                    break
-                if isinstance(item, BaseException):
-                    raise item
-                if not sent_header:
-                    sent_header = True
-                    assembled_chunks.append(lead_wav)
-                    assembled_chunks.append(item)
-                    yield (
-                        _streaming_wav_header(sr)
-                        + _float32_to_pcm16_bytes(lead_wav)
-                        + _float32_to_pcm16_bytes(item)
-                    )
-                else:
-                    assembled_chunks.append(item)
-                    yield _float32_to_pcm16_bytes(item)
-
-            if not sent_header:
-                sent_header = True
-                assembled_chunks.append(lead_wav)
-                yield _streaming_wav_header(sr) + _float32_to_pcm16_bytes(lead_wav)
-
-            assembled_chunks.append(tail_wav)
-            yield _float32_to_pcm16_bytes(tail_wav)
-
-            await worker_task
-            full_wav = np.concatenate(assembled_chunks).astype(np.float32)
-            duration_s = round(float(len(full_wav) / sr), 3)
-            cached_wav_bytes = encode_wav_bytes(full_wav, sr)
-            wav_cache.write_bytes(cached_wav_bytes)
-            meta_cache.write_text(
-                json.dumps({"duration_seconds": duration_s}, ensure_ascii=False),
-                encoding="utf-8",
-            )
-            _mem_cache_put(cache_key, (cached_wav_bytes, duration_s))
-        finally:
-            if not worker_task.done():
-                worker_task.cancel()
-                await asyncio.gather(worker_task, return_exceptions=True)
-            runtime.active_tts_jobs -= 1
-            runtime.tts_semaphore.release()
-
-    return StreamingResponse(
-        _stream_audio_response(),
-        media_type="audio/wav",
+    return Response(
+        content=out_bytes,
+        media_type=out_media_type,
         headers={
-            **response_headers,
-            "X-TTS-Streamed": "1",
+            "Cache-Control": "no-store",
+            "X-Voice-Provider": "local",
+            "X-Resolved-Voice-Id": preset.voice_id,
+            "X-Voice-Region": preset.region,
+            "X-Voice-Gender": preset.gender,
+            "X-Voice-Model-Version": TTS_MODEL_VERSION,
+            "X-TTS-Precision": used_precision,
+            "X-Voice-Fallback": "0",
+            "X-Audio-Duration-Seconds": str(duration_s),
         },
     )
 
 
 @app.post("/tts/timed", dependencies=[Depends(require_voice_worker_token)])
-async def post_tts_timed(req: TtsSynthesisRequest) -> dict[str, Any]:
+async def post_tts_timed(req: TtsSynthesisRequest, request: Request) -> dict[str, Any]:
     await _ensure_capability_loaded("tts")
     preset = resolve_strict_voice(req.voice_id)
     text_nfc = normalize_nfc_text(req.text)
     speed = normalize_speed(req.speed)
-    word_count = len(WORD_TOKEN_RE.findall(text_nfc))
-    engine, active_precision = runtime.select_tts_engine(
-        word_sample=False,
-        is_phonics=False,
-        word_count=word_count,
+    preferred_media_type = resolve_preferred_audio_media_type(
+        request.headers.get("accept"), req.audio_format
     )
 
     try:
@@ -1717,11 +1733,11 @@ async def post_tts_timed(req: TtsSynthesisRequest) -> dict[str, Any]:
     try:
         result = await asyncio.to_thread(
             synthesize_timed_passage_sync,
-            engine,
+            runtime.tts_engine,
             text_nfc,
             preset,
             speed,
-            active_precision,
+            preferred_media_type=preferred_media_type,
         )
         logger.info(
             "tts_timed_ok voice=%s region=%s speed=%.2f words=%d duration_s=%.3f",
@@ -1738,14 +1754,13 @@ async def post_tts_timed(req: TtsSynthesisRequest) -> dict[str, Any]:
 
 
 @app.post("/tts/phonics", dependencies=[Depends(require_voice_worker_token)])
-async def post_tts_phonics(req: PhonicsSynthesisRequest) -> dict[str, Any]:
+async def post_tts_phonics(req: PhonicsSynthesisRequest, request: Request) -> dict[str, Any]:
     await _ensure_capability_loaded("tts")
     preset = resolve_strict_voice(req.voice_id)
     speed = normalize_speed(req.speed)
-    engine, active_precision = runtime.select_tts_engine(
-        word_sample=True,
-        is_phonics=True,
-        word_count=1,
+    tts_engine, used_precision = runtime.get_tts_engine_for_mode(crisp=True)
+    preferred_media_type = resolve_preferred_audio_media_type(
+        request.headers.get("accept"), req.audio_format
     )
 
     try:
@@ -1766,11 +1781,12 @@ async def post_tts_phonics(req: PhonicsSynthesisRequest) -> dict[str, Any]:
     try:
         result = await asyncio.to_thread(
             synthesize_phonics_steps_sync,
-            engine,
+            tts_engine,
             req.steps,
             preset,
             speed,
-            active_precision,
+            precision_override=used_precision,
+            preferred_media_type=preferred_media_type,
         )
         logger.info(
             "tts_phonics_ok voice=%s region=%s speed=%.2f steps=%d duration_s=%.3f",

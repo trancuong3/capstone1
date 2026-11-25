@@ -136,7 +136,6 @@ class AdminOcrAuthorizationTests(unittest.TestCase):
         self.db.rollback = AsyncMock()
         self.db.add = MagicMock()
         self.db.add_all = MagicMock()
-        from app.api.routes.book import router as book_router
 
         self.app = FastAPI()
         self.app.include_router(book_router, prefix="/books")

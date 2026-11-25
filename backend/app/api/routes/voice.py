@@ -29,7 +29,9 @@ from fastapi import (
 )
 from fastapi.security import HTTPAuthorizationCredentials
 
-from app.api.deps import require_active_profile_id
+from app.api.deps import get_current_parent_id, require_active_profile_id
+from app.database.role_cache import get_cached_profile_role
+from app.database.session import AsyncSessionLocal
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
 from app.providers.google_voice_provider import GOOGLE_VOICE_BY_ID
 from app.providers.local_voice_provider import (
@@ -134,6 +136,32 @@ def _parse_bool_form(raw: str | bool | None) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _validate_stt_keyterms(keyterms: list[str] | None) -> list[str] | None:
+    """Validate bounded NFC-normalized STT keyterms."""
+    if keyterms is None:
+        return None
+    if len(keyterms) > MAX_STT_KEYTERMS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "TOO_MANY_KEYTERMS"},
+        )
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in keyterms:
+        term = unicodedata.normalize("NFC", raw).strip()
+        if not term:
+            continue
+        if len(term) > MAX_STT_KEYTERM_CHARS:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "KEYTERM_TOO_LONG"},
+            )
+        if term not in seen:
+            seen.add(term)
+            normalized.append(term)
+    return normalized or None
+
+
 def _extract_audio_accept(request: Request) -> str | None:
     raw = (request.headers.get("accept") or "").strip()
     if not raw or raw == "*/*":
@@ -147,7 +175,8 @@ def _extract_audio_accept(request: Request) -> str | None:
 @router.get("/status")
 async def voice_status(
     response: Response,
-    _actor_id: UUID = Depends(get_current_parent_id),
+    _actor_id: UUID = Depends(require_active_profile_id),
+    _rate_limited: None = Depends(rate_limit("voice_status", default_max=120, default_window=60.0)),
 ) -> dict[str, Any]:
     """Report safe local worker & Google backup readiness without secrets."""
 

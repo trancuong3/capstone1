@@ -1152,6 +1152,7 @@ class ReadingContentService:
         *,
         base_url: str | None = None,
         book_is_private: bool | None = None,
+        owner_parent_id: UUID | None = None,
     ) -> ReadingPageDTO:
         text_content = (revision.VerifiedText or "").strip()
         if not text_content:
@@ -1229,11 +1230,21 @@ class ReadingContentService:
             image_path = page.ImagePath
 
         book_id_value = getattr(page, "BookId", None)
-        if book_is_private is None:
-            book_is_private = False
-            if book_id_value is not None and isinstance(self.repository, ReadingContentRepository):
-                book_row = await self.repository.book_by_id(book_id_value)
+        needs_book_lookup = book_is_private is None or (
+            book_is_private and owner_parent_id is None
+        )
+        if (
+            needs_book_lookup
+            and book_id_value is not None
+            and isinstance(self.repository, ReadingContentRepository)
+        ):
+            book_row = await self.repository.book_by_id(book_id_value)
+            if book_is_private is None:
                 book_is_private = book_row is not None and is_book_private(book_row)
+            if book_row is not None and owner_parent_id is None:
+                owner_parent_id = getattr(book_row, "OwnerParentId", None)
+        elif book_is_private is None:
+            book_is_private = False
 
         await self.repository.db.rollback()
 

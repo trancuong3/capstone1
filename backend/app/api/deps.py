@@ -234,22 +234,6 @@ async def _require_database_role(actor_id: UUID, db: AsyncSession, expected_role
     return actor_id
 
 
-async def require_active_profile_id(
-    actor_id: UUID = Depends(get_current_parent_id),
-    db: AsyncSession = Depends(get_db),
-) -> UUID:
-    """Require a verified Supabase user with an active parent or admin profile."""
-    from app.database.role_cache import get_cached_profile_role
-
-    role = await get_cached_profile_role(db, actor_id)
-    if role not in ("parent", "admin"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied",
-        )
-    return actor_id
-
-
 async def require_parent_id(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
