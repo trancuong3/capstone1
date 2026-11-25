@@ -58,7 +58,8 @@ export function buildSpeechServiceError(params: {
   const { capability, status, requestId = "", providerCode } = params;
   let code: ServiceErrorCode = capability;
   let message = DEFAULT_SPEECH_MESSAGE;
-  let retryable = params.retryable ?? (status === 0 || status === 429 || status >= 500);
+  let retryable =
+    params.retryable ?? (status === 0 || status === 429 || status >= 500);
 
   if (capability === "STT_UNAVAILABLE") {
     switch (providerCode) {
@@ -78,8 +79,7 @@ export function buildSpeechServiceError(params: {
         break;
       case "STT_PERMISSION_DENIED":
         code = "STT_PERMISSION_DENIED";
-        message =
-          "Dịch vụ nghe đọc chưa được cấp quyền truy cập lúc này.";
+        message = "Dịch vụ nghe đọc chưa được cấp quyền truy cập lúc này.";
         retryable = false;
         break;
       case "STT_TERMS_NOT_ACCEPTED":
@@ -146,7 +146,8 @@ export function buildSpeechServiceError(params: {
       default:
         if (status === 401) {
           code = "AUTH_REQUIRED";
-          message = "Phiên đăng nhập đã hết hạn. Ba mẹ vui lòng đăng nhập lại nhé.";
+          message =
+            "Phiên đăng nhập đã hết hạn. Ba mẹ vui lòng đăng nhập lại nhé.";
           retryable = false;
         } else if (status === 403) {
           code = "FORBIDDEN";
@@ -205,7 +206,8 @@ export function buildSpeechServiceError(params: {
       default:
         if (status === 401) {
           code = "AUTH_REQUIRED";
-          message = "Phiên đăng nhập đã hết hạn. Ba mẹ vui lòng đăng nhập lại nhé.";
+          message =
+            "Phiên đăng nhập đã hết hạn. Ba mẹ vui lòng đăng nhập lại nhé.";
           retryable = false;
         } else if (status === 403) {
           code = "FORBIDDEN";

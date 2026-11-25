@@ -56,7 +56,8 @@ describe("coalesced browser auth and bounded user-scoped read cache", () => {
           { status: 200 },
         );
       }
-      return new Response(new Blob(["audio"], { type: "audio/mpeg" }), {
+      // Use bytes across the Node Response and jsdom Blob boundary.
+      return new Response(new Uint8Array([1, 2, 3]), {
         status: 200,
         headers: { "content-type": "audio/mpeg" },
       });
@@ -97,7 +98,9 @@ describe("coalesced browser auth and bounded user-scoped read cache", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     // Explicit bypassCache refreshes live state
-    await requestApi("/catalog/1", itemSchema, undefined, { bypassCache: true });
+    await requestApi("/catalog/1", itemSchema, undefined, {
+      bypassCache: true,
+    });
     expect(fetchMock).toHaveBeenCalledTimes(3);
 
     // Mutation clears cached reads
@@ -171,7 +174,9 @@ describe("coalesced browser auth and bounded user-scoped read cache", () => {
       }),
     );
     await expect(
-      createSpeechService().transcribe(new Blob(["audio"], { type: "audio/wav" })),
+      createSpeechService().transcribe(
+        new Blob(["audio"], { type: "audio/wav" }),
+      ),
     ).rejects.toMatchObject({
       code: "STT_TIMEOUT",
       retryable: true,

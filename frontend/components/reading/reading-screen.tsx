@@ -6136,9 +6136,8 @@ function ReadingSessionScreen({
           }
           clearApiReadCache();
           try {
-            const nextPage = await services.readingService.getCurrentPage(
-              sessionId,
-            );
+            const nextPage =
+              await services.readingService.getCurrentPage(sessionId);
             if (!mountedRef.current || nextPage.page_id !== targetPageId) {
               return null;
             }

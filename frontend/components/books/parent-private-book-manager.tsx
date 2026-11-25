@@ -141,12 +141,7 @@ function describeToolCheckScope(scope: ToolCheckScopeDTO): string {
 }
 
 type SubmissionFilterGroup =
-  | "ALL"
-  | "CHECKING"
-  | "READY"
-  | "ADMIN"
-  | "FAILED"
-  | "ADDED";
+  "ALL" | "CHECKING" | "READY" | "ADMIN" | "FAILED" | "ADDED";
 
 function submissionFilterGroup(
   sub: ParentPageSubmissionDTO,
@@ -172,7 +167,9 @@ function submissionFilterGroup(
   return "CHECKING";
 }
 
-function describeStageErrorHint(code: string | null | undefined): string | null {
+function describeStageErrorHint(
+  code: string | null | undefined,
+): string | null {
   if (!code) return null;
   const upper = code.toUpperCase();
   if (upper.includes("TIMEOUT")) {
@@ -186,7 +183,11 @@ function describeStageErrorHint(code: string | null | undefined): string | null 
   ) {
     return "Dịch vụ OCR/AI tạm dừng hoặc đang khởi động — các trang khác vẫn giữ nguyên, bạn có thể thử lại riêng trang này.";
   }
-  if (upper.includes("BUSY") || upper.includes("RATE") || upper.includes("429")) {
+  if (
+    upper.includes("BUSY") ||
+    upper.includes("RATE") ||
+    upper.includes("429")
+  ) {
     return "Hàng đợi xử lý đang quá tải — chờ ít giây rồi bấm Thử lại kiểm tra.";
   }
   if (upper.includes("OCR")) {
@@ -1327,7 +1328,9 @@ function ParentPrivateBookManagerContent({
                       type="button"
                     >
                       <span>Tr.{sub.source_page_number}</span>
-                      <span className="font-normal">· {sub.workflow_status_label}</span>
+                      <span className="font-normal">
+                        · {sub.workflow_status_label}
+                      </span>
                     </button>
                   );
                 })}
@@ -1338,11 +1341,16 @@ function ParentPrivateBookManagerContent({
               <div className="rounded-control border border-amber-300 bg-amber-50/80 px-3 py-2 text-xs text-amber-950">
                 {workerFailureCount > 0 ? (
                   <p className="font-semibold">
-                    Có {workerFailureCount} trang gặp lỗi OCR/AI (dịch vụ kiểm tra có thể đang bận hoặc tạm ngắt). Các trang đạt chuẩn hoặc chờ Admin bên cạnh không bị ảnh hưởng — hãy bấm «Thử lại kiểm tra» ở từng trang bị lỗi.
+                    Có {workerFailureCount} trang gặp lỗi OCR/AI (dịch vụ kiểm
+                    tra có thể đang bận hoặc tạm ngắt). Các trang đạt chuẩn hoặc
+                    chờ Admin bên cạnh không bị ảnh hưởng — hãy bấm «Thử lại
+                    kiểm tra» ở từng trang bị lỗi.
                   </p>
                 ) : (
                   <p className="font-semibold">
-                    Đang xử lý song song {submissionCounts.CHECKING} trang ở chế độ nền. Các trang đã kiểm tra xong vẫn hiển thị đầy đủ để bạn thao tác ngay.
+                    Đang xử lý song song {submissionCounts.CHECKING} trang ở chế
+                    độ nền. Các trang đã kiểm tra xong vẫn hiển thị đầy đủ để
+                    bạn thao tác ngay.
                   </p>
                 )}
               </div>
@@ -1494,7 +1502,9 @@ function ParentPrivateBookManagerContent({
                           </p>
                           {describeStageErrorHint(sub.tool_check_error_code) ? (
                             <p className="mt-1 text-[11px] font-medium text-rose-800">
-                              {describeStageErrorHint(sub.tool_check_error_code)}
+                              {describeStageErrorHint(
+                                sub.tool_check_error_code,
+                              )}
                             </p>
                           ) : null}
                         </div>

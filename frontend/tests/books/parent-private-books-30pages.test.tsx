@@ -239,8 +239,9 @@ describe("ParentPrivateBookManager 30-page mixed state view", () => {
       expect(
         fetchMock.mock.calls.some(
           ([url, init]) =>
-            String(url).includes("/92000000-0000-4000-8000-000000000007/retry") &&
-            init?.method === "POST",
+            String(url).includes(
+              "/92000000-0000-4000-8000-000000000007/retry",
+            ) && init?.method === "POST",
         ),
       ).toBe(true);
     });

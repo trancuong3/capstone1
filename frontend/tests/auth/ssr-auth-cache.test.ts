@@ -65,16 +65,24 @@ describe("SSR auth cache and proxy handoff", () => {
       "parent",
     );
     // Tampered payload/signature rejected
-    expect(verifySsrRoleCacheCookie(`${signed}x`, "user-1", cookieHash, 5_000)).toBeNull();
+    expect(
+      verifySsrRoleCacheCookie(`${signed}x`, "user-1", cookieHash, 5_000),
+    ).toBeNull();
     // Expired TTL rejected
-    expect(verifySsrRoleCacheCookie(signed, "user-1", cookieHash, 40_000)).toBeNull();
+    expect(
+      verifySsrRoleCacheCookie(signed, "user-1", cookieHash, 40_000),
+    ).toBeNull();
     // Different user rejected
-    expect(verifySsrRoleCacheCookie(signed, "user-2", cookieHash, 5_000)).toBeNull();
+    expect(
+      verifySsrRoleCacheCookie(signed, "user-2", cookieHash, 5_000),
+    ).toBeNull();
     // Cookie fingerprint change (logout / account switch) rejected
     const switchedHash = computeSupabaseAuthCookieFingerprint([
       { name: "sb-proj-auth-token", value: "token-b" },
     ]);
-    expect(verifySsrRoleCacheCookie(signed, "user-1", switchedHash, 5_000)).toBeNull();
+    expect(
+      verifySsrRoleCacheCookie(signed, "user-1", switchedHash, 5_000),
+    ).toBeNull();
     expect(verifySsrRoleCacheCookie(signed, "user-1", "", 5_000)).toBeNull();
   });
 
@@ -121,11 +129,14 @@ describe("SSR auth cache and proxy handoff", () => {
 
     // Second navigation with the signed role cookie skips profiles DB query in proxy
     profileQuery.maybeSingle.mockClear();
-    const nextRequest = new NextRequest("https://app.example.com/admin/books/1", {
-      headers: {
-        cookie: `sb-proj-auth-token=session-123; ${VIREAD_ROLE_CACHE_COOKIE}=${cachedCookie!.value}`,
+    const nextRequest = new NextRequest(
+      "https://app.example.com/admin/books/1",
+      {
+        headers: {
+          cookie: `sb-proj-auth-token=session-123; ${VIREAD_ROLE_CACHE_COOKIE}=${cachedCookie!.value}`,
+        },
       },
-    });
+    );
     const nextResult = await refreshSupabaseAuth(nextRequest);
     expect(nextResult.userId).toBe("admin-1");
     expect(profileQuery.maybeSingle).not.toHaveBeenCalled();

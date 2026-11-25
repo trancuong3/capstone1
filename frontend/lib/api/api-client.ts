@@ -6,10 +6,7 @@ import {
   getBrowserAccessToken,
   invalidateBrowserTokenCache,
 } from "@/lib/api/browser-auth";
-import {
-  clearApiReadCache,
-  runCoalescedApiGet,
-} from "@/lib/api/read-cache";
+import { clearApiReadCache, runCoalescedApiGet } from "@/lib/api/read-cache";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
 const safeMessage = "Có lỗi xảy ra. Vui lòng thử lại sau.";
@@ -480,7 +477,8 @@ export async function requestApi<T>(
   const executeFetch = async (fetchSignal?: AbortSignal): Promise<T> => {
     let response: Response;
     const isFormDataBody =
-      typeof FormData !== "undefined" && requestOptions.body instanceof FormData;
+      typeof FormData !== "undefined" &&
+      requestOptions.body instanceof FormData;
     const headers: Record<string, string> = {
       Accept: "application/json",
       Authorization: `Bearer ${token}`,

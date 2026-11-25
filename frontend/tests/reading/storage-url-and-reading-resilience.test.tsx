@@ -46,7 +46,9 @@ describe("expired storage URL refresh resilience", () => {
   it("refreshes an expired signed image URL once in BookPageViewer and caps retries on double failure", async () => {
     const refreshMock = vi
       .fn<() => Promise<string>>()
-      .mockResolvedValueOnce("https://storage.example.com/fresh-signed-url.jpg");
+      .mockResolvedValueOnce(
+        "https://storage.example.com/fresh-signed-url.jpg",
+      );
 
     render(
       <BookPageViewer
@@ -83,9 +85,7 @@ describe("expired storage URL refresh resilience", () => {
     });
 
     // If the refreshed URL also fails, stop retrying cleanly without looping
-    fireEvent.error(
-      screen.getByRole("img", { name: /Ảnh tham khảo trang 1/ }),
-    );
+    fireEvent.error(screen.getByRole("img", { name: /Ảnh tham khảo trang 1/ }));
     await waitFor(() => {
       expect(refreshMock).toHaveBeenCalledTimes(1);
     });

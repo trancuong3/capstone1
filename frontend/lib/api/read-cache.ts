@@ -92,7 +92,9 @@ export function isCacheableApiGetPath(path: string): boolean {
   return !NON_CACHEABLE_PATH_PATTERNS.some((pattern) => pattern.test(path));
 }
 
-export function setApiReadCacheActorScope(userId: string | null | undefined): void {
+export function setApiReadCacheActorScope(
+  userId: string | null | undefined,
+): void {
   const nextScope = userId ? `usr:${userId}` : "anon";
   if (nextScope !== activeActorScope) {
     activeActorScope = nextScope;
@@ -189,7 +191,10 @@ export async function runCoalescedApiGet<T>(
   accessToken: string,
   signal: AbortSignal | undefined,
   loader: (sharedSignal: AbortSignal) => Promise<T>,
-  options: { readonly cacheTtlMs?: number; readonly bypassCache?: boolean } = {},
+  options: {
+    readonly cacheTtlMs?: number;
+    readonly bypassCache?: boolean;
+  } = {},
 ): Promise<T> {
   if (signal?.aborted) {
     throw createAbortError();

@@ -1,4 +1,9 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
 
 import type { ParentRole } from "@/types/profile";
 
@@ -95,7 +100,9 @@ function signPayload(payload: object): string {
   return `${encoded}.${sig}`;
 }
 
-function verifyToken(token: string | null | undefined): Record<string, unknown> | null {
+function verifyToken(
+  token: string | null | undefined,
+): Record<string, unknown> | null {
   if (!token || typeof token !== "string") {
     return null;
   }

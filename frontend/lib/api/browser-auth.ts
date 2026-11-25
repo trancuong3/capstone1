@@ -46,10 +46,7 @@ export async function getBrowserAccessToken({
   onUnauthorized,
 }: BrowserAccessTokenOptions): Promise<string> {
   const now = Date.now();
-  if (
-    cachedTokenState &&
-    cachedTokenState.expiresAtMs > now
-  ) {
+  if (cachedTokenState && cachedTokenState.expiresAtMs > now) {
     return cachedTokenState.accessToken;
   }
 
@@ -87,7 +84,8 @@ export async function getBrowserAccessToken({
       ) => { data?: { subscription?: { unsubscribe?: () => void } } };
     };
 
-    const supportsReactiveAuthEvents = typeof auth.onAuthStateChange === "function";
+    const supportsReactiveAuthEvents =
+      typeof auth.onAuthStateChange === "function";
     if (supportsReactiveAuthEvents) {
       setApiReadCacheEnabled(true);
     }
