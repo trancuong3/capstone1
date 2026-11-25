@@ -625,6 +625,19 @@ class TtsAudioCacheRepository:
         )
         return [(str(row.StorageBucket), str(row.StoragePath)) for row in rows]
 
+    async def list_active_public_voice_ids(self) -> list[str]:
+        rows = (
+            await self.db.execute(
+                select(TtsAudioCacheEntry.VoiceId)
+                .distinct()
+                .where(
+                    TtsAudioCacheEntry.Status == "ACTIVE",
+                    TtsAudioCacheEntry.Scope.in_(("CATALOG", "COACHING")),
+                )
+            )
+        ).scalars().all()
+        return sorted({str(v).strip() for v in rows if v and str(v).strip()})
+
     async def get_summary(self, *, now: datetime | None = None) -> dict[str, Any]:
         ts = now or datetime.now(timezone.utc)
         agg = (

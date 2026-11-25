@@ -676,6 +676,51 @@ class HostedAuditBackendRegressionTests(unittest.TestCase):
         self.assertTrue(captured_timeouts)
         self.assertGreaterEqual(captured_timeouts[0], 5.0)
 
+    def test_voice_voices_exposes_cached_voice_ids_when_offline(self):
+        """GET /voice/voices returns distinct precomputed public voice IDs when local worker is offline."""
+        from app.api.deps import require_active_profile_id
+        from app.api.routes import voice_studio as voice_studio_route
+
+        app = FastAPI()
+        app.include_router(voice_studio_route.router, prefix="/voice")
+        actor_id = uuid4()
+        app.dependency_overrides[require_active_profile_id] = lambda: actor_id
+        client = TestClient(app)
+
+        voice_studio_route.clear_cached_public_voice_ids_cache()
+        fake_orch = MagicMock()
+        fake_orch.list_voices = AsyncMock(
+            return_value={
+                "voices": [
+                    {"voice_id": "local_north_truc_ly", "name": "Cô Trúc Ly", "provider": "local"},
+                    {"voice_id": "local_central_ngoc_tran", "name": "Cô Ngọc Trân", "provider": "local"},
+                    {"voice_id": "local_south_thuc_doan", "name": "Cô Thục Đoan", "provider": "local"},
+                ],
+                "default_voice_id": "local_north_truc_ly",
+                "local_worker_ready": False,
+                "google_tts_available": False,
+            }
+        )
+        cached_ids = [
+            "local_central_ngoc_tran",
+            "local_north_truc_ly",
+            "local_south_thuc_doan",
+        ]
+        with (
+            patch.object(voice_studio_route, "get_voice_orchestrator", return_value=fake_orch),
+            patch.object(
+                voice_studio_route,
+                "_get_cached_public_voice_ids",
+                new=AsyncMock(return_value=cached_ids),
+            ),
+        ):
+            resp = client.get("/voice/voices")
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertFalse(body["local_worker_ready"])
+        self.assertEqual(body["cached_voice_ids"], cached_ids)
+
 
 if __name__ == "__main__":
     unittest.main()

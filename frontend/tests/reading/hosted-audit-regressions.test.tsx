@@ -667,4 +667,80 @@ describe("Hosted Audit Regressions (DEF-H01..DEF-H10)", () => {
       screen.getByTestId("voice-offline-cache-notice").textContent,
     ).toContain("Wi-Fi tự lập");
   });
+
+  it("ReadingVoiceSettings shows Wi-Fi badges and lists all cached regional voices when offline", async () => {
+    const listVoices = vi.fn().mockResolvedValue({
+      voices: [
+        {
+          voice_id: "local_north_truc_ly",
+          name: "Cô Trúc Ly",
+          gender: "female",
+          region: "north",
+          provider: "local",
+        },
+        {
+          voice_id: "local_central_ngoc_tran",
+          name: "Cô Ngọc Trân",
+          gender: "female",
+          region: "central",
+          provider: "local",
+        },
+        {
+          voice_id: "local_south_thuc_doan",
+          name: "Cô Thục Đoan",
+          gender: "female",
+          region: "south",
+          provider: "local",
+        },
+        {
+          voice_id: "local_south_thai_son",
+          name: "Thầy Thái Sơn",
+          gender: "male",
+          region: "south",
+          provider: "local",
+        },
+      ],
+      default_voice_id: "local_north_truc_ly",
+      local_worker_ready: false,
+      google_tts_available: false,
+      cached_voice_ids: [
+        "local_north_truc_ly",
+        "local_central_ngoc_tran",
+        "local_south_thuc_doan",
+      ],
+    });
+
+    vi.spyOn(
+      voiceStudioServiceModule,
+      "createVoiceStudioService",
+    ).mockReturnValue({
+      listVoices,
+      synthesizeTimed: vi.fn(),
+    } as never);
+
+    render(
+      <ReadingVoiceSettings onPreview={vi.fn()} onStopPreview={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Giọng đọc/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("voice-offline-cache-notice")).toBeTruthy();
+    });
+    expect(
+      screen.getByTestId("voice-wifi-ready-badge-local_north_truc_ly"),
+    ).toBeTruthy();
+    expect(
+      screen.getByTestId("voice-wifi-ready-badge-local_central_ngoc_tran"),
+    ).toBeTruthy();
+    expect(
+      screen.getByTestId("voice-wifi-ready-badge-local_south_thuc_doan"),
+    ).toBeTruthy();
+    expect(
+      screen.queryByTestId("voice-wifi-ready-badge-local_south_thai_son"),
+    ).toBeNull();
+    const notice = screen.getByTestId("voice-offline-cache-notice").textContent;
+    expect(notice).toContain("Cô Trúc Ly");
+    expect(notice).toContain("Cô Ngọc Trân");
+    expect(notice).toContain("Cô Thục Đoan");
+  });
 });

@@ -625,6 +625,16 @@ export function ReadingVoiceSettings({
                 ) : null}
                 {filteredVoices.map((voice) => {
                   const selected = voice.voice_id === selectedVoiceId;
+                  const cachedVoiceIds =
+                    loadState.status === "ready" &&
+                    loadState.data.cached_voice_ids &&
+                    loadState.data.cached_voice_ids.length > 0
+                      ? loadState.data.cached_voice_ids
+                      : [defaultVoiceId];
+                  const isCachedOffline =
+                    loadState.status === "ready" &&
+                    loadState.data.local_worker_ready === false &&
+                    cachedVoiceIds.includes(voice.voice_id);
                   return (
                     <label
                       key={voice.voice_id}
@@ -634,8 +644,16 @@ export function ReadingVoiceSettings({
                       )}
                     >
                       <span className="min-w-0 flex-1">
-                        <span className="block break-words text-sm font-bold text-ink">
-                          {voiceTitle(voice)}
+                        <span className="flex flex-wrap items-center gap-1.5 break-words text-sm font-bold text-ink">
+                          <span>{voiceTitle(voice)}</span>
+                          {isCachedOffline ? (
+                            <span
+                              className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800"
+                              data-testid={`voice-wifi-ready-badge-${voice.voice_id}`}
+                            >
+                              Sẵn Wi-Fi
+                            </span>
+                          ) : null}
                         </span>
                         {voiceDetails(voice) ? (
                           <span className="block break-words text-sm text-muted">
@@ -666,17 +684,28 @@ export function ReadingVoiceSettings({
               </div>
             )}
             {loadState.status === "ready" &&
-            loadState.data.local_worker_ready === false ? (
-              <p
-                className="rounded-control border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs leading-relaxed text-amber-950"
-                data-testid="voice-offline-cache-notice"
-              >
-                Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có
-                sẵn âm thanh dựng trước cho giọng mặc định; để nghe trực tiếp
-                các giọng vùng miền khác hãy bật máy trạm giọng đọc hoặc bật chế
-                độ dự phòng bên dưới.
-              </p>
-            ) : null}
+            loadState.data.local_worker_ready === false
+              ? (() => {
+                  const cachedIds =
+                    loadState.data.cached_voice_ids &&
+                    loadState.data.cached_voice_ids.length > 0
+                      ? loadState.data.cached_voice_ids
+                      : [];
+                  const cachedNames = loadState.data.voices
+                    .filter((v) => cachedIds.includes(v.voice_id))
+                    .map((v) => voiceTitle(v));
+                  return (
+                    <p
+                      className="rounded-control border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs leading-relaxed text-amber-950"
+                      data-testid="voice-offline-cache-notice"
+                    >
+                      {cachedNames.length > 1
+                        ? `Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có sẵn âm thanh dựng trước cho: ${cachedNames.join(", ")}; các giọng khác cần bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới.`
+                        : "Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có sẵn âm thanh dựng trước cho giọng mặc định; để nghe trực tiếp các giọng vùng miền khác hãy bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới."}
+                    </p>
+                  );
+                })()
+              : null}
           </section>
 
           <section

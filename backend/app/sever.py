@@ -229,6 +229,10 @@ async def lifespan(_app: FastAPI):
                     latency_ms=db_probe["latency_ms"],
                     database_error_type=db_probe["error_type"],
                 )
+                if db_probe["ok"]:
+                    from app.api.routes.voice_studio import refresh_cached_public_voice_ids
+
+                    await refresh_cached_public_voice_ids(timeout=6.0)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
