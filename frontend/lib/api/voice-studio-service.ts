@@ -1,6 +1,15 @@
 import { z } from "zod";
 
+import {
+  getBrowserAccessToken,
+  invalidateBrowserTokenCache,
+} from "@/lib/api/browser-auth";
 import { ServiceError } from "@/lib/api/service-error";
+import {
+  buildSpeechServiceError,
+  extractSpeechProviderCode,
+  isTimeoutError,
+} from "@/lib/api/speech-error";
 import { withRequestDeadline } from "@/lib/api/request-deadline";
 import {
   getActiveSessionVoiceLock,
@@ -8,11 +17,7 @@ import {
 } from "@/lib/reading/session-voice-lock";
 import { recordTtsEngineUsage } from "@/lib/reading/voice-engine-status";
 import { resolveVoiceGender } from "@/lib/reading/voice-persona";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getApiBaseUrl } from "@/lib/supabase/config";
-
-const safeMessage =
-  "Chức năng giọng nói đang chưa sẵn sàng. Vui lòng thử lại sau.";
 
 const voiceSchema = z.object({
   voice_id: z.string().min(1),
@@ -92,31 +97,26 @@ export interface VoiceStudioService {
   ): Promise<TimedSpeech>;
 }
 
-function failure(status: number, retryable = false): ServiceError {
-  return new ServiceError({
-    code:
-      status === 401
-        ? "AUTH_REQUIRED"
-        : status === 403
-          ? "FORBIDDEN"
-          : status === 422
-            ? "VALIDATION_ERROR"
-            : "TTS_UNAVAILABLE",
-    message: safeMessage,
+function failure(
+  status: number,
+  retryable = false,
+  requestId = "",
+  providerCode?: string,
+): ServiceError {
+  return buildSpeechServiceError({
+    capability: "TTS_UNAVAILABLE",
     status,
-    request_id: "",
+    requestId,
     retryable,
+    providerCode,
   });
 }
 
 async function accessToken(): Promise<string> {
   try {
-    const supabase = createBrowserSupabaseClient();
-    const { error: initializationError } = await supabase.auth.initialize();
-    if (initializationError) throw failure(401);
-    const { data, error } = await supabase.auth.getSession();
-    if (error || !data.session?.access_token) throw failure(401);
-    return data.session.access_token;
+    return await getBrowserAccessToken({
+      onUnauthorized: () => failure(401),
+    });
   } catch (error) {
     if (error instanceof ServiceError) throw error;
     throw failure(401);
@@ -147,9 +147,15 @@ async function request(
           signal: requestSignal,
         });
         if (!response.ok) {
+          if (response.status === 401) {
+            invalidateBrowserTokenCache();
+          }
+          const providerCode = await extractSpeechProviderCode(response);
           throw failure(
             response.status,
             response.status === 429 || response.status >= 500,
+            response.headers.get("x-request-id") ?? "",
+            providerCode,
           );
         }
         const payload: unknown = await response.json();
@@ -161,6 +167,9 @@ async function request(
     );
   } catch (error) {
     if (error instanceof ServiceError || signal?.aborted) throw error;
+    if (isTimeoutError(error)) {
+      throw failure(504, true, "", "LOCAL_TTS_TIMEOUT");
+    }
     throw failure(0, true);
   }
 }
@@ -187,6 +196,7 @@ export function createVoiceStudioService(): VoiceStudioService {
         `/voice/voices${query}`,
         { method: "GET" },
         signal,
+        15_000,
       );
       const parsed = voiceListSchema.safeParse(payload);
       if (!parsed.success) throw failure(502);

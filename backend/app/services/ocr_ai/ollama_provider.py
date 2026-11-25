@@ -48,6 +48,7 @@ class OllamaOcrProvider:
             # `thinking` field when reasoning is left enabled. OCR consumes
             # only message.content, so explicitly request a final answer.
             "think": False,
+            "keep_alive": self._config.keep_alive,
             "format": (
                 "json"
                 if use_json_fallback
@@ -60,14 +61,12 @@ class OllamaOcrProvider:
                     "images": [image_b64],
                 }
             ],
-            "options": {
-                "temperature": 0,
-                "num_ctx": self._config.num_ctx,
-                "num_predict": min(
+            "options": self._config.build_ollama_options(
+                num_predict=min(
                     self._config.num_predict,
                     max(256, 128 + chunk.expected_word_count * 16),
                 ),
-            },
+            ),
         }
 
     async def correct_chunk(

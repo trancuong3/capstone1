@@ -1,6 +1,7 @@
 """Business services for book catalog and admin page-read endpoints."""
 from __future__ import annotations
 
+import asyncio
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -31,7 +32,7 @@ from app.schemas.book import (
     CatalogBookResponse,
     CatalogPagePreviewResponse,
 )
-from app.services.storage_service import create_signed_image_url
+from app.services.storage_service import create_signed_image_url, create_signed_image_urls
 
 
 class BookService:
@@ -171,26 +172,35 @@ class CatalogService:
         ]
         # Signed URL creation calls Supabase Storage; close the read transaction first.
         await self.repository.db.rollback()
-        previews = []
-        for page in snapshots:
-            if private:
-                preview_url = private_page_image_url(
+        if private:
+            preview_urls = [
+                private_page_image_url(
                     book_id,
                     page["page_id"],
                     revision_id=page["current_verified_revision_id"],
                     base_url=base_url,
                 )
-            else:
-                # Preserve the existing Storage error contract after releasing the DB transaction.
-                preview_url = create_signed_image_url(page["image_path"])
-            previews.append(CatalogPagePreviewResponse(
+                for page in snapshots
+            ]
+        elif snapshots:
+            # Batch/parallel Storage signing eliminates N sequential HTTP calls per book preview.
+            preview_urls = await asyncio.to_thread(
+                create_signed_image_urls,
+                [page["image_path"] for page in snapshots],
+            )
+        else:
+            preview_urls = []
+
+        return [
+            CatalogPagePreviewResponse(
                 page_id=page["page_id"],
                 page_number=page["page_number"],
                 lifecycle_status=page["lifecycle_status"],
                 current_verified_revision_id=page["current_verified_revision_id"],
                 preview_url=preview_url,
-            ))
-        return previews
+            )
+            for page, preview_url in zip(snapshots, preview_urls)
+        ]
 
 
 class AdminCatalogService:
@@ -451,7 +461,7 @@ class AdminCatalogService:
         page_number = page.PageNumber
         selected_revision_id = selected.Id if selected is not None else None
         await self.repository.db.rollback()
-        preview_url = create_signed_image_url(image_path)
+        preview_url = await asyncio.to_thread(create_signed_image_url, image_path)
         try:
             return AdminPageImageRead(
                 page_id=page_id,

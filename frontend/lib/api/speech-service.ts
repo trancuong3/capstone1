@@ -1,6 +1,14 @@
 import { z } from "zod";
 
-import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
+import {
+  getBrowserAccessToken,
+  invalidateBrowserTokenCache,
+} from "@/lib/api/browser-auth";
+import { ServiceError } from "@/lib/api/service-error";
+import {
+  buildSpeechServiceError,
+  extractSpeechProviderCode,
+} from "@/lib/api/speech-error";
 import { withRequestDeadline } from "@/lib/api/request-deadline";
 import {
   getActiveSessionVoiceLock,
@@ -13,11 +21,7 @@ import {
   recordTtsEngineUsage,
 } from "@/lib/reading/voice-engine-status";
 import { resolveVoiceGender } from "@/lib/reading/voice-persona";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getApiBaseUrl } from "@/lib/supabase/config";
-
-const safeMessage =
-  "Chức năng giọng nói trên máy đang chưa sẵn sàng. Ba mẹ và bé vui lòng thử lại nhé.";
 
 const wordTimestampSchema = z.object({
   text: z.string(),
@@ -139,88 +143,12 @@ function failure(
   retryable = false,
   providerCode?: string,
 ): ServiceError {
-  let code: ServiceErrorCode = capabilityCode;
-  let message = safeMessage;
-  let shouldRetry = retryable;
-
-  if (capabilityCode === "STT_UNAVAILABLE") {
-    switch (providerCode) {
-      case "STT_QUOTA_EXCEEDED":
-        code = "STT_QUOTA_EXCEEDED";
-        message =
-          "Dịch vụ nhận diện dự phòng đã hết hạn mức. Ba mẹ kiểm tra lại bộ giọng nói trên máy nhé.";
-        shouldRetry = false;
-        break;
-      case "STT_AUTH_FAILED":
-      case "GOOGLE_STT_AUTH_ERROR":
-        code = "STT_AUTH_FAILED";
-        shouldRetry = false;
-        break;
-      case "STT_PERMISSION_DENIED":
-        code = "STT_PERMISSION_DENIED";
-        shouldRetry = false;
-        break;
-      case "STT_TERMS_NOT_ACCEPTED":
-        code = "STT_TERMS_NOT_ACCEPTED";
-        shouldRetry = false;
-        break;
-      case "STT_CONCURRENCY_LIMITED":
-      case "LOCAL_STT_BUSY":
-        code = "STT_CONCURRENCY_LIMITED";
-        message =
-          "Bộ nhận diện giọng nói trên máy đang bận. Bé thử lại sau ít giây nhé.";
-        shouldRetry = true;
-        break;
-      case "STT_TEMPORARILY_UNAVAILABLE":
-      case "LOCAL_STT_UNAVAILABLE":
-      case "GOOGLE_STT_UNAVAILABLE":
-        code = "STT_TEMPORARILY_UNAVAILABLE";
-        message =
-          "Bộ nhận diện giọng nói trên máy chưa bật hoặc đang khởi động. Ba mẹ kiểm tra dịch vụ giọng nói local rồi bấm Thử lại nhé.";
-        shouldRetry = true;
-        break;
-      case "STT_TIMEOUT":
-      case "LOCAL_STT_TIMEOUT":
-      case "GOOGLE_STT_TIMEOUT":
-        code = "STT_TIMEOUT";
-        shouldRetry = true;
-        break;
-      case "STT_NETWORK_ERROR":
-        code = "STT_NETWORK_ERROR";
-        shouldRetry = true;
-        break;
-      case "STT_RATE_LIMITED":
-      case "GOOGLE_STT_COOLDOWN":
-        code = "STT_RATE_LIMITED";
-        shouldRetry = true;
-        break;
-      case "STT_INVALID_AUDIO":
-      case "INVALID_AUDIO":
-        code = "STT_INVALID_AUDIO";
-        shouldRetry = false;
-        break;
-      case "STT_PROVIDER_REJECTED":
-      case "GOOGLE_STT_REJECTED":
-        code = "STT_PROVIDER_REJECTED";
-        shouldRetry = false;
-        break;
-      default:
-        if (status === 401) code = "AUTH_REQUIRED";
-        if (status === 403) code = "FORBIDDEN";
-        if (status === 422) code = "VALIDATION_ERROR";
-    }
-  } else {
-    if (status === 401) code = "AUTH_REQUIRED";
-    if (status === 403) code = "FORBIDDEN";
-    if (status === 422) code = "VALIDATION_ERROR";
-  }
-
-  return new ServiceError({
-    code,
-    message,
+  return buildSpeechServiceError({
+    capability: capabilityCode,
     status,
-    request_id: requestId,
-    retryable: shouldRetry,
+    requestId,
+    retryable,
+    providerCode,
   });
 }
 
@@ -228,14 +156,9 @@ async function accessToken(
   capabilityCode: "STT_UNAVAILABLE" | "TTS_UNAVAILABLE",
 ) {
   try {
-    const supabase = createBrowserSupabaseClient();
-    const { error: initializationError } = await supabase.auth.initialize();
-    if (initializationError) throw failure(capabilityCode, 401);
-
-    const { data, error } = await supabase.auth.getSession();
-    if (error || !data.session?.access_token)
-      throw failure(capabilityCode, 401);
-    return data.session.access_token;
+    return await getBrowserAccessToken({
+      onUnauthorized: () => failure(capabilityCode, 401),
+    });
   } catch (error) {
     if (error instanceof ServiceError) throw error;
     throw failure(capabilityCode, 401);
@@ -266,23 +189,10 @@ async function speechRequest(
       signal,
     });
     if (!response.ok) {
-      let providerCode: string | undefined;
-      try {
-        const payload: unknown = await response.clone().json();
-        if (
-          typeof payload === "object" &&
-          payload !== null &&
-          "detail" in payload &&
-          typeof payload.detail === "object" &&
-          payload.detail !== null &&
-          "code" in payload.detail &&
-          typeof payload.detail.code === "string"
-        ) {
-          providerCode = payload.detail.code;
-        }
-      } catch {
-        // Non-JSON provider responses remain a generic safe service error.
+      if (response.status === 401) {
+        invalidateBrowserTokenCache();
       }
+      const providerCode = await extractSpeechProviderCode(response);
       throw failure(
         capabilityCode,
         response.status,

@@ -88,6 +88,18 @@ import {
 } from "@/lib/reading/browser-transcript-collector";
 import { ReadingStatusDialog } from "@/components/reading/reading-status-dialog";
 import { SessionComplete } from "@/components/reading/session-complete";
+import { clearApiReadCache } from "@/lib/api/read-cache";
+import { unlockAudioNow } from "@/lib/reading/android-audio-unlock";
+
+function describePlaybackError(error: unknown): string | null {
+  if (error instanceof Error && error.name === "NotAllowedError") {
+    return "Trình duyệt đang chờ bé chạm nút Thử nghe lại để phát âm thanh.";
+  }
+  if (isServiceError(error) && error.message) {
+    return error.message;
+  }
+  return null;
+}
 import { StatusBanner } from "@/components/reading/status-banner";
 import { TutorMessage } from "@/components/reading/tutor-message";
 import { useReadingServices } from "@/hooks/use-reading-services";
@@ -293,6 +305,8 @@ function ReadingSessionScreen({
   const [pickerIndex, setPickerIndex] = useState<number | null>(null);
   const [tutorOpen, setTutorOpen] = useState(false);
   const [tutorAction, setTutorAction] = useState<TutorAction | null>(null);
+  const [ttsErrorMessage, setTtsErrorMessage] = useState<string | null>(null);
+  const lastSttErrorMessageRef = useRef<string | null>(null);
   const tutorResumeListeningRef = useRef(false);
   const tutorResumeMicAfterPlaybackRef = useRef(false);
   const tutorPlaybackGenerationRef = useRef(0);
@@ -2488,6 +2502,29 @@ function ReadingSessionScreen({
               return;
             }
 
+            if (
+              event.error === "stt-unavailable" ||
+              event.error === "network"
+            ) {
+              console.warn("[REALTIME STT INTERRUPTED]", {
+                error: event.error,
+                recorderStarted,
+                browserRecognitionStarted,
+                isListeningActive: isListeningActiveRef.current,
+              });
+              clearPageSilenceTimer();
+              clearCoachingTimers();
+              isListeningActiveRef.current = false;
+              isUsingRecorderRef.current = false;
+              speechRecorder.cancel();
+              recognitionRef.current = null;
+              setIsMicRecording(false);
+              setComparisonError(
+                "Dịch vụ nhận diện giọng nói đang tạm gián đoạn. Bé giữ nguyên từ và trang hiện tại — có thể nhìn chữ đọc tiếp hoặc bấm Bé đọc lại sau nhé.",
+              );
+              return;
+            }
+
             console.error("[REALTIME STT ERROR]", {
               error: event.error,
               recorderStarted,
@@ -2624,6 +2661,7 @@ function ReadingSessionScreen({
 
     const controller = new AbortController();
     transcriptionAbortRef.current = controller;
+    lastSttErrorMessageRef.current = null;
 
     try {
       // Supply safe contextual keyterms from the current page to improve
@@ -2659,6 +2697,7 @@ function ReadingSessionScreen({
     } catch (error) {
       if (!controller.signal.aborted) {
         if (isServiceError(error)) {
+          lastSttErrorMessageRef.current = error.message;
           console.warn("[STT SERVICE DIAGNOSTIC]", {
             code: error.code,
             status: error.status,
@@ -2666,6 +2705,8 @@ function ReadingSessionScreen({
             retryable: error.retryable,
           });
         } else {
+          lastSttErrorMessageRef.current =
+            "Chưa kết nối được dịch vụ nghe đọc qua mạng. Bé giữ nguyên vị trí và bấm Thử lại nhé.";
           console.error("Lỗi chuyển ghi âm thành văn bản:", error);
         }
       }
@@ -2778,8 +2819,10 @@ function ReadingSessionScreen({
     ) {
       markCaptureUncertain(targetEngine, targetPage);
       setComparisonError(
-        "Chưa nghe rõ lời đọc. Kết quả đã xác nhận được giữ lại; phần chưa rõ không được tính là đọc sai.",
+        lastSttErrorMessageRef.current ??
+          "Chưa nghe rõ lời đọc. Kết quả đã xác nhận được giữ lại; phần chưa rõ không được tính là đọc sai.",
       );
+      lastSttErrorMessageRef.current = null;
     }
     if (
       resolvedText &&
@@ -2849,6 +2892,7 @@ function ReadingSessionScreen({
     listeningGenerationRef.current += 1;
     const generation = ++assistantAudioGenerationRef.current;
     setCountdown(null);
+    let playFailed = false;
 
     try {
       if (retryModeRef.current) {
@@ -2900,7 +2944,12 @@ function ReadingSessionScreen({
       }
 
       assistantAudioPlayingRef.current = true;
-      await play();
+      try {
+        await play();
+      } catch (err) {
+        playFailed = true;
+        throw err;
+      }
     } finally {
       if (generation === assistantAudioGenerationRef.current) {
         assistantAudioPlayingRef.current = false;
@@ -2909,6 +2958,7 @@ function ReadingSessionScreen({
         const retryCandidate = retryResumeAfterAssistantAudioRef.current;
         retryResumeAfterAssistantAudioRef.current = null;
         if (
+          !playFailed &&
           retryCandidate &&
           retryModeRef.current &&
           isActiveRetryCandidate(retryCandidate)
@@ -2922,6 +2972,7 @@ function ReadingSessionScreen({
         const shouldResume = assistantAudioResumeRequestedRef.current;
         assistantAudioResumeRequestedRef.current = false;
         if (
+          !playFailed &&
           resumeAfterPlayback &&
           shouldResume &&
           mountedRef.current &&
@@ -2933,6 +2984,7 @@ function ReadingSessionScreen({
         }
 
         if (
+          !playFailed &&
           tutorResumeMicAfterPlaybackRef.current &&
           mountedRef.current &&
           !retryModeRef.current
@@ -2998,6 +3050,8 @@ function ReadingSessionScreen({
 
     setIsBusy(true);
     setIsReadingWord(false);
+    setTtsErrorMessage(null);
+    unlockAudioNow({ force: true });
     const readingCursorBeforeSample =
       alignmentEngineRef.current?.getSnapshot().currentWordId ??
       currentWordId ??
@@ -3043,6 +3097,7 @@ function ReadingSessionScreen({
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") return;
       if (isCurrentSample()) {
+        setTtsErrorMessage(describePlaybackError(error));
         setUiState("tts-error");
       }
     } finally {
@@ -3111,6 +3166,7 @@ function ReadingSessionScreen({
     }
     if (isBusy) return;
 
+    unlockAudioNow({ force: true });
     setIsBusy(true);
 
     try {
@@ -3217,16 +3273,24 @@ function ReadingSessionScreen({
       return;
     }
     setIsBusy(true);
-    const nextState = await services.readingSocketAdapter.sendControl(
-      sessionId,
-      "resume",
-    );
-    if (!mountedRef.current) return;
-    setCanonicalState(nextState);
-    setConnectionState("connected");
-    setUiState("reading");
-    setIsMicRecording(false);
-    setIsBusy(false);
+    try {
+      const nextState = await services.readingSocketAdapter.sendControl(
+        sessionId,
+        "resume",
+      );
+      if (!mountedRef.current) return;
+      setCanonicalState(nextState);
+      setConnectionState("connected");
+      setUiState("reading");
+      setIsMicRecording(false);
+    } catch {
+      if (mountedRef.current) {
+        setConnectionState("reconnecting");
+        setUiState("reconnecting");
+      }
+    } finally {
+      if (mountedRef.current) setIsBusy(false);
+    }
   }
 
   async function pauseReading() {
@@ -3617,7 +3681,9 @@ function ReadingSessionScreen({
       speechRecorder.isRecording ||
       countdown !== null;
     setTutorOpen(true);
+    setTtsErrorMessage(null);
     setIsBusy(true);
+    unlockAudioNow({ force: true });
     const playbackGeneration = tutorPlaybackGenerationRef.current;
     try {
       await playAssistantAudio(
@@ -3657,6 +3723,7 @@ function ReadingSessionScreen({
         playbackGeneration === tutorPlaybackGenerationRef.current &&
         !(error instanceof Error && error.name === "AbortError")
       ) {
+        setTtsErrorMessage(describePlaybackError(error));
         setUiState("tts-error");
       }
     } finally {
@@ -3676,7 +3743,9 @@ function ReadingSessionScreen({
       isUsingRecorderRef.current ||
       speechRecorder.isRecording ||
       countdown !== null;
+    setTtsErrorMessage(null);
     setIsBusy(true);
+    unlockAudioNow({ force: true });
     const playbackGeneration = ++tutorPlaybackGenerationRef.current;
     try {
       let nextAction = tutorAction;
@@ -3710,6 +3779,7 @@ function ReadingSessionScreen({
         playbackGeneration === tutorPlaybackGenerationRef.current
       ) {
         setTutorAction(nextAction);
+        setTtsErrorMessage(null);
         setUiState("reading");
       }
     } catch (error) {
@@ -3718,6 +3788,7 @@ function ReadingSessionScreen({
         playbackGeneration === tutorPlaybackGenerationRef.current &&
         !(error instanceof Error && error.name === "AbortError")
       ) {
+        setTtsErrorMessage(describePlaybackError(error));
         setUiState("tts-error");
       }
     } finally {
@@ -3731,6 +3802,7 @@ function ReadingSessionScreen({
     tutorPlaybackGenerationRef.current += 1;
     speechPlayer.stop();
     setTutorOpen(false);
+    setTtsErrorMessage(null);
     setUiState("reading");
 
     if (shouldResumeListening) {
@@ -4670,7 +4742,7 @@ function ReadingSessionScreen({
             retryBrowserFinalRef.current,
             classifyOptions,
           ) === "CORRECT" &&
-          /^(STT_(QUOTA_EXCEEDED|NETWORK_ERROR|TEMPORARILY_UNAVAILABLE|TIMEOUT|RATE_LIMITED)|SPEECH_UNAVAILABLE)$/.test(
+          /^(STT_(QUOTA_EXCEEDED|NETWORK_ERROR|TEMPORARILY_UNAVAILABLE|TIMEOUT|RATE_LIMITED|CONCURRENCY_LIMITED|UNAVAILABLE)|SPEECH_UNAVAILABLE)$/.test(
             error.code,
           )
         ) {
@@ -4695,7 +4767,9 @@ function ReadingSessionScreen({
         setRetryFeedback("speech-unavailable");
 
         setLatestTranscript(
-          "Chưa kết nối được dịch vụ nhận diện. Bé thử lại sau nhé; hệ thống chưa đánh dấu từ này sai.",
+          isServiceError(error) && error.message
+            ? `Chưa kết nối được dịch vụ nhận diện (${error.message}). Bé thử lại sau nhé; hệ thống chưa đánh dấu từ này sai.`
+            : "Chưa kết nối được dịch vụ nhận diện. Bé thử lại sau nhé; hệ thống chưa đánh dấu từ này sai.",
         );
       }
     } finally {
@@ -5854,6 +5928,7 @@ function ReadingSessionScreen({
 
   return (
     <div
+      className="w-full max-w-full overflow-x-clip"
       data-canonical-state={canonicalState}
       data-child-error-count={safety.child_error_events.length}
       data-evidence-valid={safety.evidence_valid}
@@ -6013,8 +6088,12 @@ function ReadingSessionScreen({
         isPlayingSample={speechPlayer.isPlaying && !isReadingWord}
         isSamplePaused={speechPlayer.isPaused}
         onToggleSamplePause={() => {
+          unlockAudioNow({ force: true });
           if (speechPlayer.isPaused)
-            void speechPlayer.resume().catch(() => setUiState("tts-error"));
+            void speechPlayer.resume().catch((err: unknown) => {
+              setTtsErrorMessage(describePlaybackError(err));
+              setUiState("tts-error");
+            });
           else speechPlayer.pause();
         }}
         isReadingWord={isReadingWord}
@@ -6084,6 +6163,28 @@ function ReadingSessionScreen({
         }
         onSkipRetryWord={skipRetryWord}
         onToggleListening={() => void handleToggleListening()}
+        onRefreshPageImage={async (targetPageId) => {
+          if (typeof services.readingService?.getCurrentPage !== "function") {
+            return null;
+          }
+          clearApiReadCache();
+          try {
+            const nextPage = await services.readingService.getCurrentPage(
+              sessionId,
+            );
+            if (!mountedRef.current || nextPage.page_id !== targetPageId) {
+              return null;
+            }
+            setPage((current) =>
+              current && current.page_id === targetPageId
+                ? { ...current, image_url: nextPage.image_url }
+                : current,
+            );
+            return nextPage.image_url;
+          } catch {
+            return null;
+          }
+        }}
         onWordClick={handleWordClick}
         page={page}
         spokenWords={spokenWords}
@@ -6353,6 +6454,7 @@ function ReadingSessionScreen({
       {uiState === "tts-error" || tutorOpen ? (
         <TutorMessage
           action={tutorAction}
+          errorMessage={ttsErrorMessage}
           isPlaying={speechPlayer.isPlaying}
           isRetrying={isBusy}
           onClose={closeTutor}

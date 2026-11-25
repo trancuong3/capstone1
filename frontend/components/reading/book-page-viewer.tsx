@@ -15,6 +15,7 @@ import {
   isPrivateApiMediaUrl,
   revokePrivateBlobUrl,
 } from "@/lib/api/api-client";
+import { invalidateBrowserTokenCache } from "@/lib/api/browser-auth";
 import { canOverlayPage, containImage } from "@/lib/reading/page-presentation";
 import {
   wordPresentationLabels,
@@ -30,6 +31,7 @@ interface BookPageViewerProps extends PageWordEvidence {
   illustration?: ReactNode;
   isTransitioning?: boolean;
   onWordClick?: (word: ReadingPageWordDTO) => void;
+  onRefreshImageUrl?: (pageId: string) => Promise<string | null | undefined>;
   spokenWords?: Set<string>;
 }
 
@@ -131,21 +133,36 @@ const MemoOverlayWordButton = memo(function OverlayWordButton({
 });
 
 export function BookPageViewer(props: BookPageViewerProps) {
+  const refreshedPageIdsRef = useRef<Set<string>>(new Set());
+  const claimExpiredImageRefresh = useCallback((pageId: string) => {
+    if (refreshedPageIdsRef.current.has(pageId)) {
+      return false;
+    }
+    refreshedPageIdsRef.current.add(pageId);
+    return true;
+  }, []);
   return (
     <PageSurface
       key={`${props.page.page_id}:${props.page.page_revision_id}:${props.page.image_url ?? "text"}`}
+      claimExpiredImageRefresh={claimExpiredImageRefresh}
       {...props}
     />
   );
 }
 
-function PageSurface(props: BookPageViewerProps) {
+function PageSurface(
+  props: BookPageViewerProps & {
+    readonly claimExpiredImageRefresh: (pageId: string) => boolean;
+  },
+) {
   const {
     page,
     currentWordId,
     isTransitioning = false,
     onWordClick,
+    onRefreshImageUrl,
     previewSnapshot,
+    claimExpiredImageRefresh,
   } = props;
   const rootRef = useRef<HTMLDivElement>(null);
   const overlayNodesRef = useRef(new Map<string, HTMLButtonElement>());
@@ -168,17 +185,23 @@ function PageSurface(props: BookPageViewerProps) {
     { width: number; height: number } | "failed" | null
   >(null);
   const [referenceOpen, setReferenceOpen] = useState(false);
+  const [refreshedImageUrl, setRefreshedImageUrl] = useState<string | null>(
+    null,
+  );
+  const [privateRetryNonce, setPrivateRetryNonce] = useState(0);
+  const privateRetriedRef = useRef(false);
   const [privateBlobUrl, setPrivateBlobUrl] = useState<string | null>(null);
-  const isPrivateSource = isPrivateApiMediaUrl(page.image_url);
+  const activeImageUrl = refreshedImageUrl ?? page.image_url;
+  const isPrivateSource = isPrivateApiMediaUrl(activeImageUrl);
 
   useEffect(() => {
-    if (!isPrivateSource || !page.image_url) {
+    if (!isPrivateSource || !activeImageUrl) {
       return;
     }
     const controller = new AbortController();
     let createdUrl: string | null = null;
     let cancelled = false;
-    void fetchAuthenticatedBlobUrl(page.image_url, controller.signal)
+    void fetchAuthenticatedBlobUrl(activeImageUrl, controller.signal)
       .then((blobUrl) => {
         if (cancelled) {
           revokePrivateBlobUrl(blobUrl);
@@ -189,6 +212,12 @@ function PageSurface(props: BookPageViewerProps) {
       })
       .catch(() => {
         if (!cancelled) {
+          if (!privateRetriedRef.current) {
+            privateRetriedRef.current = true;
+            invalidateBrowserTokenCache();
+            setPrivateRetryNonce((value) => value + 1);
+            return;
+          }
           setImage("failed");
         }
       });
@@ -200,20 +229,54 @@ function PageSurface(props: BookPageViewerProps) {
       }
       setPrivateBlobUrl(null);
     };
-  }, [isPrivateSource, page.image_url]);
+  }, [activeImageUrl, isPrivateSource, privateRetryNonce]);
+
+  const handleImageLoadError = useCallback(() => {
+    if (isPrivateSource && !privateRetriedRef.current) {
+      privateRetriedRef.current = true;
+      invalidateBrowserTokenCache();
+      setPrivateRetryNonce((value) => value + 1);
+      return;
+    }
+    if (
+      !isPrivateSource &&
+      onRefreshImageUrl &&
+      activeImageUrl &&
+      claimExpiredImageRefresh(page.page_id)
+    ) {
+      void Promise.resolve(onRefreshImageUrl(page.page_id))
+        .then((nextUrl) => {
+          if (nextUrl) {
+            setImage(null);
+            setRefreshedImageUrl(nextUrl);
+            return;
+          }
+          setImage("failed");
+        })
+        .catch(() => setImage("failed"));
+      return;
+    }
+    setImage("failed");
+  }, [
+    activeImageUrl,
+    claimExpiredImageRefresh,
+    isPrivateSource,
+    onRefreshImageUrl,
+    page.page_id,
+  ]);
 
   let source: string | null = null;
   if (isPrivateSource) {
     source = privateBlobUrl;
-  } else if (page.image_url) {
+  } else if (activeImageUrl) {
     try {
-      const url = new URL(page.image_url);
+      const url = new URL(activeImageUrl);
       if (
         ["https:", "http:"].includes(url.protocol) &&
         !url.username &&
         !url.password
       )
-        source = page.image_url;
+        source = activeImageUrl;
     } catch {
       /* Invalid source falls back to the verified text. */
     }
@@ -319,7 +382,7 @@ function PageSurface(props: BookPageViewerProps) {
                 height: target.naturalHeight,
               });
             }}
-            onError={() => setImage("failed")}
+            onError={handleImageLoadError}
           />
         ) : null}
         {overlay && rect && source ? (
@@ -335,7 +398,7 @@ function PageSurface(props: BookPageViewerProps) {
               unoptimized
               className="object-contain"
               sizes="(max-width: 768px) 100vw, 1008px"
-              onError={() => setImage("failed")}
+              onError={handleImageLoadError}
             />
             <div
               className="absolute"
@@ -378,7 +441,7 @@ function PageSurface(props: BookPageViewerProps) {
                     height={Math.max(1, page.height)}
                     unoptimized
                     className="mx-auto h-auto max-h-[55dvh] w-auto max-w-full object-contain"
-                    onError={() => setImage("failed")}
+                    onError={handleImageLoadError}
                   />
                 ) : null}
               </details>

@@ -140,6 +140,61 @@ function describeToolCheckScope(scope: ToolCheckScopeDTO): string {
   return `${parts.join("; ")}.`;
 }
 
+type SubmissionFilterGroup =
+  | "ALL"
+  | "CHECKING"
+  | "READY"
+  | "ADMIN"
+  | "FAILED"
+  | "ADDED";
+
+function submissionFilterGroup(
+  sub: ParentPageSubmissionDTO,
+): Exclude<SubmissionFilterGroup, "ALL"> {
+  if (sub.workflow_status === "ADDED_TO_BOOK") return "ADDED";
+  if (sub.workflow_status === "CHECKING") return "CHECKING";
+  if (
+    sub.workflow_status === "CHECK_FAILED" ||
+    sub.workflow_status === "REJECTED" ||
+    sub.workflow_status === "NEEDS_RECHECK"
+  ) {
+    return "FAILED";
+  }
+  if (
+    sub.workflow_status === "NEEDS_ADMIN_REVIEW" ||
+    sub.workflow_status === "PENDING_ADMIN"
+  ) {
+    return "ADMIN";
+  }
+  if (sub.can_add_to_book || sub.workflow_status === "PASSED_READY_TO_ADD") {
+    return "READY";
+  }
+  return "CHECKING";
+}
+
+function describeStageErrorHint(code: string | null | undefined): string | null {
+  if (!code) return null;
+  const upper = code.toUpperCase();
+  if (upper.includes("TIMEOUT")) {
+    return "Xử lý quá thời gian chờ do mạng hoặc dịch vụ bận — bấm Thử lại kiểm tra cho trang này.";
+  }
+  if (
+    upper.includes("UNAVAILABLE") ||
+    upper.includes("OFFLINE") ||
+    upper.includes("CONNECT") ||
+    upper.includes("WORKER")
+  ) {
+    return "Dịch vụ OCR/AI tạm dừng hoặc đang khởi động — các trang khác vẫn giữ nguyên, bạn có thể thử lại riêng trang này.";
+  }
+  if (upper.includes("BUSY") || upper.includes("RATE") || upper.includes("429")) {
+    return "Hàng đợi xử lý đang quá tải — chờ ít giây rồi bấm Thử lại kiểm tra.";
+  }
+  if (upper.includes("OCR")) {
+    return "Chưa đọc được chữ rõ từ ảnh trang — hãy thử lại hoặc tải ảnh sắc nét hơn.";
+  }
+  return null;
+}
+
 function lockReasonForSubmission(sub: ParentPageSubmissionDTO): string | null {
   if (sub.can_add_to_book) return null;
   if (sub.workflow_status === "ADDED_TO_BOOK") {
@@ -218,6 +273,8 @@ function ParentPrivateBookManagerContent({
   const [uploading, setUploading] = useState(false);
 
   // Per-submission UI state
+  const [statusFilter, setStatusFilter] =
+    useState<SubmissionFilterGroup>("ALL");
   const [editingSubId, setEditingSubId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [editSourceType, setEditSourceType] = useState<SourceUsageType>(
@@ -270,6 +327,13 @@ function ParentPrivateBookManagerContent({
         if (isServiceError(error) && error.status === 404) {
           setDetail(null);
           setNotFound(true);
+        } else if (silent) {
+          setActionError(
+            errorText(
+              error,
+              "Không thể cập nhật tiến trình mới nhất lúc này; trạng thái hiện tại vẫn được giữ nguyên.",
+            ),
+          );
         } else {
           setLoadError(
             errorText(
@@ -760,6 +824,27 @@ function ParentPrivateBookManagerContent({
   const activeSubmissions = submissions.filter(
     (item) => item.workflow_status !== "CANCELLED",
   );
+  const submissionCounts = activeSubmissions.reduce(
+    (acc, item) => {
+      const group = submissionFilterGroup(item);
+      acc[group] += 1;
+      return acc;
+    },
+    { CHECKING: 0, READY: 0, ADMIN: 0, FAILED: 0, ADDED: 0 },
+  );
+  const workerFailureCount = activeSubmissions.filter(
+    (item) =>
+      Boolean(item.ocr_error_code) ||
+      Boolean(item.proofread_error_code) ||
+      Boolean(item.tool_check_error_code) ||
+      item.workflow_status === "CHECK_FAILED",
+  ).length;
+  const visibleSubmissions =
+    statusFilter === "ALL"
+      ? activeSubmissions
+      : activeSubmissions.filter(
+          (item) => submissionFilterGroup(item) === statusFilter,
+        );
 
   return (
     <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 py-6 sm:px-8 sm:py-8">
@@ -1161,14 +1246,122 @@ function ParentPrivateBookManagerContent({
           Các trang đang kiểm tra & duyệt ({activeSubmissions.length})
         </h2>
 
+        {activeSubmissions.length > 0 ? (
+          <div className="flex flex-col gap-3 rounded-card border border-border bg-white p-4">
+            <div
+              aria-label="Lọc trạng thái từng trang"
+              className="flex flex-wrap items-center gap-2"
+              role="group"
+            >
+              {(
+                [
+                  {
+                    key: "ALL",
+                    label: `Tất cả (${activeSubmissions.length})`,
+                  },
+                  {
+                    key: "CHECKING",
+                    label: `Đang kiểm tra (${submissionCounts.CHECKING})`,
+                  },
+                  {
+                    key: "READY",
+                    label: `Sẵn sàng thêm (${submissionCounts.READY})`,
+                  },
+                  {
+                    key: "ADMIN",
+                    label: `Chờ / Cần Admin (${submissionCounts.ADMIN})`,
+                  },
+                  {
+                    key: "FAILED",
+                    label: `Lỗi kiểm tra (${submissionCounts.FAILED})`,
+                  },
+                  {
+                    key: "ADDED",
+                    label: `Đã thêm (${submissionCounts.ADDED})`,
+                  },
+                ] as const
+              ).map((pill) => {
+                const isSelected = statusFilter === pill.key;
+                return (
+                  <button
+                    key={pill.key}
+                    aria-pressed={isSelected}
+                    className={`min-h-9 rounded-full border px-3 py-1 text-xs font-bold transition-colors ${
+                      isSelected
+                        ? "border-primary bg-primary text-white"
+                        : "border-border bg-canvas text-ink hover:bg-sky/50"
+                    }`}
+                    onClick={() => setStatusFilter(pill.key)}
+                    type="button"
+                  >
+                    {pill.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {activeSubmissions.length > 1 ? (
+              <div
+                aria-label="Tổng quan nhanh trạng thái các trang"
+                className="flex flex-wrap gap-1.5 border-t border-border pt-3"
+              >
+                {activeSubmissions.map((sub) => {
+                  const chipStyle =
+                    WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
+                    "border-border bg-canvas text-ink";
+                  return (
+                    <button
+                      key={`map-${sub.id}`}
+                      className={`inline-flex items-center gap-1 rounded-control border px-2 py-1 text-[11px] font-bold ${chipStyle}`}
+                      onClick={() => {
+                        setStatusFilter("ALL");
+                        const target = document.querySelector(
+                          `[data-submission-id="${sub.id}"]`,
+                        );
+                        target?.scrollIntoView?.({
+                          behavior: "smooth",
+                          block: "nearest",
+                        });
+                      }}
+                      title={`Trang nguồn ${sub.source_page_number}: ${sub.workflow_status_label}`}
+                      type="button"
+                    >
+                      <span>Tr.{sub.source_page_number}</span>
+                      <span className="font-normal">· {sub.workflow_status_label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {workerFailureCount > 0 || submissionCounts.CHECKING > 0 ? (
+              <div className="rounded-control border border-amber-300 bg-amber-50/80 px-3 py-2 text-xs text-amber-950">
+                {workerFailureCount > 0 ? (
+                  <p className="font-semibold">
+                    Có {workerFailureCount} trang gặp lỗi OCR/AI (dịch vụ kiểm tra có thể đang bận hoặc tạm ngắt). Các trang đạt chuẩn hoặc chờ Admin bên cạnh không bị ảnh hưởng — hãy bấm «Thử lại kiểm tra» ở từng trang bị lỗi.
+                  </p>
+                ) : (
+                  <p className="font-semibold">
+                    Đang xử lý song song {submissionCounts.CHECKING} trang ở chế độ nền. Các trang đã kiểm tra xong vẫn hiển thị đầy đủ để bạn thao tác ngay.
+                  </p>
+                )}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         {activeSubmissions.length === 0 ? (
           <div className="rounded-card border border-dashed border-border bg-white p-6 text-center text-sm text-muted">
             Chưa có trang nào được tải lên. Hãy chọn ảnh hoặc tệp PDF/DOCX ở
             trên để bắt đầu chạy OCR, rà chính tả và kiểm tra an toàn.
           </div>
+        ) : visibleSubmissions.length === 0 ? (
+          <div className="rounded-card border border-dashed border-border bg-white p-6 text-center text-sm text-muted">
+            Không có trang nào thuộc nhóm trạng thái đang lọc.
+          </div>
         ) : (
           <div className="flex flex-col gap-4">
-            {activeSubmissions.map((sub) => {
+            {visibleSubmissions.map((sub) => {
               const badgeStyle =
                 WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
                 "border-border bg-canvas text-ink";
@@ -1261,6 +1454,11 @@ function ParentPrivateBookManagerContent({
                               ? ` (${sub.ocr_error_code})`
                               : ""}
                           </p>
+                          {describeStageErrorHint(sub.ocr_error_code) ? (
+                            <p className="mt-1 text-[11px] font-medium text-rose-800">
+                              {describeStageErrorHint(sub.ocr_error_code)}
+                            </p>
+                          ) : null}
                         </div>
                         <div className="rounded-control border border-border bg-canvas px-3 py-2 text-xs">
                           <p className="font-bold text-ink">2. Rà chính tả</p>
@@ -1274,6 +1472,11 @@ function ParentPrivateBookManagerContent({
                               ? ` (${sub.proofread_error_code})`
                               : ""}
                           </p>
+                          {describeStageErrorHint(sub.proofread_error_code) ? (
+                            <p className="mt-1 text-[11px] font-medium text-rose-800">
+                              {describeStageErrorHint(sub.proofread_error_code)}
+                            </p>
+                          ) : null}
                         </div>
                         <div className="rounded-control border border-border bg-canvas px-3 py-2 text-xs">
                           <p className="font-bold text-ink">
@@ -1289,6 +1492,11 @@ function ParentPrivateBookManagerContent({
                               ? ` (${sub.tool_check_error_code})`
                               : ""}
                           </p>
+                          {describeStageErrorHint(sub.tool_check_error_code) ? (
+                            <p className="mt-1 text-[11px] font-medium text-rose-800">
+                              {describeStageErrorHint(sub.tool_check_error_code)}
+                            </p>
+                          ) : null}
                         </div>
                       </div>
 

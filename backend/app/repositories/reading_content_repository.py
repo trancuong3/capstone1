@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from uuid import UUID
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, case, exists, literal, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.role_cache import get_cached_profile_role
@@ -12,7 +13,11 @@ from app.models import (
 )
 from app.repositories.book_repository import CatalogRepository
 from app.models.reading_comparison_report import ReadingComparisonReport
-from app.policies.book_access import is_private_book, is_private_page_readable
+from app.policies.book_access import (
+    _private_page_has_incomplete_multipage_batch,
+    is_private_book,
+    is_private_page_readable,
+)
 
 
 class ReadingContentRepository:
@@ -56,6 +61,94 @@ class ReadingContentRepository:
 
     async def book_by_id(self, book_id: UUID) -> Book | None:
         return await self.db.scalar(select(Book).where(Book.Id == book_id))
+
+    async def session_start_context(
+        self, child_id: UUID, book_id: UUID, actor_id: UUID
+    ) -> tuple[bool, Book | None, bool]:
+        """Fetch child ownership, book metadata, and readability in one round-trip."""
+        probe = select(literal(1).label("probe")).subquery()
+        child_owned_expr = exists(
+            select(ChildProfile.Id).where(
+                ChildProfile.Id == child_id,
+                ChildProfile.ParentId == actor_id,
+            )
+        )
+        is_readable_expr = case(
+            (
+                and_(
+                    Book.Id.is_not(None),
+                    CatalogRepository.readable_book(actor_id),
+                ),
+                True,
+            ),
+            else_=False,
+        )
+        row = (
+            await self.db.execute(
+                select(
+                    child_owned_expr.label("child_owned"),
+                    Book,
+                    is_readable_expr.label("is_readable"),
+                )
+                .select_from(probe)
+                .outerjoin(Book, Book.Id == book_id)
+            )
+        ).first()
+        if row is None:
+            return False, None, False
+        return bool(row[0]), row[1], bool(row[2])
+
+    async def active_book_pages_with_revisions(
+        self,
+        book_id: UUID,
+        *,
+        include_private_batch_check: bool = False,
+    ) -> list[tuple[BookPage, PageRevision | None, bool]]:
+        """Fetch all ACTIVE pages for a book with their current verified revision in one query."""
+        eligible_expr = and_(
+            PageRevision.Id.is_not(None),
+            PageRevision.VerificationStatus == "VERIFIED",
+        )
+        if include_private_batch_check:
+            eligible_expr = and_(
+                eligible_expr,
+                not_(_private_page_has_incomplete_multipage_batch()),
+            )
+        result = await self.db.execute(
+            select(
+                BookPage,
+                PageRevision,
+                case((eligible_expr, True), else_=False).label("is_eligible"),
+            )
+            .outerjoin(
+                PageRevision,
+                and_(
+                    PageRevision.Id == BookPage.CurrentVerifiedRevisionId,
+                    PageRevision.PageId == BookPage.Id,
+                ),
+            )
+            .where(
+                BookPage.BookId == book_id,
+                BookPage.LifecycleStatus == "ACTIVE",
+            )
+            .order_by(BookPage.PageNumber, BookPage.Id)
+        )
+        return [(row[0], row[1], bool(row[2])) for row in result.all()]
+
+    async def revision_word_validation_rows(
+        self, revision_ids: list[UUID]
+    ) -> list[tuple[UUID, str, object]]:
+        """Batch-fetch `(PageRevisionId, Text, BoundingBox)` for range validation."""
+        if not revision_ids:
+            return []
+        result = await self.db.execute(
+            select(
+                PageRevisionWord.PageRevisionId,
+                PageRevisionWord.Text,
+                PageRevisionWord.BoundingBox,
+            ).where(PageRevisionWord.PageRevisionId.in_(revision_ids))
+        )
+        return [(row[0], row[1], row[2]) for row in result.all()]
 
     async def verified_page(
         self,
@@ -254,6 +347,53 @@ class ReadingContentRepository:
             )
         )
 
+    async def session_with_ownership_and_book(
+        self, session_id: UUID, actor_id: UUID
+    ) -> tuple[ReadingSession, Book, bool] | None:
+        """Fetch session, its book, and child ownership in one round-trip."""
+        child_owned_expr = exists(
+            select(ChildProfile.Id).where(
+                ChildProfile.Id == ReadingSession.ChildId,
+                ChildProfile.ParentId == actor_id,
+            )
+        )
+        row = (
+            await self.db.execute(
+                select(
+                    ReadingSession,
+                    Book,
+                    child_owned_expr.label("child_owned"),
+                )
+                .join(Book, Book.Id == ReadingSession.BookId)
+                .where(
+                    ReadingSession.Id == session_id,
+                    CatalogRepository.readable_book(actor_id),
+                )
+            )
+        ).first()
+        if row is None:
+            return None
+        return row[0], row[1], bool(row[2])
+
+    async def session_pages_with_content(
+        self, session_id: UUID
+    ) -> list[tuple[ReadingSessionPage, BookPage | None, PageRevision | None]]:
+        """Fetch session page snapshots together with their BookPage and PageRevision."""
+        result = await self.db.execute(
+            select(ReadingSessionPage, BookPage, PageRevision)
+            .outerjoin(BookPage, BookPage.Id == ReadingSessionPage.PageId)
+            .outerjoin(
+                PageRevision,
+                and_(
+                    PageRevision.Id == ReadingSessionPage.PageRevisionId,
+                    PageRevision.PageId == ReadingSessionPage.PageId,
+                ),
+            )
+            .where(ReadingSessionPage.SessionId == session_id)
+            .order_by(ReadingSessionPage.PageOrder, ReadingSessionPage.Id)
+        )
+        return [(row[0], row[1], row[2]) for row in result.all()]
+
     async def sessions_for_parent(self, parent_id: UUID) -> list[ReadingSession]:
         result = await self.db.execute(
             select(ReadingSession)
@@ -370,15 +510,22 @@ class ReadingContentRepository:
         session: ReadingSession,
         page_rows: list[ReadingSessionPage] | None = None,
     ) -> ReadingSession:
+        if session.Id is None:
+            session.Id = uuid4()
+        if session.StartedAt is None:
+            session.StartedAt = datetime.now(timezone.utc)
         self.db.add(session)
         try:
-            await self.db.flush()
             if page_rows:
                 for row in page_rows:
+                    if row.Id is None:
+                        row.Id = uuid4()
                     row.SessionId = session.Id
                 self.db.add_all(page_rows)
             await self.db.commit()
-            await self.db.refresh(session)
+            sync_session = getattr(self.db, "sync_session", None)
+            if getattr(sync_session, "expire_on_commit", True):
+                await self.db.refresh(session)
         except Exception:
             await self.db.rollback()
             raise
