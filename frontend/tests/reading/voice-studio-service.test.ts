@@ -252,4 +252,38 @@ describe("voice studio service", () => {
       { code: "AUTH_REQUIRED" },
     );
   });
+
+  it("preserves cachedSpeed from JSON body or X-TTS-Cached-Speed header on timed speech", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ...timedBody, cached_speed: 1.0 }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-tts-cache": "HIT",
+          "x-tts-scope": "CATALOG",
+          "x-tts-cached-speed": "1.00",
+        },
+      }),
+    );
+    const fromJson = await createVoiceStudioService().synthesizeTimed(
+      ["Bé", "Na"],
+      { speed: 0.9 },
+    );
+    expect(fromJson.cachedSpeed).toBe(1.0);
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(timedBody), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-tts-cached-speed": "1.00",
+        },
+      }),
+    );
+    const fromHeader = await createVoiceStudioService().synthesizeTimed(
+      ["Bé", "Na"],
+      { speed: 0.85 },
+    );
+    expect(fromHeader.cachedSpeed).toBe(1.0);
+  });
 });

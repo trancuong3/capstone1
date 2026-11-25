@@ -37,7 +37,10 @@ import {
   clampSpeed,
   getSpeechPreferences,
 } from "@/lib/reading/speech-preferences";
-import { getSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
+import {
+  getSynthesizedAudioMeta,
+  setSynthesizedAudioMeta,
+} from "@/lib/reading/synthesized-audio-meta";
 import type { TtsCacheScope } from "@/lib/reading/tts-audio-cache";
 import {
   isWavAudioBlob,
@@ -451,6 +454,52 @@ function resolveOperationVoice(
   };
 }
 
+export function computeEffectivePlaybackRate(
+  requestedSpeed: number,
+  cachedSpeed: number | null | undefined,
+): number {
+  if (
+    typeof cachedSpeed !== "number" ||
+    !Number.isFinite(cachedSpeed) ||
+    cachedSpeed <= 0
+  ) {
+    return 1;
+  }
+  if (Math.abs(requestedSpeed - cachedSpeed) <= 0.01) {
+    return 1;
+  }
+  return Math.min(2.0, Math.max(0.5, requestedSpeed / cachedSpeed));
+}
+
+export function inferPrecomputedCatalogUrlSpeed(
+  rawUrl: string | null | undefined,
+): number | null {
+  if (!rawUrl) return null;
+  try {
+    const parsed = new URL(
+      rawUrl.trim(),
+      typeof window !== "undefined"
+        ? window.location.origin
+        : "https://viread.local",
+    );
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    if (segments.length < 2) return null;
+    const speedSegment = segments[segments.length - 2];
+    if (!/^\d\.\d{1,2}$/.test(speedSegment)) return null;
+    const parsedSpeed = Number(speedSegment);
+    if (
+      !Number.isFinite(parsedSpeed) ||
+      parsedSpeed < 0.5 ||
+      parsedSpeed > 2.0
+    ) {
+      return null;
+    }
+    return parsedSpeed;
+  } catch {
+    return null;
+  }
+}
+
 function findActivePhonicsStepIndex(
   timings: readonly PhonicsStepTiming[],
   currentTime: number,
@@ -502,7 +551,11 @@ export class TtsPlayback {
   private cacheBytes = 0;
   private readonly shortCache = new Map<
     string,
-    { readonly audio: Blob; readonly usedFallbackVoice: boolean }
+    {
+      readonly audio: Blob;
+      readonly usedFallbackVoice: boolean;
+      readonly cachedSpeed: number | null;
+    }
   >();
   private shortCacheBytes = 0;
   private readonly phonicsCache = new Map<string, SynthesizedPhonicsSpeech>();
@@ -585,20 +638,22 @@ export class TtsPlayback {
       null;
     const isPrivateBook =
       options.isPrivateBook ?? this.defaultCacheContext?.isPrivateBook;
-    const cacheScope: TtsCacheScope | undefined = isPrivateBook
-      ? "PRIVATE"
-      : options.coaching
-        ? "COACHING"
+    const cacheScope: TtsCacheScope | undefined = options.coaching
+      ? "COACHING"
+      : isPrivateBook
+        ? "PRIVATE"
         : (options.cacheScope ??
           (this.defaultCacheContext ? defaultPublicScope : undefined));
     const attachBookRefs = cacheScope !== "COACHING";
+    const resolvedIsPrivateBook =
+      cacheScope === "COACHING" ? false : isPrivateBook;
     return {
       ...(attachBookRefs && bookId ? { bookId } : {}),
       ...(attachBookRefs && pageId ? { pageId } : {}),
       ...(attachBookRefs && pageRevisionId ? { pageRevisionId } : {}),
       ...(cacheScope ? { cacheScope } : {}),
       ...(includeIsPrivate && isPrivateBook !== undefined
-        ? { isPrivateBook }
+        ? { isPrivateBook: resolvedIsPrivateBook }
         : {}),
     };
   }
@@ -1152,6 +1207,10 @@ export class TtsPlayback {
             });
             this.setFallbackNotice(null);
             try {
+              const precomputedPlaybackRate = computeEffectivePlaybackRate(
+                operation.voice.speed,
+                inferPrecomputedCatalogUrlSpeed(options.precomputedAudioUrl),
+              );
               await this.playAudio(
                 operation,
                 precomputedBlob,
@@ -1161,7 +1220,7 @@ export class TtsPlayback {
                   this.started(operation, () => options.onPlay?.(duration)),
                 undefined,
                 (time, duration) => options.onTimeUpdate?.(time, duration),
-                1,
+                precomputedPlaybackRate,
               );
               this.ensure(operation);
               options.onEnded?.();
@@ -1196,6 +1255,7 @@ export class TtsPlayback {
         ): Promise<{
           audio: Blob;
           usedFallbackVoice: boolean;
+          cachedSpeed: number | null;
           key: string;
         }> => {
           const normalized = chunkText.normalize("NFC");
@@ -1217,6 +1277,7 @@ export class TtsPlayback {
             return {
               audio: cachedShort.audio,
               usedFallbackVoice: cachedShort.usedFallbackVoice,
+              cachedSpeed: cachedShort.cachedSpeed,
               key: shortKey,
             };
           }
@@ -1267,22 +1328,33 @@ export class TtsPlayback {
           }
           this.ensure(operation);
           const resolvedKey = makeKey();
+          const sourceMeta = getSynthesizedAudioMeta(source);
+          const cachedSpeed = sourceMeta?.cachedSpeed ?? null;
           const usedFallbackVoice =
-            forcedFallbackVoice ||
-            Boolean(getSynthesizedAudioMeta(source)?.usedFallbackVoice);
+            forcedFallbackVoice || Boolean(sourceMeta?.usedFallbackVoice);
           if (options.wordSample) {
             source = await this.wait(operation, prepareWordSampleAudio(source));
+            if (sourceMeta) {
+              setSynthesizedAudioMeta(source, sourceMeta);
+            }
           }
           this.cacheShort(resolvedKey, {
             audio: source,
             usedFallbackVoice,
+            cachedSpeed,
           });
-          return { audio: source, usedFallbackVoice, key: resolvedKey };
+          return {
+            audio: source,
+            usedFallbackVoice,
+            cachedSpeed,
+            key: resolvedKey,
+          };
         };
 
         let nextPrefetch: Promise<{
           audio: Blob;
           usedFallbackVoice: boolean;
+          cachedSpeed: number | null;
           key: string;
         }> | null = null;
         let useBrowserFallback =
@@ -1312,6 +1384,7 @@ export class TtsPlayback {
           let fetched: {
             audio: Blob;
             usedFallbackVoice: boolean;
+            cachedSpeed: number | null;
             key: string;
           };
           try {
@@ -1349,7 +1422,10 @@ export class TtsPlayback {
             fetched.usedFallbackVoice ? SERVER_FALLBACK_VOICE_NOTICE : null,
           );
           try {
-            // Speed is already applied once at generation -> playbackRate MUST stay 1.0!
+            const playbackRate = computeEffectivePlaybackRate(
+              operation.voice.speed,
+              fetched.cachedSpeed,
+            );
             elapsed += await this.playAudio(
               operation,
               fetched.audio,
@@ -1358,7 +1434,7 @@ export class TtsPlayback {
               onStart,
               undefined,
               onTime,
-              1,
+              playbackRate,
             );
           } catch (error) {
             this.ensure(operation);
@@ -1381,6 +1457,10 @@ export class TtsPlayback {
                     ? SERVER_FALLBACK_VOICE_NOTICE
                     : null,
                 );
+                const wavPlaybackRate = computeEffectivePlaybackRate(
+                  operation.voice.speed,
+                  wavRetry.cachedSpeed,
+                );
                 elapsed += await this.playAudio(
                   operation,
                   wavRetry.audio,
@@ -1389,7 +1469,7 @@ export class TtsPlayback {
                   onStart,
                   undefined,
                   onTime,
-                  1,
+                  wavPlaybackRate,
                 );
                 continue;
               } catch (wavError) {
@@ -1475,6 +1555,161 @@ export class TtsPlayback {
           ]),
         ]);
 
+        const tryPlayPhonicsViaCachedWordSynthesize =
+          async (): Promise<boolean> => {
+            const wholeStep =
+              lesson.steps.find((s) => s.kind === "whole_syllable") ??
+              lesson.steps[lesson.steps.length - 1];
+            if (!wholeStep) return false;
+            const focusWord = normalizeVietnameseWord(
+              lesson.focusSyllable || wholeStep.spokenText,
+            );
+            const syllableCandidates = lesson.syllables
+              .map((s) => normalizeVietnameseWord(s))
+              .filter(Boolean);
+            const wordList =
+              syllableCandidates.length > 1
+                ? syllableCandidates
+                : focusWord
+                  ? [focusWord]
+                  : [];
+            if (!wordList.length) return false;
+
+            const wordCacheMeta = this.resolveCacheMeta(
+              { ...options, cacheScope: undefined, coaching: false },
+              "CATALOG",
+              true,
+            );
+            const fetchSingleWord = async (
+              word: string,
+            ): Promise<{
+              readonly audio: Blob;
+              readonly cachedSpeed: number | null;
+              readonly key: string;
+            } | null> => {
+              const stepKey = JSON.stringify([
+                operation.voice.provider,
+                operation.voice.cacheVoiceId,
+                operation.voice.modelVersion,
+                operation.voice.speed,
+                word,
+                true,
+              ]);
+              const cached = this.shortCache.get(stepKey);
+              if (cached) {
+                return {
+                  audio: cached.audio,
+                  cachedSpeed: cached.cachedSpeed,
+                  key: stepKey,
+                };
+              }
+              try {
+                let blob = await this.wait(
+                  operation,
+                  this.speech.synthesize(word, {
+                    voiceId: operation.voice.requestedVoiceId ?? undefined,
+                    speed: operation.voice.speed,
+                    wordSample: true,
+                    ...wordCacheMeta,
+                    signal: operation.controller.signal,
+                  }),
+                );
+                this.ensure(operation);
+                const meta = getSynthesizedAudioMeta(blob);
+                const cachedSpeed = meta?.cachedSpeed ?? null;
+                blob = await this.wait(operation, prepareWordSampleAudio(blob));
+                if (meta) {
+                  setSynthesizedAudioMeta(blob, meta);
+                }
+                this.cacheShort(stepKey, {
+                  audio: blob,
+                  usedFallbackVoice: Boolean(meta?.usedFallbackVoice),
+                  cachedSpeed,
+                });
+                return { audio: blob, cachedSpeed, key: stepKey };
+              } catch (err) {
+                this.ensure(operation);
+                if (isAbort(err)) throw err;
+                return null;
+              }
+            };
+
+            const fetchedBlobs: {
+              readonly audio: Blob;
+              readonly cachedSpeed: number | null;
+              readonly key: string;
+            }[] = [];
+            for (const word of wordList) {
+              const item = await fetchSingleWord(word);
+              if (item) fetchedBlobs.push(item);
+            }
+            if (!fetchedBlobs.length && focusWord && wordList.length > 1) {
+              const focusItem = await fetchSingleWord(focusWord);
+              if (focusItem) fetchedBlobs.push(focusItem);
+            }
+            if (!fetchedBlobs.length) return false;
+
+            this.setFallbackNotice(null);
+            let fallbackElapsed = 0;
+            let activeItem: {
+              readonly audio: Blob;
+              readonly cachedSpeed: number | null;
+              readonly key: string;
+            } | null = null;
+            try {
+              for (let i = 0; i < fetchedBlobs.length; i += 1) {
+                await this.waitIfPaused(operation);
+                this.ensure(operation);
+                const item = fetchedBlobs[i];
+                activeItem = item;
+                const rate = computeEffectivePlaybackRate(
+                  operation.voice.speed,
+                  item.cachedSpeed,
+                );
+                fallbackElapsed += await this.playAudio(
+                  operation,
+                  item.audio,
+                  undefined,
+                  0,
+                  (duration) =>
+                    this.started(operation, () => {
+                      options.onPlay?.(duration);
+                      options.onStepChange?.(wholeStep.index, wholeStep);
+                    }),
+                  undefined,
+                  (time, duration) =>
+                    options.onTimeUpdate?.(
+                      fallbackElapsed + time,
+                      fallbackElapsed + duration,
+                    ),
+                  rate,
+                );
+              }
+            } catch (playFallbackError) {
+              this.ensure(operation);
+              if (
+                isAbort(playFallbackError) ||
+                playFallbackError instanceof PartialPlaybackError
+              ) {
+                throw playFallbackError;
+              }
+              if (activeItem) {
+                const cachedEntry = this.shortCache.get(activeItem.key);
+                if (cachedEntry && cachedEntry.audio === activeItem.audio) {
+                  this.shortCacheBytes -= cachedEntry.audio.size;
+                  this.shortCache.delete(activeItem.key);
+                }
+              }
+              if (fallbackElapsed > 0) {
+                throw playFallbackError;
+              }
+              return false;
+            }
+            this.ensure(operation);
+            options.onEnded?.();
+            return true;
+          };
+
         // Preferred path: single combined step-timed WAV from `/voice/text-to-speech/phonics`
         if (this.speech.synthesizePhonics) {
           const makePhonicsKey = () =>
@@ -1543,12 +1778,15 @@ export class TtsPlayback {
                     if (isAbort(googleError)) throw googleError;
                   }
                 }
-                if (!synthesized && canUseAllowedDeviceFallbackTts()) {
+              }
+              if (!synthesized) {
+                if (await tryPlayPhonicsViaCachedWordSynthesize()) {
+                  return;
+                }
+                if (canUseAllowedDeviceFallbackTts()) {
                   await playPhonicsViaBrowser();
                   return;
                 }
-              }
-              if (!synthesized) {
                 this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
                 throw unavailable();
               }
@@ -1572,6 +1810,11 @@ export class TtsPlayback {
             }
           };
 
+          const phonicsPlaybackRate = computeEffectivePlaybackRate(
+            operation.voice.speed,
+            activePhonics.cachedSpeed ??
+              getSynthesizedAudioMeta(activePhonics.audio)?.cachedSpeed,
+          );
           try {
             await this.playAudio(
               operation,
@@ -1588,7 +1831,7 @@ export class TtsPlayback {
                 emitStepForTime(activePhonics, currentTime);
                 options.onTimeUpdate?.(currentTime, duration);
               },
-              1,
+              phonicsPlaybackRate,
             );
           } catch (playErr) {
             this.ensure(operation);
@@ -1607,6 +1850,7 @@ export class TtsPlayback {
                   voiceId: operation.voice.requestedVoiceId ?? undefined,
                   speed: operation.voice.speed,
                   audioFormat: "wav",
+                  ...phonicsCacheMeta,
                   signal: operation.controller.signal,
                 }),
               );
@@ -1618,6 +1862,11 @@ export class TtsPlayback {
                 throw unavailable();
               }
               this.cachePhonics(makePhonicsKey(), wavPhonics);
+              const wavPhonicsPlaybackRate = computeEffectivePlaybackRate(
+                operation.voice.speed,
+                wavPhonics.cachedSpeed ??
+                  getSynthesizedAudioMeta(wavPhonics.audio)?.cachedSpeed,
+              );
               await this.playAudio(
                 operation,
                 wavPhonics.audio,
@@ -1633,7 +1882,7 @@ export class TtsPlayback {
                   emitStepForTime(wavPhonics, currentTime);
                   options.onTimeUpdate?.(currentTime, duration);
                 },
-                1,
+                wavPhonicsPlaybackRate,
               );
             } else {
               throw playErr;
@@ -1658,7 +1907,9 @@ export class TtsPlayback {
             step.spokenText.normalize("NFC"),
             true,
           ]);
-          let stepBlob = this.shortCache.get(stepKey)?.audio ?? null;
+          const cachedStep = this.shortCache.get(stepKey);
+          let stepBlob = cachedStep?.audio ?? null;
+          let stepCachedSpeed = cachedStep?.cachedSpeed ?? null;
           if (!stepBlob) {
             try {
               const stepCacheMeta = this.resolveCacheMeta(
@@ -1677,9 +1928,12 @@ export class TtsPlayback {
                 }),
               );
               this.ensure(operation);
+              stepCachedSpeed =
+                getSynthesizedAudioMeta(stepBlob)?.cachedSpeed ?? null;
               this.cacheShort(stepKey, {
                 audio: stepBlob,
                 usedFallbackVoice: false,
+                cachedSpeed: stepCachedSpeed,
               });
             } catch (error) {
               this.ensure(operation);
@@ -1727,7 +1981,10 @@ export class TtsPlayback {
             undefined,
             (time, duration) =>
               options.onTimeUpdate?.(elapsed + time, elapsed + duration),
-            1,
+            computeEffectivePlaybackRate(
+              operation.voice.speed,
+              stepCachedSpeed,
+            ),
           );
           await this.wait(
             operation,
@@ -1773,6 +2030,10 @@ export class TtsPlayback {
           });
           this.setFallbackNotice(null);
           try {
+            const precomputedPlaybackRate = computeEffectivePlaybackRate(
+              operation.voice.speed,
+              inferPrecomputedCatalogUrlSpeed(options.precomputedAudioUrl),
+            );
             await this.playAudio(
               operation,
               precomputedBlob,
@@ -1792,7 +2053,7 @@ export class TtsPlayback {
                 if (canMap) options.onWordChange?.(index);
               },
               undefined,
-              1,
+              precomputedPlaybackRate,
             );
             this.ensure(operation);
             options.onEnded?.();
@@ -1906,6 +2167,10 @@ export class TtsPlayback {
             timed.usedFallbackVoice ? SERVER_FALLBACK_VOICE_NOTICE : null,
           );
           try {
+            const timedPlaybackRate = computeEffectivePlaybackRate(
+              operation.voice.speed,
+              timed.cachedSpeed,
+            );
             elapsed += await this.playAudio(
               operation,
               timed.audio,
@@ -1914,7 +2179,7 @@ export class TtsPlayback {
               onStart,
               onWord,
               undefined,
-              1,
+              timedPlaybackRate,
             );
           } catch (playErr) {
             this.ensure(operation);
@@ -1947,6 +2212,10 @@ export class TtsPlayback {
                 throw unavailable();
               }
               this.cacheTimed(makeTimedKey(), wavTimed);
+              const wavTimedPlaybackRate = computeEffectivePlaybackRate(
+                operation.voice.speed,
+                wavTimed.cachedSpeed,
+              );
               elapsed += await this.playAudio(
                 operation,
                 wavTimed.audio,
@@ -1955,7 +2224,7 @@ export class TtsPlayback {
                 onStart,
                 onWord,
                 undefined,
-                1,
+                wavTimedPlaybackRate,
               );
             } else {
               throw playErr;
@@ -2006,7 +2275,11 @@ export class TtsPlayback {
 
   private cacheShort(
     key: string,
-    entry: { readonly audio: Blob; readonly usedFallbackVoice: boolean },
+    entry: {
+      readonly audio: Blob;
+      readonly usedFallbackVoice: boolean;
+      readonly cachedSpeed: number | null;
+    },
   ): void {
     if (entry.audio.size > 4 * 1024 * 1024) return;
     const prev = this.shortCache.get(key);
@@ -2083,12 +2356,16 @@ export class TtsPlayback {
       if (typeof source !== "string") URL.revokeObjectURL(url);
     };
     let audio: HTMLAudioElement;
+    const applyPlaybackRate = (el: HTMLAudioElement) => {
+      // Exact speed matches use playbackRate=1; speed-fallback cache hits scale
+      // cleanly to requestedSpeed / cachedSpeed while preserving pitch and word timings.
+      el.defaultPlaybackRate = playbackRate;
+      el.playbackRate = playbackRate;
+      el.preservesPitch = true;
+    };
     try {
       audio = new Audio(url);
-      // Synthesized audio already includes the requested speed once.
-      audio.defaultPlaybackRate = playbackRate;
-      audio.playbackRate = playbackRate;
-      audio.preservesPitch = true;
+      applyPlaybackRate(audio);
       audio.volume = 1;
       this.ensure(operation);
     } catch (error) {
@@ -2172,7 +2449,9 @@ export class TtsPlayback {
       };
       const begin = async () => {
         try {
+          applyPlaybackRate(audio);
           await audio.play();
+          applyPlaybackRate(audio);
           if (!active()) {
             audio.pause();
             return;
@@ -2221,7 +2500,10 @@ export class TtsPlayback {
       const abort = () => finish(stopped());
       signal.addEventListener("abort", abort, { once: true });
       audio.onloadedmetadata = () => {
-        if (active()) validate();
+        if (active()) {
+          applyPlaybackRate(audio);
+          validate();
+        }
       };
       audio.ontimeupdate = () => {
         if (active()) {

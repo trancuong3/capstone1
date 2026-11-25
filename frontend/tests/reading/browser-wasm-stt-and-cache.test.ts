@@ -4,7 +4,10 @@ import vm from "node:vm";
 import crypto from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createSpeechService } from "@/lib/api/speech-service";
+import {
+  createSpeechService,
+  getSynthesizedAudioMeta,
+} from "@/lib/api/speech-service";
 import {
   BrowserWasmSttClient,
   detectBrowserWasmSttSupport,
@@ -514,5 +517,46 @@ describe("Browser WASM STT worker, client & 50MB TTS IndexedDB cache", () => {
     expect(finalStats.usedBytes).toBeLessThanOrEqual(
       MAX_BROWSER_TTS_CACHE_BYTES,
     );
+  });
+
+  it("persists and restores X-TTS-Cached-Speed across IndexedDB cache hits", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response("cached-1p00-word", {
+        headers: {
+          "content-type": "audio/mpeg",
+          "cache-control": "private, max-age=86400",
+          "x-tts-cache": "HIT",
+          "x-tts-provider": "precomputed_cache",
+          "x-tts-scope": "CATALOG",
+          "x-tts-cached-speed": "1.00",
+        },
+      }),
+    );
+
+    const service1 = createSpeechService();
+    const first = await service1.synthesize("mèo", {
+      speed: 0.9,
+      wordSample: true,
+      bookId: "book-1",
+      pageId: "page-1",
+      cacheScope: "CATALOG",
+      isPrivateBook: false,
+    });
+    expect(getSynthesizedAudioMeta(first)?.cachedSpeed).toBe(1.0);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    // Simulate reload with a fresh SpeechService instance hitting IndexedDB directly
+    const service2 = createSpeechService();
+    const second = await service2.synthesize("mèo", {
+      speed: 0.9,
+      wordSample: true,
+      bookId: "book-1",
+      pageId: "page-1",
+      cacheScope: "CATALOG",
+      isPrivateBook: false,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(await second.text()).toBe("cached-1p00-word");
+    expect(getSynthesizedAudioMeta(second)?.cachedSpeed).toBe(1.0);
   });
 });

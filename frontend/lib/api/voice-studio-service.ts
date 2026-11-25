@@ -63,6 +63,7 @@ const timedSpeechSchema = z.object({
   region: z.string().nullable().optional(),
   model_version: z.string().nullable().optional(),
   used_fallback_voice: z.boolean().optional(),
+  cached_speed: z.number().positive().nullable().optional(),
 });
 
 export type VoiceOption = z.infer<typeof voiceSchema>;
@@ -83,6 +84,7 @@ export interface TimedSpeech {
   readonly region?: string | null;
   readonly modelVersion?: string | null;
   readonly usedFallbackVoice?: boolean;
+  readonly cachedSpeed?: number | null;
 }
 
 export interface TimedSpeechOptions {
@@ -132,12 +134,18 @@ async function accessToken(): Promise<string> {
   }
 }
 
-async function request(
+function parsePositiveSpeedHeader(raw: string | null): number | null {
+  if (!raw) return null;
+  const parsed = Number(raw.trim());
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function requestWithHeaders(
   path: string,
   init: RequestInit,
   signal?: AbortSignal,
   timeoutMs = 30_000,
-): Promise<unknown> {
+): Promise<{ readonly payload: unknown; readonly headers: Headers }> {
   try {
     return await withRequestDeadline(
       async (requestSignal) => {
@@ -170,7 +178,7 @@ async function request(
         }
         const payload: unknown = await response.json();
         requestSignal.throwIfAborted();
-        return payload;
+        return { payload, headers: response.headers };
       },
       signal,
       timeoutMs,
@@ -182,6 +190,16 @@ async function request(
     }
     throw failure(0, true);
   }
+}
+
+async function request(
+  path: string,
+  init: RequestInit,
+  signal?: AbortSignal,
+  timeoutMs = 30_000,
+): Promise<unknown> {
+  const { payload } = await requestWithHeaders(path, init, signal, timeoutMs);
+  return payload;
 }
 
 function base64ToBlob(base64: string, contentType: string): Blob {
@@ -224,7 +242,7 @@ export function createVoiceStudioService(): VoiceStudioService {
     async synthesizeTimed(words, options = {}) {
       const policy = getVoicePolicyPreferences();
       const activeLock = getActiveSessionVoiceLock();
-      const payload = await request(
+      const { payload, headers } = await requestWithHeaders(
         "/voice/text-to-speech/timed",
         {
           method: "POST",
@@ -287,6 +305,9 @@ export function createVoiceStudioService(): VoiceStudioService {
       const timedProvider = parsed.data.provider ?? "local";
       const resolvedId =
         parsed.data.resolved_voice_id ?? options.voiceId ?? null;
+      const cachedSpeed =
+        parsed.data.cached_speed ??
+        parsePositiveSpeedHeader(headers.get("x-tts-cached-speed"));
       recordTtsEngineUsage({
         provider: timedProvider,
         fallbackUsed:
@@ -304,6 +325,7 @@ export function createVoiceStudioService(): VoiceStudioService {
         region: parsed.data.region ?? null,
         modelVersion: parsed.data.model_version ?? null,
         usedFallbackVoice: Boolean(parsed.data.used_fallback_voice),
+        ...(cachedSpeed !== null ? { cachedSpeed } : {}),
       };
     },
   };

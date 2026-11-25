@@ -17,7 +17,10 @@ import {
   inferModelVersionForVoiceId,
   type VoiceProviderMode,
 } from "@/lib/reading/session-voice-lock";
-import { setSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
+import {
+  getSynthesizedAudioMeta,
+  setSynthesizedAudioMeta,
+} from "@/lib/reading/synthesized-audio-meta";
 import {
   buildTtsBrowserCacheKey,
   getCachedTtsAudio,
@@ -67,6 +70,7 @@ const phonicsSpeechSchema = z.object({
   resolved_voice_id: z.string(),
   region: z.string().optional(),
   model_version: z.string(),
+  cached_speed: z.number().positive().nullable().optional(),
 });
 
 export interface WordTimestamp {
@@ -118,6 +122,7 @@ export interface SynthesizedPhonicsSpeech {
   readonly resolvedVoiceId: string;
   readonly region: string;
   readonly modelVersion: string;
+  readonly cachedSpeed?: number | null;
 }
 
 export interface SynthesizePhonicsStepInput {
@@ -255,6 +260,12 @@ function appendKeyterms(
   }
 }
 
+function parsePositiveSpeedHeader(raw: string | null): number | null {
+  if (!raw) return null;
+  const parsed = Number(raw.trim());
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 function base64ToBlob(base64: string, contentType: string): Blob {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -305,6 +316,8 @@ export function createSpeechService(): SpeechService {
         options.signal?.throwIfAborted();
         if (cachedAudio && cachedAudio.size > 0) {
           const voiceGender = resolveVoiceGender(cacheVoiceId, null);
+          const storedCachedSpeed =
+            getSynthesizedAudioMeta(cachedAudio)?.cachedSpeed ?? null;
           setSynthesizedAudioMeta(cachedAudio, {
             resolvedVoiceId: cacheVoiceId,
             usedFallbackVoice: false,
@@ -313,6 +326,7 @@ export function createSpeechService(): SpeechService {
             modelVersion:
               activeLock?.modelVersion ??
               inferModelVersionForVoiceId(cacheVoiceId),
+            cachedSpeed: storedCachedSpeed,
           });
           recordTtsEngineUsage({
             provider: "precomputed_cache",
@@ -388,6 +402,9 @@ export function createSpeechService(): SpeechService {
             resolvedVoiceId ?? options.voiceId,
             response.headers.get("x-voice-gender"),
           );
+          const cachedSpeed = parsePositiveSpeedHeader(
+            response.headers.get("x-tts-cached-speed"),
+          );
           setSynthesizedAudioMeta(audio, {
             resolvedVoiceId,
             usedFallbackVoice,
@@ -395,6 +412,7 @@ export function createSpeechService(): SpeechService {
             region: response.headers.get("x-voice-region")?.trim() || null,
             modelVersion:
               response.headers.get("x-voice-model-version")?.trim() || null,
+            cachedSpeed,
           });
           recordTtsEngineUsage({
             provider,
@@ -429,6 +447,7 @@ export function createSpeechService(): SpeechService {
               scope: effectiveScope,
               cacheControl: response.headers.get("cache-control"),
               isPrivateBook: options.isPrivateBook,
+              cachedSpeed,
             });
           }
           return audio;
@@ -513,12 +532,18 @@ export function createSpeechService(): SpeechService {
             phonicsProvider === "google" ||
             (Boolean(options.voiceId) &&
               parsed.data.resolved_voice_id !== options.voiceId);
+          const cachedSpeed =
+            parsed.data.cached_speed ??
+            parsePositiveSpeedHeader(
+              response.headers.get("x-tts-cached-speed"),
+            );
           setSynthesizedAudioMeta(audio, {
             resolvedVoiceId: parsed.data.resolved_voice_id,
             usedFallbackVoice: phonicsUsedFallback,
             provider: phonicsProvider,
             region: parsed.data.region ?? "north",
             modelVersion: parsed.data.model_version,
+            cachedSpeed,
           });
           recordTtsEngineUsage({
             provider: phonicsProvider,
@@ -534,6 +559,7 @@ export function createSpeechService(): SpeechService {
             resolvedVoiceId: parsed.data.resolved_voice_id,
             region: parsed.data.region ?? "north",
             modelVersion: parsed.data.model_version,
+            ...(cachedSpeed !== null ? { cachedSpeed } : {}),
           };
         },
         options.signal,

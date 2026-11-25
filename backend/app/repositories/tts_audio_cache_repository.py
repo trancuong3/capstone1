@@ -181,7 +181,7 @@ class TtsAudioCacheRepository:
                     PageRevisionWord.Text,
                 )
                 .where(PageRevisionWord.PageRevisionId.in_(rev_ids))
-                .order_by(PageRevisionWord.WordOrder.asc())
+                .order_by(PageRevisionWord.WordIndex.asc())
             )
         ).all()
         words_by_rev: dict[UUID, list[tuple[str | None, str | None]]] = {}
@@ -204,6 +204,8 @@ class TtsAudioCacheRepository:
         model_version: str | None,
         speed: float,
         audio_formats: Sequence[str],
+        allow_speed_fallback: bool = False,
+        require_word_timings: bool = False,
     ) -> TtsAudioCacheEntry | None:
         if scope == "PRIVATE" and owner_parent_id is None:
             return None
@@ -221,11 +223,67 @@ class TtsAudioCacheRepository:
             filters.append(TtsAudioCacheEntry.OwnerParentId.is_(None))
         if model_version:
             filters.append(TtsAudioCacheEntry.ModelVersion == model_version)
+        if require_word_timings:
+            filters.append(TtsAudioCacheEntry.WordTimingsJson.is_not(None))
 
         stmt = (
             select(TtsAudioCacheEntry)
             .where(*filters)
             .order_by(TtsAudioCacheEntry.CreatedAt.desc())
+            .limit(1)
+        )
+        exact = await self.db.scalar(stmt)
+        if exact is not None or not allow_speed_fallback:
+            return exact
+        return await self.get_nearest_active_entry(
+            scope=scope,
+            owner_parent_id=owner_parent_id,
+            content_sha256=content_sha256,
+            voice_id=voice_id,
+            model_version=model_version,
+            speed=speed,
+            audio_formats=audio_formats,
+            require_word_timings=require_word_timings,
+        )
+
+    async def get_nearest_active_entry(
+        self,
+        *,
+        scope: str,
+        owner_parent_id: UUID | None,
+        content_sha256: str,
+        voice_id: str,
+        model_version: str | None,
+        speed: float,
+        audio_formats: Sequence[str],
+        require_word_timings: bool = False,
+    ) -> TtsAudioCacheEntry | None:
+        if scope == "PRIVATE" and owner_parent_id is None:
+            return None
+        q_speed = self._quantize_speed(speed)
+        filters = [
+            TtsAudioCacheEntry.Status == "ACTIVE",
+            TtsAudioCacheEntry.Scope == scope,
+            TtsAudioCacheEntry.ContentSha256 == content_sha256,
+            TtsAudioCacheEntry.VoiceId == voice_id,
+            TtsAudioCacheEntry.AudioFormat.in_(list(audio_formats)),
+        ]
+        if scope == "PRIVATE":
+            filters.append(TtsAudioCacheEntry.OwnerParentId == owner_parent_id)
+        else:
+            filters.append(TtsAudioCacheEntry.OwnerParentId.is_(None))
+        if model_version:
+            filters.append(TtsAudioCacheEntry.ModelVersion == model_version)
+        if require_word_timings:
+            filters.append(TtsAudioCacheEntry.WordTimingsJson.is_not(None))
+
+        stmt = (
+            select(TtsAudioCacheEntry)
+            .where(*filters)
+            .order_by(
+                func.abs(TtsAudioCacheEntry.Speed - q_speed).asc(),
+                TtsAudioCacheEntry.CreatedAt.desc(),
+            )
             .limit(1)
         )
         return await self.db.scalar(stmt)

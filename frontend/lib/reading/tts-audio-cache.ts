@@ -7,6 +7,8 @@
  *   `Cache-Control: no-store` / `X-TTS-Scope: PRIVATE`.
  */
 
+import { setSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
+
 export type TtsCacheScope = "CATALOG" | "PRIVATE" | "COACHING";
 
 export const MAX_BROWSER_TTS_CACHE_BYTES = 50 * 1024 * 1024;
@@ -20,6 +22,7 @@ interface StoredTtsEntry {
   readonly byteSize: number;
   readonly buffer: ArrayBuffer;
   readonly createdAt: number;
+  readonly cachedSpeed?: number | null;
   lastAccessedAt: number;
 }
 
@@ -116,6 +119,17 @@ export async function getCachedTtsAudio(key: string): Promise<Blob | null> {
         const blob = new Blob([rec.buffer], {
           type: rec.contentType || "audio/mpeg",
         });
+        if (
+          typeof rec.cachedSpeed === "number" &&
+          Number.isFinite(rec.cachedSpeed) &&
+          rec.cachedSpeed > 0
+        ) {
+          setSynthesizedAudioMeta(blob, {
+            resolvedVoiceId: null,
+            usedFallbackVoice: false,
+            cachedSpeed: rec.cachedSpeed,
+          });
+        }
         tx.oncomplete = () => {
           db.close();
           resolve(blob);
@@ -144,6 +158,7 @@ export async function putCachedTtsAudio(input: {
   scope?: TtsCacheScope | null;
   cacheControl?: string | null;
   isPrivateBook?: boolean;
+  cachedSpeed?: number | null;
 }): Promise<boolean> {
   if (
     !shouldPersistTtsCacheEntry({
@@ -196,6 +211,11 @@ export async function putCachedTtsAudio(input: {
           byteSize: buffer.byteLength,
           buffer,
           createdAt: now,
+          ...(typeof input.cachedSpeed === "number" &&
+          Number.isFinite(input.cachedSpeed) &&
+          input.cachedSpeed > 0
+            ? { cachedSpeed: input.cachedSpeed }
+            : {}),
           lastAccessedAt: now,
         };
         store.put(entry);

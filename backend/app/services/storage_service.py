@@ -277,7 +277,7 @@ def download_object(object_path: str, *, bucket_name: str | None = None) -> byte
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Could not read the image from Supabase Storage",
-            )
+            ) from FileNotFoundError(object_path)
         data = local_target.read_bytes()
         if not data:
             raise HTTPException(
