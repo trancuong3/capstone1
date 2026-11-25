@@ -1,16 +1,18 @@
-# ViRead V4.0 Swarm Task Board & Ownership
+# ViRead Intelligent Play & Learn V4.0 — Swarm Execution Ledger
 
-## Active Phase: Phase 01–02 (Research & Baseline Audit)
+- **Swarm Title**: `ViRead Play & Learn V4.0`
+- **Workflow Equivalents Activated**: Antigravity native `swarm` (`add`/`status`/`kill`), `read_board`, `post_message`, `swarm_wait`, `swarm_pane` (`plan.json`), `update_steps`, and persistent `GOAL.md` / `PLAN.md` / `SWARM_TASKS.md`. *(Note: `/swarm`, `/goal`, `/plan` are user-facing chat UI slash commands; these runtime tools provide full programmatic multi-agent coordination.)*
 
-| Worker | Roles Covered | Workspace | Owned Files / Scope | Status |
-| :--- | :--- | :--- | :--- | :--- |
-| `coordinator` | Agent 01 (Principal Orchestrator) | `inherit` | `GOAL.md`, `PLAN.md`, `SWARM_TASKS.md`, `ARCHITECTURE_DECISION_RECORDS.md`, integration & conflict governance | `ACTIVE` |
-| `researcher-edu` | Agents 02, 03, 04 (Educational Research, Primary Education, LX Design) | `inherit` | `docs/entertainment-v4/research/EDUCATIONAL_RESEARCH.md`, `PRODUCT_COMPARISON.md` | `IN_PROGRESS` |
-| `auditor-backend` | Agents 06, 08, 11, 13, 14, 15, 17 (Repo Architect, AI/DSP/Image/DB/Zero-Cost Research) | `inherit` | `docs/entertainment-v4/research/AI_PROVIDER_RESEARCH.md`, `AUDIO_DSP_RESEARCH.md`, `IMAGE_GENERATION_RESEARCH.md`, `ADMIN_KARAOKE_WORKFLOW_RESEARCH.md`, `ZERO_COST_FEASIBILITY.md` | `IN_PROGRESS` |
-| `auditor-frontend` | Agents 07, 10, 12, 16 (UI/UX, Game Perf, Karaoke UX, Android Audit) | `inherit` | `docs/entertainment-v4/ADMIN_WORKFLOW_BEFORE_AFTER.md` (BEFORE), `PERFORMANCE_BEFORE_AFTER.md` (BEFORE) | `IN_PROGRESS` |
-
-## Upcoming Implementation & Independent QA Waves
-- **Wave 2 (Design & Foundation)**: Adaptive Learning Engine, DB migration & RLS, shared AI/Speech contracts.
-- **Wave 3 (Parallel Implementation)**: Non-overlapping `share` worktrees or strictly partitioned file ownership across Hub/Adaptive/Reports, AI Teacher V4.0, Sentence Shooter V4.0, Karaoke DSP + Admin One-File Automation, and AI Memory Game.
-- **Wave 4 (Independent QA & Adversarial Review)**: Fresh QA/Reviewer worker separated from implementation authors.
-- **Wave 5 (Release)**: Prettier/ESLint/TypeScript/Vitest/Unittest/Hygiene/PR/CI verification.
+| Wave | Worker Name | Scope | Owned Deliverables | Final Status |
+|---|---|---|---|---|
+| Wave 1 | `researcher-edu` | G01–G02 Educational & UX Research | `research/EDUCATIONAL_RESEARCH.md`, `research/PRODUCT_COMPARISON.md` | `DONE` (killed cleanly) |
+| Wave 1 | `auditor-backend` | G02 Backend, AI, Audio DSP, DB & Zero-Cost Audit | `research/AI_PROVIDER_RESEARCH.md`, `AUDIO_DSP_RESEARCH.md`, `IMAGE_GENERATION_RESEARCH.md`, `ADMIN_KARAOKE_WORKFLOW_RESEARCH.md`, `ZERO_COST_FEASIBILITY.md` | `DONE` (killed cleanly) |
+| Wave 1 | `auditor-frontend` | G02 Frontend, Admin & Performance Baseline Audit | `ADMIN_WORKFLOW_BEFORE_AFTER.md` (BEFORE), `PERFORMANCE_BEFORE_AFTER.md` (BEFORE) | `DONE` (killed cleanly) |
+| Wave 2 | `coordinator` | Additive DB Schema, RLS, ORM Models, G03 Adaptive Engine, G04 4-Zone Hub, G11 Parent Analytics, Central Router Mount | `20261125120000_entertainment_v4_ecosystem.sql`, `rollbacks/...`, `entertainment_v4.py`, `adaptive_learning*.py`, `entertainment-screen.tsx`, `entertainment-learning-summary.tsx`, `router.py`, `ADAPTIVE_LEARNING_ARCHITECTURE.md`, `EDUCATIONAL_DESIGN.md`, `DATABASE_AND_RLS.md` | `DONE` |
+| Wave 3 | `eng-ai-teacher` | G05 AI Teacher V4.0 + G10 Anti-Self-Capture Voice Lifecycle | `picture_description*.py`, `picture-description-screen.tsx`, `AI_TEACHER_ARCHITECTURE.md` | `DONE` (killed cleanly) |
+| Wave 3 | `eng-shooter` | G06 Real-Time Sentence Shooter V4.0 (`<20ms` decoupled queue + 3 modes) | `sentence_shooter*.py`, `shot-queue.ts`, `stage-layout-cache.ts`, `sound-engine.ts`, `sentence-shooter-screen.tsx`, `SENTENCE_SHOOTER_PERFORMANCE.md` | `DONE` (killed cleanly) |
+| Wave 3 | `eng-karaoke-dsp` | G07 Musical Karaoke DSP, 12-Scenario PCM Benchmark, 60fps Perf & Segment Practice | `musical-dsp.ts`, `musical-scoring.ts`, `musical-practice.ts`, `karaoke-stage.tsx`, `syllable-lyrics.tsx`, `karaoke_practice*.py`, `KARAOKE_DSP_ARCHITECTURE.md`, `KARAOKE_SCORING_BENCHMARK.json` | `DONE` (killed cleanly) |
+| Wave 3 | `eng-admin-karaoke` | G08 (P0) Admin Karaoke One-File Simple Mode Automation (`-54%` to `-94%+` steps) | `karaoke_media_service.py`, `karaoke_simple_import*.py`, `audio-type-classifier.ts`, `karaoke-simple-upload-screen.tsx`, `syllable-timing-editor.tsx`, `ADMIN_KARAOKE_AUTOMATION.md`, `ADMIN_WORKFLOW_BEFORE_AFTER.md` (AFTER) | `DONE` (killed cleanly) |
+| Wave 3 | `eng-memory-game` | G09 AI Memory & Creative Story Game (`"Bé nhớ được gì?"`) | `memory_scene_generator.py`, `memory_game_evaluator.py`, `memory_game*.py`, `memory-scene-canvas.tsx`, `memory-game-screen.tsx`, `AI_MEMORY_GAME_DESIGN.md` | `DONE` (killed cleanly) |
+| Wave 4 | `qa-independent` | Fresh Independent 12-Round Adversarial QA, Security Audit & Post-Fix Re-Verification | Found & verified closure of 3 P0 + 2 P1 + 5 P2 defects; authored `SECURITY_REVIEW.md`, `PERFORMANCE_BEFORE_AFTER.md` (AFTER), `MOBILE_ACCEPTANCE.md`, `ZERO_COST_REPORT.md`, `FINAL_TEST_REPORT.md`, `FINAL_QA_REPORT.md`, `EVIDENCE_INDEX.md`, `GOAL.md` (`GO`) | `DONE` (killed cleanly) |
+| Wave 5 | `coordinator` | Modular Commits, Repository Hygiene, Push & Release Handover | `RELEASE_REPORT.md`, `HANDOVER.md`, `SWARM_TASKS.md`, branch push | `DONE` |
