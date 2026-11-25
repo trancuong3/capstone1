@@ -357,7 +357,7 @@ describe("QA Audit Scenarios A & C — Short-word 'một' retry, green sync, imm
     await user.click(agreeBtn);
     await waitFor(() => {
       expect(speechRecorderMock.start).toHaveBeenCalledWith(
-        expect.objectContaining({ retainStream: true, mode: "short-word" }),
+        expect.objectContaining({ retainStream: false, mode: "short-word" }),
       );
     });
 

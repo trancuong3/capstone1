@@ -5,8 +5,14 @@ import type {
   AdminRevisionVerifyRequestDTO,
 } from "@/types/admin";
 import { z } from "zod";
+import {
+  adminOcrJobSchema,
+  adminProcessingSchema,
+  pollAdminOcrJob,
+} from "@/lib/api/admin-page-service";
 import { requestApi } from "@/lib/api/api-client";
 import { adminRevisionDetailSchema } from "@/lib/api/ocr-review-service";
+import { isServiceError, ServiceError } from "@/lib/api/service-error";
 
 export interface RevisionService {
   list(pageId: string): Promise<readonly AdminRevisionSummaryUI[]>;
@@ -24,7 +30,12 @@ export interface RevisionService {
   ): Promise<AdminPageRevisionDetailDTO>;
 }
 
-export function createRevisionService(): RevisionService {
+export function createRevisionService(options?: {
+  readonly pollIntervalMs?: number;
+  readonly maxPollAttempts?: number;
+}): RevisionService {
+  const pollIntervalMs = options?.pollIntervalMs ?? 1_500;
+  const maxPollAttempts = options?.maxPollAttempts ?? 60;
   return {
     list: (pageId) =>
       requestApi(
@@ -83,30 +94,76 @@ export function createRevisionService(): RevisionService {
         },
       ),
     reprocess: async (pageId, onStatus) => {
-      const detail = await requestApi(
-        `/books/admin/pages/${encodeURIComponent(pageId)}/reprocess`,
-        adminRevisionDetailSchema.refine((item) => item.page_id === pageId),
-        undefined,
-        { method: "POST" },
-      );
+      let detail: AdminPageRevisionDetailDTO;
+      try {
+        const job = await requestApi(
+          `/books/admin/pages/${encodeURIComponent(pageId)}/reprocess/jobs`,
+          adminOcrJobSchema,
+          undefined,
+          { method: "POST" },
+        );
+        const finalJob = await pollAdminOcrJob(job, {
+          pollIntervalMs,
+          maxAttempts: maxPollAttempts,
+        });
+        if (
+          finalJob.status === "DEAD_LETTER" ||
+          finalJob.status === "CANCELLED"
+        ) {
+          throw new ServiceError({
+            code: "NETWORK_ERROR",
+            status: 503,
+            request_id: finalJob.id,
+            retryable: finalJob.status !== "CANCELLED",
+            message:
+              finalJob.error_message ||
+              "Tác vụ OCR lại trang chưa hoàn tất. Vui lòng thử lại.",
+          });
+        }
+        if (finalJob.status !== "SUCCEEDED") {
+          throw new ServiceError({
+            code: "NETWORK_ERROR",
+            status: 503,
+            request_id: finalJob.id,
+            retryable: true,
+            message:
+              "Trang đã được xếp hàng chờ máy chủ OCR Windows xử lý lại. Vui lòng làm mới sau khi hoàn tất.",
+          });
+        }
+        if (finalJob.revision_id) {
+          detail = await requestApi(
+            `/books/admin/pages/${encodeURIComponent(pageId)}/revisions/${encodeURIComponent(finalJob.revision_id)}`,
+            adminRevisionDetailSchema.refine((item) => item.page_id === pageId),
+          );
+        } else {
+          const processing = await requestApi(
+            `/books/admin/pages/${encodeURIComponent(pageId)}/processing`,
+            adminProcessingSchema.refine((item) => item.page_id === pageId),
+          );
+          detail = await requestApi(
+            `/books/admin/pages/${encodeURIComponent(pageId)}/revisions/${encodeURIComponent(processing.page_revision_id)}`,
+            adminRevisionDetailSchema.refine((item) => item.page_id === pageId),
+          );
+        }
+      } catch (error) {
+        const shouldFallbackSync =
+          isServiceError(error) &&
+          (error.status === 404 ||
+            error.status === 405 ||
+            error.status === 501);
+        if (!shouldFallbackSync) throw error;
+        detail = await requestApi(
+          `/books/admin/pages/${encodeURIComponent(pageId)}/reprocess`,
+          adminRevisionDetailSchema.refine((item) => item.page_id === pageId),
+          undefined,
+          { method: "POST" },
+        );
+      }
       if (onStatus) {
         try {
           const status = await requestApi(
             `/books/admin/pages/${encodeURIComponent(pageId)}/processing`,
-            z.object({
-              page_id: z.uuid(),
-              page_revision_id: z.uuid(),
-              revision_no: z.number().int().positive(),
-              verification_status: z.enum([
-                "PROCESSING",
-                "NEEDS_REVIEW",
-                "VERIFIED",
-              ]),
-              lifecycle_status: z.enum(["ACTIVE", "RETIRED"]),
-              ocr_preview_metadata: z.record(z.string(), z.unknown()),
-              verified_at: z.iso.datetime({ offset: true }).nullable(),
-              current_verified_revision_id: z.uuid().nullable(),
-            }),
+            adminProcessingSchema,
           );
           onStatus(status);
         } catch {

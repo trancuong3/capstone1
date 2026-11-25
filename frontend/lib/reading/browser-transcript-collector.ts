@@ -2,6 +2,7 @@ import { hasUsableBrowserConfidence } from "@/lib/reading/recognition-evidence";
 
 export interface BrowserRecognitionResultLike {
   readonly isFinal: boolean;
+  readonly onsetAt?: number | null;
   readonly 0?: { readonly transcript?: string; readonly confidence?: number };
 }
 
@@ -25,6 +26,7 @@ export class BrowserTranscriptCollector {
       text: string,
       usable: boolean,
       confidence?: number,
+      onsetAt?: number | null,
     ) => boolean,
   ): string[] {
     const newFinals: string[] = [];
@@ -39,9 +41,13 @@ export class BrowserTranscriptCollector {
       const text = result[0]?.transcript?.trim();
       if (text) {
         const confidence = result[0]?.confidence;
+        const onsetAt =
+          typeof result.onsetAt === "number" && Number.isFinite(result.onsetAt)
+            ? result.onsetAt
+            : null;
         const usable = hasUsableBrowserConfidence(confidence);
         const accept = acceptFinal
-          ? acceptFinal(text, usable, confidence)
+          ? acceptFinal(text, usable, confidence, onsetAt)
           : usable;
         if (!accept) {
           // A discarded command or uncertain final still occupies its slot.

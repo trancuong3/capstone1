@@ -18,6 +18,7 @@ import { useReadingServices } from "@/hooks/use-reading-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { createSpeechService } from "@/lib/api/speech-service";
 import { resolveLocalFirstSpeechRecognitionConstructor } from "@/lib/reading/local-segment-speech-recognition";
+import { isAndroidNativeSpeechAvailable } from "@/lib/reading/native-speech-bridge";
 import { lockSessionVoice } from "@/lib/reading/session-voice-lock";
 import {
   choiceLetterForSpeech,
@@ -51,6 +52,7 @@ interface BrowserSpeechRecognitionAlternative {
 }
 interface BrowserSpeechRecognitionResult {
   readonly isFinal?: boolean;
+  readonly onsetAt?: number | null;
   readonly 0?: BrowserSpeechRecognitionAlternative;
 }
 interface BrowserSpeechRecognitionEvent {
@@ -335,6 +337,8 @@ export function ComprehensionQuestion({
       setVoicePhase("listening");
 
       let processedUpTo = -1;
+      let fatalError = false;
+      let consecutiveRestarts = 0;
 
       const armReminder = () => {
         clearRemindTimer();
@@ -387,14 +391,20 @@ export function ComprehensionQuestion({
           }
 
           // Block echo from our own question / option TTS!
+          const onsetAt =
+            typeof item.onsetAt === "number" && Number.isFinite(item.onsetAt)
+              ? item.onsetAt
+              : null;
           if (
             !echoGuard.evaluate({
               text: transcript,
               receivedAt: performance.now(),
+              onsetAt,
             }).accept
           ) {
             continue;
           }
+          consecutiveRestarts = 0;
 
           const matched = matchComprehensionVoiceInput(
             transcript,
@@ -422,8 +432,13 @@ export function ComprehensionQuestion({
         if (recognitionRef.current !== rec) return;
         if (
           event.error === "not-allowed" ||
-          event.error === "service-not-allowed"
+          event.error === "service-not-allowed" ||
+          event.error === "stt-unavailable" ||
+          event.error === "network" ||
+          event.error === "audio-capture" ||
+          event.error === "language-not-supported"
         ) {
+          fatalError = true;
           stopVoiceRecognition();
           setVoicePhase("idle");
         }
@@ -431,16 +446,28 @@ export function ComprehensionQuestion({
 
       rec.onend = () => {
         if (recognitionRef.current !== rec) return;
+        if (fatalError) {
+          stopVoiceRecognition();
+          setVoicePhase("idle");
+          return;
+        }
         if (
           mountedRef.current &&
           gen === flowGenRef.current &&
           !voicePausedRef.current &&
           !isSubmittingRef.current
         ) {
+          if (consecutiveRestarts >= 5) {
+            stopVoiceRecognition();
+            setVoicePhase("idle");
+            return;
+          }
+          consecutiveRestarts += 1;
           try {
             rec.start();
           } catch {
-            // Keep manual buttons usable
+            stopVoiceRecognition();
+            setVoicePhase("idle");
           }
         }
       };
@@ -472,6 +499,7 @@ export function ComprehensionQuestion({
       // recognition or speech synthesis (keeps non-audio unit environments calm).
       const hasVoiceApi =
         Boolean(getSpeechRecognitionCtor()) ||
+        isAndroidNativeSpeechAvailable() ||
         (typeof window !== "undefined" &&
           (typeof window.AudioContext === "function" ||
             Boolean(window.speechSynthesis?.getVoices?.().length)));

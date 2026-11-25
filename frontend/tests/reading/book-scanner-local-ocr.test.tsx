@@ -132,10 +132,20 @@ describe("BookScannerScreen local OCR photo upload", () => {
       if (path === `/profiles/children/${TEST_CHILD_ID}`) {
         return Response.json(childFixture);
       }
-      if (path === "/reading/scan-page-ocr") {
-        return Response.json(ocrSuccessPayload, {
-          headers: { "X-Request-ID": "req-local-ocr-001" },
-        });
+      if (path === "/reading/scan-page-ocr/jobs") {
+        return Response.json(
+          {
+            job_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            status: "SUCCEEDED",
+            worker_online: true,
+            created_at: "2026-11-25T10:00:00Z",
+            updated_at: "2026-11-25T10:00:02Z",
+            error_code: null,
+            error_message: null,
+            result: ocrSuccessPayload,
+          },
+          { status: 202, headers: { "X-Request-ID": "req-local-ocr-001" } },
+        );
       }
       throw new Error(`Unexpected path: ${path}`);
     });
@@ -172,7 +182,7 @@ describe("BookScannerScreen local OCR photo upload", () => {
       if (path === `/profiles/children/${TEST_CHILD_ID}`) {
         return Response.json(childFixture);
       }
-      if (path === "/reading/scan-page-ocr") {
+      if (path === "/reading/scan-page-ocr/jobs") {
         capturedSignal = init?.signal as AbortSignal | undefined;
         return await new Promise<Response>((_resolve, reject) => {
           capturedSignal?.addEventListener("abort", () => {
@@ -192,14 +202,14 @@ describe("BookScannerScreen local OCR photo upload", () => {
     await user.upload(input, makePageFile());
 
     expect(
-      await screen.findByText(/Đang gửi ảnh và chạy OCR tiếng Việt cục bộ/i),
+      await screen.findByText(/Đang gửi ảnh tới hệ thống nhận diện OCR tiếng Việt/i),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Hủy quét/i }));
     expect(capturedSignal?.aborted).toBe(true);
     await waitFor(() => {
       expect(
-        screen.queryByText(/Đang gửi ảnh và chạy OCR tiếng Việt cục bộ/i),
+        screen.queryByText(/Đang gửi ảnh tới hệ thống nhận diện OCR tiếng Việt/i),
       ).not.toBeInTheDocument();
     });
   });
@@ -213,6 +223,9 @@ describe("BookScannerScreen local OCR photo upload", () => {
       const path = new URL(String(input)).pathname;
       if (path === `/profiles/children/${TEST_CHILD_ID}`) {
         return Response.json(childFixture);
+      }
+      if (path === "/reading/scan-page-ocr/jobs") {
+        return Response.json({ detail: "Not Found" }, { status: 404 });
       }
       if (path === "/reading/scan-page-ocr") {
         attempt += 1;
@@ -258,7 +271,7 @@ describe("BookScannerScreen local OCR photo upload", () => {
       if (path === `/profiles/children/${TEST_CHILD_ID}`) {
         return Response.json(childFixture);
       }
-      if (path === "/reading/scan-page-ocr") {
+      if (path === "/reading/scan-page-ocr/jobs") {
         return Response.json({ detail: "Unauthorized" }, { status: 401 });
       }
       throw new Error(`Unexpected path: ${path}`);
