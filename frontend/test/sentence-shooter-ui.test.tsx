@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -625,5 +625,518 @@ describe("Sentence Shooter", () => {
     expect(
       await screen.findByText("Thời gian chơi: 0 phút 8 giây"),
     ).toBeInTheDocument();
+  });
+
+  it("never freezes UI under 500ms slow network, delivers <100ms tap-to-visible-feedback, preserves FIFO order, and avoids tap-time reflows", async () => {
+    let activeRequests = 0;
+    let maxConcurrentRequests = 0;
+    const dispatchedTokenIds: string[] = [];
+    const expectedOrder = [tokenIds.first, tokenIds.second, tokenIds.third];
+
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const path = new URL(url).pathname;
+      if (path === `/profiles/children/${TEST_CHILD_ID}`) {
+        return Response.json(childFixture);
+      }
+      if (path === "/games/sentence-shooter/books") {
+        return Response.json([book]);
+      }
+      if (path === "/games/sentence-shooter/sessions") {
+        return Response.json({ ...session, total_rounds: 2 }, { status: 201 });
+      }
+      if (
+        path === `/games/sentence-shooter/sessions/${TEST_SESSION_ID}/shots`
+      ) {
+        const body = JSON.parse(String(init?.body)) as {
+          token_id: string;
+          client_shot_id?: string;
+        };
+        activeRequests += 1;
+        maxConcurrentRequests = Math.max(maxConcurrentRequests, activeRequests);
+        dispatchedTokenIds.push(body.token_id);
+
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        activeRequests -= 1;
+
+        const pos = expectedOrder.indexOf(body.token_id) + 1;
+        const done = pos === 3;
+        return Response.json({
+          is_correct: true,
+          correct_count: pos,
+          token_count: 3,
+          mistakes_total: 0,
+          completed_rounds: done ? 1 : 0,
+          total_stars: done ? 3 : 0,
+          round_completed: done,
+          session_completed: false,
+          next_expected_position: pos,
+          stars_awarded: done ? 3 : 0,
+          score: pos * 10 + (done ? 15 : 0),
+          completed_sentence: done ? "Bé đọc sách." : null,
+          next_round: null,
+          message: done ? "Hoàn thành câu! Tuyệt lắm!" : "Hay lắm!",
+          client_shot_id: body.client_shot_id ?? null,
+        });
+      }
+      throw new Error(`Unexpected test route ${path}`);
+    });
+
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(
+      await screen.findByRole("button", { name: /Sách xạ thủ/ }),
+    );
+    await user.click(screen.getByRole("button", { name: /Bắt đầu chơi/ }));
+
+    const btnBe = await screen.findByRole("button", { name: "Bé" });
+    const btnDoc = screen.getByRole("button", { name: "đọc" });
+    const btnSach = screen.getByRole("button", { name: "sách." });
+
+    // Allow initial ResizeObserver/rAF layout snapshot to populate before spying on reflows.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
+
+    const tapLatenciesMs: number[] = [];
+
+    // Tap 1: "Bé" — must reflect visually immediately (<100ms) while 500ms HTTP is still pending!
+    const t0 = performance.now();
+    fireEvent.click(btnBe);
+    expect(btnBe).toHaveAttribute("data-shot-state", "in-flight");
+    expect(btnBe).toBeDisabled();
+    expect(
+      screen.getByRole("listitem", { name: "Ô 1: Bé (đang kiểm tra)" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByTestId("shot-projectile").length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId("shot-particles").length).toBeGreaterThan(0);
+    tapLatenciesMs.push(performance.now() - t0);
+
+    // Other bubbles remain 100% enabled during the 500ms network RTT!
+    expect(btnDoc).toBeEnabled();
+    expect(btnSach).toBeEnabled();
+
+    // Tap 2 & Tap 3 immediately while Shot 1 is STILL waiting on the 500ms network!
+    const t1 = performance.now();
+    fireEvent.click(btnDoc);
+    expect(btnDoc).toHaveAttribute("data-shot-state", "in-flight");
+    expect(
+      screen.getByRole("listitem", { name: "Ô 2: đọc (đang kiểm tra)" }),
+    ).toBeInTheDocument();
+    tapLatenciesMs.push(performance.now() - t1);
+
+    const t2 = performance.now();
+    fireEvent.click(btnSach);
+    expect(btnSach).toHaveAttribute("data-shot-state", "in-flight");
+    expect(
+      screen.getByRole("listitem", { name: "Ô 3: sách. (đang kiểm tra)" }),
+    ).toBeInTheDocument();
+    tapLatenciesMs.push(performance.now() - t2);
+
+    // Zero forced synchronous getBoundingClientRect reflows during all 3 cached taps!
+    expect(rectSpy).not.toHaveBeenCalled();
+    rectSpy.mockRestore();
+
+    // Log and verify actual measured tap-to-visible-feedback timings (<100ms budget).
+    const maxLatency = Math.max(...tapLatenciesMs);
+    console.info(
+      `[SentenceShooter V4] Tap-to-visible-feedback timings (ms): ${tapLatenciesMs.map((v) => v.toFixed(2)).join(", ")} (max=${maxLatency.toFixed(2)}ms)`,
+    );
+    expect(maxLatency).toBeLessThan(100);
+
+    // Only 1 request is in flight on the wire right now (strict FIFO).
+    await waitFor(() => expect(dispatchedTokenIds).toEqual([tokenIds.first]));
+
+    // Wait for all 3 500ms FIFO shots to reconcile cleanly.
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText("Tuyệt vời! Bé đã ghép đúng cả câu."),
+        ).toBeInTheDocument();
+      },
+      { timeout: 4000 },
+    );
+    expect(dispatchedTokenIds).toEqual(expectedOrder);
+    expect(maxConcurrentRequests).toBe(1);
+    expect(screen.getByTestId("session-score")).toHaveTextContent("45 điểm");
+  });
+
+  it("rolls back only the wrong optimistic shot on server reconciliation while preserving queued FIFO shots", async () => {
+    const resolvers: Array<(r: Response) => void> = [];
+    const sentTokens: string[] = [];
+
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const path = new URL(url).pathname;
+      if (path === `/profiles/children/${TEST_CHILD_ID}`) {
+        return Response.json(childFixture);
+      }
+      if (path === "/games/sentence-shooter/books") {
+        return Response.json([book]);
+      }
+      if (path === "/games/sentence-shooter/sessions") {
+        return Response.json(session, { status: 201 });
+      }
+      if (
+        path === `/games/sentence-shooter/sessions/${TEST_SESSION_ID}/shots`
+      ) {
+        const body = JSON.parse(String(init?.body)) as { token_id: string };
+        sentTokens.push(body.token_id);
+        return await new Promise<Response>((resolve) => {
+          resolvers.push(resolve);
+        });
+      }
+      throw new Error(`Unexpected test route ${path}`);
+    });
+
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(
+      await screen.findByRole("button", { name: /Sách xạ thủ/ }),
+    );
+    await user.click(screen.getByRole("button", { name: /Bắt đầu chơi/ }));
+
+    const btnSach = await screen.findByRole("button", { name: "sách." });
+    const btnBe = screen.getByRole("button", { name: "Bé" });
+
+    // Rapidly tap WRONG token "sách." followed immediately by RIGHT token "Bé"
+    fireEvent.click(btnSach);
+    fireEvent.click(btnBe);
+    expect(
+      screen.getByRole("listitem", { name: "Ô 1: sách. (đang kiểm tra)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("listitem", { name: "Ô 2: Bé (đang kiểm tra)" }),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(sentTokens).toEqual([tokenIds.third]));
+
+    // Server rejects "sách." -> must roll back ONLY "sách.", shake it, and advance FIFO to "Bé"
+    resolvers[0]?.(
+      Response.json({
+        is_correct: false,
+        correct_count: 0,
+        token_count: 3,
+        mistakes_total: 1,
+        completed_rounds: 0,
+        total_stars: 0,
+        round_completed: false,
+        session_completed: false,
+        next_expected_position: 0,
+        stars_awarded: 0,
+        score: 0,
+        completed_sentence: null,
+        message: "Thử lại nhé! Bé làm được mà!",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(sentTokens).toEqual([tokenIds.third, tokenIds.first]),
+    );
+    expect(btnSach).toHaveAttribute("data-shot-state", "wrong");
+    expect(btnSach).toBeEnabled();
+    expect(
+      screen.getByRole("listitem", { name: "Ô 1: Bé (đang kiểm tra)" }),
+    ).toBeInTheDocument();
+
+    // Server confirms "Bé" -> cleanly placed in Ô 1 without double-scoring or corruption
+    resolvers[1]?.(
+      Response.json({
+        is_correct: true,
+        correct_count: 1,
+        token_count: 3,
+        mistakes_total: 1,
+        completed_rounds: 0,
+        total_stars: 0,
+        round_completed: false,
+        session_completed: false,
+        next_expected_position: 1,
+        stars_awarded: 0,
+        score: 10,
+        completed_sentence: null,
+        message: "Hay lắm!",
+      }),
+    );
+
+    expect(
+      await screen.findByRole("listitem", { name: "Ô 1: Bé" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("listitem", { name: "Ô 2 còn trống" }),
+    ).toBeInTheDocument();
+  });
+
+  it("cancels stale-epoch queued shots when a round completes so trailing taps are never sent", async () => {
+    let resolveFirstShot: ((r: Response) => void) | undefined;
+    const sentTokens: string[] = [];
+
+    const fillBlankSession = {
+      ...session,
+      learning_mode: "FILL_BLANK" as const,
+      round: {
+        round_id: roundId,
+        round_number: 1,
+        token_count: 1,
+        learning_mode: "FILL_BLANK" as const,
+        prompt_slots: [
+          { position: 0, text: "Bé", is_blank: false },
+          { position: 1, text: null, is_blank: true },
+          { position: 2, text: "sách.", is_blank: false },
+        ],
+        tokens: [
+          { id: tokenIds.second, text: "đọc" },
+          { id: tokenIds.third, text: "mây" },
+          { id: tokenIds.first, text: "hoa" },
+        ],
+      },
+    };
+
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const path = new URL(url).pathname;
+      if (path === `/profiles/children/${TEST_CHILD_ID}`) {
+        return Response.json(childFixture);
+      }
+      if (path === "/games/sentence-shooter/books") {
+        return Response.json([book]);
+      }
+      if (path === "/games/sentence-shooter/sessions") {
+        return Response.json(fillBlankSession, { status: 201 });
+      }
+      if (
+        path === `/games/sentence-shooter/sessions/${TEST_SESSION_ID}/shots`
+      ) {
+        const body = JSON.parse(String(init?.body)) as { token_id: string };
+        sentTokens.push(body.token_id);
+        return await new Promise<Response>((resolve) => {
+          resolveFirstShot = resolve;
+        });
+      }
+      throw new Error(`Unexpected test route ${path}`);
+    });
+
+    const user = userEvent.setup();
+    renderScreen();
+    await user.click(
+      await screen.findByRole("button", { name: /Sách xạ thủ/ }),
+    );
+    await user.click(screen.getByRole("button", { name: /Bắt đầu chơi/ }));
+
+    const btnDoc = await screen.findByRole("button", { name: "đọc" });
+    const btnMay = screen.getByRole("button", { name: "mây" });
+    fireEvent.click(btnDoc);
+    fireEvent.click(btnMay);
+
+    await waitFor(() => expect(resolveFirstShot).toBeDefined());
+    resolveFirstShot?.(
+      Response.json({
+        is_correct: true,
+        correct_count: 1,
+        token_count: 1,
+        mistakes_total: 0,
+        completed_rounds: 1,
+        total_stars: 3,
+        round_completed: true,
+        session_completed: false,
+        next_expected_position: 1,
+        stars_awarded: 3,
+        score: 25,
+        completed_sentence: "Bé đọc sách.",
+        grammar_tip: 'Từ "đọc" giúp câu có nghĩa trọn vẹn và tự nhiên hơn.',
+        practiced_difficult_words: ["đọc"],
+        next_round: null,
+        message: "Hoàn thành câu! Tuyệt lắm!",
+      }),
+    );
+
+    expect(
+      await screen.findByText("Tuyệt vời! Bé đã ghép đúng cả câu."),
+    ).toBeInTheDocument();
+    // Trailing queued shot "mây" was discarded by epoch advancement and NEVER sent!
+    expect(sentTokens).toEqual([tokenIds.second]);
+  });
+
+  it("reuses a single lazy AudioContext across shots, respects mute, suspends on android-background, and closes on unmount", async () => {
+    const suspendSpy = vi.fn().mockResolvedValue(undefined);
+    const closeSpy = vi.fn().mockResolvedValue(undefined);
+    const createOscillatorSpy = vi.fn(() => ({
+      type: "sine",
+      frequency: { setValueAtTime: vi.fn() },
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      start: vi.fn(),
+      stop: vi.fn(),
+      onended: null as null | (() => void),
+    }));
+    const createGainSpy = vi.fn(() => ({
+      gain: {
+        setValueAtTime: vi.fn(),
+        exponentialRampToValueAtTime: vi.fn(),
+      },
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+    }));
+    const AudioContextSpy = vi.fn(function MockAudioContext(
+      this: Record<string, unknown>,
+    ) {
+      this.state = "running";
+      this.currentTime = 0;
+      this.destination = {};
+      this.resume = vi.fn().mockResolvedValue(undefined);
+      this.suspend = suspendSpy;
+      this.close = closeSpy;
+      this.createOscillator = createOscillatorSpy;
+      this.createGain = createGainSpy;
+    });
+    vi.stubGlobal("AudioContext", AudioContextSpy);
+
+    const user = userEvent.setup();
+    const { unmount } = renderScreen();
+    await user.click(
+      await screen.findByRole("button", { name: /Sách xạ thủ/ }),
+    );
+    await user.click(screen.getByRole("button", { name: /Bắt đầu chơi/ }));
+
+    await user.click(await screen.findByRole("button", { name: "sách." }));
+    await screen.findByText("Thử lại nhé! Bé làm được mà!");
+    await user.click(screen.getByRole("button", { name: "Bé" }));
+    await screen.findByRole("listitem", { name: "Ô 1: Bé" });
+
+    // Singleton AudioContext constructed EXACTLY ONCE across all shot + verdict sounds!
+    expect(AudioContextSpy).toHaveBeenCalledTimes(1);
+    expect(createOscillatorSpy.mock.calls.length).toBeGreaterThanOrEqual(4);
+
+    // Mute stops further Web Audio scheduling
+    const countBeforeMute = createOscillatorSpy.mock.calls.length;
+    await user.click(screen.getByRole("button", { name: "Tắt âm thanh" }));
+    await user.click(screen.getByRole("button", { name: "đọc" }));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([u]) =>
+          new URL(String(u)).pathname.endsWith("/shots"),
+        ).length,
+      ).toBe(3),
+    );
+    expect(createOscillatorSpy.mock.calls.length).toBe(countBeforeMute);
+
+    // Android background event suspends the singleton context cleanly
+    document.dispatchEvent(new Event("viread:android-background"));
+    expect(suspendSpy).toHaveBeenCalledTimes(1);
+
+    // Unmount closes the singleton context cleanly
+    unmount();
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("supports learning mode selector, renders GRAMMAR_FOCUS prompt slots, grammar_tip pill, difficult-word badge, and post-round readout", async () => {
+    const grammarSession = {
+      ...session,
+      learning_mode: "GRAMMAR_FOCUS" as const,
+      practiced_difficult_words: ["truyện"],
+      round: {
+        round_id: roundId,
+        round_number: 1,
+        token_count: 1,
+        learning_mode: "GRAMMAR_FOCUS" as const,
+        prompt_hint: "Chọn từ có dấu câu kết thúc phù hợp nhé!",
+        practiced_difficult_words: ["truyện"],
+        prompt_slots: [
+          { position: 0, text: "Bé", is_blank: false },
+          { position: 1, text: "đọc", is_blank: false },
+          { position: 2, text: null, is_blank: true },
+        ],
+        tokens: [
+          { id: tokenIds.first, text: "truyện!" },
+          { id: tokenIds.second, text: "truyện?" },
+          { id: tokenIds.third, text: "truyện," },
+        ],
+      },
+    };
+
+    let createBody: Record<string, unknown> | null = null;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const path = new URL(url).pathname;
+      if (path === `/profiles/children/${TEST_CHILD_ID}`) {
+        return Response.json(childFixture);
+      }
+      if (path === "/games/sentence-shooter/books") {
+        return Response.json([book]);
+      }
+      if (path === "/games/sentence-shooter/sessions") {
+        createBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return Response.json(grammarSession, { status: 201 });
+      }
+      if (
+        path === `/games/sentence-shooter/sessions/${TEST_SESSION_ID}/shots`
+      ) {
+        return Response.json({
+          is_correct: true,
+          correct_count: 1,
+          token_count: 1,
+          mistakes_total: 0,
+          completed_rounds: 1,
+          total_stars: 3,
+          round_completed: true,
+          session_completed: false,
+          next_expected_position: 1,
+          stars_awarded: 3,
+          score: 25,
+          completed_sentence: "Bé đọc truyện!",
+          grammar_tip:
+            "Dấu chấm than (!) đặt cuối câu thể hiện cảm xúc vui mừng hoặc ngạc nhiên.",
+          practiced_difficult_words: ["truyện"],
+          learning_mode: "GRAMMAR_FOCUS",
+          next_round: null,
+          message: "Hoàn thành câu! Tuyệt lắm!",
+        });
+      }
+      if (path.startsWith("/speech")) {
+        return new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { "Content-Type": "audio/mpeg" },
+        });
+      }
+      throw new Error(`Unexpected test route ${path}`);
+    });
+
+    const user = userEvent.setup();
+    renderScreen();
+
+    // All 3 learning mode buttons are visible in lobby
+    expect(
+      await screen.findByRole("button", { name: /Xếp thứ tự từ/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Điền từ vào chỗ trống/ }),
+    ).toBeInTheDocument();
+    const grammarBtn = screen.getByRole("button", { name: /Luyện ngữ pháp/ });
+    await user.click(grammarBtn);
+    expect(grammarBtn).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(screen.getByRole("button", { name: /Sách xạ thủ/ }));
+    await user.click(screen.getByRole("button", { name: /Bắt đầu chơi/ }));
+
+    expect(createBody).toMatchObject({
+      learning_mode: "GRAMMAR_FOCUS",
+      book_id: TEST_BOOK_ID,
+      difficulty: "easy",
+    });
+
+    // Prompt slots + difficult-word badge render cleanly
+    expect(
+      await screen.findByText("Chọn từ có dấu câu kết thúc phù hợp nhé!"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("difficult-word-badge")).toHaveTextContent(
+      "Có từ bé đang luyện",
+    );
+
+    // Shoot correct grammar token -> shows grammar_tip pill, practiced words, and readout button
+    await user.click(screen.getByRole("button", { name: "truyện!" }));
+    expect(await screen.findByTestId("grammar-tip-pill")).toHaveTextContent(
+      "Dấu chấm than (!)",
+    );
+    expect(screen.getByTestId("practiced-difficult-words")).toHaveTextContent(
+      "truyện",
+    );
+    const readAgainBtn = screen.getByRole("button", {
+      name: /Nghe lại câu hoàn chỉnh/,
+    });
+    expect(readAgainBtn).toBeEnabled();
+    await user.click(readAgainBtn);
   });
 });
