@@ -42,8 +42,8 @@ android {
         applicationId 'vn.viread.android'
         minSdk 26
         targetSdk 35
-        versionCode 1
-        versionName '0.1.0'
+        versionCode 2
+        versionName '0.2.0'
         buildConfigField 'String', 'FRONTEND_URL', JsonOutput.toJson(siteUrl)
         buildConfigField 'boolean', 'LAN_ACCEPTANCE_MODE', lanAcceptanceMode ? 'true' : 'false'
     }
@@ -84,6 +84,7 @@ android {
 dependencies {
     implementation 'androidx.core:core:1.13.1'
     implementation 'androidx.browser:browser:1.8.0'
+    implementation 'androidx.webkit:webkit:1.12.1'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'androidx.test:core:1.6.1'
     testImplementation 'org.robolectric:robolectric:4.14.1'

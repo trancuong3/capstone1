@@ -59,21 +59,30 @@ import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 import java.io.File;
 import java.io.IOException;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Branded server-backed Android shell for ViRead.
- * - Preserves strict SSR / PKCE security (zero JS bridge, zero secrets, exact HTTPS origin).
+ * - Preserves strict SSR / PKCE security (origin-locked WebMessageListener only, zero
+ *   {@code @JavascriptInterface}, zero secrets, exact HTTPS origin).
  * - Never exposes raw Chromium error HTML (hides WebView immediately on main-frame error).
- * - Supports Adaptive Icons, Splash transition, Edge-to-Edge insets, Android 13-15 Back gestures,
- *   multi-format document picker (.jpg/.png/.webp/.bmp/.tiff/.pdf/.docx), and direct Camera capture
- *   via FileProvider.
+ * - Supports Adaptive Icons, Splash transition, Edge-to-Edge insets, Android 13-16 Back gestures,
+ *   multi-format document picker (.jpg/.png/.webp/.bmp/.tiff/.pdf/.docx), direct Camera capture
+ *   via FileProvider, early paint reveal, authenticated dashboard direct-load, and native speech.
  */
 public final class MainActivity extends Activity {
     static final int WEB_PERMISSION_CODE = 151;
     static final int FILE_CHOOSER_CODE = 152;
     static final int CAMERA_CHOOSER_PERMISSION_CODE = 153;
+    static final int NATIVE_SPEECH_PERMISSION_CODE = 154;
+
+    static final String BACKEND_HEALTH_WARMUP_URL = "https://capstone1-ssd8.onrender.com/health";
+    private static final int BACKEND_WARMUP_TIMEOUT_MS = 12_000;
+    static final int COLOR_APP_CANVAS = 0xFFFFFAF0;
+    static final int COLOR_BAR_WHITE = 0xFFFFFFFF;
 
     // Render.com free tier cold start can take 30-60 s; measured at 61s in production.
     // Use 90s to give a 30s safety buffer beyond the worst observed cold start.
@@ -81,11 +90,18 @@ public final class MainActivity extends Activity {
     private static final long BACK_EXIT_WINDOW_MS = 2_000L;
     static final String VIREAD_ANDROID_UA_MARKER = "ViReadAndroid/1.0";
 
+    interface BackendWarmupRunner {
+        void warmUp(String url);
+    }
+
+    static volatile BackendWarmupRunner backendWarmupRunnerForTest;
+
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final OAuthLoopbackServer oauthLoopbackServer = new OAuthLoopbackServer();
 
     private ServerEndpointStore endpointStore;
     private TrustedNavigation navigation;
+    private ViReadNativeSpeechBridge nativeSpeechBridge;
 
     private WebView webView;
     private ProgressBar progress;
@@ -153,7 +169,7 @@ public final class MainActivity extends Activity {
         configureSystemBarsAndEdgeToEdge();
 
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(0xFFF6FAF8);
+        root.setBackgroundColor(COLOR_APP_CANVAS);
         ViewCompat.setOnApplyWindowInsetsListener(root, (view, windowInsets) -> {
             Insets bars = windowInsets.getInsets(
                     WindowInsetsCompat.Type.systemBars()
@@ -164,7 +180,7 @@ public final class MainActivity extends Activity {
         });
 
         webView = new WebView(this);
-        webView.setBackgroundColor(0xFFF6FAF8);
+        webView.setBackgroundColor(COLOR_APP_CANVAS);
         webView.setVisibility(View.INVISIBLE);
         root.addView(webView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -188,8 +204,13 @@ public final class MainActivity extends Activity {
         setContentView(root);
         configureWebViewSettings(webView.getSettings());
         installWebViewClients();
+        installNativeSpeechBridge();
         registerModernBackCallback();
         cleanupStaleCameraCaptures(true);
+
+        if (state == null) {
+            fireBackendHealthWarmup();
+        }
 
         String initialDeepLinkCallback = resolveAuthCallbackIntent(getIntent());
         if (initialDeepLinkCallback != null) {
@@ -201,11 +222,111 @@ public final class MainActivity extends Activity {
                 startupOverlay.setVisibility(View.GONE);
                 webView.setVisibility(View.VISIBLE);
             } else {
-                loadTrustedUrl(navigation.getOrigin());
+                loadTrustedUrl(resolveInitialStartupUrl());
             }
         } else {
-            loadTrustedUrl(navigation.getOrigin());
+            loadTrustedUrl(resolveInitialStartupUrl());
         }
+    }
+
+    private void installNativeSpeechBridge() {
+        nativeSpeechBridge = ViReadNativeSpeechBridge.createDefault(
+                this,
+                () -> navigation,
+                new ViReadNativeSpeechBridge.HostCallbacks() {
+                    @Override
+                    public boolean hasRecordAudioPermission() {
+                        return checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                                == PackageManager.PERMISSION_GRANTED;
+                    }
+
+                    @Override
+                    public boolean requestRecordAudioPermission() {
+                        if (isFinishing()) return false;
+                        awaitingSystemPermission = true;
+                        requestPermissions(
+                                new String[]{Manifest.permission.RECORD_AUDIO},
+                                NATIVE_SPEECH_PERMISSION_CODE);
+                        return true;
+                    }
+
+                    @Override
+                    public boolean openTtsInstallSettings() {
+                        return ViReadNativeSpeechBridge.launchTtsInstallSettings(MainActivity.this);
+                    }
+
+                    @Override
+                    public String getPackageName() {
+                        return MainActivity.this.getPackageName();
+                    }
+                });
+        nativeSpeechBridge.attachToWebView(webView, navigation.getOrigin());
+    }
+
+    String resolveInitialStartupUrl() {
+        String cookieHeader = null;
+        try {
+            cookieHeader = CookieManager.getInstance().getCookie(navigation.getOrigin());
+        } catch (Throwable ignored) {
+            // Safe fallback when CookieManager is unavailable.
+        }
+        return resolveInitialStartupUrl(cookieHeader);
+    }
+
+    String resolveInitialStartupUrl(String cookieHeader) {
+        if (hasSupabaseAuthCookie(cookieHeader)) {
+            return navigation.getOrigin() + "/dashboard";
+        }
+        return navigation.getOrigin();
+    }
+
+    static boolean hasSupabaseAuthCookie(String cookieHeader) {
+        if (cookieHeader == null || cookieHeader.isEmpty()) {
+            return false;
+        }
+        String[] pairs = cookieHeader.split(";");
+        for (String pair : pairs) {
+            int eq = pair.indexOf('=');
+            if (eq <= 0) continue;
+            String name = pair.substring(0, eq).trim();
+            String value = pair.substring(eq + 1).trim();
+            if (name.startsWith("sb-")
+                    && !name.endsWith("-code-verifier")
+                    && !value.isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void fireBackendHealthWarmup() {
+        BackendWarmupRunner customRunner = backendWarmupRunnerForTest;
+        if (customRunner != null) {
+            customRunner.warmUp(BACKEND_HEALTH_WARMUP_URL);
+            return;
+        }
+        Thread warmupThread = new Thread(() -> {
+            HttpURLConnection conn = null;
+            try {
+                URL url = new URL(BACKEND_HEALTH_WARMUP_URL);
+                conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(BACKEND_WARMUP_TIMEOUT_MS);
+                conn.setReadTimeout(BACKEND_WARMUP_TIMEOUT_MS);
+                conn.setInstanceFollowRedirects(false);
+                conn.setUseCaches(false);
+                conn.setRequestProperty("User-Agent", VIREAD_ANDROID_UA_MARKER);
+                conn.getResponseCode();
+            } catch (Throwable ignored) {
+                // Best-effort parallel Render warmup; ignore all network errors.
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
+            }
+        }, "viread-render-warmup");
+        warmupThread.setDaemon(true);
+        warmupThread.start();
     }
 
     @Override
@@ -231,8 +352,8 @@ public final class MainActivity extends Activity {
 
     private void configureSystemBarsAndEdgeToEdge() {
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
-        getWindow().setStatusBarColor(0xFFF6FAF8);
-        getWindow().setNavigationBarColor(0xFFF6FAF8);
+        getWindow().setStatusBarColor(COLOR_BAR_WHITE);
+        getWindow().setNavigationBarColor(COLOR_BAR_WHITE);
         WindowInsetsControllerCompat controller =
                 WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
         if (controller != null) {
@@ -244,6 +365,7 @@ public final class MainActivity extends Activity {
     private void configureWebViewSettings(WebSettings settings) {
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
+        settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(true); // Required for Android content:// document & camera URIs
         settings.setAllowFileAccessFromFileURLs(false);
@@ -352,15 +474,21 @@ public final class MainActivity extends Activity {
             }
 
             @Override
+            public void onPageCommitVisible(WebView view, String url) {
+                super.onPageCommitVisible(view, url);
+                if (isInternalBlankOrErrorUrl(url)) return;
+                if (!mainFrameHasError) {
+                    revealWebViewOnCleanPage();
+                }
+            }
+
+            @Override
             public void onPageFinished(WebView view, String url) {
                 if (isInternalBlankOrErrorUrl(url)) return;
                 cancelLoadWatchdog();
                 if (progress != null) progress.setVisibility(View.GONE);
                 if (!mainFrameHasError) {
-                    hasLoadedCleanPage = true;
-                    if (startupOverlay != null) startupOverlay.setVisibility(View.GONE);
-                    if (errorOverlay != null) errorOverlay.setVisibility(View.GONE);
-                    if (webView != null) webView.setVisibility(View.VISIBLE);
+                    revealWebViewOnCleanPage();
                 }
                 CookieManager.getInstance().flush();
             }
@@ -394,6 +522,14 @@ public final class MainActivity extends Activity {
                 return launchFileAndCameraChooser(callback, params);
             }
         });
+    }
+
+    private void revealWebViewOnCleanPage() {
+        cancelLoadWatchdog();
+        hasLoadedCleanPage = true;
+        if (startupOverlay != null) startupOverlay.setVisibility(View.GONE);
+        if (errorOverlay != null) errorOverlay.setVisibility(View.GONE);
+        if (webView != null) webView.setVisibility(View.VISIBLE);
     }
 
     private static boolean isInternalBlankOrErrorUrl(String url) {
@@ -503,7 +639,7 @@ public final class MainActivity extends Activity {
         LinearLayout container = new LinearLayout(this);
         container.setOrientation(LinearLayout.VERTICAL);
         container.setGravity(Gravity.CENTER);
-        container.setBackgroundColor(0xFFF6FAF8);
+        container.setBackgroundColor(COLOR_APP_CANVAS);
         container.setPadding(pad, pad, pad, pad);
 
         ImageView logo = new ImageView(this);
@@ -541,7 +677,7 @@ public final class MainActivity extends Activity {
     private ScrollView buildErrorOverlay() {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
-        scroll.setBackgroundColor(0xFFF6FAF8);
+        scroll.setBackgroundColor(COLOR_APP_CANVAS);
 
         LinearLayout outer = new LinearLayout(this);
         outer.setOrientation(LinearLayout.VERTICAL);
@@ -719,6 +855,9 @@ public final class MainActivity extends Activity {
                             : "";
                     try {
                         navigation = endpointStore.saveCustomLanOrigin(candidate);
+                        if (nativeSpeechBridge != null) {
+                            nativeSpeechBridge.attachToWebView(webView, navigation.getOrigin());
+                        }
                         lastFailedUrl = null;
                         hasLoadedCleanPage = false;
                         loadTrustedUrl(navigation.getOrigin());
@@ -729,6 +868,9 @@ public final class MainActivity extends Activity {
                 })
                 .setNeutralButton(R.string.lan_dialog_reset, (dialog, which) -> {
                     navigation = endpointStore.clearCustomLanOrigin();
+                    if (nativeSpeechBridge != null) {
+                        nativeSpeechBridge.attachToWebView(webView, navigation.getOrigin());
+                    }
                     lastFailedUrl = null;
                     hasLoadedCleanPage = false;
                     loadTrustedUrl(navigation.getOrigin());
@@ -1071,6 +1213,17 @@ public final class MainActivity extends Activity {
             return;
         }
 
+        if (code == NATIVE_SPEECH_PERMISSION_CODE) {
+            awaitingSystemPermission = false;
+            boolean granted = results != null
+                    && results.length > 0
+                    && results[0] == PackageManager.PERMISSION_GRANTED;
+            if (nativeSpeechBridge != null) {
+                nativeSpeechBridge.onRecordAudioPermissionResult(granted);
+            }
+            return;
+        }
+
         if (code != WEB_PERMISSION_CODE) return;
         awaitingSystemPermission = false;
         boolean granted = results != null && results.length > 0;
@@ -1190,6 +1343,9 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onStop() {
+        if (!awaitingSystemPermission && nativeSpeechBridge != null) {
+            nativeSpeechBridge.onHostStop();
+        }
         if (webView != null && !awaitingSystemPermission && pendingFiles == null) {
             webView.evaluateJavascript(
                     "document.dispatchEvent(new Event('viread:android-background'))", null);
@@ -1264,7 +1420,12 @@ public final class MainActivity extends Activity {
             pendingFiles = null;
         }
         cleanupStaleCameraCaptures(true);
+        if (nativeSpeechBridge != null) {
+            nativeSpeechBridge.onHostDestroy();
+            nativeSpeechBridge = null;
+        }
         if (webView != null) {
+            ViReadNativeSpeechBridge.detachFromWebView(webView);
             webView.stopLoading();
             webView.loadUrl("about:blank");
             webView.destroy();
@@ -1316,5 +1477,9 @@ public final class MainActivity extends Activity {
 
     boolean hasPendingFilesForTest() {
         return pendingFiles != null;
+    }
+
+    ViReadNativeSpeechBridge getNativeSpeechBridgeForTest() {
+        return nativeSpeechBridge;
     }
 }
