@@ -492,17 +492,26 @@ describe("Empathetic Grade-1 teacher comfort, mistake classification & phonics m
     act(() => lastRecognition().say("tờ ê tê"));
     expect(wordEl("Tê")).not.toHaveClass("underline");
 
-    // Attempt 3 wrong after 2 rounds -> celebrates effort warmly, marks "Tê" assisted (never green!), and invites sentence reinforcement!
+    // After the phonics model, an incorrect attempt leads to phrase practice. A further real attempt exhausts the retry budget.
     await act(async () => vi.advanceTimersByTimeAsync(2_000));
     speechPlayerMock.play.mockClear();
     act(() => lastRecognition().say("bàn"));
+    await act(async () => vi.advanceTimersByTimeAsync(1_600));
+
+    expect(speechPlayerMock.play.mock.calls.map(([text]) => text)).toContain(
+      "Tê ăn cỏ.",
+    );
+    expect(wordEl("Tê")).not.toHaveClass(SUCCESS);
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    speechPlayerMock.play.mockClear();
+    act(() => lastRecognition().say("ghế"));
     await act(async () => vi.advanceTimersByTimeAsync(1_600));
 
     const moveOnCalls = speechPlayerMock.play.mock.calls.map(([t]) =>
       String(t),
     );
     expect(moveOnCalls.join(" | ")).toMatch(
-      /dũng cảm|tự hào|chăm chỉ|ngôi sao|nỗ lực|giỏi lắm/iu,
+      /dũng cảm|tự hào|chăm chỉ|ngôi sao|nỗ lực|giỏi lắm|kiên trì/iu,
     );
     expect(wordEl("Tê")).not.toHaveClass(SUCCESS);
     expect(wordEl("Tê")).toHaveClass("underline"); // assisted, never plain green
