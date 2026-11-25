@@ -1261,6 +1261,34 @@ class ReadingContentService:
                 if isinstance(item, int) and not isinstance(item, bool) and item >= 0
             })
 
+        illustration_url = None
+        illustration_text_free = False
+        try:
+            from sqlalchemy import desc, select
+            from app.models.smart_book_studio import BookPresentationAsset
+
+            db_session = getattr(self.repository, "db", None)
+            if db_session is not None and callable(getattr(db_session, "begin_nested", None)):
+                async with db_session.begin_nested():
+                    ill_asset = await db_session.scalar(
+                        select(BookPresentationAsset)
+                        .where(
+                            BookPresentationAsset.BookPageId == page_id,
+                            BookPresentationAsset.AssetRole == "PAGE_ILLUSTRATION",
+                            BookPresentationAsset.IsActive.is_(True),
+                            BookPresentationAsset.ModerationStatus == "APPROVED",
+                            BookPresentationAsset.TextFreeVerified.is_(True),
+                        )
+                        .order_by(desc(BookPresentationAsset.AssetVersion), desc(BookPresentationAsset.UpdatedAt))
+                        .limit(1)
+                    )
+                    if ill_asset is not None:
+                        illustration_url = f"/studio/assets/{ill_asset.Id}/media"
+                        illustration_text_free = True
+        except Exception:
+            illustration_url = None
+            illustration_text_free = False
+
         return ReadingPageDTO(
             page_id=page_id,
             page_revision_id=page_revision_id,
@@ -1275,6 +1303,8 @@ class ReadingContentService:
                 processing_meta.get("word_box_geometry"),
                 [word.model_dump() for word in words], page_width, page_height,
             ),
+            illustration_url=illustration_url,
+            illustration_text_free=illustration_text_free,
             text=text_content,
             words=words,
             paragraph_start_line_indices=safe_line_indices("paragraph_start_line_indices"),

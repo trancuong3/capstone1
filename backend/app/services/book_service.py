@@ -81,6 +81,45 @@ class CatalogService:
         if await self.repository.role(actor_id) != "parent":
             raise HTTPException(status_code=403, detail="Access denied")
 
+    async def _cover_map_for_books(self, book_ids: list[UUID]) -> dict[UUID, tuple[str, str]]:
+        """Best-effort batch cover lookup (USER_UPLOAD > AI_GENERATED > METADATA_RENDER)."""
+        if not book_ids:
+            return {}
+        db_session = getattr(self.repository, "db", None)
+        if db_session is None or not callable(getattr(db_session, "begin_nested", None)):
+            return {}
+        try:
+            from sqlalchemy import desc, select
+            from app.models.smart_book_studio import BookPresentationAsset
+
+            priority = {"USER_UPLOAD": 3, "AI_GENERATED": 2, "METADATA_RENDER": 1}
+            async with db_session.begin_nested():
+                rows = (
+                    await db_session.scalars(
+                        select(BookPresentationAsset)
+                        .where(
+                            BookPresentationAsset.BookId.in_(book_ids),
+                            BookPresentationAsset.AssetRole == "COVER",
+                            BookPresentationAsset.IsActive.is_(True),
+                            BookPresentationAsset.ModerationStatus == "APPROVED",
+                        )
+                        .order_by(desc(BookPresentationAsset.AssetVersion), desc(BookPresentationAsset.UpdatedAt))
+                    )
+                ).all()
+            chosen: dict[UUID, tuple[int, str, str]] = {}
+            for asset in rows:
+                rank = priority.get(str(asset.SourceType), 0)
+                prev = chosen.get(asset.BookId)
+                if prev is None or rank > prev[0]:
+                    chosen[asset.BookId] = (
+                        rank,
+                        f"/studio/assets/{asset.Id}/media",
+                        str(asset.SourceType),
+                    )
+            return {bid: (url, src) for bid, (_r, url, src) in chosen.items()}
+        except Exception:
+            return {}
+
     async def list(
         self,
         search: str | None,
@@ -100,7 +139,17 @@ class CatalogService:
             )
         else:
             books = await self.repository.list(search, author, grade)
-        return [CatalogBookResponse.model_validate(book) for book in books]
+        covers = await self._cover_map_for_books([b.Id for b in books])
+        output = []
+        for book in books:
+            dto = CatalogBookResponse.model_validate(book)
+            cover_info = covers.get(book.Id)
+            if cover_info is not None:
+                dto = dto.model_copy(
+                    update={"cover_url": cover_info[0], "cover_source_type": cover_info[1]}
+                )
+            output.append(dto)
+        return output
 
     async def _require_readable_book(
         self, book_id: UUID, *, actor_id: UUID | None = None
@@ -144,7 +193,14 @@ class CatalogService:
 
     async def get(self, book_id: UUID, *, actor_id: UUID | None = None):
         book = await self._require_readable_book(book_id, actor_id=actor_id)
-        return CatalogBookResponse.model_validate(book)
+        dto = CatalogBookResponse.model_validate(book)
+        covers = await self._cover_map_for_books([book.Id])
+        cover_info = covers.get(book.Id)
+        if cover_info is not None:
+            dto = dto.model_copy(
+                update={"cover_url": cover_info[0], "cover_source_type": cover_info[1]}
+            )
+        return dto
 
     async def previews(
         self,

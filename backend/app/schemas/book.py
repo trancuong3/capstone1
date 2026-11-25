@@ -124,6 +124,8 @@ class CatalogBookResponse(BaseModel):
         default="CATALOG",
         validation_alias=AliasChoices("visibility_scope", "VisibilityScope"),
     )
+    cover_url: str | None = None
+    cover_source_type: str | None = None
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -143,6 +145,8 @@ class AdminBookMetadataResponse(BaseModel):
         default="CATALOG",
         validation_alias=AliasChoices("visibility_scope", "VisibilityScope"),
     )
+    cover_url: str | None = None
+    cover_source_type: str | None = None
     model_config = ConfigDict(from_attributes=True)
 
 
