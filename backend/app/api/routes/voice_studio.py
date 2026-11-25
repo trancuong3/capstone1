@@ -31,7 +31,7 @@ async def list_voices(
     allow_google_tts: bool = Query(default=False),
     _actor_id: UUID = Depends(require_active_profile_id),
     _rate_limited: None = Depends(
-        rate_limit("voice_status", default_max=120, default_window=60.0)
+        rate_limit("voice_status", default_max=120, default_window=60.0, actor_dependency=require_active_profile_id)
     ),
 ) -> VoiceListRead:
     """List curated Bắc · Trung · Nam local voices (plus Google backup voices when enabled)."""
@@ -62,7 +62,7 @@ async def timed_text_to_speech(
     response: Response,
     _actor_id: UUID = Depends(require_active_profile_id),
     _rate_limited: None = Depends(
-        rate_limit("voice_tts", default_max=60, default_window=60.0)
+        rate_limit("voice_tts", default_max=60, default_window=60.0, actor_dependency=require_active_profile_id)
     ),
 ) -> TimedSpeechRead:
     """Synthesize a page in the locked voice and return per-word start/end times."""

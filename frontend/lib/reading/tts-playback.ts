@@ -34,6 +34,10 @@ import {
 } from "@/lib/reading/speech-preferences";
 import { getSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
 import {
+  isWavAudioBlob,
+  type TtsAudioFormat,
+} from "@/lib/reading/tts-audio-format";
+import {
   hasMatchingSpeechWords,
   SHORT_TTS_MAX_CHARACTERS,
   splitSpeechText,
@@ -723,6 +727,7 @@ export class TtsPlayback {
 
         const fetchChunk = async (
           chunkText: string,
+          audioFormat?: TtsAudioFormat,
         ): Promise<{
           audio: Blob;
           usedFallbackVoice: boolean;
@@ -739,7 +744,10 @@ export class TtsPlayback {
               Boolean(options.wordSample),
             ]);
           const shortKey = makeKey();
-          const cachedShort = this.shortCache.get(shortKey);
+          const cachedShort =
+            audioFormat === undefined
+              ? this.shortCache.get(shortKey)
+              : undefined;
           if (cachedShort) {
             return {
               audio: cachedShort.audio,
@@ -756,6 +764,7 @@ export class TtsPlayback {
                 voiceId: operation.voice.requestedVoiceId ?? undefined,
                 speed: operation.voice.speed,
                 wordSample: Boolean(options.wordSample),
+                ...(audioFormat ? { audioFormat } : {}),
                 signal: operation.controller.signal,
               }),
             );
@@ -773,6 +782,7 @@ export class TtsPlayback {
                   voiceId: googleVoiceId,
                   speed: operation.voice.speed,
                   wordSample: Boolean(options.wordSample),
+                  ...(audioFormat ? { audioFormat } : {}),
                   signal: operation.controller.signal,
                 }),
               );
@@ -876,6 +886,44 @@ export class TtsPlayback {
               throw error;
             this.shortCacheBytes -= fetched.audio.size;
             this.shortCache.delete(fetched.key);
+            if (error instanceof CompressedAudioDecodeError) {
+              try {
+                const wavRetry = await fetchChunk(chunk.text, "wav");
+                if (
+                  wavRetry.audio.type.trim().length > 0 &&
+                  !isWavAudioBlob(wavRetry.audio)
+                ) {
+                  this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+                  throw unavailable();
+                }
+                this.setFallbackNotice(
+                  wavRetry.usedFallbackVoice
+                    ? SERVER_FALLBACK_VOICE_NOTICE
+                    : null,
+                );
+                elapsed += await this.playAudio(
+                  operation,
+                  wavRetry.audio,
+                  undefined,
+                  0,
+                  onStart,
+                  undefined,
+                  onTime,
+                  1,
+                );
+                continue;
+              } catch (wavError) {
+                this.ensure(operation);
+                if (
+                  isAbort(wavError) ||
+                  wavError instanceof PartialPlaybackError
+                ) {
+                  throw wavError;
+                }
+                this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+                throw unavailable();
+              }
+            }
             this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
             throw error;
           }
@@ -1020,11 +1068,15 @@ export class TtsPlayback {
             }
           }
 
+          const activePhonics = synthesized;
           this.setFallbackNotice(null);
           let lastEmittedStep = -1;
-          const emitStepForTime = (currentTime: number) => {
+          const emitStepForTime = (
+            phonics: SynthesizedPhonicsSpeech,
+            currentTime: number,
+          ) => {
             const idx = findActivePhonicsStepIndex(
-              synthesized.stepTimings,
+              phonics.stepTimings,
               currentTime,
             );
             if (idx >= 0 && idx !== lastEmittedStep && lesson.steps[idx]) {
@@ -1033,23 +1085,73 @@ export class TtsPlayback {
             }
           };
 
-          await this.playAudio(
-            operation,
-            synthesized.audio,
-            undefined,
-            0,
-            (duration) =>
-              this.started(operation, () => {
-                options.onPlay?.(duration);
-                emitStepForTime(0);
-              }),
-            undefined,
-            (currentTime, duration) => {
-              emitStepForTime(currentTime);
-              options.onTimeUpdate?.(currentTime, duration);
-            },
-            1,
-          );
+          try {
+            await this.playAudio(
+              operation,
+              activePhonics.audio,
+              undefined,
+              0,
+              (duration) =>
+                this.started(operation, () => {
+                  options.onPlay?.(duration);
+                  emitStepForTime(activePhonics, 0);
+                }),
+              undefined,
+              (currentTime, duration) => {
+                emitStepForTime(activePhonics, currentTime);
+                options.onTimeUpdate?.(currentTime, duration);
+              },
+              1,
+            );
+          } catch (playErr) {
+            this.ensure(operation);
+            if (
+              playErr instanceof CompressedAudioDecodeError &&
+              this.speech.synthesizePhonics
+            ) {
+              const stale = this.phonicsCache.get(phonicsKey);
+              if (stale) {
+                this.phonicsCacheBytes -= stale.audio.size;
+                this.phonicsCache.delete(phonicsKey);
+              }
+              const wavPhonics = await this.wait(
+                operation,
+                this.speech.synthesizePhonics(normalizedSteps, {
+                  voiceId: operation.voice.requestedVoiceId ?? undefined,
+                  speed: operation.voice.speed,
+                  audioFormat: "wav",
+                  signal: operation.controller.signal,
+                }),
+              );
+              this.ensure(operation);
+              if (
+                wavPhonics.audio.type.trim().length > 0 &&
+                !isWavAudioBlob(wavPhonics.audio)
+              ) {
+                throw unavailable();
+              }
+              this.cachePhonics(makePhonicsKey(), wavPhonics);
+              await this.playAudio(
+                operation,
+                wavPhonics.audio,
+                undefined,
+                0,
+                (duration) =>
+                  this.started(operation, () => {
+                    options.onPlay?.(duration);
+                    emitStepForTime(wavPhonics, 0);
+                  }),
+                undefined,
+                (currentTime, duration) => {
+                  emitStepForTime(wavPhonics, currentTime);
+                  options.onTimeUpdate?.(currentTime, duration);
+                },
+                1,
+              );
+            } else {
+              throw playErr;
+            }
+          }
           this.ensure(operation);
           options.onEnded?.();
           return;
@@ -1248,16 +1350,56 @@ export class TtsPlayback {
           this.setFallbackNotice(
             timed.usedFallbackVoice ? SERVER_FALLBACK_VOICE_NOTICE : null,
           );
-          elapsed += await this.playAudio(
-            operation,
-            timed.audio,
-            timed.words,
-            elapsed,
-            onStart,
-            onWord,
-            undefined,
-            1,
-          );
+          try {
+            elapsed += await this.playAudio(
+              operation,
+              timed.audio,
+              timed.words,
+              elapsed,
+              onStart,
+              onWord,
+              undefined,
+              1,
+            );
+          } catch (playErr) {
+            this.ensure(operation);
+            if (playErr instanceof CompressedAudioDecodeError) {
+              const stale = this.cache.get(key);
+              if (stale) {
+                this.cacheBytes -= stale.audio.size;
+                this.cache.delete(key);
+              }
+              const wavTimed = await this.wait(
+                operation,
+                this.studio.synthesizeTimed(chunk.words, {
+                  voiceId: operation.voice.requestedVoiceId,
+                  speed: operation.voice.speed,
+                  audioFormat: "wav",
+                  signal: operation.controller.signal,
+                }),
+              );
+              this.ensure(operation);
+              if (
+                wavTimed.audio.type.trim().length > 0 &&
+                !isWavAudioBlob(wavTimed.audio)
+              ) {
+                throw unavailable();
+              }
+              this.cacheTimed(makeTimedKey(), wavTimed);
+              elapsed += await this.playAudio(
+                operation,
+                wavTimed.audio,
+                wavTimed.words,
+                elapsed,
+                onStart,
+                onWord,
+                undefined,
+                1,
+              );
+            } else {
+              throw playErr;
+            }
+          }
         } catch (error) {
           this.ensure(operation);
           if (isAbort(error) || error instanceof PartialPlaybackError)
@@ -1422,10 +1564,19 @@ export class TtsPlayback {
         if (error) reject(error);
         else resolve(duration);
       };
-      const fail = () =>
+      const fail = () => {
+        if (
+          audio.currentTime <= 0 &&
+          typeof source !== "string" &&
+          !isWavAudioBlob(source)
+        ) {
+          finish(new CompressedAudioDecodeError());
+          return;
+        }
         finish(
           audio.currentTime > 0 ? new PartialPlaybackError() : unavailable(),
         );
+      };
       const validate = () => {
         if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
         if (
@@ -1474,7 +1625,32 @@ export class TtsPlayback {
           this.cancelFrame();
           this.frame = requestAnimationFrame(tick);
         } catch (error) {
-          if (active()) finish(error);
+          if (active()) {
+            if (error instanceof Error && error.name === "NotAllowedError") {
+              const blocked = new Error(
+                "Trình duyệt đang chờ bé chạm nút Nghe lại để bật âm thanh.",
+              );
+              blocked.name = "NotAllowedError";
+              finish(blocked);
+              return;
+            }
+            const isDecodeReject =
+              error instanceof Error &&
+              (error.name === "NotSupportedError" ||
+                error.name === "EncodingError" ||
+                /decode|codec|format|unsupported/i.test(error.message));
+            if (
+              isDecodeReject &&
+              audio.currentTime <= 0 &&
+              typeof source !== "string" &&
+              !isWavAudioBlob(source) &&
+              !isAbort(error)
+            ) {
+              finish(new CompressedAudioDecodeError());
+              return;
+            }
+            finish(error);
+          }
         }
       };
       const media: ActiveMedia = { pause: () => audio.pause(), resume: begin };
@@ -1504,5 +1680,12 @@ export class TtsPlayback {
 class PartialPlaybackError extends Error {
   constructor() {
     super("Âm thanh bị gián đoạn. Bé có thể nghe lại từ đầu nhé.");
+  }
+}
+
+class CompressedAudioDecodeError extends Error {
+  constructor() {
+    super("Compressed TTS audio failed to decode; retrying with WAV fallback.");
+    this.name = "CompressedAudioDecodeError";
   }
 }

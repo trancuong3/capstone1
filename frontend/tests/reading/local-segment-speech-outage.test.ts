@@ -26,11 +26,18 @@ describe("LocalSegmentSpeechRecognition service-outage circuit breaker", () => {
       ended = true;
     };
 
-    (rec as unknown as { active: boolean; abortController: AbortController }).active = true;
-    (rec as unknown as { abortController: AbortController }).abortController = new AbortController();
-    (rec as unknown as { speechChunks: Float32Array[]; speechSamples: number; inSpeech: boolean }).speechChunks = [
-      new Float32Array(3200),
-    ];
+    (
+      rec as unknown as { active: boolean; abortController: AbortController }
+    ).active = true;
+    (rec as unknown as { abortController: AbortController }).abortController =
+      new AbortController();
+    (
+      rec as unknown as {
+        speechChunks: Float32Array[];
+        speechSamples: number;
+        inSpeech: boolean;
+      }
+    ).speechChunks = [new Float32Array(3200)];
     (rec as unknown as { speechSamples: number }).speechSamples = 3200;
     (rec as unknown as { inSpeech: boolean }).inSpeech = true;
 
@@ -45,9 +52,9 @@ describe("LocalSegmentSpeechRecognition service-outage circuit breaker", () => {
     expect(errors).toEqual([{ error: "stt-unavailable" }]);
     expect(ended).toBe(false);
 
-    (rec as unknown as { speechChunks: Float32Array[]; speechSamples: number }).speechChunks = [
-      new Float32Array(3200),
-    ];
+    (
+      rec as unknown as { speechChunks: Float32Array[]; speechSamples: number }
+    ).speechChunks = [new Float32Array(3200)];
     (rec as unknown as { speechSamples: number }).speechSamples = 3200;
     internal.flushCurrentSegment(false);
     await new Promise((r) => setTimeout(r, 20));

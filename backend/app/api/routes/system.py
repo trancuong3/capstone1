@@ -282,25 +282,64 @@ class ProgressRepository:
         self.db = db
 
     async def period_assessment(self, child_id, actor_id, start, end, generated_at):
-        from app.models import ReadingSession
-        from app.repositories.reading_content_repository import ReadingContentRepository
+        from app.models import ReadingComparisonReport, ReadingEvent, ReadingSession
         from app.services.reading_assessment import aggregate_period_assessment
+
         local_tz = timezone(timedelta(hours=7))
         begin = datetime.combine(start, datetime.min.time(), tzinfo=local_tz)
         finish = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=local_tz)
         rows = await self.db.execute(
             select(ReadingSession)
             .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
-            .where(ChildProfile.ParentId == actor_id, ReadingSession.ChildId == child_id,
-                   ReadingSession.State == "COMPLETED", ReadingSession.StartedAt >= begin,
-                   ReadingSession.StartedAt < finish, ReadingSession.EndedAt <= generated_at)
+            .where(
+                ChildProfile.ParentId == actor_id,
+                ReadingSession.ChildId == child_id,
+                ReadingSession.State == "COMPLETED",
+                ReadingSession.StartedAt >= begin,
+                ReadingSession.StartedAt < finish,
+                ReadingSession.EndedAt <= generated_at,
+            )
             .order_by(ReadingSession.StartedAt, ReadingSession.Id)
         )
-        repository = ReadingContentRepository(self.db)
-        evidence = []
-        for session in rows.scalars().all():
-            evidence.append((session.Id, await repository.comparison_reports(session.Id),
-                             await repository.events_for_session(session.Id)))
+        sessions = list(rows.scalars().all())
+        if not sessions:
+            return aggregate_period_assessment([])
+
+        session_ids = [session.Id for session in sessions]
+        report_rows = await self.db.execute(
+            select(ReadingComparisonReport)
+            .where(ReadingComparisonReport.SessionId.in_(session_ids))
+            .order_by(
+                ReadingComparisonReport.SessionId,
+                ReadingComparisonReport.CreatedAt.desc(),
+                ReadingComparisonReport.Id.desc(),
+            )
+        )
+        reports_by_session: dict[UUID, list[ReadingComparisonReport]] = {}
+        for report in report_rows.scalars().all():
+            reports_by_session.setdefault(report.SessionId, []).append(report)
+
+        event_rows = await self.db.execute(
+            select(ReadingEvent)
+            .where(ReadingEvent.SessionId.in_(session_ids))
+            .order_by(
+                ReadingEvent.SessionId,
+                ReadingEvent.StartMs,
+                ReadingEvent.Id,
+            )
+        )
+        events_by_session: dict[UUID, list[ReadingEvent]] = {}
+        for event in event_rows.scalars().all():
+            events_by_session.setdefault(event.SessionId, []).append(event)
+
+        evidence = [
+            (
+                session.Id,
+                reports_by_session.get(session.Id, []),
+                events_by_session.get(session.Id, []),
+            )
+            for session in sessions
+        ]
         return aggregate_period_assessment(evidence)
 
     async def report(self, child_id: UUID, period_start: date, period_end: date, actor_id: UUID):

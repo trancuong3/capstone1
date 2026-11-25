@@ -550,7 +550,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       }
     });
 
-    it("offers a model after two quiet windows, then keeps stepping the ladder (slower, phrase, encouragement) instead of going silent", async () => {
+    it("models, slows down and offers a phrase during silence without recording a failed attempt", async () => {
       await act(async () => {
         renderReading("reading");
       });
@@ -576,7 +576,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
           speedScale: 0.8,
         });
         expect(speechPlayerMock.play).toHaveBeenCalledWith("Bé mèo nhỏ");
-        expect(speechPlayerMock.play).toHaveBeenCalledWith(
+        expect(speechPlayerMock.play).not.toHaveBeenCalledWith(
           "Con đã cố gắng rất tốt rồi. Mình đọc tiếp nhé!",
         );
         expect(speechRecorderMock.start.mock.calls.length).toBeGreaterThan(2);

@@ -777,7 +777,7 @@ async def match_book_page_from_camera(
     """
     await HistoryService(HistoryRepository(db)).require_parent(actor_id)
 
-    camera_bytes = await _read_upload_bounded(file, max_bytes=MAX_SCAN_IMAGE_BYTES)
+    camera_bytes = await _read_and_validate_camera_frame(file)
     framing = vision_page_matcher.check_framing(camera_bytes)
 
     if not framing["framing_valid"]:
@@ -899,7 +899,7 @@ async def match_page_global_from_camera(
     """
     await HistoryService(HistoryRepository(db)).require_parent(actor_id)
 
-    camera_bytes = await _read_upload_bounded(file, max_bytes=MAX_SCAN_IMAGE_BYTES)
+    camera_bytes = await _read_and_validate_camera_frame(file)
     framing = vision_page_matcher.check_framing(camera_bytes)
 
     if not framing["framing_valid"]:

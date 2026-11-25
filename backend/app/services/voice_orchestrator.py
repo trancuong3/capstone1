@@ -153,6 +153,9 @@ class VoiceOrchestrator:
                 "worker_version": local_health.get("worker_version"),
                 "latency_ms": local_health.get("latency_ms"),
                 "stt_model_version": local_health.get("stt_model_version"),
+                "stt_mode": local_health.get("stt_mode"),
+                "tts_precision": local_health.get("tts_precision"),
+                "active_voices": local_health.get("active_voices") or [v["voice_id"] for v in STATIC_LOCAL_VOICES],
                 "tts_model_version": local_health.get("tts_model_version"),
             },
             "google": {

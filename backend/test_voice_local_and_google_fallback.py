@@ -627,7 +627,7 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
                 )
 
         self.assertEqual(
-            health_no_token,
+            {key: health_no_token[key] for key in ("available", "stt_ready", "tts_ready", "stt_model_version", "tts_model_version")},
             {
                 "available": False,
                 "stt_ready": False,

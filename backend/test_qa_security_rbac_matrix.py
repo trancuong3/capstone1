@@ -291,16 +291,17 @@ class Def002RbacMatrixTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_require_dependencies_enforce_active_flag_and_roles(self):
         db = _MatrixFakeDb()
+        request = SimpleNamespace(app=SimpleNamespace(dependency_overrides={get_db: lambda: db}))
         self.assertEqual(await require_parent_id(PARENT_A, db), PARENT_A)
         self.assertEqual(await require_admin_id(ADMIN_ID, db), ADMIN_ID)
-        self.assertEqual(await require_active_profile_id(PARENT_A, db), PARENT_A)
-        self.assertEqual(await require_active_profile_id(ADMIN_ID, db), ADMIN_ID)
+        self.assertEqual(await require_active_profile_id(request, PARENT_A), PARENT_A)
+        self.assertEqual(await require_active_profile_id(request, ADMIN_ID), ADMIN_ID)
 
         for bad_call in (
             require_parent_id(INACTIVE_PARENT, db),
             require_parent_id(ADMIN_ID, db),
             require_admin_id(PARENT_A, db),
-            require_active_profile_id(INACTIVE_PARENT, db),
+            require_active_profile_id(request, INACTIVE_PARENT),
         ):
             with self.assertRaises(HTTPException) as ctx:
                 await bad_call

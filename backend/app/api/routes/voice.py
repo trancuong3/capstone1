@@ -176,7 +176,7 @@ def _extract_audio_accept(request: Request) -> str | None:
 async def voice_status(
     response: Response,
     _actor_id: UUID = Depends(require_active_profile_id),
-    _rate_limited: None = Depends(rate_limit("voice_status", default_max=120, default_window=60.0)),
+    _rate_limited: None = Depends(rate_limit("voice_status", default_max=120, default_window=60.0, actor_dependency=require_active_profile_id)),
 ) -> dict[str, Any]:
     """Report safe local worker & Google backup readiness without secrets."""
 
@@ -190,7 +190,7 @@ async def text_to_speech(
     request: Request,
     _actor_id: UUID = Depends(require_active_profile_id),
     _rate_limited: None = Depends(
-        rate_limit("voice_tts", default_max=60, default_window=60.0)
+        rate_limit("voice_tts", default_max=60, default_window=60.0, actor_dependency=require_active_profile_id)
     ),
 ) -> Response:
     """Synthesize a short utterance strictly using the requested locked voice."""
@@ -245,7 +245,7 @@ async def phonics_text_to_speech(
     request: Request,
     _actor_id: UUID = Depends(require_active_profile_id),
     _rate_limited: None = Depends(
-        rate_limit("voice_tts", default_max=60, default_window=60.0)
+        rate_limit("voice_tts", default_max=60, default_window=60.0, actor_dependency=require_active_profile_id)
     ),
 ) -> PhonicsSpeechRead:
     """Synthesize step-by-step Vietnamese phonics with sample-accurate step timings."""
@@ -308,7 +308,7 @@ async def speech_to_text(
     source: Annotated[str | None, Form(max_length=40)] = None,
     actor_id: UUID = Depends(require_active_profile_id),
     _rate_limited: None = Depends(
-        rate_limit("voice_stt", default_max=60, default_window=60.0)
+        rate_limit("voice_stt", default_max=60, default_window=60.0, actor_dependency=require_active_profile_id)
     ),
 ) -> SpeechToTextResponse:
     """Transcribe an uploaded recording local-first without persisting child audio."""

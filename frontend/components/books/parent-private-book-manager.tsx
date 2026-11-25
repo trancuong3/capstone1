@@ -173,6 +173,62 @@ function lockReasonForSubmission(sub: ParentPageSubmissionDTO): string | null {
   return "Trang chưa đủ điều kiện để thêm vào sách đọc.";
 }
 
+type SubmissionFilterGroup =
+  "ALL" | "CHECKING" | "READY" | "ADMIN" | "FAILED" | "ADDED";
+
+function submissionFilterGroup(
+  sub: ParentPageSubmissionDTO,
+): Exclude<SubmissionFilterGroup, "ALL"> {
+  if (sub.workflow_status === "ADDED_TO_BOOK") return "ADDED";
+  if (sub.workflow_status === "CHECKING") return "CHECKING";
+  if (
+    sub.workflow_status === "CHECK_FAILED" ||
+    sub.workflow_status === "REJECTED" ||
+    sub.workflow_status === "NEEDS_RECHECK"
+  ) {
+    return "FAILED";
+  }
+  if (
+    sub.workflow_status === "NEEDS_ADMIN_REVIEW" ||
+    sub.workflow_status === "PENDING_ADMIN"
+  ) {
+    return "ADMIN";
+  }
+  if (sub.can_add_to_book || sub.workflow_status === "PASSED_READY_TO_ADD") {
+    return "READY";
+  }
+  return "CHECKING";
+}
+
+function describeStageErrorHint(
+  code: string | null | undefined,
+): string | null {
+  if (!code) return null;
+  const upper = code.toUpperCase();
+  if (upper.includes("TIMEOUT")) {
+    return "Xử lý quá thời gian chờ do mạng hoặc dịch vụ bận — bấm Thử lại kiểm tra cho trang này.";
+  }
+  if (
+    upper.includes("UNAVAILABLE") ||
+    upper.includes("OFFLINE") ||
+    upper.includes("CONNECT") ||
+    upper.includes("WORKER")
+  ) {
+    return "Dịch vụ OCR/AI tạm dừng hoặc đang khởi động — các trang khác vẫn giữ nguyên, bạn có thể thử lại riêng trang này.";
+  }
+  if (
+    upper.includes("BUSY") ||
+    upper.includes("RATE") ||
+    upper.includes("429")
+  ) {
+    return "Hàng đợi xử lý đang quá tải — chờ ít giây rồi bấm Thử lại kiểm tra.";
+  }
+  if (upper.includes("OCR")) {
+    return "Chưa đọc được chữ rõ từ ảnh trang — hãy thử lại hoặc tải ảnh sắc nét hơn.";
+  }
+  return null;
+}
+
 const SUBMISSIONS_PAGE_SIZE = 10;
 const COMMITTED_PAGES_PAGE_SIZE = 12;
 
@@ -216,6 +272,8 @@ function ParentPrivateBookManagerContent({
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] =
+    useState<SubmissionFilterGroup>("ALL");
   const [submissionsPage, setSubmissionsPage] = useState(1);
   const [committedPage, setCommittedPage] = useState(1);
 
@@ -783,12 +841,26 @@ function ParentPrivateBookManagerContent({
   const activeSubmissions = submissions.filter(
     (item) => item.workflow_status !== "CANCELLED",
   );
+  const submissionCounts = activeSubmissions.reduce(
+    (acc, item) => {
+      const group = submissionFilterGroup(item);
+      acc[group] += 1;
+      return acc;
+    },
+    { CHECKING: 0, READY: 0, ADMIN: 0, FAILED: 0, ADDED: 0 },
+  );
+  const filteredSubmissions =
+    statusFilter === "ALL"
+      ? activeSubmissions
+      : activeSubmissions.filter(
+          (item) => submissionFilterGroup(item) === statusFilter,
+        );
   const submissionsTotalPages = Math.max(
     1,
-    Math.ceil(activeSubmissions.length / SUBMISSIONS_PAGE_SIZE),
+    Math.ceil(filteredSubmissions.length / SUBMISSIONS_PAGE_SIZE),
   );
   const safeSubmissionsPage = Math.min(submissionsPage, submissionsTotalPages);
-  const visibleSubmissions = activeSubmissions.slice(
+  const visibleSubmissions = filteredSubmissions.slice(
     (safeSubmissionsPage - 1) * SUBMISSIONS_PAGE_SIZE,
     safeSubmissionsPage * SUBMISSIONS_PAGE_SIZE,
   );
@@ -1213,12 +1285,71 @@ function ParentPrivateBookManagerContent({
           </div>
         ) : (
           <>
+            <div
+              aria-label="Lọc trạng thái từng trang"
+              className="flex flex-wrap items-center gap-2"
+              role="group"
+            >
+              {(
+                [
+                  {
+                    key: "ALL",
+                    label: `Tất cả (${activeSubmissions.length})`,
+                  },
+                  {
+                    key: "CHECKING",
+                    label: `Đang kiểm tra (${submissionCounts.CHECKING})`,
+                  },
+                  {
+                    key: "READY",
+                    label: `Sẵn sàng thêm (${submissionCounts.READY})`,
+                  },
+                  {
+                    key: "ADMIN",
+                    label: `Chờ / Cần Admin (${submissionCounts.ADMIN})`,
+                  },
+                  {
+                    key: "FAILED",
+                    label: `Lỗi kiểm tra (${submissionCounts.FAILED})`,
+                  },
+                  {
+                    key: "ADDED",
+                    label: `Đã thêm (${submissionCounts.ADDED})`,
+                  },
+                ] as const
+              ).map((pill) => {
+                const isSelected = statusFilter === pill.key;
+                return (
+                  <button
+                    key={pill.key}
+                    aria-pressed={isSelected}
+                    className={`min-h-9 rounded-full border px-3 py-1 text-xs font-bold transition-colors ${
+                      isSelected
+                        ? "border-primary bg-primary text-white"
+                        : "border-border bg-canvas text-ink hover:bg-sky/50"
+                    }`}
+                    onClick={() => {
+                      setStatusFilter(pill.key);
+                      setSubmissionsPage(1);
+                    }}
+                    type="button"
+                  >
+                    {pill.label}
+                  </button>
+                );
+              })}
+            </div>
             <div className="flex flex-col gap-4">
               {visibleSubmissions.map((sub) => {
                 const badgeStyle =
                   WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
                   "border-border bg-canvas text-ink";
                 const lockReason = lockReasonForSubmission(sub);
+                const errorHint = describeStageErrorHint(
+                  sub.ocr_error_code ??
+                    sub.proofread_error_code ??
+                    sub.tool_check_error_code,
+                );
                 const isEditing = editingSubId === sub.id;
                 const isReviewFormOpen = reviewFormSubId === sub.id;
                 const isSubBusy =
@@ -1231,6 +1362,9 @@ function ParentPrivateBookManagerContent({
                     data-workflow-status={sub.workflow_status}
                     className="flex flex-col gap-4 rounded-card border border-border bg-white p-5 shadow-sm"
                   >
+                    {errorHint ? (
+                      <p className="text-sm text-muted">{errorHint}</p>
+                    ) : null}
                     <div className="flex flex-col gap-4 lg:flex-row">
                       {/* Private Authenticated Page Preview */}
                       <div className="w-full shrink-0 lg:w-48">
@@ -1736,7 +1870,7 @@ function ParentPrivateBookManagerContent({
               onPageChange={setSubmissionsPage}
               page={safeSubmissionsPage}
               pageSize={SUBMISSIONS_PAGE_SIZE}
-              total={activeSubmissions.length}
+              total={filteredSubmissions.length}
             />
           </>
         )}

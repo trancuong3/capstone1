@@ -114,10 +114,11 @@ def rate_limit(
     *,
     default_max: int,
     default_window: float = 60.0,
+    actor_dependency=get_current_parent_id,
 ):
     """Build a FastAPI dependency enforcing a sliding-window per-actor limit."""
 
-    async def _enforce_rate_limit(actor_id: UUID = Depends(get_current_parent_id)) -> None:
+    async def _enforce_rate_limit(actor_id: UUID = Depends(actor_dependency)) -> None:
         max_requests, window_seconds = rate_limiter.resolve_limits(
             bucket, default_max, default_window
         )

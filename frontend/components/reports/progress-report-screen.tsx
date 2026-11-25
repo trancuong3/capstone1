@@ -90,7 +90,9 @@ function ProgressReportContent({
           requestedPeriodEnd,
         );
         if (window === "invalid") return;
-        const periods = await reportService.listPeriods(child.id).catch(() => null);
+        const periods = await reportService
+          .listPeriods(child.id)
+          .catch(() => null);
         if (!active) return;
         const periodsValue = periods ?? { items: [], next_cursor: null };
         const periodsError = periods === null;
