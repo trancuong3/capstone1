@@ -207,6 +207,14 @@ begin
           owner_id is null
           and is_active = true
           and moderation_status = 'APPROVED'
+          and exists (
+            select 1
+            from public.books b
+            where b.id = book_presentation_assets.book_id
+              and b.visibility_scope = 'CATALOG'
+              and b.lifecyclestatus = 'ACTIVE'
+              and coalesce(b.is_deleted, false) = false
+          )
         )
       );
   end if;
