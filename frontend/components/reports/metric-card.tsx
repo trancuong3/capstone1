@@ -1,20 +1,53 @@
+import { cn } from "@/lib/utils/cn";
 import type { MetricViewModelUI } from "@/types/reports";
+
+export interface MetricCardDelta {
+  readonly label: string;
+  readonly tone: "positive" | "negative" | "neutral";
+}
 
 interface MetricCardProps {
   readonly metric: MetricViewModelUI;
+  readonly delta?: MetricCardDelta | null;
 }
 
-export function MetricCard({ metric }: MetricCardProps) {
+const DELTA_TONE_CLASSES: Record<MetricCardDelta["tone"], string> = {
+  positive: "bg-success-surface text-success-ink",
+  negative: "bg-warning-surface text-warning",
+  neutral: "bg-canvas text-muted border border-border",
+};
+
+export function MetricCard({ metric, delta }: MetricCardProps) {
   return (
-    <article className="report-metric flex min-w-0 flex-col gap-2">
-      <h2 className="text-label font-bold text-muted">{metric.label}</h2>
+    <article className="report-metric flex h-full min-w-0 flex-col justify-between gap-2">
+      <div className="flex flex-wrap items-start justify-between gap-1.5">
+        <h2 className="text-xs font-bold leading-snug text-muted sm:text-sm">
+          {metric.label}
+        </h2>
+        {delta ? (
+          <span
+            className={cn(
+              "inline-flex shrink-0 items-center rounded-control px-1.5 py-0.5 text-[11px] font-bold tabular-nums sm:px-2 sm:text-xs",
+              DELTA_TONE_CLASSES[delta.tone],
+            )}
+          >
+            {delta.label}
+          </span>
+        ) : null}
+      </div>
       <p
-        className="break-words text-3xl font-extrabold leading-[1.4] text-primary"
+        className={cn(
+          "break-words leading-tight",
+          metric.unavailable
+            ? "text-sm font-bold text-muted sm:text-base"
+            : "text-[22px] font-extrabold tracking-tight tabular-nums text-primary sm:text-[28px] lg:text-[32px]",
+        )}
+        data-metric-value="true"
         data-unavailable={metric.unavailable || undefined}
       >
         {metric.value}
       </p>
-      <p className="text-sm text-muted">{metric.hint}</p>
+      <p className="text-xs leading-5 text-muted">{metric.hint}</p>
     </article>
   );
 }

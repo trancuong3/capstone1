@@ -568,6 +568,10 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
   });
 
   it("does not speak with a non-Vietnamese browser voice during an outage", async () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_with_google_fallback",
+      allowGoogleTtsFallback: true,
+    });
     vi.stubGlobal("SpeechSynthesisUtterance", class {});
     synthesis.getVoices.mockReturnValueOnce([
       { lang: "en-US", localService: true },
@@ -587,6 +591,8 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     speech.synthesize.mockRejectedValueOnce(new Error("local worker unavailable"));
     const { result } = renderHook(() => useSpeechPlayer());
     await expect(result.current.play("Bé đọc sách.")).rejects.toThrow();
+    expect(speech.synthesize).not.toHaveBeenCalled();
+    expect(synthesis.getVoices).toHaveBeenCalled();
     expect(synthesis.speak).not.toHaveBeenCalled();
     expect(result.current.fallbackNotice).toMatch(/không tự đổi giọng/i);
   });

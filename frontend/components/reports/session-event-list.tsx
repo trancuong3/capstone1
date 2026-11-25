@@ -22,6 +22,16 @@ const statusLabels: Record<HistoryEventDTO["status"], string> = {
   DISMISSED: "Đã loại",
 };
 
+function eventStatusBadgeClass(status: HistoryEventDTO["status"]): string {
+  if (status === "CONFIRMED") {
+    return "border border-success-ink/20 bg-success-surface text-success-ink";
+  }
+  if (status === "FAILED") {
+    return "border border-warning/25 bg-warning-surface text-warning";
+  }
+  return "border border-border bg-canvas text-muted";
+}
+
 interface SessionEventListProps {
   readonly events: readonly HistoryEventDTO[];
 }
@@ -29,7 +39,7 @@ interface SessionEventListProps {
 export function SessionEventList({ events }: SessionEventListProps) {
   if (events.length === 0) {
     return (
-      <p className="rounded-control bg-sky p-5 text-body text-muted">
+      <p className="rounded-control border border-border bg-canvas px-4 py-4 text-sm text-muted">
         Buổi đọc này chưa có sự kiện để hiển thị.
       </p>
     );
@@ -41,9 +51,9 @@ export function SessionEventList({ events }: SessionEventListProps) {
   return (
     <div className="flex flex-col gap-5">
       {retryEvents.length > 0 ? (
-        <section aria-label="Kết quả đọc lại" className="flex flex-col gap-3">
-          <h3 className="text-lg font-semibold text-ink">Kết quả đọc lại</h3>
-          <ol className="flex flex-col gap-3">
+        <section aria-label="Kết quả đọc lại" className="flex flex-col gap-2.5">
+          <h3 className="text-base font-extrabold text-ink">Kết quả đọc lại</h3>
+          <ol className="divide-y divide-border rounded-control border border-border bg-white">
             {retryEvents.map((event) => {
               const metadata = event.metadata;
               const attempt = metadata.retry_attempt;
@@ -51,40 +61,41 @@ export function SessionEventList({ events }: SessionEventListProps) {
               const recognizedText = metadata.recognized_text;
               const targetWord = metadata.target_word;
               return (
-                <li
-                  className="rounded-control border border-border bg-white p-4"
-                  key={event.id}
-                >
+                <li className="space-y-1.5 p-3.5 sm:p-4" key={event.id}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-semibold text-ink">
+                    <p className="text-sm font-bold text-ink">
                       {event.status === "CONFIRMED"
                         ? "Đã đọc đúng ở lượt đọc lại"
                         : event.status === "FAILED"
                           ? "Chưa đọc đúng ở lượt đọc lại"
                           : "Kết quả đọc lại chưa chắc chắn"}
                     </p>
-                    <span className="rounded-full bg-sky px-3 py-1 text-label font-semibold text-primary-hover">
+                    <span
+                      className={`rounded-control px-2.5 py-0.5 text-xs font-bold ${eventStatusBadgeClass(event.status)}`}
+                    >
                       {typeof attempt === "number" && Number.isInteger(attempt)
                         ? `Lần thử ${attempt}`
                         : statusLabels[event.status]}
                     </span>
                   </div>
-                  <p className="mt-2 text-label text-muted">
+                  <p className="text-sm text-muted">
                     Từ cần luyện:{" "}
-                    {typeof targetWord === "string"
-                      ? targetWord
-                      : (event.page_revision_word_id ?? "Chưa ghi nhận")}
+                    <strong className="font-bold text-ink">
+                      {typeof targetWord === "string"
+                        ? targetWord
+                        : (event.page_revision_word_id ?? "Chưa ghi nhận")}
+                    </strong>
                     {typeof originalStatus === "string"
                       ? ` · ${originalStatus === "OMISSION" ? "Bỏ sót" : "Phát âm chưa đúng"}`
                       : ""}
                   </p>
                   {typeof recognizedText === "string" && recognizedText ? (
-                    <p className="mt-2 text-label text-muted">
+                    <p className="text-sm text-muted">
                       ViRead nhận diện: “{recognizedText}”
                     </p>
                   ) : null}
-                  <p className="mt-2 text-label text-muted">
-                    Trang {event.page_id} · revision đã đọc{" "}
+                  <p className="text-xs text-muted">
+                    Mã trang {event.page_id} · phiên bản{" "}
                     <code className="break-all">{event.page_revision_id}</code>
                   </p>
                 </li>
@@ -93,17 +104,18 @@ export function SessionEventList({ events }: SessionEventListProps) {
           </ol>
         </section>
       ) : null}
+
       {readingEvents.length > 0 ? (
         <section
           aria-label="Sự kiện lượt đọc đầu"
-          className="flex flex-col gap-3"
+          className="flex flex-col gap-2.5"
         >
           {retryEvents.length > 0 ? (
-            <h3 className="text-lg font-semibold text-ink">
+            <h3 className="text-base font-extrabold text-ink">
               Sự kiện lượt đọc đầu
             </h3>
           ) : null}
-          <ol className="flex flex-col gap-3">
+          <ol className="divide-y divide-border rounded-control border border-border bg-white">
             {readingEvents.map((event) => {
               const countsAsError =
                 event.status === "CONFIRMED" &&
@@ -115,27 +127,29 @@ export function SessionEventList({ events }: SessionEventListProps) {
                 ].includes(event.type);
 
               return (
-                <li
-                  className="rounded-control border border-border bg-white p-4"
-                  key={event.id}
-                >
+                <li className="space-y-1.5 p-3.5 sm:p-4" key={event.id}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-semibold text-ink">
+                    <p className="text-sm font-bold text-ink">
                       {eventLabels[event.type]}
                     </p>
-                    <span className="rounded-full bg-sky px-3 py-1 text-label font-semibold text-primary-hover">
+                    <span
+                      className={`rounded-control px-2.5 py-0.5 text-xs font-bold ${eventStatusBadgeClass(event.status)}`}
+                    >
                       {statusLabels[event.status]}
                     </span>
                   </div>
-                  <p className="mt-2 text-label text-muted">
-                    Mốc {Math.round(event.start_ms / 1000)} giây · revision lịch
-                    sử{" "}
+                  <p className="text-xs text-muted">
+                    Mốc{" "}
+                    <span className="font-bold tabular-nums text-ink">
+                      {Math.round(event.start_ms / 1000)} giây
+                    </span>{" "}
+                    · phiên bản{" "}
                     <code className="break-all">{event.page_revision_id}</code>
                   </p>
-                  <p className="mt-2 text-label font-semibold text-muted">
+                  <p className="text-xs font-semibold text-muted">
                     {countsAsError
                       ? "Bằng chứng lỗi đã xác nhận."
-                      : "Sự kiện hỗ trợ/không chắc chắn, không tính là lỗi của bé."}
+                      : "Sự kiện hỗ trợ hoặc chưa chắc chắn, không tính là lỗi của bé."}
                   </p>
                 </li>
               );

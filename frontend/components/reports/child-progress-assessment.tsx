@@ -6,7 +6,6 @@ import {
   Lightbulb,
   Minus,
   RefreshCw,
-  Sparkles,
   TriangleAlert,
 } from "lucide-react";
 import {
@@ -28,10 +27,10 @@ import { cn } from "@/lib/utils/cn";
 
 const PERIODS = [7, 30, 90] as const;
 const GRADE_STYLES: Record<string, string> = {
-  EXCELLENT: "bg-success-surface text-success-ink",
-  GOOD: "bg-sky text-primary-hover",
-  FAIR: "bg-warning-surface text-ink",
-  NEEDS_SUPPORT: "bg-danger-surface text-danger",
+  EXCELLENT: "border border-success-ink/20 bg-success-surface text-success-ink",
+  GOOD: "border border-primary/20 bg-sky text-primary-hover",
+  FAIR: "border border-warning/25 bg-warning-surface text-warning",
+  NEEDS_SUPPORT: "border border-danger/20 bg-danger-surface text-danger",
 };
 
 type View =
@@ -48,44 +47,6 @@ function shortDate(iso: string): string {
   return `${day}/${month}`;
 }
 
-function ScoreRing({ score }: { readonly score: number | null }) {
-  const radius = 52;
-  const circumference = 2 * Math.PI * radius;
-  const filled = score === null ? 0 : (score / 100) * circumference;
-  return (
-    <div className="relative size-36 shrink-0">
-      <svg
-        aria-hidden="true"
-        className="size-full -rotate-90"
-        viewBox="0 0 120 120"
-      >
-        <circle
-          className="stroke-border"
-          cx="60"
-          cy="60"
-          fill="none"
-          r={radius}
-          strokeWidth="12"
-        />
-        <circle
-          className="stroke-primary transition-[stroke-dasharray] duration-700"
-          cx="60"
-          cy="60"
-          fill="none"
-          r={radius}
-          strokeDasharray={`${filled} ${circumference}`}
-          strokeLinecap="round"
-          strokeWidth="12"
-        />
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-4xl font-semibold text-ink">{score ?? "–"}</span>
-        <span className="text-label font-semibold text-muted">/ 100</span>
-      </div>
-    </div>
-  );
-}
-
 function TrendBadge({ delta }: { readonly delta: number | null }) {
   if (delta === null) return null;
   const up = delta >= 3;
@@ -94,15 +55,15 @@ function TrendBadge({ delta }: { readonly delta: number | null }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-control px-2 py-1 text-label font-semibold",
+        "inline-flex items-center gap-1 rounded-control px-2.5 py-1 text-xs font-bold tabular-nums",
         up
           ? "bg-success-surface text-success-ink"
           : down
-            ? "bg-warning-surface text-ink"
-            : "bg-sky text-primary-hover",
+            ? "bg-warning-surface text-warning"
+            : "bg-canvas text-muted ring-1 ring-inset ring-border",
       )}
     >
-      <Icon aria-hidden="true" className="size-4" />
+      <Icon aria-hidden="true" className="size-3.5" />
       {up || down
         ? `${delta > 0 ? "+" : ""}${delta} điểm so với kỳ trước`
         : "Ổn định so với kỳ trước"}
@@ -119,8 +80,13 @@ function ComponentBar({
   return (
     <li className="space-y-1.5">
       <div className="flex items-baseline justify-between gap-3">
-        <span className="font-semibold text-ink">{component.label}</span>
-        <span className="text-label font-semibold text-primary">
+        <span className="text-sm font-bold text-ink">{component.label}</span>
+        <span
+          className={cn(
+            "text-sm font-extrabold tabular-nums",
+            score === null ? "text-muted" : "text-primary",
+          )}
+        >
           {score === null ? "Chưa đủ dữ liệu" : `${score}/100`}
         </span>
       </div>
@@ -129,18 +95,18 @@ function ComponentBar({
         aria-valuemax={100}
         aria-valuemin={0}
         aria-valuenow={score ?? undefined}
-        className="h-3 overflow-hidden rounded-full bg-border"
+        className="h-2.5 overflow-hidden rounded-full bg-canvas ring-1 ring-inset ring-border/70"
         role="progressbar"
       >
         <div
           className={cn(
-            "h-full rounded-full transition-[width] duration-700",
-            score !== null && score < 55 ? "bg-book-orange" : "bg-primary",
+            "h-full rounded-full transition-[width] duration-500",
+            score !== null && score < 55 ? "bg-warning/70" : "bg-primary",
           )}
           style={{ width: `${score ?? 0}%` }}
         />
       </div>
-      <p className="text-label text-muted">{component.detail}</p>
+      <p className="text-xs leading-5 text-muted">{component.detail}</p>
     </li>
   );
 }
@@ -152,38 +118,58 @@ function WeeklyChart({
 }) {
   const maxMinutes = Math.max(...weekly.map((week) => week.minutes), 1);
   return (
-    <section aria-labelledby="progress-weekly-title" className="space-y-3">
-      <h3 className="text-lg font-semibold text-ink" id="progress-weekly-title">
-        Thời gian đọc theo tuần
-      </h3>
-      <div aria-hidden="true" className="flex h-36 items-end gap-3">
-        {weekly.map((week) => (
-          <div
-            className="flex h-full min-w-0 flex-1 flex-col justify-end text-center"
-            key={week.week_start}
-          >
-            <span className="mb-1 text-xs font-semibold text-muted">
-              {week.accuracy_pct === null
-                ? ""
-                : `${Math.round(week.accuracy_pct)}%`}
-            </span>
-            <div
-              className="mx-auto w-full max-w-12 rounded-t-control bg-primary/80"
-              style={{
-                height: `${Math.max(4, (week.minutes / maxMinutes) * 88)}px`,
-              }}
-              title={`${week.minutes} phút`}
-            />
-            <span className="mt-2 text-xs font-semibold text-muted">
-              {shortDate(week.week_start)}
-            </span>
-          </div>
-        ))}
+    <section
+      aria-labelledby="progress-weekly-title"
+      className="space-y-3 rounded-card border border-border bg-cream/60 p-4 sm:p-5"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3
+          className="text-base font-extrabold text-ink"
+          id="progress-weekly-title"
+        >
+          Thời gian đọc theo tuần
+        </h3>
+        <span className="text-xs font-semibold text-muted">
+          Chiều cao: phút đọc · Nhãn trên cột: tỷ lệ đọc đúng
+        </span>
       </div>
-      <p className="text-label text-muted">
-        Cột cao là đọc nhiều phút hơn; số % phía trên là tỉ lệ đọc đúng của
-        tuần.
-      </p>
+      <div
+        aria-hidden="true"
+        className="flex h-40 items-end gap-2 border-b border-border pt-2 sm:gap-4"
+      >
+        {weekly.map((week) => {
+          const barHeight =
+            week.minutes > 0
+              ? Math.max(10, Math.round((week.minutes / maxMinutes) * 92))
+              : 3;
+          return (
+            <div
+              className="flex h-full min-w-0 flex-1 flex-col justify-end text-center"
+              key={week.week_start}
+            >
+              <span className="mb-1 text-xs font-bold tabular-nums text-primary">
+                {week.accuracy_pct === null
+                  ? "–"
+                  : `${Math.round(week.accuracy_pct)}%`}
+              </span>
+              <div
+                className={cn(
+                  "mx-auto w-full max-w-12 rounded-t-control",
+                  week.minutes > 0 ? "bg-primary/85" : "bg-border",
+                )}
+                style={{ height: `${barHeight}px` }}
+                title={`${week.minutes} phút (${week.sessions} buổi)`}
+              />
+              <span className="mt-1.5 text-[11px] font-bold tabular-nums text-ink">
+                {week.minutes}p
+              </span>
+              <span className="pb-1.5 text-[11px] font-semibold tabular-nums text-muted">
+                {shortDate(week.week_start)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
       <ul className="sr-only">
         {weekly.map((week) => (
           <li key={week.week_start}>
@@ -199,7 +185,7 @@ function WeeklyChart({
   );
 }
 
-function ListSection({
+function InsightColumn({
   title,
   tone,
   children,
@@ -209,8 +195,8 @@ function ListSection({
   readonly children: ReactNode;
 }) {
   return (
-    <section className={cn("space-y-3 rounded-card p-4 sm:p-5", tone)}>
-      <h3 className="text-lg font-semibold text-ink">{title}</h3>
+    <section className={cn("space-y-2.5 rounded-control border p-4", tone)}>
+      <h4 className="text-sm font-extrabold text-ink">{title}</h4>
       {children}
     </section>
   );
@@ -219,9 +205,11 @@ function ListSection({
 export function ChildProgressAssessmentCard({
   childId,
   childName,
+  showReadingAssessment = true,
 }: {
   readonly childId: string;
   readonly childName: string;
+  readonly showReadingAssessment?: boolean;
 }) {
   const service = useContext(AppServicesContext)?.childProgressService;
   const [days, setDays] = useState<(typeof PERIODS)[number]>(30);
@@ -302,36 +290,36 @@ export function ChildProgressAssessmentCard({
       aria-labelledby="ai-progress-title"
       className="rounded-card border border-border bg-white p-5 sm:p-6"
     >
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-1">
-          <p className="inline-flex items-center gap-2 text-sm font-semibold text-purple-ink">
-            <Sparkles aria-hidden="true" className="size-4" />
-            Đánh giá bằng AI
+          <p className="text-xs font-bold text-primary">
+            Đánh giá động theo khoảng ngày gần đây
           </p>
           <h2
-            className="text-2xl font-semibold text-ink"
+            className="text-xl font-extrabold text-ink sm:text-2xl"
             id="ai-progress-title"
           >
             {childName} đang đọc thế nào?
           </h2>
-          <p className="text-label text-muted">
-            Điểm được tính từ dữ liệu đọc thật của bé; AI chỉ viết nhận xét và
-            gợi ý.
+          <p className="text-sm text-muted">
+            Tính trực tiếp trên các buổi đọc gần đây (độc lập với kỳ báo cáo đã
+            lưu ở trên).
           </p>
         </div>
+
         <div
           aria-label="Khoảng thời gian đánh giá"
-          className="inline-flex shrink-0 rounded-control bg-sky p-1"
+          className="inline-flex shrink-0 self-start rounded-control border border-border bg-canvas p-1 sm:self-auto"
           role="radiogroup"
         >
           {PERIODS.map((option) => (
             <button
               aria-checked={days === option}
               className={cn(
-                "rounded-control px-3 py-2 text-label font-semibold transition focus-visible:outline-3 focus-visible:outline-primary",
+                "min-h-10 rounded-control px-3.5 text-sm font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
                 days === option
                   ? "bg-primary text-white"
-                  : "text-primary-hover hover:bg-white",
+                  : "text-ink hover:bg-white",
               )}
               key={option}
               onClick={() => {
@@ -352,16 +340,16 @@ export function ChildProgressAssessmentCard({
         <div
           aria-busy="true"
           aria-label="Đang tính điểm tiến bộ"
-          className="mt-6 space-y-4"
+          className="mt-5 space-y-4"
         >
-          <Skeleton className="h-40 rounded-card" />
+          <Skeleton className="h-32 rounded-card" />
           <Skeleton className="h-24 rounded-card" />
         </div>
       ) : view.status === "error" ? (
-        <div className="mt-6 space-y-4">
+        <div className="mt-5 space-y-4">
           <StatusMessage title="Chưa tải được đánh giá" tone="error">
-            Có lỗi xảy ra. Ba mẹ có thể thử lại, báo cáo đã lưu bên dưới không
-            bị ảnh hưởng.
+            Có lỗi xảy ra. Ba mẹ có thể thử lại, báo cáo theo kỳ đã lưu ở trên
+            không bị ảnh hưởng.
           </StatusMessage>
           <Button
             className="sm:w-auto"
@@ -371,12 +359,16 @@ export function ChildProgressAssessmentCard({
             }}
             variant="secondary"
           >
-            <RefreshCw aria-hidden="true" className="size-5" />
+            <RefreshCw aria-hidden="true" className="size-4" />
             Thử lại
           </Button>
         </div>
       ) : (
-        <AssessmentBody onRefresh={refreshAi} view={view} />
+        <AssessmentBody
+          onRefresh={refreshAi}
+          showReadingAssessment={showReadingAssessment}
+          view={view}
+        />
       )}
     </section>
   );
@@ -385,9 +377,11 @@ export function ChildProgressAssessmentCard({
 function AssessmentBody({
   view,
   onRefresh,
+  showReadingAssessment,
 }: {
   readonly view: Extract<View, { status: "ready" }>;
   readonly onRefresh: () => void;
+  readonly showReadingAssessment: boolean;
 }) {
   const { data } = view;
   const { score, metrics, assessment } = data;
@@ -395,20 +389,33 @@ function AssessmentBody({
     assessment.actions.filter((action) => action.audience === audience);
 
   return (
-    <div className="mt-6 space-y-8">
-      <p className="text-label text-muted">
-        Kỳ {shortDate(data.period_start)} → {shortDate(data.period_end)} (
-        {data.days} ngày)
-      </p>
+    <div className="mt-5 space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-muted">
+        <p>
+          Khoảng đánh giá: {shortDate(data.period_start)} →{" "}
+          {shortDate(data.period_end)} ({data.days} ngày gần nhất)
+        </p>
+        <p className="tabular-nums">
+          Cơ sở tính: {metrics.sessions} buổi · {metrics.reading_minutes} phút ·{" "}
+          {metrics.words_read} từ
+          {metrics.accuracy_pct !== null
+            ? ` · ${Math.round(metrics.accuracy_pct)}% đọc đúng`
+            : ""}
+        </p>
+      </div>
 
-      <div className="grid gap-6 lg:grid-cols-[auto_1fr] lg:items-center">
-        <div className="flex flex-col items-center gap-3 sm:flex-row lg:flex-col">
-          <ScoreRing score={score.overall} />
-          <div className="flex flex-col items-center gap-2 sm:items-start lg:items-center">
+      <div className="grid gap-5 lg:grid-cols-[minmax(220px,0.75fr)_minmax(0,1.25fr)] lg:items-start">
+        <div className="flex flex-col gap-3 rounded-control border border-border bg-cream/70 p-4 sm:p-5">
+          <p className="text-xs font-bold text-muted">Điểm tổng hợp</p>
+          <div className="flex flex-wrap items-baseline gap-2">
+            <span className="text-4xl font-extrabold tracking-tight tabular-nums text-ink">
+              {score.overall ?? "–"}
+            </span>
+            <span className="text-sm font-bold text-muted">/ 100</span>
             {score.grade_label ? (
               <span
                 className={cn(
-                  "rounded-control px-3 py-1 text-lg font-semibold",
+                  "ml-1 rounded-control px-2.5 py-0.5 text-sm font-bold",
                   GRADE_STYLES[score.grade ?? ""] ??
                     "bg-sky text-primary-hover",
                 )}
@@ -416,65 +423,58 @@ function AssessmentBody({
                 {score.grade_label}
               </span>
             ) : (
-              <span className="rounded-control bg-sky px-3 py-1 text-lg font-semibold text-primary-hover">
+              <span className="ml-1 rounded-control bg-canvas px-2.5 py-0.5 text-sm font-bold text-muted ring-1 ring-inset ring-border">
                 Chưa đủ dữ liệu
               </span>
             )}
+          </div>
+          <div>
             <TrendBadge delta={score.delta} />
           </div>
         </div>
-        <ul className="space-y-4">
-          {score.components.map((component) => (
-            <ComponentBar component={component} key={component.key} />
-          ))}
-        </ul>
+
+        {score.components.length > 0 ? (
+          <ul className="space-y-3.5">
+            {score.components.map((component) => (
+              <ComponentBar component={component} key={component.key} />
+            ))}
+          </ul>
+        ) : (
+          <p className="rounded-control border border-dashed border-border bg-canvas p-4 text-sm text-muted">
+            Chưa đủ buổi đọc trong {data.days} ngày gần nhất để tách điểm từng
+            kỹ năng.
+          </p>
+        )}
       </div>
 
-      <ReadingAssessmentSummary assessment={metrics.reading_assessment} />
-      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {[
-          ["Buổi đọc", `${metrics.sessions}`],
-          ["Phút đọc", `${metrics.reading_minutes}`],
-          ["Từ đã đọc", `${metrics.words_read}`],
-          [
-            "Đọc đúng",
-            metrics.accuracy_pct === null
-              ? "–"
-              : `${Math.round(metrics.accuracy_pct)}%`,
-          ],
-        ].map(([label, value]) => (
-          <div className="rounded-card bg-cream p-4 text-center" key={label}>
-            <dt className="text-label font-semibold text-muted">{label}</dt>
-            <dd className="text-2xl font-semibold text-ink">{value}</dd>
-          </div>
-        ))}
-      </dl>
+      {showReadingAssessment ? (
+        <ReadingAssessmentSummary
+          assessment={metrics.reading_assessment}
+          scopeLabel={`${data.days} ngày gần nhất`}
+        />
+      ) : null}
 
       {data.weekly.some((week) => week.minutes > 0) ? (
         <WeeklyChart weekly={data.weekly} />
       ) : null}
 
-      <div
-        className="space-y-4 rounded-card border-2 border-border p-4 sm:p-6"
-        aria-live="polite"
-      >
+      <div className="space-y-4 border-t border-border pt-5" aria-live="polite">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p
+          <span
             className={cn(
-              "inline-flex items-center gap-2 rounded-control px-3 py-1 text-label font-semibold",
+              "inline-flex items-center rounded-control px-2.5 py-1 text-xs font-bold",
               assessment.source === "AI"
-                ? "bg-purple/20 text-purple-ink"
-                : "bg-sky text-primary-hover",
+                ? "border border-primary/20 bg-sky text-primary-hover"
+                : "border border-border bg-canvas text-muted",
             )}
           >
-            <Sparkles aria-hidden="true" className="size-4" />
             {assessment.source === "AI"
               ? "Nhận xét do AI viết"
               : "Nhận xét tự động từ số liệu"}
-          </p>
+          </span>
           {data.data_status === "OK" ? (
             <Button
-              className="h-11 w-auto px-4 text-label"
+              className="min-h-11 w-auto px-3.5 text-sm"
               disabled={view.ai === "writing"}
               isLoading={view.ai === "writing"}
               onClick={onRefresh}
@@ -495,79 +495,97 @@ function AssessmentBody({
           </StatusMessage>
         ) : null}
 
-        <h3 className="text-xl font-semibold text-ink">
-          {assessment.headline}
-        </h3>
-        <p className="text-body text-ink">{assessment.summary}</p>
-
-        <div className="grid gap-4 lg:grid-cols-2">
-          {assessment.strengths.length > 0 ? (
-            <ListSection title="Bé làm tốt" tone="bg-success-surface/50">
-              <ul className="list-disc space-y-2 pl-5 text-ink">
-                {assessment.strengths.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </ListSection>
-          ) : null}
-          {assessment.weaknesses.length > 0 ? (
-            <ListSection title="Bé cần cải thiện" tone="bg-warning-surface/60">
-              <ul className="space-y-3">
-                {assessment.weaknesses.map((item) => (
-                  <li className="flex gap-2" key={item.area}>
-                    <TriangleAlert
-                      aria-hidden="true"
-                      className="mt-1 size-4 shrink-0 text-book-orange"
-                    />
-                    <span>
-                      <strong className="block text-ink">{item.area}</strong>
-                      <span className="text-muted">{item.detail}</span>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </ListSection>
-          ) : null}
+        <div className="max-w-3xl space-y-1.5">
+          <h3 className="text-lg font-extrabold text-ink">
+            {assessment.headline}
+          </h3>
+          <p className="text-body leading-relaxed text-ink">
+            {assessment.summary}
+          </p>
         </div>
 
-        <section className="space-y-3">
-          <h3 className="inline-flex items-center gap-2 text-lg font-semibold text-ink">
-            <Lightbulb aria-hidden="true" className="size-5 text-book-orange" />
-            Cần làm gì để bé tốt hơn
-          </h3>
-          <div className="grid gap-4 lg:grid-cols-2">
-            {(
-              [
-                ["PARENT", "Ba mẹ có thể làm"],
-                ["CHILD", "Bé có thể làm"],
-              ] as const
-            ).map(([audience, title]) =>
-              actionsFor(audience).length > 0 ? (
-                <div
-                  className="space-y-2 rounded-card bg-cream p-4"
-                  key={audience}
-                >
-                  <h4 className="font-semibold text-purple-ink">{title}</h4>
-                  <ul className="space-y-3">
-                    {actionsFor(audience).map((action) => (
-                      <li key={action.title}>
-                        <strong className="block text-ink">
-                          {action.title}
+        {assessment.strengths.length > 0 || assessment.weaknesses.length > 0 ? (
+          <div className="grid gap-3 lg:grid-cols-2">
+            {assessment.strengths.length > 0 ? (
+              <InsightColumn
+                title="Bé làm tốt"
+                tone="border-success-ink/20 bg-success-surface/35"
+              >
+                <ul className="list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-ink">
+                  {assessment.strengths.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </InsightColumn>
+            ) : null}
+            {assessment.weaknesses.length > 0 ? (
+              <InsightColumn
+                title="Bé cần cải thiện"
+                tone="border-warning/25 bg-warning-surface/40"
+              >
+                <ul className="space-y-2.5 text-sm">
+                  {assessment.weaknesses.map((item) => (
+                    <li className="flex gap-2" key={item.area}>
+                      <TriangleAlert
+                        aria-hidden="true"
+                        className="mt-0.5 size-4 shrink-0 text-warning"
+                      />
+                      <span>
+                        <strong className="block font-bold text-ink">
+                          {item.area}
                         </strong>
-                        <span className="text-muted">{action.detail}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null,
-            )}
+                        <span className="text-muted">{item.detail}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </InsightColumn>
+            ) : null}
           </div>
-        </section>
+        ) : null}
+
+        {assessment.actions.length > 0 ? (
+          <section className="space-y-3">
+            <h3 className="inline-flex items-center gap-2 text-base font-extrabold text-ink">
+              <Lightbulb aria-hidden="true" className="size-4 text-primary" />
+              Gợi ý đồng hành tiếp theo
+            </h3>
+            <div className="grid gap-3 lg:grid-cols-2">
+              {(
+                [
+                  ["PARENT", "Ba mẹ có thể làm"],
+                  ["CHILD", "Bé có thể làm"],
+                ] as const
+              ).map(([audience, title]) =>
+                actionsFor(audience).length > 0 ? (
+                  <div
+                    className="space-y-2 rounded-control border border-border bg-cream/70 p-4"
+                    key={audience}
+                  >
+                    <h4 className="text-sm font-extrabold text-primary">
+                      {title}
+                    </h4>
+                    <ul className="space-y-2.5 text-sm">
+                      {actionsFor(audience).map((action) => (
+                        <li key={action.title}>
+                          <strong className="block font-bold text-ink">
+                            {action.title}
+                          </strong>
+                          <span className="text-muted">{action.detail}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null,
+              )}
+            </div>
+          </section>
+        ) : null}
 
         {assessment.practice_words.length > 0 ? (
           <section className="space-y-2">
-            <h3 className="text-lg font-semibold text-ink">
-              Từ bé nên luyện thêm
+            <h3 className="text-sm font-extrabold text-ink">
+              Từ gợi ý luyện thêm ({data.days} ngày)
             </h3>
             <ul className="flex flex-wrap gap-2">
               {assessment.practice_words.map((word) => {
@@ -576,17 +594,19 @@ function AssessmentBody({
                 );
                 return (
                   <li
-                    className="rounded-control bg-sky px-3 py-1.5 font-semibold text-primary-hover"
+                    className="rounded-control border border-border bg-canvas px-3 py-1.5 text-sm font-bold text-ink"
                     key={word}
                     title={
                       detail?.heard_as
                         ? `Bé thường đọc thành “${detail.heard_as}” (${detail.times} lần)`
-                        : `Sai ${detail?.times ?? 0} lần`
+                        : detail
+                          ? `Ghi nhận ${detail.times} lần`
+                          : undefined
                     }
                   >
                     {word}
                     {detail?.heard_as ? (
-                      <span className="ml-1 text-xs font-medium text-muted">
+                      <span className="ml-1.5 text-xs font-medium text-muted">
                         (đọc thành “{detail.heard_as}”)
                       </span>
                     ) : null}
@@ -597,9 +617,11 @@ function AssessmentBody({
           </section>
         ) : null}
 
-        <p className="rounded-card bg-primary/10 p-4 text-center text-lg font-semibold text-primary-hover">
-          {assessment.encouragement}
-        </p>
+        {assessment.encouragement ? (
+          <p className="border-l-2 border-primary pl-3.5 text-sm font-semibold text-muted">
+            {assessment.encouragement}
+          </p>
+        ) : null}
       </div>
     </div>
   );
