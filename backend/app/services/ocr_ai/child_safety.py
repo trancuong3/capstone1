@@ -622,12 +622,13 @@ class ChildSafetyOrchestrator:
                 "model": provider.model,
                 "stream": False,
                 "think": False,
+                "keep_alive": self.config.local.keep_alive,
                 "format": _OUTPUT_SCHEMA,
                 "messages": [
                     {"role": "system", "content": _SYSTEM_PROMPT},
                     {"role": "user", "content": request_data},
                 ],
-                "options": {"temperature": 0, "num_ctx": self.config.local.num_ctx, "num_predict": self.config.local.num_predict},
+                "options": self.config.local.build_ollama_options(),
             }
             url = self.config.local.base_url.rstrip("/") + "/api/chat"
             headers = {}

@@ -1,0 +1,26 @@
+# ViRead Remote OCR Worker Dependencies (Windows / Docker host)
+# ABI pins match backend/requirements.txt strictly.
+fastapi==0.121.2
+uvicorn==0.38.0
+pydantic==2.12.4
+httpx==0.28.1
+PyYAML==6.0.3
+pillow==12.0.0
+numpy==1.26.4
+protobuf==3.20.2
+pytesseract==0.3.13
+opencv-python-headless==4.10.0.84
+paddleocr==2.7.3
+paddlepaddle==2.6.2
+vietocr==0.3.12
+torch==2.14.1
+torchvision==0.29.1
+jiwer==4.0.0
+pyclipper==1.4.0
+shapely==2.2.0
+lmdb==3.0.0
+einops==0.2.0
+attrdict==2.0.1
+scikit-image==0.26.0
+imgaug==0.4.0
+scipy==1.12.0

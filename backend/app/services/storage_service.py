@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import logging
 import os
 import re
 from pathlib import Path
+from typing import Sequence
 from urllib.parse import quote, urlsplit
 
 import requests
@@ -327,35 +329,156 @@ def hash_storage_object(object_path: str, aggregate_digest: object | None = None
         ) from exc
 
 
-def create_signed_image_url(
-    image_path: str | None,
-    *,
-    bucket_name: str | None = None,
-) -> str:
+_SIGN_BATCH_SIZE = 50
+
+
+def _validate_image_reference(image_path: str | None) -> tuple[bool, str]:
+    """Return `(is_external_url, clean_reference)` or raise 503 for invalid paths."""
     if not isinstance(image_path, str) or not image_path.strip():
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Stored image reference is invalid")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stored image reference is invalid",
+        )
     if image_path.startswith(("https://", "http://")):
         try:
             parsed = urlsplit(image_path)
             parsed.port  # Validate malformed port values without exposing the URL.
             if parsed.hostname and not parsed.username and not parsed.password:
-                return image_path  # Legacy references remain readable; new writes store object paths.
+                return True, image_path  # Legacy references remain readable; new writes store object paths.
         except ValueError:
             pass
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Stored image reference is invalid")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stored image reference is invalid",
+        )
+    return False, image_path
+
+
+def _normalize_signed_url(signed: object) -> str:
+    if not isinstance(signed, str) or not signed:
+        raise ValueError("Storage did not return a signed URL")
+    if signed.startswith(("https://", "http://")):
+        return signed
+    if not SUPABASE_URL:
+        raise ValueError("Supabase URL is not configured")
+    if signed.startswith("/storage/v1/"):
+        return f"{SUPABASE_URL.rstrip('/')}{signed}"
+    return f"{SUPABASE_URL.rstrip('/')}/storage/v1{signed if signed.startswith('/') else '/' + signed}"
+
+
+def create_signed_image_url(
+    image_path: str | None,
+    *,
+    bucket_name: str | None = None,
+) -> str:
+    is_external, validated = _validate_image_reference(image_path)
+    if is_external:
+        return validated
     try:
         bucket = _storage_bucket() if bucket_name is None else _storage_bucket(bucket_name)
-        result = bucket.create_signed_url(image_path, SIGNED_URL_TTL_SECONDS)
+        result = bucket.create_signed_url(validated, SIGNED_URL_TTL_SECONDS)
         signed = result.get("signedURL") or result.get("signedUrl") or result.get("signed_url")
-        if not isinstance(signed, str) or not signed:
-            raise ValueError("Storage did not return a signed URL")
-        if signed.startswith(("https://", "http://")):
-            return signed
-        if not SUPABASE_URL:
-            raise ValueError("Supabase URL is not configured")
-        if signed.startswith("/storage/v1/"):
-            return f"{SUPABASE_URL.rstrip('/')}{signed}"
-        return f"{SUPABASE_URL.rstrip('/')}/storage/v1{signed if signed.startswith('/') else '/' + signed}"
+        return _normalize_signed_url(signed)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log_diagnostic(
+            logger,
+            logging.ERROR,
+            event="storage_signed_url_failed",
+            stage="storage_preview",
+            exception=exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not create an image preview URL",
+        ) from exc
+
+
+def create_signed_image_urls(
+    image_paths: Sequence[str | None],
+    *,
+    bucket_name: str | None = None,
+    max_workers: int = 8,
+) -> list[str]:
+    """Batch-sign Storage image paths in order, avoiding N sequential HTTP round-trips."""
+    if not image_paths:
+        return []
+
+    validated_refs = [_validate_image_reference(path) for path in image_paths]
+    unique_relative_paths = list(
+        dict.fromkeys(ref for is_ext, ref in validated_refs if not is_ext)
+    )
+    if not unique_relative_paths:
+        return [ref for _, ref in validated_refs]
+
+    try:
+        bucket = _storage_bucket() if bucket_name is None else _storage_bucket(bucket_name)
+        signed_by_path: dict[str, str] = {}
+
+        def _sign_single(path: str) -> tuple[str, str]:
+            result = bucket.create_signed_url(path, SIGNED_URL_TTL_SECONDS)
+            signed = (
+                result.get("signedURL")
+                or result.get("signedUrl")
+                or result.get("signed_url")
+            )
+            return path, _normalize_signed_url(signed)
+
+        def _sign_chunk(chunk: list[str]) -> dict[str, str]:
+            chunk_map: dict[str, str] = {}
+            batch_fn = getattr(bucket, "create_signed_urls", None)
+            if callable(batch_fn):
+                try:
+                    batch_res = batch_fn(chunk, SIGNED_URL_TTL_SECONDS)
+                    if isinstance(batch_res, list):
+                        for idx, item in enumerate(batch_res):
+                            if not isinstance(item, dict) or item.get("error"):
+                                continue
+                            item_path = item.get("path")
+                            if not isinstance(item_path, str) or not item_path:
+                                if len(batch_res) == len(chunk):
+                                    item_path = chunk[idx]
+                                else:
+                                    continue
+                            raw_signed = (
+                                item.get("signedURL")
+                                or item.get("signedUrl")
+                                or item.get("signed_url")
+                            )
+                            if isinstance(raw_signed, str) and raw_signed:
+                                chunk_map[item_path] = _normalize_signed_url(raw_signed)
+                except (AttributeError, NotImplementedError, TypeError):
+                    pass
+
+            missing = [path for path in chunk if path not in chunk_map]
+            if missing:
+                if len(missing) == 1:
+                    p, u = _sign_single(missing[0])
+                    chunk_map[p] = u
+                else:
+                    workers = max(1, min(max_workers, len(missing)))
+                    with ThreadPoolExecutor(max_workers=workers) as executor:
+                        for p, u in executor.map(_sign_single, missing):
+                            chunk_map[p] = u
+            return chunk_map
+
+        chunks = [
+            unique_relative_paths[i : i + _SIGN_BATCH_SIZE]
+            for i in range(0, len(unique_relative_paths), _SIGN_BATCH_SIZE)
+        ]
+        if len(chunks) == 1:
+            signed_by_path.update(_sign_chunk(chunks[0]))
+        else:
+            chunk_workers = max(1, min(4, len(chunks)))
+            with ThreadPoolExecutor(max_workers=chunk_workers) as executor:
+                for chunk_result in executor.map(_sign_chunk, chunks):
+                    signed_by_path.update(chunk_result)
+
+        return [
+            ref if is_ext else signed_by_path[ref]
+            for is_ext, ref in validated_refs
+        ]
     except HTTPException:
         raise
     except Exception as exc:

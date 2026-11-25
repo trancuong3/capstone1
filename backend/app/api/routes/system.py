@@ -15,8 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_parent_id, get_db, require_admin_id, require_parent_id
 from app.api.routes.reading import HistoryRepository, HistoryService
+from app.database.role_cache import get_cached_profile_role
 from app.models import AuditLog, ChildProfile, ConsentRecord, Profile, ProgressReport, ReadingSession
-from app.providers.elevenlabs_voice_provider import ElevenLabsVoiceProvider
 from app.repositories.difficult_words_repository import DifficultWordsRepository
 from app.services.admin_ocr_local import LocalCorrectionError, LocalOcrConfig, LocalOcrCorrector
 from app.services.runtime_diagnostics import (
@@ -24,6 +24,7 @@ from app.services.runtime_diagnostics import (
     collect_worker_health,
     probe_storage_health,
 )
+from app.services.voice_orchestrator import VoiceOrchestrator
 from app.services.difficult_words_service import (
     DifficultWordsService,
     MAX_PRACTICE_AUDIO_BYTES,
@@ -758,7 +759,7 @@ class AdminSystemRepository:
         self.db = db
 
     async def role(self, actor_id: UUID):
-        return await self.db.scalar(select(Profile.Role).where(Profile.Id == actor_id, Profile.Active == 1))
+        return await get_cached_profile_role(self.db, actor_id)
 
     async def logs(self, action: str | None, resource_type: str | None, offset: int, limit: int):
         query = select(AuditLog)
@@ -779,10 +780,10 @@ class AdminSystemService:
     def __init__(
         self,
         repository: AdminSystemRepository,
-        voice_provider: ElevenLabsVoiceProvider | None = None,
+        voice_provider: object | None = None,
     ):
         self.repository = repository
-        self.voice_provider = voice_provider or ElevenLabsVoiceProvider()
+        self.voice_provider = voice_provider
 
     async def require_admin(self, actor_id: UUID):
         if await self.repository.role(actor_id) != "admin":
@@ -826,68 +827,234 @@ class AdminSystemService:
         except ValidationError:
             raise HTTPException(status_code=501, detail="Audit contract is not available yet") from None
 
-    async def health(self, workers: dict[str, object] | None = None):
-        # Lightweight, bounded probes. Never initialize OCR weights from Health.
-        try:
-            database_ready = await asyncio.wait_for(self.repository.probe_database(), timeout=4)
-        except (TimeoutError, asyncio.TimeoutError, SQLAlchemyError, OSError):
-            database_ready = False
+    @staticmethod
+    def _is_legacy_voice_probe(voice_provider: object | None) -> bool:
+        if voice_provider is None or isinstance(voice_provider, VoiceOrchestrator):
+            return False
+        mock_children = getattr(voice_provider, "_mock_children", None)
+        if isinstance(mock_children, dict):
+            return ("probe_tts" in mock_children or "probe_stt" in mock_children) and (
+                "get_status" not in mock_children
+            )
+        return callable(getattr(voice_provider, "probe_tts", None)) and not callable(
+            getattr(voice_provider, "get_status", None)
+        )
 
-        try:
-            local_ocr_status, local_ocr_message = await asyncio.wait_for(
-                LocalOcrCorrector.probe(LocalOcrConfig.from_environment()), timeout=4
+    @staticmethod
+    def _map_voice_capability_health(
+        capability: str,
+        *,
+        local: dict,
+        google: dict,
+    ) -> tuple[str, Literal["installed", "initialized", "loaded", "healthy", "failed", "unknown", "disabled"] | None, str]:
+        ready_key = "tts_ready" if capability == "tts" else "stt_ready"
+        cap_label = "TTS" if capability == "tts" else "STT"
+        google_configured = bool(google.get(f"{capability}_configured"))
+        google_cooldown = bool(google.get(f"{capability}_cooldown"))
+        local_configured = bool(local.get("configured", True))
+        error_code = local.get(f"{capability}_error_code") or local.get("error_code")
+
+        if local.get(ready_key):
+            engine_name = "VieNeu-TTS" if capability == "tts" else "Sherpa-ONNX"
+            return (
+                "HEALTHY",
+                "healthy",
+                f"Local {cap_label} ({engine_name}) đang sẵn sàng.",
             )
-        except LocalCorrectionError:
-            local_ocr_status, local_ocr_message = (
+        if not local_configured or error_code == "LOCAL_VOICE_UNCONFIGURED":
+            if google_configured and not google_cooldown:
+                return (
+                    "DEGRADED",
+                    "disabled",
+                    f"Local {cap_label} chưa cấu hình; dịch vụ Google {cap_label} dự phòng sẵn sàng.",
+                )
+            return (
                 "UNAVAILABLE",
-                "Cấu hình AI OCR cục bộ chưa hợp lệ.",
+                "disabled",
+                f"Local {cap_label} chưa được cấu hình (VIREAD_LOCAL_VOICE_WORKER_URL).",
             )
+        if error_code == "LOCAL_VOICE_TIMEOUT":
+            return (
+                "UNAVAILABLE",
+                "failed",
+                f"Kết nối Local {cap_label} bị hết thời gian chờ.",
+            )
+        if error_code == "LOCAL_VOICE_BUSY":
+            return (
+                "DEGRADED",
+                "unknown",
+                f"Local {cap_label} đang bận xử lý.",
+            )
+        if google_configured and not google_cooldown:
+            return (
+                "DEGRADED",
+                "failed",
+                f"Local {cap_label} tạm thời không phản hồi; Google {cap_label} dự phòng sẵn sàng.",
+            )
+        return (
+            "UNAVAILABLE",
+            "failed",
+            f"Không thể kết nối dịch vụ {cap_label}.",
+        )
+
+    async def _probe_voice_health(
+        self,
+    ) -> tuple[
+        tuple[str, str | None, str],
+        tuple[str, str | None, str],
+    ]:
+        if self._is_legacy_voice_probe(self.voice_provider):
+            async def _legacy_tts():
+                try:
+                    st, msg = await asyncio.wait_for(self.voice_provider.probe_tts(), timeout=5)
+                    return st, None, msg
+                except Exception:
+                    return "UNAVAILABLE", None, "Không thể kiểm tra dịch vụ TTS."
+
+            async def _legacy_stt():
+                try:
+                    st, msg = await asyncio.wait_for(self.voice_provider.probe_stt(), timeout=5)
+                    return st, None, msg
+                except Exception:
+                    return "UNAVAILABLE", None, "Không thể kiểm tra dịch vụ STT."
+
+            tts_res, stt_res = await asyncio.gather(_legacy_tts(), _legacy_stt())
+            return tts_res, stt_res
+
+        orchestrator = (
+            self.voice_provider
+            if self.voice_provider is not None
+            else VoiceOrchestrator()
+        )
+        try:
+            status_payload = await asyncio.wait_for(orchestrator.get_status(), timeout=4)
         except Exception:
+            return (
+                ("UNAVAILABLE", "failed", "Không thể kiểm tra dịch vụ TTS."),
+                ("UNAVAILABLE", "failed", "Không thể kiểm tra dịch vụ STT."),
+            )
+        local = status_payload.get("local") or {}
+        google = status_payload.get("google") or {}
+        return (
+            self._map_voice_capability_health("tts", local=local, google=google),
+            self._map_voice_capability_health("stt", local=local, google=google),
+        )
+
+    async def health(self, workers: dict[str, object] | None = None):
+        # Lightweight, bounded probes executed concurrently. Never initialize OCR weights from Health.
+        async def _probe_db() -> bool:
+            try:
+                return bool(await asyncio.wait_for(self.repository.probe_database(), timeout=4))
+            except (TimeoutError, asyncio.TimeoutError, SQLAlchemyError, OSError):
+                return False
+
+        async def _probe_local_ocr() -> tuple[str, str]:
+            try:
+                return await asyncio.wait_for(
+                    LocalOcrCorrector.probe(LocalOcrConfig.from_environment()), timeout=4
+                )
+            except LocalCorrectionError:
+                return "UNAVAILABLE", "Cấu hình AI OCR cục bộ chưa hợp lệ."
+            except Exception:
+                return "UNAVAILABLE", "Không thể kiểm tra AI OCR cục bộ."
+
+        async def _probe_ocr_engines():
+            try:
+                return await asyncio.wait_for(asyncio.to_thread(collect_ocr_health), timeout=3)
+            except Exception:
+                return [
+                    dict(
+                        id=key,
+                        label=label,
+                        status="DEGRADED",
+                        detail_status="unknown",
+                        safe_message="Chưa xác minh được trạng thái runtime OCR.",
+                    )
+                    for key, label in (
+                        ("paddleocr", "PaddleOCR"),
+                        ("vietocr", "VietOCR"),
+                        ("tesseract", "Tesseract"),
+                        ("tesseract_vie", "Tesseract tiếng Việt"),
+                    )
+                ]
+
+        async def _probe_storage():
+            try:
+                return await asyncio.wait_for(probe_storage_health(), timeout=3)
+            except Exception:
+                return dict(
+                    id="storage",
+                    label="Supabase Storage",
+                    status="DEGRADED",
+                    detail_status="unknown",
+                    safe_message="Chưa thể xác minh trạng thái Storage.",
+                )
+
+        db_res, ocr_res, voice_res, ocr_details_res, storage_res = await asyncio.gather(
+            _probe_db(),
+            _probe_local_ocr(),
+            self._probe_voice_health(),
+            _probe_ocr_engines(),
+            _probe_storage(),
+            return_exceptions=True,
+        )
+
+        for probe_res in (db_res, ocr_res, voice_res, ocr_details_res, storage_res):
+            if isinstance(probe_res, asyncio.CancelledError):
+                raise probe_res
+
+        database_ready = False if isinstance(db_res, BaseException) else bool(db_res)
+        if isinstance(ocr_res, BaseException):
             local_ocr_status, local_ocr_message = (
                 "UNAVAILABLE",
                 "Không thể kiểm tra AI OCR cục bộ.",
             )
+        else:
+            local_ocr_status, local_ocr_message = ocr_res
 
-        try:
-            tts_status, tts_message = await asyncio.wait_for(
-                self.voice_provider.probe_tts(), timeout=5
+        if isinstance(voice_res, BaseException):
+            tts_status, tts_detail, tts_message = (
+                "UNAVAILABLE",
+                "failed",
+                "Không thể kiểm tra dịch vụ TTS.",
             )
-        except Exception:
-            tts_status, tts_message = "UNAVAILABLE", "Không thể kiểm tra dịch vụ TTS."
+            stt_status, stt_detail, stt_message = (
+                "UNAVAILABLE",
+                "failed",
+                "Không thể kiểm tra dịch vụ STT.",
+            )
+        else:
+            (tts_status, tts_detail, tts_message), (stt_status, stt_detail, stt_message) = voice_res
 
-        try:
-            stt_status, stt_message = await asyncio.wait_for(
-                self.voice_provider.probe_stt(), timeout=5
-            )
-        except Exception:
-            stt_status, stt_message = "UNAVAILABLE", "Không thể kiểm tra dịch vụ STT."
-
-        try:
-            ocr_details = await asyncio.wait_for(
-                asyncio.to_thread(collect_ocr_health), timeout=3
-            )
-        except Exception:
-            # Never imply engine readiness after an inconclusive probe.
+        if isinstance(ocr_details_res, BaseException):
             ocr_details = [
-                dict(id=key, label=label, status="DEGRADED", detail_status="unknown",
-                     safe_message="Chưa xác minh được trạng thái runtime OCR.")
+                dict(
+                    id=key,
+                    label=label,
+                    status="DEGRADED",
+                    detail_status="unknown",
+                    safe_message="Chưa xác minh được trạng thái runtime OCR.",
+                )
                 for key, label in (
-                    ("paddleocr", "PaddleOCR"), ("vietocr", "VietOCR"),
+                    ("paddleocr", "PaddleOCR"),
+                    ("vietocr", "VietOCR"),
                     ("tesseract", "Tesseract"),
                     ("tesseract_vie", "Tesseract tiếng Việt"),
                 )
             ]
+        else:
+            ocr_details = ocr_details_res
 
-        try:
-            storage_details = await asyncio.wait_for(
-                probe_storage_health(), timeout=3
-            )
-        except Exception:
+        if isinstance(storage_res, BaseException):
             storage_details = dict(
-                id="storage", label="Supabase Storage", status="DEGRADED",
+                id="storage",
+                label="Supabase Storage",
+                status="DEGRADED",
                 detail_status="unknown",
                 safe_message="Chưa thể xác minh trạng thái Storage.",
             )
+        else:
+            storage_details = storage_res
 
         checked_at = datetime.now(timezone.utc)
         items = [
@@ -920,6 +1087,7 @@ class AdminSystemService:
                 id="tts",
                 label="Text-to-Speech (TTS)",
                 status=tts_status,
+                detail_status=tts_detail,
                 checked_at=checked_at,
                 safe_message=tts_message,
             ),
@@ -927,6 +1095,7 @@ class AdminSystemService:
                 id="stt",
                 label="Speech-to-Text (STT)",
                 status=stt_status,
+                detail_status=stt_detail,
                 checked_at=checked_at,
                 safe_message=stt_message,
             ),

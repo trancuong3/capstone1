@@ -2,7 +2,11 @@ import type { ZodType } from "zod";
 
 import { readingManagementMessages } from "@/lib/api/reading-management-messages";
 import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import {
+  getBrowserAccessToken,
+  invalidateBrowserTokenCache,
+} from "@/lib/api/browser-auth";
+import { clearApiReadCache, runCoalescedApiGet } from "@/lib/api/read-cache";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
 const safeMessage = "Có lỗi xảy ra. Vui lòng thử lại sau.";
@@ -441,6 +445,8 @@ async function safeBackendMessage(response: Response): Promise<string> {
 export interface RequestApiOptions {
   readonly method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   readonly body?: unknown;
+  readonly bypassCache?: boolean;
+  readonly cacheTtlMs?: number;
 }
 
 /**
@@ -459,81 +465,97 @@ export async function requestApi<T>(
 
   let token: string;
   try {
-    const supabase = createBrowserSupabaseClient();
-    // Automatic initialization is disabled to let AuthServiceProvider subscribe
-    // before initialization. Every API caller must therefore await restoration.
-    const { error: initializationError } = await supabase.auth.initialize();
-    if (initializationError) throw failure(401);
-
-    const { data, error } = await supabase.auth.getSession();
-    if (error || !data.session?.access_token) throw failure(401);
-    token = data.session.access_token;
+    token = await getBrowserAccessToken({
+      onUnauthorized: () => failure(401),
+    });
   } catch (error) {
     if (error instanceof ServiceError) throw error;
     throw failure(401);
   }
 
-  let response: Response;
-  const isFormDataBody =
-    typeof FormData !== "undefined" && requestOptions.body instanceof FormData;
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    Authorization: `Bearer ${token}`,
+  const method = requestOptions.method ?? "GET";
+  const executeFetch = async (fetchSignal?: AbortSignal): Promise<T> => {
+    let response: Response;
+    const isFormDataBody =
+      typeof FormData !== "undefined" &&
+      requestOptions.body instanceof FormData;
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+    };
+    if (requestOptions.body !== undefined && !isFormDataBody) {
+      headers["Content-Type"] = "application/json";
+    }
+    const body =
+      requestOptions.body === undefined
+        ? undefined
+        : isFormDataBody
+          ? requestOptions.body
+          : JSON.stringify(requestOptions.body);
+    try {
+      response = await fetch(`${getApiBaseUrl()}${path}`, {
+        method,
+        headers,
+        ...(body !== undefined ? { body: body as BodyInit } : {}),
+        cache: "no-store",
+        credentials: "omit",
+        redirect: "error",
+        signal: fetchSignal,
+      });
+    } catch (error) {
+      if (fetchSignal?.aborted) throw error;
+      throw failure(0, "", true);
+    }
+
+    const requestId = response.headers.get("x-request-id") ?? "";
+    if (!response.ok) {
+      if (response.status === 401) {
+        invalidateBrowserTokenCache();
+        clearApiReadCache();
+      }
+      const backendMessage = await safeBackendMessage(response);
+      const correlation =
+        response.status >= 500 && requestId ? ` Mã yêu cầu: ${requestId}.` : "";
+      throw failure(
+        response.status,
+        requestId,
+        response.status >= 500,
+        `${backendMessage}${correlation}`,
+      );
+    }
+
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw failure(response.status, requestId);
+    }
+    const parsed = schema.safeParse(payload);
+
+    if (!parsed.success) {
+      console.error("[API schema validation failed]", {
+        issueCount: parsed.error.issues.length,
+      });
+
+      throw failure(response.status, requestId);
+    }
+
+    return parsed.data;
   };
-  if (requestOptions.body !== undefined && !isFormDataBody) {
-    headers["Content-Type"] = "application/json";
-  }
-  const body =
-    requestOptions.body === undefined
-      ? undefined
-      : isFormDataBody
-        ? requestOptions.body
-        : JSON.stringify(requestOptions.body);
-  try {
-    response = await fetch(`${getApiBaseUrl()}${path}`, {
-      method: requestOptions.method ?? "GET",
-      headers,
-      ...(body !== undefined ? { body: body as BodyInit } : {}),
-      cache: "no-store",
-      credentials: "omit",
-      redirect: "error",
-      signal,
-    });
-  } catch (error) {
-    if (signal?.aborted) throw error;
-    throw failure(0, "", true);
+
+  if (method !== "GET") {
+    clearApiReadCache();
+    try {
+      return await executeFetch(signal);
+    } finally {
+      clearApiReadCache();
+    }
   }
 
-  const requestId = response.headers.get("x-request-id") ?? "";
-  if (!response.ok) {
-    const backendMessage = await safeBackendMessage(response);
-    const correlation =
-      response.status >= 500 && requestId ? ` Mã yêu cầu: ${requestId}.` : "";
-    throw failure(
-      response.status,
-      requestId,
-      response.status >= 500,
-      `${backendMessage}${correlation}`,
-    );
-  }
-
-  let payload: unknown;
-  try {
-    payload = await response.json();
-  } catch {
-    throw failure(response.status, requestId);
-  }
-  const parsed = schema.safeParse(payload);
-
-  if (!parsed.success) {
-    console.error("[API schema validation failed]", {
-      issueCount: parsed.error.issues.length,
-    });
-
-    throw failure(response.status, requestId);
-  }
-
-  return parsed.data;
+  return runCoalescedApiGet(path, token, signal, executeFetch, {
+    bypassCache: requestOptions.bypassCache,
+    cacheTtlMs: requestOptions.cacheTtlMs,
+  });
 }
 
 export function apiQuery(
@@ -628,12 +650,9 @@ export async function fetchAuthenticatedBlobUrl(
 ): Promise<string> {
   let token: string;
   try {
-    const supabase = createBrowserSupabaseClient();
-    const { error: initError } = await supabase.auth.initialize();
-    if (initError) throw failure(401);
-    const { data, error } = await supabase.auth.getSession();
-    if (error || !data.session?.access_token) throw failure(401);
-    token = data.session.access_token;
+    token = await getBrowserAccessToken({
+      onUnauthorized: () => failure(401),
+    });
   } catch (error) {
     if (error instanceof ServiceError) throw error;
     throw failure(401);

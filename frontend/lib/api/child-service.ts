@@ -3,8 +3,12 @@ import type {
   ChildProfileDTO,
   ChildProfilePatchDTO,
 } from "@/types/child";
+import {
+  getBrowserAccessToken,
+  invalidateBrowserTokenCache,
+} from "@/lib/api/browser-auth";
+import { clearApiReadCache, runCoalescedApiGet } from "@/lib/api/read-cache";
 import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
 export interface ChildService {
@@ -96,92 +100,102 @@ function createHttpError(
   });
 }
 
-async function createHeaders(): Promise<Headers> {
-  const supabase = createBrowserSupabaseClient();
+function unauthorizedError(): ServiceError {
+  return new ServiceError({
+    code: "AUTH_REQUIRED",
+    message: "Authentication required.",
+    status: 401,
+    request_id: "",
+    retryable: false,
+  });
+}
 
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (!session?.access_token) {
-    throw new ServiceError({
-      code: "AUTH_REQUIRED",
-      message: "Authentication required.",
-      status: 401,
-      request_id: "",
-      retryable: false,
-    });
-  }
-
-  return new Headers({
-    Accept: "application/json",
-    Authorization: `Bearer ${session.access_token}`,
+async function resolveChildAccessToken(): Promise<string> {
+  return getBrowserAccessToken({
+    onUnauthorized: unauthorizedError,
   });
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  let headers: Headers;
+  let token: string;
 
   try {
-    headers = await createHeaders();
-    if (typeof init?.body === "string") {
-      headers.set("Content-Type", "application/json");
-    }
+    token = await resolveChildAccessToken();
   } catch (error) {
     if (error instanceof ServiceError) {
       throw error;
     }
 
-    throw new ServiceError({
-      code: "AUTH_REQUIRED",
-      message: "Authentication required.",
-      status: 401,
-      request_id: "",
-      retryable: false,
+    throw unauthorizedError();
+  }
+
+  const method = (init?.method ?? "GET").toUpperCase();
+  const execute = async (): Promise<T> => {
+    const headers = new Headers({
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
     });
+    if (typeof init?.body === "string") {
+      headers.set("Content-Type", "application/json");
+    }
+
+    let response: Response;
+
+    try {
+      response = await fetch(`${getApiBaseUrl()}${path}`, {
+        ...init,
+        headers: {
+          ...Object.fromEntries(headers.entries()),
+          ...(init?.headers ?? {}),
+        },
+        cache: "no-store",
+      });
+    } catch {
+      throw new ServiceError({
+        code: "NETWORK_ERROR",
+        message: "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
+        status: 0,
+        request_id: "",
+        retryable: true,
+      });
+    }
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        invalidateBrowserTokenCache();
+        clearApiReadCache();
+      }
+      const payload = await parseErrorPayload(response);
+      throw createHttpError(response, payload);
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
+    try {
+      return (await response.json()) as T;
+    } catch {
+      throw new ServiceError({
+        code: "NETWORK_ERROR",
+        message: "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
+        status: response.status,
+        request_id: response.headers.get("x-request-id") ?? "",
+        retryable: false,
+      });
+    }
+  };
+
+  if (method !== "GET") {
+    clearApiReadCache();
+    try {
+      return await execute();
+    } finally {
+      clearApiReadCache();
+    }
   }
 
-  let response: Response;
-
-  try {
-    response = await fetch(`${getApiBaseUrl()}${path}`, {
-      ...init,
-      headers: {
-        ...Object.fromEntries(headers.entries()),
-        ...(init?.headers ?? {}),
-      },
-      cache: "no-store",
-    });
-  } catch {
-    throw new ServiceError({
-      code: "NETWORK_ERROR",
-      message: "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
-      status: 0,
-      request_id: "",
-      retryable: true,
-    });
-  }
-
-  if (!response.ok) {
-    const payload = await parseErrorPayload(response);
-    throw createHttpError(response, payload);
-  }
-
-  if (response.status === 204) {
-    return undefined as T;
-  }
-
-  try {
-    return (await response.json()) as T;
-  } catch {
-    throw new ServiceError({
-      code: "NETWORK_ERROR",
-      message: "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
-      status: response.status,
-      request_id: response.headers.get("x-request-id") ?? "",
-      retryable: false,
-    });
-  }
+  return runCoalescedApiGet(path, token, undefined, () => execute());
 }
 
 export function createChildService(): ChildService {

@@ -1,0 +1,24 @@
+services:
+  viread-ocr-worker:
+    build:
+      context: ..
+      dockerfile: ocr_worker/Dockerfile
+    container_name: viread-ocr-worker
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8020:8020"
+    environment:
+      VIREAD_OCR_BACKEND_URL: ${VIREAD_OCR_BACKEND_URL:-https://staging-api.example.invalid}
+      VIREAD_OCR_WORKER_TOKEN: ${VIREAD_OCR_WORKER_TOKEN}
+      VIREAD_OCR_WORKER_ID: ${VIREAD_OCR_WORKER_ID:-docker-ocr-1}
+      VIREAD_OCR_CPU_THREADS: ${VIREAD_OCR_CPU_THREADS:-2}
+      OMP_NUM_THREADS: "2"
+      OPENBLAS_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+    volumes:
+      - ocr-model-cache:/tmp
+    mem_limit: 4g
+    cpus: "2.0"
+
+volumes:
+  ocr-model-cache:

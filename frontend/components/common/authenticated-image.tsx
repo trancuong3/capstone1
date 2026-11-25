@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   fetchAuthenticatedBlobUrl,
   isPrivateApiMediaUrl,
   revokePrivateBlobUrl,
 } from "@/lib/api/api-client";
+import { invalidateBrowserTokenCache } from "@/lib/api/browser-auth";
 
 interface AuthenticatedImageProps {
   src: string;
@@ -31,6 +32,8 @@ export function AuthenticatedImage({
   fallbackLabel = "Không tải được ảnh trang",
 }: AuthenticatedImageProps) {
   const needsAuth = isPrivateApiMediaUrl(src);
+  const retriedSrcRef = useRef<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
   const [resolved, setResolved] = useState<{
     src: string;
     blobUrl: string | null;
@@ -57,6 +60,12 @@ export function AuthenticatedImage({
       })
       .catch(() => {
         if (!active || controller.signal.aborted) return;
+        if (retriedSrcRef.current !== src) {
+          retriedSrcRef.current = src;
+          invalidateBrowserTokenCache();
+          setRetryNonce((value) => value + 1);
+          return;
+        }
         setResolved({ src, blobUrl: null, failed: true });
         onImageError?.();
       });
@@ -68,7 +77,7 @@ export function AuthenticatedImage({
         revokePrivateBlobUrl(createdBlob);
       }
     };
-  }, [needsAuth, onImageError, src]);
+  }, [needsAuth, onImageError, retryNonce, src]);
 
   const effectiveSrc = needsAuth
     ? resolved.src === src
@@ -111,7 +120,15 @@ export function AuthenticatedImage({
           height: event.currentTarget.naturalHeight,
         });
       }}
-      onError={() => onImageError?.()}
+      onError={() => {
+        if (needsAuth && retriedSrcRef.current !== src) {
+          retriedSrcRef.current = src;
+          invalidateBrowserTokenCache();
+          setRetryNonce((value) => value + 1);
+          return;
+        }
+        onImageError?.();
+      }}
     />
   );
 }

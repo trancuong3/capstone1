@@ -32,6 +32,7 @@ from app.providers.local_voice_provider import (
     LocalVoiceProvider,
     LocalVoiceTechnicalError,
 )
+from app.request_context import get_request_id
 
 logger = logging.getLogger("viread.voice_orchestrator")
 
@@ -86,13 +87,35 @@ class VoiceOrchestrator:
 
     async def get_status(self) -> dict[str, Any]:
         local_health = await self.local.get_health()
+        is_configured = (
+            bool(local_health["configured"])
+            if "configured" in local_health
+            else (
+                self.local.is_configured()
+                if callable(getattr(self.local, "is_configured", None))
+                else True
+            )
+        )
+        is_loopback = bool(getattr(self.local, "is_loopback", True))
+        mode = (
+            "unconfigured"
+            if not is_configured
+            else ("loopback" if is_loopback else "remote_https")
+        )
         return {
             "default_mode": "local_only",
             "default_voice_id": DEFAULT_LOCAL_VOICE_ID,
             "local": {
+                "configured": is_configured,
+                "mode": mode,
                 "available": bool(local_health.get("available")),
                 "stt_ready": bool(local_health.get("stt_ready")),
                 "tts_ready": bool(local_health.get("tts_ready")),
+                "error_code": local_health.get("error_code"),
+                "stt_error_code": local_health.get("stt_error_code"),
+                "tts_error_code": local_health.get("tts_error_code"),
+                "worker_version": local_health.get("worker_version"),
+                "latency_ms": local_health.get("latency_ms"),
                 "stt_model_version": local_health.get("stt_model_version"),
                 "tts_model_version": local_health.get("tts_model_version"),
             },
@@ -155,25 +178,38 @@ class VoiceOrchestrator:
                 text=text, voice_id=voice_id, speed=speed
             )
             logger.info(
-                "tts_ok provider=google voice=%s ms=%.1f session=%s",
+                "tts_ok provider=google voice=%s ms=%.1f session=%s request_id=%s",
                 audio.resolved_voice_id,
                 (time.perf_counter() - t0) * 1000,
                 ctx.session_id or "-",
+                get_request_id(),
             )
             return audio
 
         # Local voice locked: NEVER switch to Google or to another local voice!
-        audio = await self.local.synthesize(
-            text=text,
-            voice_id=voice_id,
-            speed=speed,
-            word_sample=word_sample,
-        )
+        try:
+            audio = await self.local.synthesize(
+                text=text,
+                voice_id=voice_id,
+                speed=speed,
+                word_sample=word_sample,
+            )
+        except LocalVoiceTechnicalError as local_err:
+            logger.warning(
+                "tts_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
+                local_err.code,
+                voice_id,
+                (time.perf_counter() - t0) * 1000,
+                ctx.session_id or "-",
+                get_request_id(),
+            )
+            raise
         logger.info(
-            "tts_ok provider=local voice=%s ms=%.1f session=%s",
+            "tts_ok provider=local voice=%s ms=%.1f session=%s request_id=%s",
             audio.resolved_voice_id,
             (time.perf_counter() - t0) * 1000,
             ctx.session_id or "-",
+            get_request_id(),
         )
         return audio
 
@@ -187,16 +223,46 @@ class VoiceOrchestrator:
     ) -> LocalTimedSpeech:
         ctx = policy or VoicePolicyContext()
         voice_id = (requested_voice_id or "").strip() or DEFAULT_LOCAL_VOICE_ID
+        t0 = time.perf_counter()
 
         if voice_id.startswith("google_"):
             self._validate_google_tts_allowed(ctx)
-            return await self.google.synthesize_timed(
+            speech = await self.google.synthesize_timed(
                 words=words, voice_id=voice_id, speed=speed
             )
+            logger.info(
+                "tts_timed_ok provider=google voice=%s words=%d ms=%.1f session=%s request_id=%s",
+                speech.resolved_voice_id,
+                len(words),
+                (time.perf_counter() - t0) * 1000,
+                ctx.session_id or "-",
+                get_request_id(),
+            )
+            return speech
 
-        return await self.local.synthesize_timed(
-            words=words, voice_id=voice_id, speed=speed
+        try:
+            speech = await self.local.synthesize_timed(
+                words=words, voice_id=voice_id, speed=speed
+            )
+        except LocalVoiceTechnicalError as local_err:
+            logger.warning(
+                "tts_timed_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
+                local_err.code,
+                voice_id,
+                (time.perf_counter() - t0) * 1000,
+                ctx.session_id or "-",
+                get_request_id(),
+            )
+            raise
+        logger.info(
+            "tts_timed_ok provider=local voice=%s words=%d ms=%.1f session=%s request_id=%s",
+            speech.resolved_voice_id,
+            len(words),
+            (time.perf_counter() - t0) * 1000,
+            ctx.session_id or "-",
+            get_request_id(),
         )
+        return speech
 
     async def synthesize_phonics(
         self,
@@ -208,16 +274,46 @@ class VoiceOrchestrator:
     ) -> LocalPhonicsSpeech:
         ctx = policy or VoicePolicyContext()
         voice_id = (requested_voice_id or "").strip() or DEFAULT_LOCAL_VOICE_ID
+        t0 = time.perf_counter()
 
         if voice_id.startswith("google_"):
             self._validate_google_tts_allowed(ctx)
-            return await self.google.synthesize_phonics(
+            speech = await self.google.synthesize_phonics(
                 steps=steps, voice_id=voice_id, speed=speed
             )
+            logger.info(
+                "tts_phonics_ok provider=google voice=%s steps=%d ms=%.1f session=%s request_id=%s",
+                speech.resolved_voice_id,
+                len(steps),
+                (time.perf_counter() - t0) * 1000,
+                ctx.session_id or "-",
+                get_request_id(),
+            )
+            return speech
 
-        return await self.local.synthesize_phonics(
-            steps=steps, voice_id=voice_id, speed=speed
+        try:
+            speech = await self.local.synthesize_phonics(
+                steps=steps, voice_id=voice_id, speed=speed
+            )
+        except LocalVoiceTechnicalError as local_err:
+            logger.warning(
+                "tts_phonics_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
+                local_err.code,
+                voice_id,
+                (time.perf_counter() - t0) * 1000,
+                ctx.session_id or "-",
+                get_request_id(),
+            )
+            raise
+        logger.info(
+            "tts_phonics_ok provider=local voice=%s steps=%d ms=%.1f session=%s request_id=%s",
+            speech.resolved_voice_id,
+            len(steps),
+            (time.perf_counter() - t0) * 1000,
+            ctx.session_id or "-",
+            get_request_id(),
         )
+        return speech
 
     async def transcribe(
         self,
@@ -298,11 +394,12 @@ class VoiceOrchestrator:
                 language_code=language_code,
             )
             logger.info(
-                "stt_ok provider=local fallback=0 ms=%.1f session=%s page=%s turn=%s",
+                "stt_ok provider=local fallback=0 ms=%.1f session=%s page=%s turn=%s request_id=%s",
                 (time.perf_counter() - t0) * 1000,
                 ctx.session_id or "-",
                 ctx.page_id or "-",
                 ctx.turn_id or "-",
+                get_request_id(),
             )
             return res
         except LocalVoiceTechnicalError as local_err:
@@ -314,10 +411,11 @@ class VoiceOrchestrator:
             )
             if not can_fallback:
                 logger.warning(
-                    "stt_fail provider=local fallback=0 reason=%s mode=%s allow_google=%s",
+                    "stt_fail provider=local fallback=0 reason=%s mode=%s allow_google=%s request_id=%s",
                     local_err.code,
                     ctx.provider_mode,
                     ctx.allow_google_stt,
+                    get_request_id(),
                 )
                 raise VoiceProviderError(
                     status_code=503, code=local_err.code
@@ -333,11 +431,12 @@ class VoiceOrchestrator:
                 fallback_reason=local_err.code,
             )
             logger.info(
-                "stt_ok provider=google fallback=1 reason=%s ms=%.1f session=%s page=%s turn=%s",
+                "stt_ok provider=google fallback=1 reason=%s ms=%.1f session=%s page=%s turn=%s request_id=%s",
                 local_err.code,
                 (time.perf_counter() - t_google) * 1000,
                 ctx.session_id or "-",
                 ctx.page_id or "-",
                 ctx.turn_id or "-",
+                get_request_id(),
             )
             return google_res
