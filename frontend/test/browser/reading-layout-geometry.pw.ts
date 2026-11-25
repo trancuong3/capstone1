@@ -349,11 +349,7 @@ async function installLongReadingSession(
     if (path.startsWith("/voice/text-to-speech")) {
       if (options.voiceStatusUnavailable) {
         voice503Counts.tts += 1;
-        return json(
-          route,
-          { detail: { code: "LOCAL_TTS_UNAVAILABLE" } },
-          503,
-        );
+        return json(route, { detail: { code: "LOCAL_TTS_UNAVAILABLE" } }, 503);
       }
       return route.fulfill({
         headers: corsHeaders,
@@ -364,11 +360,7 @@ async function installLongReadingSession(
     if (path === "/voice/speech-to-text") {
       voice503Counts.stt += 1;
     }
-    return json(
-      route,
-      { detail: { code: "LOCAL_STT_UNAVAILABLE" } },
-      503,
-    );
+    return json(route, { detail: { code: "LOCAL_STT_UNAVAILABLE" } }, 503);
   });
 
   await page.addInitScript(() => {

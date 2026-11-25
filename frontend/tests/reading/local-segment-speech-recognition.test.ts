@@ -532,7 +532,9 @@ describe("LocalSegmentSpeechRecognition 503 Offline -> Online browser fallback",
       isTechnicalSttUnavailabilityError(new TypeError("Failed to fetch")),
     ).toBe(true);
     expect(
-      isTechnicalSttUnavailabilityError(new DOMException("aborted", "AbortError")),
+      isTechnicalSttUnavailabilityError(
+        new DOMException("aborted", "AbortError"),
+      ),
     ).toBe(false);
   });
 });

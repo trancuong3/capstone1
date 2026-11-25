@@ -152,9 +152,7 @@ function canUseBrowserSpeechSynthesis(): boolean {
   );
 }
 
-function shouldSkipBackendTtsForBrowserFallback(
-  operation: Operation,
-): boolean {
+function shouldSkipBackendTtsForBrowserFallback(operation: Operation): boolean {
   if (
     !canUseGoogleTtsFallback() ||
     !canUseBrowserSpeechSynthesis() ||
