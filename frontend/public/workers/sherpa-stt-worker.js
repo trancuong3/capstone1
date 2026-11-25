@@ -7,8 +7,8 @@
  * - Model weights fetched on-demand from verified CORS-safe Hugging Face Hub,
  *   verified with SHA-256 before caching in IndexedDB (`0` Supabase/Vercel egress).
  * - NEVER receives or injects expected book text into the recognizer.
- * - Conditionally appends 0.35s (5,600 zero Float32 samples at 16 kHz) trailing
- *   silence ONLY when input length >= 1.2s (19,200 samples); shorter isolated words
+ * - Conditionally appends 0.35s trailing silence ONLY when clip duration >= 1.2s
+ *   (computed dynamically from the actual input sample rate); shorter isolated words
  *   stay unpadded to avoid OfflineRecognizer trailing collocation hallucinations.
  */
 
@@ -16,8 +16,8 @@ const MODEL_VERSION = "sherpa-onnx-zipformer-vi-30M-int8-2026-02-09";
 const HF_BASE_URL =
   "https://huggingface.co/csukuangfj2/sherpa-onnx-zipformer-vi-30M-int8-2026-02-09/resolve/main";
 const SAMPLE_RATE = 16000;
-const MIN_PAD_INPUT_SAMPLES = 19200; // 1.2s @ 16kHz
-const TRAILING_PAD_SAMPLES = 5600; // 0.35s @ 16kHz
+const MIN_PAD_DURATION_SECONDS = 1.2;
+const TRAILING_PAD_SECONDS = 0.35;
 const IDB_NAME = "viread-wasm-models-v1";
 const IDB_STORE = "files";
 
@@ -215,7 +215,17 @@ async function ensureRecognizer() {
       M.FS_createDataFile("/", spec.name, bytes, true, true, false);
     }
 
-    const recognizer = new self.OfflineRecognizer(
+    const OfflineRecognizerCtor =
+      typeof OfflineRecognizer === "function"
+        ? OfflineRecognizer
+        : self.OfflineRecognizer;
+    if (typeof OfflineRecognizerCtor !== "function") {
+      throw new Error(
+        "OfflineRecognizer constructor unavailable in WASM runtime",
+      );
+    }
+
+    const recognizer = new OfflineRecognizerCtor(
       {
         featConfig: { sampleRate: SAMPLE_RATE, featureDim: 80 },
         modelConfig: {
@@ -303,11 +313,16 @@ self.onmessage = async (event) => {
         return;
       }
 
-      // Append 0.35s (5,600 zero samples at 16 kHz) ONLY for clips >= 1.2s (19,200 samples).
+      // Append 0.35s trailing silence ONLY for clips >= 1.2s (sample-rate invariant).
       // Keep < 1.2s isolated word clips unpadded so OfflineRecognizer does not hallucinate collocations.
+      const sr =
+        typeof msg.sampleRate === "number" && msg.sampleRate > 0
+          ? msg.sampleRate
+          : SAMPLE_RATE;
       let waveform = input;
-      if (input.length >= MIN_PAD_INPUT_SAMPLES) {
-        const padded = new Float32Array(input.length + TRAILING_PAD_SAMPLES);
+      if (input.length / sr >= MIN_PAD_DURATION_SECONDS) {
+        const padSamples = Math.round(TRAILING_PAD_SECONDS * sr);
+        const padded = new Float32Array(input.length + padSamples);
         padded.set(input, 0);
         waveform = padded;
       }
@@ -316,7 +331,7 @@ self.onmessage = async (event) => {
       const stream = recognizer.createStream();
       let rawText = "";
       try {
-        stream.acceptWaveform(msg.sampleRate || SAMPLE_RATE, waveform);
+        stream.acceptWaveform(sr, waveform);
         recognizer.decode(stream);
         const result = recognizer.getResult(stream);
         rawText = result && result.text ? String(result.text) : "";

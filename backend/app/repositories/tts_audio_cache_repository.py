@@ -288,6 +288,51 @@ class TtsAudioCacheRepository:
         )
         return await self.db.scalar(stmt)
 
+    async def get_active_timed_entries_for_page(
+        self,
+        *,
+        scope: str,
+        page_id: UUID,
+        voice_id: str,
+        model_version: str | None,
+        speed: float,
+        audio_formats: Sequence[str],
+        allow_speed_fallback: bool = False,
+        limit: int = 8,
+    ) -> list[TtsAudioCacheEntry]:
+        if scope != "CATALOG":
+            return []
+        q_speed = self._quantize_speed(speed)
+        filters = [
+            TtsAudioCacheEntry.Status == "ACTIVE",
+            TtsAudioCacheEntry.Scope == "CATALOG",
+            TtsAudioCacheEntry.OwnerParentId.is_(None),
+            TtsAudioCacheEntry.PageId == page_id,
+            TtsAudioCacheEntry.VoiceId == voice_id,
+            TtsAudioCacheEntry.AudioFormat.in_(list(audio_formats)),
+            TtsAudioCacheEntry.WordTimingsJson.is_not(None),
+        ]
+        if not allow_speed_fallback:
+            filters.append(TtsAudioCacheEntry.Speed == q_speed)
+        if model_version:
+            filters.append(TtsAudioCacheEntry.ModelVersion == model_version)
+
+        order_by = (
+            [
+                func.abs(TtsAudioCacheEntry.Speed - q_speed).asc(),
+                TtsAudioCacheEntry.CreatedAt.desc(),
+            ]
+            if allow_speed_fallback
+            else [TtsAudioCacheEntry.CreatedAt.desc()]
+        )
+        stmt = (
+            select(TtsAudioCacheEntry)
+            .where(*filters)
+            .order_by(*order_by)
+            .limit(max(1, min(int(limit), 16)))
+        )
+        return list((await self.db.scalars(stmt)).all())
+
     async def upsert_active_entry(
         self,
         *,

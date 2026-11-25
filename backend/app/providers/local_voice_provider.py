@@ -382,6 +382,7 @@ class LocalVoiceProvider:
         )
         self._client: httpx.AsyncClient | None = None
         self._recovery_task: asyncio.Task[bool] | None = None
+        self._remote_unavailable_until: float = 0.0
 
     def _schedule_background_recovery(self) -> None:
         if not self.is_loopback or not is_local_voice_worker_autostart_armed():
@@ -631,12 +632,17 @@ class LocalVoiceProvider:
         started = time.perf_counter()
         try:
             client = self._get_client()
-            resp = await client.get(
-                f"{self.base_url}/health",
-                headers=self._request_headers(include_auth=self.is_loopback),
-                timeout=self._make_timeout(3.0, 3.0),
+            resp = await asyncio.wait_for(
+                client.get(
+                    f"{self.base_url}/health",
+                    headers=self._request_headers(include_auth=self.is_loopback),
+                    timeout=self._make_timeout(2.0, 2.0),
+                ),
+                timeout=2.5,
             )
             latency_ms = int((time.perf_counter() - started) * 1000)
+            if resp.status_code == 200:
+                self._remote_unavailable_until = 0.0
             if resp.status_code == 503:
                 return {
                     "configured": True,
@@ -705,7 +711,9 @@ class LocalVoiceProvider:
                 "worker_version": data.get("version"),
                 "latency_ms": latency_ms,
             }
-        except httpx.TimeoutException:
+        except (httpx.TimeoutException, asyncio.TimeoutError):
+            if not self.is_loopback:
+                self._remote_unavailable_until = time.monotonic() + 15.0
             return {
                 "configured": True,
                 "available": False,
@@ -717,6 +725,8 @@ class LocalVoiceProvider:
                 "latency_ms": int((time.perf_counter() - started) * 1000),
             }
         except httpx.ConnectError:
+            if not self.is_loopback:
+                self._remote_unavailable_until = time.monotonic() + 15.0
             self._schedule_background_recovery()
             return {
                 "configured": True,
@@ -729,6 +739,8 @@ class LocalVoiceProvider:
                 "latency_ms": int((time.perf_counter() - started) * 1000),
             }
         except Exception:
+            if not self.is_loopback:
+                self._remote_unavailable_until = time.monotonic() + 15.0
             return {
                 "configured": True,
                 "available": False,
@@ -743,14 +755,20 @@ class LocalVoiceProvider:
     async def list_voices(self) -> tuple[list[dict[str, Any]], bool]:
         if not self.base_url:
             return [dict(v) for v in STATIC_LOCAL_VOICES], False
+        if not self.is_loopback and time.monotonic() < self._remote_unavailable_until:
+            return [dict(v) for v in STATIC_LOCAL_VOICES], False
         try:
             client = self._get_client()
-            resp = await client.get(
-                f"{self.base_url}/voices",
-                headers=self._request_headers(include_auth=True),
-                timeout=self._make_timeout(4.0, 4.0),
+            resp = await asyncio.wait_for(
+                client.get(
+                    f"{self.base_url}/voices",
+                    headers=self._request_headers(include_auth=True),
+                    timeout=self._make_timeout(1.5, 1.5),
+                ),
+                timeout=2.0,
             )
             if resp.status_code == 200:
+                self._remote_unavailable_until = 0.0
                 payload = resp.json()
                 model_ver = str(
                     payload.get("model_version") or LOCAL_TTS_MODEL_VERSION
@@ -785,7 +803,8 @@ class LocalVoiceProvider:
                 if mapped:
                     return mapped, True
         except Exception:
-            pass
+            if not self.is_loopback:
+                self._remote_unavailable_until = time.monotonic() + 15.0
         return [dict(v) for v in STATIC_LOCAL_VOICES], False
 
     @staticmethod

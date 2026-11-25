@@ -34,6 +34,7 @@ export interface ServiceErrorOptions {
   status: number;
   request_id: string;
   retryable: boolean;
+  provider_code?: string;
 }
 
 export class ServiceError extends Error {
@@ -41,6 +42,7 @@ export class ServiceError extends Error {
   readonly status: number;
   readonly request_id: string;
   readonly retryable: boolean;
+  readonly provider_code?: string;
 
   constructor(options: ServiceErrorOptions) {
     super(options.message);
@@ -49,6 +51,9 @@ export class ServiceError extends Error {
     this.status = options.status;
     this.request_id = options.request_id;
     this.retryable = options.retryable;
+    if (options.provider_code !== undefined) {
+      this.provider_code = options.provider_code;
+    }
   }
 }
 

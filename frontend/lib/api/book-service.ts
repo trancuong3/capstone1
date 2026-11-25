@@ -24,6 +24,11 @@ export const bookDtoSchema = z.object({
   max_grade: z.number().int().min(1).max(5),
   lifecycle_status: z.enum(["ACTIVE", "RETIRED"]),
   visibility_scope: z.enum(["CATALOG", "PARENT_PRIVATE"]).optional(),
+  cover_url: z.string().nullable().optional(),
+  cover_source_type: z
+    .enum(["USER_UPLOAD", "AI_GENERATED", "METADATA_RENDER"])
+    .nullable()
+    .optional(),
 });
 
 const parentBookSchema = bookDtoSchema.refine(

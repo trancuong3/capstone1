@@ -1849,11 +1849,14 @@ def decode_stt_window_sync(
         return "", [], (time.perf_counter() - t_d0) * 1000.0
     duration_s = float(samples16.size / 16000.0)
     arr = preprocess_audio_for_stt(samples16)
+    # Keep <1.2s isolated word clips free of trailing silence padding so Zipformer
+    # does not hallucinate trailing collocations (e.g. "trường" -> "trường đại học").
+    effective_trail_pad = trail_pad_s if duration_s >= 1.2 else 0.0
     padded = np.concatenate(
         [
             np.zeros(int(16000 * lead_pad_s), dtype=np.float32),
             arr,
-            np.zeros(int(16000 * trail_pad_s), dtype=np.float32),
+            np.zeros(int(16000 * effective_trail_pad), dtype=np.float32),
         ]
     )
     stream = runtime.stt_recognizer.create_stream()

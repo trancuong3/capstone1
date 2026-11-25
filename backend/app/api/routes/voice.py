@@ -93,7 +93,7 @@ def _resolve_audio_content_type(raw_content_type: str | None, filename: str) -> 
     return "audio/webm"
 
 
-_DEFAULT_ORCHESTRATORS: dict[tuple[str, str], VoiceOrchestrator] = {}
+_DEFAULT_ORCHESTRATORS: dict[tuple[str, str, str, str], VoiceOrchestrator] = {}
 
 
 def clear_default_voice_orchestrators() -> None:
@@ -110,7 +110,9 @@ def get_voice_orchestrator() -> VoiceOrchestrator:
         or os.getenv("VIREAD_LOCAL_VOICE_WORKER_TOKEN")
         or ""
     ).strip()
-    key = (worker_url, worker_token)
+    render_flag = (os.getenv("RENDER") or "").strip()
+    app_env = (os.getenv("APP_ENVIRONMENT") or "").strip().lower()
+    key = (worker_url, worker_token, render_flag, app_env)
     cached = _DEFAULT_ORCHESTRATORS.get(key)
     if cached is None:
         cached = VoiceOrchestrator()

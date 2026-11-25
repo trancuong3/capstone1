@@ -403,16 +403,26 @@ const TECHNICAL_STT_UNAVAILABLE_CODES = new Set<string>([
   "STT_CONCURRENCY_LIMITED",
 ]);
 
+export function isPermanentLocalVoiceUnconfigured(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const rec = error as {
+    code?: unknown;
+    message?: unknown;
+    providerCode?: unknown;
+    provider_code?: unknown;
+  };
+  const combined = `${String(rec.code ?? "")} ${String(rec.provider_code ?? "")} ${String(rec.providerCode ?? "")} ${String(rec.message ?? "")}`;
+  return combined.includes("LOCAL_VOICE_UNCONFIGURED");
+}
+
 function isImmediateLocalOutageError(error: unknown): boolean {
+  if (isPermanentLocalVoiceUnconfigured(error)) return true;
   if (!error || typeof error !== "object") return false;
   const rec = error as { code?: unknown; message?: unknown };
   const code = typeof rec.code === "string" ? rec.code : "";
   const message = typeof rec.message === "string" ? rec.message : "";
   const combined = `${code} ${message}`;
-  return (
-    combined.includes("LOCAL_VOICE_UNCONFIGURED") ||
-    combined.includes("máy chủ giọng nói cục bộ chưa được bật")
-  );
+  return combined.includes("máy chủ giọng nói cục bộ chưa được bật");
 }
 
 /**
@@ -856,14 +866,20 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.onerror?.({ error: "stt-unavailable" });
   }
 
-  private recordTechnicalFailureAndMaybeFallback(error?: unknown): boolean {
+  private recordTechnicalFailureAndMaybeFallback(
+    errorOrForce?: unknown,
+  ): boolean {
     this.consecutiveTechnicalFailures += 1;
+    const forceImmediate =
+      typeof errorOrForce === "boolean"
+        ? errorOrForce
+        : isImmediateLocalOutageError(errorOrForce);
     const freshHealth = getFreshVoiceEngineHealth();
     const confirmedLocalOutage =
-      freshHealth !== null &&
-      (!freshHealth.local.available || !freshHealth.local.stt_ready);
+      forceImmediate ||
+      (freshHealth !== null &&
+        (!freshHealth.local.available || !freshHealth.local.stt_ready));
     if (
-      isImmediateLocalOutageError(error) ||
       confirmedLocalOutage ||
       this.consecutiveTechnicalFailures >= EMERGENCY_FAILURE_THRESHOLD
     ) {

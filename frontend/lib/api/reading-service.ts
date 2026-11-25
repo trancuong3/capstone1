@@ -132,6 +132,8 @@ export const readingPageDtoSchema = z.object({
   height: z.number(),
   image_url: z.string().nullable().optional(),
   image_overlay_safe: z.boolean().optional(),
+  illustration_url: z.string().nullable().optional(),
+  illustration_text_free: z.boolean().optional(),
   text: z.string().optional(),
   words: z.array(wordDtoSchema),
   paragraph_start_line_indices: z
