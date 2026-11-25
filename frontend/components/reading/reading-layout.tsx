@@ -247,8 +247,12 @@ export function ReadingLayout({
       >
         <BookPageViewer
           title={bookTitle}
-          illustrationUrl={page.illustration_url ?? null}
-          illustrationTextFree={Boolean(page.illustration_text_free)}
+          illustrationUrl={page.illustration_url || undefined}
+          illustrationTextFree={
+            page.illustration_url
+              ? Boolean(page.illustration_text_free)
+              : undefined
+          }
           illustration={
             book && (
               <BookCover

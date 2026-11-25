@@ -237,7 +237,8 @@ export function GlobalTaskCenter({
       aria-expanded={isOpen}
       aria-label="Mở trung tâm tác vụ AI"
       className={cn(
-        "inline-flex min-h-11 items-center gap-2 rounded-full border px-3 text-xs font-semibold shadow-sm transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-11 sm:px-3.5 sm:text-sm",
+        "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full border text-xs font-semibold shadow-sm transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:gap-2 sm:px-3.5 sm:text-sm",
+        variant === "header-pill" ? "min-w-11 px-2.5" : "px-3.5",
         activeCount > 0
           ? "border-primary/40 bg-sky text-primary-hover hover:bg-sky/80"
           : failedCount > 0
@@ -246,7 +247,7 @@ export function GlobalTaskCenter({
               ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100/70"
               : "border-border bg-white text-ink hover:bg-canvas",
         variant === "floating" &&
-          "fixed bottom-5 right-5 z-40 min-h-12 px-4 shadow-lg",
+          "fixed bottom-20 right-4 z-40 min-h-12 px-4 shadow-lg xl:bottom-5 xl:right-5",
         className,
       )}
       data-testid="global-task-center-trigger"
@@ -260,7 +261,19 @@ export function GlobalTaskCenter({
       ) : (
         <Sparkles aria-hidden="true" className="size-4 shrink-0 text-primary" />
       )}
-      <span className="whitespace-nowrap">{pillText}</span>
+      <span
+        className={cn(
+          "whitespace-nowrap",
+          variant === "header-pill" && "sr-only sm:not-sr-only",
+        )}
+      >
+        {pillText}
+      </span>
+      {variant === "header-pill" && activeCount > 0 ? (
+        <span aria-hidden="true" className="tabular-nums sm:hidden">
+          {activeCount}
+        </span>
+      ) : null}
     </button>
   );
 
