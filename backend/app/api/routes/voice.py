@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import os
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -12,12 +13,13 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Request,
     Response,
     UploadFile,
     status,
 )
 
-from app.api.deps import get_current_parent_id
+from app.api.deps import require_active_profile_id
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
 from app.providers.google_voice_provider import GOOGLE_VOICE_BY_ID
 from app.providers.local_voice_provider import STATIC_LOCAL_VOICES
@@ -29,6 +31,7 @@ from app.schemas.voice import (
     TextToSpeechRequest,
     VoiceProviderMode,
 )
+from app.services.rate_limiter import rate_limit
 from app.services.voice_orchestrator import VoiceOrchestrator, VoicePolicyContext
 
 router = APIRouter()
@@ -70,8 +73,29 @@ def _resolve_audio_content_type(raw_content_type: str | None, filename: str) -> 
     return "audio/webm"
 
 
+_DEFAULT_ORCHESTRATORS: dict[tuple[str, str], VoiceOrchestrator] = {}
+
+
+def clear_default_voice_orchestrators() -> None:
+    """Reset pooled VoiceOrchestrator instances (used by tests)."""
+    _DEFAULT_ORCHESTRATORS.clear()
+
+
 def get_voice_orchestrator() -> VoiceOrchestrator:
-    return VoiceOrchestrator()
+    worker_url = (
+        os.getenv("VIREAD_LOCAL_VOICE_WORKER_URL") or "http://127.0.0.1:8010"
+    ).strip().rstrip("/") or "http://127.0.0.1:8010"
+    worker_token = (
+        os.getenv("VIREAD_VOICE_WORKER_TOKEN")
+        or os.getenv("VIREAD_LOCAL_VOICE_WORKER_TOKEN")
+        or ""
+    ).strip()
+    key = (worker_url, worker_token)
+    cached = _DEFAULT_ORCHESTRATORS.get(key)
+    if cached is None:
+        cached = VoiceOrchestrator()
+        _DEFAULT_ORCHESTRATORS[key] = cached
+    return cached
 
 
 def provider_http_exception(error: VoiceProviderError) -> HTTPException:
@@ -97,10 +121,23 @@ def _parse_bool_form(raw: str | bool | None) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _extract_audio_accept(request: Request) -> str | None:
+    raw = (request.headers.get("accept") or "").strip()
+    if not raw or raw == "*/*":
+        return None
+    lower = raw.lower()
+    if any(token in lower for token in ("audio/mpeg", "audio/mp3", "audio/ogg", "audio/opus", "audio/wav")):
+        return raw[:120]
+    return None
+
+
 @router.get("/status")
 async def voice_status(
     response: Response,
-    _actor_id: UUID = Depends(get_current_parent_id),
+    _actor_id: UUID = Depends(require_active_profile_id),
+    _rate_limited: None = Depends(
+        rate_limit("voice_status", default_max=120, default_window=60.0)
+    ),
 ) -> dict[str, Any]:
     """Report safe local worker & Google backup readiness without secrets."""
 
@@ -111,7 +148,11 @@ async def voice_status(
 @router.post("/text-to-speech", response_class=Response)
 async def text_to_speech(
     payload: TextToSpeechRequest,
-    _actor_id: UUID = Depends(get_current_parent_id),
+    request: Request,
+    _actor_id: UUID = Depends(require_active_profile_id),
+    _rate_limited: None = Depends(
+        rate_limit("voice_tts", default_max=60, default_window=60.0)
+    ),
 ) -> Response:
     """Synthesize a short utterance strictly using the requested locked voice."""
 
@@ -119,6 +160,8 @@ async def text_to_speech(
         provider_mode=payload.provider_mode,
         allow_google_tts=payload.allow_google_tts,
         session_id=payload.session_id,
+        accept=_extract_audio_accept(request),
+        audio_format=payload.audio_format,
     )
     try:
         audio = await get_voice_orchestrator().synthesize(
@@ -160,7 +203,11 @@ async def text_to_speech(
 @router.post("/text-to-speech/phonics", response_model=PhonicsSpeechRead)
 async def phonics_text_to_speech(
     payload: PhonicsSpeechRequest,
-    _actor_id: UUID = Depends(get_current_parent_id),
+    request: Request,
+    _actor_id: UUID = Depends(require_active_profile_id),
+    _rate_limited: None = Depends(
+        rate_limit("voice_tts", default_max=60, default_window=60.0)
+    ),
 ) -> PhonicsSpeechRead:
     """Synthesize step-by-step Vietnamese phonics with sample-accurate step timings."""
 
@@ -168,6 +215,8 @@ async def phonics_text_to_speech(
         provider_mode=payload.provider_mode,
         allow_google_tts=payload.allow_google_tts,
         session_id=payload.session_id,
+        accept=_extract_audio_accept(request),
+        audio_format=payload.audio_format,
     )
     try:
         speech = await get_voice_orchestrator().synthesize_phonics(
@@ -218,7 +267,10 @@ async def speech_to_text(
     page_id: Annotated[str | None, Form(max_length=80)] = None,
     turn_id: Annotated[str | None, Form(max_length=80)] = None,
     source: Annotated[str | None, Form(max_length=40)] = None,
-    actor_id: UUID = Depends(get_current_parent_id),
+    actor_id: UUID = Depends(require_active_profile_id),
+    _rate_limited: None = Depends(
+        rate_limit("voice_stt", default_max=60, default_window=60.0)
+    ),
 ) -> SpeechToTextResponse:
     """Transcribe an uploaded recording local-first without persisting child audio."""
 

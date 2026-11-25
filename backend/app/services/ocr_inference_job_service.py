@@ -50,6 +50,16 @@ DEFAULT_LEASE_SECONDS = 120
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_WORKER_HEARTBEAT_TTL_SECONDS = 45
 ORIGINAL_VIETOCR_SHA256 = "380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59"
+OCR_PIPELINE_VERSION = "hybrid_ocr_v2"
+ADMIN_JOB_KINDS = (
+    JOB_KIND_ADMIN_UPLOAD,
+    JOB_KIND_ADMIN_REUPLOAD,
+    JOB_KIND_ADMIN_REPROCESS,
+)
+USER_SCOPED_JOB_KINDS = (
+    JOB_KIND_PARENT_SUBMISSION,
+    JOB_KIND_LOCAL_SCAN,
+)
 
 _TRUTHY_VALUES = {"1", "true", "yes", "on"}
 _FALSY_VALUES = {"0", "false", "no", "off"}
@@ -668,6 +678,117 @@ class OcrInferenceJobService:
         self.db = db
         self.repo = OcrInferenceJobRepository(db)
 
+    async def _resolve_cache_key_components(
+        self, processing_meta: dict[str, Any] | None = None
+    ) -> tuple[str, str, str | None, str]:
+        meta = dict(processing_meta or {})
+        pointer = await self.repo.get_active_model_pointer()
+        profile = str(
+            meta.get("active_model_profile")
+            or meta.get("expected_model_profile")
+            or (pointer or {}).get("profile")
+            or "ORIGINAL"
+        )
+        model_sha = str(
+            meta.get("active_model_sha256")
+            or (pointer or {}).get("checkpoint_sha256")
+            or ORIGINAL_VIETOCR_SHA256
+        ).lower()
+        config_sha = meta.get("active_config_sha256")
+        if config_sha is None and pointer and pointer.get("config_sha256"):
+            config_sha = str(pointer["config_sha256"]).lower()
+        pipeline_version = str(meta.get("pipeline_version") or OCR_PIPELINE_VERSION)
+        return profile, model_sha, config_sha, pipeline_version
+
+    async def _apply_parent_submission_ocr_result(
+        self,
+        *,
+        job: OcrInferenceJob,
+        worker_id: str,
+        clean_full_text: str,
+        normalized_words: list[dict[str, Any]],
+        ocr_meta: dict[str, Any],
+        no_text_detected: bool,
+        model_profile: str | None,
+        model_sha256: str | None,
+        now: datetime,
+    ) -> UUID:
+        if job.SubmissionId is None:
+            raise HTTPException(status_code=422, detail="SubmissionId missing on job.")
+        sub = await self.db.scalar(
+            select(ParentBookPageSubmission)
+            .where(ParentBookPageSubmission.Id == job.SubmissionId)
+            .with_for_update()
+        )
+        stale_reason: str | None = None
+        if sub is None:
+            stale_reason = "SUBMISSION_DELETED"
+        elif sub.WorkflowStatus != "CHECKING":
+            stale_reason = f"SUBMISSION_STATUS_{sub.WorkflowStatus}"
+        elif sub.SourceSha256 != job.ImageSha256:
+            stale_reason = "SOURCE_IMAGE_REPLACED"
+        elif int(sub.SubmissionVersion) != int(job.ExpectedVersion):
+            stale_reason = "SUBMISSION_VERSION_CHANGED"
+        elif sub.CandidateHash != job.ExpectedCandidateHash:
+            stale_reason = "SUBMISSION_EDITED_MID_JOB"
+
+        if stale_reason is not None:
+            job.Status = "CANCELLED"
+            job.CancelledReason = stale_reason
+            job.LeaseExpiresAt = None
+            job.CompletedAt = now
+            job.UpdatedAt = now
+            await self.db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "STALE_SUBMISSION_MODIFIED", "reason": stale_reason},
+            )
+
+        merged_meta = dict(ocr_meta or {})
+        merged_meta["remote_worker_id"] = worker_id
+        if model_profile:
+            merged_meta["vietocr_profile"] = model_profile
+        if model_sha256:
+            merged_meta["vietocr_sha256"] = model_sha256
+        sub.OcrMetaJson = merged_meta
+        sub.OcrErrorCode = None
+
+        if no_text_detected:
+            empty_hash = hashlib.sha256(b"").hexdigest()
+            sub.OcrStatus = "NO_TEXT_DETECTED"
+            sub.IsImageOnly = True
+            sub.OcrText = ""
+            sub.OcrWordsJson = []
+            sub.OcrHash = empty_hash
+            sub.ProofreadStatus = "SKIPPED"
+            sub.ProofreadText = ""
+            sub.ProofreadHash = empty_hash
+            sub.ProofreadSuggestionsJson = []
+            sub.UncertainWordIndicesJson = []
+            sub.CandidateText = ""
+            sub.CandidateWordsJson = []
+            sub.CandidateHash = compute_candidate_hash(
+                "", source_sha256=sub.SourceSha256, is_image_only=True
+            )
+        else:
+            sub.OcrStatus = "COMPLETED"
+            sub.IsImageOnly = False
+            sub.OcrText = clean_full_text
+            sub.OcrWordsJson = normalized_words
+            sub.OcrHash = hashlib.sha256(
+                " ".join(unicodedata.normalize("NFC", clean_full_text).split()).encode("utf-8")
+            ).hexdigest()
+            sub.ProofreadStatus = "PENDING"
+            sub.CandidateText = clean_full_text
+            sub.CandidateWordsJson = normalized_words
+            sub.CandidateHash = compute_candidate_hash(
+                clean_full_text, source_sha256=sub.SourceSha256, is_image_only=False
+            )
+
+        sub.OptimisticLockVersion = int(sub.OptimisticLockVersion or 1) + 1
+        sub.UpdatedAt = now
+        return sub.Id
+
     async def enqueue_job(
         self,
         *,
@@ -707,7 +828,139 @@ class OcrInferenceJobService:
                     )
                 return existing
 
+        if book_id is not None:
+            book_row = await self.db.scalar(select(Book).where(Book.Id == book_id))
+            if book_row is not None and (
+                getattr(book_row, "IsDeleted", False)
+                or book_row.LifecycleStatus == "RETIRED"
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"code": "BOOK_SOFT_DELETED", "reason": "BOOK_SOFT_DELETED"},
+                )
+
         now = datetime.now(timezone.utc)
+        (
+            active_profile,
+            active_model_sha,
+            active_config_sha,
+            pipeline_version,
+        ) = await self._resolve_cache_key_components(processing_meta)
+        meta = dict(processing_meta or {})
+        meta.setdefault("active_model_profile", active_profile)
+        meta.setdefault("active_model_sha256", active_model_sha)
+        meta.setdefault("active_config_sha256", active_config_sha)
+        meta.setdefault("pipeline_version", pipeline_version)
+
+        cached_hit: OcrInferenceJob | None = None
+        if not meta.get("bypass_ocr_cache"):
+            cached_hit = await self.repo.find_completed_cached_job(
+                job_kind=job_kind,
+                owner_user_id=owner_user_id,
+                image_sha256=image_sha256,
+                active_model_profile=active_profile,
+                active_model_sha256=active_model_sha,
+                active_config_sha256=active_config_sha,
+                pipeline_version=pipeline_version,
+                admin_job_kinds=ADMIN_JOB_KINDS,
+                user_job_kinds=USER_SCOPED_JOB_KINDS,
+            )
+
+        if cached_hit is not None and isinstance(cached_hit.ResultPayload, dict):
+            cached_payload = dict(cached_hit.ResultPayload)
+            cached_words = _normalize_worker_words(list(cached_payload.get("words") or []))
+            cached_text = unicodedata.normalize(
+                "NFC", str(cached_payload.get("full_text") or "")
+            ).strip()
+            cached_no_text = bool(cached_payload.get("no_text_detected")) or (
+                not cached_words and not cached_text
+            )
+            cached_meta = dict(cached_payload.get("ocr_meta") or {})
+            cached_meta["ocr_cache_hit"] = True
+            cached_meta["ocr_cache_source_job_id"] = str(cached_hit.Id)
+            meta["ocr_cache_hit"] = True
+            meta["ocr_cache_source_job_id"] = str(cached_hit.Id)
+
+            job = OcrInferenceJob(
+                Id=uuid4(),
+                JobKind=job_kind,
+                Status="SUCCEEDED",
+                Priority=priority,
+                IdempotencyKey=clean_idem,
+                OwnerUserId=owner_user_id,
+                BookId=book_id,
+                PageId=page_id,
+                SubmissionId=submission_id,
+                LocalScanRequestId=local_scan_request_id,
+                ImageBucket=image_bucket,
+                ImagePath=image_path,
+                ImageSha256=image_sha256,
+                ImageWidth=image_width,
+                ImageHeight=image_height,
+                ImageMimeType=image_mime_type,
+                ProcessingMeta=meta,
+                ExpectedVersion=int(expected_version),
+                ExpectedCandidateHash=expected_candidate_hash,
+                ExpectedVerifiedRevisionId=expected_verified_revision_id,
+                ExpectedLatestRevisionId=expected_latest_revision_id,
+                FencingToken=0,
+                WorkerId="ocr-cache",
+                AttemptCount=0,
+                MaxAttempts=max(1, min(20, int(max_attempts))),
+                ResultPayload=cached_payload,
+                ModelProfile=active_profile,
+                ModelSha256=active_model_sha,
+                EngineDiagnostics={"cache_hit": True, "source_job_id": str(cached_hit.Id)},
+                DurationMs=0,
+                CreatedAt=now,
+                UpdatedAt=now,
+                CompletedAt=now,
+            )
+            await self.repo.create_job(job)
+
+            if job_kind in ADMIN_JOB_KINDS:
+                from app.services.admin_ocr_service import AdminOcrService
+
+                applied = await AdminOcrService(self.db).apply_remote_ocr_job_completion(
+                    job=job,
+                    full_text=cached_text,
+                    words=cached_words,
+                    ocr_meta=cached_meta,
+                    no_text_detected=cached_no_text,
+                    model_profile=active_profile,
+                    model_sha256=active_model_sha,
+                    now=now,
+                )
+                if applied.get("stale_reason"):
+                    job.Status = "CANCELLED"
+                    job.CancelledReason = str(applied["stale_reason"])
+                    job.CompletedAt = now
+                    job.UpdatedAt = now
+                    if job.CancelledReason == "BOOK_SOFT_DELETED":
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail={"code": "BOOK_SOFT_DELETED", "reason": "BOOK_SOFT_DELETED"},
+                        )
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={"code": "STALE_TARGET_MODIFIED", "reason": job.CancelledReason},
+                    )
+                job.RevisionId = applied.get("revision_id")
+            elif job_kind == JOB_KIND_PARENT_SUBMISSION:
+                sub_id = await self._apply_parent_submission_ocr_result(
+                    job=job,
+                    worker_id="ocr-cache",
+                    clean_full_text=cached_text,
+                    normalized_words=cached_words,
+                    ocr_meta=cached_meta,
+                    no_text_detected=cached_no_text,
+                    model_profile=active_profile,
+                    model_sha256=active_model_sha,
+                    now=now,
+                )
+                schedule_parent_submission_post_ocr(sub_id)
+            return job
+
         job = OcrInferenceJob(
             Id=uuid4(),
             JobKind=job_kind,
@@ -725,7 +978,7 @@ class OcrInferenceJobService:
             ImageWidth=image_width,
             ImageHeight=image_height,
             ImageMimeType=image_mime_type,
-            ProcessingMeta=dict(processing_meta or {}),
+            ProcessingMeta=meta,
             ExpectedVersion=int(expected_version),
             ExpectedCandidateHash=expected_candidate_hash,
             ExpectedVerifiedRevisionId=expected_verified_revision_id,
@@ -944,7 +1197,18 @@ class OcrInferenceJobService:
             )
         return job
 
+    async def _is_book_deleted(self, book_id: UUID | None) -> bool:
+        if book_id is None:
+            return False
+        book = await self.db.scalar(select(Book).where(Book.Id == book_id))
+        if book is None:
+            return False
+        return bool(getattr(book, "IsDeleted", False) or book.LifecycleStatus == "RETIRED")
+
     async def _is_target_still_current(self, job: OcrInferenceJob) -> tuple[bool, str | None]:
+        if await self._is_book_deleted(job.BookId):
+            return False, "BOOK_SOFT_DELETED"
+
         if job.JobKind == JOB_KIND_PARENT_SUBMISSION and job.SubmissionId is not None:
             sub = await self.db.scalar(
                 select(ParentBookPageSubmission).where(
@@ -970,6 +1234,8 @@ class OcrInferenceJobService:
             page = await self.db.scalar(select(BookPage).where(BookPage.Id == job.PageId))
             if page is None:
                 return False, "PAGE_DELETED"
+            if await self._is_book_deleted(page.BookId):
+                return False, "BOOK_SOFT_DELETED"
             if page.LifecycleStatus == "RETIRED":
                 return False, "PAGE_RETIRED"
             expected_page_path = (job.ProcessingMeta or {}).get("expected_page_image_path") or job.ImagePath
@@ -1149,12 +1415,13 @@ class OcrInferenceJobService:
             }
 
         if job.Status == "CANCELLED":
+            cancelled_reason = job.CancelledReason or "CANCELLED"
             await self.db.rollback()
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
-                    "code": "JOB_CANCELLED",
-                    "cancelled_reason": job.CancelledReason or "CANCELLED",
+                    "code": "BOOK_SOFT_DELETED" if cancelled_reason == "BOOK_SOFT_DELETED" else "JOB_CANCELLED",
+                    "cancelled_reason": cancelled_reason,
                 },
             )
         if (
@@ -1166,6 +1433,20 @@ class OcrInferenceJobService:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Fencing token mismatch; worker lease superseded.",
+            )
+        if await self._is_book_deleted(job.BookId):
+            job.Status = "CANCELLED"
+            job.CancelledReason = "BOOK_SOFT_DELETED"
+            job.LeaseExpiresAt = None
+            job.CompletedAt = now
+            job.UpdatedAt = now
+            await self.db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "BOOK_SOFT_DELETED",
+                    "reason": "BOOK_SOFT_DELETED",
+                },
             )
         if str(source_sha256).lower() != str(job.ImageSha256).lower():
             job.Status = "CANCELLED"
@@ -1210,6 +1491,14 @@ class OcrInferenceJobService:
                 job.CompletedAt = now
                 job.UpdatedAt = now
                 await self.db.commit()
+                if job.CancelledReason == "BOOK_SOFT_DELETED":
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "code": "BOOK_SOFT_DELETED",
+                            "reason": "BOOK_SOFT_DELETED",
+                        },
+                    )
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail={
@@ -1220,93 +1509,44 @@ class OcrInferenceJobService:
             job.RevisionId = applied.get("revision_id")
 
         elif job.JobKind == JOB_KIND_PARENT_SUBMISSION:
-            if job.SubmissionId is None:
-                raise HTTPException(status_code=422, detail="SubmissionId missing on job.")
-            sub = await self.db.scalar(
-                select(ParentBookPageSubmission)
-                .where(ParentBookPageSubmission.Id == job.SubmissionId)
-                .with_for_update()
+            should_schedule_post_ocr_submission_id = await self._apply_parent_submission_ocr_result(
+                job=job,
+                worker_id=worker_id,
+                clean_full_text=clean_full_text,
+                normalized_words=normalized_words,
+                ocr_meta=dict(ocr_meta or {}),
+                no_text_detected=bool(no_text_detected),
+                model_profile=model_profile,
+                model_sha256=model_sha256,
+                now=now,
             )
-            stale_reason: str | None = None
-            if sub is None:
-                stale_reason = "SUBMISSION_DELETED"
-            elif sub.WorkflowStatus != "CHECKING":
-                stale_reason = f"SUBMISSION_STATUS_{sub.WorkflowStatus}"
-            elif sub.SourceSha256 != job.ImageSha256:
-                stale_reason = "SOURCE_IMAGE_REPLACED"
-            elif int(sub.SubmissionVersion) != int(job.ExpectedVersion):
-                stale_reason = "SUBMISSION_VERSION_CHANGED"
-            elif sub.CandidateHash != job.ExpectedCandidateHash:
-                stale_reason = "SUBMISSION_EDITED_MID_JOB"
 
-            if stale_reason is not None:
-                job.Status = "CANCELLED"
-                job.CancelledReason = stale_reason
-                job.LeaseExpiresAt = None
-                job.CompletedAt = now
-                job.UpdatedAt = now
-                await self.db.commit()
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={"code": "STALE_SUBMISSION_MODIFIED", "reason": stale_reason},
-                )
+        proc_meta = dict(job.ProcessingMeta or {})
+        eff_profile = model_profile or proc_meta.get("active_model_profile") or "ORIGINAL"
+        eff_model_sha = (
+            model_sha256
+            or proc_meta.get("active_model_sha256")
+            or ORIGINAL_VIETOCR_SHA256
+        )
+        eff_config_sha = proc_meta.get("active_config_sha256")
+        eff_pipeline = str(proc_meta.get("pipeline_version") or OCR_PIPELINE_VERSION)
 
-            merged_meta = dict(ocr_meta or {})
-            merged_meta["remote_worker_id"] = worker_id
-            if model_profile:
-                merged_meta["vietocr_profile"] = model_profile
-            if model_sha256:
-                merged_meta["vietocr_sha256"] = model_sha256
-            sub.OcrMetaJson = merged_meta
-            sub.OcrErrorCode = None
-
-            if no_text_detected:
-                empty_hash = hashlib.sha256(b"").hexdigest()
-                sub.OcrStatus = "NO_TEXT_DETECTED"
-                sub.IsImageOnly = True
-                sub.OcrText = ""
-                sub.OcrWordsJson = []
-                sub.OcrHash = empty_hash
-                sub.ProofreadStatus = "SKIPPED"
-                sub.ProofreadText = ""
-                sub.ProofreadHash = empty_hash
-                sub.ProofreadSuggestionsJson = []
-                sub.UncertainWordIndicesJson = []
-                sub.CandidateText = ""
-                sub.CandidateWordsJson = []
-                sub.CandidateHash = compute_candidate_hash(
-                    "", source_sha256=sub.SourceSha256, is_image_only=True
-                )
-            else:
-                sub.OcrStatus = "COMPLETED"
-                sub.IsImageOnly = False
-                sub.OcrText = clean_full_text
-                sub.OcrWordsJson = normalized_words
-                sub.OcrHash = hashlib.sha256(
-                    " ".join(unicodedata.normalize("NFC", clean_full_text).split()).encode("utf-8")
-                ).hexdigest()
-                sub.ProofreadStatus = "PENDING"
-                sub.CandidateText = clean_full_text
-                sub.CandidateWordsJson = normalized_words
-                sub.CandidateHash = compute_candidate_hash(
-                    clean_full_text, source_sha256=sub.SourceSha256, is_image_only=False
-                )
-
-            sub.OptimisticLockVersion = int(sub.OptimisticLockVersion or 1) + 1
-            sub.UpdatedAt = now
-            should_schedule_post_ocr_submission_id = sub.Id
-
-        elif job.JobKind == JOB_KIND_LOCAL_SCAN:
-            job.ResultPayload = {
-                "full_text": clean_full_text,
-                "words": normalized_words,
-                "ocr_meta": dict(ocr_meta or {}),
-                "no_text_detected": bool(no_text_detected),
-            }
-
+        job.ResultPayload = {
+            "full_text": clean_full_text,
+            "words": normalized_words,
+            "ocr_meta": dict(ocr_meta or {}),
+            "no_text_detected": bool(no_text_detected),
+            "cache_key": {
+                "image_sha256": job.ImageSha256,
+                "active_model_profile": eff_profile,
+                "active_model_sha256": eff_model_sha,
+                "active_config_sha256": eff_config_sha,
+                "pipeline_version": eff_pipeline,
+            },
+        }
         job.Status = "SUCCEEDED"
-        job.ModelProfile = model_profile
-        job.ModelSha256 = model_sha256
+        job.ModelProfile = eff_profile
+        job.ModelSha256 = eff_model_sha
         job.EngineDiagnostics = dict(engine_diagnostics or {})
         job.DurationMs = duration_ms
         job.LeaseExpiresAt = None

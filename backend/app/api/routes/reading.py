@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, or_, select
 from typing import List
@@ -6,6 +6,8 @@ from uuid import UUID
 from app.api.deps import get_db, get_current_parent_id
 from app.models import (
     Book,
+    BookPage,
+    PageRevision,
     ReadingSession,
     ReadingEvent,
     FluencyAssessment,
@@ -27,6 +29,8 @@ from app.repositories.reading_content_repository import ReadingContentRepository
 from app.repositories.book_repository import CatalogRepository
 from app.services.reading_content_service import ReadingContentService
 from app.services.reading_comparison_service import ReadingComparisonService
+from app.services.local_ocr_scan_service import MAX_SCAN_IMAGE_BYTES
+from app.services.rate_limiter import rate_limit
 from app.schemas.reading import (
     ReadingPageDTO, ReadingCompletionSummaryDTO,
     SessionSummaryRead, ReadingPageNavigationCreate,
@@ -602,11 +606,59 @@ def _normalize_bbox_tuple(raw_bbox: object) -> tuple[float, float, float, float]
     return (0.0, 0.0, 0.1, 0.05)
 
 
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+MAX_MATCH_PAGE_BOOK_CANDIDATES = 120
+MAX_MATCH_PAGE_GLOBAL_CANDIDATES = 60
+
+
+def _bounded_match_limit(default_limit: int) -> int:
+    import os
+
+    raw = (os.getenv("VIREAD_MAX_MATCH_PAGE_CANDIDATES") or "").strip()
+    if raw:
+        try:
+            return max(1, min(200, int(raw)))
+        except ValueError:
+            pass
+    return default_limit
+
+
+async def _read_upload_bounded(
+    file: UploadFile,
+    *,
+    max_bytes: int = MAX_SCAN_IMAGE_BYTES,
+) -> bytes:
+    """Read an uploaded image in bounded chunks and fail fast with HTTP 413 above limit."""
+    chunks: list[bytes] = []
+    total = 0
+    try:
+        while True:
+            chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail="Image exceeds the 12 MB limit",
+                )
+            chunks.append(chunk)
+    finally:
+        try:
+            await file.close()
+        except Exception:
+            pass
+    return b"".join(chunks)
+
+
 @router.post("/books/{book_id}/match-page", response_model=CameraPageMatchRead)
 async def match_book_page_from_camera(
     book_id: UUID,
     file: UploadFile = File(...),
     actor_id: UUID = Depends(get_current_parent_id),
+    _rate_limited: None = Depends(
+        rate_limit("reading_match", default_max=60, default_window=60.0)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -615,7 +667,7 @@ async def match_book_page_from_camera(
     """
     await HistoryService(HistoryRepository(db)).require_parent(actor_id)
 
-    camera_bytes = await file.read()
+    camera_bytes = await _read_upload_bounded(file, max_bytes=MAX_SCAN_IMAGE_BYTES)
     framing = vision_page_matcher.check_framing(camera_bytes)
 
     if not framing["framing_valid"]:
@@ -630,24 +682,31 @@ async def match_book_page_from_camera(
 
     # Lấy các trang ACTIVE của cuốn sách (catalog hợp lệ hoặc sách riêng đã sẵn sàng của actor)
     from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
-    from app.policies.book_access import is_book_private
+    from app.policies.book_access import (
+        is_book_private,
+        is_private_book,
+        is_private_page_readable,
+    )
 
+    max_candidates = _bounded_match_limit(MAX_MATCH_PAGE_BOOK_CANDIDATES)
     pages_result = await db.execute(
         select(BookPage, Book)
         .join(Book, Book.Id == BookPage.BookId)
+        .join(PageRevision, PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
         .where(
             BookPage.BookId == book_id,
             BookPage.LifecycleStatus == "ACTIVE",
             BookPage.CurrentVerifiedRevisionId.is_not(None),
             CatalogRepository.readable_book(actor_id),
             or_(
-                ~CatalogRepository.is_private_book(),
-                CatalogRepository.is_private_page_readable(),
+                ~is_private_book(),
+                is_private_page_readable(),
             ),
         )
         .order_by(BookPage.PageNumber)
+        .limit(max_candidates)
     )
-    rows = pages_result.all()
+    rows = pages_result.all()[:max_candidates]
 
     if not rows:
         raise HTTPException(status_code=404, detail="Resource not found")
@@ -729,15 +788,18 @@ async def match_book_page_from_camera(
 async def match_page_global_from_camera(
     file: UploadFile = File(...),
     actor_id: UUID = Depends(get_current_parent_id),
+    _rate_limited: None = Depends(
+        rate_limit("reading_match", default_max=60, default_window=60.0)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Nhận diện sách và trang toàn cục từ Camera (dành cho Dashboard).
-    So khớp frame ảnh với toàn bộ các trang sách ACTIVE trong hệ thống để tìm cuốn sách và trang tương ứng.
+    So khớp frame ảnh với các trang sách ACTIVE trong phạm vi tối đa cho phép để tìm cuốn sách và trang tương ứng.
     """
     await HistoryService(HistoryRepository(db)).require_parent(actor_id)
 
-    camera_bytes = await file.read()
+    camera_bytes = await _read_upload_bounded(file, max_bytes=MAX_SCAN_IMAGE_BYTES)
     framing = vision_page_matcher.check_framing(camera_bytes)
 
     if not framing["framing_valid"]:
@@ -751,25 +813,32 @@ async def match_page_global_from_camera(
             matched_page=None,
         )
 
-    # Lấy toàn bộ các trang sách ACTIVE của các sách mà actor được phép đọc
+    # Lấy tập ứng viên giới hạn các trang sách ACTIVE của các sách mà actor được phép đọc
     from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
-    from app.policies.book_access import is_book_private
+    from app.policies.book_access import (
+        is_book_private,
+        is_private_book,
+        is_private_page_readable,
+    )
 
+    max_candidates = _bounded_match_limit(MAX_MATCH_PAGE_GLOBAL_CANDIDATES)
     pages_result = await db.execute(
         select(BookPage, Book)
         .join(Book, Book.Id == BookPage.BookId)
+        .join(PageRevision, PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
         .where(
             BookPage.LifecycleStatus == "ACTIVE",
             BookPage.CurrentVerifiedRevisionId.is_not(None),
             CatalogRepository.readable_book(actor_id),
             or_(
-                ~CatalogRepository.is_private_book(),
-                CatalogRepository.is_private_page_readable(),
+                ~is_private_book(),
+                is_private_page_readable(),
             ),
         )
         .order_by(BookPage.BookId, BookPage.PageNumber)
+        .limit(max_candidates)
     )
-    rows = pages_result.all()
+    rows = pages_result.all()[:max_candidates]
 
     if not rows:
         raise HTTPException(status_code=404, detail="No active books or pages found")
@@ -863,6 +932,9 @@ async def scan_page_with_local_ocr(
     child_id: UUID | None = Form(default=None),
     idempotency_key: UUID | None = Form(default=None),
     actor_id: UUID = Depends(get_current_parent_id),
+    _rate_limited: None = Depends(
+        rate_limit("reading_ocr", default_max=20, default_window=60.0)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Run local Vietnamese OCR on an uploaded/photographed book page and match verified catalog pages."""

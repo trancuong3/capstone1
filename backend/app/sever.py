@@ -42,6 +42,10 @@ from app.database.session import (
 )
 from app.diagnostic_logging import log_diagnostic
 from app.request_context import request_id_context
+from app.services.local_voice_worker_bootstrap import (
+    arm_local_voice_worker_autostart,
+    ensure_local_voice_worker_running,
+)
 from app.services.ocr_inference_job_service import (
     get_ocr_mode,
     is_heavy_workers_disabled,
@@ -281,11 +285,9 @@ async def lifespan(_app: FastAPI):
             ),
             name="admin_ai_workflow_worker",
         )
-    parent_book_worker_enabled = (
-        not is_heavy_workers_disabled()
-        and os.getenv("PARENT_BOOK_WORKER_ENABLED", "true").strip().lower()
-        not in {"0", "false", "no", "off"}
-    )
+    parent_book_worker_enabled = os.getenv(
+        "PARENT_BOOK_WORKER_ENABLED", "true"
+    ).strip().lower() not in {"0", "false", "no", "off"}
     if APP_ENVIRONMENT != "test" and parent_book_worker_enabled:
         parent_book_task = asyncio.create_task(
             _run_worker_with_startup_delay(
@@ -295,12 +297,9 @@ async def lifespan(_app: FastAPI):
             ),
             name="parent_book_submission_worker",
         )
-    ocr_outbox_enabled = (
-        not is_remote_ocr_mode()
-        and not is_heavy_workers_disabled()
-        and os.getenv("VIREAD_OCR_OUTBOX_WORKER_ENABLED", "true").strip().lower()
-        not in {"0", "false", "no", "off"}
-    )
+    ocr_outbox_enabled = os.getenv(
+        "VIREAD_OCR_OUTBOX_WORKER_ENABLED", "true"
+    ).strip().lower() not in {"0", "false", "no", "off"}
     stop_viread_ocr_outbox = asyncio.Event()
     if APP_ENVIRONMENT != "test" and ocr_outbox_enabled:
         viread_outbox_task = asyncio.create_task(
@@ -311,12 +310,9 @@ async def lifespan(_app: FastAPI):
             ),
             name="viread_ocr_verified_outbox_worker",
         )
-    training_worker_enabled = (
-        not is_remote_ocr_mode()
-        and not is_heavy_workers_disabled()
-        and os.getenv("VIREAD_OCR_AUTO_TRAINING_WORKER_ENABLED", "true").strip().lower()
-        not in {"0", "false", "no", "off"}
-    )
+    training_worker_enabled = os.getenv(
+        "VIREAD_OCR_AUTO_TRAINING_WORKER_ENABLED", "true"
+    ).strip().lower() not in {"0", "false", "no", "off"}
     stop_viread_training = asyncio.Event()
     if APP_ENVIRONMENT != "test" and training_worker_enabled:
         viread_training_task = asyncio.create_task(
@@ -349,6 +345,15 @@ async def lifespan(_app: FastAPI):
         except Exception as exc:
             logger.warning("Could not start the local VietOCR worker (%s)", type(exc).__name__)
 
+    stop_local_voice_bootstrap = asyncio.Event()
+    local_voice_bootstrap_task = None
+    if APP_ENVIRONMENT != "test":
+        arm_local_voice_worker_autostart(True)
+        local_voice_bootstrap_task = asyncio.create_task(
+            ensure_local_voice_worker_running(stop_event=stop_local_voice_bootstrap),
+            name="local_voice_worker_bootstrap",
+        )
+
     if _app is not None:
         _app.state.background_workers = {
             "viread_ocr_outbox": viread_outbox_task,
@@ -356,6 +361,7 @@ async def lifespan(_app: FastAPI):
             "book_quality": book_quality_task,
             "admin_ai_workflow": admin_ai_workflow_task,
             "parent_book_submission": parent_book_task,
+            "local_voice_bootstrap": local_voice_bootstrap_task,
             "active_model_registry": active_model_worker,
             "local_trainer_process": local_trainer_process,
         }
@@ -367,6 +373,8 @@ async def lifespan(_app: FastAPI):
         # completes ASGI lifespan shutdown cleanly instead of logging a traceback.
         pass
     finally:
+        arm_local_voice_worker_autostart(False)
+        stop_local_voice_bootstrap.set()
         stop_active_model_worker.set()
         stop_viread_ocr_outbox.set()
         stop_viread_training.set()
@@ -375,6 +383,7 @@ async def lifespan(_app: FastAPI):
         stop_parent_book_worker.set()
 
         worker_tasks = (
+            local_voice_bootstrap_task,
             viread_outbox_task,
             viread_training_task,
             book_quality_task,
@@ -387,6 +396,11 @@ async def lifespan(_app: FastAPI):
             await asyncio.gather(
                 _shutdown_subprocess(local_trainer_process),
                 shutdown_post_ocr_tasks(),
+                _shutdown_worker_task(
+                    local_voice_bootstrap_task,
+                    stop_local_voice_bootstrap,
+                    timeout=2.0,
+                ),
                 _shutdown_worker_task(viread_outbox_task, stop_viread_ocr_outbox),
                 _shutdown_worker_task(viread_training_task, stop_viread_training),
                 _shutdown_worker_task(book_quality_task, stop_book_quality_worker),

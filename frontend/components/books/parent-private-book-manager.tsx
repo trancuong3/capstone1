@@ -31,6 +31,7 @@ import { ParentOcrContributionCard } from "@/components/books/parent-ocr-contrib
 import { AuthenticatedImage } from "@/components/common/authenticated-image";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
@@ -227,12 +228,17 @@ function lockReasonForSubmission(sub: ParentPageSubmissionDTO): string | null {
   return "Trang chưa đủ điều kiện để thêm vào sách đọc.";
 }
 
+const SUBMISSIONS_PAGE_SIZE = 10;
+const COMMITTED_PAGES_PAGE_SIZE = 12;
+
 interface ParentPrivateBookManagerProps {
   bookId: string;
+  returnPage?: number;
 }
 
 export function ParentPrivateBookManager({
   bookId,
+  returnPage = 1,
 }: ParentPrivateBookManagerProps) {
   const authRuntime = useAuthRuntime();
   const currentUserId = authRuntime.session?.user?.id ?? "";
@@ -241,6 +247,7 @@ export function ParentPrivateBookManager({
       key={`${currentUserId}:${bookId}`}
       bookId={bookId}
       currentUserId={currentUserId}
+      returnPage={returnPage}
     />
   );
 }
@@ -248,10 +255,14 @@ export function ParentPrivateBookManager({
 function ParentPrivateBookManagerContent({
   bookId,
   currentUserId,
+  returnPage = 1,
 }: ParentPrivateBookManagerProps & { currentUserId: string }) {
   const service = useParentPrivateBookService();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const detailRequestIdRef = useRef(0);
+  const backHref =
+    returnPage > 1 ? `/my-books?page=${Math.floor(returnPage)}` : "/my-books";
 
   const [detail, setDetail] = useState<ParentPrivateBookDetailDTO | null>(null);
   const [loading, setLoading] = useState(true);
@@ -260,6 +271,8 @@ function ParentPrivateBookManagerContent({
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [submissionsPage, setSubmissionsPage] = useState(1);
+  const [committedPage, setCommittedPage] = useState(1);
 
   // Upload form state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -315,6 +328,7 @@ function ParentPrivateBookManagerContent({
 
   const loadDetail = useCallback(
     async (silent = false) => {
+      const requestId = ++detailRequestIdRef.current;
       if (!silent) {
         setLoading(true);
       }
@@ -322,8 +336,10 @@ function ParentPrivateBookManagerContent({
       setNotFound(false);
       try {
         const data = await service.get(bookId);
+        if (requestId !== detailRequestIdRef.current) return;
         setDetail(data);
       } catch (error) {
+        if (requestId !== detailRequestIdRef.current) return;
         if (isServiceError(error) && error.status === 404) {
           setDetail(null);
           setNotFound(true);
@@ -343,7 +359,7 @@ function ParentPrivateBookManagerContent({
           );
         }
       } finally {
-        if (!silent) {
+        if (!silent && requestId === detailRequestIdRef.current) {
           setLoading(false);
         }
       }
@@ -353,17 +369,23 @@ function ParentPrivateBookManagerContent({
 
   useEffect(() => {
     clearPrivateMediaMemoryCache();
-    let active = true;
+    const requestId = ++detailRequestIdRef.current;
+    const controller = new AbortController();
     void service
-      .get(bookId)
+      .get(bookId, controller.signal)
       .then((data) => {
-        if (!active) return;
+        if (requestId !== detailRequestIdRef.current) return;
         setDetail(data);
         setNotFound(false);
         setLoadError(null);
       })
       .catch((error: unknown) => {
-        if (!active) return;
+        if (
+          controller.signal.aborted ||
+          requestId !== detailRequestIdRef.current
+        ) {
+          return;
+        }
         if (isServiceError(error) && error.status === 404) {
           setDetail(null);
           setNotFound(true);
@@ -377,10 +399,11 @@ function ParentPrivateBookManagerContent({
         }
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (requestId === detailRequestIdRef.current) setLoading(false);
       });
     return () => {
-      active = false;
+      detailRequestIdRef.current += 1;
+      controller.abort();
     };
   }, [bookId, currentUserId, service]);
 
@@ -624,7 +647,7 @@ function ParentPrivateBookManagerContent({
     setActionNotice(null);
     try {
       await service.delete(bookId);
-      router.push("/my-books");
+      router.push(backHref);
     } catch (error) {
       setActionError(
         errorText(error, "Không thể xóa sách riêng. Vui lòng thử lại."),
@@ -786,7 +809,7 @@ function ParentPrivateBookManagerContent({
         <EmptyState
           action={
             <ButtonLink
-              href="/my-books"
+              href={backHref}
               variant="secondary"
               className="max-w-64"
             >
@@ -839,18 +862,36 @@ function ParentPrivateBookManagerContent({
       Boolean(item.tool_check_error_code) ||
       item.workflow_status === "CHECK_FAILED",
   ).length;
-  const visibleSubmissions =
+  const filteredSubmissions =
     statusFilter === "ALL"
       ? activeSubmissions
       : activeSubmissions.filter(
           (item) => submissionFilterGroup(item) === statusFilter,
         );
+  const submissionsTotalPages = Math.max(
+    1,
+    Math.ceil(filteredSubmissions.length / SUBMISSIONS_PAGE_SIZE),
+  );
+  const safeSubmissionsPage = Math.min(submissionsPage, submissionsTotalPages);
+  const visibleSubmissions = filteredSubmissions.slice(
+    (safeSubmissionsPage - 1) * SUBMISSIONS_PAGE_SIZE,
+    safeSubmissionsPage * SUBMISSIONS_PAGE_SIZE,
+  );
+  const committedTotalPages = Math.max(
+    1,
+    Math.ceil(committedPages.length / COMMITTED_PAGES_PAGE_SIZE),
+  );
+  const safeCommittedPage = Math.min(committedPage, committedTotalPages);
+  const visibleCommittedPages = committedPages.slice(
+    (safeCommittedPage - 1) * COMMITTED_PAGES_PAGE_SIZE,
+    safeCommittedPage * COMMITTED_PAGES_PAGE_SIZE,
+  );
 
   return (
     <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 py-6 sm:px-8 sm:py-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link
-          href="/my-books"
+          href={backHref}
           className="inline-flex min-h-10 items-center gap-1.5 text-sm font-bold text-primary hover:underline"
         >
           <ArrowLeft aria-hidden="true" className="size-4" />
@@ -860,6 +901,7 @@ function ParentPrivateBookManagerContent({
         <div className="flex flex-wrap items-center gap-2">
           <Button
             className="w-auto"
+            fullWidth={false}
             onClick={() => void loadDetail(false)}
             variant="secondary"
           >
@@ -870,12 +912,13 @@ function ParentPrivateBookManagerContent({
             <ButtonLink
               href={`/books/${encodeURIComponent(book.id)}`}
               className="w-auto"
+              fullWidth={false}
             >
               <BookOpen aria-hidden="true" className="size-4" />
               Mở đọc cùng bé
             </ButtonLink>
           ) : (
-            <Button className="w-auto" disabled type="button">
+            <Button className="w-auto" disabled fullWidth={false} type="button">
               <BookOpen aria-hidden="true" className="size-4" />
               Chưa mở đọc cùng bé
             </Button>
@@ -1291,7 +1334,10 @@ function ParentPrivateBookManagerContent({
                         ? "border-primary bg-primary text-white"
                         : "border-border bg-canvas text-ink hover:bg-sky/50"
                     }`}
-                    onClick={() => setStatusFilter(pill.key)}
+                    onClick={() => {
+                      setStatusFilter(pill.key);
+                      setSubmissionsPage(1);
+                    }}
                     type="button"
                   >
                     {pill.label}
@@ -1305,7 +1351,7 @@ function ParentPrivateBookManagerContent({
                 aria-label="Tổng quan nhanh trạng thái các trang"
                 className="flex flex-wrap gap-1.5 border-t border-border pt-3"
               >
-                {activeSubmissions.map((sub) => {
+                {activeSubmissions.map((sub, subIdx) => {
                   const chipStyle =
                     WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
                     "border-border bg-canvas text-ink";
@@ -1315,6 +1361,9 @@ function ParentPrivateBookManagerContent({
                       className={`inline-flex items-center gap-1 rounded-control border px-2 py-1 text-[11px] font-bold ${chipStyle}`}
                       onClick={() => {
                         setStatusFilter("ALL");
+                        setSubmissionsPage(
+                          Math.floor(subIdx / SUBMISSIONS_PAGE_SIZE) + 1,
+                        );
                         const target = document.querySelector(
                           `[data-submission-id="${sub.id}"]`,
                         );
@@ -1360,6 +1409,7 @@ function ParentPrivateBookManagerContent({
             Không có trang nào thuộc nhóm trạng thái đang lọc.
           </div>
         ) : (
+          <>
           <div className="flex flex-col gap-4">
             {visibleSubmissions.map((sub) => {
               const badgeStyle =
@@ -1879,6 +1929,16 @@ function ParentPrivateBookManagerContent({
               );
             })}
           </div>
+          <PaginationBar
+            ariaLabel="Phân trang các trang đang kiểm tra"
+            compact
+            itemLabel="trang"
+            onPageChange={setSubmissionsPage}
+            page={safeSubmissionsPage}
+            pageSize={SUBMISSIONS_PAGE_SIZE}
+            total={filteredSubmissions.length}
+          />
+          </>
         )}
       </section>
 
@@ -1899,8 +1959,9 @@ function ParentPrivateBookManagerContent({
             được Admin duyệt), bấm <strong>Thêm trang vào sách</strong> ở trên.
           </p>
         ) : (
+          <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {committedPages.map((page) => {
+            {visibleCommittedPages.map((page) => {
               const isEditingPage = editingPageId === page.page_id;
               const isConfirmingDelete = confirmDeletePageId === page.page_id;
               const isPageBusy =
@@ -2106,6 +2167,16 @@ function ParentPrivateBookManagerContent({
               );
             })}
           </div>
+          <PaginationBar
+            ariaLabel="Phân trang các trang đã thêm vào sách"
+            compact
+            itemLabel="trang"
+            onPageChange={setCommittedPage}
+            page={safeCommittedPage}
+            pageSize={COMMITTED_PAGES_PAGE_SIZE}
+            total={committedPages.length}
+          />
+          </>
         )}
       </section>
     </section>

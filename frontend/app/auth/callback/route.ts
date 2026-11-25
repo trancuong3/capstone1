@@ -4,7 +4,63 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 const SAFE_HOST_HEADER_RE = /^[a-zA-Z0-9.-]+(?::\d{1,5})?$/;
 
+function parseConfiguredOrigin(raw: string | undefined): string | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+function isLoopbackOrPrivateLanHost(hostHeader: string): boolean {
+  const hostname = hostHeader.replace(/:\d+$/, "").toLowerCase();
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return true;
+  }
+  const parts = hostname.split(".");
+  if (parts.length !== 4) return false;
+  const octets = parts.map((part) => Number.parseInt(part, 10));
+  if (
+    octets.some(
+      (value, idx) =>
+        !Number.isInteger(value) ||
+        String(value) !== parts[idx] ||
+        value < 0 ||
+        value > 255,
+    )
+  ) {
+    return false;
+  }
+  return (
+    octets[0] === 10 ||
+    (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+    (octets[0] === 192 && octets[1] === 168)
+  );
+}
+
 function resolvePublicOrigin(request: NextRequest): string {
+  const configuredSiteOrigin = parseConfiguredOrigin(
+    process.env.NEXT_PUBLIC_SITE_URL,
+  );
+  const extraAllowedOrigins = (
+    process.env.VIREAD_ALLOWED_CALLBACK_ORIGINS ?? ""
+  )
+    .split(",")
+    .map((entry) => parseConfiguredOrigin(entry))
+    .filter((entry): entry is string => entry !== null);
+
+  const allowedOrigins = new Set<string>([
+    ...(configuredSiteOrigin ? [configuredSiteOrigin] : []),
+    ...extraAllowedOrigins,
+  ]);
+  const requestOrigin = new URL(request.url).origin;
+
   const rawHost =
     request.headers.get("x-forwarded-host")?.split(",")[0]?.trim() ??
     request.headers.get("host")?.split(",")[0]?.trim() ??
@@ -21,9 +77,19 @@ function resolvePublicOrigin(request: NextRequest): string {
         : request.nextUrl.protocol === "http:"
           ? "http"
           : "https";
-    return `${proto}://${rawHost}`;
+    const candidateOrigin = `${proto}://${rawHost}`;
+    if (
+      allowedOrigins.has(candidateOrigin) ||
+      (allowedOrigins.size === 0 &&
+        (candidateOrigin === requestOrigin ||
+          isLoopbackOrPrivateLanHost(rawHost))) ||
+      (!configuredSiteOrigin && isLoopbackOrPrivateLanHost(rawHost))
+    ) {
+      return candidateOrigin;
+    }
   }
-  return new URL(request.url).origin;
+
+  return configuredSiteOrigin ?? requestOrigin;
 }
 
 function redirectToLogin(

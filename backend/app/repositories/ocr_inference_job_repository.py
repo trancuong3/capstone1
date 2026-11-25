@@ -323,7 +323,7 @@ class OcrInferenceJobRepository:
         )
         return list((await self.db.scalars(query)).all())
 
-    async def queue_depth_counts(self, *, now: datetime | None = None) -> dict[str, int]:
+    async def queue_depth_counts(self, *, now: datetime | None = None) -> dict[str, Any]:
         ts = now or datetime.now(timezone.utc)
         rows = (
             await self.db.execute(
@@ -332,7 +332,7 @@ class OcrInferenceJobRepository:
                 )
             )
         ).all()
-        counts = {
+        counts: dict[str, Any] = {
             "queued": 0,
             "claimed": 0,
             "running": 0,
@@ -353,9 +353,31 @@ class OcrInferenceJobRepository:
                 OcrInferenceJob.LeaseExpiresAt <= ts,
             )
         )
+        oldest_pending_created = await self.db.scalar(
+            select(func.min(OcrInferenceJob.CreatedAt)).where(
+                OcrInferenceJob.Status.in_(("QUEUED", "FAILED_RETRYABLE", "CLAIMED", "RUNNING"))
+            )
+        )
+        latest_succeeded_at = await self.db.scalar(
+            select(func.max(OcrInferenceJob.CompletedAt)).where(
+                OcrInferenceJob.Status == "SUCCEEDED"
+            )
+        )
+        if oldest_pending_created is not None:
+            if oldest_pending_created.tzinfo is None:
+                oldest_pending_created = oldest_pending_created.replace(tzinfo=timezone.utc)
+            oldest_age = round(max(0.0, (ts - oldest_pending_created).total_seconds()), 1)
+        else:
+            oldest_age = None
+        if latest_succeeded_at is not None and latest_succeeded_at.tzinfo is None:
+            latest_succeeded_at = latest_succeeded_at.replace(tzinfo=timezone.utc)
         counts["expired_leases"] = int(expired_count or 0)
         counts["pending_total"] = counts["queued"] + counts["failed_retryable"]
         counts["active_total"] = counts["claimed"] + counts["running"]
+        counts["oldest_pending_job_age_seconds"] = oldest_age
+        counts["latest_succeeded_at"] = (
+            latest_succeeded_at.isoformat() if latest_succeeded_at is not None else None
+        )
         return counts
 
     async def get_active_model_pointer(self) -> dict[str, Any] | None:
@@ -371,3 +393,63 @@ class OcrInferenceJobRepository:
             return dict(row) if row is not None else None
         except Exception:
             return None
+
+    async def find_completed_cached_job(
+        self,
+        *,
+        job_kind: str,
+        owner_user_id: UUID | None,
+        image_sha256: str,
+        active_model_profile: str | None,
+        active_model_sha256: str | None,
+        active_config_sha256: str | None,
+        pipeline_version: str,
+        admin_job_kinds: tuple[str, ...],
+        user_job_kinds: tuple[str, ...],
+    ) -> OcrInferenceJob | None:
+        """Tenant-safe SHA-256 completed OCR cache lookup keyed by model/config/pipeline."""
+        filters: list[Any] = [
+            OcrInferenceJob.Status == "SUCCEEDED",
+            OcrInferenceJob.ImageSha256 == image_sha256,
+            OcrInferenceJob.ResultPayload.is_not(None),
+        ]
+        if job_kind in user_job_kinds:
+            if owner_user_id is None:
+                return None
+            filters.append(OcrInferenceJob.OwnerUserId == owner_user_id)
+            filters.append(OcrInferenceJob.JobKind.in_(user_job_kinds))
+        else:
+            filters.append(OcrInferenceJob.JobKind.in_(admin_job_kinds))
+        if active_model_profile:
+            filters.append(OcrInferenceJob.ModelProfile == active_model_profile)
+        if active_model_sha256:
+            filters.append(OcrInferenceJob.ModelSha256 == active_model_sha256)
+
+        candidates = list(
+            (
+                await self.db.scalars(
+                    select(OcrInferenceJob)
+                    .where(*filters)
+                    .order_by(OcrInferenceJob.CompletedAt.desc(), OcrInferenceJob.CreatedAt.desc())
+                    .limit(20)
+                )
+            ).all()
+        )
+        for candidate in candidates:
+            payload = candidate.ResultPayload if isinstance(candidate.ResultPayload, dict) else None
+            if not payload or "words" not in payload:
+                continue
+            cache_meta = payload.get("cache_key") if isinstance(payload.get("cache_key"), dict) else {}
+            proc_meta = candidate.ProcessingMeta if isinstance(candidate.ProcessingMeta, dict) else {}
+            cand_profile = cache_meta.get("active_model_profile") or candidate.ModelProfile
+            cand_sha = cache_meta.get("active_model_sha256") or candidate.ModelSha256
+            cand_cfg = cache_meta.get("active_config_sha256") if "active_config_sha256" in cache_meta else proc_meta.get("active_config_sha256")
+            cand_pipe = cache_meta.get("pipeline_version") or proc_meta.get("pipeline_version")
+            if (
+                cand_profile == active_model_profile
+                and cand_sha == active_model_sha256
+                and cand_cfg == active_config_sha256
+                and cand_pipe == pipeline_version
+            ):
+                return candidate
+        return None

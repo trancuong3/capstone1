@@ -380,11 +380,17 @@ function applyToneToRhyme(rhyme: string, tone: "sac" | "nang"): string | null {
   return chars.join("");
 }
 
+const phonicsCueCache = new Map<string, ReadonlySet<string>>();
+const MAX_PHONICS_CUE_CACHE = 4096;
+
 /**
  * Build the set of legal single-token phonics cues (including controlled ASR
  * phonetic variants) a child may utter BEFORE blending `word`.
  */
 export function buildPhonicsCueSet(word: string): ReadonlySet<string> {
+  const cached = phonicsCueCache.get(word);
+  if (cached) return cached;
+
   const parts = decomposeVietnameseSyllable(word);
   if (!parts) return new Set();
 
@@ -478,6 +484,10 @@ export function buildPhonicsCueSet(word: string): ReadonlySet<string> {
     add(toneWord);
   }
 
+  if (phonicsCueCache.size >= MAX_PHONICS_CUE_CACHE) {
+    phonicsCueCache.clear();
+  }
+  phonicsCueCache.set(word, cues);
   return cues;
 }
 

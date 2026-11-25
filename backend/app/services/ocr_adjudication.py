@@ -41,14 +41,18 @@ MIN_SUPPORTING_ENGINES = 2
 MAX_OPPOSING_READINGS_PER_TOKEN = 1
 
 
+_SEQ2SEQ_CONTROL_TOKEN_RE = re.compile(r"<(?:pad|sos|eos|unk)>", re.IGNORECASE)
+
+
 def adjudication_token(value: object) -> str | None:
     """NFC + lowercase + outer punctuation trim; diacritics are preserved.
 
     Mirrors ``ocr_engine.normalize_word`` without importing the heavy engine
-    module. Returns ``None`` for non-strings and for values that are not a
-    single token, so an empty or multi-word result never counts as a reading.
+    module. Returns ``None`` for non-strings, values containing seq2seq control
+    tokens (``<pad>``, ``<sos>``, ``<eos>``, ``<unk>``), and values that are not
+    a single token, so an empty or multi-word result never counts as a reading.
     """
-    if not isinstance(value, str):
+    if not isinstance(value, str) or _SEQ2SEQ_CONTROL_TOKEN_RE.search(value):
         return None
     token = unicodedata.normalize("NFC", value).strip().lower()
     while token and (

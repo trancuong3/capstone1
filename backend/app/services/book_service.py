@@ -155,6 +155,7 @@ class CatalogService:
     ):
         book = await self._require_readable_book(book_id, actor_id=actor_id)
         private = is_book_private(book)
+        book_owner_id = getattr(book, "OwnerParentId", None)
         pages = (
             await self.repository.previews(book_id, private=True)
             if private
@@ -174,11 +175,14 @@ class CatalogService:
         await self.repository.db.rollback()
         if private:
             preview_urls = [
-                private_page_image_url(
+                await asyncio.to_thread(
+                    private_page_image_url,
                     book_id,
                     page["page_id"],
                     revision_id=page["current_verified_revision_id"],
                     base_url=base_url,
+                    storage_path=page["image_path"],
+                    owner_id=book_owner_id,
                 )
                 for page in snapshots
             ]

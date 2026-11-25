@@ -50,6 +50,7 @@ from app.schemas.parent_private_book import (
     ParentPageSubmissionRead,
     ParentPrivateBookCreate,
     ParentPrivateBookDetailRead,
+    ParentPrivateBookPageRead,
     ParentPrivateBookSummaryRead,
     ParentPrivateBookUpdate,
     ParentPrivatePageEditRequest,
@@ -384,7 +385,13 @@ class ParentPrivateBookService:
             source_format=sub.SourceFormat,
             image_width=int(sub.ImageWidth),
             image_height=int(sub.ImageHeight),
-            image_url=private_submission_image_url(sub.BookId, sub.Id, base_url=base_url),
+            image_url=private_submission_image_url(
+                sub.BookId,
+                sub.Id,
+                base_url=base_url,
+                storage_path=sub.SourceStoragePath,
+                owner_id=sub.OwnerParentId,
+            ),
             source_type=sub.SourceType,  # type: ignore[arg-type]
             source_type_label=SOURCE_TYPE_LABELS.get(sub.SourceType, sub.SourceType),
             source_note=sub.SourceNote,
@@ -592,11 +599,13 @@ class ParentPrivateBookService:
             ocr_contribution=contrib_map.get(book.Id),
         )
 
-    async def list_books(
-        self, actor_id: UUID, *, ready_only: bool = False
+    async def _serialize_book_summaries(
+        self,
+        actor_id: UUID,
+        books: list[Book],
+        *,
+        ready_only: bool = False,
     ) -> list[ParentPrivateBookSummaryRead]:
-        await self._require_parent(actor_id)
-        books = await self.repo.list_owned_private_books(actor_id, ready_only=ready_only)
         if not books:
             return []
         book_ids = [b.Id for b in books]
@@ -625,6 +634,42 @@ class ParentPrivateBookService:
             )
         return results
 
+    async def list_books(
+        self, actor_id: UUID, *, ready_only: bool = False
+    ) -> list[ParentPrivateBookSummaryRead]:
+        await self._require_parent(actor_id)
+        books = await self.repo.list_owned_private_books(actor_id, ready_only=ready_only)
+        return await self._serialize_book_summaries(
+            actor_id, books, ready_only=ready_only
+        )
+
+    async def list_books_paged(
+        self,
+        actor_id: UUID,
+        *,
+        ready_only: bool = False,
+        search: str | None = None,
+        limit: int = 9,
+        offset: int = 0,
+    ) -> ParentPrivateBookPageRead:
+        await self._require_parent(actor_id)
+        books, total = await self.repo.list_owned_private_books_paged(
+            actor_id,
+            ready_only=ready_only,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+        items = await self._serialize_book_summaries(
+            actor_id, books, ready_only=ready_only
+        )
+        return ParentPrivateBookPageRead(
+            items=items,
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
     async def get_book(
         self, actor_id: UUID, book_id: UUID, *, base_url: str | None = None
     ) -> ParentPrivateBookDetailRead:
@@ -649,6 +694,8 @@ class ParentPrivateBookService:
                     page.Id,
                     revision_id=page.CurrentVerifiedRevisionId,
                     base_url=base_url,
+                    storage_path=page.ImagePath,
+                    owner_id=book.OwnerParentId,
                 ),
                 created_at=page.CreatedAt,
             )
@@ -2679,7 +2726,11 @@ class ParentPrivateBookService:
             source_sha256=sub.SourceSha256,
             image_width=int(sub.ImageWidth),
             image_height=int(sub.ImageHeight),
-            image_url=admin_submission_image_url(sub.Id, base_url=base_url),
+            image_url=admin_submission_image_url(
+                sub.Id,
+                base_url=base_url,
+                storage_path=sub.SourceStoragePath,
+            ),
             workflow_status=sub.WorkflowStatus,  # type: ignore[arg-type]
             workflow_status_label=WORKFLOW_STATUS_LABELS.get(sub.WorkflowStatus, sub.WorkflowStatus),
             request_status=latest_req.Status if latest_req else None,

@@ -17,6 +17,10 @@ import {
 } from "@/lib/reading/session-voice-lock";
 import { setSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
 import {
+  getPreferredTtsAcceptHeader,
+  type TtsAudioFormat,
+} from "@/lib/reading/tts-audio-format";
+import {
   recordSttEngineUsage,
   recordTtsEngineUsage,
 } from "@/lib/reading/voice-engine-status";
@@ -78,6 +82,7 @@ export interface TextToSpeechOptions {
   readonly voiceId?: string;
   readonly speed?: number;
   readonly wordSample?: boolean;
+  readonly audioFormat?: TtsAudioFormat;
   readonly providerMode?: VoiceProviderMode;
   readonly allowGoogleTts?: boolean;
   readonly sessionId?: string | null;
@@ -265,7 +270,10 @@ export function createSpeechService(): SpeechService {
             "TTS_UNAVAILABLE",
             {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                Accept: getPreferredTtsAcceptHeader(options.audioFormat),
+                "Content-Type": "application/json",
+              },
               body: JSON.stringify({
                 text: normalizedText,
                 ...(options.voiceId ? { voice_id: options.voiceId } : {}),
@@ -273,6 +281,9 @@ export function createSpeechService(): SpeechService {
                   ? { speed: options.speed }
                   : {}),
                 ...(options.wordSample ? { word_sample: true } : {}),
+                ...(options.audioFormat
+                  ? { audio_format: options.audioFormat }
+                  : {}),
                 ...(mode !== "local_only" ? { provider_mode: mode } : {}),
                 ...(allowGoogleTts ? { allow_google_tts: true } : {}),
                 ...(sessionId ? { session_id: sessionId } : {}),
@@ -338,7 +349,12 @@ export function createSpeechService(): SpeechService {
             "TTS_UNAVAILABLE",
             {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                Accept: options.audioFormat
+                  ? `application/json, ${getPreferredTtsAcceptHeader(options.audioFormat)}`
+                  : "application/json, audio/mpeg;q=0.9, audio/wav;q=0.8",
+                "Content-Type": "application/json",
+              },
               body: JSON.stringify({
                 steps: steps.map((s) => ({
                   id: s.id,
@@ -348,6 +364,9 @@ export function createSpeechService(): SpeechService {
                 ...(options.voiceId ? { voice_id: options.voiceId } : {}),
                 ...(options.speed !== undefined
                   ? { speed: options.speed }
+                  : {}),
+                ...(options.audioFormat
+                  ? { audio_format: options.audioFormat }
                   : {}),
                 ...(mode !== "local_only" ? { provider_mode: mode } : {}),
                 ...(allowGoogleTts ? { allow_google_tts: true } : {}),

@@ -135,7 +135,10 @@ class AdminOcrAuthorizationTests(unittest.TestCase):
         self.db.rollback = AsyncMock()
         self.db.add = MagicMock()
         self.db.add_all = MagicMock()
+        from app.api.routes.book import router as book_router
+
         self.app = FastAPI()
+        self.app.include_router(book_router, prefix="/books")
         self.app.include_router(admin_ocr_router, prefix="/books")
         self.app.dependency_overrides[get_db] = lambda: self.db
         self.client = TestClient(self.app)
