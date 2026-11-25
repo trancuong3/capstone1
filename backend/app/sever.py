@@ -51,6 +51,7 @@ from app.services.ocr_inference_job_service import (
     is_heavy_workers_disabled,
     is_remote_ocr_mode,
     shutdown_post_ocr_tasks,
+    worker_heartbeat_ttl_seconds,
 )
 from app.services.runtime_diagnostics import (
     collect_ocr_health,
@@ -787,7 +788,6 @@ app.add_middleware(
 @app.get("/health", tags=["System"])
 async def get_health(request: Request) -> dict[str, object]:
     """Read-only liveness/readiness check (SELECT 1 + worker states, zero secrets)."""
-    db_probe = await probe_database_connection(timeout=4.0)
     workers = getattr(request.app.state, "background_workers", None) or {}
     active_model_thread = workers.get("active_model_registry")
     local_trainer = workers.get("local_trainer_process")
@@ -808,27 +808,32 @@ async def get_health(request: Request) -> dict[str, object]:
             else ("running" if local_trainer.returncode is None else "stopped")
         ),
     }
-    ocr_payload: dict[str, object]
-    if is_remote_ocr_mode():
+
+    async def _probe_remote_ocr() -> dict[str, object]:
         try:
-            remote_info = await asyncio.wait_for(collect_remote_ocr_health(), timeout=2.5)
-            ocr_payload = {
+            remote_info = await asyncio.wait_for(collect_remote_ocr_health(), timeout=3.5)
+            return {
                 "mode": "remote_worker",
                 "ready": bool(remote_info.get("ready", False)),
                 "engines": remote_info.get("engines", {}),
                 "workers": remote_info.get("workers", []),
                 "queue": remote_info.get("queue", {}),
-                "heartbeat_ttl_seconds": remote_info.get("heartbeat_ttl_seconds", 45),
+                "heartbeat_ttl_seconds": remote_info.get(
+                    "heartbeat_ttl_seconds", worker_heartbeat_ttl_seconds()
+                ),
             }
         except Exception:
-            ocr_payload = {
+            return {
                 "mode": "remote_worker",
                 "ready": False,
                 "engines": {},
                 "workers": [],
                 "queue": {},
+                "heartbeat_ttl_seconds": worker_heartbeat_ttl_seconds(),
+                "probe_degraded": True,
             }
-    else:
+
+    async def _probe_local_ocr() -> dict[str, object]:
         try:
             ocr_items = await asyncio.wait_for(asyncio.to_thread(collect_ocr_health), timeout=2.5)
             ocr_engines = {
@@ -855,11 +860,17 @@ async def get_health(request: Request) -> dict[str, object]:
         except Exception:
             ocr_engines = {}
             ocr_ready = False
-        ocr_payload = {
+        return {
             "mode": "local_inprocess",
             "ready": ocr_ready,
             "engines": ocr_engines,
         }
+
+    # Run DB probe and OCR readiness probe concurrently so NullPool handshakes don't stack.
+    db_probe, ocr_payload = await asyncio.gather(
+        probe_database_connection(timeout=6.0),
+        _probe_remote_ocr() if is_remote_ocr_mode() else _probe_local_ocr(),
+    )
 
     return {
         "status": "ok" if db_probe["ok"] else "degraded",

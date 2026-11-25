@@ -393,7 +393,67 @@ export function ReadingVoiceSettings({
         </span>
       </Button>
 
-      <Modal isOpen={isOpen} onClose={close} title="Giọng đọc mẫu">
+      <Modal
+        footer={
+          <div className="space-y-2">
+            <footer className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                className="w-auto!"
+                size="compact"
+                onClick={() => change({ voiceId: null })}
+                variant="quiet"
+              >
+                Dùng giọng mặc định
+              </Button>
+              <Button
+                className="w-auto!"
+                size="compact"
+                onClick={() => {
+                  const generation = ++previewGenerationRef.current;
+                  if (isPreviewing) {
+                    onStopPreview();
+                    return;
+                  }
+                  setPreviewError(false);
+                  const previewText = adaptTextToTeacherPersona(
+                    PREVIEW_TEXT,
+                    resolveVoiceGender(selectedVoiceId, selectedVoice?.gender),
+                  );
+                  void Promise.resolve()
+                    .then(() => onPreview(previewText))
+                    .catch((error: unknown) => {
+                      if (
+                        mountedRef.current &&
+                        generation === previewGenerationRef.current &&
+                        !(error instanceof Error && error.name === "AbortError")
+                      )
+                        setPreviewError(true);
+                    });
+                }}
+                variant="primary"
+              >
+                <Volume2 aria-hidden="true" className="size-5" />
+                {isPreviewing ? "Dừng nghe thử" : "Nghe thử"}
+              </Button>
+            </footer>
+            {previewError ? (
+              <p role="alert" className="text-body text-muted">
+                Chưa phát được giọng đọc. Bé thử lại hoặc chọn giọng khác nhé.
+              </p>
+            ) : fallbackNotice ? (
+              <p
+                role="status"
+                className="rounded-control bg-warning-surface px-3 py-2 text-sm font-medium text-ink"
+              >
+                {fallbackNotice}
+              </p>
+            ) : null}
+          </div>
+        }
+        isOpen={isOpen}
+        onClose={close}
+        title="Giọng đọc mẫu"
+      >
         <div className="space-y-4">
           <div
             className="rounded-control bg-sky px-3 py-2 text-sm font-semibold text-primary"
@@ -779,59 +839,6 @@ export function ReadingVoiceSettings({
           </section>
 
           <ReadingAutomationSettings />
-
-          <footer className="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-border bg-cream pt-3">
-            <Button
-              className="w-auto!"
-              size="compact"
-              onClick={() => change({ voiceId: null })}
-              variant="quiet"
-            >
-              Dùng giọng mặc định
-            </Button>
-            <Button
-              className="w-auto!"
-              size="compact"
-              onClick={() => {
-                const generation = ++previewGenerationRef.current;
-                if (isPreviewing) {
-                  onStopPreview();
-                  return;
-                }
-                setPreviewError(false);
-                const previewText = adaptTextToTeacherPersona(
-                  PREVIEW_TEXT,
-                  resolveVoiceGender(selectedVoiceId, selectedVoice?.gender),
-                );
-                void Promise.resolve()
-                  .then(() => onPreview(previewText))
-                  .catch((error: unknown) => {
-                    if (
-                      mountedRef.current &&
-                      generation === previewGenerationRef.current &&
-                      !(error instanceof Error && error.name === "AbortError")
-                    )
-                      setPreviewError(true);
-                  });
-              }}
-              variant="primary"
-            >
-              <Volume2 aria-hidden="true" className="size-5" />
-              {isPreviewing ? "Dừng nghe thử" : "Nghe thử"}
-            </Button>
-          </footer>
-          {previewError ? (
-            <p role="alert" className="text-body text-muted">
-              Chưa phát được giọng đọc. Bé thử lại hoặc chọn giọng khác nhé.
-            </p>
-          ) : fallbackNotice ? (
-            <p
-              role="status"
-              className="rounded-control bg-warning-surface px-3 py-2 text-sm font-medium text-ink"
-            >
-              {fallbackNotice}
-            </p>
-          ) : null}
         </div>
       </Modal>
     </>

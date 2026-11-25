@@ -251,6 +251,7 @@ class LocalOcrScanService:
         except (UnidentifiedImageError, OSError, ValueError) as exc:
             raise HTTPException(status_code=422, detail="Image decoding failed") from exc
 
+        # Hash the exact encoded bytes stored/transmitted so remote OCR workers verify cleanly.
         image_sha256 = hashlib.sha256(clean_bytes).hexdigest()
         return clean_bytes, image_sha256
 

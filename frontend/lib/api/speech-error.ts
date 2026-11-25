@@ -103,6 +103,7 @@ export function buildSpeechServiceError(params: {
         break;
       case "STT_TEMPORARILY_UNAVAILABLE":
       case "LOCAL_STT_UNAVAILABLE":
+      case "LOCAL_VOICE_UNCONFIGURED":
         code = "STT_TEMPORARILY_UNAVAILABLE";
         message =
           "Dịch vụ nghe đọc đang tạm dừng hoặc khởi động. Bé bấm Thử lại hoặc tiếp tục sau nhé.";
@@ -179,6 +180,7 @@ export function buildSpeechServiceError(params: {
         retryable = true;
         break;
       case "LOCAL_TTS_UNAVAILABLE":
+      case "LOCAL_VOICE_UNCONFIGURED":
         code = "TTS_UNAVAILABLE";
         message =
           "Giọng đọc mẫu đang tạm dừng hoặc đang khởi động. Bé có thể bấm Thử lại hoặc tự đọc tiếp nhé.";
@@ -246,5 +248,6 @@ export function buildSpeechServiceError(params: {
     status,
     request_id: requestId,
     retryable,
+    ...(providerCode ? { provider_code: providerCode } : {}),
   });
 }

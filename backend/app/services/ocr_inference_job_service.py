@@ -1144,11 +1144,12 @@ class OcrInferenceJobService:
         job_id: UUID,
         *,
         timeout_seconds: float | None = None,
-        poll_interval_seconds: float = 0.15,
+        poll_interval_seconds: float | None = None,
     ) -> OcrInferenceJob:
         deadline = asyncio.get_running_loop().time() + float(
             timeout_seconds or remote_sync_wait_timeout_seconds()
         )
+        attempt = 0
         while True:
             async with AsyncSessionLocal() as poll_db:
                 row = await OcrInferenceJobRepository(poll_db).get(job_id)
@@ -1162,7 +1163,15 @@ class OcrInferenceJobService:
                     status_code=status.HTTP_504_GATEWAY_TIMEOUT,
                     detail="Remote OCR worker did not finish before sync timeout; poll job status asynchronously.",
                 )
-            await asyncio.sleep(min(poll_interval_seconds, remaining))
+            if poll_interval_seconds is not None:
+                sleep_for = poll_interval_seconds
+            elif APP_ENVIRONMENT == "test":
+                sleep_for = 0.15
+            else:
+                # Adaptive backoff (0.5s -> 1.0s -> 1.5s) to avoid NullPool exhaustion on Supabase pooler.
+                sleep_for = 0.5 if attempt < 4 else (1.0 if attempt < 12 else 1.5)
+            attempt += 1
+            await asyncio.sleep(min(sleep_for, remaining))
 
     async def record_worker_heartbeat(
         self,

@@ -1,3 +1,4 @@
+import { getBrowserAccessToken } from "@/lib/api/browser-auth";
 import {
   inferRegionFromVoiceId,
   type VoiceRegion,
@@ -6,7 +7,6 @@ import {
   resolveVoiceGender,
   type VoiceGender,
 } from "@/lib/reading/voice-persona";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
 export type VoiceEngineTier =
@@ -251,13 +251,18 @@ export async function fetchVoiceEngineHealth(
   const onAbort = () => controller.abort();
   if (signal?.aborted) return null;
   signal?.addEventListener("abort", onAbort, { once: true });
-  const timeout = window.setTimeout(() => controller.abort(), 4_000);
+  const timeout = window.setTimeout(() => controller.abort(), 8_000);
 
   try {
-    const supabase = createBrowserSupabaseClient();
-    const { data, error } = await supabase.auth.getSession();
-    const token = data.session?.access_token;
-    if (error || !token || controller.signal.aborted) return null;
+    let token: string;
+    try {
+      token = await getBrowserAccessToken({
+        onUnauthorized: () => new Error("AUTH_REQUIRED"),
+      });
+    } catch {
+      return null;
+    }
+    if (!token || controller.signal.aborted) return null;
 
     const response = await fetch(`${getApiBaseUrl()}/voice/status`, {
       method: "GET",

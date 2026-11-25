@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from typing import Any
 from uuid import UUID
@@ -18,6 +19,10 @@ from app.api.routes.voice import (
     provider_http_exception,
 )
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
+from app.providers.local_voice_provider import (
+    DEFAULT_LOCAL_VOICE_ID,
+    STATIC_LOCAL_VOICES,
+)
 from app.schemas.voice_studio import (
     TimedSpeechRead,
     TimedSpeechRequest,
@@ -50,8 +55,33 @@ async def list_voices(
         provider_mode=provider_mode,
         allow_google_tts=allow_google_tts,
     )
+    orchestrator = get_voice_orchestrator()
     try:
-        listing = await get_voice_orchestrator().list_voices(policy=policy)
+        listing = await asyncio.wait_for(
+            orchestrator.list_voices(policy=policy),
+            timeout=2.5,
+        )
+    except asyncio.TimeoutError:
+        voices: list[dict[str, Any]] = [dict(v) for v in STATIC_LOCAL_VOICES]
+        google_tts_available = bool(
+            getattr(
+                getattr(orchestrator, "google", None),
+                "is_tts_configured",
+                lambda: False,
+            )()
+        )
+        if (
+            policy.provider_mode == "local_with_google_fallback"
+            and policy.allow_google_tts
+            and google_tts_available
+        ):
+            voices.extend(orchestrator.google.list_backup_voices())
+        listing = {
+            "voices": voices,
+            "default_voice_id": DEFAULT_LOCAL_VOICE_ID,
+            "local_worker_ready": False,
+            "google_tts_available": google_tts_available,
+        }
     except VoiceProviderError as error:
         raise provider_http_exception(error) from None
 

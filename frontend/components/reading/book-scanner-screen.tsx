@@ -36,6 +36,7 @@ import {
 } from "@/lib/api/page-match-service";
 import { isServiceError } from "@/lib/api/service-error";
 import { preprocessScanImage } from "@/lib/reading/scan-image-preprocess";
+import { getApiBaseUrl } from "@/lib/supabase/config";
 import { cn } from "@/lib/utils/cn";
 import type { ReadingPageDTO } from "@/types/reading";
 
@@ -153,6 +154,62 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
   const [ocrState, setOcrState] = useState<LocalOcrScanState>({
     status: "idle",
   });
+  const [ocrWorkerStatus, setOcrWorkerStatus] = useState<
+    "checking" | "ready" | "offline" | "unreachable"
+  >("checking");
+  const [ocrCheckNonce, setOcrCheckNonce] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let didTimeout = false;
+    const timer = globalThis.setTimeout(() => {
+      didTimeout = true;
+      controller.abort();
+    }, 15_000);
+    let active = true;
+
+    async function checkOcrReadiness() {
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/health`, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!active) return;
+        if (!res.ok) {
+          setOcrWorkerStatus("unreachable");
+          return;
+        }
+        const body = (await res.json()) as {
+          ocr?: { mode?: string; ready?: boolean };
+        };
+        if (!active) return;
+        if (body?.ocr?.ready === false) {
+          setOcrWorkerStatus("offline");
+        } else {
+          setOcrWorkerStatus("ready");
+        }
+      } catch {
+        if (!active) return;
+        if (didTimeout) {
+          setOcrWorkerStatus("unreachable");
+        } else {
+          // Keep non-blocking when health probe is unavailable in isolated test/offline envs.
+          setOcrWorkerStatus("ready");
+        }
+      } finally {
+        globalThis.clearTimeout(timer);
+      }
+    }
+
+    void checkOcrReadiness();
+    return () => {
+      active = false;
+      globalThis.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [ocrCheckNonce]);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const nativeCameraInputRef = useRef<HTMLInputElement | null>(null);
@@ -552,6 +609,40 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
         onChange={(event) => handleFileChange(event, child.id)}
         type="file"
       />
+
+      {ocrWorkerStatus === "offline" || ocrWorkerStatus === "unreachable" ? (
+        <div
+          className="flex flex-col gap-3 rounded-card border border-amber-300 bg-amber-50/80 p-4"
+          data-testid="ocr-worker-offline-banner"
+        >
+          <StatusMessage
+            title={
+              ocrWorkerStatus === "offline"
+                ? "Máy trạm OCR hiện đang ngoại tuyến"
+                : "Máy chủ OCR đang khởi động hoặc tạm chưa phản hồi"
+            }
+            tone="warning"
+          >
+            {ocrWorkerStatus === "offline"
+              ? "Tính năng quét trang sách cần máy trạm OCR (remote worker) đang kết nối để nhận diện chữ tiếng Việt. Ba mẹ vẫn có thể đọc toàn bộ sách trong Thư viện bằng Wi-Fi mà không cần bật máy tính."
+              : "Chưa kiểm tra được trạng thái máy trạm OCR do máy chủ đang khởi động hoặc mạng chậm. Ba mẹ bấm kiểm tra lại sau vài giây, hoặc đọc sách trực tiếp trong Thư viện nhé."}
+          </StatusMessage>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              className="min-h-11 sm:w-auto"
+              onClick={() => {
+                setOcrWorkerStatus("checking");
+                setOcrCheckNonce((n) => n + 1);
+              }}
+              size="compact"
+              variant="secondary"
+            >
+              <RefreshCw aria-hidden="true" className="size-4" />
+              Kiểm tra lại kết nối OCR
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {ocrState.status === "processing" ? (
         <div
