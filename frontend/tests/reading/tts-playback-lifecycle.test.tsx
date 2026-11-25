@@ -529,12 +529,52 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
   });
 
   it("prefers the locked-voice short fallback when timed synthesis fails", async () => {
-    studio.synthesizeTimed.mockRejectedValueOnce(new Error("Timed unavailable"));
+    vi.stubGlobal("SpeechSynthesisUtterance", class {});
+    synthesis.speak.mockImplementationOnce(() => {
+      throw new Error("Unexpected browser voice switch");
+    });
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: { available: true, stt_ready: true, tts_ready: true },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+    studio.synthesizeTimed.mockRejectedValueOnce(
+      new Error("Timed unavailable"),
+    );
     const { result } = renderHook(() => useSpeechPlayer());
     const fallback = vi.fn(async () => {});
     await result.current.playWithWordTimings(["bé"], {}, fallback);
     expect(fallback).toHaveBeenCalledOnce();
     expect(synthesis.speak).not.toHaveBeenCalled();
+    synthesis.speak.mockReset();
+  });
+
+  it("does not speak with a non-Vietnamese browser voice during an outage", async () => {
+    vi.stubGlobal("SpeechSynthesisUtterance", class {});
+    synthesis.getVoices.mockReturnValueOnce([
+      { lang: "en-US", localService: true },
+    ]);
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: { available: false, stt_ready: false, tts_ready: false },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+    const { result } = renderHook(() => useSpeechPlayer());
+    await expect(result.current.play("Bé đọc sách.")).rejects.toThrow();
+    expect(synthesis.speak).not.toHaveBeenCalled();
+    expect(result.current.fallbackNotice).toMatch(/không tự đổi giọng/i);
   });
 
   it("does not replay a chunk automatically after an error partway through audio", async () => {
