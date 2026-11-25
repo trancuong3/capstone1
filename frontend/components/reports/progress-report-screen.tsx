@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ChildProgressAssessmentCard } from "@/components/reports/child-progress-assessment";
+import { EntertainmentLearningSummary } from "@/components/reports/entertainment-learning-summary";
 import { MetricCard } from "@/components/reports/metric-card";
 import { ProgressChart } from "@/components/reports/progress-chart";
 import { ProgressReportFilters } from "@/components/reports/progress-report-filters";
@@ -516,6 +517,17 @@ function ProgressReportContent({
         </summary>
         <div className="mt-4">
           <ChildProgressAssessmentCard
+            childId={child.id}
+            childName={child.alias}
+          />
+        </div>
+      </details>
+      <details className="rounded-card border border-border bg-white p-4 sm:p-6">
+        <summary className="cursor-pointer font-bold text-primary">
+          Học tập qua Giải trí &amp; Kỹ năng ngôn ngữ (V4.0)
+        </summary>
+        <div className="mt-4">
+          <EntertainmentLearningSummary
             childId={child.id}
             childName={child.alias}
           />
