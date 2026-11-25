@@ -766,6 +766,34 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     expect(services.readingService.createRetryEvent).not.toHaveBeenCalled();
   });
 
+  it("shows a recoverable page sample failure without automatically starting the microphone", async () => {
+    const user = userEvent.setup();
+    speechPlayerMock.playWithWordTimings.mockRejectedValueOnce(
+      new Error("All TTS providers unavailable"),
+    );
+    speechRecorderMock.start.mockRejectedValueOnce(
+      new Error("Microphone permission denied"),
+    );
+    renderReading("reading");
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Nghe đọc mẫu cả trang",
+      }),
+    );
+    expect(
+      await screen.findByText(
+        "Mình chưa phát được âm thanh. Bé vẫn có thể nhìn chữ và đọc tiếp nhé.",
+      ),
+    ).toBeVisible();
+    expect(speechRecorderMock.start).not.toHaveBeenCalled();
+    expect(compareTranscriptMock).not.toHaveBeenCalled();
+    expect(services.readingService.createRetryEvent).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Đọc tiếp" }));
+    expect(
+      await screen.findByRole("button", { name: "Nghe đọc mẫu cả trang" }),
+    ).toBeEnabled();
+  });
+
   it("cancels a page sample on navigation and ignores every stale sample callback", async () => {
     const user = userEvent.setup();
     let callbacks!: WordTimedPlayOptions;

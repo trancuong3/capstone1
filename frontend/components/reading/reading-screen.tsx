@@ -3215,6 +3215,7 @@ function ReadingSessionScreen({
     listeningGenerationRef.current += 1;
     const generation = ++assistantAudioGenerationRef.current;
     setCountdown(null);
+    let playbackFailed = false;
 
     try {
       if (retryModeRef.current) {
@@ -3267,6 +3268,11 @@ function ReadingSessionScreen({
 
       assistantAudioPlayingRef.current = true;
       await play();
+    } catch (error) {
+      playbackFailed = !(
+        error instanceof Error && error.name === "AbortError"
+      );
+      throw error;
     } finally {
       if (generation === assistantAudioGenerationRef.current) {
         assistantAudioPlayingRef.current = false;
@@ -3275,6 +3281,7 @@ function ReadingSessionScreen({
         const retryCandidate = retryResumeAfterAssistantAudioRef.current;
         retryResumeAfterAssistantAudioRef.current = null;
         if (
+          !playbackFailed &&
           retryCandidate &&
           retryModeRef.current &&
           isActiveRetryCandidate(retryCandidate)
@@ -3282,12 +3289,15 @@ function ReadingSessionScreen({
           // If a child stops a retry sample early (for example from voice
           // settings), restore capture after the TTS promise has settled.
           await startRetryRecognition(retryCandidate);
-          return;
         }
 
         const shouldResume = assistantAudioResumeRequestedRef.current;
         assistantAudioResumeRequestedRef.current = false;
+        // A synthesis failure must reach the caller before any new capture.
+        // Starting STT here can replace the recoverable TTS error with a mic
+        // error or invalidate the sample generation before its catch runs.
         if (
+          !playbackFailed &&
           resumeAfterPlayback &&
           shouldResume &&
           mountedRef.current &&
@@ -3298,7 +3308,11 @@ function ReadingSessionScreen({
           if (mountedRef.current) setIsMicRecording(resumed);
         }
 
+        if (playbackFailed) {
+          tutorResumeMicAfterPlaybackRef.current = false;
+        }
         if (
+          !playbackFailed &&
           tutorResumeMicAfterPlaybackRef.current &&
           mountedRef.current &&
           !retryModeRef.current
