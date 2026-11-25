@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -240,9 +241,29 @@ export function AppStoreProvider({
     return { childId: null, child: null };
   }, [activeUserId, selection.child, selection.childId, selection.userId]);
 
-  useEffect(() => {
-    clearApiReadCache();
-  }, [activeUserId, selection.childId]);
+  const previousCacheSelectionRef = useRef({
+    userId: activeUserId,
+    childId: effectiveSelection.childId,
+  });
+
+  useLayoutEffect(() => {
+    const previous = previousCacheSelectionRef.current;
+    previousCacheSelectionRef.current = {
+      userId: activeUserId,
+      childId: effectiveSelection.childId,
+    };
+
+    // AppServicesProvider already clears the cache when the actor changes.
+    // Do not abort in-flight reads on mount or initial auth hydration.
+    // Invalidate only on an actual child change for the same actor, before
+    // descendant passive effects begin loading the newly selected child.
+    if (
+      previous.userId === activeUserId &&
+      previous.childId !== effectiveSelection.childId
+    ) {
+      clearApiReadCache();
+    }
+  }, [activeUserId, effectiveSelection.childId]);
 
   const selectChild = useCallback(
     (childId: string) => {
