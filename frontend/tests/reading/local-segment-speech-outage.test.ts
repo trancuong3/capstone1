@@ -5,7 +5,7 @@ import type { SpeechService } from "@/lib/api/speech-service";
 import { LocalSegmentSpeechRecognition } from "@/lib/reading/local-segment-speech-recognition";
 
 describe("LocalSegmentSpeechRecognition service-outage circuit breaker", () => {
-  it("trips immediately on STT 503 outage, cleans up without loop, and emits stt-unavailable", async () => {
+  it("stops after one bounded retry on STT 503 outage, cleans up without loop, and emits stt-unavailable", async () => {
     const transcribe = vi.fn().mockRejectedValue(
       new ServiceError({
         code: "STT_UNAVAILABLE",
@@ -45,10 +45,10 @@ describe("LocalSegmentSpeechRecognition service-outage circuit breaker", () => {
       flushCurrentSegment: (carry?: boolean) => void;
     };
     internal.flushCurrentSegment(false);
-    await new Promise((r) => setTimeout(r, 30));
+    await new Promise((r) => setTimeout(r, 350));
 
     // Must not retry on 503 or accept further segments once circuit opens.
-    expect(transcribe).toHaveBeenCalledTimes(1);
+    expect(transcribe).toHaveBeenCalledTimes(2);
     expect(errors).toEqual([{ error: "stt-unavailable" }]);
     expect(ended).toBe(false);
 
@@ -58,6 +58,6 @@ describe("LocalSegmentSpeechRecognition service-outage circuit breaker", () => {
     (rec as unknown as { speechSamples: number }).speechSamples = 3200;
     internal.flushCurrentSegment(false);
     await new Promise((r) => setTimeout(r, 20));
-    expect(transcribe).toHaveBeenCalledTimes(1);
+    expect(transcribe).toHaveBeenCalledTimes(2);
   });
 });

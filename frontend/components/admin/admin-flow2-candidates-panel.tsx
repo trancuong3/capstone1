@@ -62,15 +62,18 @@ export function AdminFlow2CandidatesPanel() {
     page?.items[0] ??
     null;
 
-  const selectCandidate = useCallback((item: AdminFlow2CandidateDTO | null) => {
-    if (item?.id === selectedId) return;
-    setSelectedId(item?.id ?? null);
-    if (item) {
-      setLabelDraft(item.verified_label ?? item.proposed_label);
-      setRejectionReason("");
-      setActionError(null);
-    }
-  }, [selectedId]);
+  const selectCandidate = useCallback(
+    (item: AdminFlow2CandidateDTO | null) => {
+      if (item?.id === selectedId) return;
+      setSelectedId(item?.id ?? null);
+      if (item) {
+        setLabelDraft(item.verified_label ?? item.proposed_label);
+        setRejectionReason("");
+        setActionError(null);
+      }
+    },
+    [selectedId],
+  );
 
   const reload = useCallback(() => {
     setLoading(true);
