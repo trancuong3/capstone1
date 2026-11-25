@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AuthenticatedImage } from "@/components/common/authenticated-image";
 import { Button } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
@@ -35,9 +36,11 @@ const REJECTION_CODES = Object.keys(
 
 export function AdminFlow2CandidatesPanel() {
   const { bookContentQuality } = useAdminServices();
+  const FLOW2_PAGE_SIZE = 50;
   const [statusFilter, setStatusFilter] = useState<"" | Flow2CandidateStatus>(
     "PENDING_VERIFICATION",
   );
+  const [offset, setOffset] = useState(0);
   const [page, setPage] = useState<AdminFlow2CandidatePageDTO | null>(null);
   const [loading, setLoading] = useState(() =>
     Boolean(bookContentQuality.listFlow2Candidates),
@@ -82,11 +85,15 @@ export function AdminFlow2CandidatesPanel() {
     let cancelled = false;
     listFn({
       status: statusFilter,
-      limit: 50,
-      offset: 0,
+      limit: FLOW2_PAGE_SIZE,
+      offset,
     })
       .then((data) => {
         if (cancelled) return;
+        if (data.items.length === 0 && offset > 0 && data.total > 0) {
+          setOffset(Math.max(0, offset - FLOW2_PAGE_SIZE));
+          return;
+        }
         setPage(data);
         setSelectedId((prev) => {
           const next =
@@ -115,7 +122,7 @@ export function AdminFlow2CandidatesPanel() {
     return () => {
       cancelled = true;
     };
-  }, [bookContentQuality, statusFilter, reloadKey]);
+  }, [bookContentQuality, offset, statusFilter, reloadKey]);
 
   async function handleApprove() {
     if (!selected || !bookContentQuality.decideFlow2Candidate) return;
@@ -181,6 +188,7 @@ export function AdminFlow2CandidatesPanel() {
                 onClick={() => {
                   setLoading(Boolean(bookContentQuality.listFlow2Candidates));
                   setError(null);
+                  setOffset(0);
                   setStatusFilter(f.key);
                 }}
                 type="button"
@@ -236,35 +244,52 @@ export function AdminFlow2CandidatesPanel() {
         />
       ) : (
         <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
-          <div className="flex max-h-[600px] flex-col gap-2 overflow-y-auto rounded-card border border-border bg-white p-3">
-            {page.items.map((item) => {
-              const isSelected = selected?.id === item.id;
-              return (
-                <button
-                  key={item.id}
-                  className={`flex flex-col items-start gap-1 rounded-control border p-3 text-left text-xs transition ${
-                    isSelected
-                      ? "border-primary bg-sky/40"
-                      : "border-border bg-white hover:bg-surface-subtle"
-                  }`}
-                  onClick={() => selectCandidate(item)}
-                  type="button"
-                >
-                  <div className="flex w-full items-center justify-between gap-2">
-                    <span className="truncate font-extrabold text-ink">
-                      {item.book_title}
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2 rounded-card border border-border bg-white p-3 lg:max-h-[600px] lg:overflow-y-auto">
+              {page.items.map((item) => {
+                const isSelected = selected?.id === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    className={`flex flex-col items-start gap-1 rounded-control border p-3 text-left text-xs transition ${
+                      isSelected
+                        ? "border-primary bg-sky/40"
+                        : "border-border bg-white hover:bg-surface-subtle"
+                    }`}
+                    onClick={() => selectCandidate(item)}
+                    type="button"
+                  >
+                    <div className="flex w-full items-center justify-between gap-2">
+                      <span className="truncate font-extrabold text-ink">
+                        {item.book_title}
+                      </span>
+                      <span className="shrink-0 font-mono text-[11px] text-muted">
+                        Tr.{item.page_number} · Dòng {item.line_index + 1}
+                      </span>
+                    </div>
+                    <p className="line-clamp-2 text-ink">
+                      {item.proposed_label}
+                    </p>
+                    <span className="text-[11px] text-muted">
+                      {item.rights_basis_label}
                     </span>
-                    <span className="shrink-0 font-mono text-[11px] text-muted">
-                      Tr.{item.page_number} · Dòng {item.line_index + 1}
-                    </span>
-                  </div>
-                  <p className="line-clamp-2 text-ink">{item.proposed_label}</p>
-                  <span className="text-[11px] text-muted">
-                    {item.rights_basis_label}
-                  </span>
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })}
+            </div>
+            <PaginationBar
+              ariaLabel="Phân trang ứng viên mẫu OCR Flow 2"
+              compact
+              disabled={loading || busy}
+              itemLabel="mẫu"
+              onPageChange={(nextPage) => {
+                setLoading(true);
+                setOffset((nextPage - 1) * FLOW2_PAGE_SIZE);
+              }}
+              page={Math.floor(offset / FLOW2_PAGE_SIZE) + 1}
+              pageSize={FLOW2_PAGE_SIZE}
+              total={page.total}
+            />
           </div>
 
           {selected ? (

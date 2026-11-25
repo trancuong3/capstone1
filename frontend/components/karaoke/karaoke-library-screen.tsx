@@ -8,6 +8,7 @@ import { SongCard } from "@/components/karaoke/song-card";
 import { SelectedChildIdentity } from "@/components/children/selected-child-identity";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import {
   karaokeParentErrorMessage,
@@ -151,32 +152,18 @@ function Catalog({
           }
         />
       )}
-      <nav
-        aria-label="Phân trang Hát vui"
-        className="flex flex-wrap items-center justify-between gap-3"
-      >
-        <Button
-          variant="secondary"
-          className="sm:w-auto"
-          disabled={query.offset === 0}
-          onClick={() => onPage(Math.max(0, query.offset - 12))}
-        >
-          Trang trước
-        </Button>
-        <p>
-          {data.items.length
-            ? `${data.offset + 1}–${data.offset + data.items.length} / ${data.total} bài`
-            : `0 / ${data.total} bài`}
-        </p>
-        <Button
-          variant="secondary"
-          className="sm:w-auto"
-          disabled={query.offset + data.limit >= data.total}
-          onClick={() => onPage(query.offset + data.limit)}
-        >
-          Trang sau
-        </Button>
-      </nav>
+      <PaginationBar
+        ariaLabel="Phân trang Hát vui"
+        itemLabel="bài"
+        nextLabel="Trang sau"
+        onPageChange={(nextPage) =>
+          onPage((nextPage - 1) * Math.max(1, data.limit))
+        }
+        page={Math.floor(query.offset / Math.max(1, data.limit)) + 1}
+        pageSize={Math.max(1, data.limit)}
+        prevLabel="Trang trước"
+        total={data.total}
+      />
     </>
   );
 }

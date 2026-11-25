@@ -171,7 +171,11 @@ describe("speech service", () => {
       "http://127.0.0.1:8000/voice/text-to-speech",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ text: "Bé đọc cùng mình nhé." }),
+        body: JSON.stringify({
+          text: "Bé đọc cùng mình nhé.",
+          provider_mode: "local_with_google_fallback",
+          allow_google_tts: true,
+        }),
         cache: "no-store",
         credentials: "omit",
         redirect: "error",

@@ -202,9 +202,6 @@ export function ParentProfileScreen() {
         </StatusMessage>
       ) : null}
       <Card className="sm:px-8 sm:py-6">
-        <h2 className="text-2xl font-extrabold text-ink">
-          {displayName || "Chưa cập nhật tên hiển thị"}
-        </h2>
         <div className="flex flex-col items-start gap-4 sm:flex-row sm:gap-6">
           <ProfileAvatar
             ariaLabel={`Ảnh đại diện của ${displayName ?? "ba mẹ"}`}
@@ -213,9 +210,9 @@ export function ParentProfileScreen() {
             size="lg"
           />
           <div className="flex min-w-0 flex-col items-start gap-3">
-            <p className="break-words text-2xl font-extrabold text-ink">
+            <h2 className="max-w-full break-words text-2xl font-extrabold text-ink">
               {displayName || "Chưa cập nhật tên hiển thị"}
-            </p>
+            </h2>
             <p className="break-all text-body text-muted">
               {contactValue(profile.email, profile.contact_info_status)} ·{" "}
               {getRoleLabel(profile.role)}

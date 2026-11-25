@@ -9,6 +9,7 @@ import { AdminBookForm } from "@/components/admin/admin-book-form";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
+import { Modal } from "@/components/common/modal";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { isServiceError } from "@/lib/api/service-error";
@@ -38,6 +39,7 @@ export function AdminBookEditorScreen({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<"not-found" | "safe" | null>(null);
   const [statusBusy, setStatusBusy] = useState(false);
+  const [confirmLifecycleOpen, setConfirmLifecycleOpen] = useState(false);
   const [notice, setNotice] = useState<{
     tone: "info" | "error";
     title: string;
@@ -93,11 +95,6 @@ export function AdminBookEditorScreen({
     if (!book || statusBusy) return;
     const nextStatus =
       book.lifecycle_status === "ACTIVE" ? "RETIRED" : "ACTIVE";
-    const confirmation =
-      nextStatus === "RETIRED"
-        ? "Ngừng hoạt động sách này? Trang sách và lịch sử đọc sẽ được giữ nguyên."
-        : "Kích hoạt lại sách này trong catalog dành cho phụ huynh?";
-    if (!window.confirm(confirmation)) return;
 
     setStatusBusy(true);
     setNotice(null);
@@ -106,6 +103,7 @@ export function AdminBookEditorScreen({
       if (updated.id !== bookId || updated.lifecycle_status !== nextStatus) {
         throw new Error("Unexpected lifecycle response");
       }
+      setConfirmLifecycleOpen(false);
       setBook(updated);
       setNotice({
         tone: "info",
@@ -119,6 +117,7 @@ export function AdminBookEditorScreen({
             : "Trạng thái mới đã được lưu. Kho sách và dashboard sẽ đọc lại dữ liệu từ API khi mở hoặc tải lại.",
       });
     } catch (cause) {
+      setConfirmLifecycleOpen(false);
       setNotice({
         tone: "error",
         title:
@@ -207,7 +206,7 @@ export function AdminBookEditorScreen({
           className="sm:w-auto"
           disabled={statusBusy}
           isLoading={statusBusy}
-          onClick={() => void changeLifecycle()}
+          onClick={() => setConfirmLifecycleOpen(true)}
           variant="secondary"
         >
           {book.lifecycle_status === "ACTIVE"
@@ -229,6 +228,55 @@ export function AdminBookEditorScreen({
           submitLabel="Lưu metadata"
         />
       </Card>
+      <Modal
+        closeOnBackdropClick={!statusBusy}
+        closeOnEscape={!statusBusy}
+        footer={
+          <div className="flex flex-wrap justify-end gap-3">
+            <Button
+              disabled={statusBusy}
+              fullWidth={false}
+              onClick={() => setConfirmLifecycleOpen(false)}
+              type="button"
+              variant="secondary"
+            >
+              Hủy
+            </Button>
+            <Button
+              disabled={statusBusy}
+              fullWidth={false}
+              isLoading={statusBusy}
+              onClick={() => void changeLifecycle()}
+              type="button"
+              variant={
+                book.lifecycle_status === "ACTIVE" ? "destructive" : "primary"
+              }
+            >
+              {book.lifecycle_status === "ACTIVE"
+                ? "Xác nhận ngừng hoạt động"
+                : "Xác nhận kích hoạt lại"}
+            </Button>
+          </div>
+        }
+        isOpen={confirmLifecycleOpen}
+        onClose={() => {
+          if (!statusBusy) setConfirmLifecycleOpen(false);
+        }}
+        role="alertdialog"
+        showCloseButton={!statusBusy}
+        title={
+          book.lifecycle_status === "ACTIVE"
+            ? "Ngừng hoạt động sách?"
+            : "Kích hoạt lại sách?"
+        }
+        tone="paper"
+      >
+        <p className="text-body text-ink">
+          {book.lifecycle_status === "ACTIVE"
+            ? "Ngừng hoạt động sách này? Trang sách và lịch sử đọc sẽ được giữ nguyên."
+            : "Kích hoạt lại sách này trong catalog dành cho phụ huynh?"}
+        </p>
+      </Modal>
     </section>
   );
 }

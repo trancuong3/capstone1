@@ -11,21 +11,50 @@ import {
 
 import { Button } from "@/components/common/button";
 
-interface ModalProps {
+import { cn } from "@/lib/utils/cn";
+
+export interface ModalProps {
   children: ReactNode;
+  closeOnBackdropClick?: boolean;
   closeOnEscape?: boolean;
+  footer?: ReactNode;
   isOpen: boolean;
   onClose: () => void;
+  role?: "dialog" | "alertdialog";
   showCloseButton?: boolean;
   title: string;
   tone?: "cream" | "paper";
 }
 
+let activeModalLocks = 0;
+let previousBodyOverflow: string | null = null;
+
+function lockBodyScroll() {
+  if (typeof document === "undefined") return;
+  if (activeModalLocks === 0) {
+    previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+  }
+  activeModalLocks += 1;
+}
+
+function unlockBodyScroll() {
+  if (typeof document === "undefined") return;
+  activeModalLocks = Math.max(0, activeModalLocks - 1);
+  if (activeModalLocks === 0) {
+    document.body.style.overflow = previousBodyOverflow ?? "";
+    previousBodyOverflow = null;
+  }
+}
+
 export function Modal({
   children,
+  closeOnBackdropClick = false,
   closeOnEscape = true,
+  footer,
   isOpen,
   onClose,
+  role = "dialog",
   showCloseButton = true,
   title,
   tone = "cream",
@@ -38,10 +67,14 @@ export function Modal({
       return;
     }
 
+    lockBodyScroll();
     const previouslyFocused = document.activeElement as HTMLElement | null;
     dialogRef.current?.focus({ preventScroll: true });
 
-    return () => previouslyFocused?.focus({ preventScroll: true });
+    return () => {
+      unlockBodyScroll();
+      previouslyFocused?.focus({ preventScroll: true });
+    };
   }, [isOpen]);
 
   if (!isOpen) {
@@ -50,6 +83,7 @@ export function Modal({
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape" && closeOnEscape) {
+      event.stopPropagation();
       onClose();
       return;
     }
@@ -87,24 +121,38 @@ export function Modal({
     }
   }
 
+  const surfaceClass = tone === "paper" ? "bg-white" : "bg-cream";
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 p-4">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 p-4"
+      data-modal-backdrop="true"
+      onClick={(event) => {
+        if (closeOnBackdropClick && event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <div
         aria-labelledby={titleId}
         aria-modal="true"
-        className={`max-h-[calc(100dvh-2rem)] w-full max-w-[640px] overflow-y-auto rounded-card p-4 outline-none sm:p-8 ${tone === "paper" ? "bg-white" : "bg-cream"}`}
+        className={cn(
+          "flex max-h-[calc(100dvh-2rem)] w-full max-w-[640px] flex-col overflow-hidden rounded-card shadow-xl outline-none",
+          surfaceClass,
+        )}
         onKeyDown={handleKeyDown}
         ref={dialogRef}
-        role="dialog"
+        role={role}
         tabIndex={-1}
       >
-        <div className="mb-6 flex items-start justify-between gap-4">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border/70 px-4 py-4 sm:px-8 sm:py-6">
           <h2
-            className={
+            className={cn(
+              "min-w-0 break-words",
               tone === "paper"
                 ? "text-2xl font-extrabold text-ink"
-                : "text-heading font-semibold text-ink"
-            }
+                : "text-heading font-semibold text-ink",
+            )}
             id={titleId}
           >
             {title}
@@ -113,6 +161,7 @@ export function Modal({
             <Button
               aria-label="Đóng hộp thoại"
               className="size-12! shrink-0 p-0!"
+              fullWidth={false}
               onClick={onClose}
               variant="quiet"
             >
@@ -120,7 +169,20 @@ export function Modal({
             </Button>
           ) : null}
         </div>
-        {children}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-8 sm:py-6">
+          {children}
+        </div>
+        {footer ? (
+          <div
+            className={cn(
+              "shrink-0 border-t border-border px-4 py-3 sm:px-8 sm:py-4",
+              surfaceClass,
+            )}
+            data-modal-footer="true"
+          >
+            {footer}
+          </div>
+        ) : null}
       </div>
     </div>
   );

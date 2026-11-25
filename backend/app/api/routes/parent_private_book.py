@@ -28,6 +28,7 @@ from app.schemas.parent_private_book import (
     ParentPageSubmissionRead,
     ParentPrivateBookCreate,
     ParentPrivateBookDetailRead,
+    ParentPrivateBookPageRead,
     ParentPrivateBookSummaryRead,
     ParentPrivateBookUpdate,
     ParentPrivatePageEditRequest,
@@ -80,6 +81,26 @@ async def list_my_private_books(
 ):
     _apply_no_store(response)
     return await ParentPrivateBookService(db).list_books(actor_id, ready_only=ready_only)
+
+
+@router.get("/my-books/paged", response_model=ParentPrivateBookPageRead)
+async def list_my_private_books_paged(
+    response: Response,
+    ready_only: bool = Query(default=False),
+    search: str | None = Query(default=None, max_length=120),
+    limit: int = Query(default=9, ge=1, le=50),
+    offset: int = Query(default=0, ge=0),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    _apply_no_store(response)
+    return await ParentPrivateBookService(db).list_books_paged(
+        actor_id,
+        ready_only=ready_only,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/my-books/{book_id}", response_model=ParentPrivateBookDetailRead)

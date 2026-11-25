@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { ReadingManagementScreen } from "@/components/reading-management/reading-management-screen";
@@ -96,5 +96,290 @@ describe("ReadingManagementScreen backed by HTTP API adapter", () => {
       await screen.findByText(/Không thực hiện được thao tác/),
     ).toBeInTheDocument();
     expect(screen.queryByText("Đã lưu mục tiêu đọc.")).not.toBeInTheDocument();
+  });
+
+  it("paginates 20 reminders at 5/page independently from plans/goals/collections, keeps true KPI totals, targets exact item on page 2, and resets state on child switch", async () => {
+    const child2Id = "22222222-2222-4222-8222-222222222222";
+    const child2 = {
+      ...child,
+      id: child2Id,
+      alias: "Bé Bình",
+      grade: 3,
+    };
+    const ts = "2026-11-20T08:00:00Z";
+    let child1Reminders = Array.from({ length: 20 }, (_, i) => ({
+      id: `55555555-5555-4555-8555-${String(i + 1).padStart(12, "0")}`,
+      child_id: childId,
+      remind_at: `${String(6 + Math.floor(i / 2)).padStart(2, "0")}:${i % 2 === 0 ? "00" : "30"}:00`,
+      weekdays: [0, 2, 4],
+      timezone: "Asia/Ho_Chi_Minh",
+      is_active: true,
+      email_enabled: i % 2 === 0,
+      deleted_at: null,
+      created_at: ts,
+      updated_at: ts,
+    }));
+    const child1Plans = Array.from({ length: 6 }, (_, i) => ({
+      id: `66666666-6666-4666-8666-${String(i + 1).padStart(12, "0")}`,
+      child_id: childId,
+      book_id: null,
+      book_title: null,
+      title: `Kế hoạch số ${i + 1}`,
+      target_minutes: 20,
+      weekdays: [0, 2, 4],
+      starts_on: "2026-11-01",
+      ends_on: null,
+      timezone: "Asia/Ho_Chi_Minh",
+      status: "ACTIVE",
+      scheduled_days_this_week: 3,
+      completed_days_this_week: 1,
+      progress_percent: 33,
+      completed_at: null,
+      created_at: ts,
+      updated_at: ts,
+      phase: "RUNNING",
+      next_scheduled_date: "2026-11-21",
+      is_scheduled_today: true,
+      minutes_today: 10,
+    }));
+    const child1Collections = Array.from({ length: 7 }, (_, i) => ({
+      id: `77777777-7777-4777-8777-${String(i + 1).padStart(12, "0")}`,
+      child_id: childId,
+      book_id: `88888888-8888-4888-8888-${String(i + 1).padStart(12, "0")}`,
+      collection_type: i < 4 ? "FAVORITE" : "WANT_TO_READ",
+      created_at: ts,
+      book: {
+        id: `88888888-8888-4888-8888-${String(i + 1).padStart(12, "0")}`,
+        title: `Cuốn sách đã lưu ${i + 1}`,
+        author: "Tác giả",
+        min_grade: 1,
+        max_grade: 3,
+        lifecycle_status: "ACTIVE",
+        available_to_read: true,
+      },
+    }));
+    const child1Due = [
+      {
+        id: "99999999-9999-4999-8999-000000000001",
+        reminder_id: child1Reminders[0].id,
+        scheduled_local_date: "2026-11-20",
+        scheduled_for: ts,
+        status: "PENDING",
+        acknowledged_at: null,
+        email_status: "NOT_REQUESTED",
+        email_attempts: 0,
+        email_sent_at: null,
+        email_error_code: null,
+        reminder: child1Reminders[0],
+      },
+    ];
+    const toggledIds: string[] = [];
+
+    fetchMock.mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        const method = (init?.method ?? "GET").toUpperCase();
+        const reqChildId = url.searchParams.get("child_id");
+        if (url.pathname === "/profiles/children") {
+          return Response.json([child, child2]);
+        }
+        if (url.pathname === "/books/catalog") return Response.json([]);
+        if (url.pathname === "/reading-management/goals") {
+          return Response.json([]);
+        }
+        if (url.pathname === "/reading-management/plans") {
+          return Response.json(reqChildId === childId ? child1Plans : []);
+        }
+        if (url.pathname === "/reading-management/collections") {
+          return Response.json(reqChildId === childId ? child1Collections : []);
+        }
+        if (url.pathname === "/reading-management/reminders/due") {
+          return Response.json(reqChildId === childId ? child1Due : []);
+        }
+        if (
+          url.pathname === "/reading-management/reminders" &&
+          method === "GET"
+        ) {
+          return Response.json(reqChildId === childId ? child1Reminders : []);
+        }
+        if (
+          url.pathname.startsWith("/reading-management/reminders/") &&
+          method === "PATCH"
+        ) {
+          const id = url.pathname.split("/").pop()!;
+          toggledIds.push(id);
+          const body = JSON.parse(String(init?.body ?? "{}")) as {
+            is_active?: boolean;
+          };
+          child1Reminders = child1Reminders.map((r) =>
+            r.id === id
+              ? { ...r, is_active: body.is_active ?? r.is_active }
+              : r,
+          );
+          return Response.json(child1Reminders.find((r) => r.id === id));
+        }
+        throw new Error("Unexpected API route: " + method + " " + url.pathname);
+      },
+    );
+
+    const user = userEvent.setup();
+    renderScreen();
+
+    // True KPI totals reflect all 20 reminders, 6 plans, 7 collections even though lists are paginated!
+    const overview = await screen.findByRole("region", {
+      name: "Tổng quan thói quen đọc",
+    });
+    expect(
+      within(overview).getByText("Lịch nhắc đã bật").closest("article"),
+    ).toHaveTextContent("20");
+    expect(
+      within(overview).getByText("Kế hoạch trong tuần").closest("article"),
+    ).toHaveTextContent("6");
+    expect(
+      within(overview).getByText("Sách đã lưu").closest("article"),
+    ).toHaveTextContent("7");
+
+    // Reminders show only 5 items on page 1 (06:00..08:00), NOT 08:30 (item #6)
+    const reminderSection = screen.getByRole("region", {
+      name: "Lịch nhắc đọc",
+    });
+    expect(
+      reminderSection.querySelectorAll("article[data-reminder-id]"),
+    ).toHaveLength(5);
+    expect(within(reminderSection).getByText("06:00")).toBeInTheDocument();
+    expect(
+      within(reminderSection).queryByText("08:30"),
+    ).not.toBeInTheDocument();
+
+    // Navigate reminders to page 2 -> Plans remain on page 1 (independent state!)
+    const plansSection = screen.getByRole("region", {
+      name: "Kế hoạch đọc trong tuần",
+    });
+    const remindersNav = screen.getByRole("navigation", {
+      name: "Phân trang lịch nhắc đọc",
+    });
+    await user.click(
+      within(remindersNav).getByRole("button", { name: /Tiếp/ }),
+    );
+    expect(
+      await within(reminderSection).findByText("08:30"),
+    ).toBeInTheDocument();
+    expect(within(plansSection).getByText("Kế hoạch số 1")).toBeInTheDocument();
+    expect(
+      within(plansSection).queryByText("Kế hoạch số 5"),
+    ).not.toBeInTheDocument();
+
+    // Toggle exact reminder #6 (08:30) on page 2
+    const reminder6Card = reminderSection.querySelector(
+      `article[data-reminder-id="${child1Reminders[5].id}"]`,
+    ) as HTMLElement;
+    expect(reminder6Card).not.toBeNull();
+    await user.click(within(reminder6Card).getByRole("checkbox"));
+    await waitFor(() => {
+      expect(toggledIds).toEqual([child1Reminders[5].id]);
+    });
+
+    // Switch to child 2 -> stale due reminder & child 1 data disappear immediately
+    expect(screen.getByText(/Đến giờ đọc sách/)).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Hồ sơ bé"), child2Id);
+    expect(
+      await screen.findByText("Chưa có lịch nhắc nào."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Đến giờ đọc sách/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Kế hoạch số 1")).not.toBeInTheDocument();
+  });
+
+  it("renders a 2-column vertical masonry stack and compact single-line reminder metadata", async () => {
+    const ts = "2026-11-20T08:00:00Z";
+    const dailyReminder = {
+      id: "55555555-5555-4555-8555-000000000099",
+      child_id: childId,
+      remind_at: "19:30:00",
+      weekdays: [0, 1, 2, 3, 4, 5, 6],
+      timezone: "Asia/Ho_Chi_Minh",
+      is_active: true,
+      email_enabled: true,
+      deleted_at: null,
+      created_at: ts,
+      updated_at: ts,
+    };
+    const appReminder = {
+      ...dailyReminder,
+      id: "55555555-5555-4555-8555-000000000100",
+      remind_at: "20:00:00",
+      weekdays: [0, 2, 4],
+      email_enabled: false,
+    };
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/profiles/children") return Response.json([child]);
+      if (url.pathname === "/books/catalog") return Response.json([]);
+      if (url.pathname === "/reading-management/reminders") {
+        return Response.json([dailyReminder, appReminder]);
+      }
+      if (url.pathname.startsWith("/reading-management/")) {
+        return Response.json([]);
+      }
+      throw new Error("Unexpected API route: " + url.pathname);
+    });
+
+    renderScreen();
+
+    const plansSection = await screen.findByRole("region", {
+      name: "Kế hoạch đọc trong tuần",
+    });
+    const collectionsSection = screen.getByRole("region", {
+      name: "Sách yêu thích và danh sách muốn đọc",
+    });
+    const goalsSection = screen.getByRole("region", {
+      name: "Mục tiêu đọc",
+    });
+    const remindersSection = screen.getByRole("region", {
+      name: "Lịch nhắc đọc",
+    });
+
+    // Exact accessible heading names preserved with sibling count badges outside h2
+    expect(
+      screen.getByRole("heading", { name: "Kế hoạch đọc trong tuần" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Mục tiêu đọc" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", {
+        name: "Sách yêu thích và danh sách muốn đọc",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Lịch nhắc đọc" }),
+    ).toBeInTheDocument();
+
+    // True 2-column vertical masonry stack: Plans+Collections share left column, Goals+Reminders share right column
+    expect(plansSection.parentElement).toBe(collectionsSection.parentElement);
+    expect(goalsSection.parentElement).toBe(remindersSection.parentElement);
+    expect(plansSection.parentElement).not.toBe(goalsSection.parentElement);
+
+    // Compact reminder rows show concise channel pill & weekday summary with full tooltip
+    const dailyRow = remindersSection.querySelector(
+      `article[data-reminder-id="${dailyReminder.id}"]`,
+    ) as HTMLElement;
+    expect(within(dailyRow).getByText("19:30")).toBeInTheDocument();
+    expect(within(dailyRow).getByText("Email")).toBeInTheDocument();
+    const dailySchedule = within(dailyRow).getByText("Hằng ngày");
+    expect(dailySchedule).toHaveAttribute(
+      "title",
+      "T2, T3, T4, T5, T6, T7, CN · Asia/Ho_Chi_Minh",
+    );
+
+    const appRow = remindersSection.querySelector(
+      `article[data-reminder-id="${appReminder.id}"]`,
+    ) as HTMLElement;
+    expect(within(appRow).getByText("20:00")).toBeInTheDocument();
+    expect(within(appRow).getByText("Ứng dụng")).toBeInTheDocument();
+    expect(within(appRow).getByText("T2, T4, T6")).toHaveAttribute(
+      "title",
+      "T2, T4, T6 · Asia/Ho_Chi_Minh",
+    );
   });
 });

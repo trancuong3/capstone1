@@ -54,6 +54,7 @@ function ProgressReportContent({
   const [state, setState] = useState<State>({ status: "loading" });
   const [retry, setRetry] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [showAllDifficultWords, setShowAllDifficultWords] = useState(false);
   const alive = useRef(true);
   const paging = useRef(false);
   const selected = parseProgressPeriod(
@@ -453,16 +454,40 @@ function ProgressReportContent({
               </StatusMessage>
             ) : null}
             {report.difficult_words?.length ? (
-              <ul className="mt-5 flex flex-wrap gap-3">
-                {report.difficult_words.map((word, index) => (
-                  <li
-                    key={`${word.normalized_word}-${index}`}
-                    className="rounded-full bg-warning-surface px-4 py-2 font-semibold text-warning"
+              <>
+                <p className="mt-2 text-xs font-semibold text-muted">
+                  Tổng cộng {report.difficult_words.length} từ cần luyện trong
+                  kỳ này.
+                </p>
+                <ul className="mt-4 flex flex-wrap gap-3">
+                  {(showAllDifficultWords
+                    ? report.difficult_words
+                    : report.difficult_words.slice(0, 12)
+                  ).map((word, index) => (
+                    <li
+                      key={`${word.normalized_word}-${index}`}
+                      className="rounded-full bg-warning-surface px-4 py-2 font-semibold text-warning"
+                    >
+                      {word.display_text} · {word.difficulty_score}
+                    </li>
+                  ))}
+                </ul>
+                {report.difficult_words.length > 12 ? (
+                  <Button
+                    className="mt-3"
+                    fullWidth={false}
+                    onClick={() =>
+                      setShowAllDifficultWords((current) => !current)
+                    }
+                    type="button"
+                    variant="quiet"
                   >
-                    {word.display_text} · {word.difficulty_score}
-                  </li>
-                ))}
-              </ul>
+                    {showAllDifficultWords
+                      ? "Thu gọn"
+                      : `Xem tất cả (${report.difficult_words.length})`}
+                  </Button>
+                ) : null}
+              </>
             ) : report.availability.difficult_words === "available" ? (
               <p className="mt-5 text-body text-muted">
                 Báo cáo này chưa ghi nhận từ cần luyện.

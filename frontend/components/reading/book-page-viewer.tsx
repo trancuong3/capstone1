@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowDown } from "lucide-react";
 import Image from "next/image";
 import {
   memo,
@@ -16,8 +17,10 @@ import {
   revokePrivateBlobUrl,
 } from "@/lib/api/api-client";
 import { canOverlayPage, containImage } from "@/lib/reading/page-presentation";
+import { useReadingAutoScroll } from "@/lib/reading/use-reading-auto-scroll";
 import {
-  wordPresentationLabels,
+  getWordHighlightTier,
+  getWordPresentationLabel,
   type WordPresentationState,
   type PageWordEvidence,
   wordStateForPage,
@@ -35,16 +38,19 @@ interface BookPageViewerProps extends PageWordEvidence {
 
 const OVERLAY_COLORS: Record<WordPresentationState, string> = {
   unread: "",
-  current: "bg-yellow-300/25 ring-2 ring-yellow-500",
-  "preview-correct": "bg-green-300/15 ring-1 ring-green-600/60",
-  correct: "bg-green-300/25 ring-1 ring-green-600",
+  current: "bg-yellow-300/25 ring-2 ring-amber-600 border-b-2 border-primary",
+  "preview-correct":
+    "bg-emerald-300/15 ring-1 ring-emerald-600/70 border-b-2 border-dashed border-emerald-600",
+  correct:
+    "bg-green-300/25 ring-1 ring-green-600 border-b-2 border-solid border-emerald-700",
   incorrect: "bg-red-300/25 ring-1 ring-red-600",
   repeated: "bg-purple-300/25 ring-1 ring-purple-600",
   hesitation: "bg-purple-300/25 ring-1 ring-purple-600",
   omission: "bg-red-300/25 ring-1 ring-red-600",
   "self-corrected": "bg-green-300/25 ring-2 ring-green-700 ring-offset-1",
   unresolved: "bg-red-300/25 ring-2 ring-red-700",
-  assisted: "bg-sky-300/25 ring-2 ring-sky-600",
+  assisted:
+    "bg-sky-300/25 ring-2 ring-sky-600 border-b-2 border-dotted border-sky-700",
   uncertain: "bg-slate-300/20 ring-1 ring-slate-500",
 };
 
@@ -85,6 +91,7 @@ const MemoOverlayWordButton = memo(function OverlayWordButton({
       aria-current={isCurrent ? "true" : undefined}
       data-word-id={word.word_id}
       data-reading-state={state}
+      data-reading-tier={getWordHighlightTier(state, isCurrent)}
       data-page-revision-id={pageRevisionId}
       data-bbox={word.bbox.join(",")}
       onClick={handleClick}
@@ -101,9 +108,10 @@ const MemoOverlayWordButton = memo(function OverlayWordButton({
     >
       <span className="sr-only">{word.text}</span>
       <span hidden id={`image-word-state-${pageRevisionId}-${word.word_id}`}>
-        {wordPresentationLabels[state]}
+        {getWordPresentationLabel(state)}
       </span>
       {[
+        "preview-correct",
         "self-corrected",
         "unresolved",
         "uncertain",
@@ -115,15 +123,17 @@ const MemoOverlayWordButton = memo(function OverlayWordButton({
           aria-hidden="true"
           className="absolute -right-1 -top-3 rounded-full bg-white px-1 text-xs font-semibold text-ink"
         >
-          {state === "self-corrected"
-            ? "↺"
-            : state === "uncertain"
-              ? "?"
-              : state === "unresolved"
-                ? "◇"
-                : state === "assisted"
-                  ? "♪"
-                  : "!"}
+          {state === "preview-correct"
+            ? "·"
+            : state === "self-corrected"
+              ? "↺"
+              : state === "uncertain"
+                ? "?"
+                : state === "unresolved"
+                  ? "◇"
+                  : state === "assisted"
+                    ? "♪"
+                    : "!"}
         </span>
       ) : null}
     </button>
@@ -149,17 +159,22 @@ function PageSurface(props: BookPageViewerProps) {
   } = props;
   const rootRef = useRef<HTMLDivElement>(null);
   const overlayNodesRef = useRef(new Map<string, HTMLButtonElement>());
+  const textNodesRef = useRef(new Map<string, HTMLElement>());
   const onWordClickRef = useRef(onWordClick);
   useEffect(() => {
     onWordClickRef.current = onWordClick;
   });
-  const handleSelectOverlayWord = useCallback((word: ReadingPageWordDTO) => {
-    onWordClickRef.current?.(word);
-  }, []);
   const registerOverlayNode = useCallback(
     (wordId: string, node: HTMLButtonElement | null) => {
       if (node) overlayNodesRef.current.set(wordId, node);
       else overlayNodesRef.current.delete(wordId);
+    },
+    [],
+  );
+  const registerTextNode = useCallback(
+    (wordId: string, node: HTMLElement | null) => {
+      if (node) textNodesRef.current.set(wordId, node);
+      else textNodesRef.current.delete(wordId);
     },
     [],
   );
@@ -223,7 +238,12 @@ function PageSurface(props: BookPageViewerProps) {
     if (!root) return;
     const measure = () => {
       const width = root.getBoundingClientRect().width;
-      const height = Math.min(window.innerHeight * 0.6, 680);
+      const availableHeight = root.clientHeight;
+      const defaultHeight = Math.min(window.innerHeight * 0.6, 680);
+      const height =
+        availableHeight > 120
+          ? Math.max(160, Math.min(defaultHeight, availableHeight - 24))
+          : defaultHeight;
       setFrame((previous) =>
         previous.width === width && previous.height === height
           ? previous
@@ -256,17 +276,29 @@ function PageSurface(props: BookPageViewerProps) {
   const activeId = previewSnapshot
     ? previewSnapshot.currentWordId
     : currentWordId;
-  useEffect(() => {
-    if (!overlay || !activeId) return;
-    const active = overlayNodesRef.current.get(activeId);
-    active?.scrollIntoView?.({
-      block: "nearest",
-      inline: "nearest",
-      behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
-        ? "instant"
-        : "smooth",
-    });
+
+  const getActiveNode = useCallback(() => {
+    if (!activeId) return null;
+    if (overlay) {
+      return overlayNodesRef.current.get(activeId) ?? null;
+    }
+    return textNodesRef.current.get(activeId) ?? null;
   }, [activeId, overlay]);
+
+  const { isDetached, resumeAutoFollow } = useReadingAutoScroll({
+    containerRef: rootRef,
+    getActiveElement: getActiveNode,
+    activeWordId: activeId,
+    pageKey: `${page.page_id}:${page.page_revision_id}`,
+  });
+
+  const handleSelectWord = useCallback(
+    (word: ReadingPageWordDTO) => {
+      resumeAutoFollow();
+      onWordClickRef.current?.(word);
+    },
+    [resumeAutoFollow],
+  );
 
   const stateFor = wordStateForPage(props);
   return (
@@ -293,13 +325,19 @@ function PageSurface(props: BookPageViewerProps) {
       <header className="reader-bookplate">
         <div className="min-w-0">
           <p className="reader-folio">Trang {page.page_number}</p>
-          <h1 className="book-title break-words text-3xl sm:text-4xl">
+          <h1 className="book-title line-clamp-1 break-words text-lg sm:line-clamp-none sm:text-3xl">
             {props.title ?? "Trang sách của bé"}
           </h1>
         </div>
         {props.illustration}
       </header>
-      <div ref={rootRef} className="reader-leaf w-full min-w-0">
+      <div
+        ref={rootRef}
+        className="reader-leaf w-full min-w-0"
+        data-reading-scroll-container="true"
+        data-auto-follow={isDetached ? "paused" : "active"}
+        tabIndex={0}
+      >
         {source && image !== "failed" ? (
           <Image
             key={source}
@@ -324,7 +362,7 @@ function PageSurface(props: BookPageViewerProps) {
         ) : null}
         {overlay && rect && source ? (
           <div
-            className="relative mt-4 w-full overflow-hidden"
+            className="relative mt-1 w-full overflow-hidden"
             style={{ height: frame.height }}
             data-reading-panel="image"
           >
@@ -354,7 +392,7 @@ function PageSurface(props: BookPageViewerProps) {
                   pageRevisionId={page.page_revision_id}
                   state={stateFor(word, index)}
                   isCurrent={word.word_id === activeId}
-                  onSelectWord={handleSelectOverlayWord}
+                  onSelectWord={handleSelectWord}
                   registerNode={registerOverlayNode}
                 />
               ))}
@@ -365,9 +403,9 @@ function PageSurface(props: BookPageViewerProps) {
             {source && image !== "failed" ? (
               <details
                 onToggle={(event) => setReferenceOpen(event.currentTarget.open)}
-                className="mt-3 rounded-control border border-border bg-white/60 p-2"
+                className="mb-2 rounded-control border border-border bg-white/70 p-1.5"
               >
-                <summary className="min-h-11 cursor-pointer px-2 py-3 font-semibold text-primary">
+                <summary className="min-h-11 cursor-pointer px-2 py-2.5 text-sm font-semibold text-primary">
                   Xem ảnh trang sách
                 </summary>
                 {referenceOpen ? (
@@ -377,15 +415,33 @@ function PageSurface(props: BookPageViewerProps) {
                     width={Math.max(1, page.width)}
                     height={Math.max(1, page.height)}
                     unoptimized
-                    className="mx-auto h-auto max-h-[55dvh] w-auto max-w-full object-contain"
+                    className="mx-auto h-auto max-h-[42dvh] w-auto max-w-full object-contain"
                     onError={() => setImage("failed")}
                   />
                 ) : null}
               </details>
             ) : null}
-            <BookPageContent {...props} />
+            <BookPageContent
+              {...props}
+              onWordClick={handleSelectWord}
+              registerWordNode={registerTextNode}
+              scrollContainerRef={rootRef}
+            />
           </>
         )}
+        {isDetached && activeId ? (
+          <div className="pointer-events-none sticky bottom-3 z-20 flex h-0 justify-end overflow-visible">
+            <button
+              type="button"
+              data-testid="resume-auto-follow-btn"
+              onClick={resumeAutoFollow}
+              className="pointer-events-auto inline-flex min-h-11 -translate-y-full items-center gap-1.5 rounded-full border border-primary/40 bg-primary px-3.5 py-2 text-xs font-bold text-white shadow-md hover:bg-primary-hover focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            >
+              <ArrowDown aria-hidden="true" className="size-4 shrink-0" />
+              Về từ đang đọc
+            </button>
+          </div>
+        ) : null}
       </div>
       <p className="sr-only" aria-live="polite">
         Từ hiện tại:{" "}

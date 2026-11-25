@@ -5,6 +5,8 @@ import Link from "next/link";
 import { RefreshCw, Search } from "lucide-react";
 
 import { Button } from "@/components/common/button";
+import { PaginationBar } from "@/components/common/pagination-bar";
+import { ResponsiveTable } from "@/components/common/responsive-table";
 
 import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
 import { SelectField } from "@/components/common/select-field";
@@ -91,10 +93,9 @@ export function AdminMetadataQualityScreen() {
     setOffset(0);
   }
 
-  const firstItem = dashboard && dashboard.total > 0 ? dashboard.offset + 1 : 0;
-  const lastItem = dashboard
-    ? Math.min(dashboard.offset + dashboard.limit, dashboard.total)
-    : 0;
+  const currentPage = dashboard
+    ? Math.floor(dashboard.offset / Math.max(1, dashboard.limit)) + 1
+    : 1;
   const hasFilters = Boolean(search.trim() || issueType || lifecycle);
 
   return (
@@ -297,7 +298,7 @@ export function AdminMetadataQualityScreen() {
                 </p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <ResponsiveTable ariaLabel="Bảng sách cần kiểm tra metadata">
                 <table className="w-full min-w-[900px] border-collapse text-left text-sm">
                   <thead>
                     <tr className="border-b border-border bg-sky text-primary">
@@ -395,40 +396,21 @@ export function AdminMetadataQualityScreen() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ResponsiveTable>
             )}
 
-            <div className="mt-5 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-muted">
-                Hiển thị {firstItem}–{lastItem} trên{" "}
-                {dashboard.total.toLocaleString("vi-VN")} kết quả
-              </p>
-              <div className="flex gap-2">
-                <Button
-                  className="w-auto"
-                  disabled={dashboard.offset === 0 || loading}
-                  onClick={() =>
-                    setOffset((current) => Math.max(0, current - limit))
-                  }
-                  type="button"
-                  variant="secondary"
-                >
-                  Trước
-                </Button>
-                <Button
-                  className="w-auto"
-                  disabled={
-                    dashboard.offset + dashboard.limit >= dashboard.total ||
-                    loading
-                  }
-                  onClick={() => setOffset((current) => current + limit)}
-                  type="button"
-                  variant="secondary"
-                >
-                  Tiếp
-                </Button>
-              </div>
-            </div>
+            <PaginationBar
+              ariaLabel="Phân trang danh sách kiểm tra metadata"
+              className="mt-5"
+              compact
+              disabled={loading}
+              itemLabel="kết quả"
+              onPageChange={(nextPage) => setOffset((nextPage - 1) * limit)}
+              page={currentPage}
+              pageSize={dashboard.limit}
+              showSummaryWhenSinglePage
+              total={dashboard.total}
+            />
             <p className="mt-4 text-xs text-muted">
               Lần kiểm tra dữ liệu:{" "}
               {new Date(dashboard.summary.checked_at).toLocaleString("vi-VN")}.

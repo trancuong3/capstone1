@@ -12,6 +12,7 @@
 import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
+import net from "node:net";
 
 const listenHost = process.env.VIREAD_PROXY_HOST || "0.0.0.0";
 const listenPort = Number.parseInt(process.env.VIREAD_PROXY_PORT || "8443", 10);
@@ -47,20 +48,20 @@ const HOP_BY_HOP = new Set([
   "upgrade",
 ]);
 
-function filterHeaders(rawHeaders) {
+function filterHeaders(rawHeaders, stripHopByHop = true) {
   const out = {};
   for (const [k, v] of Object.entries(rawHeaders)) {
     if (v === undefined) continue;
     const lk = k.toLowerCase();
-    if (HOP_BY_HOP.has(lk)) continue;
+    if (stripHopByHop && HOP_BY_HOP.has(lk)) continue;
     out[k] = v;
   }
   return out;
 }
 
-const server = https.createServer(tlsOptions, (req, res) => {
-  const rawUrl = req.url || "/";
-  const isApi = rawUrl === apiPrefix || rawUrl.startsWith(apiPrefix + "/") || rawUrl.startsWith(apiPrefix + "?");
+function resolveProxyTarget(rawUrl) {
+  const isApi =
+    rawUrl === apiPrefix || rawUrl.startsWith(apiPrefix + "/") || rawUrl.startsWith(apiPrefix + "?");
   const isSupabase =
     supabasePort > 0 &&
     (rawUrl === supabasePrefix ||
@@ -76,14 +77,24 @@ const server = https.createServer(tlsOptions, (req, res) => {
     targetPath = rawUrl.slice(supabasePrefix.length) || "/";
     if (targetPath.startsWith("?")) targetPath = "/" + targetPath;
   }
+  return { isApi, isSupabase, targetHost, targetPort, targetPath };
+}
 
-  const forwardedHeaders = filterHeaders(req.headers);
+function buildForwardedHeaders(req, { stripHopByHop = true } = {}) {
+  const forwardedHeaders = filterHeaders(req.headers, stripHopByHop);
   const incomingHost = req.headers.host || `${listenHost}:${listenPort}`;
   forwardedHeaders["x-forwarded-proto"] = "https";
   forwardedHeaders["x-forwarded-host"] = incomingHost;
   forwardedHeaders["x-forwarded-for"] = req.socket.remoteAddress || "127.0.0.1";
   // Preserve original Host for Next.js SSR cookie/redirect origin resolution.
   forwardedHeaders["host"] = incomingHost;
+  return { forwardedHeaders, incomingHost };
+}
+
+const server = https.createServer(tlsOptions, (req, res) => {
+  const rawUrl = req.url || "/";
+  const { isApi, targetHost, targetPort, targetPath } = resolveProxyTarget(rawUrl);
+  const { forwardedHeaders, incomingHost } = buildForwardedHeaders(req, { stripHopByHop: true });
 
   const upstreamReq = http.request(
     {
@@ -140,6 +151,65 @@ const server = https.createServer(tlsOptions, (req, res) => {
   });
 
   req.pipe(upstreamReq);
+});
+
+server.on("upgrade", (req, clientSocket, head) => {
+  const rawUrl = req.url || "/";
+  const { isApi, targetHost, targetPort, targetPath } = resolveProxyTarget(rawUrl);
+  if (!isApi) {
+    clientSocket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+    clientSocket.destroy();
+    return;
+  }
+
+  const { forwardedHeaders } = buildForwardedHeaders(req, { stripHopByHop: false });
+  const upstreamSocket = net.connect({ host: targetHost, port: targetPort });
+
+  const destroyBoth = () => {
+    if (!clientSocket.destroyed) clientSocket.destroy();
+    if (!upstreamSocket.destroyed) upstreamSocket.destroy();
+  };
+
+  clientSocket.on("error", destroyBoth);
+  upstreamSocket.on("error", (err) => {
+    console.error(`[viread-proxy] upstream_ws_error code=${err.code || err.name}`);
+    if (!clientSocket.destroyed) {
+      try {
+        clientSocket.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n");
+      } catch {
+        // Ignore write error on closing socket
+      }
+    }
+    destroyBoth();
+  });
+
+  upstreamSocket.on("connect", () => {
+    const method = (req.method || "GET").toUpperCase();
+    const lines = [`${method} ${targetPath} HTTP/1.1`];
+    for (const [key, val] of Object.entries(forwardedHeaders)) {
+      if (val === undefined) continue;
+      if (Array.isArray(val)) {
+        for (const item of val) {
+          lines.push(`${key}: ${item}`);
+        }
+      } else {
+        lines.push(`${key}: ${val}`);
+      }
+    }
+    upstreamSocket.write(lines.join("\r\n") + "\r\n\r\n");
+    if (head && head.length > 0) {
+      upstreamSocket.write(head);
+    }
+    upstreamSocket.pipe(clientSocket);
+    clientSocket.pipe(upstreamSocket);
+  });
+
+  clientSocket.on("close", () => {
+    if (!upstreamSocket.destroyed) upstreamSocket.destroy();
+  });
+  upstreamSocket.on("close", () => {
+    if (!clientSocket.destroyed) clientSocket.destroy();
+  });
 });
 
 server.requestTimeout = 160_000;
