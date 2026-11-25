@@ -196,10 +196,32 @@ class AdminAuditPageRead(BaseModel):
     next_cursor: str | None
 
 
+OperationalState = Literal[
+    "Healthy",
+    "Degraded",
+    "Offline",
+    "Queued",
+    "Quota exhausted",
+    "Unsupported",
+    "Unknown",
+]
+
+
+class AdminAudioCacheSummaryRead(BaseModel):
+    entry_count: int = Field(ge=0)
+    storage_used_bytes: int = Field(ge=0)
+    storage_quota_bytes: int = Field(ge=0)
+    daily_egress_bytes: int = Field(ge=0)
+    daily_egress_limit_bytes: int = Field(ge=0)
+    cache_hit_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+    quota_exhausted: bool = False
+
+
 class AdminHealthItemRead(BaseModel):
     id: str
     label: str
     status: Literal["HEALTHY", "DEGRADED", "UNAVAILABLE"]
+    operational_state: OperationalState | None = None
     checked_at: datetime
     safe_message: str
     detail_status: Literal[
@@ -215,3 +237,4 @@ class AdminHealthRead(BaseModel):
     overall_status: Literal["HEALTHY", "DEGRADED", "UNAVAILABLE"]
     checked_at: datetime
     services: list[AdminHealthItemRead]
+    audio_cache: AdminAudioCacheSummaryRead | None = None

@@ -95,7 +95,20 @@ class AdminHealthConcurrencyAndVoiceTests(unittest.IsolatedAsyncioTestCase):
         ), patch(
             "app.api.routes.system.probe_storage_health",
             AsyncMock(side_effect=slow_storage),
-        ):
+        ), patch(
+            "app.api.routes.system.is_tts_cache_enabled", return_value=True,
+        ), patch(
+            "app.api.routes.system.TtsAudioCacheService.get_summary",
+            new=AsyncMock(return_value={
+                        "entry_count": 2,
+                        "storage_used_bytes": 2048,
+                        "storage_quota_bytes": 150 * 1024 * 1024,
+                        "daily_egress_bytes": 0,
+                        "daily_egress_limit_bytes": 300 * 1024 * 1024,
+                        "cache_hit_ratio": None,
+                        "quota_exhausted": False,
+                    }),
+        ) as cache_probe:
             mock_orch_cls.return_value.get_status = AsyncMock(side_effect=slow_voice_status)
             started = time.perf_counter()
             report = await service.health()
@@ -105,7 +118,9 @@ class AdminHealthConcurrencyAndVoiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(elapsed, 0.55, f"probes appeared sequential ({elapsed:.3f}s)")
         mock_orch_cls.return_value.get_status.assert_awaited_once()
         ids = [item.id for item in report.services]
-        self.assertEqual(ids[:6], ["api", "database", "local_ocr", "tts", "stt", "storage"])
+        self.assertEqual(ids, ["api", "database", "local_ocr", "tts", "stt", "tts_audio_cache", "storage", "paddleocr"])
+        cache_probe.assert_awaited_once()
+        self.assertEqual(report.audio_cache.entry_count, 2)
         self.assertEqual(report.overall_status, "HEALTHY")
 
     async def test_admin_health_isolates_single_probe_exception(self) -> None:

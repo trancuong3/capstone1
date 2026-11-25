@@ -100,7 +100,12 @@ const MemoWordToken = memo(function WordToken({
             "min-h-11 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
           !readOnly && "cursor-pointer select-none",
           wordPresentationClasses[presentationState],
-          isCurrent && "font-semibold ring-2 ring-primary/45 shadow-xs",
+          isCurrent &&
+            presentationState !== "current" &&
+            (presentationState === "incorrect"
+              ? "shadow-xs"
+              : "font-semibold ring-2 ring-primary/45 shadow-xs"),
+          isCurrent && presentationState === "current" && "shadow-xs",
           presentationState === "incorrect" &&
             "font-semibold border-b-2 border-red-500",
           presentationState === "unread" &&
@@ -164,7 +169,7 @@ const MemoWordToken = memo(function WordToken({
             {"\u266A"}
           </span>
         ) : null}
-      </span>
+      </span>{" "}
     </Fragment>
   );
 });
@@ -189,7 +194,7 @@ export function BookPageContent(props: BookPageContentProps) {
   useEffect(() => {
     onWordClickRef.current = onWordClick;
     registerWordNodeRef.current = registerWordNode;
-  });
+  }, [onWordClick, registerWordNode]);
 
   const registerNode = useCallback(
     (wordId: string, node: HTMLSpanElement | null) => {
@@ -206,14 +211,20 @@ export function BookPageContent(props: BookPageContentProps) {
   const activeWordId = previewSnapshot
     ? previewSnapshot.currentWordId
     : currentWordId;
+  const activeWordIdRef = useRef(activeWordId);
+  useEffect(() => {
+    activeWordIdRef.current = activeWordId;
+  }, [activeWordId]);
 
   const isManagedByParent = Boolean(registerWordNode);
   const effectiveScrollRef = scrollContainerRef ?? panelRef;
 
   const getActiveWordNode = useCallback(
     () =>
-      activeWordId ? (wordNodesRef.current.get(activeWordId) ?? null) : null,
-    [activeWordId],
+      activeWordIdRef.current
+        ? (wordNodesRef.current.get(activeWordIdRef.current) ?? null)
+        : null,
+    [],
   );
 
   const { isDetached, resumeAutoFollow } = useReadingAutoScroll({
@@ -248,7 +259,7 @@ export function BookPageContent(props: BookPageContentProps) {
       className="min-h-0 flex-1 py-2"
     >
       {hasWords ? (
-        <p className="max-w-[58ch] text-[24px] font-bold leading-[2] tracking-[0.01em] text-ink sm:text-[30px] sm:leading-[1.9]">
+        <p className="w-full max-w-[58ch] text-[24px] font-bold leading-[2] tracking-[0.01em] text-ink sm:text-[30px] sm:leading-[1.9]">
           {layout.map((entry) => (
             <MemoWordToken
               key={entry.word.word_id}

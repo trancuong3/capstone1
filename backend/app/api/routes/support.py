@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict
 
-from app.api.deps import require_active_profile_id
+from app.api.deps import require_parent_id
 from app.providers.support_email_provider import (
     SupportEmailDeliveryError,
     SupportEmailNotConfiguredError,
@@ -35,9 +35,9 @@ class SupportFeedbackResponse(BaseModel):
 )
 async def submit_support_feedback(
     request: SupportFeedbackRequest,
-    _parent_id: UUID = Depends(require_active_profile_id),
+    _parent_id: UUID = Depends(require_parent_id),
     _rate_limited: None = Depends(
-        rate_limit("support_feedback", default_max=10, default_window=300.0)
+        rate_limit("support_feedback", default_max=10, default_window=300.0, actor_dependency=require_parent_id)
     ),
 ) -> SupportFeedbackResponse:
     """Send authenticated parent feedback to the backend-configured inbox."""

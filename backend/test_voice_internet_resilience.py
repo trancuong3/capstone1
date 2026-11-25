@@ -19,7 +19,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_current_parent_id, get_db
+from app.api.deps import get_current_parent_id, require_active_profile_id
 from app.api.routes.voice import (
     _resolve_audio_content_type,
     router as voice_router,
@@ -469,10 +469,8 @@ class VoiceOrchestratorAndRouteResilienceTests(unittest.IsolatedAsyncioTestCase)
 
         app = FastAPI()
         app.include_router(voice_router, prefix="/voice")
-        active_db = MagicMock()
-        active_db.scalar = AsyncMock(return_value="parent")
         app.dependency_overrides[get_current_parent_id] = lambda: uuid.uuid4()
-        app.dependency_overrides[get_db] = lambda: active_db
+        app.dependency_overrides[require_active_profile_id] = lambda: uuid.uuid4()
 
         fake_status = {
             "default_mode": "local_only",

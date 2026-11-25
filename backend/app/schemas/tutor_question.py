@@ -74,3 +74,4 @@ class TutorAnswerResultRead(BaseModel):
     is_correct: bool
     score: float
     feedback_code: Literal["CORRECT", "TRY_AGAIN"]
+    story_hint: str | None = None

@@ -4,7 +4,7 @@ import asyncio
 import base64
 import os
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 from uuid import UUID
 
 import httpx
@@ -16,7 +16,7 @@ os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_current_parent_id, get_db
+from app.api.deps import require_active_profile_id
 from app.api.routes import voice_studio as studio_routes
 from app.providers import elevenlabs_studio_provider as studio
 from app.providers.elevenlabs_studio_provider import (
@@ -261,10 +261,7 @@ class RouteTests(unittest.TestCase):
         app = FastAPI()
         app.include_router(studio_routes.router, prefix="/voice")
         if authenticated:
-            active_db = MagicMock()
-            active_db.scalar = AsyncMock(return_value="parent")
-            app.dependency_overrides[get_current_parent_id] = lambda: ACTOR_ID
-            app.dependency_overrides[get_db] = lambda: active_db
+            app.dependency_overrides[require_active_profile_id] = lambda: ACTOR_ID
         return TestClient(app)
 
     def test_endpoints_require_authentication(self):

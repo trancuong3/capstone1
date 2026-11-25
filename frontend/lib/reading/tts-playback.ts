@@ -38,6 +38,7 @@ import {
   getSpeechPreferences,
 } from "@/lib/reading/speech-preferences";
 import { getSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
+import type { TtsCacheScope } from "@/lib/reading/tts-audio-cache";
 import {
   isWavAudioBlob,
   type TtsAudioFormat,
@@ -79,6 +80,11 @@ export interface SpeechPlayOptions {
   utteranceKind?: string;
   /** Verified public-catalog precomputed MP3 URL (never used for private books). */
   precomputedAudioUrl?: string | null;
+  bookId?: string | null;
+  pageId?: string | null;
+  pageRevisionId?: string | null;
+  cacheScope?: TtsCacheScope | null;
+  isPrivateBook?: boolean;
   onPlay?: (duration: number) => void;
   onTimeUpdate?: (currentTime: number, duration: number) => void;
   onWordChange?: (index: number) => void;
@@ -92,6 +98,11 @@ export interface WordTimedPlayOptions {
   precomputedAudioUrl?: string | null;
   /** Optional word timings sidecar for precomputed verified-catalog audio. */
   precomputedWordTimings?: readonly WordTiming[] | null;
+  bookId?: string | null;
+  pageId?: string | null;
+  pageRevisionId?: string | null;
+  cacheScope?: TtsCacheScope | null;
+  isPrivateBook?: boolean;
   onPlay?: () => void;
   /** -1 clears the cursor if text and OCR words cannot be safely mapped. */
   onWordChange?: (index: number) => void;
@@ -100,10 +111,22 @@ export interface WordTimedPlayOptions {
 
 export interface PhonicsPlayOptions {
   speedScale?: number;
+  bookId?: string | null;
+  pageId?: string | null;
+  pageRevisionId?: string | null;
+  cacheScope?: TtsCacheScope | null;
+  isPrivateBook?: boolean;
   onPlay?: (duration: number) => void;
   onStepChange?: (stepIndex: number, step: PhonicsLessonStep) => void;
   onTimeUpdate?: (currentTime: number, duration: number) => void;
   onEnded?: () => void;
+}
+
+export interface TtsPlaybackCacheContext {
+  readonly bookId?: string | null;
+  readonly pageId?: string | null;
+  readonly pageRevisionId?: string | null;
+  readonly isPrivateBook?: boolean;
 }
 
 interface ResolvedOperationVoice {
@@ -162,36 +185,24 @@ function canUseGoogleTtsFallback(): boolean {
 }
 
 function canUseBrowserSpeechSynthesis(): boolean {
-  if (
-    typeof window === "undefined" ||
-    !("speechSynthesis" in window) ||
-    typeof window.speechSynthesis?.speak !== "function" ||
-    typeof SpeechSynthesisUtterance !== "function"
-  ) {
-    return false;
-  }
-  try {
-    const voices = window.speechSynthesis.getVoices?.() ?? [];
-    if (
-      voices.length > 0 &&
-      !voices.some((voice) => (voice.lang ?? "").toLowerCase().startsWith("vi"))
-    ) {
-      return false;
-    }
-  } catch {
-    return false;
-  }
-  return true;
+  return (
+    typeof window !== "undefined" &&
+    "speechSynthesis" in window &&
+    typeof window.speechSynthesis?.speak === "function" &&
+    typeof SpeechSynthesisUtterance === "function"
+  );
 }
 
-function canUseDeviceFallbackTts(): boolean {
-  return isAndroidNativeSpeechAvailable() || canUseBrowserSpeechSynthesis();
+function canUseAllowedDeviceFallbackTts(): boolean {
+  if (isAndroidNativeSpeechAvailable()) {
+    return true;
+  }
+  return canUseGoogleTtsFallback() && canUseBrowserSpeechSynthesis();
 }
 
 function shouldSkipBackendTtsForBrowserFallback(operation: Operation): boolean {
   if (
-    !canUseGoogleTtsFallback() ||
-    !canUseDeviceFallbackTts() ||
+    !canUseAllowedDeviceFallbackTts() ||
     operation.voice.provider !== "local"
   ) {
     return false;
@@ -497,12 +508,99 @@ export class TtsPlayback {
   private readonly phonicsCache = new Map<string, SynthesizedPhonicsSpeech>();
   private phonicsCacheBytes = 0;
   private timedCooldownUntil = 0;
+  private defaultCacheContext: TtsPlaybackCacheContext | null = null;
 
   constructor(
     private readonly speech: SpeechService,
     private readonly studio: VoiceStudioService,
   ) {
     installAndroidAudioUnlock();
+  }
+
+  setCacheContext = (context: TtsPlaybackCacheContext | null): void => {
+    this.defaultCacheContext = context;
+  };
+
+  private resolveCacheMeta(
+    options: {
+      readonly bookId?: string | null;
+      readonly pageId?: string | null;
+      readonly pageRevisionId?: string | null;
+      readonly cacheScope?: TtsCacheScope | null;
+      readonly isPrivateBook?: boolean;
+      readonly wordSample?: boolean;
+      readonly coaching?: boolean;
+    },
+    defaultPublicScope: TtsCacheScope | undefined,
+    includeIsPrivate: true,
+  ): {
+    readonly bookId?: string;
+    readonly pageId?: string;
+    readonly pageRevisionId?: string;
+    readonly cacheScope?: TtsCacheScope;
+    readonly isPrivateBook?: boolean;
+  };
+  private resolveCacheMeta(
+    options: {
+      readonly bookId?: string | null;
+      readonly pageId?: string | null;
+      readonly pageRevisionId?: string | null;
+      readonly cacheScope?: TtsCacheScope | null;
+      readonly isPrivateBook?: boolean;
+      readonly wordSample?: boolean;
+      readonly coaching?: boolean;
+    },
+    defaultPublicScope: TtsCacheScope | undefined,
+    includeIsPrivate: false,
+  ): {
+    readonly bookId?: string;
+    readonly pageId?: string;
+    readonly pageRevisionId?: string;
+    readonly cacheScope?: TtsCacheScope;
+  };
+  private resolveCacheMeta(
+    options: {
+      readonly bookId?: string | null;
+      readonly pageId?: string | null;
+      readonly pageRevisionId?: string | null;
+      readonly cacheScope?: TtsCacheScope | null;
+      readonly isPrivateBook?: boolean;
+      readonly wordSample?: boolean;
+      readonly coaching?: boolean;
+    },
+    defaultPublicScope: TtsCacheScope | undefined,
+    includeIsPrivate: boolean,
+  ): {
+    readonly bookId?: string;
+    readonly pageId?: string;
+    readonly pageRevisionId?: string;
+    readonly cacheScope?: TtsCacheScope;
+    readonly isPrivateBook?: boolean;
+  } {
+    const bookId = options.bookId ?? this.defaultCacheContext?.bookId ?? null;
+    const pageId = options.pageId ?? this.defaultCacheContext?.pageId ?? null;
+    const pageRevisionId =
+      options.pageRevisionId ??
+      this.defaultCacheContext?.pageRevisionId ??
+      null;
+    const isPrivateBook =
+      options.isPrivateBook ?? this.defaultCacheContext?.isPrivateBook;
+    const cacheScope: TtsCacheScope | undefined = isPrivateBook
+      ? "PRIVATE"
+      : options.coaching
+        ? "COACHING"
+        : (options.cacheScope ??
+          (this.defaultCacheContext ? defaultPublicScope : undefined));
+    const attachBookRefs = cacheScope !== "COACHING";
+    return {
+      ...(attachBookRefs && bookId ? { bookId } : {}),
+      ...(attachBookRefs && pageId ? { pageId } : {}),
+      ...(attachBookRefs && pageRevisionId ? { pageRevisionId } : {}),
+      ...(cacheScope ? { cacheScope } : {}),
+      ...(includeIsPrivate && isPrivateBook !== undefined
+        ? { isPrivateBook }
+        : {}),
+    };
   }
 
   handlePreferencesChange = (): void => {
@@ -788,10 +886,14 @@ export class TtsPlayback {
       } catch (error) {
         this.ensure(operation);
         if (isAbort(error)) throw error;
-        if (!canUseBrowserSpeechSynthesis()) {
+        if (!canUseGoogleTtsFallback() || !canUseBrowserSpeechSynthesis()) {
           throw unavailable();
         }
       }
+    }
+    if (!canUseGoogleTtsFallback()) {
+      this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+      throw unavailable();
     }
     return this.playBrowserSpeech(operation, text, options);
   }
@@ -817,7 +919,10 @@ export class TtsPlayback {
       operation.controller.signal,
     );
     this.ensure(operation);
-    if (!resolvedVoice) throw unavailable();
+    if (!resolvedVoice) {
+      this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+      throw unavailable();
+    }
     recordTtsEngineUsage({
       provider: "browser",
       fallbackUsed: true,
@@ -920,10 +1025,7 @@ export class TtsPlayback {
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = "vi-VN";
       utterance.rate = operation.voice.speed;
-      const viVoice = resolvedVoice ?? pickVietnameseBrowserVoice(synth);
-      if (viVoice) {
-        utterance.voice = viVoice;
-      }
+      utterance.voice = resolvedVoice;
 
       const media: ActiveMedia = {
         pause: () => {
@@ -1118,6 +1220,11 @@ export class TtsPlayback {
               key: shortKey,
             };
           }
+          const cacheMeta = this.resolveCacheMeta(
+            options,
+            options.wordSample ? "CATALOG" : "COACHING",
+            true,
+          );
           let source: Blob;
           let forcedFallbackVoice = false;
           try {
@@ -1128,6 +1235,7 @@ export class TtsPlayback {
                 speed: operation.voice.speed,
                 wordSample: Boolean(options.wordSample),
                 ...(audioFormat ? { audioFormat } : {}),
+                ...cacheMeta,
                 signal: operation.controller.signal,
               }),
             );
@@ -1146,6 +1254,7 @@ export class TtsPlayback {
                   speed: operation.voice.speed,
                   wordSample: Boolean(options.wordSample),
                   ...(audioFormat ? { audioFormat } : {}),
+                  ...cacheMeta,
                   signal: operation.controller.signal,
                 }),
               );
@@ -1213,7 +1322,7 @@ export class TtsPlayback {
             nextPrefetch = null;
             this.ensure(operation);
             if (isAbort(error)) throw error;
-            if (canUseGoogleTtsFallback() && canUseDeviceFallbackTts()) {
+            if (canUseAllowedDeviceFallbackTts()) {
               useBrowserFallback = true;
               elapsed += await this.playDeviceFallbackSpeech(
                 operation,
@@ -1385,6 +1494,11 @@ export class TtsPlayback {
             spokenText: s.spokenText.normalize("NFC"),
             pauseAfterMs: s.pauseAfterMs,
           }));
+          const phonicsCacheMeta = this.resolveCacheMeta(
+            options,
+            options.cacheScope ?? "COACHING",
+            true,
+          );
           let synthesized = this.phonicsCache.get(phonicsKey);
           if (!synthesized) {
             try {
@@ -1393,6 +1507,7 @@ export class TtsPlayback {
                 this.speech.synthesizePhonics(normalizedSteps, {
                   voiceId: operation.voice.requestedVoiceId ?? undefined,
                   speed: operation.voice.speed,
+                  ...phonicsCacheMeta,
                   signal: operation.controller.signal,
                 }),
               );
@@ -1413,6 +1528,7 @@ export class TtsPlayback {
                       this.speech.synthesizePhonics(normalizedSteps, {
                         voiceId: googleVoiceId,
                         speed: operation.voice.speed,
+                        ...phonicsCacheMeta,
                         signal: operation.controller.signal,
                       }),
                     );
@@ -1427,7 +1543,7 @@ export class TtsPlayback {
                     if (isAbort(googleError)) throw googleError;
                   }
                 }
-                if (!synthesized && canUseDeviceFallbackTts()) {
+                if (!synthesized && canUseAllowedDeviceFallbackTts()) {
                   await playPhonicsViaBrowser();
                   return;
                 }
@@ -1545,12 +1661,18 @@ export class TtsPlayback {
           let stepBlob = this.shortCache.get(stepKey)?.audio ?? null;
           if (!stepBlob) {
             try {
+              const stepCacheMeta = this.resolveCacheMeta(
+                options,
+                options.cacheScope ?? "COACHING",
+                true,
+              );
               stepBlob = await this.wait(
                 operation,
                 this.speech.synthesize(step.spokenText.normalize("NFC"), {
                   voiceId: operation.voice.requestedVoiceId ?? undefined,
                   speed: operation.voice.speed,
                   wordSample: true,
+                  ...stepCacheMeta,
                   signal: operation.controller.signal,
                 }),
               );
@@ -1562,7 +1684,7 @@ export class TtsPlayback {
             } catch (error) {
               this.ensure(operation);
               if (isAbort(error)) throw error;
-              if (canUseGoogleTtsFallback() && canUseDeviceFallbackTts()) {
+              if (canUseAllowedDeviceFallbackTts()) {
                 options.onStepChange?.(step.index, step);
                 elapsed += await this.playDeviceFallbackSpeech(
                   operation,
@@ -1737,12 +1859,18 @@ export class TtsPlayback {
               await fallback();
               return;
             }
+            const timedCacheMeta = this.resolveCacheMeta(
+              options,
+              "CATALOG",
+              false,
+            );
             try {
               timed = await this.wait(
                 operation,
                 this.studio.synthesizeTimed(chunk.words, {
                   voiceId: operation.voice.requestedVoiceId,
                   speed: operation.voice.speed,
+                  ...timedCacheMeta,
                   signal: operation.controller.signal,
                 }),
               );
@@ -1759,6 +1887,7 @@ export class TtsPlayback {
                   this.studio.synthesizeTimed(chunk.words, {
                     voiceId: googleVoiceId,
                     speed: operation.voice.speed,
+                    ...timedCacheMeta,
                     signal: operation.controller.signal,
                   }),
                 );
@@ -1795,12 +1924,18 @@ export class TtsPlayback {
                 this.cacheBytes -= stale.audio.size;
                 this.cache.delete(key);
               }
+              const wavTimedCacheMeta = this.resolveCacheMeta(
+                options,
+                "CATALOG",
+                false,
+              );
               const wavTimed = await this.wait(
                 operation,
                 this.studio.synthesizeTimed(chunk.words, {
                   voiceId: operation.voice.requestedVoiceId,
                   speed: operation.voice.speed,
                   audioFormat: "wav",
+                  ...wavTimedCacheMeta,
                   signal: operation.controller.signal,
                 }),
               );
@@ -1835,17 +1970,16 @@ export class TtsPlayback {
             this.cacheBytes -= invalid.audio.size;
             this.cache.delete(key);
           }
+          // Prefer the same locked voice via the short endpoint before
+          // switching providers, and never replay already completed chunks.
           if (!completedChunks && fallback) {
-            // The short endpoint can still play the locked voice when timed
-            // synthesis fails. Restart the page only before any chunk played.
             this.timedCooldownUntil = Date.now() + 15_000;
             await fallback();
             return;
           }
           if (
             (!synthesizedTimedOk || !fallback) &&
-            canUseGoogleTtsFallback() &&
-            canUseDeviceFallbackTts()
+            canUseAllowedDeviceFallbackTts()
           ) {
             useBrowserFallback = true;
             elapsed += await this.playDeviceFallbackSpeech(

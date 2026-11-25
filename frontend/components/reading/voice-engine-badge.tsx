@@ -29,6 +29,7 @@ function getTierStyles(tier: VoiceEngineTier): {
         chip: "border-sky-200 bg-sky-50/90 text-sky-900",
       };
     case "catalog_cache":
+    case "browser_wasm":
     case "local_offline":
     case "idle":
     default:
@@ -55,6 +56,9 @@ function buildTooltip(kind: "STT" | "TTS", snap: EngineSourceSnapshot): string {
   }
   if (snap.tier === "browser_default") {
     return `${base} (Online · Dự phòng Google/Trình duyệt)`;
+  }
+  if (snap.tier === "browser_wasm") {
+    return `${base} (Offline · Nhận diện trên thiết bị bằng WASM)`;
   }
   return `${base} (Offline · Chạy trực tiếp trên máy này)`;
 }

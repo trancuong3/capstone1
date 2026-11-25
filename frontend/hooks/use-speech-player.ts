@@ -11,16 +11,23 @@ import {
   type PhonicsPlayOptions,
   type PlaybackState,
   type SpeechPlayOptions,
+  type TtsPlaybackCacheContext,
   type WordTimedPlayOptions,
 } from "@/lib/reading/tts-playback";
 
-export type { PhonicsPlayOptions, SpeechPlayOptions, WordTimedPlayOptions };
+export type {
+  PhonicsPlayOptions,
+  SpeechPlayOptions,
+  TtsPlaybackCacheContext,
+  WordTimedPlayOptions,
+};
 
 export interface SpeechPlayer {
   readonly isPlaying: boolean;
   readonly isPaused: boolean;
   readonly state: PlaybackState;
   readonly fallbackNotice: string | null;
+  setCacheContext?: (context: TtsPlaybackCacheContext | null) => void;
   play(text: string, options?: SpeechPlayOptions): Promise<void>;
   playPhonicsLesson(
     lesson: SupportedPhonicsLessonPlan,
@@ -79,6 +86,7 @@ export function useSpeechPlayer(): SpeechPlayer {
           : Promise.reject(
               new DOMException("Audio player is not ready", "AbortError"),
             ),
+      setCacheContext: player.setCacheContext,
     }),
     [player],
   );
@@ -88,8 +96,16 @@ export function useSpeechPlayer(): SpeechPlayer {
       player.handlePreferencesChange,
     );
     const unsubPolicy = subscribeVoicePolicy(player.handlePreferencesChange);
+    const onAndroidBackground = () => {
+      player.stop();
+    };
+    document.addEventListener("viread:android-background", onAndroidBackground);
     return () => {
       mounted.current = false;
+      document.removeEventListener(
+        "viread:android-background",
+        onAndroidBackground,
+      );
       unsubSpeech();
       unsubPolicy();
       player.dispose();

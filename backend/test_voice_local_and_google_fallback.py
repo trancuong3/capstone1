@@ -7,12 +7,11 @@ import io
 import os
 import unittest
 import wave
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import httpx
 
-os.environ.setdefault("APP_ENVIRONMENT", "test")
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:1/test")
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
@@ -20,7 +19,7 @@ os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_current_parent_id, get_db
+from app.api.deps import require_active_profile_id
 from app.api.routes import voice as voice_routes
 from app.api.routes import voice_studio as studio_routes
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
@@ -62,10 +61,7 @@ def _make_app(orchestrator: VoiceOrchestrator) -> TestClient:
     app = FastAPI()
     app.include_router(voice_routes.router, prefix="/voice")
     app.include_router(studio_routes.router, prefix="/voice")
-    active_db = MagicMock()
-    active_db.scalar = AsyncMock(return_value="parent")
-    app.dependency_overrides[get_current_parent_id] = lambda: ACTOR_ID
-    app.dependency_overrides[get_db] = lambda: active_db
+    app.dependency_overrides[require_active_profile_id] = lambda: ACTOR_ID
     voice_routes.get_voice_orchestrator = lambda: orchestrator  # type: ignore[assignment]
     studio_routes.get_voice_orchestrator = lambda: orchestrator  # type: ignore[assignment]
     return TestClient(app)
@@ -565,8 +561,6 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
         recorded_headers: list[dict[str, str] | None] = []
 
         class AuthGatedHealthClient:
-            is_closed = False
-
             def __init__(self, **_kwargs):
                 pass
 
@@ -575,9 +569,6 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
 
             async def __aexit__(self, *_args):
                 return None
-
-            async def aclose(self):
-                self.is_closed = True
 
             async def get(self, url, **kwargs):
                 recorded_headers.append(kwargs.get("headers"))
@@ -615,7 +606,6 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
             AuthGatedHealthClient,
         ):
             with patch.dict(os.environ, {}, clear=False):
-                os.environ.pop("VIREAD_VOICE_WORKER_TOKEN", None)
                 os.environ.pop("VIREAD_LOCAL_VOICE_WORKER_TOKEN", None)
                 provider_no_token = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
                 health_no_token = asyncio.run(provider_no_token.get_health())
@@ -625,7 +615,7 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {"VIREAD_VOICE_WORKER_TOKEN": "secret-worker-tok"},
+                {"VIREAD_LOCAL_VOICE_WORKER_TOKEN": "secret-worker-tok"},
                 clear=False,
             ):
                 provider_with_token = LocalVoiceProvider(
@@ -636,17 +626,24 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
                     provider_with_token.list_voices()
                 )
 
-        self.assertFalse(health_no_token["available"])
-        self.assertFalse(health_no_token["stt_ready"])
-        self.assertFalse(health_no_token["tts_ready"])
-        self.assertIsNone(health_no_token["stt_model_version"])
-        self.assertIsNone(health_no_token["tts_model_version"])
+        self.assertEqual(
+            {key: health_no_token[key] for key in ("available", "stt_ready", "tts_ready", "stt_model_version", "tts_model_version")},
+            {
+                "available": False,
+                "stt_ready": False,
+                "tts_ready": False,
+                "stt_model_version": None,
+                "tts_model_version": None,
+            },
+        )
         self.assertFalse(live_no_token)
         self.assertGreater(len(voices_no_token), 0)
 
         self.assertTrue(health_with_token["available"])
         self.assertTrue(health_with_token["stt_ready"])
         self.assertTrue(health_with_token["tts_ready"])
+        self.assertIn("stt_mode", health_with_token)
+        self.assertIn("tts_precision", health_with_token)
         self.assertTrue(live_with_token)
         self.assertEqual(voices_with_token[0]["voice_id"], "local_north_truc_ly")
         self.assertEqual(

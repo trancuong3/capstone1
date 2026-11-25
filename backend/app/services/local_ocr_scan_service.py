@@ -306,13 +306,9 @@ class LocalOcrScanService:
             await self.repository.db.commit()
 
             try:
-                completed = (
-                    job
-                    if job.Status == "SUCCEEDED"
-                    else await job_service.wait_for_job_completion(
-                        job.Id,
-                        timeout_seconds=min(float(timeout_seconds), 45.0),
-                    )
+                completed = await job_service.wait_for_job_completion(
+                    job.Id,
+                    timeout_seconds=min(float(timeout_seconds), 45.0),
                 )
             except HTTPException:
                 await OcrInferenceJobService(self.repository.db).cancel_job(

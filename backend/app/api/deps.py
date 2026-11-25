@@ -223,11 +223,9 @@ def get_current_parent_id(
 
 async def _require_database_role(actor_id: UUID, db: AsyncSession, expected_role: str) -> UUID:
     """Authorize against the active database profile, never untrusted JWT role claims."""
-    from app.models import Profile
+    from app.database.role_cache import get_cached_profile_role
 
-    role = await db.scalar(
-        select(Profile.Role).where(Profile.Id == actor_id, Profile.Active == 1)
-    )
+    role = await get_cached_profile_role(db, actor_id)
     if role != expected_role:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

@@ -25,8 +25,13 @@ from app.services.runtime_diagnostics import (
     collect_remote_ocr_health,
     collect_worker_health,
     collect_worker_queue_metrics,
+    derive_operational_state,
     is_ocr_engine_ready_status,
     probe_storage_health,
+)
+from app.services.tts_audio_cache_service import (
+    TtsAudioCacheService,
+    is_tts_cache_enabled,
 )
 from app.services.worker_telemetry import get_worker_telemetry
 from app.services.voice_orchestrator import VoiceOrchestrator
@@ -50,6 +55,7 @@ from app.schemas.difficult_words import (
     PracticeStatusLiteral,
 )
 from app.schemas.system import (
+    AdminAudioCacheSummaryRead,
     AdminAuditLogRead,
     AdminAuditPageRead,
     AdminHealthItemRead,
@@ -282,25 +288,64 @@ class ProgressRepository:
         self.db = db
 
     async def period_assessment(self, child_id, actor_id, start, end, generated_at):
-        from app.models import ReadingSession
-        from app.repositories.reading_content_repository import ReadingContentRepository
+        from app.models import ReadingComparisonReport, ReadingEvent, ReadingSession
         from app.services.reading_assessment import aggregate_period_assessment
+
         local_tz = timezone(timedelta(hours=7))
         begin = datetime.combine(start, datetime.min.time(), tzinfo=local_tz)
         finish = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=local_tz)
         rows = await self.db.execute(
             select(ReadingSession)
             .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
-            .where(ChildProfile.ParentId == actor_id, ReadingSession.ChildId == child_id,
-                   ReadingSession.State == "COMPLETED", ReadingSession.StartedAt >= begin,
-                   ReadingSession.StartedAt < finish, ReadingSession.EndedAt <= generated_at)
+            .where(
+                ChildProfile.ParentId == actor_id,
+                ReadingSession.ChildId == child_id,
+                ReadingSession.State == "COMPLETED",
+                ReadingSession.StartedAt >= begin,
+                ReadingSession.StartedAt < finish,
+                ReadingSession.EndedAt <= generated_at,
+            )
             .order_by(ReadingSession.StartedAt, ReadingSession.Id)
         )
-        repository = ReadingContentRepository(self.db)
-        evidence = []
-        for session in rows.scalars().all():
-            evidence.append((session.Id, await repository.comparison_reports(session.Id),
-                             await repository.events_for_session(session.Id)))
+        sessions = list(rows.scalars().all())
+        if not sessions:
+            return aggregate_period_assessment([])
+
+        session_ids = [session.Id for session in sessions]
+        report_rows = await self.db.execute(
+            select(ReadingComparisonReport)
+            .where(ReadingComparisonReport.SessionId.in_(session_ids))
+            .order_by(
+                ReadingComparisonReport.SessionId,
+                ReadingComparisonReport.CreatedAt.desc(),
+                ReadingComparisonReport.Id.desc(),
+            )
+        )
+        reports_by_session: dict[UUID, list[ReadingComparisonReport]] = {}
+        for report in report_rows.scalars().all():
+            reports_by_session.setdefault(report.SessionId, []).append(report)
+
+        event_rows = await self.db.execute(
+            select(ReadingEvent)
+            .where(ReadingEvent.SessionId.in_(session_ids))
+            .order_by(
+                ReadingEvent.SessionId,
+                ReadingEvent.StartMs,
+                ReadingEvent.Id,
+            )
+        )
+        events_by_session: dict[UUID, list[ReadingEvent]] = {}
+        for event in event_rows.scalars().all():
+            events_by_session.setdefault(event.SessionId, []).append(event)
+
+        evidence = [
+            (
+                session.Id,
+                reports_by_session.get(session.Id, []),
+                events_by_session.get(session.Id, []),
+            )
+            for session in sessions
+        ]
         return aggregate_period_assessment(evidence)
 
     async def report(self, child_id: UUID, period_start: date, period_end: date, actor_id: UUID):
@@ -1121,18 +1166,36 @@ class AdminSystemService:
                     safe_message="Chưa thể xác minh trạng thái Storage.",
                 )
 
-        db_res, ocr_res, voice_res, ocr_details_res, storage_res = await asyncio.gather(
+        async def _probe_audio_cache() -> dict[str, object]:
+            cache_svc = TtsAudioCacheService(getattr(self.repository, "db", None))
+            return await cache_svc.get_summary()
+
+        db_res, ocr_res, voice_res, ocr_details_res, storage_res, audio_cache_res = await asyncio.gather(
             _probe_db(),
             _probe_local_ocr(),
             self._probe_voice_health(),
             _probe_ocr_engines(),
             _probe_storage(),
+            _probe_audio_cache(),
             return_exceptions=True,
         )
 
-        for probe_res in (db_res, ocr_res, voice_res, ocr_details_res, storage_res):
+        for probe_res in (db_res, ocr_res, voice_res, ocr_details_res, storage_res, audio_cache_res):
             if isinstance(probe_res, asyncio.CancelledError):
                 raise probe_res
+
+        if isinstance(audio_cache_res, BaseException) or not isinstance(audio_cache_res, dict):
+            audio_cache_summary: dict[str, object] = {
+                "entry_count": 0,
+                "storage_used_bytes": 0,
+                "storage_quota_bytes": 150 * 1024 * 1024,
+                "daily_egress_bytes": 0,
+                "daily_egress_limit_bytes": 300 * 1024 * 1024,
+                "cache_hit_ratio": None,
+                "quota_exhausted": False,
+            }
+        else:
+            audio_cache_summary = audio_cache_res
 
         database_ready = False if isinstance(db_res, BaseException) else bool(db_res)
         if isinstance(ocr_res, BaseException):
@@ -1231,6 +1294,39 @@ class AdminSystemService:
                 safe_message=stt_message,
             ),
         ]
+
+        if not is_tts_cache_enabled():
+            cache_item = AdminHealthItemRead(
+                id="tts_audio_cache",
+                label="TTS Audio Cache",
+                status="DEGRADED",
+                detail_status="disabled",
+                operational_state="Offline",
+                checked_at=checked_at,
+                safe_message="Bộ nhớ đệm TTS đang tắt theo cấu hình.",
+            )
+        elif bool(audio_cache_summary.get("quota_exhausted")):
+            cache_item = AdminHealthItemRead(
+                id="tts_audio_cache",
+                label="TTS Audio Cache",
+                status="DEGRADED",
+                detail_status="unknown",
+                operational_state="Quota exhausted",
+                checked_at=checked_at,
+                safe_message="Lưu lượng cache TTS hôm nay đã chạm ngưỡng giới hạn miễn phí.",
+                last_error="QUOTA_EXHAUSTED",
+            )
+        else:
+            cache_item = AdminHealthItemRead(
+                id="tts_audio_cache",
+                label="TTS Audio Cache",
+                status="HEALTHY",
+                detail_status="healthy",
+                operational_state="Healthy",
+                checked_at=checked_at,
+                safe_message=f"Bộ nhớ đệm TTS sẵn sàng ({int(audio_cache_summary.get('entry_count') or 0)} mục).",
+            )
+        items.append(cache_item)
 
         items.append(AdminHealthItemRead(**storage_details, checked_at=checked_at))
         items.extend(AdminHealthItemRead(**entry, checked_at=checked_at) for entry in ocr_details)
@@ -1403,6 +1499,17 @@ class AdminSystemService:
                     )
                 )
 
+        cache_quota_exhausted = bool(audio_cache_summary.get("quota_exhausted"))
+        for item in items:
+            if item.operational_state is None:
+                item.operational_state = derive_operational_state(
+                    status=item.status,
+                    detail_status=item.detail_status,
+                    queue_depth=item.queue_depth,
+                    last_error=item.last_error,
+                    quota_exhausted=(item.id == "tts" and item.status != "HEALTHY" and cache_quota_exhausted),
+                )
+
         statuses = [item.status for item in items]
         overall = "HEALTHY" if all(s == "HEALTHY" for s in statuses) else "DEGRADED"
 
@@ -1410,6 +1517,7 @@ class AdminSystemService:
             overall_status=overall,
             checked_at=checked_at,
             services=items,
+            audio_cache=AdminAudioCacheSummaryRead(**audio_cache_summary),
         )
 
 

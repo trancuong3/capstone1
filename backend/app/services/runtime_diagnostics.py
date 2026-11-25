@@ -42,6 +42,32 @@ def _health_item(
     }
 
 
+def derive_operational_state(
+    *,
+    status: str,
+    detail_status: str | None = None,
+    queue_depth: int | None = None,
+    last_error: str | None = None,
+    quota_exhausted: bool = False,
+) -> str:
+    """Map legacy health triad + detail/queue/quota telemetry to a 7-value operational_state."""
+    if quota_exhausted or (last_error and "QUOTA" in str(last_error).upper()):
+        return "Quota exhausted"
+    if detail_status == "disabled":
+        return "Offline"
+    if status == "UNAVAILABLE":
+        return "Offline"
+    if status in {"HEALTHY", "DEGRADED"} and queue_depth is not None and queue_depth > 0 and not last_error:
+        return "Queued"
+    if detail_status == "unknown" and status == "DEGRADED":
+        return "Unknown"
+    if status == "DEGRADED":
+        return "Degraded"
+    if status == "HEALTHY":
+        return "Healthy"
+    return "Unknown"
+
+
 def _ocr_engine_health(package: str, engine_name: str, status_name: str, label: str) -> dict[str, str]:
     installed = _package_installed(package)
     runtime = sys.modules.get("app.services.ocr_engine")

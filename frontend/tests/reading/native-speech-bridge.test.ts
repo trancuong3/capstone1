@@ -379,6 +379,7 @@ describe("Deterministic 0-VND TTS & STT Routing", () => {
     const rec = new LocalSegmentSpeechRecognition(
       { transcribe } as unknown as SpeechService,
       undefined,
+      undefined,
       onBeforeExternalMicStart,
     );
     const results: string[] = [];

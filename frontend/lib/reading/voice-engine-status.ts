@@ -13,6 +13,7 @@ export type VoiceEngineTier =
   | "local_offline"
   | "catalog_cache"
   | "android_native"
+  | "browser_wasm"
   | "google_cloud"
   | "browser_default"
   | "idle";
@@ -100,7 +101,15 @@ export function mapProviderToEngineSnapshot(input: {
   let engineLabel = isStt ? "Offline (Sherpa-ONNX)" : "Offline (VieNeu-TTS)";
   let shortLabel = "Offline";
 
-  if (normalized === "catalog_cache" || normalized === "precomputed") {
+  if (normalized === "wasm" || normalized === "browser_wasm") {
+    tier = "browser_wasm";
+    engineLabel = "Offline (WASM trên máy)";
+    shortLabel = "Offline (WASM)";
+  } else if (normalized === "precomputed_cache") {
+    tier = "local_offline";
+    engineLabel = "Offline (Precomputed Cache)";
+    shortLabel = "Offline (Cache)";
+  } else if (normalized === "catalog_cache" || normalized === "precomputed") {
     tier = "catalog_cache";
     engineLabel = "VieNeu (Cache chuẩn)";
     shortLabel = "Cache chuẩn";

@@ -27,9 +27,13 @@ import { createSpeechService } from "@/lib/api/speech-service";
 import { prepareShortWordAudio } from "@/lib/reading/short-word-audio";
 import { isServiceError } from "@/lib/api/service-error";
 import { withRequestDeadline } from "@/lib/api/request-deadline";
-import { BrowserTranscriptCollector } from "@/lib/reading/browser-transcript-collector";
+import {
+  BrowserTranscriptCollector,
+  type SegmentResultMeta,
+} from "@/lib/reading/browser-transcript-collector";
 import { EchoGuard } from "@/lib/reading/echo-guard";
 import {
+  LocalSegmentSpeechRecognition,
   encodeFloat32ToWav16kBlob,
   resolveLocalFirstSpeechRecognitionConstructor,
   shouldPreferAndroidNativeStt,
@@ -658,7 +662,15 @@ export function DifficultWordPracticePanel({
       } else if (guide) {
         helpRoundsRef.current += 1;
         usedHintRef.current = true;
-        if (!(await playCue("Không sao đâu. Con nghe cô đọc nhé.", generation)))
+        if (
+          !(await playCue(
+            adaptTextToTeacherPersona(
+              "Không sao đâu. Con nghe cô đọc nhé.",
+              getEffectiveTeacherPersona().gender,
+            ),
+            generation,
+          ))
+        )
           return;
         if (phraseTurnRef.current && contextPhrase) {
           if (!(await playCue(contextPhrase + ".", generation))) return;
@@ -669,12 +681,14 @@ export function DifficultWordPracticePanel({
       } else {
         autoRetryCountRef.current += 1;
         if (reason === "incorrect") usedHintRef.current = true;
-        const cue =
+        const cue = adaptTextToTeacherPersona(
           reason === "incorrect"
             ? "Con thử đọc lại nhé."
             : silence
               ? "Cô đang nghe. Con thử đọc nhé."
-              : "Cô chưa nghe rõ. Con đọc lại nhé.";
+              : "Cô chưa nghe rõ. Con đọc lại nhé.",
+          getEffectiveTeacherPersona().gender,
+        );
         if (!(await playCue(cue, generation))) return;
       }
       await captureTurnRef.current(generation);
@@ -1051,6 +1065,17 @@ export function DifficultWordPracticePanel({
       }
 
       const quality = speechRecorder.getQuality?.();
+      const qualityStatus = quality?.status as string | undefined;
+      if (
+        qualityStatus === "CLIPPING" ||
+        qualityStatus === "INVALID_AUDIO" ||
+        qualityStatus === "AUDIO_TOO_SHORT"
+      ) {
+        setRecordedBlob(null);
+        setFailureLabel("Nghe chưa rõ");
+        await retryTurn(generation, "unclear");
+        return;
+      }
       const recording =
         quality?.status === "SILENCE" || quality?.status === "NO_AUDIO"
           ? null
@@ -1181,6 +1206,26 @@ export function DifficultWordPracticePanel({
               ) {
                 return;
               }
+              const isLocalRec = rec instanceof LocalSegmentSpeechRecognition;
+              let rejectedByQuality = false;
+              const isFencedItem = (meta?: SegmentResultMeta): boolean => {
+                if (!meta) return true;
+                if (
+                  isLocalRec &&
+                  meta.epoch !== undefined &&
+                  meta.epoch !== rec.getEpoch()
+                ) {
+                  return false;
+                }
+                if (
+                  meta.sessionId !== undefined &&
+                  meta.sessionId !== null &&
+                  meta.sessionId !== practiceSessionLockId
+                ) {
+                  return false;
+                }
+                return true;
+              };
               const isAcceptedPracticeSpeech = (
                 text: string,
                 onsetAt?: number | null,
@@ -1214,11 +1259,30 @@ export function DifficultWordPracticePanel({
               };
               const addedFinals = browserCollectorRef.current.addResults(
                 event,
-                (text, usable, _confidence, onsetAt) => {
+                (text, usable, _confidence, meta) => {
+                  if (!isFencedItem(meta)) return false;
+                  if (
+                    meta?.audioQuality &&
+                    (meta.audioQuality.status === "CLIPPING" ||
+                      meta.audioQuality.status === "AUDIO_TOO_SHORT")
+                  ) {
+                    rejectedByQuality = true;
+                    setFailureLabel("Nghe chưa rõ");
+                    setCoachCue(
+                      adaptTextToTeacherPersona(
+                        "Cô chưa nghe rõ tiếng vừa rồi, con đọc lại nhé.",
+                        getEffectiveTeacherPersona().gender,
+                      ),
+                    );
+                    return false;
+                  }
                   if (!usable) return false;
-                  return isAcceptedPracticeSpeech(text, onsetAt);
+                  return isAcceptedPracticeSpeech(text, meta?.onsetAt);
                 },
               );
+              if (rejectedByQuality) {
+                return;
+              }
               if (addedFinals.length > 0) {
                 speechObservedRef.current = true;
                 browserPulseRef.current = true;
@@ -1230,7 +1294,11 @@ export function DifficultWordPracticePanel({
                 i < event.results.length;
                 i += 1
               ) {
-                const item = event.results[i];
+                const item = event.results[
+                  i
+                ] as BrowserSpeechRecognitionEventLike["results"][number] &
+                  SegmentResultMeta;
+                if (!isFencedItem(item)) continue;
                 const chunk = item?.[0]?.transcript?.trim() ?? "";
                 const conf = item?.[0]?.confidence;
                 if (!chunk || !hasUsableBrowserConfidence(conf)) continue;

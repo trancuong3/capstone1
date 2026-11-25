@@ -1,14 +1,69 @@
 import { hasUsableBrowserConfidence } from "@/lib/reading/recognition-evidence";
 
+export interface SegmentAudioQualityMeta {
+  readonly status: "OK" | "LOW_VOLUME" | "CLIPPING" | "AUDIO_TOO_SHORT";
+  readonly rms: number;
+  readonly peak: number;
+  readonly speechDurationMs: number;
+}
+
+export interface SegmentResultMeta {
+  readonly epoch?: number;
+  readonly sessionId?: string | null;
+  readonly pageId?: string | null;
+  readonly turnId?: string;
+  readonly segmentId?: string;
+  readonly onsetAt?: number | null;
+  readonly audioEndedAt?: number | null;
+  readonly speechDurationMs?: number | null;
+  readonly audioQuality?: SegmentAudioQualityMeta;
+}
+
 export interface BrowserRecognitionResultLike {
   readonly isFinal: boolean;
-  readonly onsetAt?: number | null;
   readonly 0?: { readonly transcript?: string; readonly confidence?: number };
+  readonly epoch?: number;
+  readonly sessionId?: string | null;
+  readonly pageId?: string | null;
+  readonly turnId?: string;
+  readonly segmentId?: string;
+  readonly onsetAt?: number | null;
+  readonly audioEndedAt?: number | null;
+  readonly speechDurationMs?: number | null;
+  readonly audioQuality?: SegmentAudioQualityMeta;
 }
 
 export interface BrowserRecognitionEventLike {
   readonly resultIndex: number;
   readonly results: ArrayLike<BrowserRecognitionResultLike>;
+}
+
+export function extractSegmentResultMeta(
+  result: BrowserRecognitionResultLike | undefined,
+): SegmentResultMeta | undefined {
+  if (!result) return undefined;
+  const hasMeta =
+    result.epoch !== undefined ||
+    result.sessionId !== undefined ||
+    result.pageId !== undefined ||
+    result.turnId !== undefined ||
+    result.segmentId !== undefined ||
+    result.onsetAt !== undefined ||
+    result.audioEndedAt !== undefined ||
+    result.speechDurationMs !== undefined ||
+    result.audioQuality !== undefined;
+  if (!hasMeta) return undefined;
+  return {
+    epoch: result.epoch,
+    sessionId: result.sessionId,
+    pageId: result.pageId,
+    turnId: result.turnId,
+    segmentId: result.segmentId,
+    onsetAt: result.onsetAt,
+    audioEndedAt: result.audioEndedAt,
+    speechDurationMs: result.speechDurationMs,
+    audioQuality: result.audioQuality,
+  };
 }
 
 /**
@@ -26,7 +81,7 @@ export class BrowserTranscriptCollector {
       text: string,
       usable: boolean,
       confidence?: number,
-      onsetAt?: number | null,
+      meta?: SegmentResultMeta,
     ) => boolean,
   ): string[] {
     const newFinals: string[] = [];
@@ -41,13 +96,10 @@ export class BrowserTranscriptCollector {
       const text = result[0]?.transcript?.trim();
       if (text) {
         const confidence = result[0]?.confidence;
-        const onsetAt =
-          typeof result.onsetAt === "number" && Number.isFinite(result.onsetAt)
-            ? result.onsetAt
-            : null;
         const usable = hasUsableBrowserConfidence(confidence);
+        const meta = extractSegmentResultMeta(result);
         const accept = acceptFinal
-          ? acceptFinal(text, usable, confidence, onsetAt)
+          ? acceptFinal(text, usable, confidence, meta)
           : usable;
         if (!accept) {
           // A discarded command or uncertain final still occupies its slot.

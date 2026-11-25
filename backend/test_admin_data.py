@@ -277,6 +277,19 @@ class AdminSystemTests(unittest.IsolatedAsyncioTestCase):
                 "app.api.routes.system.collect_ocr_health",
                 return_value=healthy_ocr,
             ) as ocr_probe,
+            patch("app.api.routes.system.is_tts_cache_enabled", return_value=True),
+            patch(
+                "app.api.routes.system.TtsAudioCacheService.get_summary",
+                new=AsyncMock(return_value={
+                        "entry_count": 2,
+                        "storage_used_bytes": 2048,
+                        "storage_quota_bytes": 150 * 1024 * 1024,
+                        "daily_egress_bytes": 0,
+                        "daily_egress_limit_bytes": 300 * 1024 * 1024,
+                        "cache_hit_ratio": None,
+                        "quota_exhausted": False,
+                    }),
+            ) as cache_probe,
         ):
             result = await AdminSystemService(repo, voice).health()
         self.assertEqual(result.overall_status, "HEALTHY")
@@ -284,9 +297,12 @@ class AdminSystemTests(unittest.IsolatedAsyncioTestCase):
             [item.id for item in result.services],
             [
                 "api", "database", "local_ocr", "tts", "stt",
-                "storage", "paddleocr", "vietocr", "tesseract", "tesseract_vie",
+                "tts_audio_cache", "storage", "paddleocr", "vietocr", "tesseract", "tesseract_vie",
             ],
         )
+        self.assertEqual(result.services[5].status, "HEALTHY")
+        self.assertEqual(result.audio_cache.entry_count, 2)
+        cache_probe.assert_awaited_once()
         local_probe.assert_awaited_once()
         ocr_probe.assert_called_once()
         repo.probe_database.assert_awaited_once()

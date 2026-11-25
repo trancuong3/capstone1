@@ -1,14 +1,18 @@
 "use client";
 
-import { History, RefreshCw } from "lucide-react";
+import { ArrowRight, History, RefreshCw } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
-import { MetricCard } from "@/components/reports/metric-card";
+import {
+  MetricCard,
+  type MetricCardDelta,
+} from "@/components/reports/metric-card";
 import { ProgressReportFilters } from "@/components/reports/progress-report-filters";
+import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
 import { ReportPageHeader } from "@/components/reports/report-page-header";
 
 const ChildProgressAssessmentCard = dynamic(
@@ -39,8 +43,11 @@ import {
   progressHref,
 } from "@/lib/utils/progress-report-state";
 import type { ChildProfileDTO } from "@/types/child";
-import type { ProgressPeriodsDTO, ProgressReportDTO } from "@/types/reports";
-import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
+import type {
+  DifficultWordPracticeStatus,
+  ProgressPeriodsDTO,
+  ProgressReportDTO,
+} from "@/types/reports";
 
 interface Props {
   readonly requestedChildId?: string;
@@ -58,6 +65,88 @@ type Loaded = {
 type State =
   | { status: "loading" | "no-children" | "not-found" | "error" }
   | ({ status: "loaded" } & Loaded);
+
+const PRACTICE_STATUS_LABELS: Record<
+  DifficultWordPracticeStatus,
+  { readonly label: string; readonly className: string }
+> = {
+  NOT_PRACTICED: {
+    label: "Chưa luyện",
+    className: "border border-border bg-canvas text-muted",
+  },
+  IN_PROGRESS: {
+    label: "Đang luyện",
+    className: "border border-primary/20 bg-sky text-primary-hover",
+  },
+  NEEDS_MORE_PRACTICE: {
+    label: "Cần luyện thêm",
+    className: "border border-warning/25 bg-warning-surface text-warning",
+  },
+  COMPLETED: {
+    label: "Đã hoàn thành",
+    className:
+      "border border-success-ink/20 bg-success-surface text-success-ink",
+  },
+};
+
+function formatDeltaNumber(value: number): string {
+  const rounded = Number(value.toFixed(1));
+  return `${rounded > 0 ? "+" : ""}${rounded}`;
+}
+
+function metricDeltaFor(
+  report: ProgressReportDTO,
+  metricId: string,
+): MetricCardDelta | null {
+  if (
+    report.availability.comparison !== "available" ||
+    !report.previous_period ||
+    !report.trend_deltas
+  ) {
+    return null;
+  }
+
+  const deltas = report.trend_deltas;
+  if (
+    metricId === "sessions" &&
+    typeof deltas.completed_sessions === "number"
+  ) {
+    const val = deltas.completed_sessions;
+    return {
+      label: `${formatDeltaNumber(val)} buổi`,
+      tone: val > 0 ? "positive" : val < 0 ? "negative" : "neutral",
+    };
+  }
+  if (
+    metricId === "duration" &&
+    typeof deltas.reading_duration_ms === "number"
+  ) {
+    const minutes = deltas.reading_duration_ms / 60_000;
+    return {
+      label: `${formatDeltaNumber(minutes)} phút`,
+      tone: minutes > 0 ? "positive" : minutes < 0 ? "negative" : "neutral",
+    };
+  }
+  if (
+    metricId === "comprehension" &&
+    typeof deltas.comprehension_accuracy === "number"
+  ) {
+    const val = deltas.comprehension_accuracy;
+    return {
+      label: `${formatDeltaNumber(val)} điểm %`,
+      tone: val > 0 ? "positive" : val < 0 ? "negative" : "neutral",
+    };
+  }
+  if (metricId === "omission" && typeof deltas.omission_rate === "number") {
+    const val = deltas.omission_rate;
+    // Lower omission rate is positive.
+    return {
+      label: `${formatDeltaNumber(val)} điểm %`,
+      tone: val < 0 ? "positive" : val > 0 ? "negative" : "neutral",
+    };
+  }
+  return null;
+}
 
 // Reset immediately on URL changes; an old child's report must not flash under new filters.
 export function ProgressReportScreen(props: Props) {
@@ -97,9 +186,12 @@ function ProgressReportContent({
           if (active) setState({ status: "no-children" });
           return;
         }
-        const child = requestedChildId
-          ? await childService.get(requestedChildId)
+        const matchedChild = requestedChildId
+          ? children.find((item) => item.id === requestedChildId)
           : children[0];
+        const child = matchedChild
+          ? matchedChild
+          : await childService.get(requestedChildId!);
         if (!children.some((item) => item.id === child.id)) {
           if (active) setState({ status: "not-found" });
           return;
@@ -109,34 +201,47 @@ function ProgressReportContent({
           requestedPeriodEnd,
         );
         if (window === "invalid") return;
-        const [reportResult, periodsResult] = await Promise.allSettled([
-          reportService.get(child.id, window ?? undefined),
-          reportService.listPeriods(child.id),
-        ]);
+        const periods = await reportService
+          .listPeriods(child.id)
+          .catch(() => null);
         if (!active) return;
-        const failure =
-          reportResult.status === "rejected" ? reportResult.reason : null;
-        const reportStatus =
-          reportResult.status === "fulfilled"
-            ? "ready"
-            : isServiceError(failure) && failure.status === 404
+        const periodsValue = periods ?? { items: [], next_cursor: null };
+        const periodsError = periods === null;
+        if (!window && periods !== null && periods.items.length === 0) {
+          setState({
+            status: "loaded",
+            children,
+            child,
+            report: null,
+            reportStatus: "empty",
+            periods: periodsValue,
+            periodsError: false,
+          });
+          return;
+        }
+        let report: ProgressReportDTO | null = null;
+        let reportStatus: "ready" | "empty" | "unavailable" | "error" = "error";
+        try {
+          report = await reportService.get(child.id, window ?? undefined);
+          reportStatus = "ready";
+        } catch (failure) {
+          reportStatus =
+            isServiceError(failure) && failure.status === 404
               ? "empty"
               : isServiceError(failure) &&
                   (failure.status === 501 || failure.status === 503)
                 ? "unavailable"
                 : "error";
+        }
+        if (!active) return;
         setState({
           status: "loaded",
           children,
           child,
-          report:
-            reportResult.status === "fulfilled" ? reportResult.value : null,
+          report,
           reportStatus,
-          periods:
-            periodsResult.status === "fulfilled"
-              ? periodsResult.value
-              : { items: [], next_cursor: null },
-          periodsError: periodsResult.status === "rejected",
+          periods: periodsValue,
+          periodsError,
         });
       } catch (error) {
         if (active)
@@ -218,47 +323,59 @@ function ProgressReportContent({
       variant="secondary"
       onClick={() => setRetry((value) => value + 1)}
     >
-      <RefreshCw aria-hidden="true" className="size-5" />
+      <RefreshCw aria-hidden="true" className="size-4" />
       Thử lại
     </Button>
   );
+
   if (selected === "invalid")
     return (
-      <section className="mx-auto flex max-w-[1280px] flex-col gap-4">
+      <section className="mx-auto flex max-w-[1120px] flex-col gap-4">
         <StatusMessage title="Kỳ báo cáo không hợp lệ" tone="error">
           Cần đủ ngày bắt đầu và kết thúc hợp lệ, ngày kết thúc không trước ngày
           bắt đầu.
         </StatusMessage>
         <ButtonLink
+          className="sm:w-auto sm:self-start"
           href={requestedChildId ? progressHref(requestedChildId) : "/reports"}
         >
           Xem báo cáo mới nhất
         </ButtonLink>
       </section>
     );
+
   if (state.status === "loading")
     return (
       <section
         aria-busy="true"
         aria-label="Đang tải báo cáo tiến bộ"
-        className="mx-auto flex max-w-[1280px] flex-col gap-6"
+        className="mx-auto flex w-full max-w-[1120px] flex-col gap-5"
       >
-        <Skeleton className="h-32 rounded-card" />
-        <Skeleton className="h-80 rounded-card" />
+        <Skeleton className="h-24 rounded-card" />
+        <Skeleton className="h-20 rounded-card" />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Skeleton className="h-28 rounded-card" />
+          <Skeleton className="h-28 rounded-card" />
+          <Skeleton className="h-28 rounded-card" />
+          <Skeleton className="h-28 rounded-card" />
+        </div>
+        <Skeleton className="h-64 rounded-card" />
       </section>
     );
+
   if (state.status === "no-children")
     return (
       <EmptyState
         headingLevel={1}
         title="Chưa có dữ liệu báo cáo"
-        description="Tạo hồ sơ bé để xem các báo cáo đã lưu."
+        description="Tạo hồ sơ bé để theo dõi tiến bộ đọc theo từng kỳ."
         action={<ButtonLink href="/children/new">Tạo hồ sơ bé</ButtonLink>}
       />
     );
+
   if (state.status !== "loaded")
     return (
-      <section className="mx-auto flex max-w-[1280px] flex-col gap-4">
+      <section className="mx-auto flex max-w-[1120px] flex-col gap-4">
         <StatusMessage
           title={
             state.status === "not-found"
@@ -273,24 +390,32 @@ function ProgressReportContent({
         {retryButton}
       </section>
     );
+
   const { child, children, report, periods } = state;
+  const visibleDifficultWords = report?.difficult_words
+    ? showAllDifficultWords
+      ? report.difficult_words
+      : report.difficult_words.slice(0, 8)
+    : [];
+
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 pb-4">
       <ReportPageHeader
-        eyebrow="Tiến bộ của bé"
-        title={`Cùng nhìn lại hành trình của ${child.alias}`}
-        description="Hiển thị báo cáo đã lưu trong database, không tự tính lại sau mỗi buổi đọc. Mặc định mở kỳ báo cáo gần nhất."
+        eyebrow={`Đang theo dõi · ${child.alias} (Lớp ${child.grade})`}
+        title={`Tiến bộ của ${child.alias}`}
+        description="Tổng hợp kết quả đọc theo từng kỳ báo cáo đã lưu."
         action={
           <ButtonLink
             className="sm:w-auto"
             href={`/sessions?childId=${encodeURIComponent(child.id)}`}
             variant="secondary"
           >
-            <History aria-hidden="true" className="size-5" />
+            <History aria-hidden="true" className="size-4" />
             Lịch sử đọc
           </ButtonLink>
         }
       />
+
       <ProgressReportFilters
         childrenProfiles={children}
         childId={child.id}
@@ -300,12 +425,14 @@ function ProgressReportContent({
         loadingMore={loadingMore}
         onLoadMore={() => void loadMore()}
       />
+
       {state.periodsError ? (
         <StatusMessage tone="error" title="Chưa tải được danh sách kỳ">
-          Báo cáo tải thành công vẫn được hiển thị. Hãy thử lại để tải danh sách
+          Báo cáo hiện tại vẫn được hiển thị. Ba mẹ có thể thử tải lại danh sách
           kỳ.
         </StatusMessage>
       ) : null}
+
       {state.reportStatus === "empty" ? (
         <EmptyState
           title={
@@ -313,36 +440,46 @@ function ProgressReportContent({
               ? "Chưa có báo cáo cho kỳ đã chọn"
               : "Chưa có báo cáo đã lưu"
           }
-          description="Không có báo cáo cho lựa chọn này. Có thể chọn bé khác hoặc kỳ khác; không có dữ liệu mẫu thay thế."
+          description="Không có báo cáo cho lựa chọn này. Ba mẹ có thể chọn bé khác hoặc kỳ khác; hệ thống không dùng số liệu mẫu thay thế."
         />
       ) : null}
+
       {state.reportStatus === "unavailable" ? (
         <section className="flex flex-col gap-4">
-          <h2 className="text-2xl font-semibold text-ink">
+          <h2 className="text-2xl font-extrabold text-ink">
             Dữ liệu đang chờ bổ sung
           </h2>
           <StatusMessage>
-            Dữ liệu của báo cáo chưa sẵn sàng theo định dạng hiện tại. Không có
-            dữ liệu mẫu thay thế.
+            Dữ liệu báo cáo hiện chưa sẵn sàng. Hệ thống không hiển thị số liệu
+            ước tính thay thế.
           </StatusMessage>
         </section>
       ) : null}
+
       {state.reportStatus === "error" ? (
         <StatusMessage tone="error" title="Chưa tải được báo cáo">
           Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
         </StatusMessage>
       ) : null}
+
       {state.periodsError ||
       state.reportStatus === "error" ||
       state.reportStatus === "unavailable"
         ? retryButton
         : null}
+
       {report ? (
-        <>
-          <p className="text-label text-muted">
-            Kỳ: {report.period_start} → {report.period_end} · Tạo lúc:{" "}
-            {formatProgressGeneratedAt(report.generated_at)} (giờ Việt Nam).
-          </p>
+        <div className="flex flex-col gap-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm text-muted">
+            <p className="font-semibold text-ink">
+              Kỳ: {report.period_start} → {report.period_end}
+            </p>
+            <p className="text-xs">
+              Cập nhật lúc {formatProgressGeneratedAt(report.generated_at)} (giờ
+              Việt Nam), không tự tính lại sau mỗi buổi đọc.
+            </p>
+          </div>
+
           {report.data_status !== "complete" ? (
             <StatusMessage
               title={
@@ -351,46 +488,64 @@ function ProgressReportContent({
                   : "Báo cáo có dữ liệu chưa đầy đủ"
               }
             >
-              Chỉ hiển thị giá trị hợp lệ đã lưu. Phần thiếu hoặc chưa hỗ trợ
-              không được coi là số 0.
+              Chỉ hiển thị giá trị hợp lệ đã lưu. Phần thiếu hoặc chưa đọc được
+              không được tính là 0.
             </StatusMessage>
           ) : null}
+
           {report.assessment_coverage &&
           report.assessment_coverage.assessed_sessions <
             report.assessment_coverage.total_sessions ? (
             <StatusMessage tone="info">
-              Kết quả lượt đầu và luyện lại có bằng chứng ở{" "}
+              Kết quả lượt đầu và luyện lại có dữ liệu ở{" "}
               {report.assessment_coverage.assessed_sessions}/
               {report.assessment_coverage.total_sessions} buổi. Các buổi còn
               thiếu không được tính thành đúng hoặc sai.
             </StatusMessage>
           ) : null}
-          <div className="report-metrics grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {mapReportMetrics(report).map((metric) => (
-              <MetricCard key={metric.id} metric={metric} />
+
+          <div className="report-metrics grid grid-cols-2 overflow-hidden rounded-card border border-border bg-white lg:grid-cols-4">
+            {mapReportMetrics(report).map((metric, index) => (
+              <div
+                className={[
+                  "min-w-0 border-border",
+                  index % 2 === 0 ? "border-r" : "",
+                  index >= 2 ? "border-t lg:border-t-0" : "",
+                  index < 3 ? "lg:border-r" : "lg:border-r-0",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                key={metric.id}
+              >
+                <MetricCard
+                  delta={metricDeltaFor(report, metric.id)}
+                  metric={metric}
+                />
+              </div>
             ))}
           </div>
-          <div className="grid items-start gap-4 lg:grid-cols-[1.4fr_1fr]">
+
+          <div className="grid items-stretch gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
             <ProgressChart report={report} />
+
             <section
-              className="rounded-card border border-border bg-cream p-5 sm:p-8"
               aria-labelledby="comparison-title"
+              className="rounded-card border border-border bg-white p-5 sm:p-6"
             >
               <h2
+                className="text-xl font-extrabold text-ink"
                 id="comparison-title"
-                className="text-2xl font-semibold text-ink"
               >
-                So sánh trong báo cáo đã lưu
+                So sánh với kỳ trước
               </h2>
               {report.availability.comparison === "available" &&
               report.previous_period &&
               report.trend_deltas ? (
                 <>
-                  <p className="mt-3 text-label text-muted">
-                    Chênh lệch với kỳ trước theo dữ liệu đã lưu; không tự suy ra
-                    kỳ 30 ngày.
+                  <p className="mt-1 text-sm text-muted">
+                    Mức chênh lệch so với kỳ đã lưu liền trước.
                   </p>
-                  <dl className="mt-5 flex flex-col gap-4">
+                  <dl className="mt-4 divide-y divide-border">
                     {[
                       [
                         "Buổi hoàn thành",
@@ -407,12 +562,17 @@ function ProgressReportContent({
                       [
                         "Đọc hiểu",
                         report.trend_deltas.comprehension_accuracy,
-                        " điểm phần trăm",
+                        " điểm %",
                       ],
                     ].map(([label, value, suffix]) => (
-                      <div key={String(label)}>
-                        <dt className="font-semibold text-muted">{label}</dt>
-                        <dd className="text-xl font-semibold text-ink">
+                      <div
+                        className="flex items-baseline justify-between gap-4 py-3 first:pt-0 last:pb-0"
+                        key={String(label)}
+                      >
+                        <dt className="text-sm font-semibold text-muted">
+                          {label}
+                        </dt>
+                        <dd className="text-base font-extrabold tabular-nums text-ink">
                           {typeof value !== "number"
                             ? "Chưa đủ dữ liệu"
                             : `${value > 0 ? "+" : ""}${Number(value.toFixed(2))}${suffix}`}
@@ -422,76 +582,102 @@ function ProgressReportContent({
                   </dl>
                 </>
               ) : (
-                <StatusMessage className="mt-5" title="Chưa đủ kỳ so sánh">
-                  Không có dữ liệu so sánh hợp lệ đã lưu nên không đưa ra nhận
-                  định tăng hoặc giảm.
+                <StatusMessage className="mt-4" title="Chưa đủ kỳ so sánh">
+                  Chưa có kỳ liền trước hợp lệ để so sánh tăng hoặc giảm.
                 </StatusMessage>
               )}
             </section>
           </div>
-          <ReadingAssessmentSummary assessment={report.assessment} />
-          {report.legacy ? (
-            <section className="rounded-card border border-border bg-white p-5 shadow-sm sm:p-8">
-              <h2 className="text-2xl font-semibold text-ink">
-                Chỉ số định dạng cũ
-              </h2>
-              <p className="mt-2 text-label text-muted">
-                Giữ nguyên tên trường; chưa quy đổi sang số buổi đọc hoặc phần
-                trăm chính xác.
-              </p>
-              <dl className="mt-4 flex flex-col gap-3">
-                {report.legacy.total_books !== null ? (
-                  <div>
-                    <dt>Tổng sách đã lưu (total_books)</dt>
-                    <dd className="font-semibold">
-                      {report.legacy.total_books}
-                    </dd>
-                  </div>
-                ) : null}
-                {report.legacy.avg_fluency !== null ? (
-                  <div>
-                    <dt>Giá trị avg_fluency đã lưu (chưa xác định đơn vị)</dt>
-                    <dd className="font-semibold">
-                      {report.legacy.avg_fluency}
-                    </dd>
-                  </div>
-                ) : null}
-              </dl>
-            </section>
-          ) : null}
-          <section className="rounded-card border border-border bg-white p-5 shadow-sm sm:p-8">
-            <h2 className="text-2xl font-semibold text-ink">
-              Từ cần luyện nổi bật
-            </h2>
-            <p className="mt-2 text-label text-muted">
-              Dữ liệu của kỳ báo cáo đang hiển thị.
-            </p>
+
+          <ReadingAssessmentSummary
+            assessment={report.assessment}
+            scopeLabel={`${report.period_start} → ${report.period_end}`}
+          />
+
+          <section className="rounded-card border border-border bg-white p-5 sm:p-6">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+              <div>
+                <h2 className="text-xl font-extrabold text-ink">
+                  Từ cần luyện nổi bật
+                </h2>
+                <p className="mt-0.5 text-sm text-muted">
+                  Danh sách ghi nhận trong kỳ báo cáo đang xem.
+                </p>
+              </div>
+              <ButtonLink
+                className="sm:w-auto"
+                href={`/reports/difficult-words?childId=${encodeURIComponent(child.id)}`}
+                variant="secondary"
+              >
+                Mở mục Từ cần luyện
+                <ArrowRight aria-hidden="true" className="size-4" />
+              </ButtonLink>
+            </div>
+
             {report.availability.difficult_words !== "available" ? (
               <StatusMessage className="mt-4">
-                Phần từ cần luyện của báo cáo thiếu hoặc chỉ đọc được một phần;
-                không kết luận là không có từ cần luyện.
+                Phần từ cần luyện của kỳ này thiếu hoặc chưa đọc được đầy đủ;
+                không kết luận là bé không có từ cần luyện.
               </StatusMessage>
             ) : null}
+
             {report.difficult_words?.length ? (
               <>
-                <p className="mt-2 text-xs font-semibold text-muted">
+                <p className="mt-3 text-xs font-bold text-muted">
                   Tổng cộng {report.difficult_words.length} từ cần luyện trong
                   kỳ này.
                 </p>
-                <ul className="mt-4 flex flex-wrap gap-3">
-                  {(showAllDifficultWords
-                    ? report.difficult_words
-                    : report.difficult_words.slice(0, 12)
-                  ).map((word, index) => (
-                    <li
-                      key={`${word.normalized_word}-${index}`}
-                      className="rounded-full bg-warning-surface px-4 py-2 font-semibold text-warning"
-                    >
-                      {word.display_text} · {word.difficulty_score}
-                    </li>
-                  ))}
+                <ul className="mt-3 divide-y divide-border rounded-control border border-border">
+                  {visibleDifficultWords.map((word, index) => {
+                    const statusStyle = word.practice_status
+                      ? PRACTICE_STATUS_LABELS[word.practice_status]
+                      : null;
+                    const noteParts: string[] = [];
+                    if (word.session_count > 0) {
+                      noteParts.push(`${word.session_count} buổi`);
+                    }
+                    if ((word.mispronunciation_count ?? 0) > 0) {
+                      noteParts.push(`đọc nhầm ${word.mispronunciation_count}`);
+                    }
+                    if (word.omission_count > 0) {
+                      noteParts.push(`bỏ sót ${word.omission_count}`);
+                    }
+                    if (word.repetition_count > 0) {
+                      noteParts.push(`lặp ${word.repetition_count}`);
+                    }
+
+                    return (
+                      <li
+                        className="flex flex-wrap items-center justify-between gap-2 px-4 py-3"
+                        key={`${word.normalized_word}-${index}`}
+                      >
+                        <div className="min-w-0">
+                          <span className="text-base font-extrabold text-ink">
+                            {word.display_text}
+                          </span>
+                          {noteParts.length > 0 ? (
+                            <span className="ml-2 text-xs text-muted">
+                              {noteParts.join(" · ")}
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold tabular-nums text-muted">
+                            Điểm {word.difficulty_score}
+                          </span>
+                          {statusStyle ? (
+                            <span
+                              className={`rounded-control px-2 py-0.5 text-xs font-bold ${statusStyle.className}`}
+                            >
+                              {statusStyle.label}
+                            </span>
+                          ) : null}
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
-                {report.difficult_words.length > 12 ? (
+                {report.difficult_words.length > 8 ? (
                   <Button
                     className="mt-3"
                     fullWidth={false}
@@ -508,38 +694,58 @@ function ProgressReportContent({
                 ) : null}
               </>
             ) : report.availability.difficult_words === "available" ? (
-              <p className="mt-5 text-body text-muted">
-                Báo cáo này chưa ghi nhận từ cần luyện.
+              <p className="mt-4 text-sm text-muted">
+                Báo cáo kỳ này chưa ghi nhận từ cần luyện.
               </p>
             ) : null}
-            <ButtonLink
-              className="mt-5 sm:w-auto"
-              href={`/reports/difficult-words?childId=${encodeURIComponent(child.id)}`}
-              variant="secondary"
-            >
-              Mở mục Từ cần luyện
-            </ButtonLink>
-            <p className="mt-2 text-label text-muted">
-              Mục Từ cần luyện riêng giữ kỳ mặc định 90 ngày, không tự theo kỳ
-              đang chọn ở đây.
+
+            <p className="mt-3 text-xs text-muted">
+              Lưu ý: Mục Từ cần luyện riêng mặc định tổng hợp 90 ngày gần nhất,
+              không tự đổi theo kỳ báo cáo ở trên.
             </p>
           </section>
-        </>
-      ) : null}
-      <details
-        className="rounded-card border border-border bg-white p-4 sm:p-6"
-        open
-      >
-        <summary className="cursor-pointer font-bold text-primary">
-          Đánh giá đọc của bé
-        </summary>
-        <div className="mt-4">
-          <ChildProgressAssessmentCard
-            childId={child.id}
-            childName={child.alias}
-          />
+
+          {report.legacy ? (
+            <section className="rounded-card border border-border bg-cream/60 p-5 sm:p-6">
+              <h2 className="text-lg font-extrabold text-ink">
+                Chỉ số định dạng cũ
+              </h2>
+              <p className="mt-1 text-sm text-muted">
+                Giữ nguyên tên trường đã lưu; chưa quy đổi sang số buổi đọc hoặc
+                phần trăm chính xác.
+              </p>
+              <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+                {report.legacy.total_books !== null ? (
+                  <div>
+                    <dt className="text-xs font-semibold text-muted">
+                      Tổng sách đã lưu (total_books)
+                    </dt>
+                    <dd className="mt-0.5 text-lg font-extrabold tabular-nums text-ink">
+                      {report.legacy.total_books}
+                    </dd>
+                  </div>
+                ) : null}
+                {report.legacy.avg_fluency !== null ? (
+                  <div>
+                    <dt className="text-xs font-semibold text-muted">
+                      Giá trị avg_fluency đã lưu (chưa xác định đơn vị)
+                    </dt>
+                    <dd className="mt-0.5 text-lg font-extrabold tabular-nums text-ink">
+                      {report.legacy.avg_fluency}
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
+            </section>
+          ) : null}
         </div>
-      </details>
+      ) : null}
+
+      <ChildProgressAssessmentCard
+        childId={child.id}
+        childName={child.alias}
+        showReadingAssessment={!report?.assessment}
+      />
     </section>
   );
 }

@@ -762,10 +762,12 @@ class TestOcrWorkerFixes(unittest.TestCase):
 
 class TestDifficultWordsVoiceAndCatalogTts(unittest.TestCase):
     def test_difficult_words_defaults_to_voice_orchestrator_and_handles_503_with_browser_transcript(self):
+        from app.api.routes.voice import clear_default_voice_orchestrators
         from app.providers.elevenlabs_voice_provider import VoiceProviderError
         from app.services.difficult_words_service import DifficultWordsService
         from app.services.voice_orchestrator import VoiceOrchestrator
 
+        clear_default_voice_orchestrators()
         svc_default = DifficultWordsService(MagicMock(), MagicMock())
         self.assertIsInstance(svc_default.voice_provider, VoiceOrchestrator)
 

@@ -1129,6 +1129,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
                 id: "ocr_worker",
                 label: "Remote OCR worker",
                 status: "DEGRADED",
+                operational_state: "Queued",
                 checked_at: timestamp,
                 safe_message: "Worker gặp lỗi tạm thời.",
                 detail_status: "failed",
@@ -1138,6 +1139,15 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
                 last_error: "WORKER_TIMEOUT",
               },
             ],
+            audio_cache: {
+              entry_count: 14,
+              storage_used_bytes: 2 * 1024 * 1024,
+              storage_quota_bytes: 500 * 1024 * 1024,
+              daily_egress_bytes: 512 * 1024,
+              daily_egress_limit_bytes: 300 * 1024 * 1024,
+              cache_hit_ratio: 0.75,
+              quota_exhausted: false,
+            },
           })
         : readyResponse(url),
     );
@@ -1168,6 +1178,16 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     expect(screen.getByText("1 giờ 2 phút")).toBeInTheDocument();
     expect(screen.getByText("WORKER_TIMEOUT")).toBeInTheDocument();
     expect(screen.getByText("Chưa ghi nhận")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("operational-state-ocr_worker"),
+    ).toHaveTextContent("Queued");
+    expect(screen.getByTestId("admin-audio-cache-summary")).toBeInTheDocument();
+    expect(screen.getByText("14")).toBeInTheDocument();
+    expect(screen.getByText("75%")).toBeInTheDocument();
+    expect(
+      await screen.findByTestId("admin-client-device-capabilities"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Client Device Capabilities")).toBeInTheDocument();
   });
   it("health error is safe and recheck recovers", async () => {
     const user = userEvent.setup();

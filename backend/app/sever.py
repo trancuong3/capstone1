@@ -419,6 +419,7 @@ async def lifespan(_app: FastAPI):
             # page is resumed from its durable per-page state on the next poll.
             await asyncio.gather(
                 _shutdown_subprocess(local_trainer_process),
+                shutdown_post_ocr_tasks(),
                 _shutdown_worker_task(
                     startup_db_probe_task,
                     asyncio.Event(),
@@ -429,7 +430,6 @@ async def lifespan(_app: FastAPI):
                     stop_local_voice_bootstrap,
                     timeout=2.0,
                 ),
-                shutdown_post_ocr_tasks(),
                 _shutdown_worker_task(viread_outbox_task, stop_viread_ocr_outbox),
                 _shutdown_worker_task(viread_training_task, stop_viread_training),
                 _shutdown_worker_task(book_quality_task, stop_book_quality_worker),

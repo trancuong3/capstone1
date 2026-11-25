@@ -145,6 +145,38 @@ function describeToolCheckScope(scope: ToolCheckScopeDTO): string {
   return `${parts.join("; ")}.`;
 }
 
+function lockReasonForSubmission(sub: ParentPageSubmissionDTO): string | null {
+  if (sub.can_add_to_book) return null;
+  if (sub.workflow_status === "ADDED_TO_BOOK") {
+    return "Trang này đã được thêm vào sách đọc.";
+  }
+  if (sub.tool_check_policy_blocked) {
+    return "Nội dung vi phạm mức chặn an toàn trẻ em. Hãy sửa nội dung hoặc thay ảnh trang khác.";
+  }
+  if (sub.workflow_status === "CHECKING") {
+    return "Đang chạy OCR, rà chính tả và kiểm tra an toàn.";
+  }
+  if (sub.workflow_status === "NEEDS_ADMIN_REVIEW") {
+    return "Tool Check đã gắn cờ hoặc trang cần người xem xét. Phải gửi Admin duyệt đúng phiên bản này trước khi thêm vào sách.";
+  }
+  if (sub.workflow_status === "PENDING_ADMIN") {
+    return "Đang chờ Admin duyệt đúng phiên bản này.";
+  }
+  if (sub.workflow_status === "REJECTED") {
+    return "Admin đã từ chối phiên bản này. Hãy sửa nội dung hoặc tải lại trang khác.";
+  }
+  if (sub.workflow_status === "CHECK_FAILED") {
+    return "Bước kiểm tra gặp lỗi. Hãy bấm Thử lại kiểm tra trước khi thêm trang.";
+  }
+  if (sub.workflow_status === "NEEDS_RECHECK") {
+    return "Nội dung đã thay đổi và cần kiểm tra lại trước khi thêm vào sách.";
+  }
+  if (sub.proofread_suggestions.length > 0 && !sub.spelling_accepted) {
+    return "Vui lòng xem và chấp nhận đề xuất chính tả trước khi thêm vào sách.";
+  }
+  return "Trang chưa đủ điều kiện để thêm vào sách đọc.";
+}
+
 type SubmissionFilterGroup =
   "ALL" | "CHECKING" | "READY" | "ADMIN" | "FAILED" | "ADDED";
 
@@ -201,38 +233,6 @@ function describeStageErrorHint(
   return null;
 }
 
-function lockReasonForSubmission(sub: ParentPageSubmissionDTO): string | null {
-  if (sub.can_add_to_book) return null;
-  if (sub.workflow_status === "ADDED_TO_BOOK") {
-    return "Trang này đã được thêm vào sách đọc.";
-  }
-  if (sub.tool_check_policy_blocked) {
-    return "Nội dung vi phạm mức chặn an toàn trẻ em. Hãy sửa nội dung hoặc thay ảnh trang khác.";
-  }
-  if (sub.workflow_status === "CHECKING") {
-    return "Đang chạy OCR, rà chính tả và kiểm tra an toàn.";
-  }
-  if (sub.workflow_status === "NEEDS_ADMIN_REVIEW") {
-    return "Tool Check đã gắn cờ hoặc trang cần người xem xét. Phải gửi Admin duyệt đúng phiên bản này trước khi thêm vào sách.";
-  }
-  if (sub.workflow_status === "PENDING_ADMIN") {
-    return "Đang chờ Admin duyệt đúng phiên bản này.";
-  }
-  if (sub.workflow_status === "REJECTED") {
-    return "Admin đã từ chối phiên bản này. Hãy sửa nội dung hoặc tải lại trang khác.";
-  }
-  if (sub.workflow_status === "CHECK_FAILED") {
-    return "Bước kiểm tra gặp lỗi. Hãy bấm Thử lại kiểm tra trước khi thêm trang.";
-  }
-  if (sub.workflow_status === "NEEDS_RECHECK") {
-    return "Nội dung đã thay đổi và cần kiểm tra lại trước khi thêm vào sách.";
-  }
-  if (sub.proofread_suggestions.length > 0 && !sub.spelling_accepted) {
-    return "Vui lòng xem và chấp nhận đề xuất chính tả trước khi thêm vào sách.";
-  }
-  return "Trang chưa đủ điều kiện để thêm vào sách đọc.";
-}
-
 const SUBMISSIONS_PAGE_SIZE = 10;
 const COMMITTED_PAGES_PAGE_SIZE = 12;
 
@@ -278,6 +278,8 @@ function ParentPrivateBookManagerContent({
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] =
+    useState<SubmissionFilterGroup>("ALL");
   const [submissionsPage, setSubmissionsPage] = useState(1);
   const [committedPage, setCommittedPage] = useState(1);
 
@@ -293,8 +295,6 @@ function ParentPrivateBookManagerContent({
   const [uploading, setUploading] = useState(false);
 
   // Per-submission UI state
-  const [statusFilter, setStatusFilter] =
-    useState<SubmissionFilterGroup>("ALL");
   const [editingSubId, setEditingSubId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [editSourceType, setEditSourceType] = useState<SourceUsageType>(
@@ -350,13 +350,6 @@ function ParentPrivateBookManagerContent({
         if (isServiceError(error) && error.status === 404) {
           setDetail(null);
           setNotFound(true);
-        } else if (silent) {
-          setActionError(
-            errorText(
-              error,
-              "Không thể cập nhật tiến trình mới nhất lúc này; trạng thái hiện tại vẫn được giữ nguyên.",
-            ),
-          );
         } else {
           setLoadError(
             errorText(
@@ -1321,8 +1314,13 @@ function ParentPrivateBookManagerContent({
           Các trang đang kiểm tra & duyệt ({activeSubmissions.length})
         </h2>
 
-        {activeSubmissions.length > 0 ? (
-          <div className="flex flex-col gap-3 rounded-card border border-border bg-white p-4">
+        {activeSubmissions.length === 0 ? (
+          <div className="rounded-card border border-dashed border-border bg-white p-6 text-center text-sm text-muted">
+            Chưa có trang nào được tải lên. Hãy chọn ảnh hoặc tệp PDF/DOCX ở
+            trên để bắt đầu chạy OCR, rà chính tả và kiểm tra an toàn.
+          </div>
+        ) : (
+          <>
             <div
               aria-label="Lọc trạng thái từng trang"
               className="flex flex-wrap items-center gap-2"
@@ -1377,7 +1375,6 @@ function ParentPrivateBookManagerContent({
                 );
               })}
             </div>
-
             {activeSubmissions.length > 1 ? (
               <div
                 aria-label="Tổng quan nhanh trạng thái các trang"
@@ -1457,20 +1454,11 @@ function ParentPrivateBookManagerContent({
                 )}
               </div>
             ) : null}
-          </div>
-        ) : null}
-
-        {activeSubmissions.length === 0 ? (
-          <div className="rounded-card border border-dashed border-border bg-white p-6 text-center text-sm text-muted">
-            Chưa có trang nào được tải lên. Hãy chọn ảnh hoặc tệp PDF/DOCX ở
-            trên để bắt đầu chạy OCR, rà chính tả và kiểm tra an toàn.
-          </div>
-        ) : visibleSubmissions.length === 0 ? (
-          <div className="rounded-card border border-dashed border-border bg-white p-6 text-center text-sm text-muted">
-            Không có trang nào thuộc nhóm trạng thái đang lọc.
-          </div>
-        ) : (
-          <>
+            {visibleSubmissions.length === 0 ? (
+              <div className="rounded-card border border-dashed border-border bg-white p-6 text-center text-sm text-muted">
+                Không có trang nào thuộc nhóm trạng thái đang lọc.
+              </div>
+            ) : null}
             <div className="flex flex-col gap-4">
               {visibleSubmissions.map((sub) => {
                 const badgeStyle =

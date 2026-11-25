@@ -113,6 +113,7 @@ const MemoOverlayWordButton = memo(function OverlayWordButton({
         {getWordPresentationLabel(state)}
       </span>
       {[
+        "preview-correct",
         "self-corrected",
         "unresolved",
         "uncertain",
@@ -124,15 +125,17 @@ const MemoOverlayWordButton = memo(function OverlayWordButton({
           aria-hidden="true"
           className="absolute -right-1 -top-3 rounded-full bg-white px-1 text-xs font-semibold text-ink"
         >
-          {state === "self-corrected"
-            ? "↺"
-            : state === "uncertain"
-              ? "?"
-              : state === "unresolved"
-                ? "◇"
-                : state === "assisted"
-                  ? "♪"
-                  : "!"}
+          {state === "preview-correct"
+            ? "·"
+            : state === "self-corrected"
+              ? "↺"
+              : state === "uncertain"
+                ? "?"
+                : state === "unresolved"
+                  ? "◇"
+                  : state === "assisted"
+                    ? "♪"
+                    : "!"}
         </span>
       ) : null}
     </button>

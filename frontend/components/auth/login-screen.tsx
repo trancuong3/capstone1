@@ -5,12 +5,14 @@ import type { AuthMockScenario } from "@/types/auth";
 
 interface LoginScreenProps {
   isAuthCallback?: boolean;
+  nextPath?: string | null;
   scenario: AuthMockScenario;
   oauthError?: "email_required" | "oauth_failed" | null;
 }
 
 export function LoginScreen({
   isAuthCallback = false,
+  nextPath = null,
   oauthError = null,
   scenario,
 }: LoginScreenProps) {
@@ -34,6 +36,7 @@ export function LoginScreen({
         </div>
         <LoginForm
           isAuthCallback={isAuthCallback}
+          nextPath={nextPath}
           oauthError={oauthError}
           scenario={scenario}
         />

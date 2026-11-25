@@ -42,6 +42,10 @@ import {
   fetchVoiceEngineHealth,
   type VoiceEngineHealthSnapshot,
 } from "@/lib/reading/voice-engine-status";
+import {
+  adaptTextToTeacherPersona,
+  resolveVoiceGender,
+} from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 
 const PREVIEW_TEXT =
@@ -693,7 +697,7 @@ export function ReadingVoiceSettings({
                       : "text-muted",
                   )}
                 >
-                  Chạy 100% local, không gọi Google
+                  Chạy 100% nội bộ (máy chủ + trình duyệt), không gọi Google
                 </span>
               </button>
               <button
@@ -795,8 +799,12 @@ export function ReadingVoiceSettings({
                   return;
                 }
                 setPreviewError(false);
+                const previewText = adaptTextToTeacherPersona(
+                  PREVIEW_TEXT,
+                  resolveVoiceGender(selectedVoiceId, selectedVoice?.gender),
+                );
                 void Promise.resolve()
-                  .then(() => onPreview(PREVIEW_TEXT))
+                  .then(() => onPreview(previewText))
                   .catch((error: unknown) => {
                     if (
                       mountedRef.current &&

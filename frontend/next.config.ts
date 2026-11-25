@@ -61,6 +61,8 @@ function buildContentSecurityPolicy(): string {
     "blob:",
     "https://*.supabase.co",
     "wss://*.supabase.co",
+    "https://huggingface.co",
+    "https://*.hf.co",
   ]);
   if (supabaseOrigin) {
     connectSources.add(supabaseOrigin);
@@ -70,28 +72,28 @@ function buildContentSecurityPolicy(): string {
     connectSources.add(apiOrigin);
     connectSources.add(apiOrigin.replace(/^http/, "ws"));
   }
-  const imgMediaSources = new Set<string>([
-    "'self'",
-    "https:",
-    "blob:",
-    "data:",
-  ]);
   if (isDev || isLocalApi) {
     connectSources.add("http://127.0.0.1:*");
     connectSources.add("http://localhost:*");
     connectSources.add("ws://127.0.0.1:*");
     connectSources.add("ws://localhost:*");
-    imgMediaSources.add("http://127.0.0.1:*");
-    imgMediaSources.add("http://localhost:*");
   }
 
-  const imgMediaList = Array.from(imgMediaSources).join(" ");
+  // Local development serves page images and audio from the configured API.
+  // Never allow arbitrary HTTP origins or relax the production media policy.
+  const localMediaOrigin =
+    isDev &&
+    apiOrigin &&
+    /^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/.test(apiOrigin)
+      ? ` ${apiOrigin}`
+      : "";
+
   const directives = [
     "default-src 'self'",
-    `script-src 'self' 'unsafe-inline' blob:${isDev ? " 'unsafe-eval'" : ""}`,
+    `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:${isDev ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
-    `img-src ${imgMediaList}`,
-    `media-src ${imgMediaList}`,
+    `img-src 'self' https: blob: data:${localMediaOrigin}`,
+    `media-src 'self' https: blob: data:${localMediaOrigin}`,
     "font-src 'self' data:",
     "worker-src 'self' blob:",
     `connect-src ${Array.from(connectSources).join(" ")}`,
@@ -113,6 +115,15 @@ const nextConfig: NextConfig = {
   ...(turbopackRoot ? { turbopack: { root: turbopackRoot } } : {}),
   async headers() {
     return [
+      {
+        source: "/wasm/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
       {
         source: "/:path*",
         headers: [

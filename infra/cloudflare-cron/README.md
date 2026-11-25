@@ -10,4 +10,4 @@ Free-tier Cloudflare Workers Cron Triggers require no credit card and execute up
    wrangler secret put VIREAD_CRON_DISPATCH_TOKEN
    wrangler deploy --var VIREAD_BACKEND_URL:https://your-backend-domain.example
    ```
-3. The worker triggers `POST /internal/cron/dispatch` every 5 minutes (`*/5 * * * *`), protected by `X-ViRead-Cron-Token` and PostgreSQL advisory locks on the backend.
+3. The worker triggers `POST /internal/cron/dispatch` every 30 minutes (`*/30 * * * *`), protected by `X-ViRead-Cron-Token` and PostgreSQL advisory locks on the backend.

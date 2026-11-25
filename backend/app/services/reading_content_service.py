@@ -809,7 +809,6 @@ class ReadingContentService:
                     revision,
                     base_url=base_url,
                     book_is_private=known_book_is_private,
-                    owner_parent_id=getattr(book_row, "OwnerParentId", None),
                 )
         else:
             session = await self._repo_session(session_id, actor_id)
@@ -924,7 +923,6 @@ class ReadingContentService:
                     revision,
                     base_url=base_url,
                     book_is_private=known_book_is_private,
-                    owner_parent_id=getattr(book_row, "OwnerParentId", None),
                 )
         else:
             session = await self._repo_session(session_id, actor_id)

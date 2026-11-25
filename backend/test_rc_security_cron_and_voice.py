@@ -22,6 +22,7 @@ os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 os.environ.setdefault("VIREAD_LOCAL_VOICE_WORKER_AUTOSTART", "false")
 
+from PIL import Image
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -189,6 +190,12 @@ class InternalCronDispatchAndWorkersTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
+
+
+def _valid_camera_jpeg() -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", (20, 20), "white").save(buffer, format="JPEG")
+    return buffer.getvalue()
 
 
 class RateLimiterActiveAccountAndOpenApiTests(unittest.TestCase):
@@ -386,14 +393,14 @@ class RateLimiterActiveAccountAndOpenApiTests(unittest.TestCase):
             self.assertEqual(
                 client.post(
                     "/reading/match-page",
-                    files={"file": ("p.jpg", b"\xff\xd8\xff", "image/jpeg")},
+                    files={"file": ("p.jpg", _valid_camera_jpeg(), "image/jpeg")},
                 ).status_code,
                 200,
             )
             self.assertEqual(
                 client.post(
                     f"/reading/books/{BOOK_ID}/match-page",
-                    files={"file": ("p.jpg", b"\xff\xd8\xff", "image/jpeg")},
+                    files={"file": ("p.jpg", _valid_camera_jpeg(), "image/jpeg")},
                 ).status_code,
                 429,
             )
@@ -407,7 +414,7 @@ class RateLimiterActiveAccountAndOpenApiTests(unittest.TestCase):
                 429,
             )
 
-    def test_reading_match_page_enforces_12mb_413_and_bounded_candidates(self):
+    def test_reading_match_page_enforces_camera_limit_and_bounded_candidates(self):
         active_db = MagicMock()
         active_db.scalar = AsyncMock(return_value="parent")
         fake_res = MagicMock()
@@ -420,7 +427,7 @@ class RateLimiterActiveAccountAndOpenApiTests(unittest.TestCase):
         app.dependency_overrides[get_db] = lambda: active_db
         client = TestClient(app)
 
-        oversized = b"\xff\xd8\xff" + b"\x00" * reading_route.MAX_SCAN_IMAGE_BYTES
+        oversized = b"\xff\xd8\xff" + b"\x00" * reading_route.MAX_CAMERA_FRAME_BYTES
         with patch.object(
             reading_route.HistoryService, "require_parent", new=AsyncMock(return_value=None)
         ):
@@ -447,7 +454,7 @@ class RateLimiterActiveAccountAndOpenApiTests(unittest.TestCase):
         ):
             r_empty_candidates = client.post(
                 "/reading/match-page",
-                files={"file": ("small.jpg", b"\xff\xd8\xff\xd9", "image/jpeg")},
+                files={"file": ("small.jpg", _valid_camera_jpeg(), "image/jpeg")},
             )
         self.assertEqual(r_empty_candidates.status_code, 404)
         stmt = active_db.execute.await_args.args[0]

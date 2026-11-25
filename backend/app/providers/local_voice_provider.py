@@ -29,6 +29,36 @@ logger = logging.getLogger(__name__)
 DEFAULT_LOCAL_VOICE_WORKER_URL = "http://127.0.0.1:8010"
 DEFAULT_LOCAL_VOICE_ID = "local_north_truc_ly"
 LOCAL_TTS_MODEL_VERSION = "vieneu-v3-turbo-onnx-fp32-3.8.5"
+DEFAULT_LOCAL_TTS_PRECISION = "hybrid"
+DEFAULT_LOCAL_STT_MODE = "ws"
+LOCAL_STT_MODEL_VERSION = "sherpa-onnx-zipformer-vi-30m-int8-2026-02-09"
+CONNECT_TIMEOUT_SECONDS = 5.0
+_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+
+# Shared per-(event_loop, base_url) AsyncClient pool so persistent TLS connections
+# to the Cloudflare tunnel are reused across requests without leaking closed test loops.
+_LOOP_CLIENTS: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, dict[str, httpx.AsyncClient]
+] = weakref.WeakKeyDictionary()
+
+
+def resolve_local_tts_precision() -> str:
+    raw = (os.getenv("VIREAD_VOICE_TTS_PRECISION") or DEFAULT_LOCAL_TTS_PRECISION).strip().lower()
+    return raw if raw in ("hybrid", "fp32", "int8") else DEFAULT_LOCAL_TTS_PRECISION
+
+
+def resolve_local_stt_mode() -> str:
+    raw = (os.getenv("VIREAD_STT_MODE") or DEFAULT_LOCAL_STT_MODE).strip().lower()
+    return raw if raw in ("ws", "http") else DEFAULT_LOCAL_STT_MODE
+
+
+def build_local_tts_model_version(precision: str | None = None) -> str:
+    prec = (precision or resolve_local_tts_precision()).strip().lower()
+    if prec not in ("hybrid", "fp32", "int8"):
+        prec = DEFAULT_LOCAL_TTS_PRECISION
+    return f"vieneu-v3-turbo-onnx-{prec}-3.8.5"
+
+
 LOCAL_STT_MODEL_VERSION = "sherpa-onnx-zipformer-vi-30m-int8-2026-02-09"
 CONNECT_TIMEOUT_SECONDS = 5.0
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
@@ -176,6 +206,8 @@ class LocalSynthesizedAudio:
     model_version: str
     provider: str = "local"
     used_fallback_voice: bool = False
+    cache_hit: bool = False
+    cache_scope: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +228,8 @@ class LocalTimedSpeech:
     model_version: str
     provider: str = "local"
     used_fallback_voice: bool = False
+    cache_hit: bool = False
+    cache_scope: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,6 +250,8 @@ class LocalPhonicsSpeech:
     region: str
     model_version: str
     provider: str = "local"
+    cache_hit: bool = False
+    cache_scope: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -383,6 +419,20 @@ class LocalVoiceProvider:
         except Exception:
             pass
         return False
+
+    def get_ws_stt_url(self) -> str:
+        """Build the loopback worker WebSocket URL for streaming STT."""
+        if (self.base_url or "").startswith("https://"):
+            ws_base = "wss://" + self.base_url[len("https://") :]
+        elif (self.base_url or "").startswith("http://"):
+            ws_base = "ws://" + self.base_url[len("http://") :]
+        else:
+            ws_base = self.base_url or ""
+        return f"{ws_base.rstrip('/')}/stt/stream"
+
+    def get_ws_auth_headers(self) -> dict[str, str]:
+        """Return loopback worker authentication headers for WebSocket handshake."""
+        return self._request_headers(include_auth=True)
 
     def is_configured(self) -> bool:
         return bool(self.base_url)
@@ -646,6 +696,9 @@ class LocalVoiceProvider:
                 "tts_error_code": None if tts_ready else "LOCAL_TTS_UNAVAILABLE",
                 "stt_model_version": stt.get("model_version", LOCAL_STT_MODEL_VERSION),
                 "tts_model_version": tts.get("model_version", LOCAL_TTS_MODEL_VERSION),
+                "stt_mode": stt.get("mode") or resolve_local_stt_mode(),
+                "tts_precision": tts.get("precision") or resolve_local_tts_precision(),
+                "active_voices": tts.get("active_voices"),
                 "worker_version": data.get("version"),
                 "latency_ms": latency_ms,
             }
