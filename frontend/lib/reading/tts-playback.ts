@@ -162,12 +162,26 @@ function canUseGoogleTtsFallback(): boolean {
 }
 
 function canUseBrowserSpeechSynthesis(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    "speechSynthesis" in window &&
-    typeof window.speechSynthesis?.speak === "function" &&
-    typeof SpeechSynthesisUtterance === "function"
-  );
+  if (
+    typeof window === "undefined" ||
+    !("speechSynthesis" in window) ||
+    typeof window.speechSynthesis?.speak !== "function" ||
+    typeof SpeechSynthesisUtterance !== "function"
+  ) {
+    return false;
+  }
+  try {
+    const voices = window.speechSynthesis.getVoices?.() ?? [];
+    if (
+      voices.length > 0 &&
+      !voices.some((voice) => (voice.lang ?? "").toLowerCase().startsWith("vi"))
+    ) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+  return true;
 }
 
 function canUseDeviceFallbackTts(): boolean {
@@ -803,6 +817,7 @@ export class TtsPlayback {
       operation.controller.signal,
     );
     this.ensure(operation);
+    if (!resolvedVoice) throw unavailable();
     recordTtsEngineUsage({
       provider: "browser",
       fallbackUsed: true,

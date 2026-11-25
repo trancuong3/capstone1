@@ -475,7 +475,12 @@ test("Visual QA: book, scanner and reading preparation at requested widths", asy
       ),
     ).toBe(1);
     await page
-      .getByRole("navigation", { name: "Điều hướng dành cho ba mẹ" })
+      .getByRole("navigation", {
+        name:
+          width < 1280
+            ? "Điều hướng nhanh trên di động"
+            : "Điều hướng dành cho ba mẹ",
+      })
       .getByRole("link", { name: "Tổng quan", exact: true })
       .click();
     await expect(

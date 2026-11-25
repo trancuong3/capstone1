@@ -1050,6 +1050,8 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
           },
         ],
       });
+    if (request.method() === "GET" && path === "/voice/status")
+      return respond(route, readyVoiceStatus("Binh"));
     state.unexpected.push(`unknown:${path}`);
     return respond(route, {}, 404);
   });
