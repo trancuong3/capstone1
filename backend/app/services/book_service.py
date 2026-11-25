@@ -175,7 +175,8 @@ class CatalogService:
         await self.repository.db.rollback()
         if private:
             preview_urls = [
-                private_page_image_url(
+                await asyncio.to_thread(
+                    private_page_image_url,
                     book_id,
                     page["page_id"],
                     revision_id=page["current_verified_revision_id"],

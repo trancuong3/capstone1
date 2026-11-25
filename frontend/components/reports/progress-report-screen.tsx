@@ -1,20 +1,39 @@
 "use client";
 
 import { ArrowRight, History, RefreshCw } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
-import { ChildProgressAssessmentCard } from "@/components/reports/child-progress-assessment";
 import {
   MetricCard,
   type MetricCardDelta,
 } from "@/components/reports/metric-card";
-import { ProgressChart } from "@/components/reports/progress-chart";
 import { ProgressReportFilters } from "@/components/reports/progress-report-filters";
 import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
 import { ReportPageHeader } from "@/components/reports/report-page-header";
+
+const ChildProgressAssessmentCard = dynamic(
+  () =>
+    import("@/components/reports/child-progress-assessment").then(
+      (mod) => mod.ChildProgressAssessmentCard,
+    ),
+  {
+    loading: () => <Skeleton className="h-44 w-full rounded-card" />,
+  },
+);
+
+const ProgressChart = dynamic(
+  () =>
+    import("@/components/reports/progress-chart").then(
+      (mod) => mod.ProgressChart,
+    ),
+  {
+    loading: () => <Skeleton className="h-64 w-full rounded-card" />,
+  },
+);
 import { useReportServices } from "@/hooks/use-report-services";
 import { isServiceError } from "@/lib/api/service-error";
 import { mapReportMetrics } from "@/lib/utils/report-mappers";

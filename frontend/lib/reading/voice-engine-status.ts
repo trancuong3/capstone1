@@ -11,6 +11,8 @@ import { getApiBaseUrl } from "@/lib/supabase/config";
 
 export type VoiceEngineTier =
   | "local_offline"
+  | "catalog_cache"
+  | "android_native"
   | "browser_wasm"
   | "google_cloud"
   | "browser_default"
@@ -107,6 +109,18 @@ export function mapProviderToEngineSnapshot(input: {
     tier = "local_offline";
     engineLabel = "Offline (Precomputed Cache)";
     shortLabel = "Offline (Cache)";
+  } else if (normalized === "catalog_cache" || normalized === "precomputed") {
+    tier = "catalog_cache";
+    engineLabel = "VieNeu (Cache chuẩn)";
+    shortLabel = "Cache chuẩn";
+  } else if (
+    normalized === "android_native" ||
+    normalized === "android" ||
+    normalized === "native_android"
+  ) {
+    tier = "android_native";
+    engineLabel = isStt ? "Android (vi-VN)" : "Android TTS (vi-VN)";
+    shortLabel = "Android (vi-VN)";
   } else if (normalized === "google" || normalized.startsWith("google")) {
     tier = "google_cloud";
     engineLabel = "Google Cloud API";
@@ -128,6 +142,7 @@ export function mapProviderToEngineSnapshot(input: {
     shortLabel,
     fallbackUsed:
       Boolean(input.fallbackUsed) ||
+      tier === "android_native" ||
       tier === "google_cloud" ||
       tier === "browser_default",
     fallbackReason: input.fallbackReason?.trim() || null,

@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 
 import { ChildProfileScreen } from "@/components/children/child-profile-screen";
-import { AppServicesProvider } from "@/components/providers/app-services-provider";
 
 export const metadata: Metadata = {
   title: "Chi tiết hồ sơ bé",
@@ -31,13 +30,11 @@ export default async function ChildDetailsPage({
     : query.avatarError;
 
   return (
-    <AppServicesProvider>
-      <ChildProfileScreen
-        childId={childId}
-        hasAvatarError={avatarError === "1"}
-        hasCreatedNotice={created === "1"}
-        mode="edit"
-      />
-    </AppServicesProvider>
+    <ChildProfileScreen
+      childId={childId}
+      hasAvatarError={avatarError === "1"}
+      hasCreatedNotice={created === "1"}
+      mode="edit"
+    />
   );
 }

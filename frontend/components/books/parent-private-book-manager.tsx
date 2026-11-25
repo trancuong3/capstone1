@@ -37,6 +37,10 @@ import { StatusMessage } from "@/components/common/status-message";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useParentPrivateBookService } from "@/hooks/use-parent-private-book-service";
 import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
+import {
+  fetchOcrWorkerHealth,
+  type OcrWorkerHealthSnapshot,
+} from "@/lib/api/page-match-service";
 import { isServiceError } from "@/lib/api/service-error";
 import { preprocessScanImage } from "@/lib/reading/scan-image-preprocess";
 import { CHILD_GRADES } from "@/types/child";
@@ -67,8 +71,8 @@ const WORKFLOW_BADGE_STYLES: Record<SubmissionWorkflowStatus, string> = {
 };
 
 const STAGE_LABELS: Record<string, string> = {
-  PENDING: "Chờ chạy",
-  RUNNING: "Đang chạy",
+  PENDING: "Đang xếp hàng chờ OCR",
+  RUNNING: "Đang nhận diện OCR",
   COMPLETED: "Hoàn tất",
   PASSED: "Đạt",
   FLAGGED: "Có cảnh báo",
@@ -266,6 +270,8 @@ function ParentPrivateBookManagerContent({
     returnPage > 1 ? `/my-books?page=${Math.floor(returnPage)}` : "/my-books";
 
   const [detail, setDetail] = useState<ParentPrivateBookDetailDTO | null>(null);
+  const [ocrWorkerHealth, setOcrWorkerHealth] =
+    useState<OcrWorkerHealthSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -401,16 +407,29 @@ function ParentPrivateBookManagerContent({
     };
   }, [bookId, currentUserId, service]);
 
-  // Auto-poll while any submission is CHECKING
+  // Auto-poll while any submission is CHECKING + inspect OCR worker online state
   const hasCheckingSubmission = Boolean(
     detail?.submissions.some((sub) => sub.workflow_status === "CHECKING"),
   );
   useEffect(() => {
     if (!hasCheckingSubmission) return;
+    let active = true;
+    const pollWorkerStatus = () => {
+      void fetchOcrWorkerHealth().then((snapshot) => {
+        if (active && snapshot) {
+          setOcrWorkerHealth(snapshot);
+        }
+      });
+    };
+    pollWorkerStatus();
     const timer = window.setInterval(() => {
       void loadDetail(true);
+      pollWorkerStatus();
     }, 2500);
-    return () => window.clearInterval(timer);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
   }, [hasCheckingSubmission, loadDetail]);
 
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
@@ -849,6 +868,23 @@ function ParentPrivateBookManagerContent({
     },
     { CHECKING: 0, READY: 0, ADMIN: 0, FAILED: 0, ADDED: 0 },
   );
+  const pendingOcrCount = activeSubmissions.filter(
+    (item) =>
+      item.workflow_status === "CHECKING" && item.ocr_status === "PENDING",
+  ).length;
+  const runningOcrCount = activeSubmissions.filter(
+    (item) =>
+      item.workflow_status === "CHECKING" && item.ocr_status === "RUNNING",
+  ).length;
+  const ocrWorkerOffline =
+    ocrWorkerHealth !== null && !ocrWorkerHealth.workerOnline;
+  const workerFailureCount = activeSubmissions.filter(
+    (item) =>
+      Boolean(item.ocr_error_code) ||
+      Boolean(item.proofread_error_code) ||
+      Boolean(item.tool_check_error_code) ||
+      item.workflow_status === "CHECK_FAILED",
+  ).length;
   const filteredSubmissions =
     statusFilter === "ALL"
       ? activeSubmissions
@@ -1339,6 +1375,90 @@ function ParentPrivateBookManagerContent({
                 );
               })}
             </div>
+            {activeSubmissions.length > 1 ? (
+              <div
+                aria-label="Tổng quan nhanh trạng thái các trang"
+                className="flex flex-wrap gap-1.5 border-t border-border pt-3"
+              >
+                {activeSubmissions.map((sub, index) => {
+                  const chipStyle =
+                    WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
+                    "border-border bg-canvas text-ink";
+                  return (
+                    <button
+                      key={`map-${sub.id}`}
+                      className={`inline-flex items-center gap-1 rounded-control border px-2 py-1 text-[11px] font-bold ${chipStyle}`}
+                      onClick={() => {
+                        setStatusFilter("ALL");
+                        setSubmissionsPage(
+                          Math.floor(index / SUBMISSIONS_PAGE_SIZE) + 1,
+                        );
+                        requestAnimationFrame(() => {
+                          const target = document.querySelector(
+                            `[data-submission-id="${sub.id}"]`,
+                          );
+                          target?.scrollIntoView?.({
+                            behavior: "smooth",
+                            block: "nearest",
+                          });
+                        });
+                      }}
+                      title={`Trang nguồn ${sub.source_page_number}: ${sub.workflow_status_label}`}
+                      type="button"
+                    >
+                      <span>Tr.{sub.source_page_number}</span>
+                      <span className="font-normal">
+                        · {sub.workflow_status_label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {workerFailureCount > 0 || submissionCounts.CHECKING > 0 ? (
+              <div
+                className="rounded-control border border-amber-300 bg-amber-50/80 px-3 py-2 text-xs text-amber-950"
+                data-testid="private-book-ocr-queue-banner"
+              >
+                {workerFailureCount > 0 ? (
+                  <p className="font-semibold">
+                    Có {workerFailureCount} trang gặp lỗi OCR/AI (dịch vụ kiểm
+                    tra có thể đang bận hoặc tạm ngắt). Các trang đạt chuẩn hoặc
+                    chờ Admin bên cạnh không bị ảnh hưởng — hãy bấm «Thử lại
+                    kiểm tra» ở từng trang bị lỗi.
+                  </p>
+                ) : ocrWorkerOffline && pendingOcrCount > 0 ? (
+                  <p className="font-semibold">
+                    Đang chờ máy chủ OCR Windows bật (hàng đợi an toàn —{" "}
+                    {pendingOcrCount} trang đã được lưu an toàn và sẽ tự động
+                    nhận diện ngay khi máy chủ OCR hoạt động).
+                  </p>
+                ) : runningOcrCount > 0 ? (
+                  <p className="font-semibold">
+                    Đang nhận diện OCR {runningOcrCount} trang
+                    {pendingOcrCount > 0
+                      ? ` (${pendingOcrCount} trang đang xếp hàng tiếp theo)`
+                      : ""}
+                    . Các trang đã kiểm tra xong vẫn hiển thị đầy đủ để bạn thao
+                    tác ngay.
+                  </p>
+                ) : (
+                  <p className="font-semibold">
+                    {pendingOcrCount > 0
+                      ? `Đang xếp hàng chờ OCR cho ${pendingOcrCount} trang`
+                      : `Đang xử lý song song ${submissionCounts.CHECKING} trang ở chế độ nền`}
+                    . Các trang đã kiểm tra xong vẫn hiển thị đầy đủ để bạn thao
+                    tác ngay.
+                  </p>
+                )}
+              </div>
+            ) : null}
+            {visibleSubmissions.length === 0 ? (
+              <div className="rounded-card border border-dashed border-border bg-white p-6 text-center text-sm text-muted">
+                Không có trang nào thuộc nhóm trạng thái đang lọc.
+              </div>
+            ) : null}
             <div className="flex flex-col gap-4">
               {visibleSubmissions.map((sub) => {
                 const badgeStyle =
@@ -1428,7 +1548,10 @@ function ParentPrivateBookManagerContent({
                               1. OCR tiếng Việt
                             </p>
                             <p className="mt-0.5 text-muted">
-                              {STAGE_LABELS[sub.ocr_status] ?? sub.ocr_status}
+                              {sub.ocr_status === "PENDING" && ocrWorkerOffline
+                                ? "Chờ máy chủ OCR Windows bật"
+                                : (STAGE_LABELS[sub.ocr_status] ??
+                                  sub.ocr_status)}
                               {sub.ocr_error_code
                                 ? ` (${sub.ocr_error_code})`
                                 : ""}

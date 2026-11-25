@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 
-import { AdminOcrReviewScreen } from "@/components/admin/admin-ocr-review-screen";
+import { DynamicAdminOcrReviewScreen } from "@/components/admin/admin-dynamic-screens";
 import { AdminServicesProvider } from "@/components/providers/admin-services-provider";
 
 export default async function Page({
@@ -21,7 +21,7 @@ export default async function Page({
           </div>
         }
       >
-        <AdminOcrReviewScreen bookId={bookId} pageId={pageId} />
+        <DynamicAdminOcrReviewScreen bookId={bookId} pageId={pageId} />
       </Suspense>
     </AdminServicesProvider>
   );

@@ -195,6 +195,7 @@ async def _shutdown_subprocess(
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Start lightweight durable workers; OCR models load only on OCR requests."""
+    startup_db_probe_task: asyncio.Task[object] | None = None
     if APP_ENVIRONMENT != "test":
         app_diag_logger = logging.getLogger("app")
         if app_diag_logger.level == logging.NOTSET:
@@ -206,29 +207,49 @@ async def lifespan(_app: FastAPI):
             )
             app_diag_logger.addHandler(diag_handler)
 
-        db_probe = await probe_database_connection(
-            timeout=min(5.0, DATABASE_CONNECT_TIMEOUT)
-        )
-        log_diagnostic(
-            logger,
-            logging.INFO if db_probe["ok"] else logging.WARNING,
-            event=(
-                "database_startup_probe_succeeded"
-                if db_probe["ok"]
-                else "database_startup_probe_failed"
-            ),
-            stage="lifespan_startup",
-            dns_resolved=db_probe["dns_resolved"],
-            ssl_enabled=db_probe["ssl_enabled"],
-            pool_class=db_probe["pool_class"],
-            pooler_mode=db_probe["pooler_mode"],
-            latency_ms=db_probe["latency_ms"],
-            database_error_type=db_probe["error_type"],
+        async def _run_startup_db_probe() -> None:
+            try:
+                db_probe = await probe_database_connection(
+                    timeout=min(5.0, DATABASE_CONNECT_TIMEOUT)
+                )
+                log_diagnostic(
+                    logger,
+                    logging.INFO if db_probe["ok"] else logging.WARNING,
+                    event=(
+                        "database_startup_probe_succeeded"
+                        if db_probe["ok"]
+                        else "database_startup_probe_failed"
+                    ),
+                    stage="lifespan_startup",
+                    dns_resolved=db_probe["dns_resolved"],
+                    ssl_enabled=db_probe["ssl_enabled"],
+                    pool_class=db_probe["pool_class"],
+                    pooler_mode=db_probe["pooler_mode"],
+                    latency_ms=db_probe["latency_ms"],
+                    database_error_type=db_probe["error_type"],
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="database_startup_probe_failed",
+                    stage="lifespan_startup",
+                    database_error_type=type(exc).__name__,
+                )
+
+        # Non-blocking startup probe so Uvicorn binds its HTTP port immediately on cold boot.
+        startup_db_probe_task = asyncio.create_task(
+            _run_startup_db_probe(), name="startup_db_probe"
         )
 
+    heavy_workers_disabled = is_heavy_workers_disabled()
+    remote_ocr_mode = is_remote_ocr_mode()
+
     warmup_enabled = (
-        not is_remote_ocr_mode()
-        and not is_heavy_workers_disabled()
+        not remote_ocr_mode
+        and not heavy_workers_disabled
         and os.getenv("VIREAD_OCR_WARMUP_ENABLED", "false").strip().lower()
         in {"1", "true", "yes", "on"}
     )
@@ -243,8 +264,8 @@ async def lifespan(_app: FastAPI):
     active_model_worker = None
     if (
         APP_ENVIRONMENT != "test"
-        and not is_remote_ocr_mode()
-        and not is_heavy_workers_disabled()
+        and not remote_ocr_mode
+        and not heavy_workers_disabled
     ):
         active_model_worker = threading.Thread(
             target=run_active_viread_model_worker,
@@ -266,7 +287,7 @@ async def lifespan(_app: FastAPI):
     stop_parent_book_worker = asyncio.Event()
     parent_book_task = None
     worker_startup_delay = _background_worker_startup_delay_seconds()
-    if APP_ENVIRONMENT != "test" and not worker_disabled:
+    if APP_ENVIRONMENT != "test" and not heavy_workers_disabled and not worker_disabled:
         book_quality_task = asyncio.create_task(
             _run_worker_with_startup_delay(
                 run_book_quality_worker, stop_book_quality_worker, worker_startup_delay
@@ -276,7 +297,7 @@ async def lifespan(_app: FastAPI):
     workflow_worker_enabled = os.getenv(
         "ADMIN_AI_WORKFLOW_WORKER_ENABLED", "true"
     ).strip().lower() not in {"0", "false", "no", "off"}
-    if APP_ENVIRONMENT != "test" and workflow_worker_enabled:
+    if APP_ENVIRONMENT != "test" and not heavy_workers_disabled and workflow_worker_enabled:
         admin_ai_workflow_task = asyncio.create_task(
             _run_worker_with_startup_delay(
                 run_admin_ai_workflow_worker,
@@ -285,12 +306,10 @@ async def lifespan(_app: FastAPI):
             ),
             name="admin_ai_workflow_worker",
         )
-    parent_book_worker_enabled = (
-        not is_heavy_workers_disabled()
-        and os.getenv("PARENT_BOOK_WORKER_ENABLED", "true").strip().lower()
-        not in {"0", "false", "no", "off"}
-    )
-    if APP_ENVIRONMENT != "test" and parent_book_worker_enabled:
+    parent_book_worker_enabled = os.getenv(
+        "PARENT_BOOK_WORKER_ENABLED", "true"
+    ).strip().lower() not in {"0", "false", "no", "off"}
+    if APP_ENVIRONMENT != "test" and not heavy_workers_disabled and parent_book_worker_enabled:
         parent_book_task = asyncio.create_task(
             _run_worker_with_startup_delay(
                 run_parent_book_submission_worker,
@@ -299,14 +318,11 @@ async def lifespan(_app: FastAPI):
             ),
             name="parent_book_submission_worker",
         )
-    ocr_outbox_enabled = (
-        not is_remote_ocr_mode()
-        and not is_heavy_workers_disabled()
-        and os.getenv("VIREAD_OCR_OUTBOX_WORKER_ENABLED", "true").strip().lower()
-        not in {"0", "false", "no", "off"}
-    )
+    ocr_outbox_enabled = os.getenv(
+        "VIREAD_OCR_OUTBOX_WORKER_ENABLED", "true"
+    ).strip().lower() not in {"0", "false", "no", "off"}
     stop_viread_ocr_outbox = asyncio.Event()
-    if APP_ENVIRONMENT != "test" and ocr_outbox_enabled:
+    if APP_ENVIRONMENT != "test" and not heavy_workers_disabled and ocr_outbox_enabled:
         viread_outbox_task = asyncio.create_task(
             _run_worker_with_startup_delay(
                 run_viread_ocr_outbox_worker,
@@ -315,14 +331,11 @@ async def lifespan(_app: FastAPI):
             ),
             name="viread_ocr_verified_outbox_worker",
         )
-    training_worker_enabled = (
-        not is_remote_ocr_mode()
-        and not is_heavy_workers_disabled()
-        and os.getenv("VIREAD_OCR_AUTO_TRAINING_WORKER_ENABLED", "true").strip().lower()
-        not in {"0", "false", "no", "off"}
-    )
+    training_worker_enabled = os.getenv(
+        "VIREAD_OCR_AUTO_TRAINING_WORKER_ENABLED", "true"
+    ).strip().lower() not in {"0", "false", "no", "off"}
     stop_viread_training = asyncio.Event()
-    if APP_ENVIRONMENT != "test" and training_worker_enabled:
+    if APP_ENVIRONMENT != "test" and not heavy_workers_disabled and training_worker_enabled:
         viread_training_task = asyncio.create_task(
             _run_worker_with_startup_delay(
                 run_viread_ocr_training_auto_worker,
@@ -335,8 +348,8 @@ async def lifespan(_app: FastAPI):
     # Dedicated training is opt-in. The subprocess itself defaults to disabled;
     # starting it without an explicit opt-in wastes memory and fails on Render.
     local_training_enabled = (
-        not is_remote_ocr_mode()
-        and not is_heavy_workers_disabled()
+        not remote_ocr_mode
+        and not heavy_workers_disabled
         and os.getenv("VIREAD_LOCAL_TRAINING_ENABLED", "false").strip().lower()
         in {"1", "true", "yes", "on"}
     )
@@ -355,7 +368,7 @@ async def lifespan(_app: FastAPI):
 
     stop_local_voice_bootstrap = asyncio.Event()
     local_voice_bootstrap_task = None
-    if APP_ENVIRONMENT != "test":
+    if APP_ENVIRONMENT != "test" and not heavy_workers_disabled:
         arm_local_voice_worker_autostart(True)
         local_voice_bootstrap_task = asyncio.create_task(
             ensure_local_voice_worker_running(stop_event=stop_local_voice_bootstrap),
@@ -389,8 +402,11 @@ async def lifespan(_app: FastAPI):
         stop_book_quality_worker.set()
         stop_admin_ai_workflow.set()
         stop_parent_book_worker.set()
+        if startup_db_probe_task is not None and not startup_db_probe_task.done():
+            startup_db_probe_task.cancel()
 
         worker_tasks = (
+            startup_db_probe_task,
             local_voice_bootstrap_task,
             viread_outbox_task,
             viread_training_task,
@@ -404,6 +420,11 @@ async def lifespan(_app: FastAPI):
             await asyncio.gather(
                 _shutdown_subprocess(local_trainer_process),
                 shutdown_post_ocr_tasks(),
+                _shutdown_worker_task(
+                    startup_db_probe_task,
+                    asyncio.Event(),
+                    timeout=1.0,
+                ),
                 _shutdown_worker_task(
                     local_voice_bootstrap_task,
                     stop_local_voice_bootstrap,

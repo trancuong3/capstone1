@@ -73,7 +73,13 @@ describe("Admin multi-format document upload service and UI", () => {
 
     fetchMock
       .mockResolvedValueOnce(
+        Response.json({ detail: "Not Found" }, { status: 404 }),
+      )
+      .mockResolvedValueOnce(
         Response.json(makeRevisionDetail(pageId1, revId1, "Trang ảnh")),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ detail: "Not Found" }, { status: 404 }),
       )
       .mockResolvedValueOnce(
         Response.json({
@@ -114,6 +120,9 @@ describe("Admin multi-format document upload service and UI", () => {
             },
           ],
         }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ detail: "Not Found" }, { status: 404 }),
       )
       .mockResolvedValueOnce(
         Response.json({
@@ -176,17 +185,20 @@ describe("Admin multi-format document upload service and UI", () => {
       (p) => progressUpdates.push(p),
     );
 
-    expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe(
+    const calledPaths = fetchMock.mock.calls.map(
+      ([url]) => new URL(String(url)).pathname,
+    );
+    expect(calledPaths).toEqual([
+      `/books/admin/catalog/${bookId}/pages/jobs`,
       `/books/admin/catalog/${bookId}/pages`,
-    );
-    expect(new URL(String(fetchMock.mock.calls[1][0])).pathname).toBe(
+      `/books/admin/catalog/${bookId}/documents/jobs`,
       `/books/admin/catalog/${bookId}/documents`,
-    );
-    expect(new URL(String(fetchMock.mock.calls[2][0])).pathname).toBe(
+      `/books/admin/catalog/${bookId}/documents/jobs`,
       `/books/admin/catalog/${bookId}/documents`,
-    );
+      `/books/admin/catalog/${bookId}/pages`,
+    ]);
     expect(
-      ((fetchMock.mock.calls[1][1] as RequestInit).body as FormData).get(
+      ((fetchMock.mock.calls[3][1] as RequestInit).body as FormData).get(
         "document",
       ),
     ).toBeInstanceOf(File);
@@ -238,6 +250,13 @@ describe("Admin multi-format document upload service and UI", () => {
 
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
       const target = String(url);
+      if (
+        (target.endsWith("/pages/jobs") ||
+          target.endsWith("/documents/jobs")) &&
+        init?.method === "POST"
+      ) {
+        return Response.json({ detail: "Not Found" }, { status: 404 });
+      }
       if (target.endsWith("/pages") && init?.method === "POST") {
         return Response.json(makeRevisionDetail(pageId1, revId1, "Trang ảnh"));
       }
@@ -342,6 +361,9 @@ describe("Admin multi-format document upload service and UI", () => {
 
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
       const target = String(url);
+      if (target.endsWith("/documents/jobs") && init?.method === "POST") {
+        return Response.json({ detail: "Not Found" }, { status: 404 });
+      }
       if (target.endsWith("/documents") && init?.method === "POST") {
         return new Promise<Response>((resolve) => {
           resolveUpload = resolve;
@@ -450,6 +472,9 @@ describe("Admin multi-format document upload service and UI", () => {
 
     fetchMock
       .mockResolvedValueOnce(
+        Response.json({ detail: "Not Found" }, { status: 404 }),
+      )
+      .mockResolvedValueOnce(
         Response.json({
           book_id: bookId,
           file_name: "scan.tiff",
@@ -499,6 +524,9 @@ describe("Admin multi-format document upload service and UI", () => {
         }),
       )
       .mockResolvedValueOnce(
+        Response.json({ detail: "Not Found" }, { status: 404 }),
+      )
+      .mockResolvedValueOnce(
         Response.json({
           book_id: bookId,
           file_name: "photo.bmp",
@@ -509,6 +537,9 @@ describe("Admin multi-format document upload service and UI", () => {
           failed_pages_count: 0,
           pages: [],
         }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ detail: "Not Found" }, { status: 404 }),
       )
       .mockResolvedValueOnce(
         Response.json(
@@ -582,6 +613,9 @@ describe("Admin multi-format document upload service and UI", () => {
     const multiBookId = "88888888-8888-4888-8888-888888888888";
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
       const target = String(url);
+      if (target.endsWith("/documents/jobs") && init?.method === "POST") {
+        return Response.json({ detail: "Not Found" }, { status: 404 });
+      }
       if (target.endsWith("/documents") && init?.method === "POST") {
         const uploaded = (init.body as FormData).get("document") as File;
         return Response.json({

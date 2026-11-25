@@ -137,6 +137,7 @@ class InternalCronDispatchAndWorkersTests(unittest.TestCase):
         fake_ctx.__aenter__ = AsyncMock(return_value=fake_session)
         fake_ctx.__aexit__ = AsyncMock(return_value=False)
 
+        before_modules = set(sys.modules)
         with (
             patch.object(parent_book_submission_worker, "is_remote_ocr_mode", return_value=True),
             patch.object(parent_book_submission_worker, "AsyncSessionLocal", return_value=fake_ctx),
@@ -161,8 +162,34 @@ class InternalCronDispatchAndWorkersTests(unittest.TestCase):
             fake_repo.claim_next_checking_submission.await_args.kwargs.get("only_post_ocr")
         )
         post_ocr.assert_awaited_once_with(fake_sub.Id)
-        # Import isolation is checked in a clean subprocess by test_web_lightweight_startup.
+        newly_loaded = set(sys.modules) - before_modules
+        self.assertNotIn("torch", newly_loaded)
+        self.assertNotIn("paddleocr", newly_loaded)
 
+        # Also assert in a fresh Python interpreter that importing the worker
+        # in remote_worker mode never loads heavy OCR/ML modules.
+        import subprocess
+
+        backend_dir = str(Path(__file__).resolve().parent)
+        check_code = (
+            "import os, sys; "
+            f"sys.path.insert(0, {backend_dir!r}); "
+            "os.environ['APP_ENVIRONMENT'] = 'test'; "
+            "os.environ['VIREAD_OCR_MODE'] = 'remote_worker'; "
+            "os.environ.setdefault('DATABASE_URL', 'postgresql+asyncpg://test:test@127.0.0.1:1/test'); "
+            "os.environ.setdefault('SUPABASE_URL', 'https://example.supabase.co'); "
+            "os.environ.setdefault('SUPABASE_KEY', 'isolated-test-key'); "
+            "from app.jobs import parent_book_submission_worker; "
+            "assert 'torch' not in sys.modules and 'paddleocr' not in sys.modules"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", check_code],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
 
 
 def _valid_camera_jpeg() -> bytes:

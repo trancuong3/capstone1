@@ -136,10 +136,12 @@ describe("Admin real API boundaries (migrated from legacy mutable store tests)",
     apiFetchFixture
       .mockResolvedValueOnce(
         Response.json({
-          ...adminR2Fixture,
-          verification_status: "NEEDS_REVIEW",
-          verified_at: null,
-          verified_by: null,
+          id: "job-upload-1",
+          job_kind: "ADMIN_PAGE_UPLOAD",
+          status: "SUCCEEDED",
+          book_id: ADMIN_BOOK_ID,
+          page_id: ADMIN_PAGE_ID,
+          revision_id: ADMIN_R2_ID,
         }),
       )
       .mockResolvedValueOnce(Response.json(pageList));
@@ -155,7 +157,7 @@ describe("Admin real API boundaries (migrated from legacy mutable store tests)",
     expect(result).toEqual(pageList);
     expect(apiFetchFixture).toHaveBeenCalledTimes(2);
     expect(requestedApiUrl(0).pathname).toBe(
-      `/books/admin/catalog/${ADMIN_BOOK_ID}/pages`,
+      `/books/admin/catalog/${ADMIN_BOOK_ID}/pages/jobs`,
     );
     const uploadInit = apiFetchFixture.mock.calls[0][1] as RequestInit;
     expect(uploadInit.method).toBe("POST");
@@ -217,21 +219,34 @@ describe("Admin real API boundaries (migrated from legacy mutable store tests)",
     );
     expect(apiFetchFixture.mock.calls[0][1]?.method).toBe("POST");
 
-    apiFetchFixture.mockResolvedValueOnce(
-      Response.json({
-        ...adminR2Fixture,
-        verification_status: "NEEDS_REVIEW",
-        verified_at: null,
-        verified_by: null,
-        revision_no: 3,
-      }),
-    );
+    apiFetchFixture
+      .mockResolvedValueOnce(
+        Response.json({
+          id: "job-reprocess-1",
+          job_kind: "ADMIN_PAGE_REPROCESS",
+          status: "SUCCEEDED",
+          page_id: ADMIN_PAGE_ID,
+          revision_id: ADMIN_R2_ID,
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          ...adminR2Fixture,
+          verification_status: "NEEDS_REVIEW",
+          verified_at: null,
+          verified_by: null,
+          revision_no: 3,
+        }),
+      );
     const reprocessed = await createRevisionService().reprocess(ADMIN_PAGE_ID);
     expect(reprocessed.revision_no).toBe(3);
     expect(requestedApiUrl(1).pathname).toBe(
-      `/books/admin/pages/${ADMIN_PAGE_ID}/reprocess`,
+      `/books/admin/pages/${ADMIN_PAGE_ID}/reprocess/jobs`,
     );
     expect(apiFetchFixture.mock.calls[1][1]?.method).toBe("POST");
+    expect(requestedApiUrl(2).pathname).toBe(
+      `/books/admin/pages/${ADMIN_PAGE_ID}/revisions/${ADMIN_R2_ID}`,
+    );
   });
 
   it("keeps unsupported page lifecycle updates unavailable", async () => {

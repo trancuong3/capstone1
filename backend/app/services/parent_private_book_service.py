@@ -918,6 +918,7 @@ class ParentPrivateBookService:
                 _reset_submission_for_full_recheck(
                     sub, now=now, reset_ocr=True, auto_recheck=True
                 )
+                reset_sub_ids.add(sub.Id)
                 reset_staged += 1
 
             await self.repo.supersede_open_moderation_requests_for_book(locked_book.Id, now)

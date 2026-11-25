@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import logging
 import os
 import re
+import threading
+import time
 from pathlib import Path
 from typing import Sequence
 from urllib.parse import quote, urlsplit
@@ -24,6 +27,34 @@ from app.services.runtime_diagnostics import runtime_configuration_diagnostics
 
 logger = logging.getLogger(__name__)
 SIGNED_URL_TTL_SECONDS = 3600
+SIGNED_URL_CACHE_TTL_SECONDS = 1200.0  # 20 minutes (< 60m signed TTL)
+SIGNED_URL_CACHE_MAX_ENTRIES = 2048
+
+_signed_url_cache_lock = threading.Lock()
+_signed_url_cache: "OrderedDict[tuple[str, str, int], tuple[float, str]]" = OrderedDict()
+
+
+def clear_signed_url_cache() -> None:
+    """Reset bounded in-memory signed URL cache (used by tests)."""
+    with _signed_url_cache_lock:
+        _signed_url_cache.clear()
+
+
+def invalidate_signed_url_cache(
+    object_path: str,
+    *,
+    bucket_name: str | None = None,
+) -> None:
+    """Evict cached signed URLs for a mutated or deleted Storage object."""
+    bucket_key = (bucket_name or SUPABASE_STORAGE_BUCKET or "").strip()
+    with _signed_url_cache_lock:
+        keys = [
+            key
+            for key in _signed_url_cache
+            if key[1] == object_path and (not bucket_key or key[0] == bucket_key)
+        ]
+        for key in keys:
+            _signed_url_cache.pop(key, None)
 
 
 class StorageUploadFailure(HTTPException):
@@ -179,6 +210,7 @@ def upload_object(
             data,
             file_options={"content-type": content_type, "upsert": "true" if upsert else "false"},
         )
+        invalidate_signed_url_cache(object_path, bucket_name=bucket_name)
     except Exception as exc:
         http_status = _safe_numeric_status(exc)
         error_code = _safe_error_code(exc)
@@ -214,6 +246,7 @@ def delete_object(object_path: str, *, bucket_name: str | None = None) -> None:
             return
         bucket = _storage_bucket() if bucket_name is None else _storage_bucket(bucket_name)
         bucket.remove([object_path])
+        invalidate_signed_url_cache(object_path, bucket_name=bucket_name)
         log_diagnostic(
             logger,
             logging.INFO,
@@ -502,3 +535,73 @@ def create_signed_image_urls(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Could not create an image preview URL",
         ) from exc
+
+
+def create_cached_signed_image_urls(
+    image_paths: Sequence[str | None],
+    *,
+    bucket_name: str | None = None,
+    max_workers: int = 8,
+    ttl_seconds: int | None = None,
+    cache_ttl_seconds: float = SIGNED_URL_CACHE_TTL_SECONDS,
+) -> list[str]:
+    """Batch-sign Storage paths with a bounded 20-minute server in-memory TTL cache."""
+    if not image_paths:
+        return []
+
+    effective_ttl = max(
+        30, int(ttl_seconds if ttl_seconds is not None else SIGNED_URL_TTL_SECONDS)
+    )
+    effective_cache_ttl = max(
+        0.0, min(float(cache_ttl_seconds), max(0.0, effective_ttl - 60.0))
+    )
+    bucket_key = (bucket_name or SUPABASE_STORAGE_BUCKET or "").strip()
+    validated_refs = [_validate_image_reference(path) for path in image_paths]
+
+    now = time.monotonic()
+    resolved_by_path: dict[str, str] = {}
+    missing_paths: list[str] = []
+
+    if effective_cache_ttl > 0.0:
+        with _signed_url_cache_lock:
+            for is_ext, ref in validated_refs:
+                if is_ext or ref in resolved_by_path:
+                    continue
+                cache_key = (bucket_key, ref, effective_ttl)
+                cached = _signed_url_cache.get(cache_key)
+                if cached is not None:
+                    expires_at, signed_url = cached
+                    if expires_at > now:
+                        _signed_url_cache.move_to_end(cache_key)
+                        resolved_by_path[ref] = signed_url
+                        continue
+                    _signed_url_cache.pop(cache_key, None)
+                if ref not in missing_paths:
+                    missing_paths.append(ref)
+    else:
+        missing_paths = list(
+            dict.fromkeys(ref for is_ext, ref in validated_refs if not is_ext)
+        )
+
+    if missing_paths:
+        freshly_signed = create_signed_image_urls(
+            missing_paths,
+            bucket_name=bucket_name,
+            max_workers=max_workers,
+            ttl_seconds=effective_ttl,
+        )
+        expires_at = time.monotonic() + effective_cache_ttl
+        with _signed_url_cache_lock:
+            for path, signed_url in zip(missing_paths, freshly_signed):
+                resolved_by_path[path] = signed_url
+                if effective_cache_ttl > 0.0:
+                    cache_key = (bucket_key, path, effective_ttl)
+                    _signed_url_cache[cache_key] = (expires_at, signed_url)
+                    _signed_url_cache.move_to_end(cache_key)
+            while len(_signed_url_cache) > SIGNED_URL_CACHE_MAX_ENTRIES:
+                _signed_url_cache.popitem(last=False)
+
+    return [
+        ref if is_ext else resolved_by_path[ref]
+        for is_ext, ref in validated_refs
+    ]

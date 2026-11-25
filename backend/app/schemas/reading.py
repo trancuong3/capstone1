@@ -44,6 +44,8 @@ class ReadingPageDTO(BaseModel):
     width: int = 1000
     height: int = 1000
     image_url: Optional[str] = None
+    # Deterministic public precomputed TTS MP3 URL strictly for verified public catalog pages.
+    tts_audio_url: Optional[str] = None
     # Legacy or edited geometry has no measured, content-bound proof.
     image_overlay_safe: bool = False
     text: Optional[str] = None
@@ -464,5 +466,25 @@ class LocalOcrPageScanRead(BaseModel):
     match_confidence: float = Field(ge=0, le=1)
     matched_page: ReadingPageRead | None = None
     message: str
+
+
+class LocalOcrPageScanJobRead(BaseModel):
+    job_id: UUID
+    status: Literal[
+        "QUEUED",
+        "CLAIMED",
+        "RUNNING",
+        "FAILED_RETRYABLE",
+        "SUCCEEDED",
+        "DEAD_LETTER",
+        "CANCELLED",
+    ]
+    worker_online: bool
+    created_at: datetime
+    updated_at: datetime
+    error_code: str | None = None
+    error_message: str | None = None
+    result: LocalOcrPageScanRead | None = None
+
 
 

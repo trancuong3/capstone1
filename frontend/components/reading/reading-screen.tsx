@@ -25,7 +25,12 @@ import {
   isInjectedTestSpeechRecognition,
   LocalSegmentSpeechRecognition,
   resolveLocalFirstSpeechRecognitionConstructor,
+  shouldPreferAndroidNativeStt,
 } from "@/lib/reading/local-segment-speech-recognition";
+import {
+  getAndroidSpeechCapabilities,
+  isAndroidNativeSpeechAvailable,
+} from "@/lib/reading/native-speech-bridge";
 import {
   buildPhonicsLesson,
   READING_MASTERY_LABELS,
@@ -42,11 +47,13 @@ import {
 } from "@/lib/reading/session-voice-lock";
 import {
   fetchVoiceEngineHealth,
+  getFreshVoiceEngineHealth,
   getVoiceEngineStatus,
   mapLocalVoiceToGoogleBackup,
   recordSttEngineUsage,
   recordTtsEngineUsage,
 } from "@/lib/reading/voice-engine-status";
+import type { WordTiming } from "@/lib/api/voice-studio-service";
 import {
   adaptTextToTeacherPersona,
   resolveVoiceGender,
@@ -632,10 +639,15 @@ function ReadingSessionScreen({
     setIsReadingWord(true);
     const playbackGeneration = assistantAudioGenerationRef.current + 1;
     try {
-      await playAssistantAudio(
-        () => speechPlayer.play(word.text, { wordSample: true }),
-        true,
-      );
+      await playAssistantAudio(async () => {
+        const playbackId = `word-click-${(assistantPlaybackSeqRef.current += 1)}`;
+        echoGuard.playbackStarted(playbackId, word.text, performance.now());
+        try {
+          await speechPlayer.play(word.text, { wordSample: true });
+        } finally {
+          echoGuard.playbackEnded(playbackId, performance.now());
+        }
+      }, true);
     } catch (err) {
       if (!(err instanceof Error && err.name === "AbortError")) {
         console.warn("Lỗi phát âm 1 từ:", err);
@@ -689,6 +701,12 @@ function ReadingSessionScreen({
   useEffect(() => {
     mountedRef.current = true;
     lockSessionVoice(sessionId);
+    if (isAndroidNativeSpeechAvailable()) {
+      void getAndroidSpeechCapabilities().catch(() => null);
+    }
+    if (!getFreshVoiceEngineHealth()) {
+      void fetchVoiceEngineHealth().catch(() => null);
+    }
     const cleanupMicrophoneOnLeave = () => {
       listeningGenerationRef.current += 1;
       isListeningActiveRef.current = false;
@@ -1883,11 +1901,31 @@ function ReadingSessionScreen({
     options: WordTimedPlayOptions,
   ): Promise<void> {
     const sampleText = options.text ?? words.join(" ");
+    const pageAudioMeta = page as
+      | (ReadingPageDTO & {
+          readonly tts_audio_url?: string | null;
+          readonly tts_word_timings?: readonly WordTiming[] | null;
+        })
+      | null;
+    const precomputedUrl =
+      options.precomputedAudioUrl ?? pageAudioMeta?.tts_audio_url ?? undefined;
+    const precomputedTimings =
+      options.precomputedWordTimings ??
+      pageAudioMeta?.tts_word_timings ??
+      undefined;
+    const mergedOptions: WordTimedPlayOptions = {
+      ...options,
+      ...(precomputedUrl ? { precomputedAudioUrl: precomputedUrl } : {}),
+      ...(precomputedTimings
+        ? { precomputedWordTimings: precomputedTimings }
+        : {}),
+    };
     const id = `assistant-${(assistantPlaybackSeqRef.current += 1)}`;
     echoGuard.playbackStarted(id, sampleText, performance.now());
     return speechPlayer
-      .playWithWordTimings(words, options, () =>
+      .playWithWordTimings(words, mergedOptions, () =>
         speechPlayer.play(sampleText, {
+          ...(precomputedUrl ? { precomputedAudioUrl: precomputedUrl } : {}),
           onPlay: () => options.onPlay?.(),
           onEnded: options.onEnded,
         }),
@@ -2233,27 +2271,35 @@ function ReadingSessionScreen({
       automationStateRef.current = runtime.getState();
     }
 
+    const preferAndroidNativeStt = shouldPreferAndroidNativeStt();
     let recorderStarted = false;
-    try {
-      await speechRecorder.start({ mode: "child-passage" });
-      if (!isCurrent()) {
-        speechRecorder.cancel();
-        return false;
-      }
-      isUsingRecorderRef.current = true;
-      recorderStarted = true;
-    } catch (error) {
-      if (!isCurrent()) return false;
-      const message = error instanceof Error ? error.message : "";
-      if (!message.toLowerCase().includes("not supported")) {
-        if (mountedRef.current) {
-          setConnectionState("reconnecting");
-          setUiState("microphone-denied");
-        }
-        return false;
-      }
-      // Web Speech can still provide final transcript results without MediaRecorder.
+    if (preferAndroidNativeStt) {
+      // Skip parallel WebView getUserMedia/MediaRecorder when Android native
+      // SpeechRecognizer is active to eliminate Android HAL mic contention.
       isUsingRecorderRef.current = false;
+      recorderStarted = false;
+    } else {
+      try {
+        await speechRecorder.start({ mode: "child-passage" });
+        if (!isCurrent()) {
+          speechRecorder.cancel();
+          return false;
+        }
+        isUsingRecorderRef.current = true;
+        recorderStarted = true;
+      } catch (error) {
+        if (!isCurrent()) return false;
+        const message = error instanceof Error ? error.message : "";
+        if (!message.toLowerCase().includes("not supported")) {
+          if (mountedRef.current) {
+            setConnectionState("reconnecting");
+            setUiState("microphone-denied");
+          }
+          return false;
+        }
+        // Web Speech can still provide final transcript results without MediaRecorder.
+        isUsingRecorderRef.current = false;
+      }
     }
 
     isListeningActiveRef.current = true;
@@ -2286,6 +2332,15 @@ function ReadingSessionScreen({
             };
           },
           () => speechRecorder.getStream?.()?.getAudioTracks()?.[0],
+          {
+            onBeforeExternalMicStart: () => {
+              if (isUsingRecorderRef.current || speechRecorder.isRecording) {
+                isUsingRecorderRef.current = false;
+                recorderStarted = false;
+                speechRecorder.cancel({ retainStream: false });
+              }
+            },
+          },
         ) as (new () => BrowserSpeechRecognition) | undefined;
         if (SpeechRec) {
           const rec = new SpeechRec();
@@ -2442,7 +2497,8 @@ function ReadingSessionScreen({
                   return false;
                 }
                 // Our own voice (including the echo after a sample ended) is
-                // never the child's reading, nor a command.
+                // never the child's reading, nor a command. Forward `onsetAt`
+                // so a child repeating right after TTS is never dropped as echo.
                 if (
                   !echoGuard.evaluate({
                     text: part,
@@ -3122,8 +3178,9 @@ function ReadingSessionScreen({
     const sttStatus = getVoiceEngineStatus().stt;
     const alreadyUsingEmergencyBrowserStt =
       Boolean(browserText) &&
-      sttStatus.tier === "browser_default" &&
-      sttStatus.fallbackReason === "LOCAL_STT_UNAVAILABLE";
+      (sttStatus.tier === "android_native" ||
+        (sttStatus.tier === "browser_default" &&
+          sttStatus.fallbackReason === "LOCAL_STT_UNAVAILABLE"));
 
     if (
       !passageContainsHelpRef.current &&
@@ -3246,21 +3303,19 @@ function ReadingSessionScreen({
     const generation = ++assistantAudioGenerationRef.current;
     setCountdown(null);
     let playbackFailed = false;
-
+    let playAborted = false;
     try {
       if (retryModeRef.current) {
         // Retry mode has its own capture lifecycle. Cancel that capture without
-        // transcribing it, then wait for browser recognition to fully stop
-        // before the assistant speaks.
+        // transcribing it, and release MediaStream tracks before TTS playback so
+        // Android restores loudspeaker USAGE_MEDIA instead of MODE_IN_COMMUNICATION.
         retryListeningWantedRef.current = false;
         retryShouldRestartRef.current = false;
         isListeningActiveRef.current = false;
         clearRetryCaptureTimeout();
         retryRecorderActiveRef.current = false;
         isUsingRecorderRef.current = false;
-        // Keep any permission-preflight stream warm in retry mode while stopping
-        // active recording so TTS never gets captured and subsequent mic start is instant.
-        speechRecorder.cancel({ retainStream: true });
+        speechRecorder.cancel({ retainStream: false });
         await stopBrowserRecognition();
         if (mountedRef.current) setIsMicRecording(false);
       } else if (
@@ -3276,7 +3331,7 @@ function ReadingSessionScreen({
             forPassageHelp: alignBeforePassageHelp,
           });
         } catch {
-          speechRecorder.cancel();
+          speechRecorder.cancel({ retainStream: false });
         } finally {
           if (mountedRef.current) setIsMicRecording(false);
         }
@@ -3284,7 +3339,7 @@ function ReadingSessionScreen({
         // A recognition instance can outlive a stale UI/ref state. Always
         // stop it and release any permission-preflight stream before playback,
         // even when the recorder looks idle.
-        speechRecorder.cancel();
+        speechRecorder.cancel({ retainStream: false });
         isUsingRecorderRef.current = false;
         await stopBrowserRecognition();
       }
@@ -3300,6 +3355,7 @@ function ReadingSessionScreen({
       await play();
     } catch (error) {
       const aborted = error instanceof Error && error.name === "AbortError";
+      playAborted = aborted;
       playbackFailed = !aborted;
       throw error;
     } finally {
@@ -3328,6 +3384,7 @@ function ReadingSessionScreen({
         // error or invalidate the sample generation before its catch runs.
         if (
           !playbackFailed &&
+          !playAborted &&
           resumeAfterPlayback &&
           shouldResume &&
           mountedRef.current &&
@@ -3344,6 +3401,7 @@ function ReadingSessionScreen({
         if (
           !playbackFailed &&
           tutorResumeMicAfterPlaybackRef.current &&
+          !playAborted &&
           mountedRef.current &&
           !retryModeRef.current
         ) {
@@ -4812,6 +4870,7 @@ function ReadingSessionScreen({
     }
 
     // Khóa để không xử lý cùng một bản ghi nhiều lần.
+    const hadRecorder = retryRecorderActiveRef.current;
     retryRecorderActiveRef.current = false;
 
     retryAbortControllerRef.current?.abort();
@@ -4827,7 +4886,7 @@ function ReadingSessionScreen({
 
     try {
       const [rawRecording] = await Promise.all([
-        speechRecorder.stop(),
+        hadRecorder ? speechRecorder.stop() : Promise.resolve(null),
         browserFinalResult,
       ]);
 
@@ -4848,7 +4907,9 @@ function ReadingSessionScreen({
         await offerRetryHelp(candidate);
         return;
       }
-      const captureQuality = speechRecorder.getQuality?.();
+      const captureQuality = hadRecorder
+        ? speechRecorder.getQuality?.()
+        : undefined;
       const exactBrowserRead =
         isConfidentExactBrowserRead(
           candidate.text,
@@ -4861,6 +4922,7 @@ function ReadingSessionScreen({
           retryBrowserConfidenceRef.current,
         );
       if (
+        hadRecorder &&
         hasShortWordBlockingAudioIssue(captureQuality) &&
         !(exactBrowserRead && captureQuality?.status === "AUDIO_TOO_SHORT")
       ) {
@@ -4881,6 +4943,33 @@ function ReadingSessionScreen({
       if (controller.signal.aborted || attemptId !== retryAttemptIdRef.current)
         return;
       if (!recording) {
+        if (browserTranscript) {
+          const nativeStatus = classifyRetryTranscript(
+            candidate.text,
+            browserTranscript,
+            classifyOptions,
+          );
+          setLatestTranscript(browserTranscript);
+          if (nativeStatus === "CORRECT") {
+            advancePending = await confirmRetryWord(
+              candidate,
+              browserTranscript,
+              true,
+            );
+            return;
+          }
+          if (nativeStatus === "INCORRECT") {
+            advancePending = await persistRetryOutcome({
+              candidate,
+              status: "FAILED",
+              transcript: browserTranscript,
+              attempt: nextRetryAttempt(candidate),
+            });
+            return;
+          }
+          retryUnclearCapture(candidate, browserTranscript);
+          return;
+        }
         retryUnclearCapture(candidate, "");
         return;
       }
@@ -5170,10 +5259,12 @@ function ReadingSessionScreen({
       setLatestTranscript(prompt ?? "");
     }
 
-    // Bắt đầu ghi âm dự phòng nếu chưa có bản ghi đang chạy.
-    if (!retryRecorderActiveRef.current) {
+    // Bắt đầu ghi âm dự phòng nếu chưa có bản ghi đang chạy
+    // (bỏ qua MediaRecorder khi Android Native STT đang hoạt động để tránh tranh chấp micro HAL).
+    const preferAndroidNativeStt = shouldPreferAndroidNativeStt();
+    if (!preferAndroidNativeStt && !retryRecorderActiveRef.current) {
       try {
-        await speechRecorder.start({ retainStream: true, mode: "short-word" });
+        await speechRecorder.start({ retainStream: false, mode: "short-word" });
         retryRecorderActiveRef.current = true;
       } catch (error) {
         console.warn("[RETRY RECORDER ERROR]", error);
@@ -5192,21 +5283,37 @@ function ReadingSessionScreen({
       !retryListeningWantedRef.current
     ) {
       if (speechRecorder.isRecording) {
-        speechRecorder.cancel(
-          assistantAudioPendingRef.current || assistantAudioPlayingRef.current
-            ? undefined
-            : { retainStream: true },
-        );
+        speechRecorder.cancel({ retainStream: false });
         retryRecorderActiveRef.current = false;
       }
       return false;
     }
 
-    const win = window as unknown as WindowWithSpeech;
-    const rawRetryRec = win.SpeechRecognition || win.webkitSpeechRecognition;
-    const SpeechRec = isInjectedTestSpeechRecognition(rawRetryRec)
-      ? rawRetryRec
-      : undefined;
+    const win = window as unknown as WindowWithSpeech & {
+      AudioContext?: typeof AudioContext;
+      webkitAudioContext?: typeof AudioContext;
+    };
+    const SpeechRec = resolveLocalFirstSpeechRecognitionConstructor(
+      win,
+      speechService,
+      () => ({
+        sessionId,
+        pageId: page?.page_id ?? null,
+        keyterms: [
+          candidate.text,
+          ...(resolveRetrySentenceContext(candidate)?.split(/\s+/) ?? []),
+        ].filter(Boolean),
+      }),
+      () => speechRecorder.getStream?.()?.getAudioTracks()?.[0],
+      {
+        onBeforeExternalMicStart: () => {
+          if (retryRecorderActiveRef.current || speechRecorder.isRecording) {
+            retryRecorderActiveRef.current = false;
+            speechRecorder.cancel({ retainStream: false });
+          }
+        },
+      },
+    ) as (new () => BrowserSpeechRecognition) | undefined;
 
     // Không có Browser SpeechRecognition:
     // vẫn có thể sử dụng MediaRecorder + STT backend.
@@ -5286,6 +5393,35 @@ function ReadingSessionScreen({
           );
 
         if (!text || (!usableNormal && !usablePhonics)) continue;
+
+        const rawOnsetAt = (result as { readonly onsetAt?: number | null })
+          .onsetAt;
+        const normalizedOnsetAt =
+          typeof rawOnsetAt === "number" && Number.isFinite(rawOnsetAt)
+            ? rawOnsetAt
+            : null;
+        if (result.isFinal) {
+          const echoVerdict = echoGuard.evaluate({
+            text,
+            receivedAt: performance.now(),
+            onsetAt: normalizedOnsetAt,
+          });
+          // Always reject transcripts captured during active TTS or whose
+          // acoustic onset began before playback + settle ended. When the
+          // recognizer has no `onsetAt` (desktop Web Speech API), retry mic
+          // only starts AFTER `acousticSettleMs` (250ms), so do not drop the
+          // child's valid target repetition or help request via tail-overlap.
+          const allowRetryTargetWithoutOnset =
+            echoVerdict.reason === "tail-overlap" &&
+            normalizedOnsetAt === null &&
+            (isWordHelpRequest(text, candidate.text) ||
+              classifyRetryTranscript(candidate.text, text, {
+                contextPhrase: resolveRetrySentenceContext(candidate),
+              }) === "CORRECT");
+          if (!echoVerdict.accept && !allowRetryTargetWithoutOnset) {
+            continue;
+          }
+        }
 
         // Browser recognition is a better speech-onset signal than raw
         // microphone volume, which can be triggered by room noise.
@@ -5526,23 +5662,39 @@ function ReadingSessionScreen({
     setRetryFeedback("preparing-microphone");
     setLatestTranscript("Đang chuẩn bị microphone...");
 
-    try {
-      await (permissionRequest ?? speechRecorder.prepare());
-    } catch (error) {
-      console.warn("[RETRY MICROPHONE PERMISSION]", error);
-      if (isCurrent()) {
-        setIsMicRecording(false);
-        setRetryFeedback("microphone-unavailable");
-        setLatestTranscript(
-          "Nhờ ba mẹ cho phép trình duyệt dùng microphone, rồi bé thử lại nhé.",
-        );
+    const preferAndroidNativeStt = shouldPreferAndroidNativeStt();
+    if (!preferAndroidNativeStt) {
+      try {
+        await (permissionRequest ?? speechRecorder.prepare());
+      } catch (error) {
+        console.warn("[RETRY MICROPHONE PERMISSION]", error);
+        if (isCurrent()) {
+          setIsMicRecording(false);
+          setRetryFeedback("microphone-unavailable");
+          setLatestTranscript(
+            "Nhờ ba mẹ cho phép trình duyệt dùng microphone, rồi bé thử lại nhé.",
+          );
+        }
+        return;
       }
-      return;
     }
 
     if (!isCurrent()) {
       return;
     }
+
+    const speakRetryGuarded = async (
+      text: string,
+      options: SpeechPlayOptions,
+    ): Promise<void> => {
+      const playbackId = `retry-tts-${(assistantPlaybackSeqRef.current += 1)}`;
+      echoGuard.playbackStarted(playbackId, text, performance.now());
+      try {
+        await speechPlayer.play(text, options);
+      } finally {
+        echoGuard.playbackEnded(playbackId, performance.now());
+      }
+    };
 
     try {
       await playAssistantAudio(async () => {
@@ -5551,12 +5703,12 @@ function ReadingSessionScreen({
         const phrase = retryPhraseRef.current;
         if (phrase) {
           setLatestTranscript("Bé đọc cả cụm trên màn hình nhé.");
-          await speechPlayer.play(`Con hãy đọc cả cụm: ${phrase}.`, {
+          await speakRetryGuarded(`Con hãy đọc cả cụm: ${phrase}.`, {
             coaching: true,
           });
           return;
         }
-        await speechPlayer.play(
+        await speakRetryGuarded(
           guidedHelp ? "Cô đọc mẫu cho con nhé." : "Con nghe từ này nhé.",
           { coaching: true },
         );
@@ -5569,9 +5721,9 @@ function ReadingSessionScreen({
         setLatestTranscript(`ViRead đang đọc mẫu từ ${candidate.text}...`);
         setIsReadingWord(true);
         try {
-          await speechPlayer.play(candidate.text, { wordSample: true });
+          await speakRetryGuarded(candidate.text, { wordSample: true });
           if (guidedHelp && isCurrent())
-            await speechPlayer.play("Đến lượt con đọc nhé.", {
+            await speakRetryGuarded("Đến lượt con đọc nhé.", {
               coaching: true,
             });
         } finally {

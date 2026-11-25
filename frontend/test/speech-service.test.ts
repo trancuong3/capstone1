@@ -367,4 +367,34 @@ describe("speech service", () => {
       createSpeechService().transcribe(new Blob(["audio"])),
     ).rejects.toMatchObject({ code: "STT_UNAVAILABLE" });
   });
+
+  it("maps LOCAL_VOICE_UNCONFIGURED to retryable STT_TEMPORARILY_UNAVAILABLE and TTS_UNAVAILABLE", async () => {
+    fetchMock.mockResolvedValueOnce(
+      Response.json(
+        { detail: { code: "LOCAL_VOICE_UNCONFIGURED" } },
+        { status: 503, headers: { "x-request-id": "req-unconf-stt" } },
+      ),
+    );
+    await expect(
+      createSpeechService().transcribe(new Blob(["audio"])),
+    ).rejects.toMatchObject({
+      code: "STT_TEMPORARILY_UNAVAILABLE",
+      status: 503,
+      retryable: true,
+    });
+
+    fetchMock.mockResolvedValueOnce(
+      Response.json(
+        { detail: { code: "LOCAL_VOICE_UNCONFIGURED" } },
+        { status: 503, headers: { "x-request-id": "req-unconf-tts" } },
+      ),
+    );
+    await expect(
+      createSpeechService().synthesize("Xin chào"),
+    ).rejects.toMatchObject({
+      code: "TTS_UNAVAILABLE",
+      status: 503,
+      retryable: true,
+    });
+  });
 });

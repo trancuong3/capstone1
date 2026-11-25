@@ -7,7 +7,12 @@ import { useAppStore } from "@/components/providers/app-store-provider";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useChildService } from "@/hooks/use-child-service";
 import { isServiceError } from "@/lib/api/service-error";
+import {
+  invalidateUserCacheKey,
+  readUserCacheWithStale,
+} from "@/lib/cache/user-query-cache";
 import type { ChildProfileDTO } from "@/types/child";
+import type { DashboardSummaryDTO } from "@/types/profile";
 
 type ChildLoadState =
   | { status: "loading"; childId: string | null }
@@ -15,12 +20,36 @@ type ChildLoadState =
   | { status: "redirecting"; childId: null }
   | { status: "error"; childId: string };
 
+function findCachedChild(
+  userId: string | null | undefined,
+  childId: string,
+): ChildProfileDTO | null {
+  if (!userId || !childId) return null;
+
+  const summary = readUserCacheWithStale<DashboardSummaryDTO>(
+    userId,
+    "dashboard-summary",
+  );
+  const fromSummary = summary?.data.children.find(
+    (candidate) => candidate.id === childId,
+  );
+  if (fromSummary) return fromSummary;
+
+  const children = readUserCacheWithStale<ChildProfileDTO[]>(
+    userId,
+    "children",
+  );
+  return children?.data.find((candidate) => candidate.id === childId) ?? null;
+}
+
 export function useValidatedSelectedChild() {
   const { replace } = useRouter();
   const authRuntime = useAuthRuntime();
   const childService = useChildService();
+  const userId = authRuntime?.session?.user?.id ?? null;
   const {
     selectedChildId,
+    validatedSelectedChild,
     selectChild,
     clearSelectedChild,
     setValidatedSelectedChild,
@@ -34,6 +63,18 @@ export function useValidatedSelectedChild() {
   const consumedQueryChildRef = useRef(false);
   const waitingForAuthInit =
     Boolean(authRuntime.hasProvider) && authRuntime.status === "initializing";
+
+  const immediateChild = useMemo<ChildProfileDTO | null>(() => {
+    if (!selectedChildId) return null;
+    if (validatedSelectedChild?.id === selectedChildId) {
+      return validatedSelectedChild;
+    }
+    return findCachedChild(userId, selectedChildId);
+  }, [selectedChildId, userId, validatedSelectedChild]);
+  const immediateChildRef = useRef<ChildProfileDTO | null>(immediateChild);
+  useEffect(() => {
+    immediateChildRef.current = immediateChild;
+  }, [immediateChild]);
 
   useEffect(() => {
     if (waitingForAuthInit) {
@@ -64,12 +105,16 @@ export function useValidatedSelectedChild() {
 
     consumedQueryChildRef.current = true;
     const requestChildId = selectedChildId;
+    const hadImmediateChild = Boolean(immediateChildRef.current);
+
     void childService
       .get(selectedChildId)
       .then((child) => {
         if (!active || requestEpoch !== requestEpochRef.current) return;
         if (child.id !== requestChildId) {
           clearSelectedChild();
+          invalidateUserCacheKey(userId, "dashboard-summary");
+          invalidateUserCacheKey(userId, "children");
           setState({ status: "redirecting", childId: null });
           replace("/dashboard?focus=child-selection&reason=invalid");
           return;
@@ -86,11 +131,15 @@ export function useValidatedSelectedChild() {
           )
         ) {
           clearSelectedChild();
+          invalidateUserCacheKey(userId, "dashboard-summary");
+          invalidateUserCacheKey(userId, "children");
           setState({ status: "redirecting", childId: null });
           replace("/dashboard?focus=child-selection&reason=invalid");
           return;
         }
-        setState({ status: "error", childId: requestChildId });
+        if (!hadImmediateChild) {
+          setState({ status: "error", childId: requestChildId });
+        }
       });
 
     return () => {
@@ -104,20 +153,35 @@ export function useValidatedSelectedChild() {
     selectChild,
     selectedChildId,
     setValidatedSelectedChild,
+    userId,
     waitingForAuthInit,
   ]);
 
-  const visibleState = useMemo<ChildLoadState>(
-    () =>
-      waitingForAuthInit
-        ? { status: "loading", childId: selectedChildId }
-        : selectedChildId
-          ? state.childId === selectedChildId
-            ? state
-            : { status: "loading", childId: selectedChildId }
-          : { status: "redirecting", childId: null },
-    [selectedChildId, state, waitingForAuthInit],
-  );
+  const visibleState = useMemo<ChildLoadState>(() => {
+    if (waitingForAuthInit) {
+      return { status: "loading", childId: selectedChildId };
+    }
+    if (!selectedChildId) {
+      return { status: "redirecting", childId: null };
+    }
+    if (state.status === "redirecting") {
+      return state;
+    }
+    if (state.childId === selectedChildId && state.status === "ready") {
+      return state;
+    }
+    if (immediateChild) {
+      return {
+        status: "ready",
+        childId: selectedChildId,
+        child: immediateChild,
+      };
+    }
+    if (state.childId === selectedChildId) {
+      return state;
+    }
+    return { status: "loading", childId: selectedChildId };
+  }, [immediateChild, selectedChildId, state, waitingForAuthInit]);
 
   return {
     state: visibleState,

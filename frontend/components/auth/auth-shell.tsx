@@ -15,7 +15,7 @@ export function AuthShell({ children }: AuthShellProps) {
   return (
     <div className="account-spread flex min-h-dvh w-full flex-col overflow-x-hidden bg-canvas">
       <SiteHeader />
-      <main className="flex w-full min-w-0 flex-1 items-center justify-center px-4 py-8 sm:min-h-[640px] sm:px-12 sm:py-12">
+      <main className="flex w-full min-w-0 flex-1 items-center justify-center px-3 py-4 sm:min-h-[640px] sm:px-12 sm:py-12">
         <ButtonSizeProvider size="compact">
           <div className="account-spread-inner grid w-full max-w-[560px] lg:max-w-[1088px] items-stretch overflow-hidden rounded-card border border-border bg-white lg:grid-cols-[1.1fr_1fr]">
             <div
@@ -26,9 +26,7 @@ export function AuthShell({ children }: AuthShellProps) {
                 alt=""
                 src="/images/reading-studio.webp"
                 fill
-                unoptimized
-                sizes="560px"
-                loading="eager"
+                sizes="(min-width: 1024px) 560px, 1px"
                 className="object-cover object-[41%_center]"
               />
             </div>

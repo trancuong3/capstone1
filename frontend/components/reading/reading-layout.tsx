@@ -171,12 +171,12 @@ export function ReadingLayout({
     Boolean(!retryMode && companionBubble);
 
   return (
-    <section className="relative mx-auto flex min-h-0 w-full max-w-[1200px] flex-1 flex-col gap-2 px-3 pt-2 sm:gap-3 sm:px-6 sm:pt-3">
-      <header className="flex shrink-0 flex-nowrap items-center gap-1 sm:gap-3">
+    <section className="relative mx-auto flex min-h-0 w-full max-w-[1200px] flex-1 flex-col gap-1.5 px-3 pt-1.5 sm:gap-3 sm:px-6 sm:pt-3">
+      <header className="flex shrink-0 flex-nowrap items-center gap-1.5 sm:gap-3">
         <div className="flex shrink-0 items-center">
           <Link
             aria-label="Thoát khỏi buổi đọc"
-            className="inline-flex h-11 shrink-0 items-center gap-1 rounded-control px-1.5 text-xs font-semibold text-ink focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary hover:bg-sky sm:gap-2 sm:px-3 sm:text-label"
+            className="inline-flex min-h-12 min-w-12 shrink-0 items-center justify-center gap-1 rounded-control px-2 text-xs font-semibold text-ink focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary hover:bg-sky sm:h-11 sm:min-h-11 sm:gap-2 sm:px-3 sm:text-label"
             href={exitHref}
             onClick={
               onExit
@@ -189,9 +189,9 @@ export function ReadingLayout({
           >
             <ArrowLeft
               aria-hidden="true"
-              className="size-4 shrink-0 sm:size-5"
+              className="size-5 shrink-0 sm:size-5"
             />
-            <span>Quay lại</span>
+            <span className="hidden sm:inline">Quay lại</span>
           </Link>
         </div>
         <div className="mr-auto min-w-0">
@@ -225,11 +225,11 @@ export function ReadingLayout({
           aria-label="Nhờ gia sư giúp đọc"
           onClick={onHelp}
           disabled={controlsDisabled || retryMode}
-          className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-control px-2 text-xs font-semibold text-ink hover:bg-sky disabled:opacity-55 sm:gap-2 sm:px-3 sm:text-sm"
+          className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-control px-2 text-xs font-semibold text-ink hover:bg-sky disabled:opacity-55 sm:gap-2 sm:px-3 sm:text-sm"
         >
           <CircleHelp
             aria-hidden="true"
-            className="size-4 shrink-0 sm:size-5"
+            className="size-5 shrink-0 sm:size-5"
           />
           <span>Gia sư</span>
         </button>
@@ -281,12 +281,12 @@ export function ReadingLayout({
 
       <div
         data-reading-dock="true"
-        className="reading-dock -mx-3 px-3 pt-2 sm:-mx-6 sm:px-6 sm:pt-2.5"
+        className="reading-dock -mx-3 px-3 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:-mx-6 sm:px-6 sm:pt-2.5 sm:pb-2"
       >
         {hasFeedbackPanel ? (
           <div
             data-reading-feedback="true"
-            className="mx-auto mb-2 max-h-[26dvh] w-full max-w-[1104px] space-y-2 overflow-y-auto overscroll-contain"
+            className="mx-auto mb-1.5 max-h-[20dvh] w-full max-w-[1104px] space-y-2 overflow-y-auto overscroll-contain sm:mb-2 sm:max-h-[26dvh]"
           >
             {retryMode ? (
               <div
@@ -526,6 +526,11 @@ export function ReadingLayout({
           onHelp={onHelp}
           onPause={onPause}
           onReadSample={onReadSample}
+          onSpellWord={
+            onSpellWord && (currentWordText || page.words.length > 0)
+              ? onSpellWord
+              : undefined
+          }
           onToggleListening={onToggleListening}
           voiceSettings={voiceSettings}
           onChoosePage={onChoosePage}
@@ -533,7 +538,7 @@ export function ReadingLayout({
 
         <div
           data-reading-progress-wrap="true"
-          className="mt-1 [&>div]:flex [&>div]:flex-wrap [&>div]:items-center [&>div]:justify-between [&>div]:gap-x-2 [&>div]:gap-y-0.5 [&>div]:pt-1 [&>div]:text-xs sm:[&>div]:text-sm"
+          className="mt-0.5 [&>div]:flex [&>div]:flex-wrap [&>div]:items-center [&>div]:justify-between [&>div]:gap-x-2 [&>div]:gap-y-0.5 [&>div]:pt-0.5 [&>div]:text-[11px] sm:mt-1 sm:[&>div]:pt-1 sm:[&>div]:text-sm"
         >
           <ReadingProgress
             isListening={isListening}

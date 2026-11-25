@@ -620,9 +620,12 @@ async def get_owned_progress_periods(
 
 
 def _difficult_words_service(db: AsyncSession) -> DifficultWordsService:
+    from app.api.routes.voice import get_voice_orchestrator
+
     return DifficultWordsService(
         DifficultWordsRepository(db),
         HistoryService(HistoryRepository(db)),
+        voice_provider=get_voice_orchestrator(),
     )
 
 

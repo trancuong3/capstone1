@@ -1,17 +1,27 @@
+import type { ChildProfileDTO } from "@/types/child";
 import type {
   ContactInfoStatus,
+  DashboardLatestSessionDTO,
+  DashboardSummaryDTO,
   ParentProfileDTO,
   ParentProfileChildDTO,
   ParentProfileUpdateInput,
 } from "@/types/profile";
 
+import {
+  getBrowserAccessToken,
+  invalidateBrowserTokenCache,
+} from "@/lib/api/browser-auth";
+import { clearApiReadCache, runCoalescedApiGet } from "@/lib/api/read-cache";
 import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
+import { clearUserCache } from "@/lib/cache/user-query-cache";
 
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
 export interface ProfileService {
   get(): Promise<ParentProfileDTO>;
+  getDashboardSummary(): Promise<DashboardSummaryDTO>;
   update(request: ParentProfileUpdateInput): Promise<ParentProfileDTO>;
   requestEmailChange(email: string): Promise<void>;
   resendEmailChange(email: string): Promise<void>;
@@ -124,93 +134,188 @@ function createHttpError(
   });
 }
 
-async function createHeaders(): Promise<Headers> {
-  const supabase = createBrowserSupabaseClient();
+interface DashboardLatestSessionApiResponse {
+  id?: string;
+  session_id?: string;
+  child_id?: string;
+  book_id?: string;
+  book_title?: string | null;
+  title?: string | null;
+  state?: string;
+  started_at?: string | null;
+  ended_at?: string | null;
+  resumable?: boolean;
+}
 
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+interface DashboardSummaryChildApiResponse {
+  id: string;
+  parent_id?: string;
+  alias: string;
+  grade: number;
+  settings?: Record<string, unknown>;
+  created_at: string;
+  avatar_url?: string | null;
+}
 
-  if (!session?.access_token) {
-    throw new ServiceError({
-      code: "AUTH_REQUIRED",
-      message: "Authentication required.",
-      status: 401,
-      request_id: "",
-      retryable: false,
-    });
-  }
+interface DashboardSummaryApiResponse {
+  profile?: ParentProfileApiResponse | null;
+  children?: DashboardSummaryChildApiResponse[];
+  latest_sessions_by_child?: Record<
+    string,
+    DashboardLatestSessionApiResponse | null
+  >;
+}
 
-  return new Headers({
-    Accept: "application/json",
-    Authorization: `Bearer ${session.access_token}`,
+function unauthorizedError(): ServiceError {
+  return new ServiceError({
+    code: "AUTH_REQUIRED",
+    message: "Authentication required.",
+    status: 401,
+    request_id: "",
+    retryable: false,
+  });
+}
+
+async function resolveProfileAccessToken(): Promise<string> {
+  return getBrowserAccessToken({
+    onUnauthorized: unauthorizedError,
   });
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  let headers: Headers;
+  let token: string;
 
   try {
-    headers = await createHeaders();
-    if (typeof init?.body === "string") {
-      headers.set("Content-Type", "application/json");
-    }
+    token = await resolveProfileAccessToken();
   } catch (error) {
     if (error instanceof ServiceError) {
       throw error;
     }
 
-    throw new ServiceError({
-      code: "AUTH_REQUIRED",
-      message: "Authentication required.",
-      status: 401,
-      request_id: "",
-      retryable: false,
+    throw unauthorizedError();
+  }
+
+  const method = (init?.method ?? "GET").toUpperCase();
+  const execute = async (): Promise<T> => {
+    const headers = new Headers({
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
     });
+    if (typeof init?.body === "string") {
+      headers.set("Content-Type", "application/json");
+    }
+
+    let response: Response;
+
+    try {
+      response = await fetch(`${getApiBaseUrl()}${path}`, {
+        ...init,
+        headers: {
+          ...Object.fromEntries(headers.entries()),
+          ...(init?.headers ?? {}),
+        },
+        cache: "no-store",
+      });
+    } catch {
+      throw new ServiceError({
+        code: "NETWORK_ERROR",
+        message: "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
+        status: 0,
+        request_id: "",
+        retryable: true,
+      });
+    }
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        invalidateBrowserTokenCache();
+        clearApiReadCache();
+      }
+      const payload = await parseErrorPayload(response);
+
+      throw createHttpError(response, payload);
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
+    try {
+      return (await response.json()) as T;
+    } catch {
+      throw new ServiceError({
+        code: "NETWORK_ERROR",
+        message: "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
+        status: response.status,
+        request_id: response.headers.get("x-request-id") ?? "",
+        retryable: false,
+      });
+    }
+  };
+
+  if (method !== "GET") {
+    clearApiReadCache();
+    clearUserCache();
+    try {
+      return await execute();
+    } finally {
+      clearApiReadCache();
+      clearUserCache();
+    }
   }
 
-  let response: Response;
+  return runCoalescedApiGet(path, token, undefined, () => execute());
+}
 
-  try {
-    response = await fetch(`${getApiBaseUrl()}${path}`, {
-      ...init,
-      headers: {
-        ...Object.fromEntries(headers.entries()),
-        ...(init?.headers ?? {}),
-      },
-      cache: "no-store",
-    });
-  } catch {
-    throw new ServiceError({
-      code: "NETWORK_ERROR",
-      message: "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
-      status: 0,
-      request_id: "",
-      retryable: true,
-    });
+function normalizeSummaryChild(
+  child: DashboardSummaryChildApiResponse,
+  parentId: string,
+): ChildProfileDTO {
+  return {
+    id: child.id,
+    parent_id: child.parent_id ?? parentId,
+    alias: child.alias,
+    grade: child.grade,
+    settings: child.settings ?? {},
+    created_at: child.created_at,
+    avatar_url: child.avatar_url ?? null,
+  };
+}
+
+function normalizeLatestSessionsMap(
+  raw: Record<string, DashboardLatestSessionApiResponse | null> | undefined,
+): Record<string, DashboardLatestSessionDTO | null> {
+  if (!raw || typeof raw !== "object") return {};
+  const result: Record<string, DashboardLatestSessionDTO | null> = {};
+  for (const [childId, entry] of Object.entries(raw)) {
+    if (!entry) {
+      result[childId] = null;
+      continue;
+    }
+    const id = entry.id ?? entry.session_id;
+    const bookId = entry.book_id;
+    if (!id || !bookId) {
+      result[childId] = null;
+      continue;
+    }
+    const state = entry.state ?? "IN_PROGRESS";
+    const endedAt = entry.ended_at ?? null;
+    const resumable =
+      typeof entry.resumable === "boolean"
+        ? entry.resumable
+        : !endedAt && !["FINISHED", "ABORTED"].includes(state);
+    result[childId] = {
+      id,
+      child_id: entry.child_id ?? childId,
+      book_id: bookId,
+      book_title: entry.book_title ?? entry.title ?? null,
+      state,
+      started_at: entry.started_at ?? null,
+      ended_at: endedAt,
+      resumable,
+    };
   }
-
-  if (!response.ok) {
-    const payload = await parseErrorPayload(response);
-
-    throw createHttpError(response, payload);
-  }
-
-  if (response.status === 204) {
-    return undefined as T;
-  }
-
-  try {
-    return (await response.json()) as T;
-  } catch {
-    throw new ServiceError({
-      code: "NETWORK_ERROR",
-      message: "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
-      status: response.status,
-      request_id: response.headers.get("x-request-id") ?? "",
-      retryable: false,
-    });
-  }
+  return result;
 }
 
 function normalizeParentProfile(
@@ -331,6 +436,60 @@ export function createProfileService(): ProfileService {
     async get(): Promise<ParentProfileDTO> {
       const response = await request<ParentProfileApiResponse>("/profiles/me");
       return normalizeParentProfile(response);
+    },
+
+    async getDashboardSummary(): Promise<DashboardSummaryDTO> {
+      try {
+        const response = await request<DashboardSummaryApiResponse>(
+          "/profiles/dashboard-summary",
+        );
+        const normalizedProfile = response.profile
+          ? normalizeParentProfile(response.profile)
+          : null;
+        const parentId = normalizedProfile?.id ?? "";
+        const rawChildren = Array.isArray(response.children)
+          ? response.children
+          : (normalizedProfile?.children ?? []);
+        const children = rawChildren.map((child) =>
+          normalizeSummaryChild(child, parentId),
+        );
+        return {
+          profile: normalizedProfile,
+          children,
+          latest_sessions_by_child: normalizeLatestSessionsMap(
+            response.latest_sessions_by_child,
+          ),
+          source: "dashboard-summary",
+        };
+      } catch (error) {
+        if (
+          error instanceof ServiceError &&
+          (error.status === 404 || error.code === "RESOURCE_NOT_FOUND")
+        ) {
+          const [profileResult, children] = await Promise.all([
+            request<ParentProfileApiResponse>("/profiles/me")
+              .then((res) => normalizeParentProfile(res))
+              .catch((profileError: unknown) => {
+                if (
+                  profileError instanceof ServiceError &&
+                  (profileError.code === "AUTH_REQUIRED" ||
+                    profileError.code === "FORBIDDEN")
+                ) {
+                  throw profileError;
+                }
+                return null;
+              }),
+            request<ChildProfileDTO[]>("/profiles/children"),
+          ]);
+          return {
+            profile: profileResult,
+            children,
+            latest_sessions_by_child: {},
+            source: "fallback",
+          };
+        }
+        throw error;
+      }
     },
 
     async update(

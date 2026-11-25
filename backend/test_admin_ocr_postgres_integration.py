@@ -244,7 +244,9 @@ class AdminOcrPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await connection.run_sync(
                 lambda sync_connection: ParentBookPageSubmission.__table__.create(sync_connection)
             )
-            await connection.run_sync(OcrInferenceJob.__table__.create)
+            await connection.run_sync(
+                lambda sync_connection: OcrInferenceJob.__table__.create(sync_connection)
+            )
             await connection.execute(
                 text("INSERT INTO profiles (id, role) VALUES (:id, 'admin')"),
                 {"id": ACTOR},

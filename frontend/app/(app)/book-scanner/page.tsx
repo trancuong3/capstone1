@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 
-import { AppServicesProvider } from "@/components/providers/app-services-provider";
 import { BookScannerScreen } from "@/components/reading/book-scanner-screen";
 
 export const metadata: Metadata = {
@@ -21,9 +20,5 @@ export default async function BookScannerPage({
   searchParams,
 }: BookScannerPageProps) {
   const query = await searchParams;
-  return (
-    <AppServicesProvider scenario="default">
-      <BookScannerScreen bookId={firstValue(query.bookId)} />
-    </AppServicesProvider>
-  );
+  return <BookScannerScreen bookId={firstValue(query.bookId)} />;
 }

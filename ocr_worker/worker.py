@@ -407,6 +407,13 @@ def run_worker_forever(
     )
 
     last_hb = 0.0
+    last_model_check = time.monotonic()
+    try:
+        model_sync_seconds = max(
+            15.0, float(os.getenv("VIREAD_OCR_MODEL_SYNC_SECONDS", "60"))
+        )
+    except ValueError:
+        model_sync_seconds = 60.0
     try:
         while not stop_event.is_set():
             now = time.monotonic()
@@ -426,6 +433,19 @@ def run_worker_forever(
                             artifact_fetcher=client.download_model_artifact,
                             run_smoke_inference=True,
                         )
+                        last_model_check = time.monotonic()
+                    elif (now - last_model_check) >= model_sync_seconds:
+                        last_model_check = now
+                        resynced = runtime.maybe_resync_active_model(
+                            manifest_fetcher=client.get_active_model,
+                            artifact_fetcher=client.download_model_artifact,
+                        )
+                        if resynced:
+                            try:
+                                client.send_worker_heartbeat(runtime.heartbeat_payload())
+                                last_hb = time.monotonic()
+                            except Exception:
+                                pass
                     job = client.claim_next_job(runtime.worker_id, lease_seconds=lease_seconds)
                     if job is not None:
                         did_work = True

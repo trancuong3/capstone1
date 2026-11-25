@@ -31,10 +31,21 @@ import {
   BrowserTranscriptCollector,
   type SegmentResultMeta,
 } from "@/lib/reading/browser-transcript-collector";
+import { EchoGuard } from "@/lib/reading/echo-guard";
 import {
-  isInjectedTestSpeechRecognition,
   LocalSegmentSpeechRecognition,
+  encodeFloat32ToWav16kBlob,
+  resolveLocalFirstSpeechRecognitionConstructor,
+  shouldPreferAndroidNativeStt,
 } from "@/lib/reading/local-segment-speech-recognition";
+import {
+  getAndroidSpeechCapabilities,
+  isAndroidNativeSpeechAvailable,
+} from "@/lib/reading/native-speech-bridge";
+import {
+  fetchVoiceEngineHealth,
+  getFreshVoiceEngineHealth,
+} from "@/lib/reading/voice-engine-status";
 import {
   buildPhonicsLesson,
   evaluatePostPhonicsAttempt,
@@ -100,6 +111,7 @@ interface BrowserSpeechRecognitionEventLike {
   readonly resultIndex: number;
   readonly results: ArrayLike<{
     readonly isFinal: boolean;
+    readonly onsetAt?: number | null;
     readonly 0?: { readonly transcript?: string; readonly confidence?: number };
   }>;
 }
@@ -227,6 +239,7 @@ export function DifficultWordPracticePanel({
   const { difficultWordService } = useReportServices();
   const speechService = useMemo(() => createSpeechService(), []);
   const speechPlayer = useSpeechPlayer();
+  const echoGuard = useMemo(() => new EchoGuard(), []);
   const practiceSessionLockId = `practice_${child.id}`;
 
   const [flowState, setFlowState] = useState<WordPracticeState>("IDLE");
@@ -268,6 +281,8 @@ export function DifficultWordPracticePanel({
 
   const mountedRef = useRef(true);
   const flowGenerationRef = useRef(0);
+  const playbackSeqRef = useRef(0);
+  const usingAndroidNativeSttRef = useRef(false);
   const pollTimeoutRef = useRef<number | null>(null);
   const autoAdvanceTimerRef = useRef<number | null>(null);
   const captureStartedAtRef = useRef(0);
@@ -438,6 +453,12 @@ export function DifficultWordPracticePanel({
   useEffect(() => {
     mountedRef.current = true;
     lockSessionVoice(practiceSessionLockId, { forceUpdate: true });
+    if (isAndroidNativeSpeechAvailable()) {
+      void getAndroidSpeechCapabilities().catch(() => null);
+    }
+    if (!getFreshVoiceEngineHealth()) {
+      void fetchVoiceEngineHealth().catch(() => null);
+    }
     return () => {
       mountedRef.current = false;
       flowGenerationRef.current += 1;
@@ -450,10 +471,16 @@ export function DifficultWordPracticePanel({
     async (text: string, generation: number, wordSample = false) => {
       if (!mountedRef.current || generation !== flowGenerationRef.current)
         return false;
+      // Pause/release mic before TTS playback so Android restores loudspeaker
+      // USAGE_MEDIA and EchoGuard blocks speaker bleed (Bug 5a & 5c).
+      stopBrowserRecognition();
+      speechRecorder.cancel({ retainStream: false });
       const adaptedText = wordSample
         ? text
         : adaptTextToTeacherPersona(text, getEffectiveTeacherPersona().gender);
       setCoachCue(adaptedText);
+      const playbackId = `practice-cue-${(playbackSeqRef.current += 1)}`;
+      echoGuard.playbackStarted(playbackId, adaptedText, performance.now());
       try {
         await withRequestDeadline(
           () =>
@@ -471,10 +498,12 @@ export function DifficultWordPracticePanel({
           setSampleError(
             "Chưa phát được giọng đọc mẫu tiếng Việt. Bé có thể đọc cùng ba mẹ nhé.",
           );
+      } finally {
+        echoGuard.playbackEnded(playbackId, performance.now());
       }
       return mountedRef.current && generation === flowGenerationRef.current;
     },
-    [speechPlayer],
+    [echoGuard, speechPlayer, speechRecorder, stopBrowserRecognition],
   );
 
   const runPhonicsGuidance = useCallback(
@@ -521,6 +550,12 @@ export function DifficultWordPracticePanel({
         ),
       );
 
+      const phonicsPlaybackId = `practice-phonics-${(playbackSeqRef.current += 1)}`;
+      echoGuard.playbackStarted(
+        phonicsPlaybackId,
+        phonicsLesson.steps.map((s) => s.spokenText).join(" "),
+        performance.now(),
+      );
       try {
         if (typeof speechPlayer.playPhonicsLesson === "function") {
           await withRequestDeadline(
@@ -554,6 +589,7 @@ export function DifficultWordPracticePanel({
           "Giọng đánh vần đã khóa đang tạm bận. Bé xem các bước trên màn hình và bấm Thử lại nhé.",
         );
       } finally {
+        echoGuard.playbackEnded(phonicsPlaybackId, performance.now());
         if (mountedRef.current && generation === flowGenerationRef.current) {
           setIsPlayingPhonics(false);
         }
@@ -944,11 +980,14 @@ export function DifficultWordPracticePanel({
           })
         : Promise.resolve();
 
+      const usedAndroidNativeStt = usingAndroidNativeSttRef.current;
       let blob: Blob | null = null;
-      try {
-        blob = await speechRecorder.stop();
-      } catch {
-        blob = null;
+      if (!usedAndroidNativeStt) {
+        try {
+          blob = await speechRecorder.stop();
+        } catch {
+          blob = null;
+        }
       }
       await finalResult;
 
@@ -991,8 +1030,33 @@ export function DifficultWordPracticePanel({
         }
       }
 
+      if (usedAndroidNativeStt && (!blob || blob.size === 0)) {
+        if (!transcript) {
+          setRecordedBlob(null);
+          setFailureLabel("Chưa nghe thấy");
+          await retryTurn(generation, "silence");
+          return;
+        }
+        const elapsed = Math.max(
+          200,
+          Math.round(performance.now() - captureStartedAtRef.current),
+        );
+        stopSelfPlayback();
+        setRecordedBlob(null);
+        const captured: CapturedAttemptPayload = {
+          requestId: createRequestUuid(),
+          audioBlob: encodeFloat32ToWav16kBlob(new Float32Array(1600)),
+          durationMs: elapsed,
+          audioQualityStatus: "SPEECH_DETECTED",
+          browserTranscript: transcript,
+          browserConfidence: browserBestConfRef.current ?? 0.9,
+        };
+        await submitEvaluation(captured, generation);
+        return;
+      }
+
       if (!blob || blob.size === 0) {
-        speechRecorder.cancel();
+        speechRecorder.cancel({ retainStream: false });
         setMicError(
           "Không thu được âm thanh từ micro. Ba mẹ hãy thử lại giúp bé nhé.",
         );
@@ -1068,22 +1132,26 @@ export function DifficultWordPracticePanel({
         return;
       }
 
-      try {
-        await speechRecorder.start({
-          mode: SHORT_WORD_CAPTURE_CONFIG.mode,
-          retainStream: true,
-        });
-      } catch (error) {
-        if (!mountedRef.current || generation !== flowGenerationRef.current) {
+      const preferAndroidNativeStt = shouldPreferAndroidNativeStt();
+      usingAndroidNativeSttRef.current = preferAndroidNativeStt;
+      if (!preferAndroidNativeStt) {
+        try {
+          await speechRecorder.start({
+            mode: SHORT_WORD_CAPTURE_CONFIG.mode,
+            retainStream: false,
+          });
+        } catch (error) {
+          if (!mountedRef.current || generation !== flowGenerationRef.current) {
+            return;
+          }
+          setMicError(mapMicrophoneErrorMessage(error));
+          setFlowState("PAUSED");
           return;
         }
-        setMicError(mapMicrophoneErrorMessage(error));
-        setFlowState("PAUSED");
-        return;
       }
 
       if (!mountedRef.current || generation !== flowGenerationRef.current) {
-        speechRecorder.cancel();
+        speechRecorder.cancel({ retainStream: false });
         return;
       }
 
@@ -1102,23 +1170,27 @@ export function DifficultWordPracticePanel({
       let prevSpeechDurationMs = 0;
 
       if (typeof window !== "undefined") {
-        const win = window as unknown as WindowWithSpeechRecognition;
-        const candidateCtor =
-          win.SpeechRecognition || win.webkitSpeechRecognition;
-        const track = speechRecorder.getStream()?.getAudioTracks()[0];
-        const SpeechRec: SpeechRecognitionConstructor | null =
-          isInjectedTestSpeechRecognition(candidateCtor)
-            ? candidateCtor
-            : track
-              ? (class BoundLocalPracticeRec extends LocalSegmentSpeechRecognition {
-                  constructor() {
-                    super(speechService, () => ({
-                      sessionId: practiceSessionLockId,
-                      keyterms: [word.display_text],
-                    }));
-                  }
-                } as unknown as SpeechRecognitionConstructor)
-              : null;
+        const win = window as unknown as WindowWithSpeechRecognition & {
+          AudioContext?: typeof AudioContext;
+          webkitAudioContext?: typeof AudioContext;
+        };
+        const SpeechRec = resolveLocalFirstSpeechRecognitionConstructor(
+          win as unknown as Parameters<
+            typeof resolveLocalFirstSpeechRecognitionConstructor
+          >[0],
+          speechService,
+          () => ({
+            sessionId: practiceSessionLockId,
+            keyterms: [word.display_text],
+          }),
+          () => speechRecorder.getStream()?.getAudioTracks()[0],
+          {
+            onBeforeExternalMicStart: () => {
+              usingAndroidNativeSttRef.current = true;
+              speechRecorder.cancel({ retainStream: false });
+            },
+          },
+        ) as unknown as SpeechRecognitionConstructor | undefined;
         if (SpeechRec) {
           try {
             const rec = new SpeechRec();
@@ -1154,9 +1226,40 @@ export function DifficultWordPracticePanel({
                 }
                 return true;
               };
+              const isAcceptedPracticeSpeech = (
+                text: string,
+                onsetAt?: number | null,
+              ) => {
+                const normalizedOnset =
+                  typeof onsetAt === "number" && Number.isFinite(onsetAt)
+                    ? onsetAt
+                    : null;
+                const verdict = echoGuard.evaluate({
+                  text,
+                  receivedAt: performance.now(),
+                  onsetAt: normalizedOnset,
+                });
+                if (verdict.accept) return true;
+                if (
+                  verdict.reason === "tail-overlap" &&
+                  normalizedOnset === null &&
+                  (isSpellingHelpRequest(text, word.display_text) ||
+                    isReplaySampleRequest(text, word.display_text) ||
+                    isWordHelpRequest(text, word.display_text) ||
+                    text.normalize("NFC").trim().toLowerCase() ===
+                      word.display_text.normalize("NFC").trim().toLowerCase() ||
+                    (usedPhonicsRef.current &&
+                      phonicsLesson.supported &&
+                      evaluatePostPhonicsAttempt(text, phonicsLesson).kind ===
+                        "SPELLING_STEP_ONLY"))
+                ) {
+                  return true;
+                }
+                return false;
+              };
               const addedFinals = browserCollectorRef.current.addResults(
                 event,
-                (_text, usable, _confidence, meta) => {
+                (text, usable, _confidence, meta) => {
                   if (!isFencedItem(meta)) return false;
                   if (
                     meta?.audioQuality &&
@@ -1173,7 +1276,8 @@ export function DifficultWordPracticePanel({
                     );
                     return false;
                   }
-                  return usable;
+                  if (!usable) return false;
+                  return isAcceptedPracticeSpeech(text, meta?.onsetAt);
                 },
               );
               if (rejectedByQuality) {
@@ -1198,6 +1302,9 @@ export function DifficultWordPracticePanel({
                 const chunk = item?.[0]?.transcript?.trim() ?? "";
                 const conf = item?.[0]?.confidence;
                 if (!chunk || !hasUsableBrowserConfidence(conf)) continue;
+                if (!isAcceptedPracticeSpeech(chunk, item?.onsetAt ?? null)) {
+                  continue;
+                }
                 speechObservedRef.current = true;
                 browserPulseRef.current = true;
                 silenceStartedAtRef.current = null;
@@ -1334,16 +1441,20 @@ export function DifficultWordPracticePanel({
     stopCaptureLockRef.current = false;
 
     setFlowState("PREPARING");
-    try {
-      await speechRecorder.prepare();
+    if (shouldPreferAndroidNativeStt()) {
       micPreparedRef.current = true;
-    } catch (error) {
-      if (!mountedRef.current || generation !== flowGenerationRef.current) {
+    } else {
+      try {
+        await speechRecorder.prepare();
+        micPreparedRef.current = true;
+      } catch (error) {
+        if (!mountedRef.current || generation !== flowGenerationRef.current) {
+          return;
+        }
+        setMicError(mapMicrophoneErrorMessage(error));
+        setFlowState("PAUSED");
         return;
       }
-      setMicError(mapMicrophoneErrorMessage(error));
-      setFlowState("PAUSED");
-      return;
     }
 
     if (!mountedRef.current || generation !== flowGenerationRef.current) {
@@ -1389,10 +1500,12 @@ export function DifficultWordPracticePanel({
     const generation = ++flowGenerationRef.current;
     clearTimers();
     stopBrowserRecognition();
-    speechRecorder.cancel();
+    speechRecorder.cancel({ retainStream: false });
     setSampleError(null);
     stopSelfPlayback();
     usedHintRef.current = true;
+    const playbackId = `practice-sample-${(playbackSeqRef.current += 1)}`;
+    echoGuard.playbackStarted(playbackId, word.display_text, performance.now());
     try {
       await withRequestDeadline(
         () => speechPlayer.play(word.display_text, { wordSample: true }),
@@ -1413,6 +1526,8 @@ export function DifficultWordPracticePanel({
           "Chưa phát được giọng đọc mẫu tiếng Việt trên thiết bị này. Bé vẫn có thể đọc cùng ba mẹ nhé.",
         );
       }
+    } finally {
+      echoGuard.playbackEnded(playbackId, performance.now());
     }
   }
 
@@ -1478,11 +1593,11 @@ export function DifficultWordPracticePanel({
   return (
     <section
       aria-labelledby="practice-word-heading"
-      className="mx-auto flex w-full max-w-[780px] flex-col gap-5 rounded-[24px] border border-[#DCE8E4] bg-white p-5 shadow-sm sm:p-8"
+      className="mx-auto flex w-full max-w-[780px] flex-col gap-4 rounded-[24px] border border-[#DCE8E4] bg-white p-4 shadow-sm sm:gap-5 sm:p-8"
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#DCE8E4] pb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-[#DCE8E4] pb-3 sm:gap-3 sm:pb-4">
         <Button
-          className="sm:w-auto"
+          className="min-h-12 sm:w-auto"
           onClick={() => {
             flowGenerationRef.current += 1;
             cleanupRef.current();

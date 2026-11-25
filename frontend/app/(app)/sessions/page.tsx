@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 
-import { AppServicesProvider } from "@/components/providers/app-services-provider";
 import { SessionHistoryScreen } from "@/components/reports/session-history-screen";
 import { firstQueryValue } from "@/lib/utils/report-state";
 import { historyPageFromCursor } from "@/lib/utils/report-mappers";
@@ -19,14 +18,11 @@ export default async function SessionsPage({
 }: SessionsPageProps) {
   const query = await searchParams;
   return (
-    <AppServicesProvider>
-      <SessionHistoryScreen
-        page={
-          historyPageFromCursor(`page-${firstQueryValue(query.page) ?? "1"}`) ??
-          1
-        }
-        requestedChildId={firstQueryValue(query.childId)}
-      />
-    </AppServicesProvider>
+    <SessionHistoryScreen
+      page={
+        historyPageFromCursor(`page-${firstQueryValue(query.page) ?? "1"}`) ?? 1
+      }
+      requestedChildId={firstQueryValue(query.childId)}
+    />
   );
 }

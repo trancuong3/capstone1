@@ -748,4 +748,26 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     act(() => wavAudio.finish());
     await playPromise;
   });
+
+  it("rejects unavailable TTS with zero speechSynthesis calls when browser has no Vietnamese voice", async () => {
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: { available: true, stt_ready: true, tts_ready: true },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+    synthesis.getVoices.mockReturnValueOnce([
+      { lang: "en-US", localService: true } as SpeechSynthesisVoice,
+    ]);
+    speech.synthesize.mockRejectedValue(new Error("LOCAL_TTS_UNAVAILABLE"));
+    const { result } = renderHook(() => useSpeechPlayer());
+
+    await expect(result.current.play("Xin chào bé yêu.")).rejects.toThrow();
+    expect(synthesis.speak).not.toHaveBeenCalled();
+  });
 });

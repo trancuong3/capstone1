@@ -36,7 +36,11 @@ export async function proxy(request: NextRequest) {
   request.headers.set("x-viread-next", currentPathWithQuery);
 
   if (fixtureRole) {
-    const destination = getProtectedRouteRedirect(pathname, fixtureRole);
+    const destination =
+      getProtectedRouteRedirect(pathname, fixtureRole) ??
+      (pathname === "/admin" && fixtureRole === "admin"
+        ? "/admin/parents"
+        : null);
     return destination
       ? NextResponse.redirect(
           new URL(
@@ -53,6 +57,10 @@ export async function proxy(request: NextRequest) {
 
   if (pathname === "/" && auth.userId) {
     return redirectWithAuthState(request, "/dashboard", auth.response);
+  }
+
+  if (pathname === "/admin" && auth.userId) {
+    return redirectWithAuthState(request, "/admin/parents", auth.response);
   }
 
   if (protectedArea && !auth.userId) {

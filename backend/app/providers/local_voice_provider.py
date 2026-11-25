@@ -549,7 +549,6 @@ class LocalVoiceProvider:
         http_timeout = self._make_timeout(timeout)
         backoffs = (0.25, 0.6)
         last_exc: Exception | None = None
-        retried_busy = False
         for attempt in range(3):
             client = self._get_client()
             try:

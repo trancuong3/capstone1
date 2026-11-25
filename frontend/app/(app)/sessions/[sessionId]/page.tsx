@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 
-import { AppServicesProvider } from "@/components/providers/app-services-provider";
 import { SessionDetailScreen } from "@/components/reports/session-detail-screen";
 import { firstQueryValue } from "@/lib/utils/report-state";
 import { historyPageFromCursor } from "@/lib/utils/report-mappers";
@@ -24,15 +23,12 @@ export default async function SessionDetailPage({
   const query = await searchParams;
   const childId = z.uuid().safeParse(firstQueryValue(query.childId));
   return (
-    <AppServicesProvider>
-      <SessionDetailScreen
-        sessionId={sessionId}
-        requestedChildId={childId.success ? childId.data : undefined}
-        page={
-          historyPageFromCursor(`page-${firstQueryValue(query.page) ?? "1"}`) ??
-          1
-        }
-      />
-    </AppServicesProvider>
+    <SessionDetailScreen
+      sessionId={sessionId}
+      requestedChildId={childId.success ? childId.data : undefined}
+      page={
+        historyPageFromCursor(`page-${firstQueryValue(query.page) ?? "1"}`) ?? 1
+      }
+    />
   );
 }
