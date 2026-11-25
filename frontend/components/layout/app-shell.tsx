@@ -4,6 +4,8 @@ import {
   BarChart3,
   BookMarked,
   CalendarClock,
+  Check,
+  ChevronDown,
   CircleHelp,
   Gamepad2,
   History,
@@ -17,26 +19,36 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
 
+import { ButtonSizeContext } from "@/components/common/button";
 import {
   ProfileAvatar,
   resolveDisplayName,
 } from "@/components/common/profile-avatar";
 import { ViReadLogo } from "@/components/common/viread-logo";
-import { ButtonSizeContext } from "@/components/common/button";
+import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
 import { SiteFooter } from "@/components/layout/site-footer";
+import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useProfileService } from "@/hooks/use-profile-service";
 import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
+import {
+  clearUserCache,
+  readUserCacheWithStale,
+  writeUserCache,
+} from "@/lib/cache/user-query-cache";
 import { cn } from "@/lib/utils/cn";
-import type { ParentProfileDTO } from "@/types/profile";
+import type { ChildProfileDTO } from "@/types/child";
+import type { DashboardSummaryDTO, ParentProfileDTO } from "@/types/profile";
 
 interface AppShellProps {
   children: ReactNode;
@@ -94,25 +106,77 @@ export function AppShell({ children }: AppShellProps) {
   const authRuntime = useAuthRuntime();
   const authService = useAuthService();
   const profileService = useProfileService();
+  const appStore = useContext(AppStoreContext);
   const pathname = usePathname();
   const router = useRouter();
   const activeNavigationRef = useRef<HTMLAnchorElement>(null);
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const avatarButtonRef = useRef<HTMLButtonElement>(null);
-  const [profile, setProfile] = useState<ParentProfileDTO | null>(null);
+  const childSwitcherRef = useRef<HTMLDivElement>(null);
+  const previousUserIdRef = useRef<string | undefined>(undefined);
+
+  const user = authRuntime.session?.user ?? null;
+  const userId = user?.id ?? null;
+
+  const initialSummary = useMemo(
+    () =>
+      readUserCacheWithStale<DashboardSummaryDTO>(userId, "dashboard-summary")
+        ?.data ?? null,
+    [userId],
+  );
+
+  const [fetchedProfile, setFetchedProfile] = useState<ParentProfileDTO | null>(
+    null,
+  );
+  const [fetchedChildren, setFetchedChildren] = useState<ChildProfileDTO[]>([]);
   const [accountMenu, setAccountMenu] = useState<{
     isOpen: boolean;
     pathname: string;
   }>({ isOpen: false, pathname: "" });
+  const [childSwitcherOpenForPath, setChildSwitcherOpenForPath] = useState<
+    string | null
+  >(null);
+  const [immersiveEventState, setImmersiveEventState] = useState<{
+    active: boolean;
+    pathname: string;
+  }>({ active: false, pathname: "" });
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [hasSignOutError, setHasSignOutError] = useState(false);
+
+  const profile = fetchedProfile ?? initialSummary?.profile ?? null;
+  const availableChildren =
+    fetchedChildren.length > 0
+      ? fetchedChildren
+      : (initialSummary?.children ?? []);
+
+  const selectedChild = useMemo(() => {
+    const selectedId = appStore?.selectedChildId ?? null;
+    if (
+      appStore?.validatedSelectedChild &&
+      (!selectedId || appStore.validatedSelectedChild.id === selectedId)
+    ) {
+      return appStore.validatedSelectedChild;
+    }
+    if (!selectedId) return null;
+    return (
+      availableChildren.find((candidate) => candidate.id === selectedId) ?? null
+    );
+  }, [
+    appStore?.selectedChildId,
+    appStore?.validatedSelectedChild,
+    availableChildren,
+  ]);
+
   const isAccountMenuVisible =
     accountMenu.isOpen && accountMenu.pathname === pathname;
+  const isChildSwitcherVisible = childSwitcherOpenForPath === pathname;
+  const isMobileImmersive =
+    immersiveEventState.active && immersiveEventState.pathname === pathname;
   const isChildOnboarding = pathname === "/children/new";
   const isBookRoute = pathname === "/books" || pathname.startsWith("/books/");
   const isReadingRoute = pathname.startsWith("/reading/");
   const isImmersiveRoute = isBookRoute || isReadingRoute;
-  const user = authRuntime.session?.user ?? null;
+
   const displayName = resolveDisplayName(
     profile?.display_name,
     user?.display_name,
@@ -137,38 +201,66 @@ export function AppShell({ children }: AppShellProps) {
   useEffect(() => {
     let isActive = true;
 
-    void profileService
-      .get()
-      .then((nextProfile) => {
-        if (isActive) setProfile(nextProfile);
-      })
-      .catch(() => {
-        if (isActive) setProfile(null);
-      });
+    const loadProfileAndSummary = async () => {
+      try {
+        if (typeof profileService.getDashboardSummary === "function") {
+          const summary = await profileService.getDashboardSummary();
+          if (!isActive) return;
+          setFetchedProfile(summary.profile);
+          setFetchedChildren(summary.children);
+          const ownerId = userId ?? summary.profile?.id ?? null;
+          if (ownerId) {
+            writeUserCache(ownerId, "dashboard-summary", summary);
+            writeUserCache(ownerId, "children", summary.children);
+          }
+          return;
+        }
+        const nextProfile = await profileService.get();
+        if (isActive) setFetchedProfile(nextProfile);
+      } catch {
+        if (isActive && !initialSummary) {
+          setFetchedProfile(null);
+        }
+      }
+    };
+
+    void loadProfileAndSummary();
 
     return () => {
       isActive = false;
     };
-  }, [profileService]);
+  }, [initialSummary, profileService, userId]);
 
   useEffect(() => {
     function handleProfileUpdated(event: Event) {
       const detail = (event as CustomEvent<{ displayName?: unknown }>).detail;
       if (typeof detail?.displayName !== "string") return;
-      setProfile((current) =>
-        current
-          ? { ...current, display_name: detail.displayName as string }
-          : current,
-      );
+      setFetchedProfile((current) => {
+        const base = current ?? initialSummary?.profile ?? null;
+        return base
+          ? { ...base, display_name: detail.displayName as string }
+          : base;
+      });
+    }
+
+    function handleImmersiveMode(event: Event) {
+      const detail = (event as CustomEvent<{ active?: unknown }>).detail;
+      setImmersiveEventState({
+        active: Boolean(detail?.active),
+        pathname,
+      });
     }
 
     window.addEventListener("viread:profile-updated", handleProfileUpdated);
-    return () =>
+    window.addEventListener("viread:immersive-mode", handleImmersiveMode);
+    return () => {
       window.removeEventListener(
         "viread:profile-updated",
         handleProfileUpdated,
       );
-  }, []);
+      window.removeEventListener("viread:immersive-mode", handleImmersiveMode);
+    };
+  }, [initialSummary?.profile, pathname]);
 
   useEffect(() => {
     if (!isAccountMenuVisible) return;
@@ -205,7 +297,41 @@ export function AppShell({ children }: AppShellProps) {
   }, [isAccountMenuVisible]);
 
   useEffect(() => {
+    if (!isChildSwitcherVisible) return;
+
+    function closeOnOutsidePointer(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        !childSwitcherRef.current?.contains(event.target)
+      ) {
+        setChildSwitcherOpenForPath(null);
+      }
+    }
+
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setChildSwitcherOpenForPath(null);
+      }
+    }
+
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isChildSwitcherVisible]);
+
+  useEffect(() => {
     clearPrivateMediaMemoryCache();
+    const prevId = previousUserIdRef.current;
+    if (prevId !== undefined && prevId !== user?.id) {
+      clearUserCache(prevId);
+      if (!user?.id) {
+        clearUserCache();
+      }
+    }
+    previousUserIdRef.current = user?.id;
   }, [user?.id]);
 
   async function handleSignOut() {
@@ -216,6 +342,7 @@ export function AppShell({ children }: AppShellProps) {
 
     try {
       clearPrivateMediaMemoryCache();
+      clearUserCache();
       await authService.signOut();
       setAccountMenu((current) => ({ ...current, isOpen: false }));
       router.replace("/login");
@@ -273,14 +400,17 @@ export function AppShell({ children }: AppShellProps) {
       >
         Bỏ qua điều hướng, đến nội dung
       </a>
-      <header className="parent-topbar shrink-0 border-b border-border bg-white px-4 py-4 sm:px-8">
+      <header
+        className={cn(
+          "parent-topbar sticky top-0 z-30 shrink-0 border-b border-border bg-white/95 px-3 backdrop-blur-sm sm:px-6 xl:static xl:bg-white xl:px-8",
+          isMobileImmersive && "hidden xl:block",
+        )}
+      >
         <nav
           aria-label="Điều hướng dành cho ba mẹ"
           className={cn(
-            "mx-auto flex w-full min-w-0 max-w-[1312px]",
-            isChildOnboarding
-              ? "min-h-11 items-center sm:flex-row"
-              : "flex-col gap-3 xl:min-h-16 xl:flex-row xl:items-center xl:gap-4",
+            "mx-auto flex h-14 w-full min-w-0 max-w-[1312px] items-center gap-2 xl:h-auto xl:min-h-16 xl:gap-4",
+            isChildOnboarding && "min-h-11",
           )}
         >
           <ViReadLogo
@@ -290,55 +420,157 @@ export function AppShell({ children }: AppShellProps) {
             size="md"
           />
 
-          <div className="flex w-full min-w-0 items-center gap-2 xl:w-auto xl:gap-3">
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-2 xl:w-auto xl:flex-none xl:gap-3">
             {!isChildOnboarding ? (
-              <div className="parent-nav-links flex min-w-0 flex-1 flex-wrap items-center gap-1 py-1 xl:flex-none xl:flex-nowrap xl:justify-end xl:gap-2">
-                {navigationItems.map(({ href, icon: Icon, label }) => {
-                  const isActive =
-                    (routeIsActive(pathname, href) &&
-                      !navigationItems.some(
-                        (other) =>
-                          other.href.length > href.length &&
-                          routeIsActive(pathname, other.href),
-                      )) ||
-                    (href === "/entertainment" &&
-                      (pathname === "/karaoke" ||
-                        pathname.startsWith("/karaoke/")));
+              <>
+                <div
+                  className="relative flex min-w-0 items-center xl:hidden"
+                  ref={childSwitcherRef}
+                >
+                  {availableChildren.length > 0 && appStore ? (
+                    <>
+                      <button
+                        aria-expanded={isChildSwitcherVisible}
+                        aria-haspopup="listbox"
+                        aria-label={
+                          selectedChild
+                            ? `Đang chọn hồ sơ ${selectedChild.alias}, bấm để đổi hồ sơ bé`
+                            : "Chọn hồ sơ bé"
+                        }
+                        className="inline-flex min-h-12 max-w-[164px] items-center gap-1.5 rounded-full border border-border bg-sky/70 px-3 text-xs font-bold text-primary-hover transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                        onClick={() =>
+                          setChildSwitcherOpenForPath((current) =>
+                            current === pathname ? null : pathname,
+                          )
+                        }
+                        type="button"
+                      >
+                        <span className="truncate">
+                          {selectedChild
+                            ? `${selectedChild.alias} · L${selectedChild.grade}`
+                            : "Chọn bé"}
+                        </span>
+                        <ChevronDown
+                          aria-hidden="true"
+                          className="size-3.5 shrink-0"
+                        />
+                      </button>
 
-                  return (
+                      {isChildSwitcherVisible ? (
+                        <div
+                          aria-label="Chuyển nhanh hồ sơ bé"
+                          className="absolute right-0 top-full z-50 mt-2 w-60 rounded-card border border-border bg-white p-2 shadow-lg"
+                          role="listbox"
+                        >
+                          {availableChildren.map((child) => {
+                            const isSelected = selectedChild?.id === child.id;
+                            return (
+                              <button
+                                aria-selected={isSelected}
+                                className={cn(
+                                  "flex min-h-12 w-full items-center justify-between gap-2 rounded-control px-3 text-left text-sm font-semibold transition-colors",
+                                  isSelected
+                                    ? "bg-sky text-primary-hover"
+                                    : "text-ink hover:bg-canvas",
+                                )}
+                                key={child.id}
+                                onClick={() => {
+                                  appStore.selectChild(child.id);
+                                  appStore.setValidatedSelectedChild(child);
+                                  setChildSwitcherOpenForPath(null);
+                                }}
+                                role="option"
+                                type="button"
+                              >
+                                <span className="truncate">
+                                  {child.alias}{" "}
+                                  <span className="font-normal text-muted">
+                                    · Lớp {child.grade}
+                                  </span>
+                                </span>
+                                {isSelected ? (
+                                  <Check
+                                    aria-hidden="true"
+                                    className="size-4 shrink-0 text-primary"
+                                  />
+                                ) : null}
+                              </button>
+                            );
+                          })}
+                          <div className="my-1 border-t border-border" />
+                          <Link
+                            className="flex min-h-11 items-center gap-2 rounded-control px-3 text-xs font-bold text-primary hover:bg-canvas"
+                            href="/children"
+                            onClick={() => setChildSwitcherOpenForPath(null)}
+                          >
+                            <UsersRound aria-hidden="true" className="size-4" />
+                            Quản lý hồ sơ bé
+                          </Link>
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
                     <Link
-                      aria-current={isActive ? "page" : undefined}
-                      className={cn(
-                        "flex min-h-10 shrink-0 items-center justify-center gap-1 rounded-control px-1.5 text-center text-xs font-semibold text-ink transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-11 sm:px-2.5 sm:text-sm xl:h-12 xl:gap-2 xl:px-3 xl:text-label",
-                        isActive
-                          ? "bg-sky text-primary-hover xl:underline xl:decoration-2 xl:underline-offset-8"
-                          : "bg-white hover:bg-canvas",
-                      )}
-                      href={href}
-                      key={href}
-                      onClick={() =>
-                        setAccountMenu((current) => ({
-                          ...current,
-                          isOpen: false,
-                        }))
-                      }
-                      ref={isActive ? activeNavigationRef : undefined}
+                      className="inline-flex min-h-12 max-w-[164px] items-center gap-1.5 rounded-full border border-border bg-sky/70 px-3 text-xs font-bold text-primary-hover transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                      href="/dashboard?focus=child-selection"
                     >
-                      <Icon
-                        aria-hidden="true"
-                        className="size-4 shrink-0 sm:size-[18px]"
-                        strokeWidth={1.8}
-                      />
-                      <span className="whitespace-nowrap">{label}</span>
+                      <span className="truncate">
+                        {selectedChild
+                          ? `${selectedChild.alias} · L${selectedChild.grade}`
+                          : "Chọn bé"}
+                      </span>
                     </Link>
-                  );
-                })}
-              </div>
+                  )}
+                </div>
+
+                <div className="parent-nav-links hidden min-w-0 items-center justify-end gap-2 py-1 xl:flex xl:flex-none xl:flex-nowrap">
+                  {navigationItems.map(({ href, icon: Icon, label }) => {
+                    const isActive =
+                      (routeIsActive(pathname, href) &&
+                        !navigationItems.some(
+                          (other) =>
+                            other.href.length > href.length &&
+                            routeIsActive(pathname, other.href),
+                        )) ||
+                      (href === "/entertainment" &&
+                        (pathname === "/karaoke" ||
+                          pathname.startsWith("/karaoke/")));
+
+                    return (
+                      <Link
+                        aria-current={isActive ? "page" : undefined}
+                        className={cn(
+                          "flex min-h-10 shrink-0 items-center justify-center gap-1 rounded-control px-1.5 text-center text-xs font-semibold text-ink transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-11 sm:px-2.5 sm:text-sm xl:h-12 xl:gap-2 xl:px-3 xl:text-label",
+                          isActive
+                            ? "bg-sky text-primary-hover xl:underline xl:decoration-2 xl:underline-offset-8"
+                            : "bg-white hover:bg-canvas",
+                        )}
+                        href={href}
+                        key={href}
+                        onClick={() =>
+                          setAccountMenu((current) => ({
+                            ...current,
+                            isOpen: false,
+                          }))
+                        }
+                        ref={isActive ? activeNavigationRef : undefined}
+                      >
+                        <Icon
+                          aria-hidden="true"
+                          className="size-4 shrink-0 sm:size-[18px]"
+                          strokeWidth={1.8}
+                        />
+                        <span className="whitespace-nowrap">{label}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </>
             ) : (
               <span className="flex-1" />
             )}
 
-            <div className="relative ml-auto shrink-0" ref={accountMenuRef}>
+            <div className="relative shrink-0" ref={accountMenuRef}>
               <button
                 aria-controls="parent-account-menu"
                 aria-expanded={isAccountMenuVisible}
@@ -348,8 +580,9 @@ export function AppShell({ children }: AppShellProps) {
                     ? "Đóng menu tài khoản"
                     : "Mở menu tài khoản"
                 }
-                className="flex size-11 items-center justify-center rounded-full border border-border bg-white p-0.5 shadow-sm transition-colors hover:border-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+                className="flex size-12 items-center justify-center rounded-full border border-border bg-white p-0.5 shadow-sm transition-colors hover:border-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
                 onClick={() => {
+                  setChildSwitcherOpenForPath(null);
                   if (isAccountMenuVisible) {
                     setAccountMenu((current) => ({
                       ...current,
@@ -516,7 +749,7 @@ export function AppShell({ children }: AppShellProps) {
         </nav>
         {hasSignOutError ? (
           <p
-            className="mx-auto mt-3 w-full max-w-[1376px] text-label font-semibold text-danger"
+            className="mx-auto mt-3 w-full max-w-[1376px] pb-2 text-label font-semibold text-danger"
             role="alert"
           >
             Chưa thể đăng xuất lúc này. Ba mẹ vui lòng thử lại.
@@ -533,14 +766,23 @@ export function AppShell({ children }: AppShellProps) {
             : "mx-auto w-full max-w-[1184px] px-4 sm:px-8",
           !isImmersiveRoute && "min-w-0 flex-1",
           !isImmersiveRoute &&
-            (isChildOnboarding ? "pb-8 pt-4 sm:pb-10" : "py-8 sm:py-10"),
+            (isChildOnboarding
+              ? "pb-8 pt-4 sm:pb-10"
+              : isMobileImmersive
+                ? "py-4 sm:py-6 xl:py-10"
+                : "pb-24 pt-5 sm:pt-7 xl:py-10"),
         )}
       >
         <ButtonSizeContext.Provider value="compact">
           {children}
         </ButtonSizeContext.Provider>
       </main>
-      <SiteFooter variant="parent" />
+
+      <SiteFooter className="hidden lg:block" variant="parent" />
+
+      {!isChildOnboarding && !isMobileImmersive ? (
+        <MobileBottomNav pathname={pathname} />
+      ) : null}
     </div>
   );
 }

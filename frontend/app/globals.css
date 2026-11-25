@@ -332,26 +332,81 @@
     min-height: 264px;
   }
 }
+@media (max-width: 767px) {
+  .family-title {
+    margin-bottom: 14px;
+    gap: 8px;
+  }
+  .family-title h1 {
+    font-size: clamp(24px, 6.4vw, 28px);
+    line-height: 1.2;
+  }
+  .family-dashboard h2:not(#desk-title) {
+    font-size: 20px;
+  }
+  .family-spread {
+    gap: 16px;
+  }
+  .family-profiles {
+    border-top: 0;
+    padding-top: 0;
+    gap: 10px;
+  }
+  .family-profile-list {
+    display: flex;
+    overflow-x: auto;
+    gap: 10px;
+    padding-bottom: 4px;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+  .family-profile-list > * {
+    flex: 0 0 auto;
+    min-width: 212px;
+    max-width: 260px;
+    scroll-snap-align: start;
+  }
+  .family-profile-list button {
+    min-height: 60px;
+    padding: 8px 12px;
+  }
+  .desk-copy {
+    padding: 18px 18px 20px;
+  }
+  .desk-copy h2 {
+    font-size: clamp(22px, 5.8vw, 26px);
+    margin: 12px 0 8px;
+  }
+  .desk-actions {
+    margin-top: 16px;
+  }
+  .desk-primary {
+    min-height: 48px;
+  }
+  .family-tool-list > * {
+    min-height: 56px;
+  }
+}
 @media (max-width: 650px) {
   .family-reading-desk {
     grid-template-columns: minmax(0, 1fr);
   }
   .desk-illustration {
     grid-row: 1;
-    min-height: 140px;
-    max-height: 180px;
+    min-height: 132px;
+    max-height: 168px;
   }
   .desk-illustration img {
     object-position: 50% 44%;
   }
   .family-tools {
-    margin-top: 24px;
+    margin-top: 20px;
   }
   .family-tool-list {
     grid-template-columns: 1fr;
   }
   .family-tool-list > * {
-    padding: 16px 0;
+    padding: 14px 0;
     border-bottom: 1px solid var(--ra-color-border);
   }
 }
@@ -758,6 +813,19 @@ button:disabled {
 .account-spread h1,
 .staff-login h1 {
   font-size: clamp(32px, 3vw, 46px);
+}
+@media (max-width: 767px) {
+  .account-spread header > div,
+  .staff-login header > div {
+    min-height: 56px;
+  }
+  .account-spread main {
+    padding-block: 16px;
+  }
+  .account-spread h1,
+  .staff-login h1 {
+    font-size: clamp(24px, 6.4vw, 28px);
+  }
 }
 .account-forgot,
 .account-signup {

@@ -4233,54 +4233,96 @@ function AdminOcrWordReviewPanel({
 
       <Card className="gap-4 bg-white sm:p-8">
         <h2 className="text-2xl font-extrabold text-ink">Từ và bounding box</h2>
-        <ResponsiveTable
-          ariaLabel="Bảng từ và bounding box"
-          className="max-h-[360px] overflow-y-auto"
+        <div
+          aria-label="Danh sách từ và bounding box trên di động"
+          className="grid max-h-[360px] gap-2.5 overflow-y-auto md:hidden"
         >
-          <table className="w-full border-collapse text-left text-sm">
-            <thead className="sticky top-0 z-10 bg-sky text-primary-hover">
-              <tr>
-                <th className="px-3 py-3 font-bold">#</th>
-                <th className="px-3 py-3 font-bold">Từ</th>
-                <th className="px-3 py-3 font-bold">Confidence</th>
-              </tr>
-            </thead>
-            <tbody>
-              {words.map((word) => {
-                const isSelected = word.word_index === selected?.word_index;
-                return (
-                  <tr
-                    className={
-                      isSelected ? "bg-sky/50" : "border-b border-border"
-                    }
-                    key={word.word_index}
-                  >
-                    <td className="px-3 py-3">{word.word_index}</td>
-                    <td className="px-3 py-2">
-                      <input
-                        aria-label={`Từ ${word.word_index + 1}`}
-                        className="min-h-9 w-full min-w-20 scroll-mt-12 bg-transparent text-ink outline-offset-2 focus-visible:outline-2 focus-visible:outline-primary"
-                        disabled={readOnly}
-                        onChange={(event) =>
-                          onUpdateWord(word.word_index, {
-                            text: event.target.value,
-                          })
-                        }
-                        onFocus={() => onSelectWord(word.word_index)}
-                        value={word.text}
-                      />
-                    </td>
-                    <td className="px-3 py-3">
-                      {word.ocr_confidence === null
-                        ? "—"
-                        : getOcrScoreLabel(word)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </ResponsiveTable>
+          {words.map((word) => {
+            const isSelected = word.word_index === selected?.word_index;
+            return (
+              <div
+                className={
+                  isSelected
+                    ? "rounded-control border border-primary bg-sky/50 p-3"
+                    : "rounded-control border border-border bg-white p-3"
+                }
+                key={word.word_index}
+              >
+                <div className="mb-1.5 flex items-center justify-between gap-2 text-xs text-muted">
+                  <span className="font-bold text-ink">#{word.word_index}</span>
+                  <span>
+                    Confidence:{" "}
+                    {word.ocr_confidence === null
+                      ? "—"
+                      : getOcrScoreLabel(word)}
+                  </span>
+                </div>
+                <input
+                  aria-label={`Từ ${word.word_index + 1} (di động)`}
+                  className="min-h-12 w-full rounded-control border border-border bg-white px-3 text-sm font-semibold text-ink focus-visible:outline-2 focus-visible:outline-primary"
+                  disabled={readOnly}
+                  onChange={(event) =>
+                    onUpdateWord(word.word_index, {
+                      text: event.target.value,
+                    })
+                  }
+                  onFocus={() => onSelectWord(word.word_index)}
+                  value={word.text}
+                />
+              </div>
+            );
+          })}
+        </div>
+        <div className="hidden md:block">
+          <ResponsiveTable
+            ariaLabel="Bảng từ và bounding box"
+            className="max-h-[360px] overflow-y-auto"
+          >
+            <table className="w-full border-collapse text-left text-sm">
+              <thead className="sticky top-0 z-10 bg-sky text-primary-hover">
+                <tr>
+                  <th className="px-3 py-3 font-bold">#</th>
+                  <th className="px-3 py-3 font-bold">Từ</th>
+                  <th className="px-3 py-3 font-bold">Confidence</th>
+                </tr>
+              </thead>
+              <tbody>
+                {words.map((word) => {
+                  const isSelected = word.word_index === selected?.word_index;
+                  return (
+                    <tr
+                      className={
+                        isSelected ? "bg-sky/50" : "border-b border-border"
+                      }
+                      key={word.word_index}
+                    >
+                      <td className="px-3 py-3">{word.word_index}</td>
+                      <td className="px-3 py-2">
+                        <input
+                          aria-label={`Từ ${word.word_index + 1}`}
+                          className="min-h-9 w-full min-w-20 scroll-mt-12 bg-transparent text-ink outline-offset-2 focus-visible:outline-2 focus-visible:outline-primary"
+                          disabled={readOnly}
+                          onChange={(event) =>
+                            onUpdateWord(word.word_index, {
+                              text: event.target.value,
+                            })
+                          }
+                          onFocus={() => onSelectWord(word.word_index)}
+                          value={word.text}
+                        />
+                      </td>
+                      <td className="px-3 py-3">
+                        {word.ocr_confidence === null
+                          ? "—"
+                          : getOcrScoreLabel(word)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </ResponsiveTable>
+        </div>
 
         {selected ? (
           <div className="grid gap-3 sm:grid-cols-2">

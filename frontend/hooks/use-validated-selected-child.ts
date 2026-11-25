@@ -1,12 +1,18 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 
+import { AuthRuntimeContext } from "@/components/auth/auth-service-provider";
 import { useAppStore } from "@/components/providers/app-store-provider";
 import { useChildService } from "@/hooks/use-child-service";
 import { isServiceError } from "@/lib/api/service-error";
+import {
+  invalidateUserCacheKey,
+  readUserCacheWithStale,
+} from "@/lib/cache/user-query-cache";
 import type { ChildProfileDTO } from "@/types/child";
+import type { DashboardSummaryDTO } from "@/types/profile";
 
 type ChildLoadState =
   | { status: "loading"; childId: string | null }
@@ -14,11 +20,38 @@ type ChildLoadState =
   | { status: "redirecting"; childId: null }
   | { status: "error"; childId: string };
 
+function findCachedChild(
+  userId: string | null | undefined,
+  childId: string,
+): ChildProfileDTO | null {
+  if (!userId || !childId) return null;
+
+  const summary = readUserCacheWithStale<DashboardSummaryDTO>(
+    userId,
+    "dashboard-summary",
+  );
+  const fromSummary = summary?.data.children.find(
+    (candidate) => candidate.id === childId,
+  );
+  if (fromSummary) return fromSummary;
+
+  const children = readUserCacheWithStale<ChildProfileDTO[]>(
+    userId,
+    "children",
+  );
+  return (
+    children?.data.find((candidate) => candidate.id === childId) ?? null
+  );
+}
+
 export function useValidatedSelectedChild() {
   const { replace } = useRouter();
   const childService = useChildService();
+  const authRuntime = useContext(AuthRuntimeContext);
+  const userId = authRuntime?.session?.user?.id ?? null;
   const {
     selectedChildId,
+    validatedSelectedChild,
     selectChild,
     clearSelectedChild,
     setValidatedSelectedChild,
@@ -28,6 +61,14 @@ export function useValidatedSelectedChild() {
     status: "loading",
     childId: null,
   });
+
+  const immediateChild = useMemo<ChildProfileDTO | null>(() => {
+    if (!selectedChildId) return null;
+    if (validatedSelectedChild?.id === selectedChildId) {
+      return validatedSelectedChild;
+    }
+    return findCachedChild(userId, selectedChildId);
+  }, [selectedChildId, userId, validatedSelectedChild]);
 
   useEffect(() => {
     let active = true;
@@ -51,12 +92,16 @@ export function useValidatedSelectedChild() {
     }
 
     const requestChildId = selectedChildId;
+    const hadImmediateChild = Boolean(immediateChild);
+
     void childService
       .get(selectedChildId)
       .then((child) => {
         if (!active) return;
         if (child.id !== requestChildId) {
           clearSelectedChild();
+          invalidateUserCacheKey(userId, "dashboard-summary");
+          invalidateUserCacheKey(userId, "children");
           setState({ status: "redirecting", childId: null });
           replace("/dashboard?focus=child-selection&reason=invalid");
           return;
@@ -73,11 +118,15 @@ export function useValidatedSelectedChild() {
           )
         ) {
           clearSelectedChild();
+          invalidateUserCacheKey(userId, "dashboard-summary");
+          invalidateUserCacheKey(userId, "children");
           setState({ status: "redirecting", childId: null });
           replace("/dashboard?focus=child-selection&reason=invalid");
           return;
         }
-        setState({ status: "error", childId: requestChildId });
+        if (!hadImmediateChild) {
+          setState({ status: "error", childId: requestChildId });
+        }
       });
 
     return () => {
@@ -86,22 +135,37 @@ export function useValidatedSelectedChild() {
   }, [
     childService,
     clearSelectedChild,
+    immediateChild,
     retryKey,
     replace,
     selectChild,
     selectedChildId,
     setValidatedSelectedChild,
+    userId,
   ]);
 
-  const visibleState = useMemo<ChildLoadState>(
-    () =>
-      selectedChildId
-        ? state.childId === selectedChildId
-          ? state
-          : { status: "loading", childId: selectedChildId }
-        : { status: "redirecting", childId: null },
-    [selectedChildId, state],
-  );
+  const visibleState = useMemo<ChildLoadState>(() => {
+    if (!selectedChildId) {
+      return { status: "redirecting", childId: null };
+    }
+    if (state.status === "redirecting") {
+      return state;
+    }
+    if (state.childId === selectedChildId && state.status === "ready") {
+      return state;
+    }
+    if (immediateChild) {
+      return {
+        status: "ready",
+        childId: selectedChildId,
+        child: immediateChild,
+      };
+    }
+    if (state.childId === selectedChildId) {
+      return state;
+    }
+    return { status: "loading", childId: selectedChildId };
+  }, [immediateChild, selectedChildId, state]);
 
   return {
     state: visibleState,

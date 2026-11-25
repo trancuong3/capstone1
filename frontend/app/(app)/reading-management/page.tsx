@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 
 import { ReadingManagementScreen } from "@/components/reading-management/reading-management-screen";
-import { AppServicesProvider } from "@/components/providers/app-services-provider";
 
 export const metadata: Metadata = { title: "Quản lý đọc sách" };
 
@@ -16,9 +15,5 @@ export default async function ReadingManagementPage({
   const childId = Array.isArray(query.childId)
     ? query.childId[0]
     : query.childId;
-  return (
-    <AppServicesProvider>
-      <ReadingManagementScreen requestedChildId={childId} />
-    </AppServicesProvider>
-  );
+  return <ReadingManagementScreen requestedChildId={childId} />;
 }

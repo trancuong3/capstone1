@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { AdminBookContentQualityScreen } from "@/components/admin/admin-book-content-quality-screen";
+import { DynamicAdminBookContentQualityScreen } from "@/components/admin/admin-dynamic-screens";
 import { AdminMetadataQualityScreen } from "@/components/admin/admin-metadata-quality-screen";
 import { AdminServicesProvider } from "@/components/providers/admin-services-provider";
 
@@ -12,7 +12,7 @@ export default function MetadataQualityPage() {
   return (
     <AdminServicesProvider>
       <AdminMetadataQualityScreen />
-      <AdminBookContentQualityScreen />
+      <DynamicAdminBookContentQualityScreen />
     </AdminServicesProvider>
   );
 }

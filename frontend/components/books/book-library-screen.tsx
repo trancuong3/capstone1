@@ -256,16 +256,16 @@ export function BookLibraryScreen() {
       ) : null}
 
       <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-6">
-        <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-6">
+        <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5 sm:pb-6">
           <div className="flex flex-col gap-2">
-            <h1 className="book-title min-w-0 break-words text-4xl text-ink sm:text-5xl">
+            <h1 className="book-title min-w-0 break-words text-2xl text-ink sm:text-4xl lg:text-5xl">
               Tủ sách{child ? ` của ${child.alias}` : " của bé"}
             </h1>
             <div className="flex flex-wrap items-center gap-2">
               <ButtonLink
                 href="/my-books"
                 variant="secondary"
-                className="min-h-10 w-auto px-4 text-sm"
+                className="min-h-12 w-auto px-4 text-sm"
               >
                 <BookMarked aria-hidden="true" className="size-4" />
                 Sách của tôi

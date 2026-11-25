@@ -1,6 +1,9 @@
 "use client";
 
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import {
+  getBrowserAccessToken,
+  invalidateBrowserTokenCache,
+} from "@/lib/api/browser-auth";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 import type {
   SupportFeedbackRequest,
@@ -39,13 +42,16 @@ export interface SupportService {
 export function createSupportService(): SupportService {
   return {
     async submitFeedback(request) {
-      const supabase = createBrowserSupabaseClient();
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
-
-      if (sessionError || !session?.access_token) {
+      let accessToken: string;
+      try {
+        accessToken = await getBrowserAccessToken({
+          onUnauthorized: () =>
+            new SupportFeedbackError(safeMessageForStatus(401), 401),
+        });
+      } catch (error) {
+        if (error instanceof SupportFeedbackError) {
+          throw error;
+        }
         throw new SupportFeedbackError(safeMessageForStatus(401), 401);
       }
 
@@ -55,7 +61,7 @@ export function createSupportService(): SupportService {
           method: "POST",
           headers: {
             Accept: "application/json",
-            Authorization: "Bearer " + session.access_token,
+            Authorization: "Bearer " + accessToken,
             "Content-Type": "application/json",
           },
           body: JSON.stringify(request),
@@ -66,6 +72,9 @@ export function createSupportService(): SupportService {
       }
 
       if (!response.ok) {
+        if (response.status === 401) {
+          invalidateBrowserTokenCache();
+        }
         throw new SupportFeedbackError(
           safeMessageForStatus(response.status),
           response.status,

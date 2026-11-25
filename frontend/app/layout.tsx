@@ -1,9 +1,16 @@
 import "@fontsource-variable/nunito/wght.css";
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
 import { NavigationFeedbackBar } from "@/components/common/navigation-feedback";
 import "./globals.css";
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#fffaf0",
+};
 
 export const metadata: Metadata = {
   title: {
