@@ -13,14 +13,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import {
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 
 import { AuthRuntimeContext } from "@/components/auth/auth-service-provider";
 import { ChildProfileCard } from "@/components/children/child-profile-card";
@@ -67,28 +60,8 @@ export function DashboardScreen() {
     setValidatedSelectedChild,
   } = useAppStore();
 
-  const initialCachedSummary = useMemo(
-    () =>
-      readUserCacheWithStale<DashboardSummaryDTO>(
-        userId,
-        "dashboard-summary",
-        DEFAULT_USER_CACHE_TTL_MS,
-        PERSISTENT_USER_CACHE_MAX_STALE_MS,
-      )?.data ?? null,
-    [userId],
-  );
-
   const [requestKey, setRequestKey] = useState(0);
-  const [state, setState] = useState<DashboardState>(() =>
-    initialCachedSummary
-      ? {
-          status: "ready",
-          children: initialCachedSummary.children,
-          latestSessionsByChild: initialCachedSummary.latest_sessions_by_child,
-          summarySource: initialCachedSummary.source,
-        }
-      : { status: "loading" },
-  );
+  const [state, setState] = useState<DashboardState>({ status: "loading" });
   const [selectionPrompt, setSelectionPrompt] = useState(false);
   const selectionSectionRef = useRef<HTMLElement | null>(null);
   const focusRequestHandledRef = useRef(false);

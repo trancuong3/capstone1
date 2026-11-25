@@ -120,17 +120,8 @@ export function AppShell({ children }: AppShellProps) {
   const user = authRuntime.session?.user ?? null;
   const userId = user?.id ?? authRuntime.initialUserId ?? null;
 
-  const initialSummary = useMemo(
-    () =>
-      readUserCacheWithStale<DashboardSummaryDTO>(
-        userId,
-        "dashboard-summary",
-        DEFAULT_USER_CACHE_TTL_MS,
-        PERSISTENT_USER_CACHE_MAX_STALE_MS,
-      )?.data ?? null,
-    [userId],
-  );
-
+  const [cachedSummary, setCachedSummary] =
+    useState<DashboardSummaryDTO | null>(null);
   const [fetchedProfile, setFetchedProfile] = useState<ParentProfileDTO | null>(
     null,
   );
@@ -149,13 +140,13 @@ export function AppShell({ children }: AppShellProps) {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [hasSignOutError, setHasSignOutError] = useState(false);
 
-  const profile = fetchedProfile ?? initialSummary?.profile ?? null;
+  const profile = fetchedProfile ?? cachedSummary?.profile ?? null;
   const availableChildren = useMemo(
     () =>
       fetchedChildren.length > 0
         ? fetchedChildren
-        : (initialSummary?.children ?? []),
-    [fetchedChildren, initialSummary?.children],
+        : (cachedSummary?.children ?? []),
+    [cachedSummary?.children, fetchedChildren],
   );
 
   const selectedChildId = appStore?.selectedChildId ?? null;
@@ -209,12 +200,24 @@ export function AppShell({ children }: AppShellProps) {
     let isActive = true;
 
     const loadProfileAndSummary = async () => {
+      const cached =
+        readUserCacheWithStale<DashboardSummaryDTO>(
+          userId,
+          "dashboard-summary",
+          DEFAULT_USER_CACHE_TTL_MS,
+          PERSISTENT_USER_CACHE_MAX_STALE_MS,
+        )?.data ?? null;
+      if (isActive) {
+        setCachedSummary(cached);
+      }
+
       try {
         if (typeof profileService.getDashboardSummary === "function") {
           const summary = await profileService.getDashboardSummary();
           if (!isActive) return;
           setFetchedProfile(summary.profile);
           setFetchedChildren(summary.children);
+          setCachedSummary(summary);
           const ownerId = userId ?? summary.profile?.id ?? null;
           if (ownerId) {
             writeUserCache(ownerId, "dashboard-summary", summary, {
@@ -229,7 +232,7 @@ export function AppShell({ children }: AppShellProps) {
         const nextProfile = await profileService.get();
         if (isActive) setFetchedProfile(nextProfile);
       } catch {
-        if (isActive && !initialSummary) {
+        if (isActive && !cached) {
           setFetchedProfile(null);
         }
       }
@@ -240,14 +243,14 @@ export function AppShell({ children }: AppShellProps) {
     return () => {
       isActive = false;
     };
-  }, [initialSummary, profileService, userId]);
+  }, [profileService, userId]);
 
   useEffect(() => {
     function handleProfileUpdated(event: Event) {
       const detail = (event as CustomEvent<{ displayName?: unknown }>).detail;
       if (typeof detail?.displayName !== "string") return;
       setFetchedProfile((current) => {
-        const base = current ?? initialSummary?.profile ?? null;
+        const base = current ?? cachedSummary?.profile ?? null;
         return base
           ? { ...base, display_name: detail.displayName as string }
           : base;
@@ -271,7 +274,7 @@ export function AppShell({ children }: AppShellProps) {
       );
       window.removeEventListener("viread:immersive-mode", handleImmersiveMode);
     };
-  }, [initialSummary?.profile, pathname]);
+  }, [cachedSummary?.profile, pathname]);
 
   useEffect(() => {
     if (!isAccountMenuVisible) return;
