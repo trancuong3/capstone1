@@ -1421,9 +1421,31 @@ export class TtsPlayback {
           }
           this.timedCooldownUntil = Date.now() + 15_000;
           if (!completedChunks && fallback) {
+            // The short endpoint can still play the locked voice when timed
+            // synthesis fails. Restart the page only before any chunk played.
+            this.timedCooldownUntil = Date.now() + 15_000;
             await fallback();
             return;
           }
+          if (
+            (!synthesizedTimedOk || !fallback) &&
+            canUseGoogleTtsFallback() &&
+            getVietnameseBrowserVoice()
+          ) {
+            useBrowserFallback = true;
+            elapsed += await this.playBrowserSpeech(
+              operation,
+              chunk.words.join(" "),
+              {
+                words: chunk.words,
+                onStart: () => onStart(),
+                onWord,
+              },
+            );
+            completedChunks += 1;
+            continue;
+          }
+          this.timedCooldownUntil = Date.now() + 15_000;
           this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
           throw unavailable();
         }

@@ -1,5 +1,5 @@
 import { expect, type Page, type Route } from "@playwright/test";
-import { ids, installApiFixture } from "./real-data-fixture";
+import { ids, installApiFixture, readyVoiceStatus } from "./real-data-fixture";
 
 export const readingWords = ["Bé", "mèo", "đọc"].map((text, index) => ({
   word_id: `90000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,

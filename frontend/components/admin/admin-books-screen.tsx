@@ -47,64 +47,72 @@ export function AdminBooksScreen() {
   const [lifecycleBusyBookId, setLifecycleBusyBookId] = useState<string | null>(
     null,
   );
+  const [pendingLifecycleBook, setPendingLifecycleBook] =
+    useState<AdminBookDTO | null>(null);
   const [pendingDelete, setPendingDelete] = useState<AdminBookDTO | null>(null);
   const [deleteBusyBookId, setDeleteBusyBookId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
   const deleteInFlightRef = useRef(false);
   const requestIdRef = useRef(0);
-  const loadRef = useRef<() => Promise<boolean>>(async () => false);
+  const loadRef = useRef<
+    (options?: { resetPage?: boolean }) => Promise<boolean>
+  >(async () => false);
 
-  const load = useCallback(async (): Promise<boolean> => {
-    const requestId = ++requestIdRef.current;
-    setPageNumber(1);
-    setError(null);
-    setItems(null);
-    try {
-      const nextItems = await books.list({
-        search,
-        lifecycle_status: lifecycle || undefined,
-        verification_status: verification || undefined,
-      });
-      if (requestId !== requestIdRef.current) return false;
-      setItems(nextItems);
-      return true;
-    } catch (cause) {
-      if (requestId !== requestIdRef.current) return false;
-      setError(
-        isServiceError(cause) && cause.code === "AUTH_REQUIRED"
-          ? "auth"
-          : isServiceError(cause) && cause.code === "FORBIDDEN"
-            ? "forbidden"
-            : "safe",
-      );
-      setItems([]);
-      return false;
-    }
-  }, [books, lifecycle, search, verification]);
+  const load = useCallback(
+    async (options?: { resetPage?: boolean }): Promise<boolean> => {
+      const requestId = ++requestIdRef.current;
+      if (options?.resetPage) setPageNumber(1);
+      setError(null);
+      setItems(null);
+      try {
+        const nextItems = await books.list({
+          search,
+          lifecycle_status: lifecycle || undefined,
+          verification_status: verification || undefined,
+        });
+        if (requestId !== requestIdRef.current) return false;
+        const maxPage = Math.max(1, Math.ceil(nextItems.length / pageSize));
+        setPageNumber((current) => Math.min(current, maxPage));
+        setItems(nextItems);
+        return true;
+      } catch (cause) {
+        if (requestId !== requestIdRef.current) return false;
+        setError(
+          isServiceError(cause) && cause.code === "AUTH_REQUIRED"
+            ? "auth"
+            : isServiceError(cause) && cause.code === "FORBIDDEN"
+              ? "forbidden"
+              : "safe",
+        );
+        setItems([]);
+        return false;
+      }
+    },
+    [books, lifecycle, pageSize, search, verification],
+  );
 
   useEffect(() => {
     loadRef.current = load;
   }, [load]);
 
   useEffect(() => {
-    const timeout = globalThis.setTimeout(() => void load(), 200);
+    const timeout = globalThis.setTimeout(
+      () => void load({ resetPage: true }),
+      200,
+    );
     return () => {
       globalThis.clearTimeout(timeout);
       requestIdRef.current += 1;
     };
   }, [load]);
 
-  async function changeLifecycle(book: AdminBookDTO) {
-    if (lifecycleBusyBookId !== null) return;
+  async function confirmLifecycleChange() {
+    const book = pendingLifecycleBook;
+    if (!book || lifecycleBusyBookId !== null) return;
 
     const nextStatus =
       book.lifecycle_status === "ACTIVE" ? "RETIRED" : "ACTIVE";
-    const confirmation =
-      nextStatus === "RETIRED"
-        ? "Ngừng hoạt động sách này? Trang sách, revision và lịch sử đọc sẽ được giữ nguyên."
-        : "Kích hoạt lại sách này? Sách chỉ được kích hoạt khi metadata hợp lệ.";
-    if (!window.confirm(confirmation)) return;
 
     setLifecycleBusyBookId(book.id);
     setActionNotice(null);
@@ -114,7 +122,8 @@ export function AdminBooksScreen() {
         throw new Error("Unexpected lifecycle response");
       }
 
-      const reloaded = await loadRef.current();
+      setPendingLifecycleBook(null);
+      const reloaded = await loadRef.current({ resetPage: false });
       setActionNotice(
         reloaded
           ? {
@@ -136,6 +145,7 @@ export function AdminBooksScreen() {
             },
       );
     } catch (cause) {
+      setPendingLifecycleBook(null);
       setActionNotice({
         tone: "error",
         title:
@@ -349,7 +359,7 @@ export function AdminBooksScreen() {
                     {missingTitle ? "Chưa có tiêu đề" : book.title}
                   </h2>
                 </Link>
-                <p className="text-body text-muted">
+                <p className="break-words text-body text-muted">
                   Tên sách: {book.name?.trim() ? book.name : "Chưa có tên sách"}{" "}
                   · {book.author?.trim() ? book.author : "Chưa có tác giả"} ·
                   Khối {book.min_grade}–{book.max_grade}
@@ -395,7 +405,7 @@ export function AdminBooksScreen() {
                     className="!h-[76px] !w-full !min-w-0 !max-w-none whitespace-normal px-2 text-center"
                     disabled={isBusy}
                     isLoading={lifecycleBusyBookId === book.id}
-                    onClick={() => void changeLifecycle(book)}
+                    onClick={() => setPendingLifecycleBook(book)}
                     variant="quiet"
                   >
                     {lifecycleBusyBookId === book.id
@@ -431,6 +441,57 @@ export function AdminBooksScreen() {
           />
         </div>
       )}
+      <Modal
+        closeOnBackdropClick={lifecycleBusyBookId === null}
+        closeOnEscape={lifecycleBusyBookId === null}
+        footer={
+          <div className="flex flex-wrap justify-end gap-3">
+            <Button
+              disabled={lifecycleBusyBookId !== null}
+              fullWidth={false}
+              onClick={() => setPendingLifecycleBook(null)}
+              type="button"
+              variant="secondary"
+            >
+              Hủy
+            </Button>
+            <Button
+              disabled={lifecycleBusyBookId !== null}
+              fullWidth={false}
+              isLoading={lifecycleBusyBookId !== null}
+              onClick={() => void confirmLifecycleChange()}
+              type="button"
+              variant={
+                pendingLifecycleBook?.lifecycle_status === "ACTIVE"
+                  ? "destructive"
+                  : "primary"
+              }
+            >
+              {pendingLifecycleBook?.lifecycle_status === "ACTIVE"
+                ? "Xác nhận ngừng hoạt động"
+                : "Xác nhận kích hoạt lại"}
+            </Button>
+          </div>
+        }
+        isOpen={pendingLifecycleBook !== null}
+        onClose={() => {
+          if (lifecycleBusyBookId === null) setPendingLifecycleBook(null);
+        }}
+        role="alertdialog"
+        showCloseButton={lifecycleBusyBookId === null}
+        title={
+          pendingLifecycleBook?.lifecycle_status === "ACTIVE"
+            ? "Ngừng hoạt động sách?"
+            : "Kích hoạt lại sách?"
+        }
+        tone="paper"
+      >
+        <p className="text-body text-ink">
+          {pendingLifecycleBook?.lifecycle_status === "ACTIVE"
+            ? "Ngừng hoạt động sách này? Trang sách, revision và lịch sử đọc sẽ được giữ nguyên."
+            : "Kích hoạt lại sách này? Sách chỉ được kích hoạt khi metadata hợp lệ."}
+        </p>
+      </Modal>
       <Modal
         closeOnEscape={deleteBusyBookId === null}
         isOpen={pendingDelete !== null}

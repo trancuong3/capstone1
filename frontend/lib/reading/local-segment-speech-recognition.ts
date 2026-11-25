@@ -752,6 +752,20 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
 
     this.usingBrowserFallback = true;
     this.abortController?.abort();
+    const fallbackRec = this.browserFallbackRec;
+    this.browserFallbackRec = null;
+    this.usingBrowserFallback = false;
+    if (fallbackRec) {
+      try {
+        if (typeof fallbackRec.abort === "function") {
+          fallbackRec.abort();
+        } else {
+          fallbackRec.stop();
+        }
+      } catch {
+        // Ignore teardown errors
+      }
+    }
     this.resetSegmentState();
     this.teardownAudioGraph();
 
@@ -922,6 +936,126 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         };
         resultsObj[base + i] = item;
         if (item.isFinal) {
+          this.resultsHistory[base + i] = item;
+        }
+      }
+      this.onresult?.({
+        resultIndex: base + ev.resultIndex,
+        results: resultsObj,
+      });
+    };
+
+    nativeRec.onerror = (ev: SegmentSpeechErrorEvent) => {
+      if (
+        !this.active ||
+        this.stopping ||
+        this.browserFallbackRec !== nativeRec
+      ) {
+        return;
+      }
+      this.onerror?.(ev);
+    };
+
+    nativeRec.onend = () => {
+      if (this.browserFallbackRec !== nativeRec) return;
+      if (this.active && !this.stopping && this.continuous) {
+        try {
+          this.browserBaseOffset = this.resultsHistory.length;
+          nativeRec.start();
+          return;
+        } catch {
+          // Fall through to clean termination
+        }
+      }
+      this.browserFallbackRec = null;
+      this.usingBrowserFallback = false;
+      this.active = false;
+      this.stopping = false;
+      this.onend?.();
+    };
+
+    recordSttEngineUsage({
+      provider: "browser",
+      fallbackUsed: true,
+      fallbackReason: "LOCAL_STT_UNAVAILABLE",
+    });
+
+    try {
+      nativeRec.start();
+      return true;
+    } catch {
+      this.browserFallbackRec = null;
+      this.usingBrowserFallback = false;
+      return false;
+    }
+  }
+
+  private recordTechnicalFailureAndMaybeFallback(): boolean {
+    this.consecutiveTechnicalFailures += 1;
+    const freshHealth = getFreshVoiceEngineHealth();
+    const confirmedLocalOutage =
+      freshHealth !== null &&
+      (!freshHealth.local.available || !freshHealth.local.stt_ready);
+    if (
+      confirmedLocalOutage ||
+      this.consecutiveTechnicalFailures >= EMERGENCY_FAILURE_THRESHOLD
+    ) {
+      lastLocalSttOutageAt = Date.now();
+      return this.tryActivateBrowserFallback();
+    }
+    return false;
+  }
+
+  private tryActivateBrowserFallback(): boolean {
+    if (!this.active || this.stopping || this.usingBrowserFallback) {
+      return false;
+    }
+    const policy = getVoicePolicyPreferences();
+    if (
+      policy.providerMode !== "local_with_google_fallback" ||
+      !policy.allowGoogleSttFallback
+    ) {
+      return false;
+    }
+    const BrowserCtor = getBrowserSpeechRecognitionCtor();
+    if (!BrowserCtor) {
+      return false;
+    }
+
+    this.usingBrowserFallback = true;
+    this.abortController?.abort();
+    this.resetSegmentState();
+    this.teardownAudioGraph();
+
+    let nativeRec: SegmentSpeechRecognitionLike;
+    try {
+      nativeRec = new BrowserCtor();
+    } catch {
+      this.usingBrowserFallback = false;
+      return false;
+    }
+
+    nativeRec.lang = this.lang || "vi-VN";
+    nativeRec.continuous = this.continuous;
+    nativeRec.interimResults = this.interimResults;
+    nativeRec.maxAlternatives = this.maxAlternatives;
+    this.browserFallbackRec = nativeRec;
+    this.browserBaseOffset = this.resultsHistory.length;
+
+    nativeRec.onresult = (ev: SegmentSpeechEvent) => {
+      if (!this.active || this.browserFallbackRec !== nativeRec) return;
+      const base = this.browserBaseOffset;
+      const totalLength = base + ev.results.length;
+      const resultsObj: Record<number, SegmentSpeechResultItem> & {
+        length: number;
+      } = { length: totalLength };
+      for (let i = 0; i < base; i += 1) {
+        resultsObj[i] = this.resultsHistory[i];
+      }
+      for (let i = 0; i < ev.results.length; i += 1) {
+        const item = ev.results[i];
+        resultsObj[base + i] = item;
+        if (item?.isFinal) {
           this.resultsHistory[base + i] = item;
         }
       }
