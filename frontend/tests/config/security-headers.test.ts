@@ -72,9 +72,12 @@ describe("Next.js HTTP security headers", () => {
       vi.resetModules();
       const { default: config } = await import("@/next.config");
       const rules = (await config.headers?.()) ?? [];
+      const pageRule = rules.find((rule) => rule.source === "/:path*");
+      expect(pageRule).toBeDefined();
       const csp =
-        rules[0]?.headers.find((h) => h.key === "Content-Security-Policy")
+        pageRule?.headers.find((h) => h.key === "Content-Security-Policy")
           ?.value ?? "";
+      expect(csp).not.toBe("");
       for (const directive of ["img-src", "media-src"]) {
         const sources = csp
           .split("; ")
