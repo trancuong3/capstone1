@@ -362,6 +362,28 @@ async def lifespan(_app: FastAPI):
             name="local_voice_worker_bootstrap",
         )
 
+    stop_smart_studio_worker = asyncio.Event()
+    smart_studio_worker_task = None
+    if APP_ENVIRONMENT != "test":
+        async def _run_smart_studio_worker() -> None:
+            if worker_startup_delay > 0:
+                try:
+                    await asyncio.wait_for(
+                        stop_smart_studio_worker.wait(),
+                        timeout=worker_startup_delay,
+                    )
+                    return
+                except asyncio.TimeoutError:
+                    pass
+            from app.services.global_tasks_service import run_smart_studio_worker_loop
+
+            await run_smart_studio_worker_loop(stop_smart_studio_worker)
+
+        smart_studio_worker_task = asyncio.create_task(
+            _run_smart_studio_worker(),
+            name="smart_studio_worker",
+        )
+
     if _app is not None:
         _app.state.background_workers = {
             "viread_ocr_outbox": viread_outbox_task,
@@ -369,6 +391,7 @@ async def lifespan(_app: FastAPI):
             "book_quality": book_quality_task,
             "admin_ai_workflow": admin_ai_workflow_task,
             "parent_book_submission": parent_book_task,
+            "smart_studio": smart_studio_worker_task,
             "local_voice_bootstrap": local_voice_bootstrap_task,
             "active_model_registry": active_model_worker,
             "local_trainer_process": local_trainer_process,
@@ -389,9 +412,11 @@ async def lifespan(_app: FastAPI):
         stop_book_quality_worker.set()
         stop_admin_ai_workflow.set()
         stop_parent_book_worker.set()
+        stop_smart_studio_worker.set()
 
         worker_tasks = (
             local_voice_bootstrap_task,
+            smart_studio_worker_task,
             viread_outbox_task,
             viread_training_task,
             book_quality_task,
@@ -409,6 +434,11 @@ async def lifespan(_app: FastAPI):
                     timeout=2.0,
                 ),
                 shutdown_post_ocr_tasks(),
+                _shutdown_worker_task(
+                    smart_studio_worker_task,
+                    stop_smart_studio_worker,
+                    timeout=2.0,
+                ),
                 _shutdown_worker_task(viread_outbox_task, stop_viread_ocr_outbox),
                 _shutdown_worker_task(viread_training_task, stop_viread_training),
                 _shutdown_worker_task(book_quality_task, stop_book_quality_worker),
