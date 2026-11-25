@@ -143,15 +143,16 @@ def load_verified_public_pages():
 
     # Query strictly public catalog active books only (NEVER PARENT_PRIVATE).
     books = rest_get(
-        "books?select=id,title,visibility_scope,lifecycle_status,is_deleted"
-        "&visibility_scope=eq.CATALOG&lifecycle_status=eq.ACTIVE"
+        "books?select=id,title,visibility_scope,lifecyclestatus,is_deleted,deleted_at"
+        "&visibility_scope=eq.CATALOG&lifecyclestatus=eq.ACTIVE&deleted_at=is.null"
     )
     public_book_ids = [
         b["id"]
         for b in books
         if b.get("visibility_scope") == "CATALOG"
-        and b.get("lifecycle_status") == "ACTIVE"
+        and b.get("lifecyclestatus") == "ACTIVE"
         and not b.get("is_deleted")
+        and b.get("deleted_at") is None
     ]
     pages_out = []
     for book_id in public_book_ids:

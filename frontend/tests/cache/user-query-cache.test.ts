@@ -42,9 +42,7 @@ describe("user-query-cache", () => {
       profileName: "Phụ huynh A",
       children: [{ id: "c1", alias: "Bé A" }],
     });
-    expect(
-      readUserCache("user-b", "dashboard-summary"),
-    ).toBeNull();
+    expect(readUserCache("user-b", "dashboard-summary")).toBeNull();
     expect(readUserCache(null, "dashboard-summary")).toBeNull();
     expect(readUserCache("   ", "dashboard-summary")).toBeNull();
   });
@@ -68,9 +66,9 @@ describe("user-query-cache", () => {
 
     vi.advanceTimersByTime(DEFAULT_USER_CACHE_TTL_MS - 1_000);
     expect(readUserCache("user-a", "dashboard-summary")).toEqual({ count: 2 });
-    expect(
-      readUserCacheWithStale("user-a", "dashboard-summary")?.isStale,
-    ).toBe(false);
+    expect(readUserCacheWithStale("user-a", "dashboard-summary")?.isStale).toBe(
+      false,
+    );
 
     vi.advanceTimersByTime(2_000);
     const staleEntry = readUserCacheWithStale("user-a", "dashboard-summary");

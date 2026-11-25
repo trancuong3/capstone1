@@ -76,11 +76,10 @@ const DEFAULT_SETTINGS_TIMEOUT_MS = 2_500;
 
 let requestSeq = 0;
 let attachedPort: ViReadNativeSpeechPort | null = null;
-let attachedHandler: ((event: { data?: unknown } | MessageEvent) => void) | null =
-  null;
+let attachedHandler:
+  ((event: { data?: unknown } | MessageEvent) => void) | null = null;
 let previousOnMessage:
-  | ((event: { data?: unknown } | MessageEvent) => void)
-  | null = null;
+  ((event: { data?: unknown } | MessageEvent) => void) | null = null;
 const eventListeners = new Set<BridgeEventListener>();
 
 let cachedCapabilities: AndroidSpeechCapabilities | null = null;
@@ -90,9 +89,8 @@ let inflightCapabilitiesPromise: Promise<AndroidSpeechCapabilities | null> | nul
 
 function getNativeSpeechPort(): ViReadNativeSpeechPort | null {
   if (typeof window === "undefined") return null;
-  const candidate = (
-    window as unknown as { ViReadNativeSpeech?: unknown }
-  ).ViReadNativeSpeech;
+  const candidate = (window as unknown as { ViReadNativeSpeech?: unknown })
+    .ViReadNativeSpeech;
   if (
     candidate &&
     typeof candidate === "object" &&
@@ -471,8 +469,7 @@ export async function speakWithAndroidNativeTts(
         case "tts_range":
           emitStart();
           if (typeof event.start === "number") {
-            const end =
-              typeof event.end === "number" ? event.end : event.start;
+            const end = typeof event.end === "number" ? event.end : event.start;
             opts.onRangeStart?.(event.start, end);
           }
           break;
@@ -481,9 +478,7 @@ export async function speakWithAndroidNativeTts(
           finish();
           break;
         case "tts_stopped":
-          finish(
-            new DOMException("Audio playback was stopped.", "AbortError"),
-          );
+          finish(new DOMException("Audio playback was stopped.", "AbortError"));
           break;
         case "tts_error":
           finish(
@@ -524,9 +519,7 @@ export async function speakWithAndroidNativeTts(
  * Exposes `onsetAt` (normalized to `performance.now()` clock for `EchoGuard`)
  * and `rmsDb` for live voice activity feedback.
  */
-export class AndroidNativeSpeechRecognition
-  implements SegmentSpeechRecognitionLike
-{
+export class AndroidNativeSpeechRecognition implements SegmentSpeechRecognitionLike {
   continuous = true;
   interimResults = true;
   lang = "vi-VN";
@@ -642,17 +635,24 @@ export class AndroidNativeSpeechRecognition
           if (!transcript) break;
           const rawAlts = Array.isArray(event.alternatives)
             ? event.alternatives
-                .map((a) => (typeof a === "string" ? a.normalize("NFC").trim() : ""))
+                .map((a) =>
+                  typeof a === "string" ? a.normalize("NFC").trim() : "",
+                )
                 .filter(Boolean)
             : [];
           const uniqueAlts = [
             transcript,
             ...rawAlts.filter((a) => a !== transcript),
           ].slice(0, Math.max(1, this.maxAlternatives));
-          const itemBase: Record<number, { transcript: string; confidence: number }> =
-            {};
+          const itemBase: Record<
+            number,
+            { transcript: string; confidence: number }
+          > = {};
           uniqueAlts.forEach((alt, idx) => {
-            itemBase[idx] = { transcript: alt, confidence: idx === 0 ? 0.9 : 0.7 };
+            itemBase[idx] = {
+              transcript: alt,
+              confidence: idx === 0 ? 0.9 : 0.7,
+            };
           });
           const finalItem: SegmentSpeechResultItem = {
             ...itemBase,

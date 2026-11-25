@@ -283,9 +283,7 @@ function normalizeSummaryChild(
 }
 
 function normalizeLatestSessionsMap(
-  raw:
-    | Record<string, DashboardLatestSessionApiResponse | null>
-    | undefined,
+  raw: Record<string, DashboardLatestSessionApiResponse | null> | undefined,
 ): Record<string, DashboardLatestSessionDTO | null> {
   if (!raw || typeof raw !== "object") return {};
   const result: Record<string, DashboardLatestSessionDTO | null> = {};

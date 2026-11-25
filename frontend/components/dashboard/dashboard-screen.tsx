@@ -77,8 +77,7 @@ export function DashboardScreen() {
       ? {
           status: "ready",
           children: initialCachedSummary.children,
-          latestSessionsByChild:
-            initialCachedSummary.latest_sessions_by_child,
+          latestSessionsByChild: initialCachedSummary.latest_sessions_by_child,
           summarySource: initialCachedSummary.source,
         }
       : { status: "loading" },
@@ -280,7 +279,10 @@ export function DashboardScreen() {
             </p>
           ) : null}
           {isLoading ? (
-            <div className="family-profile-list" aria-label="Đang tải hồ sơ trẻ">
+            <div
+              className="family-profile-list"
+              aria-label="Đang tải hồ sơ trẻ"
+            >
               <span className="sr-only" role="status">
                 Đang tải…
               </span>
@@ -304,7 +306,10 @@ export function DashboardScreen() {
                   />
                 ))}
               </div>
-              <Link href="/children/new" className="family-inline-link min-h-12">
+              <Link
+                href="/children/new"
+                className="family-inline-link min-h-12"
+              >
                 <Plus aria-hidden="true" size={17} /> Tạo hồ sơ bé
               </Link>
             </>

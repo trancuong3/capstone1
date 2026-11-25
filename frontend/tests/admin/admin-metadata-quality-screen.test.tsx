@@ -72,7 +72,9 @@ describe("AdminMetadataQualityScreen", () => {
     const mobileList = screen.getByLabelText(
       "Danh sách sách cần kiểm tra metadata trên di động",
     );
-    expect(within(desktopTable).getByText("Chưa có tiêu đề")).toBeInTheDocument();
+    expect(
+      within(desktopTable).getByText("Chưa có tiêu đề"),
+    ).toBeInTheDocument();
     expect(within(mobileList).getByText("Chưa có tiêu đề")).toBeInTheDocument();
     expect(screen.getAllByText("Chưa có tác giả").length).toBeGreaterThan(0);
     expect(
@@ -132,7 +134,9 @@ describe("AdminMetadataQualityScreen", () => {
     const desktopTable = await screen.findByRole("region", {
       name: "Bảng sách cần kiểm tra metadata",
     });
-    expect(within(desktopTable).getByText("Chưa có tiêu đề")).toBeInTheDocument();
+    expect(
+      within(desktopTable).getByText("Chưa có tiêu đề"),
+    ).toBeInTheDocument();
     expect(screen.getAllByText("Đã ngừng").length).toBeGreaterThan(0);
     expect(
       within(desktopTable).getByRole("link", { name: "Bổ sung metadata" }),

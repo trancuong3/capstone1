@@ -13,7 +13,8 @@ export type ComprehensionVoiceMatch =
   | {
       readonly type: "CHOICE";
       readonly choice: ComprehensionChoiceUI;
-      readonly matchedBy: "letter" | "ordinal" | "content" | "letter_and_content";
+      readonly matchedBy:
+        "letter" | "ordinal" | "content" | "letter_and_content";
     }
   | { readonly type: "REPLAY" }
   | { readonly type: "STOP" }
@@ -179,9 +180,10 @@ function extractSelfCorrectedTail(normalized: string): {
     if (tail) return { clause: tail, hadRevision: true };
   }
   // Pattern: "không phải <X> con chọn <Y>"
-  const notMatch = /^(?:con |bé |em )?không\s+(?:chọn|phải)\s+.+?\s+(?:con\s+|bé\s+|em\s+)?(?:chọn|là)\s+(.+)$/u.exec(
-    normalized,
-  );
+  const notMatch =
+    /^(?:con |bé |em )?không\s+(?:chọn|phải)\s+.+?\s+(?:con\s+|bé\s+|em\s+)?(?:chọn|là)\s+(.+)$/u.exec(
+      normalized,
+    );
   if (notMatch?.[1]) {
     return { clause: notMatch[1].trim(), hadRevision: true };
   }
@@ -351,7 +353,11 @@ function findInlineLetterIndex(
 ): number | "ambiguous" | -1 {
   const matched = new Set<number>();
   for (const token of tokens) {
-    for (let idx = 0; idx < choices.length && idx < LETTER_ALIASES.length; idx += 1) {
+    for (
+      let idx = 0;
+      idx < choices.length && idx < LETTER_ALIASES.length;
+      idx += 1
+    ) {
       if (LETTER_ALIASES[idx].includes(token)) {
         matched.add(idx);
       }

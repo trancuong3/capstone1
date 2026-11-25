@@ -202,14 +202,18 @@ describe("BookScannerScreen local OCR photo upload", () => {
     await user.upload(input, makePageFile());
 
     expect(
-      await screen.findByText(/Đang gửi ảnh tới hệ thống nhận diện OCR tiếng Việt/i),
+      await screen.findByText(
+        /Đang gửi ảnh tới hệ thống nhận diện OCR tiếng Việt/i,
+      ),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Hủy quét/i }));
     expect(capturedSignal?.aborted).toBe(true);
     await waitFor(() => {
       expect(
-        screen.queryByText(/Đang gửi ảnh tới hệ thống nhận diện OCR tiếng Việt/i),
+        screen.queryByText(
+          /Đang gửi ảnh tới hệ thống nhận diện OCR tiếng Việt/i,
+        ),
       ).not.toBeInTheDocument();
     });
   });

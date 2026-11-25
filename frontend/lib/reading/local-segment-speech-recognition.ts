@@ -343,7 +343,9 @@ export function reconcileSegmentTranscriptWithInterims(
           if (
             containsOrderedSubsequence(
               latestInterimTokens,
-              leftAnchor ? [leftAnchor, ...rSpan, rightAnchor] : [...rSpan, rightAnchor],
+              leftAnchor
+                ? [leftAnchor, ...rSpan, rightAnchor]
+                : [...rSpan, rightAnchor],
             )
           ) {
             rebuilt.push(...rSpan);
@@ -1154,8 +1156,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       !this.interimInFlight ||
       now - this.interimStartedAt >= STALE_INTERIM_ABORT_MS;
     const deltaSamples = this.speechSamples - this.lastInterimSpeechSamples;
-    const newVoicedSamples =
-      this.voicedSamples - this.lastInterimVoicedSamples;
+    const newVoicedSamples = this.voicedSamples - this.lastInterimVoicedSamples;
     // VAD / speech-pause gating:
     // - Only dispatch a new interim when at least 80ms of NEW voiced speech occurred
     //   (prevents redundant re-uploads during trailing silence before flush).
@@ -1191,9 +1192,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   }
 
   private computeAudioQuality(speechDurationMs: number): SegmentAudioQuality {
-    const rms = Math.sqrt(
-      this.segmentSumSq / Math.max(1, this.speechSamples),
-    );
+    const rms = Math.sqrt(this.segmentSumSq / Math.max(1, this.speechSamples));
     const peak = this.segmentPeak;
     let status: SegmentAudioQuality["status"] = "OK";
     if (speechDurationMs < 80) {

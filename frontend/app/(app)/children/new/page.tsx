@@ -20,9 +20,6 @@ export default async function NewChildPage({
   const from = Array.isArray(query.from) ? query.from[0] : query.from;
 
   return (
-    <ChildProfileScreen
-      fromRegistration={from === "register"}
-      mode="create"
-    />
+    <ChildProfileScreen fromRegistration={from === "register"} mode="create" />
   );
 }

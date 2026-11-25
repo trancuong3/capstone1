@@ -115,9 +115,7 @@ export function MobileMoreSheet({
                   aria-hidden="true"
                   className={cn(
                     "flex size-10 shrink-0 items-center justify-center rounded-control",
-                    active
-                      ? "bg-white text-primary"
-                      : "bg-canvas text-primary",
+                    active ? "bg-white text-primary" : "bg-canvas text-primary",
                   )}
                 >
                   <Icon className="size-5" strokeWidth={1.9} />

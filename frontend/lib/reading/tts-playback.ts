@@ -174,9 +174,7 @@ function canUseDeviceFallbackTts(): boolean {
   return isAndroidNativeSpeechAvailable() || canUseBrowserSpeechSynthesis();
 }
 
-function shouldSkipBackendTtsForBrowserFallback(
-  operation: Operation,
-): boolean {
+function shouldSkipBackendTtsForBrowserFallback(operation: Operation): boolean {
   if (
     !canUseGoogleTtsFallback() ||
     !canUseDeviceFallbackTts() ||
@@ -198,7 +196,9 @@ function isCacheablePublicCatalogTtsUrl(rawUrl: string): boolean {
   try {
     const parsed = new URL(
       trimmed,
-      typeof window !== "undefined" ? window.location.origin : "https://viread.local",
+      typeof window !== "undefined"
+        ? window.location.origin
+        : "https://viread.local",
     );
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
       return false;
@@ -252,7 +252,9 @@ async function fetchPrecomputedCatalogAudio(
       signal,
     });
     if (!response.ok) return null;
-    const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
+    const contentType = (
+      response.headers.get("content-type") ?? ""
+    ).toLowerCase();
     const looksAudio =
       contentType.startsWith("audio/") ||
       /\.(mp3|ogg|wav|m4a)(\?|$)/i.test(url);
@@ -1091,7 +1093,9 @@ export class TtsPlayback {
             ]);
           const shortKey = makeKey();
           const cachedShort =
-            audioFormat === undefined ? this.shortCache.get(shortKey) : undefined;
+            audioFormat === undefined
+              ? this.shortCache.get(shortKey)
+              : undefined;
           if (cachedShort) {
             return {
               audio: cachedShort.audio,
@@ -1266,7 +1270,10 @@ export class TtsPlayback {
                 continue;
               } catch (wavError) {
                 this.ensure(operation);
-                if (isAbort(wavError) || wavError instanceof PartialPlaybackError) {
+                if (
+                  isAbort(wavError) ||
+                  wavError instanceof PartialPlaybackError
+                ) {
                   throw wavError;
                 }
                 this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);

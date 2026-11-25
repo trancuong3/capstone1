@@ -226,17 +226,16 @@ describe("MobileBottomNav, AppShell and AdminLayout mobile UX", () => {
 
     await user.click(within(mobileNav).getByRole("button", { name: "Thêm" }));
     const sheet = screen.getByRole("dialog", { name: "Quản trị khác" });
-    expect(within(sheet).getByRole("link", { name: /Bài hát/ })).toHaveAttribute(
-      "href",
-      "/admin/karaoke",
-    );
-    expect(within(sheet).getByRole("link", { name: /Nhật ký/ })).toHaveAttribute(
-      "href",
-      "/admin/audit-logs",
-    );
     expect(
-      within(sheet).getByRole("link", { name: /^OCR/ }),
-    ).toHaveAttribute("href", "/admin/viread-training");
+      within(sheet).getByRole("link", { name: /Bài hát/ }),
+    ).toHaveAttribute("href", "/admin/karaoke");
+    expect(
+      within(sheet).getByRole("link", { name: /Nhật ký/ }),
+    ).toHaveAttribute("href", "/admin/audit-logs");
+    expect(within(sheet).getByRole("link", { name: /^OCR/ })).toHaveAttribute(
+      "href",
+      "/admin/viread-training",
+    );
     expect(
       within(sheet).getByRole("link", { name: /Vận hành/ }),
     ).toHaveAttribute("href", "/admin/health");

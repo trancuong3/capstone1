@@ -35,6 +35,8 @@ export const DynamicAdminVireadTrainingScreen = dynamic(
     ),
   {
     ssr: false,
-    loading: () => <AdminLoading label="Đang tải bảng điều khiển VietOCR V2…" />,
+    loading: () => (
+      <AdminLoading label="Đang tải bảng điều khiển VietOCR V2…" />
+    ),
   },
 );

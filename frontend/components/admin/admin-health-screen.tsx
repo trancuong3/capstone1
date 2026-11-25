@@ -31,7 +31,9 @@ function formatPendingAge(seconds: number): string {
   const minutes = Math.floor(safeSeconds / 60);
   const remSeconds = safeSeconds % 60;
   if (minutes < 60) {
-    return remSeconds > 0 ? `${minutes} phút ${remSeconds} giây` : `${minutes} phút`;
+    return remSeconds > 0
+      ? `${minutes} phút ${remSeconds} giây`
+      : `${minutes} phút`;
   }
   const hours = Math.floor(minutes / 60);
   const remMinutes = minutes % 60;
@@ -131,9 +133,7 @@ export function AdminHealthScreen() {
                     >
                       {service.queue_depth !== undefined ? (
                         <div>
-                          <dt className="font-semibold text-muted">
-                            Hàng đợi
-                          </dt>
+                          <dt className="font-semibold text-muted">Hàng đợi</dt>
                           <dd className="font-bold text-ink tabular-nums">
                             {service.queue_depth !== null
                               ? `${service.queue_depth} tác vụ`

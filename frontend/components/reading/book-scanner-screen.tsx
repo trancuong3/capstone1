@@ -257,7 +257,8 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           if (
             generation !== ocrGenerationRef.current ||
             controller.signal.aborted ||
-            (enqueueError instanceof Error && enqueueError.name === "AbortError")
+            (enqueueError instanceof Error &&
+              enqueueError.name === "AbortError")
           ) {
             return;
           }
@@ -345,9 +346,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             status: "queued",
             jobId: currentJob.job_id,
             jobStatus:
-              currentJob.status === "SUCCEEDED"
-                ? "RUNNING"
-                : currentJob.status,
+              currentJob.status === "SUCCEEDED" ? "RUNNING" : currentJob.status,
             workerOnline: currentJob.worker_online,
             fileName: uploadFile.name,
             file: uploadFile,

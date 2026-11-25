@@ -57,10 +57,7 @@ export const wordPresentationClasses: Record<WordPresentationState, string> = {
 export function getWordPresentationLabel(state: WordPresentationState): string {
   const base = wordPresentationLabels[state];
   if (state === "assisted") {
-    return adaptTextToTeacherPersona(
-      base,
-      getEffectiveTeacherPersona().gender,
-    );
+    return adaptTextToTeacherPersona(base, getEffectiveTeacherPersona().gender);
   }
   return base;
 }

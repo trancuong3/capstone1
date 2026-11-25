@@ -395,13 +395,11 @@ export function createAdminPageService(options?: {
                 const jobsToPoll =
                   enqueued.jobs && enqueued.jobs.length > 0
                     ? enqueued.jobs
-                    : enqueued.job_ids.map(
-                        (id): AdminOcrJobDTO => ({
-                          id,
-                          job_kind: "ADMIN_PAGE_UPLOAD",
-                          status: "QUEUED",
-                        }),
-                      );
+                    : enqueued.job_ids.map((id): AdminOcrJobDTO => ({
+                        id,
+                        job_kind: "ADMIN_PAGE_UPLOAD",
+                        status: "QUEUED",
+                      }));
                 for (const jobItem of jobsToPoll) {
                   const settled = await pollAdminOcrJob(jobItem, {
                     pollIntervalMs,

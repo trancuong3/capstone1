@@ -51,7 +51,8 @@ const OVERLAY_COLORS: Record<WordPresentationState, string> = {
   omission: "bg-red-300/25 ring-1 ring-red-600",
   "self-corrected": "bg-green-300/25 ring-2 ring-green-700 ring-offset-1",
   unresolved: "bg-red-300/25 ring-2 ring-red-700",
-  assisted: "bg-sky-300/25 ring-2 ring-sky-600 border-b-2 border-dotted border-sky-700",
+  assisted:
+    "bg-sky-300/25 ring-2 ring-sky-600 border-b-2 border-dotted border-sky-700",
   uncertain: "bg-slate-300/20 ring-1 ring-slate-500",
 };
 

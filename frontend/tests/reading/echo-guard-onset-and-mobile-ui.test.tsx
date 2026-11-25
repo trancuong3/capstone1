@@ -101,8 +101,7 @@ describe("Bug 5b: BrowserTranscriptCollector -> EchoGuard onsetAt propagation", 
         ],
       },
       (text, usable, _conf, onsetAt) =>
-        usable &&
-        guard.evaluate({ text, receivedAt: 1_750, onsetAt }).accept,
+        usable && guard.evaluate({ text, receivedAt: 1_750, onsetAt }).accept,
     );
     expect(rejectedEcho).toEqual([]);
 
@@ -124,8 +123,7 @@ describe("Bug 5b: BrowserTranscriptCollector -> EchoGuard onsetAt propagation", 
         ],
       },
       (text, usable, _conf, onsetAt) =>
-        usable &&
-        guard.evaluate({ text, receivedAt: 2_200, onsetAt }).accept,
+        usable && guard.evaluate({ text, receivedAt: 2_200, onsetAt }).accept,
     );
     expect(acceptedChild).toEqual(["hoa thơm"]);
     expect(collector.getTranscript()).toBe("hoa thơm");

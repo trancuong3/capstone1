@@ -39,9 +39,7 @@ function findCachedChild(
     userId,
     "children",
   );
-  return (
-    children?.data.find((candidate) => candidate.id === childId) ?? null
-  );
+  return children?.data.find((candidate) => candidate.id === childId) ?? null;
 }
 
 export function useValidatedSelectedChild() {

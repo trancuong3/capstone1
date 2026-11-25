@@ -174,8 +174,7 @@ export function MobileBottomNav({
     item.isActive ? item.isActive(pathname) : routeMatches(pathname, item.href),
   );
 
-  const columnCountClass =
-    tabs.length === 3 ? "grid-cols-4" : "grid-cols-5";
+  const columnCountClass = tabs.length === 3 ? "grid-cols-4" : "grid-cols-5";
 
   return (
     <>
@@ -190,18 +189,46 @@ export function MobileBottomNav({
             columnCountClass,
           )}
         >
-          {tabs.map(({ href, label, icon: Icon, isPrimaryAction, isActive }) => {
-            const active = isActive
-              ? isActive(pathname)
-              : routeMatches(pathname, href);
+          {tabs.map(
+            ({ href, label, icon: Icon, isPrimaryAction, isActive }) => {
+              const active = isActive
+                ? isActive(pathname)
+                : routeMatches(pathname, href);
 
-            if (isPrimaryAction) {
+              if (isPrimaryAction) {
+                return (
+                  <Link
+                    aria-current={active ? "page" : undefined}
+                    className={cn(
+                      "flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-control px-1 py-1.5 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                      active ? "text-primary-hover" : "text-primary",
+                    )}
+                    href={href}
+                    key={href}
+                    onClick={() => setOpenForPathname(null)}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "flex size-9 items-center justify-center rounded-full shadow-sm transition-colors",
+                        active
+                          ? "bg-primary-hover text-white ring-2 ring-sky"
+                          : "bg-primary text-white",
+                      )}
+                    >
+                      <Icon className="size-5" strokeWidth={2.1} />
+                    </span>
+                    <span className="truncate leading-tight">{label}</span>
+                  </Link>
+                );
+              }
+
               return (
                 <Link
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-control px-1 py-1.5 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
-                    active ? "text-primary-hover" : "text-primary",
+                    "flex min-h-12 flex-col items-center justify-center gap-1 rounded-control px-1 py-2 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                    active ? "text-primary-hover" : "text-muted hover:text-ink",
                   )}
                   href={href}
                   key={href}
@@ -210,45 +237,17 @@ export function MobileBottomNav({
                   <span
                     aria-hidden="true"
                     className={cn(
-                      "flex size-9 items-center justify-center rounded-full shadow-sm transition-colors",
-                      active
-                        ? "bg-primary-hover text-white ring-2 ring-sky"
-                        : "bg-primary text-white",
+                      "flex h-7 w-11 items-center justify-center rounded-full transition-colors",
+                      active ? "bg-sky text-primary-hover" : "bg-transparent",
                     )}
                   >
-                    <Icon className="size-5" strokeWidth={2.1} />
+                    <Icon className="size-5" strokeWidth={active ? 2.2 : 1.9} />
                   </span>
                   <span className="truncate leading-tight">{label}</span>
                 </Link>
               );
-            }
-
-            return (
-              <Link
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex min-h-12 flex-col items-center justify-center gap-1 rounded-control px-1 py-2 text-[11px] font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
-                  active
-                    ? "text-primary-hover"
-                    : "text-muted hover:text-ink",
-                )}
-                href={href}
-                key={href}
-                onClick={() => setOpenForPathname(null)}
-              >
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "flex h-7 w-11 items-center justify-center rounded-full transition-colors",
-                    active ? "bg-sky text-primary-hover" : "bg-transparent",
-                  )}
-                >
-                  <Icon className="size-5" strokeWidth={active ? 2.2 : 1.9} />
-                </span>
-                <span className="truncate leading-tight">{label}</span>
-              </Link>
-            );
-          })}
+            },
+          )}
 
           <button
             aria-controls={sheetId}

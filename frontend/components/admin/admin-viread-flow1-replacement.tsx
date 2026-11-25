@@ -419,8 +419,7 @@ export function AdminVireadReliabilityPanel({
                               {pF1 !== undefined ? `${pF1}%` : "—"}
                             </td>
                             <td className="px-4 py-2.5 text-right font-mono font-bold text-emerald-700">
-                              {bF1 !== undefined &&
-                              (pF1 ?? mF1) !== undefined
+                              {bF1 !== undefined && (pF1 ?? mF1) !== undefined
                                 ? `+${((pF1 ?? mF1)! - bF1).toFixed(2)}%`
                                 : "—"}
                             </td>
