@@ -1,0 +1,1108 @@
+{
+  "experiment": "D_VOICE_AB_AND_5MODE_TOPOLOGIES",
+  "adult_corpus_only_limit": "UNVERIFIED on real 6-7yo child speech (0 child recordings evaluated for privacy).",
+  "int8": {
+    "precision": "int8",
+    "startup_s": 26.39,
+    "health": {
+      "status": "ok",
+      "version": "1.1.0",
+      "provider": "local",
+      "auth_required": true,
+      "stt": {
+        "ready": true,
+        "model_version": "sherpa-onnx-zipformer-vi-30m-int8-2026-02-09",
+        "active_jobs": 0
+      },
+      "tts": {
+        "ready": true,
+        "model_version": "vieneu-v3-turbo-onnx-int8-3.8.5",
+        "precision": "int8",
+        "hybrid_word_fp32": false,
+        "cache_max_bytes": 524288000,
+        "voices_count": 8,
+        "regions": [
+          "north",
+          "central",
+          "south"
+        ],
+        "active_jobs": 0
+      },
+      "_startup_s": 26.39
+    },
+    "memory": {
+      "idle": {
+        "worker_pid": 15872,
+        "tree_pids": [
+          3652,
+          15872
+        ],
+        "rss_mb": 731.3,
+        "peak_rss_mb": 734.77,
+        "commit_mb": 1432.66,
+        "peak_commit_mb": 1432.71
+      },
+      "after_warmup": {
+        "worker_pid": 15872,
+        "tree_pids": [
+          3652,
+          15872
+        ],
+        "rss_mb": 799.89,
+        "peak_rss_mb": 799.92,
+        "commit_mb": 1575.95,
+        "peak_commit_mb": 1576.0
+      },
+      "peak": {
+        "worker_pid": 15872,
+        "tree_pids": [
+          3652,
+          15872
+        ],
+        "rss_mb": 859.96,
+        "peak_rss_mb": 859.99,
+        "commit_mb": 1634.3,
+        "peak_commit_mb": 1634.41
+      }
+    },
+    "minimal_pairs": {
+      "isolated_exact": "7/17",
+      "carrier_exact": "12/17",
+      "tts_p50_ms": 861.05,
+      "tts_p95_ms": 1446.3,
+      "details": [
+        {
+          "word": "mốt",
+          "tts_ms": 1446.3,
+          "iso_stt": "một",
+          "iso_ok": false,
+          "car_stt": "chữ một",
+          "car_ok": false
+        },
+        {
+          "word": "một",
+          "tts_ms": 807.15,
+          "iso_stt": "một",
+          "iso_ok": true,
+          "car_stt": "chữ một",
+          "car_ok": true
+        },
+        {
+          "word": "mót",
+          "tts_ms": 861.05,
+          "iso_stt": "mất",
+          "iso_ok": false,
+          "car_stt": "chữ mot",
+          "car_ok": false
+        },
+        {
+          "word": "ma",
+          "tts_ms": 887.64,
+          "iso_stt": "ma",
+          "iso_ok": true,
+          "car_stt": "chữ ma chữ",
+          "car_ok": true
+        },
+        {
+          "word": "má",
+          "tts_ms": 739.27,
+          "iso_stt": "má",
+          "iso_ok": true,
+          "car_stt": "chữ má chữ",
+          "car_ok": true
+        },
+        {
+          "word": "mà",
+          "tts_ms": 948.73,
+          "iso_stt": "má",
+          "iso_ok": false,
+          "car_stt": "chữ mà",
+          "car_ok": true
+        },
+        {
+          "word": "mả",
+          "tts_ms": 952.6,
+          "iso_stt": "mà",
+          "iso_ok": false,
+          "car_stt": "chữ mảnh",
+          "car_ok": false
+        },
+        {
+          "word": "mã",
+          "tts_ms": 578.35,
+          "iso_stt": "mã",
+          "iso_ok": true,
+          "car_stt": "chữ mã",
+          "car_ok": true
+        },
+        {
+          "word": "mạ",
+          "tts_ms": 780.99,
+          "iso_stt": "mạng",
+          "iso_ok": false,
+          "car_stt": "chữ mạ",
+          "car_ok": true
+        },
+        {
+          "word": "bò",
+          "tts_ms": 706.79,
+          "iso_stt": "bo",
+          "iso_ok": false,
+          "car_stt": "chữ bò",
+          "car_ok": true
+        },
+        {
+          "word": "bó",
+          "tts_ms": 729.63,
+          "iso_stt": "bó",
+          "iso_ok": true,
+          "car_stt": "chữ bó anh",
+          "car_ok": true
+        },
+        {
+          "word": "bỏ",
+          "tts_ms": 900.8,
+          "iso_stt": "bọn",
+          "iso_ok": false,
+          "car_stt": "chữ bỏ chữ",
+          "car_ok": true
+        },
+        {
+          "word": "bõ",
+          "tts_ms": 666.44,
+          "iso_stt": "bó",
+          "iso_ok": false,
+          "car_stt": "chữ bóp",
+          "car_ok": false
+        },
+        {
+          "word": "bọ",
+          "tts_ms": 898.46,
+          "iso_stt": "bọn",
+          "iso_ok": false,
+          "car_stt": "chữ bọ",
+          "car_ok": true
+        },
+        {
+          "word": "tươi",
+          "tts_ms": 1275.23,
+          "iso_stt": "tươi",
+          "iso_ok": true,
+          "car_stt": "chữ tươi",
+          "car_ok": true
+        },
+        {
+          "word": "tưới",
+          "tts_ms": 730.24,
+          "iso_stt": "tưới",
+          "iso_ok": true,
+          "car_stt": "chữ tưới",
+          "car_ok": true
+        },
+        {
+          "word": "tười",
+          "tts_ms": 1117.77,
+          "iso_stt": "tươi",
+          "iso_ok": false,
+          "car_stt": "chữ tường",
+          "car_ok": false
+        }
+      ]
+    },
+    "phonics_mot": {
+      "duration_seconds": 5.7,
+      "wav_bytes": 547244,
+      "stt_roundtrip": "ô từ út mút mốt sắc mốt mốt hai mươi mốt"
+    },
+    "regional_8_voices": {
+      "tts_p50_ms": 2921.89,
+      "tts_p95_ms": 3645.3,
+      "rows": [
+        {
+          "voice_id": "local_north_truc_ly",
+          "tts_ms": 3123.99,
+          "wav_bytes": 275564,
+          "stt_ms": 269.85,
+          "wer": 0.0909,
+          "transcript": "trên cành cây xanh đàn chim hót vang chào buổi sáng và"
+        },
+        {
+          "voice_id": "local_north_ngoc_linh",
+          "tts_ms": 2809.33,
+          "wav_bytes": 321644,
+          "stt_ms": 513.16,
+          "wer": 0.0909,
+          "transcript": "nhìn cành cây xanh đàn chim hót vang chào buổi sáng"
+        },
+        {
+          "voice_id": "local_north_thien_minh",
+          "tts_ms": 2921.89,
+          "wav_bytes": 298604,
+          "stt_ms": 273.85,
+          "wer": 0.0,
+          "transcript": "trên cành cây xanh đàn chim hót vang chào buổi sáng"
+        },
+        {
+          "voice_id": "local_central_ngoc_tran",
+          "tts_ms": 2998.87,
+          "wav_bytes": 352364,
+          "stt_ms": 302.51,
+          "wer": 0.4545,
+          "transcript": "trên canh cây xanh đang chiếm họp vang chao buổi sáng"
+        },
+        {
+          "voice_id": "local_central_quang_son",
+          "tts_ms": 2878.56,
+          "wav_bytes": 344684,
+          "stt_ms": 275.05,
+          "wer": 0.6364,
+          "transcript": "trên tranh cấy xanh đang chiếm họp vắng trao buổi sáng"
+        },
+        {
+          "voice_id": "local_south_thuc_doan",
+          "tts_ms": 2755.33,
+          "wav_bytes": 313964,
+          "stt_ms": 322.66,
+          "wer": 0.0909,
+          "transcript": "trên cành cây xanh đàn chim hóc vang chào buổi sáng"
+        },
+        {
+          "voice_id": "local_south_my_duyen",
+          "tts_ms": 3645.3,
+          "wav_bytes": 367724,
+          "stt_ms": 398.37,
+          "wer": 0.0,
+          "transcript": "trên cành cây xanh đàn chim hót vang chào buổi sáng"
+        },
+        {
+          "voice_id": "local_south_thai_son",
+          "tts_ms": 3065.16,
+          "wav_bytes": 337004,
+          "stt_ms": 403.06,
+          "wer": 0.0,
+          "transcript": "trên cành cây xanh đàn chim hót vang chào buổi sáng"
+        }
+      ]
+    },
+    "compression_ab": [
+      {
+        "voice_id": "local_north_truc_ly",
+        "wav_bytes": 275564,
+        "mp3_bytes": 23468,
+        "mp3_ratio": 11.74,
+        "mp3_enc_ms": 66.6,
+        "mp3_stt_ms": 371.1,
+        "mp3_wer": 0.0909,
+        "wav_mp3_exact_stt_match": true,
+        "opus_bytes": 11121,
+        "opus_ratio": 24.78,
+        "opus_enc_ms": 92.46,
+        "opus_stt_ms": 383.62,
+        "opus_wer": 0.0909,
+        "wav_opus_exact_stt_match": true
+      },
+      {
+        "voice_id": "local_north_ngoc_linh",
+        "wav_bytes": 321644,
+        "mp3_bytes": 27308,
+        "mp3_ratio": 11.78,
+        "mp3_enc_ms": 90.0,
+        "mp3_stt_ms": 296.14,
+        "mp3_wer": 0.0909,
+        "wav_mp3_exact_stt_match": true,
+        "opus_bytes": 13511,
+        "opus_ratio": 23.81,
+        "opus_enc_ms": 121.27,
+        "opus_stt_ms": 371.71,
+        "opus_wer": 0.0909,
+        "wav_opus_exact_stt_match": true
+      },
+      {
+        "voice_id": "local_north_thien_minh",
+        "wav_bytes": 298604,
+        "mp3_bytes": 25388,
+        "mp3_ratio": 11.76,
+        "mp3_enc_ms": 123.25,
+        "mp3_stt_ms": 351.22,
+        "mp3_wer": 0.0,
+        "wav_mp3_exact_stt_match": true,
+        "opus_bytes": 12132,
+        "opus_ratio": 24.61,
+        "opus_enc_ms": 318.76,
+        "opus_stt_ms": 434.5,
+        "opus_wer": 0.0,
+        "wav_opus_exact_stt_match": true
+      },
+      {
+        "voice_id": "local_central_ngoc_tran",
+        "wav_bytes": 352364,
+        "mp3_bytes": 29804,
+        "mp3_ratio": 11.82,
+        "mp3_enc_ms": 52.98,
+        "mp3_stt_ms": 301.59,
+        "mp3_wer": 0.4545,
+        "wav_mp3_exact_stt_match": true,
+        "opus_bytes": 14029,
+        "opus_ratio": 25.12,
+        "opus_enc_ms": 196.69,
+        "opus_stt_ms": 369.97,
+        "opus_wer": 0.4545,
+        "wav_opus_exact_stt_match": true
+      },
+      {
+        "voice_id": "local_central_quang_son",
+        "wav_bytes": 344684,
+        "mp3_bytes": 29228,
+        "mp3_ratio": 11.79,
+        "mp3_enc_ms": 56.09,
+        "mp3_stt_ms": 324.54,
+        "mp3_wer": 0.6364,
+        "wav_mp3_exact_stt_match": true,
+        "opus_bytes": 13093,
+        "opus_ratio": 26.33,
+        "opus_enc_ms": 250.93,
+        "opus_stt_ms": 309.31,
+        "opus_wer": 0.6364,
+        "wav_opus_exact_stt_match": true
+      },
+      {
+        "voice_id": "local_south_thuc_doan",
+        "wav_bytes": 313964,
+        "mp3_bytes": 26732,
+        "mp3_ratio": 11.74,
+        "mp3_enc_ms": 91.41,
+        "mp3_stt_ms": 318.53,
+        "mp3_wer": 0.0909,
+        "wav_mp3_exact_stt_match": false,
+        "opus_bytes": 12607,
+        "opus_ratio": 24.9,
+        "opus_enc_ms": 138.96,
+        "opus_stt_ms": 390.86,
+        "opus_wer": 0.0909,
+        "wav_opus_exact_stt_match": false
+      },
+      {
+        "voice_id": "local_south_my_duyen",
+        "wav_bytes": 367724,
+        "mp3_bytes": 31148,
+        "mp3_ratio": 11.81,
+        "mp3_enc_ms": 119.26,
+        "mp3_stt_ms": 438.84,
+        "mp3_wer": 0.0,
+        "wav_mp3_exact_stt_match": true,
+        "opus_bytes": 15328,
+        "opus_ratio": 23.99,
+        "opus_enc_ms": 115.17,
+        "opus_stt_ms": 382.33,
+        "opus_wer": 0.0,
+        "wav_opus_exact_stt_match": true
+      },
+      {
+        "voice_id": "local_south_thai_son",
+        "wav_bytes": 337004,
+        "mp3_bytes": 28652,
+        "mp3_ratio": 11.76,
+        "mp3_enc_ms": 151.02,
+        "mp3_stt_ms": 488.67,
+        "mp3_wer": 0.0,
+        "wav_mp3_exact_stt_match": true,
+        "opus_bytes": 14262,
+        "opus_ratio": 23.63,
+        "opus_enc_ms": 241.88,
+        "opus_stt_ms": 499.44,
+        "opus_wer": 0.0,
+        "wav_opus_exact_stt_match": true
+      }
+    ],
+    "worker_accept_negotiation": {
+      "audio/mpeg": {
+        "status": 200,
+        "content_type": "audio/mpeg",
+        "bytes": 23468,
+        "stt_ms": 339.12,
+        "wer": 0.0909
+      },
+      "audio/ogg": {
+        "status": 200,
+        "content_type": "audio/ogg",
+        "bytes": 24459,
+        "stt_ms": 294.8,
+        "wer": 0.0909
+      },
+      "audio/wav": {
+        "status": 200,
+        "content_type": "audio/wav",
+        "bytes": 275564,
+        "stt_ms": 404.69,
+        "wer": 0.0909
+      }
+    },
+    "adult_corpus_stt": {
+      "count": 18,
+      "mean_wer": 0.2624,
+      "stt_p50_ms": 340.37,
+      "stt_p95_ms": 546.55,
+      "rows": [
+        {
+          "id": "short_1",
+          "source_kind": "synthetic_tts",
+          "expected": "Sáng nay, Mi mang ô đến lớp.",
+          "stt_text": "sáng nay my mang ô đến lớp",
+          "stt_ms": 203.04,
+          "wer": 0.1429
+        },
+        {
+          "id": "short_2",
+          "source_kind": "synthetic_tts",
+          "expected": "Tan học, trời đổ mưa.",
+          "stt_text": "tan học trời đổ mưa",
+          "stt_ms": 542.51,
+          "wer": 0.0
+        },
+        {
+          "id": "short_3",
+          "source_kind": "synthetic_tts",
+          "expected": "Mi che ô cho bạn An.",
+          "stt_text": "mì che ô cho bạn an",
+          "stt_ms": 318.74,
+          "wer": 0.1667
+        },
+        {
+          "id": "long_repeat",
+          "source_kind": "synthetic_tts",
+          "expected": "Mi gọi An. An quay lại gọi Mi cùng xuống sân trường.",
+          "stt_text": "mi gọi an an quay lại gọi my cùng xuống sân trường",
+          "stt_ms": 440.2,
+          "wer": 0.0833
+        },
+        {
+          "id": "long_dialogue",
+          "source_kind": "synthetic_tts",
+          "expected": "Dừng lại! Đừng chạy nhanh quá!",
+          "stt_text": "dừng lại đừng chạy nhanh quá",
+          "stt_ms": 292.77,
+          "wer": 0.0
+        },
+        {
+          "id": "long_diff_1",
+          "source_kind": "synthetic_tts",
+          "expected": "Mi đọc chậm từng chữ: mốt, một, nghiêng đầu, khúc khích rồi cười tươi.",
+          "stt_text": "mi đọc chậm từng chữ một nghiêng đầu khúc khích rồi cười tươi",
+          "stt_ms": 493.96,
+          "wer": 0.0714
+        },
+        {
+          "id": "long_diff_2",
+          "source_kind": "synthetic_tts",
+          "expected": "Khi về nhà, bé tự lấy vở tập viết từng chữ bàn, bạn, nghỉ, nghĩ rất cẩn thận.",
+          "stt_text": "khi về nhà bé tư lấy vợ tập việc tương trừ bang ba nghỉ nghỉ rất cẩn thận",
+          "stt_ms": 546.55,
+          "wer": 0.4444
+        },
+        {
+          "id": "long_longsent",
+          "source_kind": "synthetic_tts",
+          "expected": "Mùa thu đi qua thật êm đềm trong tiếng đọc bài rộn ràng của lớp nhỏ.",
+          "stt_text": "mùa thu đi qua thật êm đềm trong tiếng đọc bài rộn ràng của lớp nhỏ",
+          "stt_ms": 317.04,
+          "wer": 0.0
+        },
+        {
+          "id": "long_rain",
+          "source_kind": "synthetic_tts",
+          "expected": "Bỗng nhiên mây xám kéo đến, gió thổi làm tán cây nghiêng ngả bên hiên.",
+          "stt_text": "bỗng nhiên mây sám kéo đến gió thổi làm tán cây nghiêng ngả bên hiên",
+          "stt_ms": 457.55,
+          "wer": 0.0667
+        },
+        {
+          "id": "long_home",
+          "source_kind": "synthetic_tts",
+          "expected": "Tối đến, cả nhà quây quần bên mâm cơm ấm áp nghe Mi kể chuyện ở lớp.",
+          "stt_text": "tối đến cả nhà quây quần bên mâm cơm ấm áp nghe my kể chuyện ở lớp",
+          "stt_ms": 406.1,
+          "wer": 0.0588
+        },
+        {
+          "id": "long_morning",
+          "source_kind": "synthetic_tts",
+          "expected": "Buổi sáng mùa thu, nắng vàng dịu nhẹ chiếu qua khung cửa sổ lớp Một.",
+          "stt_text": "buổi sáng mùa thu nắng vàng dịu nhẹ chiếu qua khung cửa số lớp một",
+          "stt_ms": 311.05,
+          "wer": 0.0667
+        },
+        {
+          "id": "long_desk",
+          "source_kind": "synthetic_tts",
+          "expected": "Trên bàn gỗ sạch sẽ, bé Mi mở quyển sách Tiếng Việt mới tinh.",
+          "stt_text": "trên bàn gỗ sạch sẽ bé my mở quyển sách tiếng việt mới tinh",
+          "stt_ms": 360.67,
+          "wer": 0.0714
+        },
+        {
+          "id": "long_story",
+          "source_kind": "synthetic_tts",
+          "expected": "Giọng đọc trong trẻo của bé khiến ông bà gật gù khen ngợi suốt buổi tối.",
+          "stt_text": "giọng đọc trong trẻo của bé khiến ông bà gật gù khen ngợi suốt buổi tối",
+          "stt_ms": 520.78,
+          "wer": 0.0
+        },
+        {
+          "id": "offbook_1",
+          "source_kind": "synthetic_tts",
+          "expected": "con mèo đen",
+          "stt_text": "con mèo đen",
+          "stt_ms": 313.12,
+          "wer": 0.0
+        },
+        {
+          "id": "offbook_tone",
+          "source_kind": "synthetic_tts",
+          "expected": "một",
+          "stt_text": "một",
+          "stt_ms": 299.03,
+          "wer": 0.0
+        },
+        {
+          "id": "human_0",
+          "source_kind": "human_recording",
+          "expected": "nếu mà không có những chế độ khống chế thì",
+          "stt_text": "rồi cũng hỗ trợ cho lâu lâu cũng cho gạo cho này kia",
+          "stt_ms": 434.35,
+          "wer": 1.3
+        },
+        {
+          "id": "human_1",
+          "source_kind": "human_recording",
+          "expected": "cho này kia thôi",
+          "stt_text": "những nơi đã khống chế được căn bệnh",
+          "stt_ms": 264.49,
+          "wer": 2.0
+        },
+        {
+          "id": "human_2",
+          "source_kind": "human_recording",
+          "expected": "âm lượng tivi giảm",
+          "stt_text": "âm lượng tv giảm",
+          "stt_ms": 340.37,
+          "wer": 0.25
+        }
+      ]
+    }
+  },
+  "fp32": {
+    "precision": "fp32",
+    "startup_s": 20.63,
+    "health": {
+      "status": "ok",
+      "version": "1.1.0",
+      "provider": "local",
+      "auth_required": true,
+      "stt": {
+        "ready": true,
+        "model_version": "sherpa-onnx-zipformer-vi-30m-int8-2026-02-09",
+        "active_jobs": 0
+      },
+      "tts": {
+        "ready": true,
+        "model_version": "vieneu-v3-turbo-onnx-fp32-3.8.5",
+        "precision": "fp32",
+        "hybrid_word_fp32": false,
+        "cache_max_bytes": 524288000,
+        "voices_count": 8,
+        "regions": [
+          "north",
+          "central",
+          "south"
+        ],
+        "active_jobs": 0
+      },
+      "_startup_s": 20.63
+    },
+    "memory": {
+      "idle": {
+        "worker_pid": 22704,
+        "tree_pids": [
+          24724,
+          22704
+        ],
+        "rss_mb": 1319.37,
+        "peak_rss_mb": 1321.02,
+        "commit_mb": 2022.03,
+        "peak_commit_mb": 2022.04
+      },
+      "after_warmup": {
+        "worker_pid": 22704,
+        "tree_pids": [
+          24724,
+          22704
+        ],
+        "rss_mb": 1386.79,
+        "peak_rss_mb": 1386.79,
+        "commit_mb": 2165.2,
+        "peak_commit_mb": 2165.21
+      },
+      "peak": {
+        "worker_pid": 22704,
+        "tree_pids": [
+          24724,
+          22704
+        ],
+        "rss_mb": 1446.99,
+        "peak_rss_mb": 1446.99,
+        "commit_mb": 2223.72,
+        "peak_commit_mb": 2223.75
+      }
+    },
+    "minimal_pairs": {
+      "isolated_exact": "7/17",
+      "carrier_exact": "13/17",
+      "tts_p50_ms": 754.09,
+      "tts_p95_ms": 904.76,
+      "details": [
+        {
+          "word": "mốt",
+          "tts_ms": 654.34,
+          "iso_stt": "một",
+          "iso_ok": false,
+          "car_stt": "chữ mốt",
+          "car_ok": true
+        },
+        {
+          "word": "một",
+          "tts_ms": 904.76,
+          "iso_stt": "một",
+          "iso_ok": true,
+          "car_stt": "chữ một",
+          "car_ok": true
+        },
+        {
+          "word": "mót",
+          "tts_ms": 860.2,
+          "iso_stt": "mất",
+          "iso_ok": false,
+          "car_stt": "chữ mot",
+          "car_ok": false
+        },
+        {
+          "word": "ma",
+          "tts_ms": 754.09,
+          "iso_stt": "ma",
+          "iso_ok": true,
+          "car_stt": "chữ ma chữ",
+          "car_ok": true
+        },
+        {
+          "word": "má",
+          "tts_ms": 823.75,
+          "iso_stt": "má",
+          "iso_ok": true,
+          "car_stt": "chữ má",
+          "car_ok": true
+        },
+        {
+          "word": "mà",
+          "tts_ms": 876.67,
+          "iso_stt": "ma",
+          "iso_ok": false,
+          "car_stt": "chữ mà",
+          "car_ok": true
+        },
+        {
+          "word": "mả",
+          "tts_ms": 837.66,
+          "iso_stt": "mà",
+          "iso_ok": false,
+          "car_stt": "chữ mảnh",
+          "car_ok": false
+        },
+        {
+          "word": "mã",
+          "tts_ms": 813.8,
+          "iso_stt": "mã",
+          "iso_ok": true,
+          "car_stt": "chữ mã",
+          "car_ok": true
+        },
+        {
+          "word": "mạ",
+          "tts_ms": 854.98,
+          "iso_stt": "mã",
+          "iso_ok": false,
+          "car_stt": "chữ mạng",
+          "car_ok": false
+        },
+        {
+          "word": "bò",
+          "tts_ms": 734.94,
+          "iso_stt": "bò",
+          "iso_ok": true,
+          "car_stt": "chữ bò",
+          "car_ok": true
+        },
+        {
+          "word": "bó",
+          "tts_ms": 751.77,
+          "iso_stt": "bón",
+          "iso_ok": false,
+          "car_stt": "chữ bó",
+          "car_ok": true
+        },
+        {
+          "word": "bỏ",
+          "tts_ms": 643.78,
+          "iso_stt": "bầu",
+          "iso_ok": false,
+          "car_stt": "chữ bỏ",
+          "car_ok": true
+        },
+        {
+          "word": "bõ",
+          "tts_ms": 686.26,
+          "iso_stt": "bỏ",
+          "iso_ok": false,
+          "car_stt": "chữ bõ",
+          "car_ok": true
+        },
+        {
+          "word": "bọ",
+          "tts_ms": 629.41,
+          "iso_stt": "bọ",
+          "iso_ok": true,
+          "car_stt": "chữ bọ",
+          "car_ok": true
+        },
+        {
+          "word": "tươi",
+          "tts_ms": 778.04,
+          "iso_stt": "tươi đẹp",
+          "iso_ok": false,
+          "car_stt": "chữ tươi đẹp",
+          "car_ok": true
+        },
+        {
+          "word": "tưới",
+          "tts_ms": 674.91,
+          "iso_stt": "tưới",
+          "iso_ok": true,
+          "car_stt": "chữ tưới tắm",
+          "car_ok": true
+        },
+        {
+          "word": "tười",
+          "tts_ms": 750.25,
+          "iso_stt": "tươi",
+          "iso_ok": false,
+          "car_stt": "chữ tường",
+          "car_ok": false
+        }
+      ]
+    },
+    "phonics_mot": {
+      "duration_seconds": 5.86,
+      "wav_bytes": 562604,
+      "stt_roundtrip": "ô tở ốt mốt mốt sắc mốt mốt hai mươi mốt"
+    },
+    "regional_8_voices": {
+      "tts_p50_ms": 3623.5,
+      "tts_p95_ms": 4642.37,
+      "rows": [
+        {
+          "voice_id": "local_north_truc_ly",
+          "tts_ms": 2764.93,
+          "wav_bytes": 275564,
+          "stt_ms": 284.57,
+          "wer": 0.0,
+          "transcript": "trên cành cây xanh đàn chim hót vang chào buổi sáng"
+        },
+        {
+          "voice_id": "local_north_ngoc_linh",
+          "tts_ms": 3138.36,
+          "wav_bytes": 313964,
+          "stt_ms": 319.59,
+          "wer": 0.0909,
+          "transcript": "kinh cành cây xanh đàn chim hót vang chào buổi sáng"
+        },
+        {
+          "voice_id": "local_north_thien_minh",
+          "tts_ms": 3408.26,
+          "wav_bytes": 298604,
+          "stt_ms": 275.79,
+          "wer": 0.0,
+          "transcript": "trên cành cây xanh đàn chim hót vang chào buổi sáng"
+        },
+        {
+          "voice_id": "local_central_ngoc_tran",
+          "tts_ms": 3779.36,
+          "wav_bytes": 352364,
+          "stt_ms": 431.43,
+          "wer": 0.6364,
+          "transcript": "trên cành cây xanh đang chiếm họp ván trao bụi sản"
+        },
+        {
+          "voice_id": "local_central_quang_son",
+          "tts_ms": 4642.37,
+          "wav_bytes": 398444,
+          "stt_ms": 333.93,
+          "wer": 0.4545,
+          "transcript": "trên cành cây xanh đang chiếm họp vắng cho buổi sáng"
+        },
+        {
+          "voice_id": "local_south_thuc_doan",
+          "tts_ms": 3623.5,
+          "wav_bytes": 337004,
+          "stt_ms": 323.6,
+          "wer": 0.0,
+          "transcript": "trên cành cây xanh đàn chim hót vang chào buổi sáng"
+        },
+        {
+          "voice_id": "local_south_my_duyen",
+          "tts_ms": 4362.25,
+          "wav_bytes": 390764,
+          "stt_ms": 464.34,
+          "wer": 0.0,
+          "transcript": "trên cành cây xanh đàn chim hót vang chào buổi sáng"
+        },
+        {
+          "voice_id": "local_south_thai_son",
+          "tts_ms": 4119.57,
+          "wav_bytes": 329324,
+          "stt_ms": 244.66,
+          "wer": 0.0,
+          "transcript": "trên cành cây xanh đàn chim hót vang chào buổi sáng"
+        }
+      ]
+    },
+    "compression_ab": [],
+    "worker_accept_negotiation": {},
+    "adult_corpus_stt": {
+      "count": 18,
+      "mean_wer": 0.2624,
+      "stt_p50_ms": 307.7,
+      "stt_p95_ms": 604.0,
+      "rows": [
+        {
+          "id": "short_1",
+          "source_kind": "synthetic_tts",
+          "expected": "Sáng nay, Mi mang ô đến lớp.",
+          "stt_text": "sáng nay my mang ô đến lớp",
+          "stt_ms": 228.39,
+          "wer": 0.1429
+        },
+        {
+          "id": "short_2",
+          "source_kind": "synthetic_tts",
+          "expected": "Tan học, trời đổ mưa.",
+          "stt_text": "tan học trời đổ mưa",
+          "stt_ms": 192.1,
+          "wer": 0.0
+        },
+        {
+          "id": "short_3",
+          "source_kind": "synthetic_tts",
+          "expected": "Mi che ô cho bạn An.",
+          "stt_text": "mì che ô cho bạn an",
+          "stt_ms": 187.64,
+          "wer": 0.1667
+        },
+        {
+          "id": "long_repeat",
+          "source_kind": "synthetic_tts",
+          "expected": "Mi gọi An. An quay lại gọi Mi cùng xuống sân trường.",
+          "stt_text": "mi gọi an an quay lại gọi my cùng xuống sân trường",
+          "stt_ms": 307.7,
+          "wer": 0.0833
+        },
+        {
+          "id": "long_dialogue",
+          "source_kind": "synthetic_tts",
+          "expected": "Dừng lại! Đừng chạy nhanh quá!",
+          "stt_text": "dừng lại đừng chạy nhanh quá",
+          "stt_ms": 222.57,
+          "wer": 0.0
+        },
+        {
+          "id": "long_diff_1",
+          "source_kind": "synthetic_tts",
+          "expected": "Mi đọc chậm từng chữ: mốt, một, nghiêng đầu, khúc khích rồi cười tươi.",
+          "stt_text": "mi đọc chậm từng chữ một nghiêng đầu khúc khích rồi cười tươi",
+          "stt_ms": 375.58,
+          "wer": 0.0714
+        },
+        {
+          "id": "long_diff_2",
+          "source_kind": "synthetic_tts",
+          "expected": "Khi về nhà, bé tự lấy vở tập viết từng chữ bàn, bạn, nghỉ, nghĩ rất cẩn thận.",
+          "stt_text": "khi về nhà bé tư lấy vợ tập việc tương trừ bang ba nghỉ nghỉ rất cẩn thận",
+          "stt_ms": 349.96,
+          "wer": 0.4444
+        },
+        {
+          "id": "long_longsent",
+          "source_kind": "synthetic_tts",
+          "expected": "Mùa thu đi qua thật êm đềm trong tiếng đọc bài rộn ràng của lớp nhỏ.",
+          "stt_text": "mùa thu đi qua thật êm đềm trong tiếng đọc bài rộn ràng của lớp nhỏ",
+          "stt_ms": 414.22,
+          "wer": 0.0
+        },
+        {
+          "id": "long_rain",
+          "source_kind": "synthetic_tts",
+          "expected": "Bỗng nhiên mây xám kéo đến, gió thổi làm tán cây nghiêng ngả bên hiên.",
+          "stt_text": "bỗng nhiên mây sám kéo đến gió thổi làm tán cây nghiêng ngả bên hiên",
+          "stt_ms": 428.71,
+          "wer": 0.0667
+        },
+        {
+          "id": "long_home",
+          "source_kind": "synthetic_tts",
+          "expected": "Tối đến, cả nhà quây quần bên mâm cơm ấm áp nghe Mi kể chuyện ở lớp.",
+          "stt_text": "tối đến cả nhà quây quần bên mâm cơm ấm áp nghe my kể chuyện ở lớp",
+          "stt_ms": 446.98,
+          "wer": 0.0588
+        },
+        {
+          "id": "long_morning",
+          "source_kind": "synthetic_tts",
+          "expected": "Buổi sáng mùa thu, nắng vàng dịu nhẹ chiếu qua khung cửa sổ lớp Một.",
+          "stt_text": "buổi sáng mùa thu nắng vàng dịu nhẹ chiếu qua khung cửa số lớp một",
+          "stt_ms": 604.0,
+          "wer": 0.0667
+        },
+        {
+          "id": "long_desk",
+          "source_kind": "synthetic_tts",
+          "expected": "Trên bàn gỗ sạch sẽ, bé Mi mở quyển sách Tiếng Việt mới tinh.",
+          "stt_text": "trên bàn gỗ sạch sẽ bé my mở quyển sách tiếng việt mới tinh",
+          "stt_ms": 348.87,
+          "wer": 0.0714
+        },
+        {
+          "id": "long_story",
+          "source_kind": "synthetic_tts",
+          "expected": "Giọng đọc trong trẻo của bé khiến ông bà gật gù khen ngợi suốt buổi tối.",
+          "stt_text": "giọng đọc trong trẻo của bé khiến ông bà gật gù khen ngợi suốt buổi tối",
+          "stt_ms": 442.49,
+          "wer": 0.0
+        },
+        {
+          "id": "offbook_1",
+          "source_kind": "synthetic_tts",
+          "expected": "con mèo đen",
+          "stt_text": "con mèo đen",
+          "stt_ms": 139.19,
+          "wer": 0.0
+        },
+        {
+          "id": "offbook_tone",
+          "source_kind": "synthetic_tts",
+          "expected": "một",
+          "stt_text": "một",
+          "stt_ms": 127.96,
+          "wer": 0.0
+        },
+        {
+          "id": "human_0",
+          "source_kind": "human_recording",
+          "expected": "nếu mà không có những chế độ khống chế thì",
+          "stt_text": "rồi cũng hỗ trợ cho lâu lâu cũng cho gạo cho này kia",
+          "stt_ms": 355.61,
+          "wer": 1.3
+        },
+        {
+          "id": "human_1",
+          "source_kind": "human_recording",
+          "expected": "cho này kia thôi",
+          "stt_text": "những nơi đã khống chế được căn bệnh",
+          "stt_ms": 181.14,
+          "wer": 2.0
+        },
+        {
+          "id": "human_2",
+          "source_kind": "human_recording",
+          "expected": "âm lượng tivi giảm",
+          "stt_text": "âm lượng tv giảm",
+          "stt_ms": 174.12,
+          "wer": 0.25
+        }
+      ]
+    }
+  },
+  "hybrid_int8_word_fp32": {
+    "health_hybrid_word_fp32": true,
+    "minimal_pairs_isolated_exact": "10/17",
+    "phonics_status": 200,
+    "memory_peak": {
+      "worker_pid": 28612,
+      "tree_pids": [
+        13516,
+        28612
+      ],
+      "rss_mb": 1901.3,
+      "peak_rss_mb": 1901.3,
+      "commit_mb": 2678.87,
+      "peak_commit_mb": 2678.9
+    },
+    "sentence_x_tts_precision": "int8",
+    "word_x_tts_precision": "fp32",
+    "memory_idle": {
+      "worker_pid": 28612,
+      "tree_pids": [
+        13516,
+        28612
+      ],
+      "rss_mb": 1759.1,
+      "peak_rss_mb": 1795.89,
+      "commit_mb": 2462.51,
+      "peak_commit_mb": 2499.79
+    }
+  },
+  "topologies_3d": {
+    "topology_1_online_local_only": {
+      "status": "PASS",
+      "provider": "local",
+      "google_fallback_disabled": true
+    },
+    "topology_2_wan_off_loopback": {
+      "status": "PASS",
+      "negative_control_external_blocked": true,
+      "cache_cleared_before_test": true,
+      "unseen_tts_status": 200,
+      "unseen_timed_status": 200,
+      "unseen_timed_words": 9,
+      "unseen_stt_text": "con mèo mướp trèo cây cao buổi sớm mai",
+      "unseen_stt_wer": 0.1111,
+      "unseen_stt_ms": 2307.2
+    },
+    "topology_4_mid_reading_kill_recovery": {
+      "status": "PASS",
+      "fail_fast_exception": "ReadError",
+      "fail_fast_ms": 4.15,
+      "recovery_tts_status": 200,
+      "recovery_stt_text": "bé đọc lại bình thường"
+    },
+    "topology_3_phone_airplane_mode": {
+      "honor_x9d_status": "CONNECTED",
+      "adb_devices": [
+        "ATSYVB6205006984\tdevice"
+      ],
+      "android_on_device_inference": false,
+      "gap_audit": "MainActivity.java is a pure server-backed WebView shell with zero JS bridge and no on-device Sherpa-ONNX/VieNeu runtime.",
+      "device_model": "MTN-NX1",
+      "android_version": "16",
+      "cpu_abi": "arm64-v8a",
+      "mem_total_kb": 7646768,
+      "installed_package": "vn.viread.android",
+      "installed_version": "0.1.0 (versionCode=1, minSdk=26, targetSdk=35)",
+      "installed_apk_size": "2.1M",
+      "installed_native_libs": "NO_NATIVE_LIBS",
+      "offline_ai_on_phone_status": "UNSUPPORTED_WEBVIEW_ONLY"
+    },
+    "topology_5_laptop_off_matrix": {
+      "local_voice_worker_status": "DOWN_503_UNAVAILABLE",
+      "local_ocr_worker_status": "DOWN_QUEUED_UNTIL_RESUME",
+      "local_ollama_status": "DOWN_SKIPPED_PROVISIONAL_FALLBACK",
+      "cloud_web_api_and_supabase_status": "UP_CATALOG_PROGRESS_REPORTS_ONLY"
+    }
+  }
+}

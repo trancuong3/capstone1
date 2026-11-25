@@ -1239,11 +1239,14 @@ class ReadingContentService:
 
         image_url = None
         if book_is_private and book_id_value is not None:
-            image_url = private_page_image_url(
+            image_url = await asyncio.to_thread(
+                private_page_image_url,
                 book_id_value,
                 page_id,
                 revision_id=page_revision_id,
                 base_url=base_url,
+                storage_path=image_path,
+                owner_id=owner_parent_id,
             )
         elif image_path:
             try:

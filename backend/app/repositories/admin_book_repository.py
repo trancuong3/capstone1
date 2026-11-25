@@ -43,11 +43,29 @@ class AdminBookRepository:
         if book is None:
             return False
         if book.IsDeleted:
+            if isinstance(self.db, AsyncSession):
+                from app.repositories.ocr_inference_job_repository import OcrInferenceJobRepository
+
+                cancelled = await OcrInferenceJobRepository(self.db).cancel_open_for_book(
+                    book_id,
+                    reason="BOOK_SOFT_DELETED",
+                )
+                if cancelled > 0:
+                    await self.db.commit()
             return True
 
+        now = datetime.now(timezone.utc)
         book.IsDeleted = True
-        book.DeletedAt = datetime.now(timezone.utc)
+        book.DeletedAt = now
         book.DeletedBy = actor_id
+        if isinstance(self.db, AsyncSession):
+            from app.repositories.ocr_inference_job_repository import OcrInferenceJobRepository
+
+            await OcrInferenceJobRepository(self.db).cancel_open_for_book(
+                book_id,
+                reason="BOOK_SOFT_DELETED",
+                now=now,
+            )
         try:
             await self.db.commit()
         except Exception:

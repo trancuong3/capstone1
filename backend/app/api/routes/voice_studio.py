@@ -7,8 +7,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response
 
-from app.api.deps import get_current_parent_id
-from app.api.routes.voice import get_voice_orchestrator, provider_http_exception
+from app.api.deps import require_active_profile_id
+from app.api.routes.voice import _extract_audio_accept, get_voice_orchestrator, provider_http_exception
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
 from app.schemas.voice_studio import (
     TimedSpeechRead,
@@ -18,6 +18,7 @@ from app.schemas.voice_studio import (
     VoiceListRead,
     VoiceProviderMode,
 )
+from app.services.rate_limiter import rate_limit
 from app.services.voice_orchestrator import VoicePolicyContext
 
 router = APIRouter()
@@ -28,7 +29,10 @@ async def list_voices(
     response: Response,
     provider_mode: VoiceProviderMode = Query(default="local_only"),
     allow_google_tts: bool = Query(default=False),
-    _actor_id: UUID = Depends(get_current_parent_id),
+    _actor_id: UUID = Depends(require_active_profile_id),
+    _rate_limited: None = Depends(
+        rate_limit("voice_status", default_max=120, default_window=60.0)
+    ),
 ) -> VoiceListRead:
     """List curated Bắc · Trung · Nam local voices (plus Google backup voices when enabled)."""
 
@@ -65,6 +69,8 @@ async def timed_text_to_speech(
         provider_mode=payload.provider_mode,
         allow_google_tts=payload.allow_google_tts,
         session_id=payload.session_id,
+        accept=_extract_audio_accept(request),
+        audio_format=payload.audio_format,
     )
     try:
         speech = await get_voice_orchestrator().synthesize_timed(

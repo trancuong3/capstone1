@@ -13,6 +13,7 @@ MIN_SPEED = 0.7
 MAX_SPEED = 1.2
 
 VoiceProviderMode = Literal["local_only", "local_with_google_fallback"]
+AudioFormatPreference = Literal["wav", "mp3", "ogg"]
 
 
 class VoiceInfoRead(BaseModel):
@@ -52,6 +53,7 @@ class TimedSpeechRequest(BaseModel):
     provider_mode: VoiceProviderMode = "local_only"
     allow_google_tts: bool = False
     session_id: str | None = Field(default=None, max_length=80)
+    audio_format: AudioFormatPreference | None = None
 
     @field_validator("words")
     @classmethod

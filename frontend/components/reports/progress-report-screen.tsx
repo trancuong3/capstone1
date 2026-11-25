@@ -90,34 +90,44 @@ function ProgressReportContent({
           requestedPeriodEnd,
         );
         if (window === "invalid") return;
-        const [reportResult, periodsResult] = await Promise.allSettled([
-          reportService.get(child.id, window ?? undefined),
-          reportService.listPeriods(child.id),
-        ]);
+        const periods = await reportService.listPeriods(child.id).catch(() => null);
         if (!active) return;
-        const failure =
-          reportResult.status === "rejected" ? reportResult.reason : null;
-        const reportStatus =
-          reportResult.status === "fulfilled"
-            ? "ready"
-            : isServiceError(failure) && failure.status === 404
+        const periodsValue = periods ?? { items: [], next_cursor: null };
+        const periodsError = periods === null;
+        if (!window && periods !== null && periods.items.length === 0) {
+          setState({
+            status: "loaded",
+            children,
+            child,
+            report: null,
+            reportStatus: "empty",
+            periods: periodsValue,
+            periodsError: false,
+          });
+          return;
+        }
+        let report: ProgressReportDTO | null = null;
+        let reportStatus: "ready" | "empty" | "unavailable" | "error" = "error";
+        try {
+          report = await reportService.get(child.id, window ?? undefined);
+          reportStatus = "ready";
+        } catch (failure) {
+          reportStatus =
+            isServiceError(failure) && failure.status === 404
               ? "empty"
               : isServiceError(failure) &&
                   (failure.status === 501 || failure.status === 503)
                 ? "unavailable"
                 : "error";
+        }
         setState({
           status: "loaded",
           children,
           child,
-          report:
-            reportResult.status === "fulfilled" ? reportResult.value : null,
+          report,
           reportStatus,
-          periods:
-            periodsResult.status === "fulfilled"
-              ? periodsResult.value
-              : { items: [], next_cursor: null },
-          periodsError: periodsResult.status === "rejected",
+          periods: periodsValue,
+          periodsError,
         });
       } catch (error) {
         if (active)

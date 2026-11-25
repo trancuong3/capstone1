@@ -2848,7 +2848,9 @@ class AdminOcrService:
                         (event_type, page_id, revision_id, actor_id, payload)
                     VALUES ('VERIFIED_REVISION', :page_id, :revision_id, :actor_id,
                             CAST(:payload AS jsonb))
-                    ON CONFLICT (event_type, revision_id) DO NOTHING
+                    ON CONFLICT (event_type, revision_id)
+                        WHERE event_type = 'VERIFIED_REVISION'
+                    DO NOTHING
                 """),
                 {
                     "page_id": page.Id,

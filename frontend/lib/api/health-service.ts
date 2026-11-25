@@ -34,6 +34,17 @@ export function createHealthService(): HealthService {
                 ])
                 .nullable()
                 .optional(),
+              last_success_at: z.iso
+                .datetime({ offset: true })
+                .nullable()
+                .optional(),
+              oldest_pending_job_age_seconds: z
+                .number()
+                .nonnegative()
+                .nullable()
+                .optional(),
+              queue_depth: z.number().int().nonnegative().nullable().optional(),
+              last_error: z.string().nullable().optional(),
             }),
           ),
         }),

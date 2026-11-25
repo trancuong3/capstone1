@@ -341,22 +341,33 @@ class ParentPrivateBookRepository:
         await self.db.flush(rows)
 
     async def claim_next_checking_submission(
-        self, worker_id: str, *, lease_seconds: int = 900
+        self,
+        worker_id: str,
+        *,
+        lease_seconds: int = 900,
+        only_post_ocr: bool = False,
     ) -> ParentBookPageSubmission | None:
         now = datetime.now(timezone.utc)
+        filters = [
+            ParentBookPageSubmission.WorkflowStatus == "CHECKING",
+            or_(
+                ParentBookPageSubmission.RetryAfter.is_(None),
+                ParentBookPageSubmission.RetryAfter <= now,
+            ),
+            or_(
+                ParentBookPageSubmission.LeaseExpiresAt.is_(None),
+                ParentBookPageSubmission.LeaseExpiresAt <= now,
+            ),
+        ]
+        if only_post_ocr:
+            filters.append(
+                ParentBookPageSubmission.OcrStatus.in_(
+                    ("COMPLETED", "NO_TEXT_DETECTED")
+                )
+            )
         row = await self.db.scalar(
             select(ParentBookPageSubmission)
-            .where(
-                ParentBookPageSubmission.WorkflowStatus == "CHECKING",
-                or_(
-                    ParentBookPageSubmission.RetryAfter.is_(None),
-                    ParentBookPageSubmission.RetryAfter <= now,
-                ),
-                or_(
-                    ParentBookPageSubmission.LeaseExpiresAt.is_(None),
-                    ParentBookPageSubmission.LeaseExpiresAt <= now,
-                ),
-            )
+            .where(*filters)
             .order_by(ParentBookPageSubmission.CreatedAt.asc(), ParentBookPageSubmission.Id.asc())
             .with_for_update(skip_locked=True)
             .limit(1)

@@ -480,6 +480,7 @@ class LocalVoiceProvider:
         json: dict[str, Any] | None = None,
         data: dict[str, Any] | None = None,
         files: dict[str, Any] | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> httpx.Response:
         if not self.base_url:
             raise LocalVoiceTechnicalError(
@@ -702,8 +703,19 @@ class LocalVoiceProvider:
         voice_id: str | None = None,
         speed: float = 1.0,
         word_sample: bool = False,
+        accept: str | None = None,
+        audio_format: str | None = None,
     ) -> LocalSynthesizedAudio:
         target_voice, migrated_legacy = self._resolve_target_voice_id(voice_id)
+        body: dict[str, Any] = {
+            "text": text,
+            "voice_id": target_voice,
+            "speed": speed,
+            "word_sample": word_sample,
+        }
+        if audio_format:
+            body["audio_format"] = audio_format
+        extra_headers = {"Accept": accept} if accept else None
         try:
             resp = await self._post_with_retry(
                 "/tts",
@@ -759,9 +771,20 @@ class LocalVoiceProvider:
         words: list[str],
         voice_id: str | None = None,
         speed: float = 1.0,
+        accept: str | None = None,
+        audio_format: str | None = None,
     ) -> LocalTimedSpeech:
         target_voice, _ = self._resolve_target_voice_id(voice_id)
         passage_text = " ".join(words)
+        body: dict[str, Any] = {
+            "text": passage_text,
+            "voice_id": target_voice,
+            "speed": speed,
+            "word_sample": False,
+        }
+        if audio_format:
+            body["audio_format"] = audio_format
+        extra_headers = {"Accept": accept} if accept else None
         try:
             resp = await self._post_with_retry(
                 "/tts/timed",
@@ -847,8 +870,18 @@ class LocalVoiceProvider:
         steps: list[dict[str, Any]],
         voice_id: str | None = None,
         speed: float = 1.0,
+        accept: str | None = None,
+        audio_format: str | None = None,
     ) -> LocalPhonicsSpeech:
         target_voice, _ = self._resolve_target_voice_id(voice_id)
+        body: dict[str, Any] = {
+            "steps": steps,
+            "voice_id": target_voice,
+            "speed": speed,
+        }
+        if audio_format:
+            body["audio_format"] = audio_format
+        extra_headers = {"Accept": accept} if accept else None
         try:
             resp = await self._post_with_retry(
                 "/tts/phonics",

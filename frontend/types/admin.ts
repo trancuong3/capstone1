@@ -323,6 +323,10 @@ export interface HealthServiceItemUI {
   readonly checked_at: ISODateTime;
   readonly safe_message: string;
   readonly detail_status?: RuntimeHealthDetailUI | null;
+  readonly last_success_at?: ISODateTime | null;
+  readonly oldest_pending_job_age_seconds?: number | null;
+  readonly queue_depth?: number | null;
+  readonly last_error?: string | null;
 }
 
 export interface HealthSnapshotUI {

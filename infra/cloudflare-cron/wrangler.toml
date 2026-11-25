@@ -1,0 +1,13 @@
+name = "viread-cron-dispatcher"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+
+[triggers]
+# 30-minute cadence lets Render Free (15m idle sleep) sleep between ticks so 2 services stay well under 750h/mo.
+crons = ["*/30 * * * *"]
+
+[vars]
+# Override in Cloudflare dashboard / wrangler secret put:
+# VIREAD_BACKEND_URL = "https://your-api.example.com"
+# Secret (never commit): wrangler secret put VIREAD_CRON_DISPATCH_TOKEN
+VIREAD_BACKEND_URL = "https://api.example.invalid"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import logging
 from datetime import datetime, timezone
@@ -10,26 +11,36 @@ from app.diagnostic_logging import log_diagnostic
 from app.jobs.reading_reminder_worker import (
     ParentEmailLookupFailed,
     ParentEmailUnavailable,
+    _advisory_lock_guard,
     get_verified_parent_email,
 )
 from app.providers.reading_presence_email_provider import send_presence_email
 from app.repositories.reading_presence_repository import ReadingPresenceRepository
 from app.services.reading_presence_service import ReadingPresenceService
+from app.services.worker_telemetry import record_worker_error, record_worker_success
 
 logger = logging.getLogger(__name__)
+READING_PRESENCE_ADVISORY_LOCK_KEY = 4201002
+_WORKER_KEY = "reading_presence"
 
 
 async def process_due_alerts_once(now: datetime | None = None) -> int:
     now = now or datetime.now(timezone.utc)
-    async with AsyncSessionLocal() as session:
-        service = ReadingPresenceService(ReadingPresenceRepository(session))
-        return await service.deliver_due(
-            now,
-            recipient_resolver=get_verified_parent_email,
-            email_sender=send_presence_email,
-            parent_email_unavailable=ParentEmailUnavailable,
-            parent_lookup_failed=ParentEmailLookupFailed,
-        )
+    async with _advisory_lock_guard(READING_PRESENCE_ADVISORY_LOCK_KEY) as acquired:
+        if not acquired:
+            logger.info("reading_presence_skipped_lock_held")
+            return 0
+        async with AsyncSessionLocal() as session:
+            service = ReadingPresenceService(ReadingPresenceRepository(session))
+            delivered = await service.deliver_due(
+                now,
+                recipient_resolver=get_verified_parent_email,
+                email_sender=send_presence_email,
+                parent_email_unavailable=ParentEmailUnavailable,
+                parent_lookup_failed=ParentEmailLookupFailed,
+            )
+        record_worker_success(_WORKER_KEY)
+        return delivered
 
 
 def validate_worker_configuration() -> None:
@@ -49,13 +60,16 @@ def validate_worker_configuration() -> None:
         )
 
 
-async def run_worker() -> None:
+async def run_worker(*, once: bool = False) -> int:
     validate_worker_configuration()
     try:
+        if once:
+            return await process_due_alerts_once()
         while True:
             try:
                 await process_due_alerts_once()
             except Exception as error:
+                record_worker_error(_WORKER_KEY, error)
                 log_diagnostic(
                     logger,
                     logging.ERROR,
@@ -68,5 +82,13 @@ async def run_worker() -> None:
         await engine.dispose()
 
 
+def main() -> int:
+    parser = argparse.ArgumentParser(description="ViRead reading presence alert worker.")
+    parser.add_argument("--once", action="store_true", help="Run one idempotent sweep and exit.")
+    args = parser.parse_args()
+    asyncio.run(run_worker(once=args.once))
+    return 0
+
+
 if __name__ == "__main__":
-    asyncio.run(run_worker())
+    raise SystemExit(main())

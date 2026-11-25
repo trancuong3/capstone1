@@ -51,6 +51,8 @@ class VoicePolicyContext:
     page_id: str | None = None
     turn_id: str | None = None
     source: str | None = None
+    accept: str | None = None
+    audio_format: str | None = None
 
 
 _TURN_CACHE_MAX = 512

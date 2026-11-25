@@ -1113,6 +1113,30 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
                 safe_message: "Worker không được khởi chạy.",
                 detail_status: "disabled",
               },
+              {
+                id: "parent_book_submission",
+                label: "Parent book submission worker",
+                status: "HEALTHY",
+                checked_at: timestamp,
+                safe_message: "Đang xử lý hàng đợi kiểm tra.",
+                detail_status: "healthy",
+                last_success_at: timestamp,
+                oldest_pending_job_age_seconds: 125,
+                queue_depth: 3,
+                last_error: null,
+              },
+              {
+                id: "ocr_worker",
+                label: "Remote OCR worker",
+                status: "DEGRADED",
+                checked_at: timestamp,
+                safe_message: "Worker gặp lỗi tạm thời.",
+                detail_status: "failed",
+                last_success_at: null,
+                oldest_pending_job_age_seconds: 3720,
+                queue_depth: 7,
+                last_error: "WORKER_TIMEOUT",
+              },
             ],
           })
         : readyResponse(url),
@@ -1138,6 +1162,12 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     expect(
       screen.getByText("Storage phản hồi kiểm tra bucket (không đọc file)."),
     ).toBeInTheDocument();
+    expect(screen.getByText("3 tác vụ")).toBeInTheDocument();
+    expect(screen.getByText("2 phút 5 giây")).toBeInTheDocument();
+    expect(screen.getByText("7 tác vụ")).toBeInTheDocument();
+    expect(screen.getByText("1 giờ 2 phút")).toBeInTheDocument();
+    expect(screen.getByText("WORKER_TIMEOUT")).toBeInTheDocument();
+    expect(screen.getByText("Chưa ghi nhận")).toBeInTheDocument();
   });
   it("health error is safe and recheck recovers", async () => {
     const user = userEvent.setup();

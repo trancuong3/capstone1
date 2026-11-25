@@ -19,9 +19,13 @@ from app.database.role_cache import get_cached_profile_role
 from app.models import AuditLog, ChildProfile, ConsentRecord, Profile, ProgressReport, ReadingSession
 from app.repositories.difficult_words_repository import DifficultWordsRepository
 from app.services.admin_ocr_local import LocalCorrectionError, LocalOcrConfig, LocalOcrCorrector
+from app.services.ocr_inference_job_service import is_remote_ocr_mode
 from app.services.runtime_diagnostics import (
     collect_ocr_health,
+    collect_remote_ocr_health,
     collect_worker_health,
+    collect_worker_queue_metrics,
+    is_ocr_engine_ready_status,
     probe_storage_health,
 )
 from app.services.voice_orchestrator import VoiceOrchestrator
@@ -775,6 +779,9 @@ class AdminSystemRepository:
     async def probe_database(self):
         return await self.db.scalar(select(literal(1))) == 1
 
+    async def worker_queue_metrics(self):
+        return await collect_worker_queue_metrics(self.db)
+
 
 class AdminSystemService:
     def __init__(
@@ -1104,10 +1111,173 @@ class AdminSystemService:
         items.append(AdminHealthItemRead(**storage_details, checked_at=checked_at))
         items.extend(AdminHealthItemRead(**entry, checked_at=checked_at) for entry in ocr_details)
         if workers is not None:
+            metrics: dict[str, dict[str, object]] = {}
+            try:
+                raw_metrics = await asyncio.wait_for(
+                    self.repository.worker_queue_metrics(), timeout=2.0
+                )
+                if isinstance(raw_metrics, dict):
+                    metrics = raw_metrics
+            except Exception:
+                metrics = {}
+
+            raw_workers = collect_worker_health(workers)
+            for entry in raw_workers:
+                wid = str(entry.get("id") or "")
+                m = metrics.get(wid) or {}
+                if entry.get("last_success_at") is None and m.get("last_success_at") is not None:
+                    entry["last_success_at"] = m.get("last_success_at")
+                if entry.get("last_error") is None and m.get("last_error") is not None:
+                    entry["last_error"] = m.get("last_error")
+                if m.get("queue_depth") is not None:
+                    entry["queue_depth"] = int(m["queue_depth"])
+                oldest_age = m.get("oldest_pending_job_age_seconds")
+                if oldest_age is not None:
+                    entry["oldest_pending_job_age_seconds"] = float(oldest_age)
+                    if entry.get("status") == "HEALTHY" and float(oldest_age) > 900.0:
+                        entry["status"] = "DEGRADED"
+                        entry["last_error"] = entry.get("last_error") or "STALE_PENDING_JOBS"
+                        entry["safe_message"] = "Worker có tác vụ chờ xử lý quá 15 phút."
+
+            # Honest ocr_worker health entry (no false-green overrides)
+            ocr_m = metrics.get("ocr_worker") or {}
+            if remote_ocr_mode:
+                queue_info = dict(remote_snapshot.get("queue") or {})
+                workers_list = list(remote_snapshot.get("workers") or [])
+                online_workers = [w for w in workers_list if isinstance(w, dict) and w.get("online")]
+                primary = online_workers[0] if online_workers else (
+                    workers_list[0] if workers_list and isinstance(workers_list[0], dict) else None
+                )
+                hb_iso = primary.get("last_heartbeat_at") if primary else None
+                last_succ = None
+                if isinstance(hb_iso, str) and hb_iso:
+                    try:
+                        last_succ = datetime.fromisoformat(hb_iso)
+                    except ValueError:
+                        last_succ = None
+                if last_succ is None:
+                    succ_iso = queue_info.get("latest_succeeded_at")
+                    if isinstance(succ_iso, str) and succ_iso:
+                        try:
+                            last_succ = datetime.fromisoformat(succ_iso)
+                        except ValueError:
+                            last_succ = None
+                if last_succ is None:
+                    last_succ = ocr_m.get("last_success_at")  # type: ignore[assignment]
+                q_depth = (
+                    int(queue_info.get("pending_total", 0) or 0)
+                    + int(queue_info.get("active_total", 0) or 0)
+                    if queue_info
+                    else ocr_m.get("queue_depth")
+                )
+                oldest_ocr_age = (
+                    queue_info.get("oldest_pending_job_age_seconds")
+                    if "oldest_pending_job_age_seconds" in queue_info
+                    else ocr_m.get("oldest_pending_job_age_seconds")
+                )
+                if remote_ocr_ready:
+                    ocr_w_status = "HEALTHY"
+                    ocr_w_detail = "healthy"
+                    ocr_w_err = None
+                    ocr_w_msg = f"OCR worker {remote_worker_desc} online và đã xác minh suy luận."
+                elif online_workers:
+                    ocr_w_status = "DEGRADED"
+                    ocr_w_detail = "initialized"
+                    ocr_w_err = "OCR_ENGINES_NOT_READY"
+                    ocr_w_msg = f"OCR worker {remote_worker_desc} online nhưng engine chưa sẵn sàng."
+                else:
+                    has_backlog = bool(q_depth and int(q_depth) > 0)
+                    ocr_w_status = "UNAVAILABLE" if has_backlog else "DEGRADED"
+                    ocr_w_detail = "failed" if has_backlog else "disabled"
+                    ocr_w_err = "NO_ONLINE_OCR_WORKER"
+                    ocr_w_msg = "Chưa có OCR worker độc lập nào online."
+                items.append(
+                    AdminHealthItemRead(
+                        id="ocr_worker",
+                        label="OCR worker",
+                        status=ocr_w_status,
+                        detail_status=ocr_w_detail,
+                        checked_at=checked_at,
+                        safe_message=ocr_w_msg,
+                        last_success_at=last_succ,
+                        oldest_pending_job_age_seconds=oldest_ocr_age,
+                        queue_depth=q_depth,
+                        last_error=ocr_w_err,
+                    )
+                )
+            else:
+                local_ready = any(
+                    is_ocr_engine_ready_status(e.get("detail_status"))
+                    for e in ocr_details
+                    if e.get("id") in {"paddleocr", "vietocr"}
+                )
+                items.append(
+                    AdminHealthItemRead(
+                        id="ocr_worker",
+                        label="OCR worker",
+                        status="HEALTHY" if local_ready else "DEGRADED",
+                        detail_status="loaded" if local_ready else "installed",
+                        checked_at=checked_at,
+                        safe_message=(
+                            "OCR chạy trực tiếp trong tiến trình (local_inprocess)."
+                            if local_ready
+                            else "OCR local_inprocess chưa nạp model."
+                        ),
+                        last_success_at=ocr_m.get("last_success_at"),  # type: ignore[arg-type]
+                        oldest_pending_job_age_seconds=ocr_m.get("oldest_pending_job_age_seconds"),  # type: ignore[arg-type]
+                        queue_depth=ocr_m.get("queue_depth"),  # type: ignore[arg-type]
+                        last_error=ocr_m.get("last_error"),  # type: ignore[arg-type]
+                    )
+                )
+
             items.extend(
                 AdminHealthItemRead(**entry, checked_at=checked_at)
-                for entry in collect_worker_health(workers)
+                for entry in raw_workers
             )
+
+            # Report external/cron workers honestly
+            for ext_key, ext_label in (
+                ("reading_reminder", "Reading reminder worker"),
+                ("reading_presence", "Reading presence worker"),
+                ("karaoke_processing", "Karaoke processing worker"),
+            ):
+                ext_m = metrics.get(ext_key) or {}
+                ext_tel = get_worker_telemetry(ext_key)
+                ext_last_succ = ext_tel.get("last_success_at") or ext_m.get("last_success_at")
+                ext_last_err = ext_tel.get("last_error") or ext_m.get("last_error")
+                ext_q_depth = ext_m.get("queue_depth")
+                ext_oldest = ext_m.get("oldest_pending_job_age_seconds")
+                if ext_last_err:
+                    ext_status = "UNAVAILABLE"
+                    ext_detail = "failed"
+                    ext_msg = f"Worker gặp lỗi gần nhất: {ext_last_err}."
+                elif ext_oldest is not None and float(ext_oldest) > 900.0:
+                    ext_status = "DEGRADED"
+                    ext_detail = "unknown"
+                    ext_last_err = "STALE_PENDING_JOBS"
+                    ext_msg = "Có tác vụ chờ xử lý quá 15 phút."
+                elif ext_last_succ is not None:
+                    ext_status = "HEALTHY"
+                    ext_detail = "healthy"
+                    ext_msg = "Đã ghi nhận lần chạy thành công gần đây."
+                else:
+                    ext_status = "DEGRADED"
+                    ext_detail = "unknown"
+                    ext_msg = "Chưa ghi nhận lượt chạy cron/worker độc lập."
+                items.append(
+                    AdminHealthItemRead(
+                        id=ext_key,
+                        label=ext_label,
+                        status=ext_status,
+                        detail_status=ext_detail,
+                        checked_at=checked_at,
+                        safe_message=ext_msg,
+                        last_success_at=ext_last_succ,
+                        oldest_pending_job_age_seconds=ext_oldest,
+                        queue_depth=ext_q_depth,
+                        last_error=ext_last_err,
+                    )
+                )
 
         statuses = [item.status for item in items]
         overall = "HEALTHY" if all(s == "HEALTHY" for s in statuses) else "DEGRADED"

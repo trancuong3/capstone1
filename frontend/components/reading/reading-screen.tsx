@@ -2816,6 +2816,29 @@ function ReadingSessionScreen({
               return;
             }
 
+            if (
+              event.error === "stt-unavailable" ||
+              event.error === "network"
+            ) {
+              console.warn("[REALTIME STT INTERRUPTED]", {
+                error: event.error,
+                recorderStarted,
+                browserRecognitionStarted,
+                isListeningActive: isListeningActiveRef.current,
+              });
+              clearPageSilenceTimer();
+              clearCoachingTimers();
+              isListeningActiveRef.current = false;
+              isUsingRecorderRef.current = false;
+              speechRecorder.cancel();
+              recognitionRef.current = null;
+              setIsMicRecording(false);
+              setComparisonError(
+                "Dịch vụ nhận diện giọng nói đang tạm gián đoạn. Bé giữ nguyên từ và trang hiện tại — có thể nhìn chữ đọc tiếp hoặc bấm Bé đọc lại sau nhé.",
+              );
+              return;
+            }
+
             console.error("[REALTIME STT ERROR]", {
               error: event.error,
               recorderStarted,
@@ -3197,6 +3220,7 @@ function ReadingSessionScreen({
     listeningGenerationRef.current += 1;
     const generation = ++assistantAudioGenerationRef.current;
     setCountdown(null);
+    let playFailed = false;
 
     try {
       if (retryModeRef.current) {
@@ -3248,7 +3272,12 @@ function ReadingSessionScreen({
       }
 
       assistantAudioPlayingRef.current = true;
-      await play();
+      try {
+        await play();
+      } catch (err) {
+        playFailed = true;
+        throw err;
+      }
     } finally {
       if (generation === assistantAudioGenerationRef.current) {
         assistantAudioPlayingRef.current = false;
@@ -3257,6 +3286,7 @@ function ReadingSessionScreen({
         const retryCandidate = retryResumeAfterAssistantAudioRef.current;
         retryResumeAfterAssistantAudioRef.current = null;
         if (
+          !playFailed &&
           retryCandidate &&
           retryModeRef.current &&
           isActiveRetryCandidate(retryCandidate)
@@ -3270,6 +3300,7 @@ function ReadingSessionScreen({
         const shouldResume = assistantAudioResumeRequestedRef.current;
         assistantAudioResumeRequestedRef.current = false;
         if (
+          !playFailed &&
           resumeAfterPlayback &&
           shouldResume &&
           mountedRef.current &&
@@ -3281,6 +3312,7 @@ function ReadingSessionScreen({
         }
 
         if (
+          !playFailed &&
           tutorResumeMicAfterPlaybackRef.current &&
           mountedRef.current &&
           !retryModeRef.current

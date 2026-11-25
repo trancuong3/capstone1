@@ -530,6 +530,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private preRoll: Float32Array = new Float32Array(0);
   private speechChunks: Float32Array[] = [];
   private speechSamples = 0;
+  private voicedSamples = 0;
   private silenceSamples = 0;
   private quietFrameStreak = 0;
   private inSpeech = false;
@@ -540,6 +541,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private turnSeq = 0;
   private epoch = 0;
   private lastInterimSpeechSamples = 0;
+  private lastInterimVoicedSamples = 0;
   private interimInFlight = false;
   private interimGeneration = 0;
   private segmentInterims: string[] = [];
@@ -713,7 +715,127 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     }
     this.resetSegmentState();
     this.teardownAudioGraph();
-    this.onend?.();
+    this.onerror?.({ error: "stt-unavailable" });
+  }
+
+  private recordTechnicalFailureAndMaybeFallback(): boolean {
+    this.consecutiveTechnicalFailures += 1;
+    const freshHealth = getFreshVoiceEngineHealth();
+    const confirmedLocalOutage =
+      freshHealth !== null &&
+      (!freshHealth.local.available || !freshHealth.local.stt_ready);
+    if (
+      confirmedLocalOutage ||
+      this.consecutiveTechnicalFailures >= EMERGENCY_FAILURE_THRESHOLD
+    ) {
+      lastLocalSttOutageAt = Date.now();
+      return this.tryActivateBrowserFallback();
+    }
+    return false;
+  }
+
+  private tryActivateBrowserFallback(): boolean {
+    if (!this.active || this.stopping || this.usingBrowserFallback) {
+      return false;
+    }
+    const policy = getVoicePolicyPreferences();
+    if (
+      policy.providerMode !== "local_with_google_fallback" ||
+      !policy.allowGoogleSttFallback
+    ) {
+      return false;
+    }
+    const BrowserCtor = getBrowserSpeechRecognitionCtor();
+    if (!BrowserCtor) {
+      return false;
+    }
+
+    this.usingBrowserFallback = true;
+    this.abortController?.abort();
+    this.resetSegmentState();
+    this.teardownAudioGraph();
+
+    let nativeRec: SegmentSpeechRecognitionLike;
+    try {
+      nativeRec = new BrowserCtor();
+    } catch {
+      this.usingBrowserFallback = false;
+      return false;
+    }
+
+    nativeRec.lang = this.lang || "vi-VN";
+    nativeRec.continuous = this.continuous;
+    nativeRec.interimResults = this.interimResults;
+    nativeRec.maxAlternatives = this.maxAlternatives;
+    this.browserFallbackRec = nativeRec;
+    this.browserBaseOffset = this.resultsHistory.length;
+
+    nativeRec.onresult = (ev: SegmentSpeechEvent) => {
+      if (!this.active || this.browserFallbackRec !== nativeRec) return;
+      const base = this.browserBaseOffset;
+      const totalLength = base + ev.results.length;
+      const resultsObj: Record<number, SegmentSpeechResultItem> & {
+        length: number;
+      } = { length: totalLength };
+      for (let i = 0; i < base; i += 1) {
+        resultsObj[i] = this.resultsHistory[i];
+      }
+      for (let i = 0; i < ev.results.length; i += 1) {
+        const item = ev.results[i];
+        resultsObj[base + i] = item;
+        if (item?.isFinal) {
+          this.resultsHistory[base + i] = item;
+        }
+      }
+      this.onresult?.({
+        resultIndex: base + ev.resultIndex,
+        results: resultsObj,
+      });
+    };
+
+    nativeRec.onerror = (ev: SegmentSpeechErrorEvent) => {
+      if (
+        !this.active ||
+        this.stopping ||
+        this.browserFallbackRec !== nativeRec
+      ) {
+        return;
+      }
+      this.onerror?.(ev);
+    };
+
+    nativeRec.onend = () => {
+      if (this.browserFallbackRec !== nativeRec) return;
+      if (this.active && !this.stopping && this.continuous) {
+        try {
+          this.browserBaseOffset = this.resultsHistory.length;
+          nativeRec.start();
+          return;
+        } catch {
+          // Fall through to clean termination
+        }
+      }
+      this.browserFallbackRec = null;
+      this.usingBrowserFallback = false;
+      this.active = false;
+      this.stopping = false;
+      this.onend?.();
+    };
+
+    recordSttEngineUsage({
+      provider: "browser",
+      fallbackUsed: true,
+      fallbackReason: "LOCAL_STT_UNAVAILABLE",
+    });
+
+    try {
+      nativeRec.start();
+      return true;
+    } catch {
+      this.browserFallbackRec = null;
+      this.usingBrowserFallback = false;
+      return false;
+    }
   }
 
   private recordTechnicalFailureAndMaybeFallback(): boolean {
@@ -858,6 +980,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.preRoll = new Float32Array(0);
     this.speechChunks = [];
     this.speechSamples = 0;
+    this.voicedSamples = 0;
     this.silenceSamples = 0;
     this.inSpeech = false;
     this.segmentOnsetAt = null;
@@ -1525,6 +1648,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         if (wsActive) this.streamWsPcmChunk(chunk);
         this.speechChunks.push(chunk);
         this.speechSamples += chunk.length;
+        this.voicedSamples += chunk.length;
       } else {
         this.noiseFloor = Math.min(
           MAX_NOISE_FLOOR,
@@ -1624,6 +1748,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     if (
       !this.active ||
       this.stopping ||
+      this.sttCircuitOpen ||
       !this.inSpeech ||
       !this.speechChunks.length ||
       this.interimInFlight
@@ -1641,6 +1766,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     parentSignal?.addEventListener("abort", forwardAbort, { once: true });
 
     const total = this.speechSamples;
+    const silenceTailSamples = this.silenceSamples;
     const combined = new Float32Array(total);
     let offset = 0;
     for (const part of this.speechChunks) {
@@ -1655,7 +1781,10 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     const onsetAt = this.segmentOnsetAt;
     const capturedEpoch = this.epoch;
     this.lastInterimSpeechSamples = total;
+    this.lastInterimVoicedSamples = this.voicedSamples;
     this.interimInFlight = true;
+    this.interimStartedAt =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
     const gen = this.interimGeneration;
     const activeSegmentInterims = this.segmentInterims;
     const wavBlob = encodeFloat32ToWav16kBlob(combined);
@@ -1745,7 +1874,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private flushCurrentSegment(carryOverlap = false): void {
     this.interimGeneration += 1;
     this.lastInterimSpeechSamples = 0;
-    if (!this.speechChunks.length) {
+    if (this.sttCircuitOpen || !this.speechChunks.length) {
       this.resetSegmentState();
       return;
     }

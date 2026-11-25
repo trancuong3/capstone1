@@ -130,6 +130,11 @@ TTS_CACHE_DIR = Path(
     )
 )
 TTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+TTS_CACHE_MAX_BYTES = max(
+    1024 * 1024,
+    int(os.environ.get("VIREAD_VOICE_TTS_CACHE_MAX_BYTES", str(500 * 1024 * 1024))),
+)
+_TTS_DISK_CACHE_LOCK = threading.Lock()
 
 MAX_AUDIO_BYTES = 15 * 1024 * 1024
 MAX_TEXT_CHARS = 5000
@@ -157,6 +162,62 @@ def _mem_cache_put(key: str, value: tuple[bytes, float]) -> None:
     _TTS_MEM_CACHE.move_to_end(key)
     while len(_TTS_MEM_CACHE) > TTS_MEM_CACHE_MAX_ENTRIES:
         _TTS_MEM_CACHE.popitem(last=False)
+
+
+def _touch_cache_files(*paths: Path) -> None:
+    now = time.time()
+    for p in paths:
+        try:
+            os.utime(p, (now, now))
+        except OSError:
+            pass
+
+
+def prune_tts_cache_dir(
+    cache_dir: Path | None = None,
+    max_bytes: int | None = None,
+) -> int:
+    """Enforce bounded LRU disk budget (default 500 MB) on TTS cache entries."""
+    target_dir = cache_dir or TTS_CACHE_DIR
+    budget = TTS_CACHE_MAX_BYTES if max_bytes is None else max(0, int(max_bytes))
+    if not target_dir.is_dir():
+        return 0
+    with _TTS_DISK_CACHE_LOCK:
+        grouped: dict[str, list[tuple[Path, int, float]]] = {}
+        total_bytes = 0
+        try:
+            entries = list(target_dir.iterdir())
+        except OSError:
+            return 0
+        for item in entries:
+            try:
+                if not item.is_file():
+                    continue
+                stat = item.stat()
+            except OSError:
+                continue
+            size = int(stat.st_size)
+            total_bytes += size
+            grouped.setdefault(item.stem, []).append((item, size, float(stat.st_mtime)))
+        if total_bytes <= budget:
+            return 0
+        # Sort entry groups oldest-last-touched first so LRU entries are evicted first.
+        ordered_groups = sorted(
+            grouped.values(),
+            key=lambda files: max(m for _, _, m in files),
+        )
+        reclaimed = 0
+        for files in ordered_groups:
+            if total_bytes <= budget:
+                break
+            for fpath, fsize, _ in files:
+                try:
+                    fpath.unlink(missing_ok=True)
+                    total_bytes -= fsize
+                    reclaimed += fsize
+                except OSError:
+                    pass
+        return reclaimed
 
 
 @dataclass(frozen=True, slots=True)
@@ -258,6 +319,7 @@ class TtsSynthesisRequest(BaseModel):
     voice_id: str = Field(default=DEFAULT_VOICE_ID, min_length=1, max_length=128)
     speed: float = Field(default=1.0, ge=0.7, le=1.3)
     word_sample: bool = False
+    audio_format: Literal["wav", "mp3", "ogg"] | None = None
 
 
 class PhonicsStepRequestItem(BaseModel):
@@ -270,6 +332,7 @@ class PhonicsSynthesisRequest(BaseModel):
     steps: list[PhonicsStepRequestItem] = Field(min_length=1, max_length=12)
     voice_id: str = Field(default=DEFAULT_VOICE_ID, min_length=1, max_length=128)
     speed: float = Field(default=1.0, ge=0.7, le=1.3)
+    audio_format: Literal["wav", "mp3", "ogg"] | None = None
 
 
 class VoiceRuntimeEngine:
@@ -393,6 +456,39 @@ class VoiceRuntimeEngine:
                 time.perf_counter() - t0,
             )
         self.tts_engine = self.tts_engine_fp32 or self.tts_engine_int8
+
+        if (
+            TTS_HYBRID_WORD_FP32
+            and TTS_PRECISION == "int8"
+            and self.word_fp32_tts_engine is None
+        ):
+            try:
+                t_fp32 = time.perf_counter()
+                self.word_fp32_tts_engine = Vieneu(
+                    mode="v3turbo",
+                    backend="onnx",
+                    precision="fp32",
+                    threads=4,
+                )
+                logger.info(
+                    "Loaded hybrid word/phonics TTS (fp32) in %.2fs",
+                    time.perf_counter() - t_fp32,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "hybrid_word_fp32_load_failed error_type=%s; keeping %s",
+                    type(exc).__name__,
+                    TTS_PRECISION,
+                )
+                self.word_fp32_tts_engine = None
+
+    def get_tts_engine_for_mode(self, *, crisp: bool) -> tuple[Any, str]:
+        if crisp and TTS_HYBRID_WORD_FP32:
+            if self.word_fp32_tts_engine is not None:
+                return self.word_fp32_tts_engine, "fp32"
+            if TTS_PRECISION == "fp32" and self.tts_engine is not None:
+                return self.tts_engine, "fp32"
+        return self.tts_engine, TTS_PRECISION
 
     async def ensure_loaded(self) -> None:
         if self.stt_recognizer is not None and self.tts_engine is not None:
@@ -950,6 +1046,7 @@ def synthesize_single_utterance_sync(
     top_k = 15 if use_crisp_temp else 25
 
     cache_mode = "word" if use_crisp_temp else "sentence"
+    precision = precision_override or TTS_PRECISION
     key = make_cache_key(
         voice_id=preset.voice_id,
         speed=speed,
@@ -961,6 +1058,7 @@ def synthesize_single_utterance_sync(
     meta_cache = TTS_CACHE_DIR / f"{key}.json"
     if wav_cache.is_file() and meta_cache.is_file():
         meta = json.loads(meta_cache.read_text(encoding="utf-8"))
+        _touch_cache_files(wav_cache, meta_cache)
         return wav_cache.read_bytes(), float(meta["duration_seconds"])
 
     normalized_text = (
@@ -992,6 +1090,7 @@ def synthesize_single_utterance_sync(
         json.dumps({"duration_seconds": duration_s}, ensure_ascii=False),
         encoding="utf-8",
     )
+    prune_tts_cache_dir()
     return wav_bytes, duration_s
 
 
@@ -1013,9 +1112,13 @@ def synthesize_timed_passage_sync(
     meta_cache = TTS_CACHE_DIR / f"{key}.json"
     if wav_cache.is_file() and meta_cache.is_file():
         meta = json.loads(meta_cache.read_text(encoding="utf-8"))
+        _touch_cache_files(wav_cache, meta_cache)
+        out_bytes, out_media_type = encode_audio_bytes_for_media_type(
+            wav_cache.read_bytes(), preferred_media_type
+        )
         return {
-            "audio_base64": base64.b64encode(wav_cache.read_bytes()).decode("ascii"),
-            "media_type": "audio/wav",
+            "audio_base64": base64.b64encode(out_bytes).decode("ascii"),
+            "media_type": out_media_type,
             "provider": "local",
             "voice_id": preset.voice_id,
             "region": preset.region,
@@ -1128,9 +1231,13 @@ def synthesize_timed_passage_sync(
         ),
         encoding="utf-8",
     )
+    prune_tts_cache_dir()
+    out_bytes, out_media_type = encode_audio_bytes_for_media_type(
+        wav_bytes, preferred_media_type
+    )
     return {
-        "audio_base64": base64.b64encode(wav_bytes).decode("ascii"),
-        "media_type": "audio/wav",
+        "audio_base64": base64.b64encode(out_bytes).decode("ascii"),
+        "media_type": out_media_type,
         "provider": "local",
         "voice_id": preset.voice_id,
         "region": preset.region,
@@ -1159,6 +1266,7 @@ def synthesize_phonics_steps_sync(
         ],
         ensure_ascii=False,
     )
+    precision = precision_override or TTS_PRECISION
     key = make_cache_key(
         voice_id=preset.voice_id,
         speed=speed,
@@ -1170,9 +1278,13 @@ def synthesize_phonics_steps_sync(
     meta_cache = TTS_CACHE_DIR / f"{key}.json"
     if wav_cache.is_file() and meta_cache.is_file():
         meta = json.loads(meta_cache.read_text(encoding="utf-8"))
+        _touch_cache_files(wav_cache, meta_cache)
+        out_bytes, out_media_type = encode_audio_bytes_for_media_type(
+            wav_cache.read_bytes(), preferred_media_type
+        )
         return {
-            "audio_base64": base64.b64encode(wav_cache.read_bytes()).decode("ascii"),
-            "media_type": "audio/wav",
+            "audio_base64": base64.b64encode(out_bytes).decode("ascii"),
+            "media_type": out_media_type,
             "provider": "local",
             "voice_id": preset.voice_id,
             "region": preset.region,
@@ -1235,9 +1347,13 @@ def synthesize_phonics_steps_sync(
         ),
         encoding="utf-8",
     )
+    prune_tts_cache_dir()
+    out_bytes, out_media_type = encode_audio_bytes_for_media_type(
+        wav_bytes, preferred_media_type
+    )
     return {
-        "audio_base64": base64.b64encode(wav_bytes).decode("ascii"),
-        "media_type": "audio/wav",
+        "audio_base64": base64.b64encode(out_bytes).decode("ascii"),
+        "media_type": out_media_type,
         "provider": "local",
         "voice_id": preset.voice_id,
         "region": preset.region,
@@ -1268,6 +1384,8 @@ async def get_health() -> dict[str, Any]:
             "ready": tts_ready,
             "model_version": TTS_MODEL_VERSION,
             "precision": TTS_PRECISION,
+            "hybrid_word_fp32": TTS_HYBRID_WORD_FP32,
+            "cache_max_bytes": TTS_CACHE_MAX_BYTES,
             "voices_count": len(CURATED_VOICES),
             "active_voices": [v.voice_id for v in CURATED_VOICES],
             "regions": ["north", "central", "south"],
@@ -1414,6 +1532,7 @@ async def post_tts(req: TtsSynthesisRequest) -> Response:
             runtime.tts_semaphore.acquire(), timeout=QUEUE_WAIT_SECONDS
         )
     except TimeoutError as exc:
+        logger.warning("tts_timed_busy voice=%s region=%s", preset.voice_id, preset.region)
         raise HTTPException(
             status_code=503,
             detail={

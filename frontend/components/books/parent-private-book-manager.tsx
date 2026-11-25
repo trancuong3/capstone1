@@ -1395,6 +1395,7 @@ function ParentPrivateBookManagerContent({
             Không có trang nào thuộc nhóm trạng thái đang lọc.
           </div>
         ) : (
+          <>
           <div className="flex flex-col gap-4">
             {visibleSubmissions.map((sub) => {
               const badgeStyle =

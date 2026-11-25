@@ -15,6 +15,10 @@ import {
   getActiveSessionVoiceLock,
   getVoicePolicyPreferences,
 } from "@/lib/reading/session-voice-lock";
+import {
+  getPreferredJsonTtsAcceptHeader,
+  type TtsAudioFormat,
+} from "@/lib/reading/tts-audio-format";
 import { recordTtsEngineUsage } from "@/lib/reading/voice-engine-status";
 import { resolveVoiceGender } from "@/lib/reading/voice-persona";
 import { getApiBaseUrl } from "@/lib/supabase/config";
@@ -84,6 +88,7 @@ export interface TimedSpeech {
 export interface TimedSpeechOptions {
   readonly voiceId?: string | null;
   readonly speed?: number;
+  readonly audioFormat?: TtsAudioFormat;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
 }
@@ -134,10 +139,11 @@ async function request(
       async (requestSignal) => {
         const token = await accessToken();
         requestSignal.throwIfAborted();
+        const requestHeaders = new Headers(init.headers);
         const response = await fetch(`${getApiBaseUrl()}${path}`, {
           ...init,
           headers: {
-            Accept: "application/json",
+            Accept: requestHeaders.get("Accept") ?? "application/json",
             Authorization: `Bearer ${token}`,
             ...(init.body ? { "Content-Type": "application/json" } : {}),
           },
@@ -218,10 +224,16 @@ export function createVoiceStudioService(): VoiceStudioService {
         "/voice/text-to-speech/timed",
         {
           method: "POST",
+          headers: {
+            Accept: getPreferredJsonTtsAcceptHeader(options.audioFormat),
+          },
           body: JSON.stringify({
             words,
             ...(options.voiceId ? { voice_id: options.voiceId } : {}),
             ...(options.speed !== undefined ? { speed: options.speed } : {}),
+            ...(options.audioFormat
+              ? { audio_format: options.audioFormat }
+              : {}),
             ...(policy.providerMode !== "local_only"
               ? { provider_mode: policy.providerMode }
               : {}),

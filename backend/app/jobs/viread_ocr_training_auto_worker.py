@@ -26,6 +26,7 @@ from app.services.viread_ocr_training_service import (
     ORIGINAL_VOCAB_SHA256,
     VireadOcrTrainingService,
 )
+from app.services.worker_telemetry import record_worker_error, record_worker_success
 
 logger = logging.getLogger(__name__)
 POLL_SECONDS = 20
@@ -1291,9 +1292,11 @@ async def run_worker(stop: asyncio.Event, *, poll_seconds: int = 60) -> None:
 
             if has_active_jobs or data_changed:
                 did_work = await _dispatch_or_poll_colab_once()
+            record_worker_success("viread_ocr_training")
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            record_worker_error("viread_ocr_training", exc)
             log_diagnostic(logger, logging.ERROR, event="viread_training_scheduler_failed",
                            stage="automatic_dataset_schedule_or_colab_dispatch", exception=exc)
             did_work = False

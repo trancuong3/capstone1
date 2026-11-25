@@ -205,6 +205,10 @@ class AdminHealthItemRead(BaseModel):
     detail_status: Literal[
         "installed", "initialized", "loaded", "healthy", "failed", "unknown", "disabled"
     ] | None = None
+    last_success_at: datetime | None = None
+    oldest_pending_job_age_seconds: float | None = None
+    queue_depth: int | None = None
+    last_error: str | None = None
 
 
 class AdminHealthRead(BaseModel):

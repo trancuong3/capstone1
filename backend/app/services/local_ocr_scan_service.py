@@ -188,8 +188,23 @@ class LocalOcrScanService:
         self.repository = repository
 
     async def _validate_and_normalize_image(self, file: UploadFile) -> tuple[bytes, str]:
+        chunks: list[bytes] = []
+        total = 0
+        chunk_size = 1024 * 1024
         try:
-            raw = await file.read(MAX_SCAN_IMAGE_BYTES + 1)
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_SCAN_IMAGE_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="Image exceeds the 12 MB limit",
+                    )
+                chunks.append(chunk)
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(
                 status_code=422,
@@ -201,10 +216,9 @@ class LocalOcrScanService:
             except Exception:
                 pass
 
+        raw = b"".join(chunks)
         if not raw:
             raise HTTPException(status_code=422, detail="A file is required")
-        if len(raw) > MAX_SCAN_IMAGE_BYTES:
-            raise HTTPException(status_code=413, detail="Image exceeds the 12 MB limit")
 
         image_sha256 = hashlib.sha256(raw).hexdigest()
 

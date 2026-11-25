@@ -164,7 +164,7 @@ const MemoWordToken = memo(function WordToken({
             {"\u266A"}
           </span>
         ) : null}
-      </span>
+      </span>{" "}
     </Fragment>
   );
 });
@@ -248,7 +248,7 @@ export function BookPageContent(props: BookPageContentProps) {
       className="min-h-0 flex-1 py-2"
     >
       {hasWords ? (
-        <p className="max-w-[58ch] text-[24px] font-bold leading-[2] tracking-[0.01em] text-ink sm:text-[30px] sm:leading-[1.9]">
+        <p className="w-full max-w-[58ch] text-[24px] font-bold leading-[2] tracking-[0.01em] text-ink sm:text-[30px] sm:leading-[1.9]">
           {layout.map((entry) => (
             <MemoWordToken
               key={entry.word.word_id}

@@ -1,0 +1,385 @@
+Mode,Scenario,Profile,Horizon,Days,Cloud_Fee_VND_Free_Tier,Electricity_VND_Min,Electricity_VND_Max,Supabase_DB_MB,Supabase_Storage_MB,Supabase_Uncached_Egress_GB_Monthly,Supabase_Cached_Egress_GB_Monthly,Render_Outbound_BW_GB_Monthly,STT_Inbound_Tunnel_GB_Monthly,OCR_Pages,Audio_Mins,First_Exhausted_Component,Status,Min_Upgrade_Trigger
+Baseline_Unoptimized,Owner_Only,Low,1d,1,0,67,275,25.1,125.2,0.00,0.00,0.01,0.44,0,2,None_Within_Free_Tier,VERIFIED,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Low,1d,1,0,67,275,25.1,125.2,0.00,0.00,0.00,0.15,0,2,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Low,1d,1,0,67,275,25.1,125.0,0.00,0.00,0.00,0.15,0,2,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Low,1d,1,0,40,165,25.1,170.1,0.00,0.00,0.00,0.00,0,2,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Low,1m,30,0,2020,8236,28.0,130.6,0.68,0.00,0.21,0.33,15,45,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Low,1m,30,0,2020,8236,28.0,130.6,0.65,0.00,0.02,0.12,15,45,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Low,1m,30,0,2020,8236,28.0,126.4,0.20,0.00,0.02,0.12,15,45,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Low,1m,30,0,1212,4942,28.0,171.4,0.09,0.12,0.01,0.00,15,45,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Low,3m,90,0,6061,24707,34.0,141.8,0.68,0.00,0.21,0.33,45,135,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Low,3m,90,0,6061,24707,34.0,141.8,0.65,0.00,0.02,0.12,45,135,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Low,3m,90,0,6061,24707,34.0,129.2,0.20,0.00,0.02,0.12,45,135,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Low,3m,90,0,3637,14824,34.0,174.2,0.09,0.12,0.01,0.00,45,135,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Low,6m,180,0,12122,49414,43.0,158.7,0.68,0.00,0.21,0.33,90,270,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Low,6m,180,0,12122,49414,43.0,158.7,0.65,0.00,0.02,0.12,90,270,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Low,6m,180,0,12122,49414,43.0,133.4,0.20,0.00,0.02,0.12,90,270,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Low,6m,180,0,7273,29648,43.0,178.4,0.09,0.12,0.01,0.00,90,270,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Low,1y,365,0,24582,100200,61.5,193.3,0.68,0.00,0.21,0.33,182,548,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Low,1y,365,0,24582,100200,61.5,193.3,0.65,0.00,0.02,0.12,182,548,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Low,1y,365,0,24582,100200,61.5,142.1,0.20,0.00,0.02,0.12,182,548,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Low,1y,365,0,14749,60120,61.5,187.1,0.09,0.12,0.01,0.00,182,548,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Low,2y,730,0,49163,200400,98.0,261.5,0.68,0.00,0.21,0.33,365,1095,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Low,2y,730,0,49163,200400,98.0,261.5,0.65,0.00,0.02,0.12,365,1095,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Low,2y,730,0,49163,200400,98.0,159.1,0.20,0.00,0.02,0.12,365,1095,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Low,2y,730,0,29498,120240,98.0,204.1,0.09,0.12,0.01,0.00,365,1095,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Typical,1d,1,0,136,557,25.2,125.8,0.01,0.00,0.03,0.88,1,4,None_Within_Free_Tier,VERIFIED,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Typical,1d,1,0,136,557,25.2,125.8,0.01,0.00,0.00,0.31,1,4,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Typical,1d,1,0,136,557,25.2,125.2,0.00,0.00,0.00,0.31,1,4,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Typical,1d,1,0,82,334,25.2,170.2,0.00,0.00,0.00,0.00,1,4,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Typical,1m,30,0,4087,16717,32.5,148.8,0.98,0.00,0.80,0.99,30,135,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Typical,1m,30,0,4087,16717,32.5,148.8,0.93,0.00,0.07,0.35,30,135,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Typical,1m,30,0,4087,16717,32.5,130.9,0.28,0.00,0.07,0.35,30,135,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Typical,1m,30,0,2452,10030,32.5,175.9,0.13,0.20,0.02,0.00,30,135,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Typical,3m,90,0,12261,50152,47.5,196.5,0.98,0.00,0.80,0.99,90,405,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Typical,3m,90,0,12261,50152,47.5,196.5,0.93,0.00,0.07,0.35,90,405,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Typical,3m,90,0,12261,50152,47.5,142.9,0.28,0.00,0.07,0.35,90,405,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Typical,3m,90,0,7357,30091,47.5,187.9,0.13,0.20,0.02,0.00,90,405,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Typical,6m,180,0,24522,100303,70.0,268.1,0.98,0.00,0.80,0.99,180,810,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Typical,6m,180,0,24522,100303,70.0,268.1,0.93,0.00,0.07,0.35,180,810,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Typical,6m,180,0,24522,100303,70.0,160.8,0.28,0.00,0.07,0.35,180,810,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Typical,6m,180,0,14713,60182,70.0,205.8,0.13,0.20,0.02,0.00,180,810,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Typical,1y,365,0,49725,203393,116.2,415.1,0.98,0.00,0.80,0.99,365,1642,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Typical,1y,365,0,49725,203393,116.2,415.1,0.93,0.00,0.07,0.35,365,1642,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Typical,1y,365,0,49725,203393,116.2,197.5,0.28,0.00,0.07,0.35,365,1642,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Typical,1y,365,0,29835,122036,116.2,242.5,0.13,0.20,0.02,0.00,365,1642,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Typical,2y,730,0,99451,406786,207.5,705.2,0.98,0.00,0.80,0.99,730,3285,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Typical,2y,730,0,99451,406786,207.5,705.2,0.93,0.00,0.07,0.35,730,3285,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Typical,2y,730,0,99451,406786,207.5,270.1,0.28,0.00,0.07,0.35,730,3285,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Typical,2y,730,0,59671,244072,207.5,315.1,0.13,0.20,0.02,0.00,730,3285,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Peak,1d,1,0,209,860,25.5,127.1,0.21,0.00,0.08,2.42,2,11,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Peak,1d,1,0,209,860,25.5,127.1,0.20,0.00,0.01,0.85,2,11,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Peak,1d,1,0,209,860,25.5,125.5,0.06,0.00,0.01,0.85,2,11,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Peak,1d,1,0,125,516,25.5,170.5,0.03,0.04,0.00,0.00,2,11,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Peak,1m,30,0,6269,25814,40.0,188.1,2.51,0.00,2.45,2.48,45,338,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Peak,1m,30,0,6269,25814,40.0,188.1,2.39,0.00,0.19,0.87,45,338,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Peak,1m,30,0,6269,25814,40.0,140.8,0.72,0.00,0.19,0.87,45,338,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Peak,1m,30,0,3761,15488,40.0,185.8,0.33,0.52,0.06,0.00,45,338,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Peak,3m,90,0,18807,77442,70.0,314.3,2.51,0.00,2.45,2.47,135,1012,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Peak,3m,90,0,18807,77442,70.0,314.3,2.39,0.00,0.19,0.86,135,1012,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Peak,3m,90,0,18807,77442,70.0,172.3,0.72,0.00,0.19,0.86,135,1012,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Peak,3m,90,0,11284,46465,70.0,217.3,0.33,0.52,0.06,0.00,135,1012,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Peak,6m,180,0,37615,154883,115.0,503.7,2.51,0.00,2.45,2.47,270,2025,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Peak,6m,180,0,37615,154883,115.0,503.7,2.39,0.00,0.19,0.86,270,2025,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Peak,6m,180,0,37615,154883,115.0,219.7,0.72,0.00,0.19,0.86,270,2025,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Peak,6m,180,0,22569,92930,115.0,264.7,0.33,0.52,0.06,0.00,270,2025,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Peak,1y,365,0,76274,314069,207.5,892.9,2.51,0.00,2.45,2.47,548,4106,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Peak,1y,365,0,76274,314069,207.5,892.9,2.39,0.00,0.19,0.86,548,4106,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Peak,1y,365,0,76274,314069,207.5,317.0,0.72,0.00,0.19,0.86,548,4106,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Peak,1y,365,0,45764,188441,207.5,362.0,0.33,0.52,0.06,0.00,548,4106,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Peak,2y,730,0,152548,628137,390.0,1660.7,2.51,0.00,2.45,2.47,1095,8212,Supabase_Storage_1GB,FAILED,Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Peak,2y,730,0,152548,628137,390.0,1660.7,2.39,0.00,0.19,0.86,1095,8212,Supabase_Storage_1GB,FAILED,Supabase_Pro_$25/mo_or_B2_10GB_Free
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Peak,2y,730,0,152548,628137,390.0,508.9,0.72,0.00,0.19,0.86,1095,8212,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Peak,2y,730,0,91529,376882,390.0,553.9,0.33,0.52,0.06,0.00,1095,8212,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Worst_Case,1d,1,0,420,1731,26.0,130.8,0.38,0.00,0.22,5.27,2,24,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Worst_Case,1d,1,0,420,1731,26.0,130.8,0.36,0.00,0.02,1.84,2,24,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Worst_Case,1d,1,0,420,1731,26.0,126.5,0.11,0.00,0.02,1.84,2,24,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Worst_Case,1d,1,0,252,1039,26.0,171.4,0.05,0.07,0.01,0.00,2,24,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Worst_Case,1m,30,0,12596,51938,54.2,300.3,7.88,0.00,6.60,5.38,75,735,Supabase_Uncached_Egress_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Worst_Case,1m,30,0,12596,51938,54.2,300.3,7.51,0.00,0.43,1.88,75,735,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Worst_Case,1m,30,0,12596,51938,54.2,168.8,2.27,0.00,0.43,1.88,75,735,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Worst_Case,1m,30,0,7558,31163,54.2,213.8,1.05,1.50,0.15,0.00,75,735,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Worst_Case,3m,90,0,37789,155814,112.8,650.9,7.88,0.00,6.60,5.38,225,2205,Supabase_Uncached_Egress_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Worst_Case,3m,90,0,37789,155814,112.8,650.9,7.51,0.00,0.43,1.88,225,2205,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Worst_Case,3m,90,0,37789,155814,112.8,256.5,2.27,0.00,0.43,1.88,225,2205,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Worst_Case,3m,90,0,22673,93488,112.8,301.5,1.05,1.50,0.15,0.00,225,2205,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Worst_Case,6m,180,0,75579,311628,200.5,1176.9,7.88,0.00,6.60,5.38,450,4410,Supabase_Uncached_Egress_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Worst_Case,6m,180,0,75579,311628,200.5,1176.9,7.51,0.00,0.43,1.88,450,4410,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Worst_Case,6m,180,0,75579,311628,200.5,388.0,2.27,0.00,0.43,1.88,450,4410,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Worst_Case,6m,180,0,45347,186977,200.5,433.0,1.05,1.50,0.15,0.00,450,4410,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Worst_Case,1y,365,0,153257,631912,380.9,2258.0,7.88,0.00,6.60,5.38,912,8942,Supabase_Uncached_Egress_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Worst_Case,1y,365,0,153257,631912,380.9,2258.0,7.51,0.00,0.43,1.88,912,8942,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Worst_Case,1y,365,0,153257,631912,380.9,658.2,2.27,0.00,0.43,1.88,912,8942,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Owner_Only,Worst_Case,1y,365,0,91954,379147,380.9,703.2,1.05,1.50,0.15,0.00,912,8942,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Owner_Only,Worst_Case,2y,730,0,306513,1263824,736.8,4390.9,7.88,0.00,6.60,5.38,1825,17885,Supabase_Uncached_Egress_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Owner_Only,Worst_Case,2y,730,0,306513,1263824,736.8,4390.9,7.51,0.00,0.43,1.88,1825,17885,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,Owner_Only,Worst_Case,2y,730,0,306513,1263824,736.8,1191.5,2.27,0.00,0.43,1.88,1825,17885,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Option5_WASM_Precomp_JPEG85,Owner_Only,Worst_Case,2y,730,0,183908,758294,736.8,1236.5,1.05,1.50,0.15,0.00,1825,17885,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Baseline_Unoptimized,Defense_Day,Low,1d,1,0,145,604,26.0,127.2,0.02,0.00,0.06,2.64,6,12,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Low,1d,1,0,145,604,26.0,127.2,0.02,0.00,0.01,0.92,6,12,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Low,1d,1,0,145,604,26.0,125.5,0.01,0.00,0.01,0.92,6,12,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Defense_Day,Low,1d,1,0,87,362,26.0,170.6,0.00,0.01,0.00,0.00,6,12,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Defense_Day,Low,1m,30,0,4351,18125,56.2,192.3,1.19,0.00,1.71,2.64,180,360,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Low,1m,30,0,4351,18125,56.2,192.3,1.13,0.00,0.16,0.92,180,360,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Low,1m,30,0,4351,18125,56.2,141.8,0.34,0.00,0.16,0.92,180,360,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Defense_Day,Low,1m,30,0,2611,10875,56.2,186.8,0.16,0.30,0.05,0.00,180,360,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Defense_Day,Low,3m,90,0,13054,54375,118.6,327.0,1.19,0.00,1.71,2.64,540,1080,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Low,3m,90,0,13054,54375,118.6,327.0,1.13,0.00,0.16,0.92,540,1080,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Low,3m,90,0,13054,54375,118.6,175.5,0.34,0.00,0.16,0.92,540,1080,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Defense_Day,Low,3m,90,0,7832,32625,118.6,220.5,0.16,0.30,0.05,0.00,540,1080,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Defense_Day,Low,6m,180,0,26108,108750,212.2,528.9,1.19,0.00,1.71,2.64,1080,2160,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Low,6m,180,0,26108,108750,212.2,528.9,1.13,0.00,0.16,0.92,1080,2160,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Low,6m,180,0,26108,108750,212.2,226.0,0.34,0.00,0.16,0.92,1080,2160,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Defense_Day,Low,6m,180,0,15665,65250,212.2,271.0,0.16,0.30,0.05,0.00,1080,2160,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Defense_Day,Low,1y,365,0,52941,220520,404.6,944.1,1.19,0.00,1.71,2.64,2190,4380,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Low,1y,365,0,52941,220520,404.6,944.1,1.13,0.00,0.16,0.92,2190,4380,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Low,1y,365,0,52941,220520,404.6,329.8,0.34,0.00,0.16,0.92,2190,4380,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Defense_Day,Low,1y,365,0,31765,132312,404.6,374.8,0.16,0.30,0.05,0.00,2190,4380,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Defense_Day,Low,2y,730,0,105882,441040,784.2,1763.1,1.19,0.00,1.71,2.64,4380,8760,Supabase_Storage_1GB,FAILED,Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Low,2y,730,0,105882,441040,784.2,1763.1,1.13,0.00,0.16,0.92,4380,8760,Supabase_Storage_1GB,FAILED,Supabase_Pro_$25/mo_or_B2_10GB_Free
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Low,2y,730,0,105882,441040,784.2,534.5,0.34,0.00,0.16,0.92,4380,8760,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Option5_WASM_Precomp_JPEG85,Defense_Day,Low,2y,730,0,63529,264624,784.2,579.5,0.16,0.30,0.05,0.00,4380,8760,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Baseline_Unoptimized,Defense_Day,Typical,1d,1,0,237,1008,27.6,134.5,0.10,0.00,0.21,7.91,12,36,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Typical,1d,1,0,237,1008,27.6,134.5,0.10,0.00,0.02,2.77,12,36,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Typical,1d,1,0,237,1008,27.6,127.4,0.03,0.00,0.02,2.77,12,36,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Defense_Day,Typical,1d,1,0,142,605,27.6,172.4,0.01,0.03,0.01,0.00,12,36,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Defense_Day,Typical,1m,30,0,7101,30246,104.2,411.1,3.66,0.00,6.37,7.91,360,1080,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Typical,1m,30,0,7101,30246,104.2,411.1,3.49,0.00,0.58,2.77,360,1080,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Typical,1m,30,0,7101,30246,104.2,196.5,1.05,0.00,0.58,2.77,360,1080,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Defense_Day,Typical,1m,30,0,4261,18148,104.2,241.5,0.49,0.98,0.17,0.00,360,1080,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Defense_Day,Typical,3m,90,0,21304,90738,262.6,983.3,3.66,0.00,6.37,7.91,1080,3240,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Typical,3m,90,0,21304,90738,262.6,983.3,3.49,0.00,0.58,2.77,1080,3240,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Typical,3m,90,0,21304,90738,262.6,339.6,1.05,0.00,0.58,2.77,1080,3240,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Defense_Day,Typical,3m,90,0,12782,54443,262.6,384.6,0.49,0.98,0.17,0.00,1080,3240,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Defense_Day,Typical,6m,180,0,42608,181476,500.2,1841.7,3.66,0.00,6.37,7.91,2160,6480,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Typical,6m,180,0,42608,181476,500.2,1841.7,3.49,0.00,0.58,2.77,2160,6480,Supabase_Storage_1GB,FAILED,Supabase_Pro_$25/mo_or_B2_10GB_Free
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Typical,6m,180,0,42608,181476,500.2,554.2,1.05,0.00,0.58,2.77,2160,6480,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Option5_WASM_Precomp_JPEG85,Defense_Day,Typical,6m,180,0,25565,108886,500.2,599.2,0.49,0.98,0.17,0.00,2160,6480,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Baseline_Unoptimized,Defense_Day,Typical,1y,365,0,86399,367994,988.6,3606.0,3.66,0.00,6.37,7.91,4380,13140,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Typical,1y,365,0,86399,367994,988.6,3606.0,3.49,0.00,0.58,2.77,4380,13140,Supabase_Storage_1GB,FAILED,Supabase_Pro_$25/mo_or_B2_10GB_Free
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Typical,1y,365,0,86399,367994,988.6,995.2,1.05,0.00,0.58,2.77,4380,13140,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Option5_WASM_Precomp_JPEG85,Defense_Day,Typical,1y,365,0,51839,220796,988.6,1040.2,0.49,0.98,0.17,0.00,4380,13140,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Baseline_Unoptimized,Defense_Day,Typical,2y,730,0,172799,735988,1952.2,7087.0,3.66,0.00,6.37,7.91,8760,26280,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Typical,2y,730,0,172799,735988,1952.2,7087.0,3.49,0.00,0.58,2.77,8760,26280,Supabase_Storage_1GB,FAILED,Supabase_Pro_$25/mo_or_B2_10GB_Free
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Typical,2y,730,0,172799,735988,1952.2,1865.5,1.05,0.00,0.58,2.77,8760,26280,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Option5_WASM_Precomp_JPEG85,Defense_Day,Typical,2y,730,0,103679,441593,1952.2,1910.5,0.49,0.98,0.17,0.00,8760,26280,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Baseline_Unoptimized,Defense_Day,Peak,1d,1,0,359,1576,30.2,150.2,0.66,0.00,0.65,19.78,18,90,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Peak,1d,1,0,359,1576,30.2,150.2,0.63,0.00,0.06,6.92,18,90,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Peak,1d,1,0,359,1576,30.2,131.3,0.19,0.00,0.06,6.92,18,90,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Defense_Day,Peak,1d,1,0,215,946,30.2,176.3,0.09,0.14,0.02,0.00,18,90,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Defense_Day,Peak,1m,30,0,10775,47287,181.0,882.4,16.15,0.00,19.58,19.78,540,2700,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Peak,1m,30,0,10775,47287,181.0,882.4,15.38,0.00,1.52,6.92,540,2700,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Peak,1m,30,0,10775,47287,181.0,314.4,4.64,0.00,1.52,6.92,540,2700,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Defense_Day,Peak,1m,30,0,6465,28372,181.0,359.4,2.15,3.54,0.48,0.00,540,2700,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Defense_Day,Peak,3m,90,0,32326,141862,493.0,2397.1,16.15,0.00,19.58,19.78,1620,8100,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Peak,3m,90,0,32326,141862,493.0,2397.1,15.38,0.00,1.52,6.92,1620,8100,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Peak,3m,90,0,32326,141862,493.0,693.0,4.64,0.00,1.52,6.92,1620,8100,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Defense_Day,Peak,3m,90,0,19396,85117,493.0,738.0,2.15,3.54,0.48,0.00,1620,8100,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Defense_Day,Peak,6m,180,0,64651,283724,961.0,4669.1,16.15,0.00,19.58,19.78,3240,16200,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Peak,6m,180,0,64651,283724,961.0,4669.1,15.38,0.00,1.52,6.92,3240,16200,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Peak,6m,180,0,64651,283724,961.0,1261.0,4.64,0.00,1.52,6.92,3240,16200,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Option5_WASM_Precomp_JPEG85,Defense_Day,Peak,6m,180,0,38791,170234,961.0,1306.0,2.15,3.54,0.48,0.00,3240,16200,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Baseline_Unoptimized,Defense_Day,Peak,1y,365,0,131098,575329,1923.0,9339.4,16.15,0.00,19.58,19.78,6570,32850,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Peak,1y,365,0,131098,575329,1923.0,9339.4,15.38,0.00,1.52,6.92,6570,32850,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Peak,1y,365,0,131098,575329,1923.0,2428.6,4.64,0.00,1.52,6.92,6570,32850,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Option5_WASM_Precomp_JPEG85,Defense_Day,Peak,1y,365,0,78659,345197,1923.0,2473.6,2.15,3.54,0.48,0.00,6570,32850,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Baseline_Unoptimized,Defense_Day,Peak,2y,730,0,262196,1150658,3821.0,18553.9,16.15,0.00,19.58,19.78,13140,65700,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Peak,2y,730,0,262196,1150658,3821.0,18553.9,15.38,0.00,1.52,6.92,13140,65700,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Peak,2y,730,0,262196,1150658,3821.0,4732.2,4.64,0.00,1.52,6.92,13140,65700,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Option5_WASM_Precomp_JPEG85,Defense_Day,Peak,2y,730,0,157318,690395,3821.0,4777.2,2.15,3.54,0.48,0.00,13140,65700,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Baseline_Unoptimized,Defense_Day,Worst_Case,1d,1,0,602,2701,35.3,195.1,2.11,0.00,1.76,43.07,30,196,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Worst_Case,1d,1,0,602,2701,35.3,195.1,2.01,0.00,0.16,15.07,30,196,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Worst_Case,1d,1,0,602,2701,35.3,142.5,0.61,0.00,0.16,15.07,30,196,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,Defense_Day,Worst_Case,1d,1,0,361,1621,35.3,187.5,0.28,0.44,0.05,0.00,30,196,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,Defense_Day,Worst_Case,1m,30,0,18061,81042,334.0,2228.8,59.57,0.00,52.79,43.07,900,5880,Supabase_Uncached_Egress_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Worst_Case,1m,30,0,18061,81042,334.0,2228.8,56.74,0.00,3.47,15.07,900,5880,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Worst_Case,1m,30,0,18061,81042,334.0,651.0,17.13,0.00,3.47,15.07,900,5880,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,Defense_Day,Worst_Case,1m,30,0,10837,48625,334.0,696.0,7.93,11.47,1.19,0.00,900,5880,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,Defense_Day,Worst_Case,3m,90,0,54184,243126,952.0,6436.2,59.57,0.00,52.79,43.07,2700,17640,Supabase_Uncached_Egress_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Worst_Case,3m,90,0,54184,243126,952.0,6436.2,56.74,0.00,3.47,15.07,2700,17640,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Worst_Case,3m,90,0,54184,243126,952.0,1702.8,17.13,0.00,3.47,15.07,2700,17640,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,Defense_Day,Worst_Case,3m,90,0,32510,145876,952.0,1747.8,7.93,11.47,1.19,0.00,2700,17640,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,Defense_Day,Worst_Case,6m,180,0,108368,486251,1879.0,12747.5,59.57,0.00,52.79,43.07,5400,35280,Supabase_Uncached_Egress_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Worst_Case,6m,180,0,108368,486251,1879.0,12747.5,56.74,0.00,3.47,15.07,5400,35280,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Worst_Case,6m,180,0,108368,486251,1879.0,3280.6,17.13,0.00,3.47,15.07,5400,35280,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,Defense_Day,Worst_Case,6m,180,0,65021,291751,1879.0,3325.6,7.93,11.47,1.19,0.00,5400,35280,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,Defense_Day,Worst_Case,1y,365,0,219745,986009,3784.5,25720.6,59.57,0.00,52.79,43.07,10950,71540,Supabase_Uncached_Egress_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Worst_Case,1y,365,0,219745,986009,3784.5,25720.6,56.74,0.00,3.47,15.07,10950,71540,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Worst_Case,1y,365,0,219745,986009,3784.5,6523.9,17.13,0.00,3.47,15.07,10950,71540,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,Defense_Day,Worst_Case,1y,365,0,131847,591605,3784.5,6568.9,7.93,11.47,1.19,0.00,10950,71540,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,Defense_Day,Worst_Case,2y,730,0,439491,1972018,7544.0,51316.2,59.57,0.00,52.79,43.07,21900,143080,Supabase_Uncached_Egress_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,Defense_Day,Worst_Case,2y,730,0,439491,1972018,7544.0,51316.2,56.74,0.00,3.47,15.07,21900,143080,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,Defense_Day,Worst_Case,2y,730,0,439491,1972018,7544.0,12922.8,17.13,0.00,3.47,15.07,21900,143080,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,Defense_Day,Worst_Case,2y,730,0,263695,1183211,7544.0,12967.8,7.93,11.47,1.19,0.00,21900,143080,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,10_DAU,Low,1d,1,0,214,885,26.0,126.9,0.02,0.00,0.07,3.30,5,15,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Low,1d,1,0,214,885,26.0,126.9,0.02,0.00,0.01,1.15,5,15,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Low,1d,1,0,214,885,26.0,125.5,0.01,0.00,0.01,1.15,5,15,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,10_DAU,Low,1d,1,0,128,531,26.0,170.5,0.00,0.01,0.00,0.00,5,15,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,10_DAU,Low,1m,30,0,6408,26553,55.0,181.1,1.30,0.00,2.14,3.30,150,450,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Low,1m,30,0,6408,26553,55.0,181.1,1.24,0.00,0.20,1.15,150,450,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Low,1m,30,0,6408,26553,55.0,139.0,0.37,0.00,0.20,1.15,150,450,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,10_DAU,Low,1m,30,0,3845,15932,55.0,184.0,0.17,0.34,0.06,0.00,150,450,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,10_DAU,Low,3m,90,0,19224,79660,115.0,293.3,1.30,0.00,2.14,3.30,450,1350,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Low,3m,90,0,19224,79660,115.0,293.3,1.24,0.00,0.20,1.15,450,1350,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Low,3m,90,0,19224,79660,115.0,167.1,0.37,0.00,0.20,1.15,450,1350,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,10_DAU,Low,3m,90,0,11534,47796,115.0,212.1,0.17,0.34,0.06,0.00,450,1350,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,10_DAU,Low,6m,180,0,38448,159320,205.0,461.6,1.30,0.00,2.14,3.30,900,2700,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Low,6m,180,0,38448,159320,205.0,461.6,1.24,0.00,0.20,1.15,900,2700,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Low,6m,180,0,38448,159320,205.0,209.2,0.37,0.00,0.20,1.15,900,2700,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,10_DAU,Low,6m,180,0,23069,95592,205.0,254.2,0.17,0.34,0.06,0.00,900,2700,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,10_DAU,Low,1y,365,0,77963,323065,390.0,807.6,1.30,0.00,2.14,3.30,1825,5475,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Low,1y,365,0,77963,323065,390.0,807.6,1.24,0.00,0.20,1.15,1825,5475,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Low,1y,365,0,77963,323065,390.0,295.6,0.37,0.00,0.20,1.15,1825,5475,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,10_DAU,Low,1y,365,0,46778,193839,390.0,340.6,0.17,0.34,0.06,0.00,1825,5475,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,10_DAU,Low,2y,730,0,155926,646129,755.0,1490.1,1.30,0.00,2.14,3.30,3650,10950,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Low,2y,730,0,155926,646129,755.0,1490.1,1.24,0.00,0.20,1.15,3650,10950,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Low,2y,730,0,155926,646129,755.0,466.3,0.37,0.00,0.20,1.15,3650,10950,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Option5_WASM_Precomp_JPEG85,10_DAU,Low,2y,730,0,93556,387677,755.0,511.3,0.17,0.34,0.06,0.00,3650,10950,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Baseline_Unoptimized,10_DAU,Typical,1d,1,0,311,1321,27.5,132.9,0.12,0.00,0.27,9.89,10,45,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Typical,1d,1,0,311,1321,27.5,132.9,0.11,0.00,0.02,3.46,10,45,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Typical,1d,1,0,311,1321,27.5,127.0,0.03,0.00,0.02,3.46,10,45,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,10_DAU,Typical,1d,1,0,187,793,27.5,172.0,0.02,0.04,0.01,0.00,10,45,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,10_DAU,Typical,1m,30,0,9336,39623,100.0,363.4,4.30,0.00,7.95,9.89,300,1350,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Typical,1m,30,0,9336,39623,100.0,363.4,4.10,0.00,0.73,3.46,300,1350,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Typical,1m,30,0,9336,39623,100.0,184.6,1.24,0.00,0.73,3.46,300,1350,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,10_DAU,Typical,1m,30,0,5602,23774,100.0,229.6,0.57,1.18,0.21,0.00,300,1350,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,10_DAU,Typical,3m,90,0,28008,118869,250.0,840.3,4.30,0.00,7.95,9.89,900,4050,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Typical,3m,90,0,28008,118869,250.0,840.3,4.10,0.00,0.73,3.46,900,4050,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Typical,3m,90,0,28008,118869,250.0,303.8,1.24,0.00,0.73,3.46,900,4050,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,10_DAU,Typical,3m,90,0,16805,71321,250.0,348.8,0.57,1.18,0.21,0.00,900,4050,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,10_DAU,Typical,6m,180,0,56016,237737,475.0,1555.6,4.30,0.00,7.95,9.89,1800,8100,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Typical,6m,180,0,56016,237737,475.0,1555.6,4.10,0.00,0.73,3.46,1800,8100,Supabase_Storage_1GB,FAILED,Supabase_Pro_$25/mo_or_B2_10GB_Free
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Typical,6m,180,0,56016,237737,475.0,482.6,1.24,0.00,0.73,3.46,1800,8100,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,10_DAU,Typical,6m,180,0,33610,142642,475.0,527.6,0.57,1.18,0.21,0.00,1800,8100,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,10_DAU,Typical,1y,365,0,113588,482078,937.5,3025.8,4.30,0.00,7.95,9.89,3650,16425,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Typical,1y,365,0,113588,482078,937.5,3025.8,4.10,0.00,0.73,3.46,3650,16425,Supabase_Storage_1GB,FAILED,Supabase_Pro_$25/mo_or_B2_10GB_Free
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Typical,1y,365,0,113588,482078,937.5,850.2,1.24,0.00,0.73,3.46,3650,16425,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Option5_WASM_Precomp_JPEG85,10_DAU,Typical,1y,365,0,68153,289247,937.5,895.2,0.57,1.18,0.21,0.00,3650,16425,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Baseline_Unoptimized,10_DAU,Typical,2y,730,0,227176,964157,1850.0,5926.7,4.30,0.00,7.95,9.89,7300,32850,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Typical,2y,730,0,227176,964157,1850.0,5926.7,4.10,0.00,0.73,3.46,7300,32850,Supabase_Storage_1GB,FAILED,Supabase_Pro_$25/mo_or_B2_10GB_Free
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Typical,2y,730,0,227176,964157,1850.0,1575.4,1.24,0.00,0.73,3.46,7300,32850,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Option5_WASM_Precomp_JPEG85,10_DAU,Typical,2y,730,0,136306,578494,1850.0,1620.4,0.57,1.18,0.21,0.00,7300,32850,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Baseline_Unoptimized,10_DAU,Peak,1d,1,0,447,1961,30.0,146.0,0.78,0.00,0.82,24.61,15,112,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Peak,1d,1,0,447,1961,30.0,146.0,0.74,0.00,0.08,8.61,15,112,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Peak,1d,1,0,447,1961,30.0,130.2,0.22,0.00,0.08,8.61,15,112,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,10_DAU,Peak,1d,1,0,268,1177,30.0,175.2,0.10,0.17,0.02,0.00,15,112,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,10_DAU,Peak,1m,30,0,13419,58843,175.0,756.1,19.69,0.00,24.45,24.72,450,3375,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Peak,1m,30,0,13419,58843,175.0,756.1,18.75,0.00,1.90,8.65,450,3375,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Peak,1m,30,0,13419,58843,175.0,282.8,5.66,0.00,1.90,8.65,450,3375,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,10_DAU,Peak,1m,30,0,8051,35306,175.0,327.8,2.62,4.35,0.60,0.00,450,3375,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,10_DAU,Peak,3m,90,0,40257,176528,475.0,2018.4,19.69,0.00,24.45,24.72,1350,10125,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Peak,3m,90,0,40257,176528,475.0,2018.4,18.75,0.00,1.90,8.65,1350,10125,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Peak,3m,90,0,40257,176528,475.0,598.4,5.66,0.00,1.90,8.65,1350,10125,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,10_DAU,Peak,3m,90,0,24154,105917,475.0,643.4,2.62,4.35,0.60,0.00,1350,10125,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,10_DAU,Peak,6m,180,0,80514,353056,925.0,3911.8,19.69,0.00,24.45,24.72,2700,20250,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Peak,6m,180,0,80514,353056,925.0,3911.8,18.75,0.00,1.90,8.65,2700,20250,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Peak,6m,180,0,80514,353056,925.0,1071.7,5.66,0.00,1.90,8.65,2700,20250,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,10_DAU,Peak,6m,180,0,48308,211834,925.0,1116.7,2.62,4.35,0.60,0.00,2700,20250,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Baseline_Unoptimized,10_DAU,Peak,1y,365,0,163264,715919,1850.0,7803.7,19.69,0.00,24.45,24.72,5475,41062,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Peak,1y,365,0,163264,715919,1850.0,7803.7,18.75,0.00,1.90,8.65,5475,41062,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Peak,1y,365,0,163264,715919,1850.0,2044.7,5.66,0.00,1.90,8.65,5475,41062,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,10_DAU,Peak,1y,365,0,97958,429551,1850.0,2089.7,2.62,4.35,0.60,0.00,5475,41062,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Baseline_Unoptimized,10_DAU,Peak,2y,730,0,326527,1431838,3675.0,15482.4,19.69,0.00,24.45,24.72,10950,82125,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Peak,2y,730,0,326527,1431838,3675.0,15482.4,18.75,0.00,1.90,8.65,10950,82125,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Peak,2y,730,0,326527,1431838,3675.0,3964.3,5.66,0.00,1.90,8.65,10950,82125,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,10_DAU,Peak,2y,730,0,195916,859103,3675.0,4009.3,2.62,4.35,0.60,0.00,10950,82125,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Baseline_Unoptimized,10_DAU,Worst_Case,1d,1,0,651,2963,34.8,183.4,2.57,0.00,2.20,53.83,25,245,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Worst_Case,1d,1,0,651,2963,34.8,183.4,2.45,0.00,0.20,18.84,25,245,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Worst_Case,1d,1,0,651,2963,34.8,139.6,0.74,0.00,0.20,18.84,25,245,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,10_DAU,Worst_Case,1d,1,0,391,1778,34.8,184.6,0.34,0.54,0.06,0.00,25,245,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,10_DAU,Worst_Case,1m,30,0,19537,88900,317.5,1878.1,73.38,0.00,65.95,53.83,750,7350,Supabase_Uncached_Egress_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Worst_Case,1m,30,0,19537,88900,317.5,1878.1,69.89,0.00,4.33,18.84,750,7350,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Worst_Case,1m,30,0,19537,88900,317.5,563.3,21.10,0.00,4.33,18.84,750,7350,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,10_DAU,Worst_Case,1m,30,0,11722,53340,317.5,608.3,9.77,14.17,1.49,0.00,750,7350,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,10_DAU,Worst_Case,3m,90,0,58611,266701,902.5,5384.4,73.38,0.00,65.95,53.83,2250,22050,Supabase_Uncached_Egress_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Worst_Case,3m,90,0,58611,266701,902.5,5384.4,69.89,0.00,4.33,18.84,2250,22050,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Worst_Case,3m,90,0,58611,266701,902.5,1439.8,21.10,0.00,4.33,18.84,2250,22050,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,10_DAU,Worst_Case,3m,90,0,35167,160021,902.5,1484.8,9.77,14.17,1.49,0.00,2250,22050,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,10_DAU,Worst_Case,6m,180,0,117221,533402,1780.0,10643.8,73.38,0.00,65.95,53.83,4500,44100,Supabase_Uncached_Egress_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Worst_Case,6m,180,0,117221,533402,1780.0,10643.8,69.89,0.00,4.33,18.84,4500,44100,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Worst_Case,6m,180,0,117221,533402,1780.0,2754.7,21.10,0.00,4.33,18.84,4500,44100,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,10_DAU,Worst_Case,6m,180,0,70333,320041,1780.0,2799.7,9.77,14.17,1.49,0.00,4500,44100,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,10_DAU,Worst_Case,1y,365,0,237698,1081621,3583.8,21454.7,73.38,0.00,65.95,53.83,9125,89425,Supabase_Uncached_Egress_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Worst_Case,1y,365,0,237698,1081621,3583.8,21454.7,69.89,0.00,4.33,18.84,9125,89425,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Worst_Case,1y,365,0,237698,1081621,3583.8,5457.4,21.10,0.00,4.33,18.84,9125,89425,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,10_DAU,Worst_Case,1y,365,0,142619,648973,3583.8,5502.4,9.77,14.17,1.49,0.00,9125,89425,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,10_DAU,Worst_Case,2y,730,0,475397,2163242,7142.5,42784.4,73.38,0.00,65.95,53.83,18250,178850,Supabase_Uncached_Egress_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,10_DAU,Worst_Case,2y,730,0,475397,2163242,7142.5,42784.4,69.89,0.00,4.33,18.84,18250,178850,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,10_DAU,Worst_Case,2y,730,0,475397,2163242,7142.5,10789.9,21.10,0.00,4.33,18.84,18250,178850,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,10_DAU,Worst_Case,2y,730,0,285238,1297945,7142.5,10834.9,9.77,14.17,1.49,0.00,18250,178850,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,50_DAU,Low,1d,1,0,345,1500,29.7,133.4,0.11,0.00,0.36,16.48,22,75,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Low,1d,1,0,345,1500,29.7,133.4,0.10,0.00,0.03,5.77,22,75,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Low,1d,1,0,345,1500,29.7,127.1,0.03,0.00,0.03,5.77,22,75,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,50_DAU,Low,1d,1,0,207,900,29.7,172.1,0.01,0.04,0.01,0.00,22,75,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,50_DAU,Low,1m,30,0,10343,44987,166.0,377.5,4.05,0.00,10.67,16.48,675,2250,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Low,1m,30,0,10343,44987,166.0,377.5,3.86,0.00,0.98,5.77,675,2250,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Low,1m,30,0,10343,44987,166.0,188.1,1.16,0.00,0.98,5.77,675,2250,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,50_DAU,Low,1m,30,0,6206,26992,166.0,233.1,0.54,1.32,0.28,0.00,675,2250,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,50_DAU,Low,3m,90,0,31030,134962,448.0,882.4,4.05,0.00,10.67,16.48,2025,6750,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Low,3m,90,0,31030,134962,448.0,882.4,3.86,0.00,0.98,5.77,2025,6750,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Low,3m,90,0,31030,134962,448.0,314.4,1.16,0.00,0.98,5.77,2025,6750,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,50_DAU,Low,3m,90,0,18618,80977,448.0,359.4,0.54,1.32,0.28,0.00,2025,6750,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,50_DAU,Low,6m,180,0,62060,269923,871.0,1639.7,4.05,0.00,10.67,16.48,4050,13500,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Low,6m,180,0,62060,269923,871.0,1639.7,3.86,0.00,0.98,5.77,4050,13500,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Low,6m,180,0,62060,269923,871.0,503.7,1.16,0.00,0.98,5.77,4050,13500,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Option5_WASM_Precomp_JPEG85,50_DAU,Low,6m,180,0,37236,161954,871.0,548.7,0.54,1.32,0.28,0.00,4050,13500,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Baseline_Unoptimized,50_DAU,Low,1y,365,0,125843,547344,1740.5,3196.5,4.05,0.00,10.67,16.48,8212,27375,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Low,1y,365,0,125843,547344,1740.5,3196.5,3.86,0.00,0.98,5.77,8212,27375,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Low,1y,365,0,125843,547344,1740.5,892.9,1.16,0.00,0.98,5.77,8212,27375,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Option5_WASM_Precomp_JPEG85,50_DAU,Low,1y,365,0,75506,328406,1740.5,937.9,0.54,1.32,0.28,0.00,8212,27375,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Baseline_Unoptimized,50_DAU,Low,2y,730,0,251686,1094688,3456.0,6268.0,4.05,0.00,10.67,16.48,16425,54750,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Low,2y,730,0,251686,1094688,3456.0,6268.0,3.86,0.00,0.98,5.77,16425,54750,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Low,2y,730,0,251686,1094688,3456.0,1660.8,1.16,0.00,0.98,5.77,16425,54750,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Option5_WASM_Precomp_JPEG85,50_DAU,Low,2y,730,0,151012,656813,3456.0,1705.8,0.54,1.32,0.28,0.00,16425,54750,Supabase_DB_500MB,FAILED,Supabase_Pro_$25/mo
+Baseline_Unoptimized,50_DAU,Typical,1d,1,0,569,2612,36.7,160.8,0.61,0.00,1.32,49.44,45,225,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Typical,1d,1,0,569,2612,36.7,160.8,0.58,0.00,0.12,17.30,45,225,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Typical,1d,1,0,569,2612,36.7,133.9,0.18,0.00,0.12,17.30,45,225,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Option5_WASM_Precomp_JPEG85,50_DAU,Typical,1d,1,0,341,1567,36.7,178.9,0.08,0.18,0.04,0.00,45,225,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,50_DAU,Typical,1m,30,0,17084,78359,376.0,1197.9,18.93,0.00,39.74,49.44,1350,6750,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Typical,1m,30,0,17084,78359,376.0,1197.9,18.03,0.00,3.65,17.30,1350,6750,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Typical,1m,30,0,17084,78359,376.0,393.2,5.44,0.00,3.65,17.30,1350,6750,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,50_DAU,Typical,1m,30,0,10250,47015,376.0,438.2,2.52,5.52,1.05,0.00,1350,6750,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,50_DAU,Typical,3m,90,0,51251,235077,1078.0,3343.7,18.93,0.00,39.74,49.44,4050,20250,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Typical,3m,90,0,51251,235077,1078.0,3343.7,18.03,0.00,3.65,17.30,4050,20250,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Typical,3m,90,0,51251,235077,1078.0,929.7,5.44,0.00,3.65,17.30,4050,20250,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,50_DAU,Typical,3m,90,0,30751,141046,1078.0,974.7,2.52,5.52,1.05,0.00,4050,20250,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,50_DAU,Typical,6m,180,0,102501,470155,2131.0,6562.5,18.93,0.00,39.74,49.44,8100,40500,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Typical,6m,180,0,102501,470155,2131.0,6562.5,18.03,0.00,3.65,17.30,8100,40500,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Typical,6m,180,0,102501,470155,2131.0,1734.4,5.44,0.00,3.65,17.30,8100,40500,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,50_DAU,Typical,6m,180,0,61501,282093,2131.0,1779.4,2.52,5.52,1.05,0.00,8100,40500,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,50_DAU,Typical,1y,365,0,207850,953370,4295.5,13178.8,18.93,0.00,39.74,49.44,16425,82125,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Typical,1y,365,0,207850,953370,4295.5,13178.8,18.03,0.00,3.65,17.30,16425,82125,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Typical,1y,365,0,207850,953370,4295.5,3388.4,5.44,0.00,3.65,17.30,16425,82125,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,50_DAU,Typical,1y,365,0,124710,572022,4295.5,3433.4,2.52,5.52,1.05,0.00,16425,82125,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,50_DAU,Typical,2y,730,0,415699,1906739,8566.0,26232.5,18.93,0.00,39.74,49.44,32850,164250,Render_Free_Bandwidth_5GB_Mo,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Typical,2y,730,0,415699,1906739,8566.0,26232.5,18.03,0.00,3.65,17.30,32850,164250,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Typical,2y,730,0,415699,1906739,8566.0,6651.9,5.44,0.00,3.65,17.30,32850,164250,Supabase_Uncached_Egress_5GB_Mo,FAILED,Supabase_Pro_$25/mo_or_B2_Offload
+Option5_WASM_Precomp_JPEG85,50_DAU,Typical,2y,730,0,249419,1144043,8566.0,6696.9,2.52,5.52,1.05,0.00,32850,164250,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,50_DAU,Peak,1d,1,0,987,4749,48.5,219.7,3.31,0.00,4.07,123.49,68,562,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+$0.15/GB; Dedicated_Voice_VPS
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Peak,1d,1,0,987,4749,48.5,219.7,3.15,0.00,0.37,43.22,68,562,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Peak,1d,1,0,987,4749,48.5,148.7,0.95,0.00,0.37,43.22,68,562,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+Option5_WASM_Precomp_JPEG85,50_DAU,Peak,1d,1,0,592,2849,48.5,193.7,0.44,0.78,0.11,0.00,68,562,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,50_DAU,Peak,1m,30,0,29598,142482,730.0,2965.1,95.68,0.00,122.24,123.60,2025,16875,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo; Dedicated_Voice_VPS
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Peak,1m,30,0,29598,142482,730.0,2965.1,91.14,0.00,9.51,43.26,2025,16875,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Peak,1m,30,0,29598,142482,730.0,835.0,27.51,0.00,9.51,43.26,2025,16875,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+Option5_WASM_Precomp_JPEG85,50_DAU,Peak,1m,30,0,17759,85489,730.0,880.0,12.74,21.30,2.99,0.00,2025,16875,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,50_DAU,Peak,3m,90,0,88794,427446,2140.0,8645.2,95.68,0.00,122.24,123.60,6075,50625,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo; Dedicated_Voice_VPS
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Peak,3m,90,0,88794,427446,2140.0,8645.2,91.14,0.00,9.51,43.26,6075,50625,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Peak,3m,90,0,88794,427446,2140.0,2255.1,27.51,0.00,9.51,43.26,6075,50625,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+Option5_WASM_Precomp_JPEG85,50_DAU,Peak,3m,90,0,53276,256468,2140.0,2300.1,12.74,21.30,2.99,0.00,6075,50625,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,50_DAU,Peak,6m,180,0,177587,854891,4255.0,17165.4,95.68,0.00,122.24,123.60,12150,101250,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo; Dedicated_Voice_VPS
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Peak,6m,180,0,177587,854891,4255.0,17165.4,91.14,0.00,9.51,43.26,12150,101250,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Peak,6m,180,0,177587,854891,4255.0,4385.1,27.51,0.00,9.51,43.26,12150,101250,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+Option5_WASM_Precomp_JPEG85,50_DAU,Peak,6m,180,0,106552,512935,4255.0,4430.1,12.74,21.30,2.99,0.00,12150,101250,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,50_DAU,Peak,1y,365,0,360107,1733529,8602.5,34679.1,95.68,0.00,122.24,123.60,24638,205312,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo; Dedicated_Voice_VPS
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Peak,1y,365,0,360107,1733529,8602.5,34679.1,91.14,0.00,9.51,43.26,24638,205312,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Peak,1y,365,0,360107,1733529,8602.5,8763.5,27.51,0.00,9.51,43.26,24638,205312,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+Option5_WASM_Precomp_JPEG85,50_DAU,Peak,1y,365,0,216064,1040117,8602.5,8808.5,12.74,21.30,2.99,0.00,24638,205312,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,50_DAU,Peak,2y,730,0,720214,3467058,17180.0,69233.2,95.68,0.00,122.24,123.60,49275,410625,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo; Dedicated_Voice_VPS
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Peak,2y,730,0,720214,3467058,17180.0,69233.2,91.14,0.00,9.51,43.26,49275,410625,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Peak,2y,730,0,720214,3467058,17180.0,17402.0,27.51,0.00,9.51,43.26,49275,410625,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+Option5_WASM_Precomp_JPEG85,50_DAU,Peak,2y,730,0,432128,2080235,17180.0,17447.0,12.74,21.30,2.99,0.00,49275,410625,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,50_DAU,Worst_Case,1d,1,0,1677,8424,70.6,388.0,12.24,0.00,10.99,269.17,112,1225,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo; Dedicated_Voice_VPS
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Worst_Case,1d,1,0,1677,8424,70.6,388.0,11.66,0.00,1.01,94.21,112,1225,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Worst_Case,1d,1,0,1677,8424,70.6,190.8,3.52,0.00,1.01,94.21,112,1225,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+Option5_WASM_Precomp_JPEG85,50_DAU,Worst_Case,1d,1,0,1006,5054,70.6,235.8,1.63,2.61,0.29,0.00,112,1225,None_Within_Free_Tier,CONDITIONAL,0_VND_Free_Tier_Within_Caps
+Baseline_Unoptimized,50_DAU,Worst_Case,1m,30,0,50300,252734,1393.8,8014.1,363.54,0.00,329.74,269.17,3375,36750,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo; Dedicated_Voice_VPS
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Worst_Case,1m,30,0,50300,252734,1393.8,8014.1,346.27,0.00,21.67,94.21,3375,36750,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Worst_Case,1m,30,0,50300,252734,1393.8,2097.3,104.52,0.00,21.67,94.21,3375,36750,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+Option5_WASM_Precomp_JPEG85,50_DAU,Worst_Case,1m,30,0,30180,151640,1393.8,2142.3,48.40,70.34,7.46,0.00,3375,36750,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,50_DAU,Worst_Case,3m,90,0,150899,758201,4131.2,23792.2,363.54,0.00,329.74,269.17,10125,110250,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo; Dedicated_Voice_VPS
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Worst_Case,3m,90,0,150899,758201,4131.2,23792.2,346.27,0.00,21.67,94.21,10125,110250,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Worst_Case,3m,90,0,150899,758201,4131.2,6041.8,104.52,0.00,21.67,94.21,10125,110250,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+Option5_WASM_Precomp_JPEG85,50_DAU,Worst_Case,3m,90,0,90539,454921,4131.2,6086.8,48.40,70.34,7.46,0.00,10125,110250,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,50_DAU,Worst_Case,6m,180,0,301799,1516401,8237.5,47459.4,363.54,0.00,329.74,269.17,20250,220500,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo; Dedicated_Voice_VPS
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Worst_Case,6m,180,0,301799,1516401,8237.5,47459.4,346.27,0.00,21.67,94.21,20250,220500,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Worst_Case,6m,180,0,301799,1516401,8237.5,11958.6,104.52,0.00,21.67,94.21,20250,220500,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+Option5_WASM_Precomp_JPEG85,50_DAU,Worst_Case,6m,180,0,181079,909841,8237.5,12003.6,48.40,70.34,7.46,0.00,20250,220500,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,50_DAU,Worst_Case,1y,365,0,611981,3074925,16678.1,96108.6,363.54,0.00,329.74,269.17,41062,447125,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo; Dedicated_Voice_VPS
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Worst_Case,1y,365,0,611981,3074925,16678.1,96108.6,346.27,0.00,21.67,94.21,41062,447125,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Worst_Case,1y,365,0,611981,3074925,16678.1,24120.9,104.52,0.00,21.67,94.21,41062,447125,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+Option5_WASM_Precomp_JPEG85,50_DAU,Worst_Case,1y,365,0,367189,1844955,16678.1,24165.9,48.40,70.34,7.46,0.00,41062,447125,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
+Baseline_Unoptimized,50_DAU,Worst_Case,2y,730,0,1223961,6149849,33331.2,192092.2,363.54,0.00,329.74,269.17,82125,894250,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+$0.15/GB; Supabase_Pro_$25/mo; Dedicated_Voice_VPS
+RC_Opt_PNG_MP3_Proxyless,50_DAU,Worst_Case,2y,730,0,1223961,6149849,33331.2,192092.2,346.27,0.00,21.67,94.21,82125,894250,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+RC_Opt_JPEG85_MP3_Proxyless,50_DAU,Worst_Case,2y,730,0,1223961,6149849,33331.2,48116.8,104.52,0.00,21.67,94.21,82125,894250,Local_Voice_CPU_Semaphore,FAILED,Render_Starter_$7+Dedicated_Voice_VPS
+Option5_WASM_Precomp_JPEG85,50_DAU,Worst_Case,2y,730,0,734377,3689909,33331.2,48161.8,48.40,70.34,7.46,0.00,82125,894250,Supabase_Cached_Egress_5GB_Mo,FAILED,Backblaze_B2_10GB_Free_or_Supabase_Pro_$25/mo
