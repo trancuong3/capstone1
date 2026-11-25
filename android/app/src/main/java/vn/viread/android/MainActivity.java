@@ -75,8 +75,9 @@ public final class MainActivity extends Activity {
     static final int FILE_CHOOSER_CODE = 152;
     static final int CAMERA_CHOOSER_PERMISSION_CODE = 153;
 
-    // Render.com free tier cold start can take 30-60 s; keep timeouts generous.
-    private static final long LOAD_TIMEOUT_MS = 60_000L;
+    // Render.com free tier cold start can take 30-60 s; measured at 61s in production.
+    // Use 90s to give a 30s safety buffer beyond the worst observed cold start.
+    private static final long LOAD_TIMEOUT_MS = 90_000L;
     private static final long BACK_EXIT_WINDOW_MS = 2_000L;
     static final String VIREAD_ANDROID_UA_MARKER = "ViReadAndroid/1.0";
 
