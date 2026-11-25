@@ -95,6 +95,12 @@ export function buildSpeechServiceError(params: {
           "Máy chủ giọng nói đang bận xử lý. Bé chờ ít giây rồi đọc lại nhé.";
         retryable = true;
         break;
+      case "LOCAL_VOICE_UNCONFIGURED":
+        code = "STT_TEMPORARILY_UNAVAILABLE";
+        message =
+          "Máy chủ giọng nói cục bộ chưa được bật. ViRead đang chuyển sang nhận diện dự phòng trên thiết bị.";
+        retryable = true;
+        break;
       case "STT_TEMPORARILY_UNAVAILABLE":
       case "LOCAL_STT_UNAVAILABLE":
         code = "STT_TEMPORARILY_UNAVAILABLE";
@@ -166,6 +172,12 @@ export function buildSpeechServiceError(params: {
     }
   } else {
     switch (providerCode) {
+      case "LOCAL_VOICE_UNCONFIGURED":
+        code = "TTS_UNAVAILABLE";
+        message =
+          "Giọng đọc mẫu trên máy chủ cục bộ chưa được bật. ViRead đang dùng giọng đọc dự phòng trên thiết bị.";
+        retryable = true;
+        break;
       case "LOCAL_TTS_UNAVAILABLE":
         code = "TTS_UNAVAILABLE";
         message =

@@ -90,7 +90,7 @@ class PresenceDbCase(unittest.IsolatedAsyncioTestCase):
                 lambda sync: Base.metadata.create_all(sync, tables=needed)
             )
             await connection.execute(text("SET session_replication_role = replica"))
-            await connection.execute(text("INSERT INTO profiles (id, role) VALUES (:p, 'PARENT'), (:o, 'PARENT')"), {"p": PARENT, "o": OTHER})
+            await connection.execute(text("INSERT INTO profiles (id, role) VALUES (:p, 'parent'), (:o, 'parent')"), {"p": PARENT, "o": OTHER})
             await connection.execute(text("INSERT INTO childprofiles (id, parentid, alias, grade) VALUES (:c, :p, 'Bé An', 1)"), {"c": CHILD, "p": PARENT})
             await connection.execute(
                 text("INSERT INTO readingsessions (id, childid, bookid, state, mode) VALUES (:s, :c, :b, 'LISTENING', 'PAGE')"),

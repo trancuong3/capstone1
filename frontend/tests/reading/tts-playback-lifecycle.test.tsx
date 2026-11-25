@@ -210,7 +210,11 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     expect(result.current.fallbackNotice).toMatch(/không tự đổi giọng/i);
   });
 
-  it("auto-falls back to Online browser TTS on default policy with zero 503 spam when cached voice health reports local down and Google unconfigured", async () => {
+  it("auto-falls back to Online browser TTS when Google fallback is opted-in with zero 503 spam on local outage", async () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_with_google_fallback",
+      allowGoogleTtsFallback: true,
+    });
     class FakeUtterance {
       text: string;
       lang = "";
@@ -256,7 +260,11 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     );
   });
 
-  it("auto-falls back to browser TTS immediately on 503 without wasting a second Google backend call when Google Cloud TTS is unconfigured", async () => {
+  it("auto-falls back to browser TTS immediately on 503 when Google fallback is opted-in without wasting a second Google backend call", async () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_with_google_fallback",
+      allowGoogleTtsFallback: true,
+    });
     class FakeUtterance {
       text: string;
       lang = "";
@@ -302,6 +310,10 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
   });
 
   it("never permanently locks into Online TTS — resumes Local Offline VieNeu-TTS automatically once local recovers", async () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_with_google_fallback",
+      allowGoogleTtsFallback: true,
+    });
     class FakeUtterance {
       text: string;
       lang = "";
@@ -528,6 +540,65 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     expect(synthesis.speak).not.toHaveBeenCalled();
   });
 
+  it("prefers the locked-voice short fallback when timed synthesis fails", async () => {
+    vi.stubGlobal("SpeechSynthesisUtterance", class {});
+    synthesis.speak.mockImplementationOnce(() => {
+      throw new Error("Unexpected browser voice switch");
+    });
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: { available: true, stt_ready: true, tts_ready: true },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+    studio.synthesizeTimed.mockRejectedValueOnce(
+      new Error("Timed unavailable"),
+    );
+    const { result } = renderHook(() => useSpeechPlayer());
+    const fallback = vi.fn(async () => {});
+    await result.current.playWithWordTimings(["bé"], {}, fallback);
+    expect(fallback).toHaveBeenCalledOnce();
+    expect(synthesis.speak).not.toHaveBeenCalled();
+    synthesis.speak.mockReset();
+  });
+
+  it("does not speak with a non-Vietnamese browser voice during an outage", async () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_with_google_fallback",
+      allowGoogleTtsFallback: true,
+    });
+    vi.stubGlobal("SpeechSynthesisUtterance", class {});
+    synthesis.getVoices.mockReturnValueOnce([
+      { lang: "en-US", localService: true },
+    ]);
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: { available: false, stt_ready: false, tts_ready: false },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+    // Worker is down — synthesize must reject so play() throws instead of hanging
+    speech.synthesize.mockRejectedValueOnce(
+      new Error("local worker unavailable"),
+    );
+    const { result } = renderHook(() => useSpeechPlayer());
+    await expect(result.current.play("Bé đọc sách.")).rejects.toThrow();
+    expect(speech.synthesize).not.toHaveBeenCalled();
+    expect(synthesis.getVoices).toHaveBeenCalled();
+    expect(synthesis.speak).not.toHaveBeenCalled();
+    expect(result.current.fallbackNotice).toMatch(/không tự đổi giọng/i);
+  });
+
   it("does not replay a chunk automatically after an error partway through audio", async () => {
     const { result } = renderHook(() => useSpeechPlayer());
     const playback = result.current
@@ -649,5 +720,54 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     );
     act(() => a1.finish());
     await normalPhrase;
+  });
+
+  it("plays audio/mpeg directly and falls back to WAV if compressed TTS decode fails", async () => {
+    const mp3Blob = new Blob(["fake-mp3"], { type: "audio/mpeg" });
+    const wavBlob = new Blob(["fake-wav"], { type: "audio/wav" });
+    speech.synthesize
+      .mockResolvedValueOnce(mp3Blob)
+      .mockResolvedValueOnce(wavBlob);
+
+    const { result } = renderHook(() => useSpeechPlayer());
+    const playPromise = result.current.play("Xin chào bé yêu.");
+
+    // First attempt receives audio/mpeg and hits WebView decode error before start
+    const mp3Audio = await audioAt(0);
+    act(() => {
+      mp3Audio.onerror?.();
+    });
+
+    // Player automatically re-requests explicit audioFormat: "wav" and completes cleanly
+    const wavAudio = await audioAt(1);
+    expect(speech.synthesize).toHaveBeenNthCalledWith(
+      2,
+      "Xin chào bé yêu.",
+      expect.objectContaining({ audioFormat: "wav" }),
+    );
+    act(() => wavAudio.finish());
+    await playPromise;
+  });
+
+  it("rejects unavailable TTS with zero speechSynthesis calls when browser has no Vietnamese voice", async () => {
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: { available: true, stt_ready: true, tts_ready: true },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+    synthesis.getVoices.mockReturnValueOnce([
+      { lang: "en-US", localService: true } as SpeechSynthesisVoice,
+    ]);
+    speech.synthesize.mockRejectedValue(new Error("LOCAL_TTS_UNAVAILABLE"));
+    const { result } = renderHook(() => useSpeechPlayer());
+
+    await expect(result.current.play("Xin chào bé yêu.")).rejects.toThrow();
+    expect(synthesis.speak).not.toHaveBeenCalled();
   });
 });

@@ -806,8 +806,12 @@ export class RealtimeAlignmentEngine {
         continue;
       }
 
-      // 4. Từ không khớp: đánh dấu SUBSTITUTE tạm thời.
-      setPreviewStatus(cursor, "SUBSTITUTE");
+      // 4. Từ không khớp ở cuối interim: có thể bé đang ghép vần hoặc sắp tự sửa
+      // ("bàn... bạn") → chỉ đánh dấu SUBSTITUTE tạm khi còn từ kế tiếp xác nhận,
+      // không vội nháy đỏ ở âm tiết cuối cùng của interim.
+      if (tokenIndex < tokens.length - 1) {
+        setPreviewStatus(cursor, "SUBSTITUTE");
+      }
       previewSpelling = false;
 
       targetIndex = cursor;

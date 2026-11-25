@@ -298,105 +298,190 @@ export function AdminMetadataQualityScreen() {
                 </p>
               </div>
             ) : (
-              <ResponsiveTable ariaLabel="Bảng sách cần kiểm tra metadata">
-                <table className="w-full min-w-[900px] border-collapse text-left text-sm">
-                  <thead>
-                    <tr className="border-b border-border bg-sky text-primary">
-                      <th className="px-3 py-3 font-semibold" scope="col">
-                        Sách
-                      </th>
-                      <th className="px-3 py-3 font-semibold" scope="col">
-                        Tác giả
-                      </th>
-                      <th className="px-3 py-3 font-semibold" scope="col">
-                        Khối lớp
-                      </th>
-                      <th className="px-3 py-3 font-semibold" scope="col">
-                        Trạng thái
-                      </th>
-                      <th className="px-3 py-3 font-semibold" scope="col">
-                        Vấn đề phát hiện
-                      </th>
-                      <th className="px-3 py-3 font-semibold" scope="col">
-                        Thao tác
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {dashboard.items.map((book) => (
-                      <tr
-                        className="border-b border-border last:border-0"
-                        key={book.id}
-                      >
-                        <td className="px-3 py-4 font-semibold text-ink">
-                          {book.title?.trim() ? book.title : "Chưa có tiêu đề"}
-                        </td>
-                        <td className="px-3 py-4 text-muted">
-                          {book.author?.trim() ? book.author : "Chưa có"}
-                        </td>
-                        <td className="px-3 py-4 text-muted">
-                          {book.min_grade == null || book.max_grade == null
-                            ? "Chưa đủ dữ liệu"
-                            : "Lớp " + book.min_grade + "–" + book.max_grade}
-                        </td>
-                        <td className="px-3 py-4">
-                          <span className="inline-flex rounded-full bg-canvas px-3 py-1 font-semibold text-muted">
-                            {lifecycleLabels[book.lifecycle_status] ??
-                              book.lifecycle_status}
+              <>
+                <div
+                  aria-label="Danh sách sách cần kiểm tra metadata trên di động"
+                  className="grid gap-3 md:hidden"
+                >
+                  {dashboard.items.map((book) => (
+                    <article
+                      className="rounded-card border border-border bg-canvas/40 p-4"
+                      key={book.id}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <h3 className="break-words text-base font-extrabold text-ink">
+                            {book.title?.trim()
+                              ? book.title
+                              : "Chưa có tiêu đề"}
+                          </h3>
+                          <p className="mt-0.5 text-sm text-muted">
+                            Tác giả:{" "}
+                            {book.author?.trim() ? book.author : "Chưa có"} ·{" "}
+                            {book.min_grade == null || book.max_grade == null
+                              ? "Chưa đủ dữ liệu lớp"
+                              : `Lớp ${book.min_grade}–${book.max_grade}`}
+                          </p>
+                        </div>
+                        <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-muted">
+                          {lifecycleLabels[book.lifecycle_status] ??
+                            book.lifecycle_status}
+                        </span>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-1.5">
+                        {book.issues.map((issue) => (
+                          <span
+                            className="inline-flex rounded-full bg-warning-surface px-2.5 py-1 text-xs font-semibold text-warning"
+                            key={issue}
+                          >
+                            {issueLabels[issue]}
                           </span>
-                        </td>
-                        <td className="px-3 py-4">
-                          <div className="flex max-w-sm flex-wrap gap-2">
-                            {book.issues.map((issue) => (
-                              <span
-                                className="inline-flex rounded-full bg-warning-surface px-3 py-1 font-semibold text-warning"
-                                key={issue}
-                              >
-                                {issueLabels[issue]}
+                        ))}
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2 border-t border-border/70 pt-3">
+                        {book.issues.some(
+                          (issue) => issue !== "POSSIBLE_DUPLICATE",
+                        ) ? (
+                          <Link
+                            className="inline-flex min-h-12 items-center rounded-control bg-sky px-3.5 text-sm font-bold text-primary-hover focus-visible:outline-3 focus-visible:outline-primary"
+                            href={
+                              "/admin/books/" +
+                              encodeURIComponent(book.id) +
+                              "/edit?returnTo=metadata-quality&issue=" +
+                              encodeURIComponent(
+                                book.issues.find(
+                                  (issue) => issue !== "POSSIBLE_DUPLICATE",
+                                ) ?? book.issues[0],
+                              )
+                            }
+                          >
+                            {book.issues.includes("MISSING_TITLE")
+                              ? "Bổ sung metadata"
+                              : "Sửa metadata"}
+                          </Link>
+                        ) : null}
+                        {book.issues.includes("POSSIBLE_DUPLICATE") ? (
+                          <Link
+                            className="inline-flex min-h-12 items-center rounded-control border border-border bg-white px-3.5 text-sm font-bold text-primary focus-visible:outline-3 focus-visible:outline-primary"
+                            href={"/admin/books/" + encodeURIComponent(book.id)}
+                          >
+                            So sánh sách
+                          </Link>
+                        ) : null}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+
+                <div className="hidden md:block">
+                  <ResponsiveTable ariaLabel="Bảng sách cần kiểm tra metadata">
+                    <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+                      <thead>
+                        <tr className="border-b border-border bg-sky text-primary">
+                          <th className="px-3 py-3 font-semibold" scope="col">
+                            Sách
+                          </th>
+                          <th className="px-3 py-3 font-semibold" scope="col">
+                            Tác giả
+                          </th>
+                          <th className="px-3 py-3 font-semibold" scope="col">
+                            Khối lớp
+                          </th>
+                          <th className="px-3 py-3 font-semibold" scope="col">
+                            Trạng thái
+                          </th>
+                          <th className="px-3 py-3 font-semibold" scope="col">
+                            Vấn đề phát hiện
+                          </th>
+                          <th className="px-3 py-3 font-semibold" scope="col">
+                            Thao tác
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dashboard.items.map((book) => (
+                          <tr
+                            className="border-b border-border last:border-0"
+                            key={book.id}
+                          >
+                            <td className="px-3 py-4 font-semibold text-ink">
+                              {book.title?.trim()
+                                ? book.title
+                                : "Chưa có tiêu đề"}
+                            </td>
+                            <td className="px-3 py-4 text-muted">
+                              {book.author?.trim() ? book.author : "Chưa có"}
+                            </td>
+                            <td className="px-3 py-4 text-muted">
+                              {book.min_grade == null || book.max_grade == null
+                                ? "Chưa đủ dữ liệu"
+                                : "Lớp " +
+                                  book.min_grade +
+                                  "–" +
+                                  book.max_grade}
+                            </td>
+                            <td className="px-3 py-4">
+                              <span className="inline-flex rounded-full bg-canvas px-3 py-1 font-semibold text-muted">
+                                {lifecycleLabels[book.lifecycle_status] ??
+                                  book.lifecycle_status}
                               </span>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="px-3 py-4">
-                          <div className="flex flex-wrap gap-x-3 gap-y-1">
-                            {book.issues.some(
-                              (issue) => issue !== "POSSIBLE_DUPLICATE",
-                            ) ? (
-                              <Link
-                                className="inline-flex min-h-10 items-center rounded-control px-2 font-semibold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
-                                href={
-                                  "/admin/books/" +
-                                  encodeURIComponent(book.id) +
-                                  "/edit?returnTo=metadata-quality&issue=" +
-                                  encodeURIComponent(
-                                    book.issues.find(
-                                      (issue) => issue !== "POSSIBLE_DUPLICATE",
-                                    ) ?? book.issues[0],
-                                  )
-                                }
-                              >
-                                {book.issues.includes("MISSING_TITLE")
-                                  ? "Bổ sung metadata"
-                                  : "Sửa metadata"}
-                              </Link>
-                            ) : null}
-                            {book.issues.includes("POSSIBLE_DUPLICATE") ? (
-                              <Link
-                                className="inline-flex min-h-10 items-center rounded-control px-2 font-semibold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
-                                href={
-                                  "/admin/books/" + encodeURIComponent(book.id)
-                                }
-                              >
-                                So sánh sách
-                              </Link>
-                            ) : null}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </ResponsiveTable>
+                            </td>
+                            <td className="px-3 py-4">
+                              <div className="flex max-w-sm flex-wrap gap-2">
+                                {book.issues.map((issue) => (
+                                  <span
+                                    className="inline-flex rounded-full bg-warning-surface px-3 py-1 font-semibold text-warning"
+                                    key={issue}
+                                  >
+                                    {issueLabels[issue]}
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="px-3 py-4">
+                              <div className="flex flex-wrap gap-x-3 gap-y-1">
+                                {book.issues.some(
+                                  (issue) => issue !== "POSSIBLE_DUPLICATE",
+                                ) ? (
+                                  <Link
+                                    className="inline-flex min-h-10 items-center rounded-control px-2 font-semibold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+                                    href={
+                                      "/admin/books/" +
+                                      encodeURIComponent(book.id) +
+                                      "/edit?returnTo=metadata-quality&issue=" +
+                                      encodeURIComponent(
+                                        book.issues.find(
+                                          (issue) =>
+                                            issue !== "POSSIBLE_DUPLICATE",
+                                        ) ?? book.issues[0],
+                                      )
+                                    }
+                                  >
+                                    {book.issues.includes("MISSING_TITLE")
+                                      ? "Bổ sung metadata"
+                                      : "Sửa metadata"}
+                                  </Link>
+                                ) : null}
+                                {book.issues.includes("POSSIBLE_DUPLICATE") ? (
+                                  <Link
+                                    className="inline-flex min-h-10 items-center rounded-control px-2 font-semibold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+                                    href={
+                                      "/admin/books/" +
+                                      encodeURIComponent(book.id)
+                                    }
+                                  >
+                                    So sánh sách
+                                  </Link>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </ResponsiveTable>
+                </div>
+              </>
             )}
 
             <PaginationBar

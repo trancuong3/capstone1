@@ -3,10 +3,13 @@
 import {
   Camera,
   CheckCircle2,
+  Clock3,
   FileImage,
   RefreshCw,
   RotateCcw,
   Sparkles,
+  Wifi,
+  WifiOff,
   X,
 } from "lucide-react";
 import {
@@ -23,8 +26,13 @@ import { StatusMessage } from "@/components/common/status-message";
 import { CameraPreview } from "@/components/reading/camera-preview";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import {
+  cancelScanPageOcrJob,
+  enqueueScanPageOcrJob,
+  getScanPageOcrJob,
   scanPageImageWithLocalOcr,
   type LocalOcrPageScanDTO,
+  type LocalOcrPageScanJobDTO,
+  type LocalOcrScanJobStatus,
 } from "@/lib/api/page-match-service";
 import { isServiceError } from "@/lib/api/service-error";
 import { preprocessScanImage } from "@/lib/reading/scan-image-preprocess";
@@ -61,6 +69,44 @@ function createIdempotencyKey(): string {
 
 type OcrProcessingStage = "optimizing" | "uploading";
 
+const POLL_INTERVAL_WORKER_ONLINE_MS = 1_500;
+const POLL_INTERVAL_WORKER_OFFLINE_MS = 4_000;
+const MAX_POLL_ATTEMPTS = 120;
+
+function sleepWithAbort(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    return Promise.reject(new DOMException("Aborted", "AbortError"));
+  }
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      window.clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function describeAsyncJobFailure(job: LocalOcrPageScanJobDTO): string {
+  if (job.status === "CANCELLED") {
+    return "Tác vụ nhận diện trang sách đã được hủy. Ba mẹ có thể chọn lại ảnh khác nhé.";
+  }
+  const code = (job.error_code ?? "").toUpperCase();
+  if (code.includes("TIMEOUT")) {
+    return "Nhận diện trang sách vượt quá thời gian xử lý. Ba mẹ bấm Thử lại với ảnh này nhé.";
+  }
+  if (code.includes("UNAVAILABLE") || code.includes("WORKER")) {
+    return "Máy chủ OCR Windows tạm chưa kết nối được. Ba mẹ kiểm tra máy chủ OCR rồi bấm Thử lại nhé.";
+  }
+  if (job.error_message && job.error_message.trim()) {
+    return `Chưa nhận diện được chữ tiếng Việt từ ảnh này (${job.error_message.trim()}). Ba mẹ hãy chụp rõ hơn hoặc bấm Thử lại nhé.`;
+  }
+  return "Chưa nhận diện được trang sách lúc này. Ba mẹ hãy chụp rõ nét, đủ sáng rồi bấm Thử lại nhé.";
+}
+
 type LocalOcrScanState =
   | { readonly status: "idle" }
   | {
@@ -68,6 +114,19 @@ type LocalOcrScanState =
       readonly stage: OcrProcessingStage;
       readonly fileName: string;
       readonly file: File;
+      readonly idempotencyKey: string;
+    }
+  | {
+      readonly status: "queued";
+      readonly jobId: string;
+      readonly jobStatus: Extract<
+        LocalOcrScanJobStatus,
+        "QUEUED" | "CLAIMED" | "RUNNING" | "FAILED_RETRYABLE"
+      >;
+      readonly workerOnline: boolean;
+      readonly fileName: string;
+      readonly file: File;
+      readonly wasOptimized: boolean;
       readonly idempotencyKey: string;
     }
   | {
@@ -98,6 +157,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const nativeCameraInputRef = useRef<HTMLInputElement | null>(null);
   const ocrAbortRef = useRef<AbortController | null>(null);
+  const activeJobIdRef = useRef<string | null>(null);
   const ocrGenerationRef = useRef(0);
 
   useEffect(() => {
@@ -184,24 +244,144 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           idempotencyKey,
         });
 
-        const result = await scanPageImageWithLocalOcr(uploadFile, {
-          fileName: uploadFile.name,
-          bookId,
-          childId,
-          idempotencyKey,
-          signal: controller.signal,
-        });
+        let job: LocalOcrPageScanJobDTO | null = null;
+        try {
+          job = await enqueueScanPageOcrJob(uploadFile, {
+            fileName: uploadFile.name,
+            bookId,
+            childId,
+            idempotencyKey,
+            signal: controller.signal,
+          });
+        } catch (enqueueError) {
+          if (
+            generation !== ocrGenerationRef.current ||
+            controller.signal.aborted ||
+            (enqueueError instanceof Error &&
+              enqueueError.name === "AbortError")
+          ) {
+            return;
+          }
+          const shouldFallbackToSync =
+            isServiceError(enqueueError) &&
+            (enqueueError.status === 404 ||
+              enqueueError.status === 405 ||
+              enqueueError.status === 501);
+          if (!shouldFallbackToSync) {
+            throw enqueueError;
+          }
+        }
+
         if (
           generation !== ocrGenerationRef.current ||
           controller.signal.aborted
         ) {
           return;
         }
+
+        if (!job) {
+          // Graceful sync fallback when backend does not expose async `/jobs`.
+          const result = await scanPageImageWithLocalOcr(uploadFile, {
+            fileName: uploadFile.name,
+            bookId,
+            childId,
+            idempotencyKey,
+            signal: controller.signal,
+          });
+          if (
+            generation !== ocrGenerationRef.current ||
+            controller.signal.aborted
+          ) {
+            return;
+          }
+          setOcrState({
+            status: "succeeded",
+            fileName: uploadFile.name,
+            wasOptimized,
+            result,
+          });
+          return;
+        }
+
+        activeJobIdRef.current = job.job_id;
+        let currentJob = job;
+
+        for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
+          if (
+            generation !== ocrGenerationRef.current ||
+            controller.signal.aborted
+          ) {
+            return;
+          }
+
+          if (currentJob.status === "SUCCEEDED" && currentJob.result) {
+            activeJobIdRef.current = null;
+            setOcrState({
+              status: "succeeded",
+              fileName: uploadFile.name,
+              wasOptimized,
+              result: currentJob.result,
+            });
+            return;
+          }
+
+          if (
+            currentJob.status === "DEAD_LETTER" ||
+            currentJob.status === "CANCELLED"
+          ) {
+            activeJobIdRef.current = null;
+            setOcrState({
+              status: "error",
+              fileName: uploadFile.name,
+              file: uploadFile,
+              idempotencyKey,
+              message: describeAsyncJobFailure(currentJob),
+              authExpired: false,
+              retryable: currentJob.status !== "CANCELLED",
+            });
+            return;
+          }
+
+          setOcrState({
+            status: "queued",
+            jobId: currentJob.job_id,
+            jobStatus:
+              currentJob.status === "SUCCEEDED" ? "RUNNING" : currentJob.status,
+            workerOnline: currentJob.worker_online,
+            fileName: uploadFile.name,
+            file: uploadFile,
+            wasOptimized,
+            idempotencyKey,
+          });
+
+          const pollDelay = currentJob.worker_online
+            ? POLL_INTERVAL_WORKER_ONLINE_MS
+            : POLL_INTERVAL_WORKER_OFFLINE_MS;
+          await sleepWithAbort(pollDelay, controller.signal);
+
+          if (
+            generation !== ocrGenerationRef.current ||
+            controller.signal.aborted
+          ) {
+            return;
+          }
+
+          currentJob = await getScanPageOcrJob(
+            currentJob.job_id,
+            controller.signal,
+          );
+        }
+
+        activeJobIdRef.current = null;
         setOcrState({
-          status: "succeeded",
+          status: "error",
           fileName: uploadFile.name,
-          wasOptimized,
-          result,
+          file: uploadFile,
+          idempotencyKey,
+          message:
+            "Ảnh trang sách vẫn đang nằm trong hàng đợi chờ máy chủ OCR Windows bật. Khi máy chủ sẵn sàng, ba mẹ bấm Thử lại với ảnh này nhé.",
+          authExpired: false,
+          retryable: true,
         });
       } catch (error) {
         if (
@@ -243,6 +423,11 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
     ocrGenerationRef.current += 1;
     ocrAbortRef.current?.abort();
     ocrAbortRef.current = null;
+    const jobIdToCancel = activeJobIdRef.current;
+    activeJobIdRef.current = null;
+    if (jobIdToCancel) {
+      void cancelScanPageOcrJob(jobIdToCancel).catch(() => undefined);
+    }
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (nativeCameraInputRef.current) nativeCameraInputRef.current.value = "";
     setOcrState({ status: "idle" });
@@ -383,14 +568,101 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               <span className="inline-flex rounded-full bg-sky px-2.5 py-0.5 text-xs font-bold text-primary">
                 {ocrState.stage === "optimizing"
                   ? "Bước 1/2 · Chuẩn hóa ảnh chụp"
-                  : "Bước 2/2 · Nhận diện OCR & khớp trang"}
+                  : "Bước 2/2 · Gửi ảnh & xếp hàng OCR"}
               </span>
               <p className="mt-1.5 text-base font-extrabold text-ink">
                 {ocrState.stage === "optimizing"
                   ? "Đang chuẩn hóa hướng xoay EXIF và tối ưu độ nét ảnh…"
-                  : "Đang gửi ảnh và chạy OCR tiếng Việt cục bộ…"}
+                  : "Đang gửi ảnh tới hệ thống nhận diện OCR tiếng Việt…"}
               </p>
               <p className="truncate text-sm text-muted">{ocrState.fileName}</p>
+            </div>
+          </div>
+          <Button
+            className="min-h-12 sm:w-auto sm:self-start"
+            onClick={handleCancelOcr}
+            variant="secondary"
+          >
+            <X aria-hidden="true" className="size-5" />
+            Hủy quét
+          </Button>
+        </div>
+      ) : null}
+
+      {ocrState.status === "queued" ? (
+        <div
+          aria-live="polite"
+          className={cn(
+            "flex flex-col gap-4 rounded-card border bg-white p-4 sm:p-6",
+            ocrState.workerOnline
+              ? "border-primary/30"
+              : "border-amber-300 bg-amber-50/40",
+          )}
+          data-ocr-job-status={ocrState.jobStatus}
+          data-testid="async-ocr-job-card"
+          role="status"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              {ocrState.jobStatus === "CLAIMED" ||
+              ocrState.jobStatus === "RUNNING" ? (
+                <Sparkles
+                  aria-hidden="true"
+                  className="mt-0.5 size-6 shrink-0 animate-spin text-primary"
+                />
+              ) : (
+                <Clock3
+                  aria-hidden="true"
+                  className="mt-0.5 size-6 shrink-0 text-amber-600"
+                />
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex rounded-full bg-sky px-2.5 py-0.5 text-xs font-bold text-primary">
+                    {ocrState.jobStatus === "CLAIMED" ||
+                    ocrState.jobStatus === "RUNNING"
+                      ? "Đang xử lý OCR"
+                      : ocrState.jobStatus === "FAILED_RETRYABLE"
+                        ? "Đang tự động thử lại"
+                        : "Đang xếp hàng chờ"}
+                  </span>
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-bold",
+                      ocrState.workerOnline
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                        : "border-amber-300 bg-amber-100 text-amber-950",
+                    )}
+                    data-testid="ocr-worker-online-badge"
+                  >
+                    {ocrState.workerOnline ? (
+                      <>
+                        <Wifi aria-hidden="true" className="size-3.5" />
+                        Máy chủ OCR Windows: Đang bật
+                      </>
+                    ) : (
+                      <>
+                        <WifiOff aria-hidden="true" className="size-3.5" />
+                        Máy chủ OCR Windows: Đang tắt
+                      </>
+                    )}
+                  </span>
+                </div>
+                <p className="mt-2 text-base font-extrabold text-ink">
+                  {ocrState.jobStatus === "CLAIMED" ||
+                  ocrState.jobStatus === "RUNNING"
+                    ? "Đang nhận diện trang sách..."
+                    : ocrState.jobStatus === "FAILED_RETRYABLE"
+                      ? "Đang thử nhận diện lại trang sách..."
+                      : ocrState.workerOnline
+                        ? "Ảnh đã vào hàng đợi — đang chờ lượt nhận diện trang sách..."
+                        : "Đang xếp hàng chờ máy chủ OCR Windows bật — ảnh đã được lưu an toàn"}
+                </p>
+                <p className="mt-0.5 truncate text-sm text-muted">
+                  {ocrState.fileName} · Mã tác vụ:{" "}
+                  <code className="font-mono text-xs">{ocrState.jobId}</code>
+                </p>
+              </div>
             </div>
           </div>
           <Button
@@ -586,7 +858,9 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             </Button>
             <Button
               className="min-h-14 w-full"
-              disabled={ocrState.status === "processing"}
+              disabled={
+                ocrState.status === "processing" || ocrState.status === "queued"
+              }
               onClick={() => nativeCameraInputRef.current?.click()}
               variant="secondary"
             >
@@ -595,7 +869,9 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             </Button>
             <Button
               className="min-h-14 w-full"
-              disabled={ocrState.status === "processing"}
+              disabled={
+                ocrState.status === "processing" || ocrState.status === "queued"
+              }
               onClick={() => fileInputRef.current?.click()}
               variant="secondary"
             >

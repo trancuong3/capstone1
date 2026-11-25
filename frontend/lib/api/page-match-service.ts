@@ -4,6 +4,7 @@ import {
   readingPageDtoSchema,
   sessionPageProgressSchema,
 } from "@/lib/api/reading-service";
+import { getApiBaseUrl } from "@/lib/supabase/config";
 import type { ReadingPageDTO } from "@/types/reading";
 
 export interface PageMatchService {
@@ -72,6 +73,133 @@ export const localOcrPageScanSchema = z.object({
 });
 
 export type LocalOcrPageScanDTO = z.infer<typeof localOcrPageScanSchema>;
+
+export const localOcrScanJobStatusSchema = z.enum([
+  "QUEUED",
+  "CLAIMED",
+  "RUNNING",
+  "FAILED_RETRYABLE",
+  "SUCCEEDED",
+  "DEAD_LETTER",
+  "CANCELLED",
+]);
+
+export type LocalOcrScanJobStatus = z.infer<typeof localOcrScanJobStatusSchema>;
+
+export const localOcrPageScanJobSchema = z.object({
+  job_id: z.string(),
+  status: localOcrScanJobStatusSchema,
+  worker_online: z.boolean(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  error_code: z.string().nullable().optional(),
+  error_message: z.string().nullable().optional(),
+  result: localOcrPageScanSchema.nullable().optional(),
+});
+
+export type LocalOcrPageScanJobDTO = z.infer<typeof localOcrPageScanJobSchema>;
+
+export interface OcrWorkerHealthSnapshot {
+  readonly mode: string;
+  readonly ready: boolean;
+  readonly workerOnline: boolean;
+  readonly queuedCount: number;
+}
+
+export async function fetchOcrWorkerHealth(
+  signal?: AbortSignal,
+): Promise<OcrWorkerHealthSnapshot | null> {
+  if (typeof fetch !== "function") return null;
+  try {
+    const response = await fetch(`${getApiBaseUrl()}/health`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+      credentials: "omit",
+      signal,
+    });
+    if (!response.ok) return null;
+    const raw: unknown = await response.json();
+    if (!raw || typeof raw !== "object") return null;
+    const ocr = (raw as Record<string, unknown>).ocr;
+    if (!ocr || typeof ocr !== "object") return null;
+    const rec = ocr as Record<string, unknown>;
+    const mode = typeof rec.mode === "string" ? rec.mode : "unknown";
+    const ready = Boolean(rec.ready);
+    const workers = Array.isArray(rec.workers) ? rec.workers : [];
+    const anyWorkerOnline = workers.some(
+      (item) =>
+        item &&
+        typeof item === "object" &&
+        Boolean((item as Record<string, unknown>).online),
+    );
+    const workerOnline =
+      mode === "remote_worker" ? anyWorkerOnline || ready : ready;
+    const queueObj =
+      rec.queue && typeof rec.queue === "object"
+        ? (rec.queue as Record<string, unknown>)
+        : null;
+    const queuedCount =
+      typeof queueObj?.queued === "number" && Number.isFinite(queueObj.queued)
+        ? Math.max(0, Math.floor(queueObj.queued))
+        : 0;
+    return { mode, ready, workerOnline, queuedCount };
+  } catch {
+    return null;
+  }
+}
+
+export async function enqueueScanPageOcrJob(
+  file: Blob,
+  options: {
+    readonly fileName?: string;
+    readonly bookId?: string;
+    readonly childId?: string;
+    readonly idempotencyKey?: string;
+    readonly signal?: AbortSignal;
+  } = {},
+): Promise<LocalOcrPageScanJobDTO> {
+  const formData = new FormData();
+  formData.append("file", file, options.fileName || "book-page.jpg");
+  if (options.bookId) formData.append("book_id", options.bookId);
+  if (options.childId) formData.append("child_id", options.childId);
+  if (options.idempotencyKey) {
+    formData.append("idempotency_key", options.idempotencyKey);
+  }
+  return requestApi(
+    "/reading/scan-page-ocr/jobs",
+    localOcrPageScanJobSchema,
+    options.signal,
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
+}
+
+export async function getScanPageOcrJob(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<LocalOcrPageScanJobDTO> {
+  return requestApi(
+    `/reading/scan-page-ocr/jobs/${encodeURIComponent(jobId)}`,
+    localOcrPageScanJobSchema,
+    signal,
+    { method: "GET" },
+  );
+}
+
+export async function cancelScanPageOcrJob(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<LocalOcrPageScanJobDTO> {
+  return requestApi(
+    `/reading/scan-page-ocr/jobs/${encodeURIComponent(jobId)}`,
+    localOcrPageScanJobSchema,
+    signal,
+    { method: "DELETE" },
+  );
+}
 
 export async function scanPageImageWithLocalOcr(
   file: Blob,

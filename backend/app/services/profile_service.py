@@ -1,5 +1,7 @@
 """Business orchestration for the authenticated user's profile."""
 
+import asyncio
+from datetime import timezone
 import logging
 from typing import Any
 from uuid import UUID
@@ -7,7 +9,10 @@ from uuid import UUID
 from app.database.config import SUPABASE_AVATAR_BUCKET
 from app.providers.supabase_auth_contact_provider import SupabaseAuthContactProvider
 from app.repositories.profile_repository import ProfileRepository
-from app.services.storage_service import create_signed_image_url
+from app.services.storage_service import (
+    create_cached_signed_image_urls,
+    create_signed_image_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +32,7 @@ class ProfileAccessDeniedError(Exception):
     """Raised when an actor does not have permission for a profile operation."""
 
 
-def _safe_avatar_url(path: object, expected_prefix: str) -> str | None:
+def _validate_safe_avatar_path(path: object, expected_prefix: str) -> str | None:
     if not isinstance(path, str) or not path:
         return None
     if (
@@ -36,7 +41,27 @@ def _safe_avatar_url(path: object, expected_prefix: str) -> str | None:
         or path.startswith(("http://", "https://"))
     ):
         return None
-    return create_signed_image_url(path, bucket_name=SUPABASE_AVATAR_BUCKET)
+    return path
+
+
+def _safe_avatar_url(path: object, expected_prefix: str) -> str | None:
+    safe_path = _validate_safe_avatar_path(path, expected_prefix)
+    if safe_path is None:
+        return None
+    return create_signed_image_url(safe_path, bucket_name=SUPABASE_AVATAR_BUCKET)
+
+
+async def batch_sign_avatar_paths(paths: list[str]) -> dict[str, str]:
+    """Batch-sign validated avatar paths via 20m TTL cache without blocking the event loop."""
+    unique_paths = list(dict.fromkeys(p for p in paths if p))
+    if not unique_paths:
+        return {}
+    signed = await asyncio.to_thread(
+        create_cached_signed_image_urls,
+        unique_paths,
+        bucket_name=SUPABASE_AVATAR_BUCKET,
+    )
+    return dict(zip(unique_paths, signed))
 
 
 def _ensure_active_profile(profile: Any) -> None:
@@ -190,7 +215,23 @@ class ProfileService:
             key=lambda child: (child.CreatedAt, str(child.Id)),
             reverse=True,
         )
-        avatar_path = getattr(profile, "AvatarPath", None)
+        parent_avatar_path = _validate_safe_avatar_path(
+            getattr(profile, "AvatarPath", None),
+            f"profiles/{profile.Id}/avatar/",
+        )
+        child_avatar_paths = {
+            child.Id: _validate_safe_avatar_path(
+                getattr(child, "AvatarPath", None),
+                f"children/{child.Id}/avatar/",
+            )
+            for child in children
+        }
+        paths_to_sign = [
+            p
+            for p in [parent_avatar_path, *child_avatar_paths.values()]
+            if p is not None
+        ]
+        signed_map = await batch_sign_avatar_paths(paths_to_sign)
 
         return {
             "id": profile.Id,
@@ -202,9 +243,7 @@ class ProfileService:
             "pending_email": pending_email,
             "email_verified": email_verified,
             "contact_info_status": status_value,
-            "avatar_url": _safe_avatar_url(
-                avatar_path, f"profiles/{profile.Id}/avatar/"
-            ),
+            "avatar_url": signed_map.get(parent_avatar_path) if parent_avatar_path else None,
             # Deliberately expose only a small display-safe child summary.
             # Settings JSON and reading/event data stay out of the profile response.
             "children": [
@@ -213,11 +252,155 @@ class ProfileService:
                     "alias": child.Alias,
                     "grade": child.Grade,
                     "created_at": child.CreatedAt,
-                    "avatar_url": _safe_avatar_url(
-                        getattr(child, "AvatarPath", None),
-                        f"children/{child.Id}/avatar/",
+                    "avatar_url": (
+                        signed_map.get(child_avatar_paths[child.Id])
+                        if child_avatar_paths[child.Id]
+                        else None
                     ),
                 }
                 for child in children
             ],
+        }
+
+    @staticmethod
+    def _serialize_latest_session(session: Any, book_title: str) -> dict[str, Any]:
+        started_at = session.StartedAt
+        ended_at = session.EndedAt
+        duration_ms = None
+        if ended_at is not None and started_at is not None:
+            start_utc = (
+                started_at
+                if started_at.tzinfo is not None
+                else started_at.replace(tzinfo=timezone.utc)
+            )
+            end_utc = (
+                ended_at
+                if ended_at.tzinfo is not None
+                else ended_at.replace(tzinfo=timezone.utc)
+            )
+            duration_ms = max(0, int((end_utc - start_utc).total_seconds() * 1000))
+
+        raw_state = str(session.State or "")
+        if raw_state in ("FINISHED", "COMPLETED"):
+            wire_state = "FINISHED"
+        elif raw_state in (
+            "CREATED",
+            "PAGE_READY",
+            "LISTENING",
+            "PAUSED",
+            "RECONNECTING",
+            "QUESTIONING",
+            "ABORTED",
+        ):
+            wire_state = raw_state
+        else:
+            wire_state = "PAGE_READY"
+
+        resumable = ended_at is None and wire_state not in ("FINISHED", "ABORTED")
+        return {
+            "session_id": session.Id,
+            "child_id": session.ChildId,
+            "book_id": session.BookId,
+            "book_title": book_title,
+            "state": wire_state,
+            "started_at": started_at,
+            "ended_at": ended_at,
+            "duration_ms": duration_ms,
+            "resumable": resumable,
+        }
+
+    async def get_dashboard_summary(self, parent_id: UUID) -> dict[str, Any]:
+        """Consolidated dashboard read: minimal SQL queries, zero Auth Admin HTTP, batched signed URLs."""
+        profile = await self.repository.get_by_id(parent_id)
+        if profile is None:
+            raise ProfileNotFoundError()
+        _ensure_active_profile(profile)
+
+        children = sorted(
+            profile.children,
+            key=lambda child: (child.CreatedAt, str(child.Id)),
+            reverse=True,
+        )
+        child_ids = [child.Id for child in children]
+        latest_rows = (
+            await self.repository.get_latest_sessions_by_child_ids(parent_id, child_ids)
+            if child_ids
+            else []
+        )
+
+        # Snapshot ORM attributes before closing read transaction prior to Storage signing.
+        contact_phone_value = getattr(profile, "ContactPhone", None)
+        contact_phone = (
+            contact_phone_value.strip() or None
+            if isinstance(contact_phone_value, str)
+            else None
+        )
+        profile_snapshot = {
+            "id": profile.Id,
+            "display_name": profile.DisplayName,
+            "role": profile.Role,
+            "created_at": profile.CreatedAt,
+            "contact_phone": contact_phone,
+        }
+        parent_avatar_path = _validate_safe_avatar_path(
+            getattr(profile, "AvatarPath", None),
+            f"profiles/{profile.Id}/avatar/",
+        )
+        child_snapshots = [
+            {
+                "id": child.Id,
+                "parent_id": getattr(child, "ParentId", profile.Id),
+                "alias": child.Alias,
+                "grade": child.Grade,
+                "settings": dict(getattr(child, "Settings", None) or {}),
+                "created_at": child.CreatedAt,
+                "avatar_path": _validate_safe_avatar_path(
+                    getattr(child, "AvatarPath", None),
+                    f"children/{child.Id}/avatar/",
+                ),
+            }
+            for child in children
+        ]
+        latest_by_child = {
+            str(session.ChildId): self._serialize_latest_session(session, book_title)
+            for session, book_title in latest_rows
+        }
+
+        repo_db = getattr(self.repository, "db", None)
+        if repo_db is not None and callable(getattr(repo_db, "rollback", None)):
+            try:
+                await repo_db.rollback()
+            except Exception:
+                pass
+
+        paths_to_sign = [
+            p
+            for p in [
+                parent_avatar_path,
+                *(c["avatar_path"] for c in child_snapshots),
+            ]
+            if p is not None
+        ]
+        signed_map = await batch_sign_avatar_paths(paths_to_sign)
+
+        return {
+            "profile": {
+                **profile_snapshot,
+                "avatar_url": signed_map.get(parent_avatar_path) if parent_avatar_path else None,
+            },
+            "children": [
+                {
+                    "id": c["id"],
+                    "parent_id": c["parent_id"],
+                    "alias": c["alias"],
+                    "grade": c["grade"],
+                    "settings": c["settings"],
+                    "created_at": c["created_at"],
+                    "avatar_url": (
+                        signed_map.get(c["avatar_path"]) if c["avatar_path"] else None
+                    ),
+                }
+                for c in child_snapshots
+            ],
+            "latest_sessions_by_child": latest_by_child,
         }

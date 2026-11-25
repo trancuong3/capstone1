@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 
 import { ChildProfileScreen } from "@/components/children/child-profile-screen";
-import { AppServicesProvider } from "@/components/providers/app-services-provider";
 
 export const metadata: Metadata = {
   title: "Tạo hồ sơ bé",
@@ -21,11 +20,6 @@ export default async function NewChildPage({
   const from = Array.isArray(query.from) ? query.from[0] : query.from;
 
   return (
-    <AppServicesProvider>
-      <ChildProfileScreen
-        fromRegistration={from === "register"}
-        mode="create"
-      />
-    </AppServicesProvider>
+    <ChildProfileScreen fromRegistration={from === "register"} mode="create" />
   );
 }

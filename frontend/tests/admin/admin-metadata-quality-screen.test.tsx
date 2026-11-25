@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -66,18 +66,35 @@ describe("AdminMetadataQualityScreen", () => {
     render(withAdminFixture(<AdminMetadataQualityScreen />, services));
 
     expect(await screen.findByText("12")).toBeInTheDocument();
-    expect(await screen.findByText("Chưa có tiêu đề")).toBeInTheDocument();
+    const desktopTable = screen.getByRole("region", {
+      name: "Bảng sách cần kiểm tra metadata",
+    });
+    const mobileList = screen.getByLabelText(
+      "Danh sách sách cần kiểm tra metadata trên di động",
+    );
+    expect(
+      within(desktopTable).getByText("Chưa có tiêu đề"),
+    ).toBeInTheDocument();
+    expect(within(mobileList).getByText("Chưa có tiêu đề")).toBeInTheDocument();
     expect(screen.getAllByText("Chưa có tác giả").length).toBeGreaterThan(0);
     expect(
       screen.getAllByText("Khoảng lớp không hợp lệ").length,
     ).toBeGreaterThan(0);
     expect(
-      screen.getByRole("link", { name: "Bổ sung metadata" }),
+      within(desktopTable).getByRole("link", { name: "Bổ sung metadata" }),
     ).toHaveAttribute(
       "href",
       "/admin/books/33333333-3333-4333-8333-333333333333/edit?returnTo=metadata-quality&issue=MISSING_TITLE",
     );
-    expect(screen.getByRole("link", { name: "So sánh sách" })).toHaveAttribute(
+    expect(
+      within(mobileList).getByRole("link", { name: "Bổ sung metadata" }),
+    ).toHaveAttribute(
+      "href",
+      "/admin/books/33333333-3333-4333-8333-333333333333/edit?returnTo=metadata-quality&issue=MISSING_TITLE",
+    );
+    expect(
+      within(desktopTable).getByRole("link", { name: "So sánh sách" }),
+    ).toHaveAttribute(
       "href",
       "/admin/books/33333333-3333-4333-8333-333333333333",
     );
@@ -114,10 +131,15 @@ describe("AdminMetadataQualityScreen", () => {
 
     render(withAdminFixture(<AdminMetadataQualityScreen />, services));
 
-    expect(await screen.findByText("Chưa có tiêu đề")).toBeInTheDocument();
+    const desktopTable = await screen.findByRole("region", {
+      name: "Bảng sách cần kiểm tra metadata",
+    });
+    expect(
+      within(desktopTable).getByText("Chưa có tiêu đề"),
+    ).toBeInTheDocument();
     expect(screen.getAllByText("Đã ngừng").length).toBeGreaterThan(0);
     expect(
-      screen.getByRole("link", { name: "Bổ sung metadata" }),
+      within(desktopTable).getByRole("link", { name: "Bổ sung metadata" }),
     ).toHaveAttribute(
       "href",
       `/admin/books/${retiredBookId}/edit?returnTo=metadata-quality&issue=MISSING_TITLE`,

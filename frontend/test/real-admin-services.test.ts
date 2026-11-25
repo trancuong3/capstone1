@@ -211,12 +211,32 @@ describe("real Admin adapters", () => {
   });
 
   it("reuses replacement upload identity for the same File after a lost response", async () => {
-    fetchMock.mockImplementation(async () => Response.json(detail));
-    const service = createAdminPageService();
+    const jobId = "99999999-9999-4999-8999-999999999991";
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/reupload-ocr/jobs")) {
+        return Response.json(
+          {
+            id: jobId,
+            job_kind: "ADMIN_PAGE_REUPLOAD",
+            status: "SUCCEEDED",
+            page_id: pageId,
+            revision_id: revisionId,
+          },
+          { status: 202 },
+        );
+      }
+      return Response.json(detail);
+    });
+    const service = createAdminPageService({ pollIntervalMs: 1 });
     const file = new File(["new image"], "page.png", { type: "image/png" });
     await service.replaceImageAndReprocess(pageId, file);
     await service.replaceImageAndReprocess(pageId, file);
-    const forms = fetchMock.mock.calls.map(
+    const postCalls = fetchMock.mock.calls.filter(
+      (call) => (call[1] as RequestInit | undefined)?.method === "POST",
+    );
+    expect(postCalls).toHaveLength(2);
+    const forms = postCalls.map(
       (call) => (call[1] as RequestInit).body as FormData,
     );
     expect(forms[0].get("upload_id")).toMatch(/^[0-9a-f-]{36}$/);
@@ -224,15 +244,36 @@ describe("real Admin adapters", () => {
     expect(forms[0].get("image")).toBeInstanceOf(File);
   });
 
-  it("uploads a replacement image without a page number", async () => {
-    fetchMock.mockResolvedValue(Response.json(detail));
+  it("uploads a replacement image via async /reupload-ocr/jobs without a page number", async () => {
+    const jobId = "99999999-9999-4999-8999-999999999992";
+    fetchMock
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            id: jobId,
+            job_kind: "ADMIN_PAGE_REUPLOAD",
+            status: "QUEUED",
+            page_id: pageId,
+          },
+          { status: 202 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          id: jobId,
+          job_kind: "ADMIN_PAGE_REUPLOAD",
+          status: "SUCCEEDED",
+          page_id: pageId,
+          revision_id: revisionId,
+        }),
+      )
+      .mockResolvedValueOnce(Response.json(detail));
     const file = new File(["new page image"], "page-1.png", {
       type: "image/png",
     });
-    const result = await createAdminPageService().replaceImageAndReprocess(
-      pageId,
-      file,
-    );
+    const result = await createAdminPageService({
+      pollIntervalMs: 1,
+    }).replaceImageAndReprocess(pageId, file);
     expect(result).toMatchObject({
       page_id: detail.page_id,
       page_revision_id: detail.page_revision_id,
@@ -240,7 +281,13 @@ describe("real Admin adapters", () => {
       verification_status: detail.verification_status,
     });
     expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe(
-      `/books/admin/pages/${pageId}/reupload-ocr`,
+      `/books/admin/pages/${pageId}/reupload-ocr/jobs`,
+    );
+    expect(new URL(String(fetchMock.mock.calls[1][0])).pathname).toBe(
+      `/books/admin/ocr-jobs/${jobId}`,
+    );
+    expect(new URL(String(fetchMock.mock.calls[2][0])).pathname).toBe(
+      `/books/admin/pages/${pageId}/revisions/${revisionId}`,
     );
     const init = fetchMock.mock.calls[0][1] as RequestInit;
     expect(init.method).toBe("POST");
@@ -495,15 +542,8 @@ describe("real Admin adapters", () => {
     });
   });
 
-  it("uploads each page as multipart data and reloads the server page list", async () => {
-    const needsReviewDetail = {
-      ...detail,
-      verification_status: "NEEDS_REVIEW",
-      draft_text: "Chú mèo",
-      words: [],
-      verified_at: null,
-      verified_by: null,
-    };
+  it("uploads each page as multipart data via async /pages/jobs and reloads the server page list", async () => {
+    const jobId = "99999999-9999-4999-8999-999999999993";
     const file = new File(["valid-for-mock"], "page-2.png", {
       type: "image/png",
     });
@@ -517,10 +557,30 @@ describe("real Admin adapters", () => {
       file,
     };
     fetchMock
-      .mockResolvedValueOnce(Response.json(needsReviewDetail))
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            id: jobId,
+            job_kind: "ADMIN_PAGE_UPLOAD",
+            status: "QUEUED",
+            book_id: bookId,
+          },
+          { status: 202 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          id: jobId,
+          job_kind: "ADMIN_PAGE_UPLOAD",
+          status: "SUCCEEDED",
+          book_id: bookId,
+          page_id: pageId,
+          revision_id: revisionId,
+        }),
+      )
       .mockResolvedValueOnce(Response.json([page]));
     const progress: { status: string; progress_percent: number }[] = [];
-    const result = await createAdminPageService().upload(
+    const result = await createAdminPageService({ pollIntervalMs: 1 }).upload(
       bookId,
       [input],
       (item) => {
@@ -531,9 +591,9 @@ describe("real Admin adapters", () => {
       },
     );
     expect(result).toEqual([page]);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain(`/books/admin/catalog/${bookId}/pages`);
+    expect(url).toContain(`/books/admin/catalog/${bookId}/pages/jobs`);
     expect(init.method).toBe("POST");
     expect(init.body).toBeInstanceOf(FormData);
     expect((init.body as FormData).get("page_number")).toBeNull();
@@ -543,8 +603,12 @@ describe("real Admin adapters", () => {
     expect(
       (init.headers as Record<string, string>)["Content-Type"],
     ).toBeUndefined();
+    expect(fetchMock.mock.calls[1][0]).toContain(
+      `/books/admin/ocr-jobs/${jobId}`,
+    );
     expect(progress).toEqual([
       { status: "UPLOADING", progress_percent: 0 },
+      { status: "PROCESSING", progress_percent: 35 },
       { status: "PROCESSING", progress_percent: 100 },
     ]);
   });
@@ -665,26 +729,56 @@ describe("real Admin adapters", () => {
     expect(verifyInit.method).toBe("POST");
 
     const nextRevisionId = "55555555-5555-4555-8555-555555555555";
+    const reprocessJobId = "99999999-9999-4999-8999-999999999994";
     fetchMock.mockReset();
-    fetchMock.mockResolvedValueOnce(
-      Response.json({
-        ...detail,
-        page_revision_id: nextRevisionId,
-        revision_no: 3,
-        verification_status: "NEEDS_REVIEW",
-        draft_text: "Chú",
-        words: [word],
-        verified_at: null,
-        verified_by: null,
-      }),
+    fetchMock
+      .mockResolvedValueOnce(
+        Response.json(
+          {
+            id: reprocessJobId,
+            job_kind: "ADMIN_PAGE_REPROCESS",
+            status: "QUEUED",
+            page_id: pageId,
+          },
+          { status: 202 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          id: reprocessJobId,
+          job_kind: "ADMIN_PAGE_REPROCESS",
+          status: "SUCCEEDED",
+          page_id: pageId,
+          revision_id: nextRevisionId,
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          ...detail,
+          page_revision_id: nextRevisionId,
+          revision_no: 3,
+          verification_status: "NEEDS_REVIEW",
+          draft_text: "Chú",
+          words: [word],
+          verified_at: null,
+          verified_by: null,
+        }),
+      );
+    const next = await createRevisionService({ pollIntervalMs: 1 }).reprocess(
+      pageId,
     );
-    const next = await createRevisionService().reprocess(pageId);
     expect(next.page_revision_id).toBe(nextRevisionId);
     expect(next.revision_no).toBe(3);
     expect(fetchMock.mock.calls[0][0]).toContain(
-      `/books/admin/pages/${pageId}/reprocess`,
+      `/books/admin/pages/${pageId}/reprocess/jobs`,
     );
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "POST" });
+    expect(fetchMock.mock.calls[1][0]).toContain(
+      `/books/admin/ocr-jobs/${reprocessJobId}`,
+    );
+    expect(fetchMock.mock.calls[2][0]).toContain(
+      `/books/admin/pages/${pageId}/revisions/${nextRevisionId}`,
+    );
   });
 
   it("starts local AI correction jobs and accepts only a validated suggestion", async () => {

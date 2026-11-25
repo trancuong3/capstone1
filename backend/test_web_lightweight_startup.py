@@ -8,7 +8,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -86,18 +86,47 @@ print(json.dumps({"forbidden_loaded": forbidden}))
         data = json.loads(proc.stdout.strip().splitlines()[-1])
         self.assertEqual(data["forbidden_loaded"], [])
 
-    def test_parent_book_worker_respects_disable_heavy_workers_flag(self):
-        from app.jobs.parent_book_submission_worker import run_once
+    def test_parent_book_worker_runs_lightweight_post_ocr_sweeper_in_remote_mode(self):
+        from app.jobs import parent_book_submission_worker
 
-        with patch.dict(
-            os.environ,
-            {"VIREAD_WEB_DISABLE_HEAVY_WORKERS": "true"},
-            clear=False,
+        fake_claimed = SimpleNamespace(Id="00000000-0000-4000-8000-000000000123")
+        fake_repo = SimpleNamespace(
+            claim_next_checking_submission=AsyncMock(return_value=fake_claimed)
+        )
+        fake_session = AsyncMock()
+        fake_cm = MagicMock()
+        fake_cm.__aenter__ = AsyncMock(return_value=fake_session)
+        fake_cm.__aexit__ = AsyncMock(return_value=False)
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "VIREAD_OCR_MODE": "remote_worker",
+                    "VIREAD_WEB_DISABLE_HEAVY_WORKERS": "true",
+                },
+                clear=False,
+            ),
+            patch.object(parent_book_submission_worker, "AsyncSessionLocal", MagicMock(return_value=fake_cm)),
+            patch.object(
+                parent_book_submission_worker,
+                "ParentPrivateBookRepository",
+                return_value=fake_repo,
+            ),
+            patch.object(
+                parent_book_submission_worker,
+                "run_parent_submission_post_ocr",
+                AsyncMock(return_value={"status": "PASSED_READY_TO_ADD"}),
+            ) as mock_post_ocr,
         ):
-            did_work = asyncio.run(run_once())
-            self.assertFalse(did_work)
+            did_work = asyncio.run(parent_book_submission_worker.run_once())
+            self.assertTrue(did_work)
+            fake_repo.claim_next_checking_submission.assert_awaited_once()
+            self.assertTrue(
+                fake_repo.claim_next_checking_submission.await_args.kwargs.get("only_post_ocr")
+            )
+            mock_post_ocr.assert_awaited_once_with(fake_claimed.Id)
 
-    def test_lifespan_skips_heavy_ocr_and_parent_workers_in_remote_mode(self):
+    def test_lifespan_decouples_lightweight_workers_from_remote_ocr_mode(self):
         import app.sever as sever_mod
 
         called_workers: list[str] = []
@@ -106,6 +135,9 @@ print(json.dumps({"forbidden_loaded": forbidden}))
             called_workers.append("started")
             await stop_event.wait()
 
+        # 1. When VIREAD_WEB_DISABLE_HEAVY_WORKERS=true (Render Free 512 MiB light web):
+        #    ALL background/polling workers AND local voice bootstrap MUST be gated off.
+        mock_voice_bootstrap = AsyncMock(return_value=False)
         with (
             patch.dict(
                 os.environ,
@@ -116,6 +148,8 @@ print(json.dumps({"forbidden_loaded": forbidden}))
                     "PARENT_BOOK_WORKER_ENABLED": "true",
                     "VIREAD_OCR_OUTBOX_WORKER_ENABLED": "true",
                     "VIREAD_OCR_AUTO_TRAINING_WORKER_ENABLED": "true",
+                    "BOOK_QUALITY_SCAN_WORKER_ENABLED": "true",
+                    "ADMIN_AI_WORKFLOW_WORKER_ENABLED": "true",
                     "BACKGROUND_WORKER_STARTUP_DELAY_SECONDS": "0",
                 },
                 clear=False,
@@ -123,11 +157,12 @@ print(json.dumps({"forbidden_loaded": forbidden}))
             patch.object(sever_mod, "APP_ENVIRONMENT", "staging"),
             patch.object(sever_mod, "warmup_ocr_engines", side_effect=AssertionError("should not warmup")),
             patch.object(sever_mod, "run_active_viread_model_worker", side_effect=AssertionError("should not poll active model")),
-            patch.object(sever_mod, "run_viread_ocr_outbox_worker", side_effect=AssertionError("should not start outbox")),
-            patch.object(sever_mod, "run_viread_ocr_training_auto_worker", side_effect=AssertionError("should not start training")),
-            patch.object(sever_mod, "run_parent_book_submission_worker", side_effect=AssertionError("should not start heavy parent worker")),
+            patch.object(sever_mod, "run_viread_ocr_outbox_worker", new=_fake_worker),
+            patch.object(sever_mod, "run_viread_ocr_training_auto_worker", new=_fake_worker),
+            patch.object(sever_mod, "run_parent_book_submission_worker", new=_fake_worker),
             patch.object(sever_mod, "run_book_quality_worker", new=_fake_worker),
             patch.object(sever_mod, "run_admin_ai_workflow_worker", new=_fake_worker),
+            patch.object(sever_mod, "ensure_local_voice_worker_running", mock_voice_bootstrap),
             patch.object(sever_mod, "probe_database_connection", AsyncMock(return_value={
                 "ok": True, "dns_resolved": True, "ssl_enabled": True,
                 "pool_class": "NullPool", "pooler_mode": "transaction", "latency_ms": 2.0,
@@ -139,7 +174,50 @@ print(json.dumps({"forbidden_loaded": forbidden}))
                 self.assertIsNone(state["viread_ocr_outbox"])
                 self.assertIsNone(state["viread_ocr_training"])
                 self.assertIsNone(state["parent_book_submission"])
+                self.assertIsNone(state["book_quality"])
+                self.assertIsNone(state["admin_ai_workflow"])
+                self.assertIsNone(state["local_voice_bootstrap"])
                 self.assertIsNone(state["active_model_registry"])
+                self.assertIsNone(state["local_trainer_process"])
+            mock_voice_bootstrap.assert_not_awaited()
+
+        # 2. When VIREAD_OCR_MODE=remote_worker AND VIREAD_WEB_DISABLE_HEAVY_WORKERS=false:
+        #    ML/OCR workers remain disabled while lightweight pollers can run if enabled.
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "VIREAD_OCR_MODE": "remote_worker",
+                    "VIREAD_WEB_DISABLE_HEAVY_WORKERS": "false",
+                    "PARENT_BOOK_WORKER_ENABLED": "true",
+                    "VIREAD_OCR_OUTBOX_WORKER_ENABLED": "true",
+                    "VIREAD_OCR_AUTO_TRAINING_WORKER_ENABLED": "true",
+                    "BACKGROUND_WORKER_STARTUP_DELAY_SECONDS": "0",
+                },
+                clear=False,
+            ),
+            patch.object(sever_mod, "APP_ENVIRONMENT", "staging"),
+            patch.object(sever_mod, "warmup_ocr_engines", side_effect=AssertionError("should not warmup")),
+            patch.object(sever_mod, "run_active_viread_model_worker", side_effect=AssertionError("should not poll active model")),
+            patch.object(sever_mod, "run_viread_ocr_outbox_worker", new=_fake_worker),
+            patch.object(sever_mod, "run_viread_ocr_training_auto_worker", new=_fake_worker),
+            patch.object(sever_mod, "run_parent_book_submission_worker", new=_fake_worker),
+            patch.object(sever_mod, "run_book_quality_worker", new=_fake_worker),
+            patch.object(sever_mod, "run_admin_ai_workflow_worker", new=_fake_worker),
+            patch.object(sever_mod, "ensure_local_voice_worker_running", AsyncMock(return_value=False)),
+            patch.object(sever_mod, "probe_database_connection", AsyncMock(return_value={
+                "ok": True, "dns_resolved": True, "ssl_enabled": True,
+                "pool_class": "NullPool", "pooler_mode": "transaction", "latency_ms": 2.0,
+                "error_type": None,
+            })),
+        ):
+            with TestClient(sever_mod.app) as client:
+                state = client.app.state.background_workers
+                self.assertIsNotNone(state["viread_ocr_outbox"])
+                self.assertIsNotNone(state["viread_ocr_training"])
+                self.assertIsNotNone(state["parent_book_submission"])
+                self.assertIsNone(state["active_model_registry"])
+                self.assertIsNone(state["local_trainer_process"])
 
     def test_health_never_marks_installed_as_ready_and_exposes_version_header(self):
         import app.sever as sever_mod

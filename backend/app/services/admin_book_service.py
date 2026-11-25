@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from app.repositories.admin_book_repository import AdminBookRepository
 from app.schemas.admin_book import AdminBookSoftDeleteResponse, AdminBookWriteRequest
 from app.schemas.book import AdminBookMetadataResponse
+from app.services.tts_audio_cache_service import invalidate_tts_cache_best_effort
 
 
 class AdminBookService:
@@ -113,7 +114,14 @@ class AdminBookService:
                     )
 
             updated = await self.repository.set_lifecycle(book, status)
-            return AdminBookMetadataResponse.model_validate(updated)
+            response = AdminBookMetadataResponse.model_validate(updated)
+            if status == "RETIRED":
+                await invalidate_tts_cache_best_effort(
+                    getattr(self.repository, "db", None),
+                    book_id=book_id,
+                    commit=True,
+                )
+            return response
         except HTTPException:
             raise
         except SQLAlchemyError:
@@ -130,6 +138,11 @@ class AdminBookService:
             deleted = await self.repository.soft_delete(book_id, actor_id=actor_id)
             if not deleted:
                 raise HTTPException(status_code=404, detail="Resource not found")
+            await invalidate_tts_cache_best_effort(
+                getattr(self.repository, "db", None),
+                book_id=book_id,
+                commit=True,
+            )
             return AdminBookSoftDeleteResponse(book_id=book_id, is_deleted=True)
         except HTTPException:
             raise

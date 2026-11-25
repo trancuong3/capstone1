@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 
-import { AppServicesProvider } from "@/components/providers/app-services-provider";
 import { ProgressReportScreen } from "@/components/reports/progress-report-screen";
 import { firstQueryValue } from "@/lib/utils/report-state";
 
@@ -17,12 +16,10 @@ interface ReportsPageProps {
 export default async function ReportsPage({ searchParams }: ReportsPageProps) {
   const query = await searchParams;
   return (
-    <AppServicesProvider>
-      <ProgressReportScreen
-        requestedChildId={firstQueryValue(query.childId)}
-        requestedPeriodStart={query.period_start}
-        requestedPeriodEnd={query.period_end}
-      />
-    </AppServicesProvider>
+    <ProgressReportScreen
+      requestedChildId={firstQueryValue(query.childId)}
+      requestedPeriodStart={query.period_start}
+      requestedPeriodEnd={query.period_end}
+    />
   );
 }

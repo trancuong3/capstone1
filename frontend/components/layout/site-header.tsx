@@ -18,8 +18,8 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
         className,
       )}
     >
-      <div className="mx-auto flex min-h-24 w-full max-w-[1376px] flex-col items-start justify-between gap-3 px-4 py-4 sm:flex-row sm:items-center sm:gap-6 sm:px-8">
-        <div className="flex min-w-0 items-center gap-3">
+      <div className="mx-auto flex min-h-14 w-full max-w-[1376px] flex-row items-center justify-between gap-2 px-3 py-2 sm:min-h-20 sm:gap-6 sm:px-8 sm:py-4">
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <ViReadLogo
             ariaLabel={
               isAdminLogin
@@ -30,31 +30,33 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
             size="md"
           />
           {isAdminLogin ? (
-            <span className="rounded-full bg-sky px-3 py-1 text-xs font-semibold tracking-wide text-primary-hover">
+            <span className="rounded-full bg-sky px-2.5 py-1 text-xs font-semibold tracking-wide text-primary-hover sm:px-3">
               ADMIN
             </span>
           ) : null}
         </div>
 
         {isAdminLogin ? (
-          <p className="text-label font-medium text-muted">Khu vực quản trị</p>
+          <p className="truncate text-xs font-medium text-muted sm:text-label">
+            Khu vực quản trị
+          </p>
         ) : (
           <nav
             aria-label="Tài khoản ViRead"
-            className="grid w-full grid-cols-2 gap-3 sm:flex sm:w-auto"
+            className="flex shrink-0 items-center gap-2 sm:gap-3"
           >
             <ButtonLink
               href="/login"
               size="compact"
               variant="quiet"
-              className="whitespace-nowrap border border-border sm:min-w-32"
+              className="w-auto whitespace-nowrap border border-border px-3 text-sm sm:min-w-32 sm:px-4 sm:text-label"
             >
               Đăng nhập
             </ButtonLink>
             <ButtonLink
               href="/register"
               size="compact"
-              className="whitespace-nowrap sm:min-w-32"
+              className="w-auto whitespace-nowrap px-3 text-sm sm:min-w-32 sm:px-4 sm:text-label"
             >
               Đăng ký
             </ButtonLink>

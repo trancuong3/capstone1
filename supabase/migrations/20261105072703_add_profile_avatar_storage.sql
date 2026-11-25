@@ -6,7 +6,7 @@ ALTER TABLE public.childprofiles
     ADD COLUMN IF NOT EXISTS avatar_path TEXT;
 
 COMMENT ON COLUMN public.profiles.avatar_path IS
-    'Private Supabase Storage object path for the parent's ViRead avatar.';
+    'Private Supabase Storage object path for the parent''s ViRead avatar.';
 
 COMMENT ON COLUMN public.childprofiles.avatar_path IS
     'Private Supabase Storage object path for the child profile avatar.';

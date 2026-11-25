@@ -58,7 +58,8 @@ class IdentityTests(unittest.TestCase):
                     get_client.return_value.auth.get_user.return_value = SimpleNamespace(user=user)
                     with self.assertRaises(HTTPException) as caught:
                         get_current_parent_id(
-                            HTTPAuthorizationCredentials(scheme="Bearer", credentials="test-token")
+                            # Use a unique token per subTest to avoid cross-subtest cache hits
+                            HTTPAuthorizationCredentials(scheme="Bearer", credentials=f"invalid-token-{id(user)}")
                         )
                 self.assertEqual(caught.exception.status_code, 401)
 

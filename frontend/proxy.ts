@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { readPlaywrightAuthFixture } from "@/lib/auth/playwright-auth-fixture";
 import {
+  buildLoginRedirectPath,
   getProtectedRouteArea,
   getProtectedRouteRedirect,
 } from "@/lib/auth/route-policy";
@@ -14,24 +15,42 @@ function redirectWithAuthState(
   request: NextRequest,
   destination: string,
   authResponse: NextResponse,
+  nextPath?: string,
 ) {
   const url = request.nextUrl.clone();
   url.pathname = destination;
   url.search = "";
+  if (nextPath) {
+    url.searchParams.set("next", nextPath);
+  }
 
   return preserveSupabaseAuthResponse(authResponse, NextResponse.redirect(url));
 }
 
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+  const currentPathWithQuery = `${pathname}${request.nextUrl.search}`;
   const protectedArea = getProtectedRouteArea(pathname);
   const fixtureRole = readPlaywrightAuthFixture(request.headers);
 
+  request.headers.set("x-viread-next", currentPathWithQuery);
+
   if (fixtureRole) {
-    const destination = getProtectedRouteRedirect(pathname, fixtureRole);
+    const destination =
+      getProtectedRouteRedirect(pathname, fixtureRole) ??
+      (pathname === "/admin" && fixtureRole === "admin"
+        ? "/admin/parents"
+        : null);
     return destination
-      ? NextResponse.redirect(new URL(destination, request.url))
-      : NextResponse.next();
+      ? NextResponse.redirect(
+          new URL(
+            destination === "/login" || destination === "/admin/login"
+              ? buildLoginRedirectPath(destination, currentPathWithQuery)
+              : destination,
+            request.url,
+          ),
+        )
+      : NextResponse.next({ request });
   }
 
   const auth = await refreshSupabaseAuth(request);
@@ -40,11 +59,16 @@ export async function proxy(request: NextRequest) {
     return redirectWithAuthState(request, "/dashboard", auth.response);
   }
 
+  if (pathname === "/admin" && auth.userId) {
+    return redirectWithAuthState(request, "/admin/parents", auth.response);
+  }
+
   if (protectedArea && !auth.userId) {
     return redirectWithAuthState(
       request,
       protectedArea === "admin" ? "/admin/login" : "/login",
       auth.response,
+      currentPathWithQuery,
     );
   }
 

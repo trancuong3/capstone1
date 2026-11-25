@@ -125,6 +125,136 @@ function playSound(kind: "shot" | "correct" | "wrong" | "celebrate") {
   }
 }
 
+interface SentenceShooterResultViewProps {
+  backHref: string;
+  child: NonNullable<
+    ReturnType<typeof useValidatedSelectedChild>["state"] & { status: "ready" }
+  >["child"];
+  finalSentence: string;
+  isLoadingResult: boolean;
+  onReloadResult: () => void;
+  onRestartLobby: () => void;
+  readingSessionId?: string;
+  result: SentenceShooterResultDTO | null;
+  resultError: boolean;
+  session: SentenceShooterSessionDTO | null;
+}
+
+function SentenceShooterResultView({
+  backHref,
+  child,
+  finalSentence,
+  isLoadingResult,
+  onReloadResult,
+  onRestartLobby,
+  readingSessionId,
+  result,
+  resultError,
+  session,
+}: SentenceShooterResultViewProps) {
+  const speechPlayer = useSpeechPlayer();
+  const summaryBookTitle = result?.book.title ?? session?.book.title ?? "";
+  const summaryCompletedRounds =
+    result?.completed_rounds ?? session?.completed_rounds ?? 0;
+  const summaryTotalRounds = result?.total_rounds ?? session?.total_rounds ?? 0;
+  const summaryTotalStars = result?.total_stars ?? session?.total_stars ?? 0;
+
+  function readSentence() {
+    if (!finalSentence.trim()) return;
+    speechPlayer.stop();
+    void speechPlayer.play(finalSentence).catch(() => undefined);
+  }
+
+  return (
+    <section className="mx-auto flex w-full max-w-[900px] flex-col gap-6 px-4 py-6 sm:px-8 sm:py-10">
+      <BookChildHeader
+        backHref={backHref}
+        child={child}
+        mobileLabel={readingSessionId ? "Kết quả đọc" : "Khu vui học"}
+      />
+      <div className="relative overflow-hidden rounded-card border border-border bg-cream p-6 text-center shadow-sm sm:p-10">
+        <div
+          aria-hidden="true"
+          className="mb-3 flex justify-center gap-3 text-warning"
+        >
+          <span className="text-3xl">✦</span>
+          <span className="mt-3 text-4xl">★</span>
+          <span className="text-3xl">✦</span>
+        </div>
+        <p className="font-extrabold text-primary">Lượt chơi đã lưu</p>
+        <h1 className="mt-2 text-heading font-extrabold text-ink">
+          {result && result.status !== "COMPLETED"
+            ? "Kết quả lượt chơi"
+            : "Giỏi quá, bé đã hoàn thành!"}
+        </h1>
+        <p className="mt-2 text-body text-muted">{summaryBookTitle}</p>
+        <div className="mx-auto mt-7 grid max-w-2xl grid-cols-2 gap-3 sm:grid-cols-4">
+          {[
+            [
+              "Câu hoàn thành",
+              `${summaryCompletedRounds}/${summaryTotalRounds}`,
+            ],
+            ["Từ ghép đúng", result ? String(result.correct_count) : "—"],
+            ["Lần thử lại", result ? String(result.mistakes_total) : "—"],
+            ["Gợi ý", result ? String(result.hint_count) : "—"],
+          ].map(([label, value]) => (
+            <div className="rounded-control bg-white/90 p-4" key={label}>
+              <p className="text-sm font-bold text-muted">{label}</p>
+              <p className="mt-1 text-2xl font-extrabold text-ink">{value}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-6 inline-flex items-center gap-2 rounded-full bg-warning-surface px-5 py-3 text-xl font-extrabold text-warning">
+          <span aria-hidden="true">★</span> {summaryTotalStars} sao
+        </p>
+        {result ? (
+          <p className="mt-3 text-sm font-semibold text-muted">
+            Thời gian chơi: {Math.floor(result.duration_seconds / 60)} phút{" "}
+            {result.duration_seconds % 60} giây
+          </p>
+        ) : isLoadingResult ? (
+          <p className="mt-3 text-sm font-semibold text-muted" role="status">
+            Đang tải chi tiết bảng tổng kết…
+          </p>
+        ) : resultError ? (
+          <div className="mt-3 flex flex-col items-center gap-2">
+            <p className="text-sm font-semibold text-danger">
+              Chưa tải được chi tiết bảng tổng kết.
+            </p>
+            <Button onClick={onReloadResult} size="compact" variant="secondary">
+              <RefreshCw aria-hidden="true" className="size-4" /> Tải lại bảng
+              tổng kết
+            </Button>
+          </div>
+        ) : null}
+        <div className="mx-auto mt-7 flex max-w-md flex-col gap-3 sm:flex-row">
+          <Button
+            className="sm:flex-1"
+            onClick={onRestartLobby}
+            variant="secondary"
+          >
+            <RotateCcw aria-hidden="true" className="size-5" /> Chơi lượt mới
+          </Button>
+          <Button className="sm:flex-1" onClick={readSentence} variant="quiet">
+            Đọc câu mẫu
+          </Button>
+        </div>
+        <p className="mt-4 text-sm text-muted">
+          Câu cuối:{" "}
+          {finalSentence || "Bé đã cùng khám phá những câu trong cuốn sách!"}
+        </p>
+      </div>
+      <Link
+        className="self-center rounded-control px-4 py-3 font-bold text-primary hover:bg-sky"
+        href={backHref}
+      >
+        <ArrowLeft aria-hidden="true" className="mr-2 inline size-4" />
+        {readingSessionId ? "Quay lại kết quả đọc" : "Về khu Giải trí"}
+      </Link>
+    </section>
+  );
+}
+
 export function SentenceShooterScreen({
   initialBookId,
   readingSessionId,
@@ -191,7 +321,6 @@ export function SentenceShooterScreen({
   const readingCompletionHref = readingSessionId
     ? `/reading/${encodeURIComponent(readingSessionId)}`
     : "/entertainment";
-  const speechPlayer = useSpeechPlayer();
 
   useEffect(() => {
     if (!childId) return;
@@ -199,8 +328,10 @@ export function SentenceShooterScreen({
     const controller = new AbortController();
     let active = true;
     async function loadBooks() {
-      setBookState({ status: "loading" });
-      setSelectedBookId("");
+      setBookState((current) =>
+        current.status === "loading" ? current : { status: "loading" },
+      );
+      setSelectedBookId((current) => (current === "" ? current : ""));
       try {
         const books = await shooterService.listBooks(
           selectedChildId,
@@ -634,12 +765,6 @@ export function SentenceShooterScreen({
     setIsPaused(false);
   }
 
-  function readSentence() {
-    if (!finalSentence.trim()) return;
-    speechPlayer.stop();
-    void speechPlayer.play(finalSentence).catch(() => undefined);
-  }
-
   if (childState.status === "loading" || childState.status === "redirecting") {
     return (
       <section
@@ -667,109 +792,20 @@ export function SentenceShooterScreen({
     );
   }
 
-  if (mode === "result" && (result || session)) {
-    const summaryBookTitle = result?.book.title ?? session?.book.title ?? "";
-    const summaryCompletedRounds =
-      result?.completed_rounds ?? session?.completed_rounds ?? 0;
-    const summaryTotalRounds =
-      result?.total_rounds ?? session?.total_rounds ?? 0;
-    const summaryTotalStars = result?.total_stars ?? session?.total_stars ?? 0;
-
+  if (mode === "result" && (result || session) && child) {
     return (
-      <section className="mx-auto flex w-full max-w-[900px] flex-col gap-6 px-4 py-6 sm:px-8 sm:py-10">
-        <BookChildHeader
-          backHref={readingCompletionHref}
-          child={child}
-          mobileLabel={readingSessionId ? "Kết quả đọc" : "Khu vui học"}
-        />
-        <div className="relative overflow-hidden rounded-card border border-border bg-cream p-6 text-center shadow-sm sm:p-10">
-          <div
-            aria-hidden="true"
-            className="mb-3 flex justify-center gap-3 text-warning"
-          >
-            <span className="text-3xl">✦</span>
-            <span className="mt-3 text-4xl">★</span>
-            <span className="text-3xl">✦</span>
-          </div>
-          <p className="font-extrabold text-primary">Lượt chơi đã lưu</p>
-          <h1 className="mt-2 text-heading font-extrabold text-ink">
-            {result && result.status !== "COMPLETED"
-              ? "Kết quả lượt chơi"
-              : "Giỏi quá, bé đã hoàn thành!"}
-          </h1>
-          <p className="mt-2 text-body text-muted">{summaryBookTitle}</p>
-          <div className="mx-auto mt-7 grid max-w-2xl grid-cols-2 gap-3 sm:grid-cols-4">
-            {[
-              [
-                "Câu hoàn thành",
-                `${summaryCompletedRounds}/${summaryTotalRounds}`,
-              ],
-              ["Từ ghép đúng", result ? String(result.correct_count) : "—"],
-              ["Lần thử lại", result ? String(result.mistakes_total) : "—"],
-              ["Gợi ý", result ? String(result.hint_count) : "—"],
-            ].map(([label, value]) => (
-              <div className="rounded-control bg-white/90 p-4" key={label}>
-                <p className="text-sm font-bold text-muted">{label}</p>
-                <p className="mt-1 text-2xl font-extrabold text-ink">{value}</p>
-              </div>
-            ))}
-          </div>
-          <p className="mt-6 inline-flex items-center gap-2 rounded-full bg-warning-surface px-5 py-3 text-xl font-extrabold text-warning">
-            <span aria-hidden="true">★</span> {summaryTotalStars} sao
-          </p>
-          {result ? (
-            <p className="mt-3 text-sm font-semibold text-muted">
-              Thời gian chơi: {Math.floor(result.duration_seconds / 60)} phút{" "}
-              {result.duration_seconds % 60} giây
-            </p>
-          ) : isLoadingResult ? (
-            <p className="mt-3 text-sm font-semibold text-muted" role="status">
-              Đang tải chi tiết bảng tổng kết…
-            </p>
-          ) : resultError ? (
-            <div className="mt-3 flex flex-col items-center gap-2">
-              <p className="text-sm font-semibold text-danger">
-                Chưa tải được chi tiết bảng tổng kết.
-              </p>
-              <Button
-                onClick={() => void loadCompletedResult()}
-                size="compact"
-                variant="secondary"
-              >
-                <RefreshCw aria-hidden="true" className="size-4" /> Tải lại bảng
-                tổng kết
-              </Button>
-            </div>
-          ) : null}
-          <div className="mx-auto mt-7 flex max-w-md flex-col gap-3 sm:flex-row">
-            <Button
-              className="sm:flex-1"
-              onClick={restartLobby}
-              variant="secondary"
-            >
-              <RotateCcw aria-hidden="true" className="size-5" /> Chơi lượt mới
-            </Button>
-            <Button
-              className="sm:flex-1"
-              onClick={readSentence}
-              variant="quiet"
-            >
-              Đọc câu mẫu
-            </Button>
-          </div>
-          <p className="mt-4 text-sm text-muted">
-            Câu cuối:{" "}
-            {finalSentence || "Bé đã cùng khám phá những câu trong cuốn sách!"}
-          </p>
-        </div>
-        <Link
-          className="self-center rounded-control px-4 py-3 font-bold text-primary hover:bg-sky"
-          href={readingCompletionHref}
-        >
-          <ArrowLeft aria-hidden="true" className="mr-2 inline size-4" />
-          {readingSessionId ? "Quay lại kết quả đọc" : "Về khu Giải trí"}
-        </Link>
-      </section>
+      <SentenceShooterResultView
+        backHref={readingCompletionHref}
+        child={child}
+        finalSentence={finalSentence}
+        isLoadingResult={isLoadingResult}
+        onReloadResult={() => void loadCompletedResult()}
+        onRestartLobby={restartLobby}
+        readingSessionId={readingSessionId}
+        result={result}
+        resultError={resultError}
+        session={session}
+      />
     );
   }
 

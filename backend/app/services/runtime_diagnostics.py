@@ -23,6 +23,7 @@ from app.database.config import (
     SUPABASE_URL,
 )
 from app.services.admin_ocr_local import LocalCorrectionError, LocalOcrConfig
+from app.services.worker_telemetry import get_worker_telemetry
 
 
 def _package_installed(name: str) -> bool:
@@ -39,6 +40,32 @@ def _health_item(
         "id": item_id, "label": label, "status": status,
         "detail_status": detail_status, "safe_message": message,
     }
+
+
+def derive_operational_state(
+    *,
+    status: str,
+    detail_status: str | None = None,
+    queue_depth: int | None = None,
+    last_error: str | None = None,
+    quota_exhausted: bool = False,
+) -> str:
+    """Map legacy health triad + detail/queue/quota telemetry to a 7-value operational_state."""
+    if quota_exhausted or (last_error and "QUOTA" in str(last_error).upper()):
+        return "Quota exhausted"
+    if detail_status == "disabled":
+        return "Offline"
+    if status == "UNAVAILABLE":
+        return "Offline"
+    if status in {"HEALTHY", "DEGRADED"} and queue_depth is not None and queue_depth > 0 and not last_error:
+        return "Queued"
+    if detail_status == "unknown" and status == "DEGRADED":
+        return "Unknown"
+    if status == "DEGRADED":
+        return "Degraded"
+    if status == "HEALTHY":
+        return "Healthy"
+    return "Unknown"
 
 
 def _ocr_engine_health(package: str, engine_name: str, status_name: str, label: str) -> dict[str, str]:
@@ -201,23 +228,152 @@ def _worker_state(worker: Any) -> str:
     return "unknown"
 
 
-def collect_worker_health(workers: dict[str, Any]) -> list[dict[str, str]]:
+def collect_worker_health(workers: dict[str, Any]) -> list[dict[str, Any]]:
     results = []
     for key, label in _WORKER_LABELS.items():
         state = _worker_state(workers.get(key))
+        tel = get_worker_telemetry(key)
+        extra = {
+            "last_success_at": tel.get("last_success_at"),
+            "last_error": tel.get("last_error"),
+            "oldest_pending_job_age_seconds": None,
+            "queue_depth": None,
+        }
         if state == "running":
-            results.append(_health_item(key, label, "HEALTHY", "healthy",
-                                        "Worker đang chạy trong tiến trình API."))
+            results.append({
+                **_health_item(key, label, "HEALTHY", "healthy",
+                               "Worker đang chạy trong tiến trình API."),
+                **extra,
+            })
         elif state == "disabled":
-            results.append(_health_item(key, label, "DEGRADED", "disabled",
-                                        "Worker không được khởi chạy trong tiến trình này."))
+            results.append({
+                **_health_item(key, label, "DEGRADED", "disabled",
+                               "Worker không được khởi chạy trong tiến trình này."),
+                **extra,
+            })
         elif state == "unknown":
-            results.append(_health_item(key, label, "DEGRADED", "unknown",
-                                        "Chưa thể xác minh trạng thái worker."))
+            results.append({
+                **_health_item(key, label, "DEGRADED", "unknown",
+                               "Chưa thể xác minh trạng thái worker."),
+                **extra,
+            })
         else:
-            results.append(_health_item(key, label, "UNAVAILABLE", "failed",
-                                        "Worker đã dừng hoặc gặp lỗi."))
+            results.append({
+                **_health_item(key, label, "UNAVAILABLE", "failed",
+                               "Worker đã dừng hoặc gặp lỗi."),
+                **extra,
+            })
     return results
+
+
+def _age_seconds(ts_val: Any, now: Any) -> float | None:
+    from datetime import timezone
+
+    if ts_val is None:
+        return None
+    if getattr(ts_val, "tzinfo", None) is None:
+        ts_val = ts_val.replace(tzinfo=timezone.utc)
+    return round(max(0.0, (now - ts_val).total_seconds()), 1)
+
+
+async def collect_worker_queue_metrics(db: Any, *, now: Any | None = None) -> dict[str, dict[str, Any]]:
+    """Read-only aggregate queue depth, oldest pending age, and last DB activity per worker."""
+    from datetime import datetime, timezone
+    from sqlalchemy import text
+
+    ts = now or datetime.now(timezone.utc)
+    metrics: dict[str, dict[str, Any]] = {}
+
+    queries: dict[str, str] = {
+        "ocr_worker": """
+            SELECT
+                COUNT(*) FILTER (WHERE status IN ('QUEUED','FAILED_RETRYABLE','CLAIMED','RUNNING'))::int AS queue_depth,
+                MIN(created_at) FILTER (WHERE status IN ('QUEUED','FAILED_RETRYABLE','CLAIMED','RUNNING')) AS oldest_pending,
+                MAX(completed_at) FILTER (WHERE status = 'SUCCEEDED') AS last_success
+            FROM public.ocr_inference_jobs
+        """,
+        "parent_book_submission": """
+            SELECT
+                COUNT(*) FILTER (WHERE workflow_status = 'CHECKING')::int AS queue_depth,
+                MIN(created_at) FILTER (WHERE workflow_status = 'CHECKING') AS oldest_pending,
+                MAX(updated_at) FILTER (WHERE workflow_status IN ('PASSED_READY_TO_ADD','NEEDS_ADMIN_REVIEW','PENDING_ADMIN','ADDED_TO_BOOK')) AS last_success
+            FROM public.parent_book_page_submissions
+        """,
+        "book_quality": """
+            SELECT
+                COUNT(*) FILTER (WHERE status IN ('QUEUED','RUNNING'))::int AS queue_depth,
+                MIN(createdat) FILTER (WHERE status IN ('QUEUED','RUNNING')) AS oldest_pending,
+                MAX(completedat) FILTER (WHERE status IN ('COMPLETED','PARTIAL')) AS last_success
+            FROM public.bookqualityscanruns
+        """,
+        "admin_ai_workflow": """
+            SELECT
+                COUNT(*) FILTER (WHERE status IN ('QUEUED','RUNNING','RETRY'))::int AS queue_depth,
+                MIN(createdat) FILTER (WHERE status IN ('QUEUED','RUNNING','RETRY')) AS oldest_pending,
+                MAX(updatedat) FILTER (WHERE status IN ('READY_FOR_ADMIN_REVIEW','VERIFIED')) AS last_success
+            FROM public.adminaiworkflows
+        """,
+        "viread_ocr_outbox": """
+            SELECT
+                COUNT(*) FILTER (WHERE status IN ('PENDING','RETRY','PROCESSING'))::int AS queue_depth,
+                MIN(created_at) FILTER (WHERE status IN ('PENDING','RETRY','PROCESSING')) AS oldest_pending,
+                MAX(updated_at) FILTER (WHERE status = 'DONE') AS last_success
+            FROM public.viread_ocr_outbox
+        """,
+        "viread_ocr_training": """
+            SELECT
+                COUNT(*) FILTER (WHERE status IN ('LOCAL_RUNNING','COLAB_RUNNING','COLAB_SUBMITTING','COLAB_SUBMITTED','COLAB_EXECUTING','WAITING_FOR_COLAB_WORKER','FALLBACK_QUEUED_COLAB'))::int AS queue_depth,
+                MIN(created_at) FILTER (WHERE status IN ('LOCAL_RUNNING','COLAB_RUNNING','COLAB_SUBMITTING','COLAB_SUBMITTED','COLAB_EXECUTING','WAITING_FOR_COLAB_WORKER','FALLBACK_QUEUED_COLAB')) AS oldest_pending,
+                MAX(updated_at) FILTER (WHERE status = 'COMPLETED') AS last_success
+            FROM public.viread_ocr_training_jobs
+        """,
+        "reading_reminder": """
+            SELECT
+                COUNT(*) FILTER (WHERE emailstatus IN ('PENDING','RETRY','SENDING'))::int AS queue_depth,
+                MIN(scheduledfor) FILTER (WHERE emailstatus IN ('PENDING','RETRY','SENDING')) AS oldest_pending,
+                MAX(emailsentat) FILTER (WHERE emailstatus = 'SENT') AS last_success
+            FROM public.readingreminderoccurrences
+        """,
+        "reading_presence": """
+            SELECT
+                COUNT(*) FILTER (WHERE status IN ('PENDING','SENDING'))::int AS queue_depth,
+                MIN(dueat) FILTER (WHERE status IN ('PENDING','SENDING')) AS oldest_pending,
+                MAX(sentat) FILTER (WHERE status = 'SENT') AS last_success
+            FROM public.readingpresencealerts
+        """,
+        "karaoke_processing": """
+            SELECT
+                COUNT(*) FILTER (WHERE status IN ('QUEUED','RUNNING'))::int AS queue_depth,
+                MIN(created_at) FILTER (WHERE status IN ('QUEUED','RUNNING')) AS oldest_pending,
+                MAX(finished_at) FILTER (WHERE status IN ('READY','NEEDS_REVIEW','APPLIED')) AS last_success
+            FROM public.karaoke_processing_jobs
+        """,
+        "active_model_registry": """
+            SELECT
+                0::int AS queue_depth,
+                NULL::timestamptz AS oldest_pending,
+                MAX(updated_at) AS last_success
+            FROM public.viread_ocr_active_model
+        """,
+    }
+
+    for worker_key, sql in queries.items():
+        try:
+            async with db.begin_nested():
+                row = (await db.execute(text(sql))).mappings().first()
+            if row is not None:
+                last_succ = row.get("last_success")
+                if last_succ is not None and getattr(last_succ, "tzinfo", None) is None:
+                    last_succ = last_succ.replace(tzinfo=timezone.utc)
+                metrics[worker_key] = {
+                    "queue_depth": int(row.get("queue_depth") or 0),
+                    "oldest_pending_job_age_seconds": _age_seconds(row.get("oldest_pending"), ts),
+                    "last_success_at": last_succ,
+                    "last_error": None,
+                }
+        except Exception:
+            continue
+    return metrics
 
 
 def runtime_configuration_diagnostics(*, include_ocr: bool = True) -> dict[str, bool | None]:

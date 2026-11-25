@@ -207,7 +207,26 @@ def _flatten_to_rgb(image: Image.Image) -> Image.Image:
     return transposed
 
 
-def _normalize_pil_frame(frame: Image.Image) -> tuple[bytes, str, str, int, int]:
+def _resolve_rasterizer_output_format() -> Literal["jpeg", "png"]:
+    raw = (os.getenv("VIREAD_RASTERIZER_FORMAT") or "jpeg").strip().lower()
+    if raw == "png":
+        return "png"
+    return "jpeg"
+
+
+def _resolve_rasterizer_jpeg_quality() -> int:
+    raw = (os.getenv("VIREAD_RASTERIZER_JPEG_QUALITY") or "85").strip()
+    try:
+        return max(60, min(95, int(raw)))
+    except ValueError:
+        return 85
+
+
+def _normalize_pil_frame(
+    frame: Image.Image,
+    *,
+    output_format: Literal["jpeg", "png"] | None = None,
+) -> tuple[bytes, str, str, int, int]:
     canvas = _flatten_to_rgb(frame)
     width, height = canvas.size
     if width <= 0 or height <= 0:
@@ -222,13 +241,20 @@ def _normalize_pil_frame(frame: Image.Image) -> tuple[bytes, str, str, int, int]
         canvas = canvas.resize((new_w, new_h), Image.Resampling.LANCZOS)
         width, height = canvas.size
 
-    png_buffer = BytesIO()
-    canvas.save(png_buffer, format="PNG", optimize=True)
-    png_bytes = png_buffer.getvalue()
-    if len(png_bytes) <= MAX_PAGE_IMAGE_BYTES:
-        return png_bytes, "image/png", "png", width, height
+    target_format = output_format or _resolve_rasterizer_output_format()
+    default_q = _resolve_rasterizer_jpeg_quality()
 
-    for quality in (92, 85, 75):
+    if target_format == "png":
+        png_buffer = BytesIO()
+        canvas.save(png_buffer, format="PNG", optimize=True)
+        png_bytes = png_buffer.getvalue()
+        if len(png_bytes) <= MAX_PAGE_IMAGE_BYTES:
+            return png_bytes, "image/png", "png", width, height
+
+    qualities = (default_q, 75) if default_q > 75 else (default_q,)
+    if target_format == "png":
+        qualities = (92, default_q, 75)
+    for quality in qualities:
         jpeg_buffer = BytesIO()
         canvas.save(jpeg_buffer, format="JPEG", quality=quality, optimize=True)
         jpeg_bytes = jpeg_buffer.getvalue()

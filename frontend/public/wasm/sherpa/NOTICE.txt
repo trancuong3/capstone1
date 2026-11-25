@@ -1,0 +1,27 @@
+Third-Party Software Notice — sherpa-onnx WASM Runtime & Vietnamese ASR Model
+
+1. sherpa-onnx WebAssembly Runtime
+   Files:
+     - sherpa-onnx-asr.js
+     - sherpa-onnx-wasm-main-vad-asr-clean.js
+     - sherpa-onnx-wasm-main-vad-asr.wasm
+   Upstream Project: https://github.com/k2-fsa/sherpa-onnx
+   Copyright: Next-gen Kaldi (k2-fsa) contributors
+   License: Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0)
+
+2. Vietnamese Speech Recognition Model Weights (downloaded on-demand to Browser IndexedDB)
+   Model: csukuangfj2/sherpa-onnx-zipformer-vi-30M-int8-2026-02-09
+   Upstream Source: https://huggingface.co/csukuangfj2/sherpa-onnx-zipformer-vi-30M-int8-2026-02-09
+   License: Apache License, Version 2.0 (see upstream model card and LICENSE)
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use these files except in compliance with the License.
+You may obtain a copy of the License at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.

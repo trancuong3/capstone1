@@ -24,13 +24,16 @@ export type AutomationPhase =
   | "ready"
   | "listening"
   | "evidence"
+  | "hinting"
   | "modeling"
   | "awaiting-retry"
+  | "quiz-listening"
   | "page-turn"
   | "complete"
   | "paused"
   | "permission-needed"
-  | "offline";
+  | "offline"
+  | "recovering";
 
 export type AutomationWordState =
   "pending" | "correct" | "retry" | "skipped" | "assisted";
@@ -60,6 +63,12 @@ export interface AutomationConfig {
   readonly autoAdvanceDelayMs: number;
   readonly saveRetryBaseMs: number;
   readonly saveRetryMaxMs: number;
+  /** Maximum consecutive silence reminders before offering pause (safe mode). */
+  readonly maxSilenceReminders?: number;
+  /** Extra wait duration when child says "chờ con" / "để con tự đọc". */
+  readonly waitExtendMs?: number;
+  /** Cap silence reminders and emit offer-pause rather than endless modeling. */
+  readonly offerPauseOnProlongedSilence?: boolean;
 }
 
 export const DEFAULT_AUTOMATION_CONFIG: AutomationConfig = {
@@ -79,6 +88,15 @@ export const DEFAULT_AUTOMATION_CONFIG: AutomationConfig = {
   autoAdvanceDelayMs: 800,
   saveRetryBaseMs: 2000,
   saveRetryMaxMs: 30_000,
+};
+
+/** Live ReadingScreen config: 2-round escalating auto-help ladder + prolonged silence safety. */
+export const AUTO_HELP_LADDER_CONFIG: AutomationConfig = {
+  ...DEFAULT_AUTOMATION_CONFIG,
+  maxAttemptsPerWord: 2,
+  maxSilenceReminders: 2,
+  waitExtendMs: 20_000,
+  offerPauseOnProlongedSilence: true,
 };
 
 export interface PageContext {
@@ -147,6 +165,12 @@ export interface AutomationState {
   readonly savedKeys: readonly string[];
   readonly completionRequested: boolean;
   readonly pauseReason: PauseReason | null;
+  readonly waitUntilAt: number | null;
+  readonly silenceReminders: number;
+  readonly silencePauseOffered: boolean;
+  readonly extraRetries: Readonly<Record<string, number>>;
+  readonly lastGivenUpWordId: string | null;
+  readonly disambiguationCandidates: readonly string[] | null;
 }
 
 export type PauseReason =
@@ -174,6 +198,7 @@ export type AutomationEvent =
       readonly type: "SPEECH_ACTIVITY";
       readonly at: number;
       readonly runId: number;
+      readonly holdMs?: number;
     }
   | {
       readonly type: "WORD_EVIDENCE";
@@ -198,7 +223,11 @@ export type AutomationEvent =
   | { readonly type: "MODEL_ENDED"; readonly at: number; readonly gen: number }
   | { readonly type: "MODEL_FAILED"; readonly at: number; readonly gen: number }
   | { readonly type: "PAUSE"; readonly at: number; readonly by: PauseReason }
-  | { readonly type: "RESUME"; readonly at: number }
+  | {
+      readonly type: "RESUME";
+      readonly at: number;
+      readonly autoListen?: boolean;
+    }
   | {
       readonly type: "PERMISSION";
       readonly at: number;
@@ -218,10 +247,41 @@ export type AutomationEvent =
       readonly at: number;
       readonly settings: Partial<AutomationSettings>;
     }
+  | {
+      readonly type: "WAIT_REQUESTED";
+      readonly at: number;
+      readonly extendMs?: number;
+    }
+  | {
+      readonly type: "TRY_MORE_REQUESTED";
+      readonly at: number;
+      readonly wordId?: string;
+    }
+  | {
+      readonly type: "DISAMBIGUATION_NEEDED";
+      readonly at: number;
+      readonly candidates: readonly [string, string];
+    }
+  | {
+      readonly type: "DISAMBIGUATION_RESOLVED";
+      readonly at: number;
+      readonly wordId: string;
+    }
+  | { readonly type: "QUIZ_START"; readonly at: number }
+  | { readonly type: "QUIZ_END"; readonly at: number }
+  | { readonly type: "RECOVER_START"; readonly at: number }
+  | { readonly type: "RECOVER_END"; readonly at: number }
   | { readonly type: "TICK"; readonly at: number };
 
 export type ModelKind =
-  "word" | "slow-word" | "phrase" | "orient" | "prompt" | "encourage";
+  | "hint"
+  | "word"
+  | "slow-word"
+  | "phrase"
+  | "orient"
+  | "prompt"
+  | "encourage"
+  | "clarify";
 
 export type AutomationMessage =
   | "gentle-prompt"
@@ -233,7 +293,10 @@ export type AutomationMessage =
   | "permission-needed"
   | "paused"
   | "page-ready"
-  | "book-complete";
+  | "book-complete"
+  | "wait-extended"
+  | "offer-pause"
+  | "recovering";
 
 export type AutomationEffect =
   | { readonly type: "START_LISTENING"; readonly runId: number }
@@ -314,6 +377,12 @@ export function createAutomationState(
     savedKeys: [],
     completionRequested: false,
     pauseReason: null,
+    waitUntilAt: null,
+    silenceReminders: 0,
+    silencePauseOffered: false,
+    extraRetries: {},
+    lastGivenUpWordId: null,
+    disambiguationCandidates: null,
   };
 }
 
@@ -345,6 +414,7 @@ function lastActivityAt(state: AutomationState): number {
     state.lastEvidenceAt,
     state.lastSpeechAt,
     state.listenStartedAt,
+    state.waitUntilAt ?? -Infinity,
   );
 }
 
@@ -359,6 +429,7 @@ function canIntervene(state: AutomationState): boolean {
     !state.userStopped &&
     !state.offline &&
     !state.permissionMissing &&
+    !state.silencePauseOffered &&
     state.page !== null &&
     !isPageDone(state) &&
     state.modeling === null &&
@@ -380,8 +451,16 @@ function addUnique(list: readonly string[], value: string): readonly string[] {
   return list.includes(value) ? list : [...list, value];
 }
 
-function ladderKind(attempt: number, unsure: boolean): ModelKind {
+function ladderKind(
+  attempt: number,
+  unsure: boolean,
+  maxAttemptsPerWord: number,
+): ModelKind {
   if (unsure && attempt <= 1) return "orient";
+  if (maxAttemptsPerWord <= 2) {
+    if (attempt <= 1) return "hint";
+    return "phrase";
+  }
   if (attempt <= 1) return "word";
   if (attempt === 2) return "slow-word";
   return "phrase";
@@ -399,14 +478,18 @@ function startHelp(
   options: { readonly forcedKind?: ModelKind } = {},
 ): AutomationState {
   const attempt = (inputState.attempts[wordId] ?? 0) + 1;
+  const maxAttempts =
+    inputState.config.maxAttemptsPerWord +
+    (inputState.extraRetries[wordId] ?? 0);
   let state: AutomationState = {
     ...inputState,
     attempts: { ...inputState.attempts, [wordId]: attempt },
     lastInterventionAt: at,
     pendingErrorCheckAt: null,
+    disambiguationCandidates: null,
   };
 
-  if (attempt > state.config.maxAttemptsPerWord) {
+  if (attempt > maxAttempts) {
     // Encourage, let the child move on, never colour the word green.
     state = withWordState(state, wordId, "skipped");
     state = {
@@ -414,6 +497,7 @@ function startHelp(
       cursor: Math.max(state.cursor, indexOfWord(state, wordId) + 1),
       needsPractice: addUnique(state.needsPractice, wordId),
       gaveUp: addUnique(state.gaveUp, wordId),
+      lastGivenUpWordId: wordId,
       stuckWordId: null,
       awaitingRetryWordId: null,
       pendingErrorCheckAt: null,
@@ -441,7 +525,9 @@ function startHelp(
     return state;
   }
 
-  const kind = options.forcedKind ?? ladderKind(attempt, state.unsure);
+  const kind =
+    options.forcedKind ??
+    ladderKind(attempt, state.unsure, state.config.maxAttemptsPerWord);
   const index = indexOfWord(state, wordId);
   const phraseSpan = kind === "phrase" || kind === "orient" ? 3 : 1;
   const wordIds = state.words
@@ -452,7 +538,7 @@ function startHelp(
     ...state,
     modelGen: gen,
     modeling: { gen, wordId },
-    phase: "modeling",
+    phase: kind === "hint" ? "hinting" : "modeling",
     stuckWordId: wordId,
     awaitingRetryWordId: null,
     helped: [
@@ -640,6 +726,12 @@ export function reduce(
           attempts: 0,
           retryAt: null,
         },
+        waitUntilAt: null,
+        silenceReminders: 0,
+        silencePauseOffered: false,
+        extraRetries: {},
+        lastGivenUpWordId: null,
+        disambiguationCandidates: null,
       };
       effects.push({ type: "STOP_AUDIO" });
       if (isPageDone(next)) {
@@ -718,7 +810,19 @@ export function reduce(
 
     case "SPEECH_ACTIVITY": {
       if (event.runId !== state.runId) return unchanged(state);
-      return { state: { ...state, lastSpeechAt: at }, effects };
+      return {
+        state: {
+          ...state,
+          lastSpeechAt: at,
+          waitUntilAt:
+            event.holdMs && event.holdMs > 0
+              ? Math.max(state.waitUntilAt ?? 0, at + event.holdMs)
+              : state.waitUntilAt,
+          silenceReminders: 0,
+          silencePauseOffered: false,
+        },
+        effects,
+      };
     }
 
     case "UNSURE_POSITION": {
@@ -745,6 +849,9 @@ export function reduce(
         ...state,
         lastEvidenceAt: at,
         unsure: false,
+        silenceReminders: 0,
+        silencePauseOffered: false,
+        waitUntilAt: null,
       };
       if (event.outcome === "correct") {
         const wasHelped = state.helped.includes(event.wordId);
@@ -913,7 +1020,9 @@ export function reduce(
       }
       if (next.permissionMissing)
         return { state: { ...next, phase: "permission-needed" }, effects };
-      next = startListeningEffect(next, at, effects);
+      if (event.autoListen !== false) {
+        next = startListeningEffect(next, at, effects);
+      }
       return { state: next, effects };
     }
 
@@ -1008,9 +1117,198 @@ export function reduce(
           resumeListenAt: null,
           pendingErrorCheckAt: null,
           pageTurnAt: null,
+          lingerUntil: null,
+          waitUntilAt: null,
         },
         effects,
       };
+    }
+
+    case "WAIT_REQUESTED": {
+      if (state.ended || state.userStopped || !state.page) {
+        return unchanged(state);
+      }
+      const extendMs = event.extendMs ?? state.config.waitExtendMs ?? 20_000;
+      const wasModeling = state.modeling !== null;
+      if (wasModeling) {
+        effects.push({ type: "STOP_AUDIO" });
+      }
+      effects.push({ type: "SHOW", message: "wait-extended" });
+      return {
+        state: {
+          ...state,
+          phase:
+            state.phase === "hinting" || state.phase === "modeling"
+              ? "listening"
+              : state.phase,
+          modelGen: state.modelGen + 1,
+          modeling: null,
+          pendingErrorCheckAt: null,
+          lingerUntil: null,
+          waitUntilAt: at + extendMs,
+          lastEvidenceAt: at,
+          silenceReminders: 0,
+          silencePauseOffered: false,
+        },
+        effects,
+      };
+    }
+
+    case "TRY_MORE_REQUESTED": {
+      if (state.ended || state.userStopped || !state.page) {
+        return unchanged(state);
+      }
+      const targetWordId =
+        event.wordId ??
+        state.stuckWordId ??
+        state.awaitingRetryWordId ??
+        state.lastGivenUpWordId ??
+        state.words[Math.max(0, Math.min(state.cursor, state.words.length - 1))]
+          ?.id;
+      if (!targetWordId) return unchanged(state);
+      const targetIdx = indexOfWord(state, targetWordId);
+      if (targetIdx === -1) return unchanged(state);
+
+      const wasGivenUp = state.gaveUp.includes(targetWordId);
+      let next: AutomationState = {
+        ...state,
+        extraRetries: {
+          ...state.extraRetries,
+          [targetWordId]: (state.extraRetries[targetWordId] ?? 0) + 1,
+        },
+        cursor: wasGivenUp ? Math.min(state.cursor, targetIdx) : state.cursor,
+        gaveUp: state.gaveUp.filter((id) => id !== targetWordId),
+        stuckWordId: targetWordId,
+        awaitingRetryWordId: targetWordId,
+        pendingErrorCheckAt: null,
+        waitUntilAt: null,
+        lastEvidenceAt: at,
+        silenceReminders: 0,
+        silencePauseOffered: false,
+        phase: "awaiting-retry",
+      };
+      if (wasGivenUp || state.wordStates[targetWordId] === "skipped") {
+        next = withWordState(next, targetWordId, "retry");
+      }
+      if (!next.listening && !next.modeling && !next.permissionMissing) {
+        next = startListeningEffect(next, at, effects);
+      }
+      return { state: next, effects };
+    }
+
+    case "DISAMBIGUATION_NEEDED": {
+      if (!state.page || state.userStopped || state.ended || state.modeling) {
+        return unchanged(state);
+      }
+      const gen = state.modelGen + 1;
+      effects.push({ type: "STOP_LISTENING", reason: "model" });
+      effects.push({
+        type: "PLAY_MODEL",
+        gen,
+        kind: "clarify",
+        wordId: null,
+        wordIds: event.candidates,
+        speed: 1,
+      });
+      return {
+        state: {
+          ...state,
+          modelGen: gen,
+          modeling: { gen, wordId: null },
+          phase: "hinting",
+          pendingErrorCheckAt: null,
+          disambiguationCandidates: event.candidates,
+        },
+        effects,
+      };
+    }
+
+    case "DISAMBIGUATION_RESOLVED": {
+      if (!state.page || state.userStopped || state.ended) {
+        return unchanged(state);
+      }
+      const next = startHelp(
+        { ...state, disambiguationCandidates: null },
+        event.wordId,
+        at,
+        effects,
+      );
+      return { state: next, effects };
+    }
+
+    case "QUIZ_START": {
+      effects.push({ type: "STOP_AUDIO" });
+      effects.push({ type: "STOP_LISTENING", reason: "pause" });
+      return {
+        state: {
+          ...state,
+          phase: "quiz-listening",
+          listening: false,
+          runId: state.runId + 1,
+          modelGen: state.modelGen + 1,
+          modeling: null,
+          pendingErrorCheckAt: null,
+          resumeListenAt: null,
+          lingerUntil: null,
+          pageTurnAt: null,
+          waitUntilAt: null,
+        },
+        effects,
+      };
+    }
+
+    case "QUIZ_END": {
+      effects.push({ type: "STOP_AUDIO" });
+      effects.push({ type: "STOP_LISTENING", reason: "end" });
+      return {
+        state: {
+          ...state,
+          phase: "complete",
+          ended: true,
+          listening: false,
+          runId: state.runId + 1,
+          modelGen: state.modelGen + 1,
+          modeling: null,
+          pendingErrorCheckAt: null,
+          resumeListenAt: null,
+          lingerUntil: null,
+          pageTurnAt: null,
+          waitUntilAt: null,
+        },
+        effects,
+      };
+    }
+
+    case "RECOVER_START": {
+      effects.push({ type: "STOP_AUDIO" });
+      effects.push({ type: "SHOW", message: "recovering" });
+      return {
+        state: {
+          ...state,
+          phase: "recovering",
+          modelGen: state.modelGen + 1,
+          modeling: null,
+          pendingErrorCheckAt: null,
+          lingerUntil: null,
+          pageTurnAt: null,
+        },
+        effects,
+      };
+    }
+
+    case "RECOVER_END": {
+      if (state.phase !== "recovering" || state.userStopped || state.ended) {
+        return unchanged(state);
+      }
+      let next: AutomationState = {
+        ...state,
+        phase: "ready",
+        lastEvidenceAt: at,
+      };
+      if (next.page && !isPageDone(next) && !next.permissionMissing) {
+        next = startListeningEffect(next, at, effects);
+      }
+      return { state: next, effects };
     }
 
     case "TICK":
@@ -1092,9 +1390,27 @@ function tick(inputState: AutomationState, at: number): ReduceResult {
 
   // Hesitation: one gentle prompt, then the sample if the child is still stuck.
   if (state.settings.assist) {
+    if (state.waitUntilAt !== null && at < state.waitUntilAt) {
+      return { state, effects };
+    }
     const plan = hesitationPlan(state);
     const word = state.words[Math.min(state.cursor, state.words.length - 1)];
     if (word && plan && at >= plan.dueAt) {
+      const maxReminders =
+        state.config.maxSilenceReminders ?? state.config.maxPromptsPerPage;
+      if (
+        state.config.offerPauseOnProlongedSilence &&
+        maxReminders > 0 &&
+        state.silenceReminders >= maxReminders
+      ) {
+        effects.push({ type: "SHOW", message: "offer-pause" });
+        state = {
+          ...state,
+          silencePauseOffered: true,
+          lastInterventionAt: at,
+        };
+        return { state, effects };
+      }
       if (plan.mode === "prompt") {
         const gen = state.modelGen + 1;
         effects.push({ type: "SHOW", message: "gentle-prompt" });
@@ -1113,13 +1429,18 @@ function tick(inputState: AutomationState, at: number): ReduceResult {
           modeling: { gen, wordId: null },
           phase: "modeling",
           promptsThisPage: state.promptsThisPage + 1,
+          silenceReminders: state.silenceReminders + 1,
           promptedAtCursor: state.cursor,
           lastInterventionAt: at,
           awaitingRetryWordId: null,
         };
         return { state, effects };
       }
-      state = startHelp(state, word.id, at, effects);
+      const nextReminders = state.silenceReminders + 1;
+      state = {
+        ...startHelp(state, word.id, at, effects),
+        silenceReminders: nextReminders,
+      };
       return { state, effects };
     }
   }
@@ -1187,7 +1508,13 @@ export function nextWakeAt(state: AutomationState, now: number): number | null {
     }
     if (state.settings.assist) {
       const plan = hesitationPlan(state);
-      if (plan) candidates.push(gate(plan.dueAt));
+      if (plan) {
+        const due =
+          state.waitUntilAt !== null
+            ? Math.max(plan.dueAt, state.waitUntilAt)
+            : plan.dueAt;
+        candidates.push(gate(due));
+      }
     }
   }
   if (!candidates.length) return null;

@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_parent_id, get_db
+from app.api.deps import get_db, require_parent_id
 from app.repositories.reading_presence_repository import ReadingPresenceRepository
 from app.schemas.reading_presence import (
     PresenceAlertArm,
@@ -58,7 +58,7 @@ def utcnow() -> datetime:
 
 @router.get("/settings", response_model=PresenceSettingsRead)
 async def read_settings(
-    actor_id: UUID = Depends(get_current_parent_id),
+    actor_id: UUID = Depends(require_parent_id),
     db: AsyncSession = Depends(get_db),
 ) -> PresenceSettingsRead:
     return PresenceSettingsRead(
@@ -69,7 +69,7 @@ async def read_settings(
 @router.put("/settings", response_model=PresenceSettingsRead)
 async def update_settings(
     payload: PresenceSettingsUpdate,
-    actor_id: UUID = Depends(get_current_parent_id),
+    actor_id: UUID = Depends(require_parent_id),
     db: AsyncSession = Depends(get_db),
 ) -> PresenceSettingsRead:
     enabled = await build_service(db).set_email_enabled(
@@ -83,7 +83,7 @@ async def update_settings(
 )
 async def arm_alert(
     payload: PresenceAlertArm,
-    actor_id: UUID = Depends(get_current_parent_id),
+    actor_id: UUID = Depends(require_parent_id),
     db: AsyncSession = Depends(get_db),
 ) -> PresenceAlertRead:
     try:
@@ -98,7 +98,7 @@ async def arm_alert(
 @router.post("/alerts/{alert_id}/confirm", response_model=PresenceAlertRead)
 async def confirm_alert(
     alert_id: UUID,
-    actor_id: UUID = Depends(get_current_parent_id),
+    actor_id: UUID = Depends(require_parent_id),
     db: AsyncSession = Depends(get_db),
 ) -> PresenceAlertRead:
     try:
@@ -111,7 +111,7 @@ async def confirm_alert(
 async def cancel_alert(
     alert_id: UUID,
     payload: PresenceAlertCancel | None = None,
-    actor_id: UUID = Depends(get_current_parent_id),
+    actor_id: UUID = Depends(require_parent_id),
     db: AsyncSession = Depends(get_db),
 ) -> PresenceAlertRead:
     reason = payload.reason if payload else "RETURNED"

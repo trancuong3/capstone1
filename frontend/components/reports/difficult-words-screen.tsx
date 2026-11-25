@@ -269,6 +269,23 @@ export function DifficultWordsScreen({
     );
   }, [activePracticeWord, practiceQueueWords, state]);
 
+  const isImmersivePracticeActive = selectedPracticeWord !== null;
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(
+      new CustomEvent("viread:immersive-mode", {
+        detail: { active: isImmersivePracticeActive },
+      }),
+    );
+    return () => {
+      window.dispatchEvent(
+        new CustomEvent("viread:immersive-mode", {
+          detail: { active: false },
+        }),
+      );
+    };
+  }, [isImmersivePracticeActive]);
+
   const firstPendingGlobalWord = useMemo(() => {
     if (state.status !== "ready") return null;
     return (
@@ -353,22 +370,24 @@ export function DifficultWordsScreen({
     );
 
   return (
-    <section className="mx-auto flex w-full max-w-[1160px] flex-col gap-5">
-      <ReportPageHeader
-        action={
-          <ButtonLink
-            className="sm:w-auto"
-            href={`/reports?childId=${encodeURIComponent(state.child.id)}`}
-            variant="secondary"
-          >
-            <ArrowLeft aria-hidden="true" className="size-5" />
-            Báo cáo
-          </ButtonLink>
-        }
-        description={`Tổng hợp theo từng cuốn sách trong ${periodDays} ngày gần nhất; bé chỉ cần đọc đúng một lần rõ tiếng để hoàn thành từ.`}
-        eyebrow="Cùng luyện mỗi ngày"
-        title={`Từ cần luyện của ${state.child.alias}`}
-      />
+    <section className="mx-auto flex w-full max-w-[1160px] flex-col gap-4 sm:gap-5">
+      <div className={selectedPracticeWord ? "hidden sm:block" : undefined}>
+        <ReportPageHeader
+          action={
+            <ButtonLink
+              className="sm:w-auto"
+              href={`/reports?childId=${encodeURIComponent(state.child.id)}`}
+              variant="secondary"
+            >
+              <ArrowLeft aria-hidden="true" className="size-5" />
+              Báo cáo
+            </ButtonLink>
+          }
+          description={`Tổng hợp theo từng cuốn sách trong ${periodDays} ngày gần nhất; bé chỉ cần đọc đúng một lần rõ tiếng để hoàn thành từ.`}
+          eyebrow="Cùng luyện mỗi ngày"
+          title={`Từ cần luyện của ${state.child.alias}`}
+        />
+      </div>
 
       {selectedPracticeWord ? (
         <DifficultWordPracticePanel
@@ -398,7 +417,7 @@ export function DifficultWordsScreen({
         />
       ) : (
         <>
-          <div className="grid w-full grid-cols-1 gap-4 rounded-[24px] border border-[#DCE8E4] bg-white p-4 sm:grid-cols-3 sm:p-5">
+          <div className="grid w-full grid-cols-1 gap-3 rounded-[24px] border border-[#DCE8E4] bg-white p-3.5 sm:grid-cols-3 sm:gap-4 sm:p-5">
             <div className="min-w-0 sm:col-span-1">
               <ChildSelector
                 childrenProfiles={state.children}
@@ -406,6 +425,45 @@ export function DifficultWordsScreen({
                 selectedChildId={state.child.id}
               />
             </div>
+
+            <div className="flex flex-col gap-2.5 sm:hidden">
+              <div
+                aria-label="Lọc nhanh theo trạng thái luyện"
+                className="flex items-center gap-2 overflow-x-auto pb-0.5"
+                role="group"
+              >
+                {(
+                  [
+                    { value: "ALL", label: "Tất cả" },
+                    { value: "NOT_PRACTICED", label: "Chưa luyện" },
+                    { value: "IN_PROGRESS", label: "Đang luyện" },
+                    { value: "NEEDS_MORE_PRACTICE", label: "Cần thêm" },
+                    { value: "COMPLETED", label: "Đã xong" },
+                  ] as const
+                ).map((pill) => {
+                  const active = statusFilter === pill.value;
+                  return (
+                    <button
+                      aria-pressed={active}
+                      className={`min-h-10 shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-extrabold transition-colors ${
+                        active
+                          ? "border-primary bg-primary text-white"
+                          : "border-[#DCE8E4] bg-[#F6FAF8] text-[#213C42]"
+                      }`}
+                      key={pill.value}
+                      onClick={() => {
+                        setStatusFilter(pill.value);
+                        setBookGroupPage(1);
+                      }}
+                      type="button"
+                    >
+                      {pill.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <SelectField
               aria-label="Chọn khoảng thời gian"
               label="Khoảng thời gian"
@@ -421,21 +479,24 @@ export function DifficultWordsScreen({
               <option value="90">90 ngày gần nhất</option>
               <option value="180">180 ngày gần nhất</option>
             </SelectField>
-            <SelectField
-              aria-label="Lọc theo trạng thái luyện"
-              label="Trạng thái luyện"
-              onChange={(event) => {
-                setStatusFilter(event.target.value as StatusFilterValue);
-                setBookGroupPage(1);
-              }}
-              value={statusFilter}
-            >
-              <option value="ALL">Tất cả trạng thái</option>
-              <option value="NOT_PRACTICED">Chưa luyện</option>
-              <option value="IN_PROGRESS">Đang luyện</option>
-              <option value="NEEDS_MORE_PRACTICE">Cần luyện thêm</option>
-              <option value="COMPLETED">Đã hoàn thành</option>
-            </SelectField>
+
+            <div className="hidden sm:contents">
+              <SelectField
+                aria-label="Lọc theo trạng thái luyện"
+                label="Trạng thái luyện"
+                onChange={(event) => {
+                  setStatusFilter(event.target.value as StatusFilterValue);
+                  setBookGroupPage(1);
+                }}
+                value={statusFilter}
+              >
+                <option value="ALL">Tất cả trạng thái</option>
+                <option value="NOT_PRACTICED">Chưa luyện</option>
+                <option value="IN_PROGRESS">Đang luyện</option>
+                <option value="NEEDS_MORE_PRACTICE">Cần luyện thêm</option>
+                <option value="COMPLETED">Đã hoàn thành</option>
+              </SelectField>
+            </div>
           </div>
 
           {state.words.length > 0 ? (

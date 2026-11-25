@@ -17,6 +17,7 @@ import time
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from io import BytesIO
 from typing import Any
 from uuid import UUID, uuid4
@@ -27,8 +28,10 @@ from starlette.concurrency import run_in_threadpool
 
 from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
 from app.diagnostic_logging import log_diagnostic
+from app.models import OcrInferenceJob
 from app.repositories.local_ocr_scan_repository import LocalOcrScanRepository
 from app.schemas.reading import (
+    LocalOcrPageScanJobRead,
     LocalOcrPageScanRead,
     LocalOcrProvenanceRead,
     LocalOcrWordRead,
@@ -188,8 +191,23 @@ class LocalOcrScanService:
         self.repository = repository
 
     async def _validate_and_normalize_image(self, file: UploadFile) -> tuple[bytes, str]:
+        chunks: list[bytes] = []
+        total = 0
+        chunk_size = 1024 * 1024
         try:
-            raw = await file.read(MAX_SCAN_IMAGE_BYTES + 1)
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_SCAN_IMAGE_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="Image exceeds the 12 MB limit",
+                    )
+                chunks.append(chunk)
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(
                 status_code=422,
@@ -201,12 +219,9 @@ class LocalOcrScanService:
             except Exception:
                 pass
 
+        raw = b"".join(chunks)
         if not raw:
             raise HTTPException(status_code=422, detail="A file is required")
-        if len(raw) > MAX_SCAN_IMAGE_BYTES:
-            raise HTTPException(status_code=413, detail="Image exceeds the 12 MB limit")
-
-        image_sha256 = hashlib.sha256(raw).hexdigest()
 
         try:
             with Image.open(BytesIO(raw)) as probe:
@@ -224,17 +239,19 @@ class LocalOcrScanService:
                         status_code=422,
                         detail="Image dimensions must not exceed 6000 by 6000 pixels",
                     )
-                # Apply EXIF orientation so rotated mobile camera photos are upright.
+                # Apply EXIF orientation so rotated mobile camera photos are upright,
+                # and store compact JPEG q85 (avoiding multi-MB uncompressed PNGs).
                 oriented = ImageOps.exif_transpose(probe)
                 rgb = oriented.convert("RGB")
                 buf = BytesIO()
-                rgb.save(buf, format="PNG")
+                rgb.save(buf, format="JPEG", quality=85, optimize=True)
                 clean_bytes = buf.getvalue()
         except HTTPException:
             raise
         except (UnidentifiedImageError, OSError, ValueError) as exc:
             raise HTTPException(status_code=422, detail="Image decoding failed") from exc
 
+        image_sha256 = hashlib.sha256(clean_bytes).hexdigest()
         return clean_bytes, image_sha256
 
     async def _run_remote_ocr_scan(
@@ -464,6 +481,56 @@ class LocalOcrScanService:
             ) from exc
 
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        response = await self._build_scan_response(
+            ocr_result=ocr_result,
+            scan_job_id=scan_job_id,
+            request_id=request_id,
+            idempotency_key=idempotency_key,
+            book_id=book_id,
+            elapsed_ms=elapsed_ms,
+        )
+
+        if idempotency_key is not None:
+            now = time.monotonic()
+            with _idempotency_lock:
+                _prune_cache(now)
+                _idempotency_cache[(actor_id, idempotency_key)] = _CachedScanEntry(
+                    image_sha256=image_sha256,
+                    book_id=book_id,
+                    child_id=child_id,
+                    created_at=now,
+                    response=response,
+                )
+
+        # Safe correlation log only: NEVER log image bytes or recognized text!
+        log_diagnostic(
+            logger,
+            logging.INFO,
+            event="local_ocr_page_scan_completed",
+            stage="ocr_inference",
+            request_id=request_id,
+            scan_job_id=str(scan_job_id),
+            engine=response.provenance.engine,
+            device=response.provenance.device,
+            model_profile=response.provenance.model_profile,
+            model_load_status=response.provenance.model_load_status,
+            elapsed_ms=elapsed_ms,
+            word_count=response.word_count,
+            matched=response.matched,
+            matched_book_id=str(response.matched_book_id) if response.matched_book_id else None,
+        )
+        return response
+
+    async def _build_scan_response(
+        self,
+        *,
+        ocr_result: dict[str, Any],
+        scan_job_id: UUID,
+        request_id: str,
+        idempotency_key: UUID | None,
+        book_id: UUID | None,
+        elapsed_ms: int,
+    ) -> LocalOcrPageScanRead:
         ocr_text = unicodedata.normalize("NFC", str(ocr_result.get("text", "")).strip())
         if not ocr_text:
             raise HTTPException(
@@ -491,7 +558,7 @@ class LocalOcrScanService:
                     line_index=max(0, int(raw_word.get("line_index", 0))),
                     text=surface,
                     normalized_text=normalize_word(surface),
-                    bbox=_normalize_bbox(raw_word.get("bbox")),
+                    bbox=_normalize_bbox(raw_word.get("bbox") or raw_word.get("bounding_box")),
                     ocr_confidence=conf,
                 )
             )
@@ -514,7 +581,7 @@ class LocalOcrScanService:
             checkpoint_sha256=str(metadata["checkpoint_sha256"]) if metadata.get("checkpoint_sha256") else None,
             model_load_status=str(metadata["model_load_status"]) if metadata.get("model_load_status") else None,
             cloud_ocr_used=False,
-            elapsed_ms=elapsed_ms,
+            elapsed_ms=max(0, int(elapsed_ms)),
         )
 
         # Match extracted Vietnamese text against child-safety-approved catalog pages.
@@ -563,16 +630,16 @@ class LocalOcrScanService:
                 ],
             )
             message = (
-                f"Đã nhận diện tiếng Việt bằng OCR cục bộ và khớp Trang {m_page.PageNumber} "
+                f"Đã nhận diện tiếng Việt bằng OCR và khớp Trang {m_page.PageNumber} "
                 f"của sách “{m_book.Title}”."
             )
         else:
             message = (
-                "Đã nhận diện văn bản tiếng Việt trên máy chủ cục bộ, nhưng trang này chưa khớp "
+                "Đã nhận diện văn bản tiếng Việt, nhưng trang này chưa khớp "
                 "trang đã duyệt trong thư viện. Ba mẹ có thể chọn sách trong thư viện để bắt đầu đọc."
             )
 
-        response = LocalOcrPageScanRead(
+        return LocalOcrPageScanRead(
             scan_job_id=scan_job_id,
             request_id=request_id,
             idempotency_key=idempotency_key,
@@ -589,33 +656,334 @@ class LocalOcrScanService:
             message=message,
         )
 
-        if idempotency_key is not None:
-            now = time.monotonic()
-            with _idempotency_lock:
-                _prune_cache(now)
-                _idempotency_cache[(actor_id, idempotency_key)] = _CachedScanEntry(
-                    image_sha256=image_sha256,
-                    book_id=book_id,
-                    child_id=child_id,
-                    created_at=now,
-                    response=response,
+    @staticmethod
+    def _parse_optional_uuid(raw: object) -> UUID | None:
+        if isinstance(raw, UUID):
+            return raw
+        if isinstance(raw, str) and raw.strip():
+            try:
+                return UUID(raw.strip())
+            except ValueError:
+                return None
+        return None
+
+    async def _serialize_scan_job(
+        self,
+        job: OcrInferenceJob,
+        *,
+        worker_online: bool,
+        request_id: str,
+    ) -> LocalOcrPageScanJobRead:
+        now_fallback = datetime.now(timezone.utc)
+        created_at = job.CreatedAt or now_fallback
+        updated_at = job.UpdatedAt or created_at
+        proc_meta = dict(job.ProcessingMeta or {})
+        effective_req_id = str(proc_meta.get("request_id") or request_id or "")
+        effective_idem = self._parse_optional_uuid(proc_meta.get("idempotency_key"))
+        result_dto: LocalOcrPageScanRead | None = None
+        error_code = job.ErrorCode
+        error_message = job.ErrorMessage
+        job_status = str(job.Status)
+
+        if job_status == "SUCCEEDED":
+            payload = dict(job.ResultPayload or {})
+            if payload.get("no_text_detected") or not str(payload.get("full_text") or "").strip():
+                job_status = "DEAD_LETTER"
+                error_code = error_code or "NO_TEXT_DETECTED"
+                error_message = (
+                    error_message
+                    or "No usable text was detected; check the image quality"
+                )
+            else:
+                ocr_meta = dict(payload.get("ocr_meta") or {})
+                ocr_meta.setdefault("runtime_device", str(ocr_meta.get("runtime_device") or "cpu"))
+                if job.ModelProfile and not ocr_meta.get("model_profile"):
+                    ocr_meta["model_profile"] = job.ModelProfile
+                if job.ModelSha256 and not ocr_meta.get("checkpoint_sha256"):
+                    ocr_meta["checkpoint_sha256"] = job.ModelSha256
+                result_dto = await self._build_scan_response(
+                    ocr_result={
+                        "text": str(payload.get("full_text") or ""),
+                        "words": list(payload.get("words") or []),
+                        "metadata": ocr_meta,
+                    },
+                    scan_job_id=job.Id,
+                    request_id=effective_req_id,
+                    idempotency_key=effective_idem,
+                    book_id=job.BookId,
+                    elapsed_ms=int(job.DurationMs or 0),
                 )
 
-        # Safe correlation log only: NEVER log image bytes or recognized text!
-        log_diagnostic(
-            logger,
-            logging.INFO,
-            event="local_ocr_page_scan_completed",
-            stage="ocr_inference",
-            request_id=request_id,
-            scan_job_id=str(scan_job_id),
-            engine=provenance.engine,
-            device=provenance.device,
-            model_profile=provenance.model_profile,
-            model_load_status=provenance.model_load_status,
-            elapsed_ms=elapsed_ms,
-            word_count=len(parsed_words),
-            matched=matched,
-            matched_book_id=str(matched_book_id) if matched_book_id else None,
+        return LocalOcrPageScanJobRead(
+            job_id=job.Id,
+            status=job_status,  # type: ignore[arg-type]
+            worker_online=worker_online,
+            created_at=created_at,
+            updated_at=updated_at,
+            error_code=error_code,
+            error_message=error_message,
+            result=result_dto,
         )
-        return response
+
+    async def enqueue_scan_page_job(
+        self,
+        actor_id: UUID,
+        file: UploadFile,
+        *,
+        request_id: str,
+        book_id: UUID | None = None,
+        child_id: UUID | None = None,
+        idempotency_key: UUID | None = None,
+        idempotency_key_raw: str | None = None,
+    ) -> LocalOcrPageScanJobRead:
+        """Enqueue an asynchronous page OCR job (202 Accepted) without blocking on worker availability."""
+        role = await self.repository.profile_role(actor_id)
+        if role != "parent":
+            raise HTTPException(status_code=403, detail="Parent access required")
+
+        if child_id is not None:
+            if not await self.repository.child_belongs_to_parent(child_id, actor_id):
+                raise HTTPException(status_code=404, detail="Child profile not found")
+
+        clean_bytes, image_sha256 = await self._validate_and_normalize_image(file)
+        with Image.open(BytesIO(clean_bytes)) as img:
+            width, height = img.size
+
+        effective_idem_raw = (
+            str(idempotency_key)
+            if idempotency_key is not None
+            else (idempotency_key_raw.strip()[:120] if idempotency_key_raw and idempotency_key_raw.strip() else None)
+        )
+        effective_idem_uuid = idempotency_key or self._parse_optional_uuid(effective_idem_raw)
+        job_idem_key = f"local_scan_job:{effective_idem_raw}" if effective_idem_raw else None
+
+        job_service = OcrInferenceJobService(self.repository.db)
+        worker_online = await job_service.has_online_worker()
+
+        if job_idem_key is not None:
+            existing = await job_service.repo.get_by_idempotency(
+                JOB_KIND_LOCAL_SCAN, actor_id, job_idem_key
+            )
+            if existing is not None:
+                if existing.ImageSha256 != image_sha256:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Upload identity already belongs to a different image",
+                    )
+                return await self._serialize_scan_job(
+                    existing, worker_online=worker_online, request_id=request_id
+                )
+
+        scan_req_id = uuid4()
+        storage_path = f"local-scans/{actor_id}/{scan_req_id}.jpg"
+        proc_meta: dict[str, Any] = {
+            "request_id": request_id,
+            "child_id": str(child_id) if child_id else None,
+            "idempotency_key": str(effective_idem_uuid) if effective_idem_uuid else None,
+            "temp_image_ttl_hours": 24,
+        }
+
+        if not is_remote_ocr_mode():
+            # Dev/local in-process compatibility: execute and persist durable job row
+            # so async polling works identically in both local and remote_worker modes.
+            now = datetime.now(timezone.utc)
+            started_at = time.perf_counter()
+            timeout_seconds = max(
+                1.0,
+                float(os.getenv("LOCAL_OCR_SCAN_TIMEOUT_SECONDS", str(DEFAULT_SCAN_TIMEOUT_SECONDS))),
+            )
+            try:
+                ocr_result = await asyncio.wait_for(
+                    run_in_threadpool(extract_text_and_boxes, clean_bytes),
+                    timeout=timeout_seconds,
+                )
+                duration_ms = int((time.perf_counter() - started_at) * 1000)
+                text_val = unicodedata.normalize("NFC", str(ocr_result.get("text") or "")).strip()
+                words_val = list(ocr_result.get("words") or [])
+                meta_val = dict(ocr_result.get("metadata") or {})
+                job = OcrInferenceJob(
+                    Id=scan_req_id,
+                    JobKind=JOB_KIND_LOCAL_SCAN,
+                    Status="SUCCEEDED" if text_val else "DEAD_LETTER",
+                    Priority=PRIORITY_LOCAL_SCAN,
+                    IdempotencyKey=job_idem_key,
+                    OwnerUserId=actor_id,
+                    BookId=book_id,
+                    LocalScanRequestId=str(scan_req_id),
+                    ImageBucket=SUPABASE_PRIVATE_BOOKS_BUCKET,
+                    ImagePath=storage_path,
+                    ImageSha256=image_sha256,
+                    ImageWidth=int(width),
+                    ImageHeight=int(height),
+                    ImageMimeType="image/jpeg",
+                    ProcessingMeta={**proc_meta, "temp_image_cleaned": True},
+                    ExpectedVersion=1,
+                    FencingToken=0,
+                    WorkerId="local-inprocess",
+                    AttemptCount=1,
+                    MaxAttempts=1,
+                    ResultPayload={
+                        "full_text": text_val,
+                        "words": words_val,
+                        "ocr_meta": meta_val,
+                        "no_text_detected": not bool(text_val),
+                    },
+                    ErrorCode=None if text_val else "NO_TEXT_DETECTED",
+                    ErrorMessage=None if text_val else "No usable text was detected; check the image quality",
+                    DurationMs=duration_ms,
+                    CreatedAt=now,
+                    UpdatedAt=now,
+                    CompletedAt=now,
+                )
+            except Exception as exc:
+                err_code = (
+                    "NO_TEXT_DETECTED"
+                    if _is_ocr_exception(exc, "OcrNoTextDetected")
+                    else (
+                        "OCR_ENGINE_UNAVAILABLE"
+                        if _is_ocr_exception(exc, "OcrEngineUnavailable")
+                        else "OCR_PROCESSING_FAILED"
+                    )
+                )
+                job = OcrInferenceJob(
+                    Id=scan_req_id,
+                    JobKind=JOB_KIND_LOCAL_SCAN,
+                    Status="DEAD_LETTER",
+                    Priority=PRIORITY_LOCAL_SCAN,
+                    IdempotencyKey=job_idem_key,
+                    OwnerUserId=actor_id,
+                    BookId=book_id,
+                    LocalScanRequestId=str(scan_req_id),
+                    ImageBucket=SUPABASE_PRIVATE_BOOKS_BUCKET,
+                    ImagePath=storage_path,
+                    ImageSha256=image_sha256,
+                    ImageWidth=int(width),
+                    ImageHeight=int(height),
+                    ImageMimeType="image/jpeg",
+                    ProcessingMeta={**proc_meta, "temp_image_cleaned": True},
+                    ExpectedVersion=1,
+                    FencingToken=0,
+                    WorkerId="local-inprocess",
+                    AttemptCount=1,
+                    MaxAttempts=1,
+                    ErrorCode=err_code,
+                    ErrorMessage="Local OCR processing failed.",
+                    CreatedAt=now,
+                    UpdatedAt=now,
+                    CompletedAt=now,
+                )
+            await job_service.repo.create_job(job)
+            await self.repository.db.commit()
+            return await self._serialize_scan_job(
+                job, worker_online=True, request_id=request_id
+            )
+
+        await asyncio.to_thread(
+            storage_service.upload_object,
+            storage_path,
+            clean_bytes,
+            "image/jpeg",
+            bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
+        )
+        try:
+            job = await job_service.enqueue_job(
+                job_kind=JOB_KIND_LOCAL_SCAN,
+                owner_user_id=actor_id,
+                book_id=book_id,
+                local_scan_request_id=str(scan_req_id),
+                image_bucket=SUPABASE_PRIVATE_BOOKS_BUCKET,
+                image_path=storage_path,
+                image_sha256=image_sha256,
+                image_width=int(width),
+                image_height=int(height),
+                image_mime_type="image/jpeg",
+                priority=PRIORITY_LOCAL_SCAN,
+                idempotency_key=job_idem_key,
+                processing_meta=proc_meta,
+            )
+            await self.repository.db.commit()
+        except Exception:
+            await self.repository.db.rollback()
+            try:
+                await asyncio.to_thread(
+                    storage_service.delete_object,
+                    storage_path,
+                    bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
+                )
+            except Exception:
+                pass
+            raise
+
+        # Clean up temp JPEG immediately on cache hit or idempotent reuse of an existing job.
+        if job.Status == "SUCCEEDED" or job.ImagePath != storage_path:
+            try:
+                await asyncio.to_thread(
+                    storage_service.delete_object,
+                    storage_path,
+                    bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
+                )
+            except Exception:
+                pass
+
+        return await self._serialize_scan_job(
+            job, worker_online=worker_online, request_id=request_id
+        )
+
+    async def get_scan_page_job(
+        self,
+        actor_id: UUID,
+        job_id: UUID,
+        *,
+        request_id: str,
+    ) -> LocalOcrPageScanJobRead:
+        role = await self.repository.profile_role(actor_id)
+        if role != "parent":
+            raise HTTPException(status_code=403, detail="Parent access required")
+
+        job_service = OcrInferenceJobService(self.repository.db)
+        job = await job_service.repo.get(job_id)
+        if (
+            job is None
+            or job.JobKind != JOB_KIND_LOCAL_SCAN
+            or job.OwnerUserId != actor_id
+        ):
+            raise HTTPException(status_code=404, detail="Scan OCR job not found")
+
+        if job.Status in ("SUCCEEDED", "DEAD_LETTER", "CANCELLED"):
+            await job_service._cleanup_local_scan_temp_object(job)
+            try:
+                await self.repository.db.commit()
+            except Exception:
+                await self.repository.db.rollback()
+
+        worker_online = await job_service.has_online_worker()
+        return await self._serialize_scan_job(
+            job, worker_online=worker_online, request_id=request_id
+        )
+
+    async def cancel_scan_page_job(
+        self,
+        actor_id: UUID,
+        job_id: UUID,
+        *,
+        request_id: str,
+    ) -> LocalOcrPageScanJobRead:
+        role = await self.repository.profile_role(actor_id)
+        if role != "parent":
+            raise HTTPException(status_code=403, detail="Parent access required")
+
+        job_service = OcrInferenceJobService(self.repository.db)
+        job = await job_service.repo.get(job_id)
+        if (
+            job is None
+            or job.JobKind != JOB_KIND_LOCAL_SCAN
+            or job.OwnerUserId != actor_id
+        ):
+            raise HTTPException(status_code=404, detail="Scan OCR job not found")
+
+        await job_service.cancel_job(job_id, reason="USER_CANCELLED")
+        refreshed = await job_service.repo.get(job_id) or job
+        worker_online = await job_service.has_online_worker()
+        return await self._serialize_scan_job(
+            refreshed, worker_online=worker_online, request_id=request_id
+        )

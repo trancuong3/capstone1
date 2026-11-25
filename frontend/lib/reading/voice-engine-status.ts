@@ -10,7 +10,13 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
 export type VoiceEngineTier =
-  "local_offline" | "google_cloud" | "browser_default" | "idle";
+  | "local_offline"
+  | "catalog_cache"
+  | "android_native"
+  | "browser_wasm"
+  | "google_cloud"
+  | "browser_default"
+  | "idle";
 
 export interface VoiceEngineHealthSnapshot {
   readonly default_mode: string;
@@ -95,7 +101,27 @@ export function mapProviderToEngineSnapshot(input: {
   let engineLabel = isStt ? "Offline (Sherpa-ONNX)" : "Offline (VieNeu-TTS)";
   let shortLabel = "Offline";
 
-  if (normalized === "google" || normalized.startsWith("google")) {
+  if (normalized === "wasm" || normalized === "browser_wasm") {
+    tier = "browser_wasm";
+    engineLabel = "Offline (WASM trên máy)";
+    shortLabel = "Offline (WASM)";
+  } else if (normalized === "precomputed_cache") {
+    tier = "local_offline";
+    engineLabel = "Offline (Precomputed Cache)";
+    shortLabel = "Offline (Cache)";
+  } else if (normalized === "catalog_cache" || normalized === "precomputed") {
+    tier = "catalog_cache";
+    engineLabel = "VieNeu (Cache chuẩn)";
+    shortLabel = "Cache chuẩn";
+  } else if (
+    normalized === "android_native" ||
+    normalized === "android" ||
+    normalized === "native_android"
+  ) {
+    tier = "android_native";
+    engineLabel = isStt ? "Android (vi-VN)" : "Android TTS (vi-VN)";
+    shortLabel = "Android (vi-VN)";
+  } else if (normalized === "google" || normalized.startsWith("google")) {
     tier = "google_cloud";
     engineLabel = "Google Cloud API";
     shortLabel = "Online (Google API)";
@@ -116,6 +142,7 @@ export function mapProviderToEngineSnapshot(input: {
     shortLabel,
     fallbackUsed:
       Boolean(input.fallbackUsed) ||
+      tier === "android_native" ||
       tier === "google_cloud" ||
       tier === "browser_default",
     fallbackReason: input.fallbackReason?.trim() || null,

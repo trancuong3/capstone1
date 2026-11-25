@@ -153,6 +153,7 @@ export interface ComprehensionAnswerResultDTO {
   readonly is_correct: boolean | null;
   readonly score: number | null;
   readonly feedback_code: string | null;
+  readonly story_hint?: string | null;
 }
 
 export type AnswerResult = ComprehensionAnswerResultDTO;

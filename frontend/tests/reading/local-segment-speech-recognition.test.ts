@@ -378,7 +378,35 @@ describe("LocalSegmentSpeechRecognition 503 Offline -> Online browser fallback",
     expect(nativeRec.stopped).toBe(true);
   });
 
-  it("immediately activates browser Online STT on start() with zero 503 uploads on default policy when cached voice health reports local down and Google unconfigured", () => {
+  it("never activates Google Browser SpeechRecognition under default local_only privacy policy when WASM is unavailable", () => {
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: { available: false, stt_ready: false, tts_ready: false },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+    const transcribe = vi.fn();
+    const rec = new LocalSegmentSpeechRecognition(
+      { transcribe } as unknown as SpeechService,
+      () => ({ sessionId: "sess-default-private", pageId: "p-1" }),
+    );
+
+    rec.start();
+
+    expect(FakeNativeBrowserSpeechRecognition.instances).toHaveLength(0);
+    rec.abort();
+  });
+
+  it("immediately activates browser Online STT on start() with zero 503 uploads when Google fallback is opted-in and local is down", () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_with_google_fallback",
+      allowGoogleSttFallback: true,
+    });
     setCachedVoiceEngineHealth({
       default_mode: "local_only",
       default_voice_id: "local_north_truc_ly",
@@ -458,6 +486,10 @@ describe("LocalSegmentSpeechRecognition 503 Offline -> Online browser fallback",
   });
 
   it("auto-recovers back Online -> Offline when local STT health becomes ready again", () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_with_google_fallback",
+      allowGoogleSttFallback: true,
+    });
     // First simulate emergency Online state during a confirmed outage
     setCachedVoiceEngineHealth({
       default_mode: "local_only",
@@ -536,5 +568,59 @@ describe("LocalSegmentSpeechRecognition 503 Offline -> Online browser fallback",
         new DOMException("aborted", "AbortError"),
       ),
     ).toBe(false);
+  });
+
+  it("reduces rolling interim HTTP amplification via VAD voiced gating and speech-pause boundaries", async () => {
+    const sources: string[] = [];
+    const transcribe = vi.fn(
+      async (_blob: Blob, opts?: { source?: string }) => {
+        sources.push(opts?.source ?? "unknown");
+        return { text: "nhà em có một", language_code: "vi" };
+      },
+    );
+    const rec = new LocalSegmentSpeechRecognition(
+      { transcribe } as unknown as SpeechService,
+      () => ({
+        sessionId: "sess-vad",
+        pageId: "p-1",
+        keyterms: SCREENSHOT_KEYTERMS,
+      }),
+    );
+
+    const internal = rec as unknown as {
+      active: boolean;
+      consumeSamples16k: (chunk: Float32Array) => void;
+    };
+    internal.active = true;
+
+    const frame = 640; // 40ms @ 16kHz
+    const voiced = new Float32Array(frame).fill(0.05);
+    const silent = new Float32Array(frame).fill(0);
+
+    // 1.6s continuous speech (40 frames) -> gated to <= 4 interims (was 10+ at 160ms step)
+    for (let i = 0; i < 40; i += 1) {
+      internal.consumeSamples16k(voiced);
+      await Promise.resolve();
+    }
+    const interimsAfterContinuous = sources.filter(
+      (s) => s === "local_live_interim",
+    ).length;
+    expect(interimsAfterContinuous).toBeGreaterThanOrEqual(2);
+    expect(interimsAfterContinuous).toBeLessThanOrEqual(4);
+
+    // 600ms trailing silence -> VAD prevents redundant re-uploads over silence, then flushes once
+    for (let i = 0; i < 15; i += 1) {
+      internal.consumeSamples16k(silent);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const totalInterims = sources.filter(
+      (s) => s === "local_live_interim",
+    ).length;
+    const totalFinals = sources.filter(
+      (s) => s === "local_live_segment",
+    ).length;
+    expect(totalInterims).toBeLessThanOrEqual(4);
+    expect(totalFinals).toBe(1);
   });
 });

@@ -38,6 +38,7 @@ from app.services.viread_training_storage_quota import (
     ensure_database_capacity,
     ensure_storage_capacity,
 )
+from app.services.worker_telemetry import record_worker_error, record_worker_success
 
 logger = logging.getLogger(__name__)
 MAX_ATTEMPTS = 8
@@ -1068,11 +1069,13 @@ async def run_worker(stop: asyncio.Event, *, poll_seconds: int = POLL_SECONDS) -
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            record_worker_error("viread_ocr_outbox", exc)
             log_diagnostic(logger, logging.ERROR, event="viread_ocr_outbox_claim_failed",
                            stage="database_claim", exception=exc)
             await _wait_for_stop_or_timeout(stop, poll_seconds)
             continue
         if event is None:
+            record_worker_success("viread_ocr_outbox")
             idle_streak = min(idle_streak + 1, 4)
             sleep_for = (
                 min(30, poll_seconds * (2 ** (idle_streak - 1)))
@@ -1093,6 +1096,7 @@ async def run_worker(stop: asyncio.Event, *, poll_seconds: int = POLL_SECONDS) -
             await asyncio.shield(
                 _finish(event["id"], status="DONE", expected_attempts=attempts)
             )
+            record_worker_success("viread_ocr_outbox")
         except OutboxEventSkipped as exc:
             await asyncio.shield(
                 _finish(

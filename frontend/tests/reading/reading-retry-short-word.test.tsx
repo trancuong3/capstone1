@@ -363,7 +363,7 @@ describe("ReadingScreen short-word 'có' retry state synchronization", () => {
     await user.click(agreeBtn);
     await waitFor(() => {
       expect(speechRecorderMock.start).toHaveBeenCalledWith(
-        expect.objectContaining({ retainStream: true, mode: "short-word" }),
+        expect.objectContaining({ retainStream: false, mode: "short-word" }),
       );
     });
 

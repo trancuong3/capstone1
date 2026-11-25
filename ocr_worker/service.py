@@ -509,6 +509,7 @@ class OcrRuntimeManager:
         run_smoke_inference: bool = True,
     ) -> dict[str, Any]:
         """Load torch -> paddle -> ocr_engine, sync checkpoint, and verify real inference."""
+        os.environ["VIREAD_OCR_WORKER_PROCESS"] = "1"
         with self._inference_lock:
             self.probe_installed()
             sync_info = self.sync_active_model(
@@ -538,17 +539,24 @@ class OcrRuntimeManager:
             )
 
             warmup_result = ocr_engine.warmup_ocr_engines()
+            warmup_map = warmup_result if isinstance(warmup_result, dict) else {}
             # Re-apply thread cap because ocr_engine CPU init raises torch threads toward 8.
             try:
                 torch_mod.set_num_threads(CPU_THREADS)
             except Exception:
                 pass
             runtime_status = ocr_engine.get_loaded_vietocr_runtime_status()
+            if not isinstance(runtime_status, dict):
+                runtime_status = {}
             loaded_sha = str(
-                runtime_status.get("active_model_sha256") or sync_info["checkpoint_sha256"]
+                runtime_status.get("loaded_checkpoint_sha256")
+                or runtime_status.get("active_model_sha256")
+                or sync_info["checkpoint_sha256"]
             ).lower()
             loaded_profile = str(
-                runtime_status.get("active_model_profile") or sync_info["profile"]
+                runtime_status.get("loaded_profile")
+                or runtime_status.get("active_model_profile")
+                or sync_info["profile"]
             )
 
             with self._state_lock:
@@ -556,11 +564,11 @@ class OcrRuntimeManager:
                 self._model_sha256 = loaded_sha
                 self._engines["paddleocr"].loaded = (
                     getattr(ocr_engine, "_paddle_engine", None) is not None
-                    or warmup_result.get("paddleocr") == "loaded"
+                    or warmup_map.get("paddleocr") == "loaded"
                 )
                 self._engines["vietocr"].loaded = (
                     getattr(ocr_engine, "_vietocr_engine", None) is not None
-                    or warmup_result.get("vietocr") == "loaded"
+                    or warmup_map.get("vietocr") == "loaded"
                 )
                 self._engines["tesseract_vie"].loaded = self._engines["tesseract_vie"].installed
 
@@ -568,6 +576,81 @@ class OcrRuntimeManager:
                 self._run_smoke_verification(ocr_engine)
 
             return self.health_payload()
+
+    def maybe_resync_active_model(
+        self,
+        *,
+        manifest_fetcher: Callable[[], dict[str, Any]],
+        artifact_fetcher: Callable[[str, int | None], bytes],
+    ) -> bool:
+        """Check backend active VietOCR pointer and hot-reload when Admin promotes/rolls back."""
+        manifest = manifest_fetcher() or {}
+        desired_profile = str(manifest.get("profile") or "ORIGINAL")
+        desired_sha = str(
+            manifest.get("checkpoint_sha256") or ORIGINAL_VIETOCR_SHA256
+        ).lower()
+        with self._state_lock:
+            current_profile = self._model_profile
+            current_sha = self._model_sha256
+        if desired_sha == current_sha and desired_profile == current_profile:
+            return False
+
+        logger.info(
+            "Active VietOCR pointer changed (%s/%s -> %s/%s); resyncing worker checkpoint.",
+            current_profile,
+            current_sha[:12],
+            desired_profile,
+            desired_sha[:12],
+        )
+        os.environ["VIREAD_OCR_WORKER_PROCESS"] = "1"
+        with self._inference_lock:
+            sync_info = self.sync_active_model(
+                manifest_fetcher=lambda: manifest,
+                artifact_fetcher=artifact_fetcher,
+            )
+            if self._ocr_engine_mod is None:
+                return True
+            ocr_engine = self._ocr_engine_mod
+            self._install_local_artifact_resolver(ocr_engine)
+            ocr_engine.set_active_viread_model_cache(
+                {
+                    "profile": sync_info["profile"],
+                    "checkpoint_sha256": sync_info["checkpoint_sha256"],
+                    "storage_path": sync_info.get("storage_path")
+                    or (
+                        f"worker-cache/viread-vietocr-v2-{sync_info['checkpoint_sha256']}.pth"
+                        if sync_info["checkpoint_sha256"] != ORIGINAL_VIETOCR_SHA256
+                        else None
+                    ),
+                }
+            )
+            warmup_result = ocr_engine.warmup_ocr_engines()
+            warmup_map = warmup_result if isinstance(warmup_result, dict) else {}
+            runtime_status = ocr_engine.get_loaded_vietocr_runtime_status()
+            if not isinstance(runtime_status, dict):
+                runtime_status = {}
+            loaded_sha = str(
+                runtime_status.get("loaded_checkpoint_sha256")
+                or runtime_status.get("active_model_sha256")
+                or sync_info["checkpoint_sha256"]
+            ).lower()
+            loaded_profile = str(
+                runtime_status.get("loaded_profile")
+                or runtime_status.get("active_model_profile")
+                or sync_info["profile"]
+            )
+            with self._state_lock:
+                self._model_profile = loaded_profile
+                self._model_sha256 = loaded_sha
+                self._engines["paddleocr"].loaded = (
+                    getattr(ocr_engine, "_paddle_engine", None) is not None
+                    or warmup_map.get("paddleocr") == "loaded"
+                )
+                self._engines["vietocr"].loaded = (
+                    getattr(ocr_engine, "_vietocr_engine", None) is not None
+                    or warmup_map.get("vietocr") == "loaded"
+                )
+        return True
 
     def _run_smoke_verification(self, ocr_engine: Any) -> None:
         smoke_bytes = build_smoke_test_image_bytes("Xin chào Việt Nam")
@@ -616,6 +699,7 @@ class OcrRuntimeManager:
 
     def run_ocr_for_job(self, job_id: str, image_bytes: bytes) -> dict[str, Any]:
         """Run all 3 engines sequentially with concurrency=1."""
+        os.environ["VIREAD_OCR_WORKER_PROCESS"] = "1"
         if self._ocr_engine_mod is None:
             self.initialize_and_verify_engines(run_smoke_inference=False)
         assert self._ocr_engine_mod is not None
@@ -635,6 +719,23 @@ class OcrRuntimeManager:
         meta = dict(result.get("metadata") or {})
         statuses = dict(meta.get("engine_statuses") or {})
         meta["runtime_device"] = str(meta.get("runtime_device") or "cpu")
+        provenance = (
+            meta.get("vietocr_runtime_provenance")
+            if isinstance(meta.get("vietocr_runtime_provenance"), dict)
+            else {}
+        )
+        resolved_profile = str(
+            meta.get("model_profile")
+            or provenance.get("model_profile")
+            or meta.get("vietocr_profile")
+            or self._model_profile
+        )
+        resolved_sha = str(
+            meta.get("checkpoint_sha256")
+            or provenance.get("checkpoint_sha256")
+            or meta.get("vietocr_sha256")
+            or self._model_sha256
+        ).lower()
         with self._state_lock:
             if statuses.get("paddleocr") == "success":
                 self._engines["paddleocr"].inference_verified = True
@@ -648,8 +749,8 @@ class OcrRuntimeManager:
             "full_text": str(result.get("text") or ""),
             "words": list(result.get("words") or []),
             "ocr_meta": meta,
-            "model_profile": str(meta.get("vietocr_profile") or self._model_profile),
-            "model_sha256": str(meta.get("vietocr_sha256") or self._model_sha256).lower(),
+            "model_profile": resolved_profile,
+            "model_sha256": resolved_sha,
             "engine_diagnostics": {
                 "engine_statuses": statuses,
                 "engines": self.engines_snapshot(),

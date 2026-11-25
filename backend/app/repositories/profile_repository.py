@@ -1,13 +1,14 @@
 """Repository for the authenticated user's profile and linked child summaries."""
 
+from typing import Sequence
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database.role_cache import get_cached_profile_role, invalidate_cached_role
-from app.models import Profile
+from app.models import Book, ChildProfile, Profile, ReadingSession
 
 
 class ProfileRepository:
@@ -89,6 +90,43 @@ class ProfileRepository:
             await self.db.rollback()
             raise
         return profile
+
+    async def get_latest_sessions_by_child_ids(
+        self,
+        parent_id: UUID,
+        child_ids: Sequence[UUID],
+    ) -> list[tuple[ReadingSession, str]]:
+        """Return each owned child's latest ReadingSession paired with Book.Title in 1 query."""
+        ids = list(dict.fromkeys(child_ids))
+        if not ids:
+            return []
+        ranked = (
+            select(
+                ReadingSession.Id.label("session_id"),
+                func.row_number()
+                .over(
+                    partition_by=ReadingSession.ChildId,
+                    order_by=(
+                        ReadingSession.StartedAt.desc(),
+                        ReadingSession.Id.desc(),
+                    ),
+                )
+                .label("rn"),
+            )
+            .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
+            .where(
+                ChildProfile.ParentId == parent_id,
+                ReadingSession.ChildId.in_(ids),
+            )
+            .subquery()
+        )
+        result = await self.db.execute(
+            select(ReadingSession, Book.Title)
+            .join(ranked, ranked.c.session_id == ReadingSession.Id)
+            .join(Book, Book.Id == ReadingSession.BookId)
+            .where(ranked.c.rn == 1)
+        )
+        return [(session, str(book_title or "")) for session, book_title in result.all()]
 
     async def delete_by_id(self, profile_id: UUID) -> bool:
         profile = await self.get_by_id(profile_id)

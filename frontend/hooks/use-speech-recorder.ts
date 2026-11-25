@@ -491,20 +491,23 @@ export function useSpeechRecorder(
 
   useEffect(() => cancel, [cancel]);
 
-  // Never retain a live mic when the Android activity or browser tab is hidden.
+  // Never retain a live mic when the Android activity, browser tab, or page unloads.
   useEffect(() => {
     const onVisibilityChange = () => {
       if (document.visibilityState === "hidden") cancel();
     };
     const onAndroidBackground = () => cancel();
+    const onPageHide = () => cancel();
     document.addEventListener("visibilitychange", onVisibilityChange);
     document.addEventListener("viread:android-background", onAndroidBackground);
+    window.addEventListener("pagehide", onPageHide);
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       document.removeEventListener(
         "viread:android-background",
         onAndroidBackground,
       );
+      window.removeEventListener("pagehide", onPageHide);
     };
   }, [cancel]);
 

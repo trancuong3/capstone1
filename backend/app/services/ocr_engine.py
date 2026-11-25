@@ -48,13 +48,74 @@ if not hasattr(PIL.Image, "ANTIALIAS"):
     PIL.Image.ANTIALIAS = PIL.Image.Resampling.LANCZOS
 
 import cv2
-import jiwer
 import numpy as np
-import pytesseract
 import requests
-from pytesseract import Output
 from PIL import Image
 from app.database.config import SUPABASE_ADMIN_KEY, SUPABASE_URL
+
+# Optional/worker-only OCR dependencies are imported lazily so light web deploys
+# (`requirements-web.txt`) never crash with ModuleNotFoundError if ocr_engine is
+# accidentally imported.
+jiwer = None
+pytesseract = None
+Output = None
+
+
+def _ensure_jiwer():
+    global jiwer
+    if jiwer is None:
+        try:
+            import jiwer as _jiwer
+            jiwer = _jiwer
+        except ImportError:
+            return None
+    return jiwer
+
+
+def _ensure_pytesseract():
+    global pytesseract, Output
+    if pytesseract is None:
+        try:
+            import pytesseract as _pytesseract
+            from pytesseract import Output as _Output
+            pytesseract = _pytesseract
+            Output = _Output
+        except ImportError:
+            return None, None
+    elif Output is None:
+        Output = getattr(pytesseract, "Output", None)
+    return pytesseract, Output
+
+
+def _is_remote_ocr_mode_guard() -> bool:
+    """Fail-closed in-process OCR guard (zero DB imports for standalone worker compatibility)."""
+    if (os.getenv("VIREAD_OCR_WORKER_PROCESS") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        return False
+    raw_mode = (os.getenv("VIREAD_OCR_MODE") or "").strip().lower()
+    if raw_mode == "remote_worker":
+        return True
+    if raw_mode == "local_inprocess":
+        return False
+    app_env = (os.getenv("APP_ENVIRONMENT") or "").strip().lower()
+    render_flag = (os.getenv("RENDER") or "").strip().lower()
+    disable_heavy = (os.getenv("VIREAD_WEB_DISABLE_HEAVY_WORKERS") or "").strip().lower()
+    return (
+        app_env == "production"
+        or render_flag in {"1", "true", "yes", "on"}
+        or disable_heavy in {"1", "true", "yes", "on"}
+    )
+
+
+def _fallback_cer(reference: str, hypothesis: str) -> float:
+    if not reference:
+        return 0.0 if not hypothesis else 1.0
+    prev = list(range(len(hypothesis) + 1))
+    for i, rc in enumerate(reference, 1):
+        curr = [i]
+        for j, hc in enumerate(hypothesis, 1):
+            curr.append(min(curr[-1] + 1, prev[j] + 1, prev[j - 1] + (rc != hc)))
+        prev = curr
+    return prev[-1] / len(reference)
 
 # OCR runtimes are deliberately imported on the first OCR request. Importing
 # PyTorch and PaddleOCR during FastAPI startup exceeded Render Free's 512 MiB
@@ -323,10 +384,16 @@ def refresh_active_viread_model() -> dict[str, Any] | None:
 
 def run_active_viread_model_worker(stop_event: threading.Event, *, poll_seconds: int = 300) -> None:
     """Poll the registry calmly and only after OCR dependencies have been activated."""
+    from app.services.worker_telemetry import record_worker_error, record_worker_success
+
     interval = max(30, int(os.getenv("VIREAD_ACTIVE_MODEL_POLL_SECONDS", str(poll_seconds))))
     while not stop_event.is_set():
-        if _ocr_dependencies_loaded:
-            refresh_active_viread_model()
+        try:
+            if _ocr_dependencies_loaded:
+                refresh_active_viread_model()
+            record_worker_success("active_model_registry")
+        except Exception as exc:
+            record_worker_error("active_model_registry", exc)
         stop_event.wait(interval)
 
 
@@ -753,19 +820,34 @@ def _transfer_punctuation(viet_text: str, paddle_text: str) -> str:
     return v_clean
 
 
+_VIETOCR_SPECIAL_TOKEN_RE = re.compile(r"<(?:pad|sos|eos|unk)>", re.IGNORECASE)
+
+
+def _sanitize_vietocr_prediction(raw_text: str | None) -> tuple[str | None, bool]:
+    """Strip seq2seq decoder control tokens (`<pad>`, `<sos>`, `<eos>`, `<unk>`) without altering normal text."""
+    if not isinstance(raw_text, str):
+        return None, False
+    had_control_token = bool(_VIETOCR_SPECIAL_TOKEN_RE.search(raw_text))
+    cleaned = _VIETOCR_SPECIAL_TOKEN_RE.sub("", raw_text)
+    cleaned = re.sub(r"\s+", " ", unicodedata.normalize("NFC", cleaned)).strip()
+    return (cleaned if cleaned else None), had_control_token
+
+
 def is_vietocr_reliable(
     viet_text: str,
     paddle_text: str,
     paddle_conf: float = 0.90,
     max_cer: float = 0.40,
 ) -> bool:
-    """Reject obvious empty/repetition outputs, not select OCR correctness.
+    """Reject obvious empty/repetition/control-token outputs, not select OCR correctness.
 
     A True result means only that VietOCR can be shown as a provisional draft.
     It does not mean the candidate is better than PaddleOCR or that its words
     are correct. Diacritic-folded CER and line-level confidence are excluded.
     """
     del paddle_text, paddle_conf, max_cer
+    if not isinstance(viet_text, str) or _VIETOCR_SPECIAL_TOKEN_RE.search(viet_text):
+        return False
     candidate = unicodedata.normalize("NFC", viet_text).strip()
     if not candidate:
         return False
@@ -846,7 +928,13 @@ def _word_engine_evidence(
     if recognized == other:
         return 1.0, "engine_agreement"
     try:
-        similarity = max(0.0, min(1.0, 1.0 - float(jiwer.cer(recognized.casefold(), other.casefold()))))
+        _jiwer = _ensure_jiwer()
+        cer_val = (
+            float(_jiwer.cer(recognized.casefold(), other.casefold()))
+            if _jiwer is not None
+            else _fallback_cer(recognized.casefold(), other.casefold())
+        )
+        similarity = max(0.0, min(1.0, 1.0 - cer_val))
     except (TypeError, ValueError, ZeroDivisionError):
         similarity = None
     return (round(similarity, 4) if similarity is not None else None), "engine_disagreement"
@@ -1244,9 +1332,12 @@ def _resolve_tesseract_command() -> str | None:
 
 def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
     """Fallback Tesseract cho môi trường CI headless không có GPU/PaddleOCR."""
+    _pt, _output = _ensure_pytesseract()
+    if _pt is None:
+        raise OcrEngineUnavailable("pytesseract is not installed")
     configured_binary = _resolve_tesseract_command()
     if configured_binary:
-        pytesseract.pytesseract.tesseract_cmd = configured_binary.strip('"\'')
+        _pt.pytesseract.tesseract_cmd = configured_binary.strip('"\'')
         _ensure_tesseract_language_data()
 
     array = np.frombuffer(image_bytes, dtype=np.uint8)
@@ -1260,11 +1351,12 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
     _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
     try:
-        result = pytesseract.image_to_data(
+        dict_output = getattr(_output, "DICT", "dict")
+        result = _pt.image_to_data(
             otsu,
             lang=target_lang,
             config="--oem 1 --psm 6",
-            output_type=Output.DICT,
+            output_type=dict_output,
         )
     except Exception as exc:
         raise OcrEngineUnavailable("Tesseract execution failed") from exc
@@ -1562,10 +1654,12 @@ def _recognize_uncertain_word_crops(
                     prediction = predictions[index] if index < len(predictions) else None
                     score = scores[index] if index < len(scores) else None
                     crop_evidence = evidence["crop_evidence"]
-                    crop_evidence["vietocr_candidate"] = (
-                        unicodedata.normalize("NFC", prediction).strip()
-                        if isinstance(prediction, str) else None
-                    )
+                    sanitized_crop, had_ctrl = _sanitize_vietocr_prediction(prediction)
+                    if had_ctrl:
+                        crop_evidence["vietocr_candidate"] = None
+                        crop_evidence["vietocr_control_token_filtered"] = True
+                    else:
+                        crop_evidence["vietocr_candidate"] = sanitized_crop
                     crop_evidence["vietocr_crop_recognition_score"] = _raw_recognition_score(score)
                     crop_evidence["vietocr_decoding_mode"] = crop_evidence_decoding_mode
                     crop_evidence["status"] = "completed"
@@ -1611,8 +1705,11 @@ def _ensure_tesseract_language_data() -> None:
         return
 
     def language_available() -> bool:
+        _pt, _ = _ensure_pytesseract()
+        if _pt is None:
+            return False
         try:
-            return language in pytesseract.get_languages(config="")
+            return language in _pt.get_languages(config="")
         except Exception:
             return False
 
@@ -1630,10 +1727,13 @@ def _ensure_tesseract_language_data() -> None:
 
 
 def _configure_tesseract() -> bool:
+    _pt, _ = _ensure_pytesseract()
+    if _pt is None:
+        return False
     configured_binary = _resolve_tesseract_command()
     if not configured_binary:
         return False
-    pytesseract.pytesseract.tesseract_cmd = configured_binary.strip('"\'')
+    _pt.pytesseract.tesseract_cmd = configured_binary.strip('"\'')
     _ensure_tesseract_language_data()
     return True
 
@@ -1724,16 +1824,20 @@ def _attach_tesseract_line_readings(
 
     if not _configure_tesseract():
         return finish("not_installed")
+    _pt, _output = _ensure_pytesseract()
+    if _pt is None:
+        return finish("not_installed")
     height, width = image.shape[:2]
     try:
         gray = _normalize_text_background(
             cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
         )
-        data = pytesseract.image_to_data(
+        dict_output = getattr(_output, "DICT", "dict")
+        data = _pt.image_to_data(
             gray,
             lang=os.getenv("TESSERACT_LANG", "vie"),
             config="--oem 1 --psm 3",
-            output_type=Output.DICT,
+            output_type=dict_output,
             timeout=60,
         )
     except Exception as exc:
@@ -1853,6 +1957,9 @@ def _recognize_crop_with_tesseract(crop: np.ndarray) -> tuple[str | None, str | 
     """Independent single-word reading of a padded crop; (candidate, error)."""
     if not _configure_tesseract():
         return None, "not_installed"
+    _pt, _ = _ensure_pytesseract()
+    if _pt is None:
+        return None, "not_installed"
     try:
         gray = _normalize_text_background(
             cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
@@ -1860,7 +1967,7 @@ def _recognize_crop_with_tesseract(crop: np.ndarray) -> tuple[str | None, str | 
         gray = cv2.copyMakeBorder(
             gray, 10, 10, 10, 10, cv2.BORDER_REPLICATE
         )
-        text = pytesseract.image_to_string(
+        text = _pt.image_to_string(
             gray,
             lang=os.getenv("TESSERACT_LANG", "vie"),
             config="--oem 1 --psm 8",
@@ -2147,13 +2254,22 @@ def _extract_text_and_boxes_dual_engine(
                         )
                     viet_text = vietocr_engine.predict(prediction_image)
                 if isinstance(viet_text, str) and viet_text.strip():
-                    viet_text_candidate = unicodedata.normalize("NFC", viet_text).strip()
-                    vietocr_status = "success"
-                    if is_vietocr_reliable(
-                        viet_text_candidate, paddle_text, paddle_conf=paddle_conf, max_cer=0.40
-                    ):
-                        chosen_text = viet_text_candidate
-                        viet_text_used = True
+                    sanitized_line, had_ctrl = _sanitize_vietocr_prediction(viet_text)
+                    viet_text_candidate = sanitized_line
+                    if had_ctrl:
+                        # A seq2seq control token (<pad>/<sos>/<eos>/<unk>) indicates a corrupted
+                        # VietOCR decode (e.g. "ti<pad>f" for "TIFF"). Never let it override PaddleOCR.
+                        vietocr_status = "control_token_filtered"
+                        vietocr_error = "VIETOCR_CONTROL_TOKEN"
+                    elif sanitized_line is not None:
+                        vietocr_status = "success"
+                        if is_vietocr_reliable(
+                            sanitized_line, paddle_text, paddle_conf=paddle_conf, max_cer=0.40
+                        ):
+                            chosen_text = sanitized_line
+                            viet_text_used = True
+                    else:
+                        vietocr_status = "no_result"
                 else:
                     vietocr_status = "no_result"
             except Exception as exc:
@@ -2507,6 +2623,10 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
     another request can switch the globally cached Predictor. Never serialize
     registry pointers or the local checkpoint path to scan metadata.
     """
+    if _is_remote_ocr_mode_guard():
+        raise OcrEngineUnavailable(
+            "In-process OCR is disabled in remote_worker mode; dispatch jobs to the remote OCR worker."
+        )
     _scan_runtime_context.provenance = None
     try:
         paddle_engine, vietocr_engine = _get_ocr_engines()

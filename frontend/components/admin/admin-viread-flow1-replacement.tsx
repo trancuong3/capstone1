@@ -192,143 +192,262 @@ export function AdminVireadReliabilityPanel({
               dataset.gpu_infer_ms_per_line?.finetuned;
             const pGpu = dataset.gpu_infer_ms_per_line?.finetuned_full_pipeline;
 
+            const mobileRows: Array<{
+              label: string;
+              baseline: string;
+              modelOnly: string;
+              fullPipeline: string;
+              gain: string;
+              highlightGain?: boolean;
+            }> = [
+              {
+                label: "CER (%) · càng thấp càng tốt",
+                baseline: bCer !== undefined ? `${bCer}%` : "—",
+                modelOnly: mCer !== undefined ? `${mCer}%` : "—",
+                fullPipeline: pCer !== undefined ? `${pCer}%` : "—",
+                gain: cerGain ? `-${cerGain}%` : "—",
+                highlightGain: true,
+              },
+              {
+                label: "WER (%) · càng thấp càng tốt",
+                baseline: bWer !== undefined ? `${bWer}%` : "—",
+                modelOnly: mWer !== undefined ? `${mWer}%` : "—",
+                fullPipeline: pWer !== undefined ? `${pWer}%` : "—",
+                gain: werGain ? `-${werGain}%` : "—",
+                highlightGain: true,
+              },
+            ];
+            if (
+              bExact !== undefined ||
+              mExact !== undefined ||
+              pExact !== undefined
+            ) {
+              mobileRows.push({
+                label: "Exact Match (%)",
+                baseline: bExact !== undefined ? `${bExact}%` : "—",
+                modelOnly: mExact !== undefined ? `${mExact}%` : "—",
+                fullPipeline: pExact !== undefined ? `${pExact}%` : "—",
+                gain:
+                  bExact !== undefined && (pExact ?? mExact) !== undefined
+                    ? `+${((pExact ?? mExact)! - bExact).toFixed(2)}%`
+                    : "—",
+                highlightGain: true,
+              });
+            }
+            if (bF1 !== undefined || mF1 !== undefined || pF1 !== undefined) {
+              mobileRows.push({
+                label: "F1-Score (%)",
+                baseline: bF1 !== undefined ? `${bF1}%` : "—",
+                modelOnly: mF1 !== undefined ? `${mF1}%` : "—",
+                fullPipeline: pF1 !== undefined ? `${pF1}%` : "—",
+                gain:
+                  bF1 !== undefined && (pF1 ?? mF1) !== undefined
+                    ? `+${((pF1 ?? mF1)! - bF1).toFixed(2)}%`
+                    : "—",
+                highlightGain: true,
+              });
+            }
+            if (
+              bGpu !== undefined ||
+              mGpu !== undefined ||
+              pGpu !== undefined
+            ) {
+              mobileRows.push({
+                label: "Tốc độ GPU (ms/dòng)",
+                baseline: bGpu !== undefined ? `${bGpu} ms` : "—",
+                modelOnly: mGpu !== undefined ? `${mGpu} ms` : "—",
+                fullPipeline: pGpu !== undefined ? `${pGpu} ms` : "—",
+                gain: `${pGpu ?? mGpu ?? bGpu} ms/dòng`,
+                highlightGain: false,
+              });
+            }
+
             return (
-              <ResponsiveTable
-                ariaLabel={`Bảng kết quả tin cậy ${dataset.label}`}
-                className="rounded-control"
-                key={dataset.key}
-              >
-                <div className="bg-sky/50 px-4 py-2 font-extrabold text-primary-hover">
+              <div key={dataset.key}>
+                <div className="mb-2.5 rounded-control bg-sky/50 px-3.5 py-2 text-sm font-extrabold text-primary-hover md:mb-0 md:rounded-b-none md:px-4">
                   {dataset.label}
                 </div>
-                <table className="w-full min-w-[640px] text-left text-sm">
-                  <thead className="border-b border-border bg-slate-50 text-xs font-bold text-muted">
-                    <tr>
-                      <th className="px-4 py-2.5">Chỉ số đánh giá</th>
-                      <th className="px-4 py-2.5">
-                        Baseline ({models.baseline || "Gốc"})
-                      </th>
-                      <th className="px-4 py-2.5">Fine-tuned (Model Only)</th>
-                      <th className="px-4 py-2.5">
-                        Fine-tuned (Full Pipeline)
-                      </th>
-                      <th className="px-4 py-2.5 text-right">
-                        Mức cải thiện (Gain)
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    <tr className="hover:bg-sky/10">
-                      <td className="px-4 py-2.5 font-bold text-ink">
-                        CER (%){" "}
-                        <span className="text-xs font-normal text-muted">
-                          (Càng thấp càng tốt)
+                <div className="space-y-2.5 md:hidden">
+                  {mobileRows.map((row) => (
+                    <article
+                      className="rounded-card border border-border bg-white p-3.5"
+                      key={row.label}
+                    >
+                      <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-2">
+                        <p className="text-sm font-bold text-ink">
+                          {row.label}
+                        </p>
+                        <span
+                          className={
+                            row.highlightGain
+                              ? "font-mono text-sm font-extrabold text-emerald-700"
+                              : "font-mono text-xs text-muted"
+                          }
+                        >
+                          {row.gain}
                         </span>
-                      </td>
-                      <td className="px-4 py-2.5 font-mono text-muted">
-                        {bCer !== undefined ? `${bCer}%` : "—"}
-                      </td>
-                      <td className="px-4 py-2.5 font-mono font-semibold text-ink">
-                        {mCer !== undefined ? `${mCer}%` : "—"}
-                      </td>
-                      <td className="px-4 py-2.5 font-mono font-semibold text-ink">
-                        {pCer !== undefined ? `${pCer}%` : "—"}
-                      </td>
-                      <td className="px-4 py-2.5 text-right font-mono font-extrabold text-emerald-700">
-                        {cerGain ? `-${cerGain}%` : "—"}
-                      </td>
-                    </tr>
-                    <tr className="hover:bg-sky/10">
-                      <td className="px-4 py-2.5 font-bold text-ink">
-                        WER (%){" "}
-                        <span className="text-xs font-normal text-muted">
-                          (Càng thấp càng tốt)
-                        </span>
-                      </td>
-                      <td className="px-4 py-2.5 font-mono text-muted">
-                        {bWer !== undefined ? `${bWer}%` : "—"}
-                      </td>
-                      <td className="px-4 py-2.5 font-mono font-semibold text-ink">
-                        {mWer !== undefined ? `${mWer}%` : "—"}
-                      </td>
-                      <td className="px-4 py-2.5 font-mono font-semibold text-ink">
-                        {pWer !== undefined ? `${pWer}%` : "—"}
-                      </td>
-                      <td className="px-4 py-2.5 text-right font-mono font-extrabold text-emerald-700">
-                        {werGain ? `-${werGain}%` : "—"}
-                      </td>
-                    </tr>
-                    {bExact !== undefined ||
-                    mExact !== undefined ||
-                    pExact !== undefined ? (
-                      <tr className="hover:bg-sky/10">
-                        <td className="px-4 py-2.5 font-bold text-ink">
-                          Exact Match (%)
-                        </td>
-                        <td className="px-4 py-2.5 font-mono text-muted">
-                          {bExact !== undefined ? `${bExact}%` : "—"}
-                        </td>
-                        <td className="px-4 py-2.5 font-mono">
-                          {mExact !== undefined ? `${mExact}%` : "—"}
-                        </td>
-                        <td className="px-4 py-2.5 font-mono font-semibold text-ink">
-                          {pExact !== undefined ? `${pExact}%` : "—"}
-                        </td>
-                        <td className="px-4 py-2.5 text-right font-mono font-bold text-emerald-700">
-                          {bExact !== undefined &&
-                          (pExact ?? mExact) !== undefined
-                            ? `+${((pExact ?? mExact)! - bExact).toFixed(2)}%`
-                            : "—"}
-                        </td>
-                      </tr>
-                    ) : null}
-                    {bF1 !== undefined ||
-                    mF1 !== undefined ||
-                    pF1 !== undefined ? (
-                      <tr className="hover:bg-sky/10">
-                        <td className="px-4 py-2.5 font-bold text-ink">
-                          F1-Score (%)
-                        </td>
-                        <td className="px-4 py-2.5 font-mono text-muted">
-                          {bF1 !== undefined ? `${bF1}%` : "—"}
-                        </td>
-                        <td className="px-4 py-2.5 font-mono">
-                          {mF1 !== undefined ? `${mF1}%` : "—"}
-                        </td>
-                        <td className="px-4 py-2.5 font-mono font-semibold text-ink">
-                          {pF1 !== undefined ? `${pF1}%` : "—"}
-                        </td>
-                        <td className="px-4 py-2.5 text-right font-mono font-bold text-emerald-700">
-                          {bF1 !== undefined && (pF1 ?? mF1) !== undefined
-                            ? `+${((pF1 ?? mF1)! - bF1).toFixed(2)}%`
-                            : "—"}
-                        </td>
-                      </tr>
-                    ) : null}
-                    {bGpu !== undefined ||
-                    mGpu !== undefined ||
-                    pGpu !== undefined ? (
-                      <tr className="hover:bg-sky/10">
-                        <td className="px-4 py-2.5 font-bold text-ink">
-                          Tốc độ GPU (ms/dòng)
-                        </td>
-                        <td className="px-4 py-2.5 font-mono text-muted">
-                          {bGpu !== undefined ? `${bGpu} ms` : "—"}
-                        </td>
-                        <td className="px-4 py-2.5 font-mono">
-                          {mGpu !== undefined ? `${mGpu} ms` : "—"}
-                        </td>
-                        <td className="px-4 py-2.5 font-mono">
-                          {pGpu !== undefined ? `${pGpu} ms` : "—"}
-                        </td>
-                        <td className="px-4 py-2.5 text-right font-mono text-muted">
-                          {pGpu ?? mGpu ?? bGpu} ms/dòng
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </ResponsiveTable>
+                      </div>
+                      <dl className="mt-2.5 grid grid-cols-3 gap-2 text-xs">
+                        <div className="rounded-control bg-canvas px-2.5 py-2">
+                          <dt className="text-muted">Baseline</dt>
+                          <dd className="mt-0.5 font-mono font-semibold text-muted">
+                            {row.baseline}
+                          </dd>
+                        </div>
+                        <div className="rounded-control bg-canvas px-2.5 py-2">
+                          <dt className="text-muted">Model Only</dt>
+                          <dd className="mt-0.5 font-mono font-semibold text-ink">
+                            {row.modelOnly}
+                          </dd>
+                        </div>
+                        <div className="rounded-control bg-sky/30 px-2.5 py-2">
+                          <dt className="text-muted">Full Pipe</dt>
+                          <dd className="mt-0.5 font-mono font-bold text-ink">
+                            {row.fullPipeline}
+                          </dd>
+                        </div>
+                      </dl>
+                    </article>
+                  ))}
+                </div>
+
+                <div className="hidden md:block">
+                  <ResponsiveTable
+                    ariaLabel={`Bảng kết quả tin cậy ${dataset.label}`}
+                    className="rounded-b-control rounded-t-none border-t-0"
+                  >
+                    <table className="w-full min-w-[640px] text-left text-sm">
+                      <thead className="border-b border-border bg-slate-50 text-xs font-bold text-muted">
+                        <tr>
+                          <th className="px-4 py-2.5">Chỉ số đánh giá</th>
+                          <th className="px-4 py-2.5">
+                            Baseline ({models.baseline || "Gốc"})
+                          </th>
+                          <th className="px-4 py-2.5">
+                            Fine-tuned (Model Only)
+                          </th>
+                          <th className="px-4 py-2.5">
+                            Fine-tuned (Full Pipeline)
+                          </th>
+                          <th className="px-4 py-2.5 text-right">
+                            Mức cải thiện (Gain)
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        <tr className="hover:bg-sky/10">
+                          <td className="px-4 py-2.5 font-bold text-ink">
+                            CER (%){" "}
+                            <span className="text-xs font-normal text-muted">
+                              (Càng thấp càng tốt)
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5 font-mono text-muted">
+                            {bCer !== undefined ? `${bCer}%` : "—"}
+                          </td>
+                          <td className="px-4 py-2.5 font-mono font-semibold text-ink">
+                            {mCer !== undefined ? `${mCer}%` : "—"}
+                          </td>
+                          <td className="px-4 py-2.5 font-mono font-semibold text-ink">
+                            {pCer !== undefined ? `${pCer}%` : "—"}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono font-extrabold text-emerald-700">
+                            {cerGain ? `-${cerGain}%` : "—"}
+                          </td>
+                        </tr>
+                        <tr className="hover:bg-sky/10">
+                          <td className="px-4 py-2.5 font-bold text-ink">
+                            WER (%){" "}
+                            <span className="text-xs font-normal text-muted">
+                              (Càng thấp càng tốt)
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5 font-mono text-muted">
+                            {bWer !== undefined ? `${bWer}%` : "—"}
+                          </td>
+                          <td className="px-4 py-2.5 font-mono font-semibold text-ink">
+                            {mWer !== undefined ? `${mWer}%` : "—"}
+                          </td>
+                          <td className="px-4 py-2.5 font-mono font-semibold text-ink">
+                            {pWer !== undefined ? `${pWer}%` : "—"}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono font-extrabold text-emerald-700">
+                            {werGain ? `-${werGain}%` : "—"}
+                          </td>
+                        </tr>
+                        {bExact !== undefined ||
+                        mExact !== undefined ||
+                        pExact !== undefined ? (
+                          <tr className="hover:bg-sky/10">
+                            <td className="px-4 py-2.5 font-bold text-ink">
+                              Exact Match (%)
+                            </td>
+                            <td className="px-4 py-2.5 font-mono text-muted">
+                              {bExact !== undefined ? `${bExact}%` : "—"}
+                            </td>
+                            <td className="px-4 py-2.5 font-mono">
+                              {mExact !== undefined ? `${mExact}%` : "—"}
+                            </td>
+                            <td className="px-4 py-2.5 font-mono font-semibold text-ink">
+                              {pExact !== undefined ? `${pExact}%` : "—"}
+                            </td>
+                            <td className="px-4 py-2.5 text-right font-mono font-bold text-emerald-700">
+                              {bExact !== undefined &&
+                              (pExact ?? mExact) !== undefined
+                                ? `+${((pExact ?? mExact)! - bExact).toFixed(2)}%`
+                                : "—"}
+                            </td>
+                          </tr>
+                        ) : null}
+                        {bF1 !== undefined ||
+                        mF1 !== undefined ||
+                        pF1 !== undefined ? (
+                          <tr className="hover:bg-sky/10">
+                            <td className="px-4 py-2.5 font-bold text-ink">
+                              F1-Score (%)
+                            </td>
+                            <td className="px-4 py-2.5 font-mono text-muted">
+                              {bF1 !== undefined ? `${bF1}%` : "—"}
+                            </td>
+                            <td className="px-4 py-2.5 font-mono">
+                              {mF1 !== undefined ? `${mF1}%` : "—"}
+                            </td>
+                            <td className="px-4 py-2.5 font-mono font-semibold text-ink">
+                              {pF1 !== undefined ? `${pF1}%` : "—"}
+                            </td>
+                            <td className="px-4 py-2.5 text-right font-mono font-bold text-emerald-700">
+                              {bF1 !== undefined && (pF1 ?? mF1) !== undefined
+                                ? `+${((pF1 ?? mF1)! - bF1).toFixed(2)}%`
+                                : "—"}
+                            </td>
+                          </tr>
+                        ) : null}
+                        {bGpu !== undefined ||
+                        mGpu !== undefined ||
+                        pGpu !== undefined ? (
+                          <tr className="hover:bg-sky/10">
+                            <td className="px-4 py-2.5 font-bold text-ink">
+                              Tốc độ GPU (ms/dòng)
+                            </td>
+                            <td className="px-4 py-2.5 font-mono text-muted">
+                              {bGpu !== undefined ? `${bGpu} ms` : "—"}
+                            </td>
+                            <td className="px-4 py-2.5 font-mono">
+                              {mGpu !== undefined ? `${mGpu} ms` : "—"}
+                            </td>
+                            <td className="px-4 py-2.5 font-mono">
+                              {pGpu !== undefined ? `${pGpu} ms` : "—"}
+                            </td>
+                            <td className="px-4 py-2.5 text-right font-mono text-muted">
+                              {pGpu ?? mGpu ?? bGpu} ms/dòng
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </ResponsiveTable>
+                </div>
+              </div>
             );
           })}
 

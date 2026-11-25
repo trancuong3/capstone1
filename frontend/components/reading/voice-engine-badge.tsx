@@ -23,6 +23,13 @@ function getTierStyles(tier: VoiceEngineTier): {
         dot: "bg-orange-500",
         chip: "border-orange-200 bg-orange-50/90 text-orange-900",
       };
+    case "android_native":
+      return {
+        dot: "bg-sky-500",
+        chip: "border-sky-200 bg-sky-50/90 text-sky-900",
+      };
+    case "catalog_cache":
+    case "browser_wasm":
     case "local_offline":
     case "idle":
     default:
@@ -38,11 +45,20 @@ function buildTooltip(kind: "STT" | "TTS", snap: EngineSourceSnapshot): string {
   if (snap.fallbackReason) {
     return `${base} (Dự phòng: ${snap.fallbackReason})`;
   }
+  if (snap.tier === "android_native") {
+    return `${base} (Thiết bị · Giọng Android vi-VN)`;
+  }
+  if (snap.tier === "catalog_cache") {
+    return `${base} (Cache chuẩn · Đọc mẫu 0 độ trễ)`;
+  }
   if (snap.tier === "google_cloud") {
     return `${base} (Online · Đang dùng dự phòng Google Cloud API)`;
   }
   if (snap.tier === "browser_default") {
     return `${base} (Online · Dự phòng Google/Trình duyệt)`;
+  }
+  if (snap.tier === "browser_wasm") {
+    return `${base} (Offline · Nhận diện trên thiết bị bằng WASM)`;
   }
   return `${base} (Offline · Chạy trực tiếp trên máy này)`;
 }

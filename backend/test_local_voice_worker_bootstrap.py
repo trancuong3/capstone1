@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
-import subprocess
 
 import httpx
 
@@ -143,6 +143,9 @@ class LocalVoiceWorkerBootstrapTests(unittest.IsolatedAsyncioTestCase):
                     "Connection refused", request=httpx.Request("POST", url)
                 )
 
+            async def aclose(self):
+                self.is_closed = True
+
         provider._client = AlwaysFailClient()  # type: ignore[assignment]
         with patch(
             "app.providers.local_voice_provider.ensure_local_voice_worker_running",
@@ -228,13 +231,14 @@ class LocalVoiceWorkerBootstrapTests(unittest.IsolatedAsyncioTestCase):
             AuthGatedClient,
         ):
             with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("VIREAD_VOICE_WORKER_TOKEN", None)
                 os.environ.pop("VIREAD_LOCAL_VOICE_WORKER_TOKEN", None)
                 self.assertFalse(
                     await bootstrap._is_worker_healthy("http://127.0.0.1:8010")
                 )
             with patch.dict(
                 os.environ,
-                {"VIREAD_LOCAL_VOICE_WORKER_TOKEN": "valid-token"},
+                {"VIREAD_VOICE_WORKER_TOKEN": "valid-token"},
                 clear=False,
             ):
                 self.assertTrue(
@@ -246,6 +250,7 @@ class LocalVoiceWorkerBootstrapTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         bootstrap.arm_local_voice_worker_autostart(True)
         with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("VIREAD_VOICE_WORKER_TOKEN", None)
             os.environ.pop("VIREAD_LOCAL_VOICE_WORKER_TOKEN", None)
             provider = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
 
@@ -269,6 +274,8 @@ class LocalVoiceWorkerBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         class FakeHealthClient:
+            is_closed = False
+
             def __init__(self, **_kwargs):
                 pass
 
@@ -277,6 +284,9 @@ class LocalVoiceWorkerBootstrapTests(unittest.IsolatedAsyncioTestCase):
 
             async def __aexit__(self, *_args):
                 return None
+
+            async def aclose(self):
+                self.is_closed = True
 
             async def get(self, _url, **_kwargs):
                 return httpx.Response(
@@ -307,10 +317,13 @@ class LocalVoiceWorkerBootstrapTests(unittest.IsolatedAsyncioTestCase):
     async def test_get_health_triggers_non_blocking_recovery_when_armed(self) -> None:
         bootstrap.arm_local_voice_worker_autostart(True)
         with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("VIREAD_VOICE_WORKER_TOKEN", None)
             os.environ.pop("VIREAD_LOCAL_VOICE_WORKER_TOKEN", None)
             provider = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
 
         class ConnectErrorClient:
+            is_closed = False
+
             def __init__(self, **_kwargs):
                 pass
 
@@ -326,6 +339,8 @@ class LocalVoiceWorkerBootstrapTests(unittest.IsolatedAsyncioTestCase):
                 )
 
         class AuthMismatchHealthClient:
+            is_closed = False
+
             def __init__(self, **_kwargs):
                 pass
 

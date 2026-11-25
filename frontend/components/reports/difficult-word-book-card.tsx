@@ -171,7 +171,7 @@ export function DifficultWordBookCard({
             return (
               <button
                 aria-label={`Luyện từ ${word.display_text} (${style.label})`}
-                className={`inline-flex min-h-11 items-center gap-2 rounded-full border px-4 py-1.5 text-base font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 ${style.className}`}
+                className={`inline-flex min-h-12 items-center gap-2 rounded-full border px-4 py-2 text-base font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 ${style.className}`}
                 key={word.normalized_word}
                 onClick={() => onSelectWord(word)}
                 type="button"

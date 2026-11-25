@@ -173,8 +173,6 @@ describe("speech service", () => {
         method: "POST",
         body: JSON.stringify({
           text: "Bé đọc cùng mình nhé.",
-          provider_mode: "local_with_google_fallback",
-          allow_google_tts: true,
         }),
         cache: "no-store",
         credentials: "omit",
@@ -185,7 +183,23 @@ describe("speech service", () => {
       "Bearer isolated-test-token",
     );
     expect(headersFromCall().get("content-type")).toBe("application/json");
+    expect(headersFromCall().get("accept")).toContain("audio/mpeg");
+    expect(headersFromCall().get("accept")).toContain("audio/wav");
     expect(JSON.stringify(fetchMock.mock.calls[0])).not.toContain("ELEVENLABS");
+  });
+
+  it("supports explicit audioFormat WAV fallback negotiation for TTS", async () => {
+    fetchMock.mockResolvedValue(
+      new Response("wav-bytes", { headers: { "content-type": "audio/wav" } }),
+    );
+    const blob = await createSpeechService().synthesize("Xin chào.", {
+      audioFormat: "wav",
+    });
+    expect(blob.type).toBe("audio/wav");
+    expect(headersFromCall().get("accept")).toBe("audio/wav");
+    expect(
+      JSON.parse(fetchMock.mock.calls[0][1].body as string).audio_format,
+    ).toBe("wav");
   });
 
   it("uploads a recorded Blob as FormData and validates the STT response", async () => {
@@ -352,5 +366,35 @@ describe("speech service", () => {
     await expect(
       createSpeechService().transcribe(new Blob(["audio"])),
     ).rejects.toMatchObject({ code: "STT_UNAVAILABLE" });
+  });
+
+  it("maps LOCAL_VOICE_UNCONFIGURED to retryable STT_TEMPORARILY_UNAVAILABLE and TTS_UNAVAILABLE", async () => {
+    fetchMock.mockResolvedValueOnce(
+      Response.json(
+        { detail: { code: "LOCAL_VOICE_UNCONFIGURED" } },
+        { status: 503, headers: { "x-request-id": "req-unconf-stt" } },
+      ),
+    );
+    await expect(
+      createSpeechService().transcribe(new Blob(["audio"])),
+    ).rejects.toMatchObject({
+      code: "STT_TEMPORARILY_UNAVAILABLE",
+      status: 503,
+      retryable: true,
+    });
+
+    fetchMock.mockResolvedValueOnce(
+      Response.json(
+        { detail: { code: "LOCAL_VOICE_UNCONFIGURED" } },
+        { status: 503, headers: { "x-request-id": "req-unconf-tts" } },
+      ),
+    );
+    await expect(
+      createSpeechService().synthesize("Xin chào"),
+    ).rejects.toMatchObject({
+      code: "TTS_UNAVAILABLE",
+      status: 503,
+      retryable: true,
+    });
   });
 });

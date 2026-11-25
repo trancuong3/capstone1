@@ -1,3 +1,5 @@
+import type { ChildProfileDTO } from "@/types/child";
+
 export type UUID = string;
 
 export type ISODateTime = string;
@@ -31,4 +33,25 @@ export interface ParentProfileDTO {
 
 export interface ParentProfileUpdateInput {
   display_name: string | null;
+}
+
+export interface DashboardLatestSessionDTO {
+  readonly id: UUID;
+  readonly child_id: UUID;
+  readonly book_id: UUID;
+  readonly book_title: string | null;
+  readonly state: string;
+  readonly started_at: ISODateTime | null;
+  readonly ended_at: ISODateTime | null;
+  readonly resumable: boolean;
+}
+
+export interface DashboardSummaryDTO {
+  readonly profile: ParentProfileDTO | null;
+  readonly children: ChildProfileDTO[];
+  readonly latest_sessions_by_child: Record<
+    string,
+    DashboardLatestSessionDTO | null
+  >;
+  readonly source: "dashboard-summary" | "fallback";
 }

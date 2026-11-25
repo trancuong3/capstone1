@@ -2,8 +2,8 @@
 
 import {
   BookOpenCheck,
-  ClipboardCheck,
   BrainCircuit,
+  ClipboardCheck,
   HeartPulse,
   LogOut,
   Music2,
@@ -13,10 +13,17 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ViReadLogo } from "@/components/common/viread-logo";
+
 import { Button, ButtonSizeContext } from "@/components/common/button";
+import { ViReadLogo } from "@/components/common/viread-logo";
+import {
+  ADMIN_MOBILE_MORE_ITEMS,
+  ADMIN_MOBILE_PRIMARY_TABS,
+  MobileBottomNav,
+} from "@/components/layout/mobile-bottom-nav";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { clearUserCache } from "@/lib/cache/user-query-cache";
 import { cn } from "@/lib/utils/cn";
 
 const links = [
@@ -65,6 +72,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
     setHasSignOutError(false);
     setIsSigningOut(true);
     try {
+      clearUserCache();
       await auth.signOut();
       router.replace("/admin/login");
       router.refresh();
@@ -85,21 +93,21 @@ export function AdminLayout({ children }: { children: ReactNode }) {
         >
           Bỏ qua điều hướng, đến nội dung quản trị
         </a>
-        <header className="shrink-0 border-b border-border bg-white">
-          <div className="mx-auto flex w-full max-w-[1440px] flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 sm:px-8 xl:grid xl:min-h-18 xl:grid-cols-[auto_minmax(0,1fr)_auto] xl:gap-x-2 xl:px-16">
-            <div className="order-1 flex min-h-12 items-center gap-3 xl:order-none">
+        <header className="sticky top-0 z-30 shrink-0 border-b border-border bg-white/95 backdrop-blur-sm xl:static xl:bg-white">
+          <div className="mx-auto flex h-14 w-full max-w-[1440px] items-center justify-between gap-3 px-3 sm:px-6 xl:grid xl:h-auto xl:min-h-18 xl:grid-cols-[auto_minmax(0,1fr)_auto] xl:gap-x-2 xl:px-16">
+            <div className="flex min-h-12 items-center gap-2.5 sm:gap-3">
               <ViReadLogo
                 ariaLabel="ViRead - khu vực quản trị"
                 href="/admin/parents"
                 size="md"
               />
-              <span className="border-l border-border pl-3 text-sm font-semibold text-muted">
+              <span className="border-l border-border pl-2.5 text-xs font-semibold text-muted sm:pl-3 sm:text-sm">
                 Quản trị
               </span>
             </div>
             <nav
               aria-label="Điều hướng quản trị"
-              className="order-3 flex w-full basis-full min-w-0 flex-wrap items-center gap-1 py-1 xl:order-none xl:ml-0 xl:basis-auto xl:flex-nowrap xl:justify-end"
+              className="hidden min-w-0 items-center gap-1 py-1 xl:flex xl:flex-nowrap xl:justify-end"
             >
               {links.map(({ href, label, icon: Icon }) => {
                 const isActive =
@@ -123,7 +131,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
               })}
             </nav>
             <Button
-              className="order-2 ml-auto w-auto shrink-0 px-3 xl:order-none xl:ml-0"
+              className="ml-auto w-auto shrink-0 px-3 xl:ml-0"
               disabled={isSigningOut}
               isLoading={isSigningOut}
               onClick={() => void handleSignOut()}
@@ -145,13 +153,21 @@ export function AdminLayout({ children }: { children: ReactNode }) {
           </p>
         ) : null}
         <main
-          className="mx-auto w-full min-w-0 max-w-[1360px] flex-1 tabular-nums px-4 py-8 sm:px-6 sm:py-10 xl:px-10"
+          className="mx-auto w-full min-w-0 max-w-[1360px] flex-1 tabular-nums px-4 pb-24 pt-5 sm:px-6 sm:pt-7 xl:px-10 xl:py-10"
           id="admin-main-content"
           tabIndex={-1}
         >
           {children}
         </main>
-        <SiteFooter variant="admin" />
+        <SiteFooter className="hidden lg:block" variant="admin" />
+        <MobileBottomNav
+          ariaLabel="Điều hướng quản trị trên di động"
+          moreItems={ADMIN_MOBILE_MORE_ITEMS}
+          moreTitle="Quản trị khác"
+          pathname={pathname}
+          sheetId="admin-mobile-more-sheet"
+          tabs={ADMIN_MOBILE_PRIMARY_TABS}
+        />
       </div>
     </ButtonSizeContext.Provider>
   );

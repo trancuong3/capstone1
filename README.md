@@ -198,3 +198,7 @@ npm run test:e2e
 ## Quyền sử dụng
 
 Repository đang **public** nhưng không có file `LICENSE` tại gốc ở thời điểm kiểm tra. Việc công khai mã nguồn trên GitHub không tự cấp giấy phép sao chép, sửa đổi hoặc phân phối theo mô hình open source. Chủ repository cần lựa chọn giấy phép phù hợp với đồ án và thành phần phụ thuộc; PR dọn dẹp tài liệu **không tự tạo hoặc chọn LICENSE**.
+
+### Thành phần bên thứ ba (WASM STT)
+
+- `frontend/public/wasm/sherpa/` chứa runtime `sherpa-onnx` WebAssembly (`sherpa-onnx-asr.js`, `sherpa-onnx-wasm-main-vad-asr-clean.js`, `sherpa-onnx-wasm-main-vad-asr.wasm`) thuộc dự án [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), phát hành theo giấy phép **Apache License 2.0** (chi tiết tại [frontend/public/wasm/sherpa/NOTICE.txt](frontend/public/wasm/sherpa/NOTICE.txt)). Model nhận dạng tiếng Việt `sherpa-onnx-zipformer-vi-30M-int8-2026-02-09` được trình duyệt tải theo yêu cầu và kiểm tra SHA-256 khi chạy chế độ trên thiết bị.

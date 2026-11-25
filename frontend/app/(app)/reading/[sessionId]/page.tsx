@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 
-import { AppServicesProvider } from "@/components/providers/app-services-provider";
 import { ReadingScreen } from "@/components/reading/reading-screen";
 import {
   parseReadingUiState,
@@ -31,13 +30,11 @@ export default async function ReadingPage({
   const [{ sessionId }, query] = await Promise.all([params, searchParams]);
 
   return (
-    <AppServicesProvider scenario="default">
-      <ReadingScreen
-        initialPageId={firstValue(query.pageId)}
-        initialUiState={parseReadingUiState(query.state)}
-        reconnectMode={parseReconnectDemoMode(query.reconnect)}
-        sessionId={sessionId}
-      />
-    </AppServicesProvider>
+    <ReadingScreen
+      initialPageId={firstValue(query.pageId)}
+      initialUiState={parseReadingUiState(query.state)}
+      reconnectMode={parseReconnectDemoMode(query.reconnect)}
+      sessionId={sessionId}
+    />
   );
 }

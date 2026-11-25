@@ -3,14 +3,19 @@
 import { ArrowRight, BookOpen } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
 import { Button, ButtonLink } from "@/components/common/button";
 import { useReportServices } from "@/hooks/use-report-services";
 import type { ChildProfileDTO } from "@/types/child";
+import type { DashboardLatestSessionDTO } from "@/types/profile";
 
 interface ReadingDeskProps {
   child?: Pick<ChildProfileDTO, "id" | "alias">;
   hasProfiles: boolean;
+  isLoadingProfiles?: boolean;
+  latestSession?: DashboardLatestSessionDTO | null;
+  summarySource?: "dashboard-summary" | "fallback";
   onChooseBook: () => void;
 }
 
@@ -20,17 +25,46 @@ interface RecentReading {
   resumable: boolean;
 }
 
+function mapSummarySessionToRecent(
+  childId: string,
+  session: DashboardLatestSessionDTO | null | undefined,
+): RecentReading | null {
+  if (!session || session.child_id !== childId) return null;
+  const title = session.book_title?.trim();
+  if (!title) return null;
+  return {
+    title,
+    resumable: session.resumable,
+    href: session.resumable
+      ? `/reading/${encodeURIComponent(session.id)}`
+      : `/sessions/${encodeURIComponent(session.id)}?childId=${encodeURIComponent(childId)}`,
+  };
+}
+
 export function FamilyReadingDesk({
   child,
   hasProfiles,
+  isLoadingProfiles = false,
+  latestSession,
+  summarySource,
   onChooseBook,
 }: ReadingDeskProps) {
   const { sessionService } = useReportServices();
-  const [recent, setRecent] = useState<RecentReading | null>(null);
+  const [fallbackRecent, setFallbackRecent] = useState<RecentReading | null>(
+    null,
+  );
   const childId = child?.id;
 
+  const summaryRecent = useMemo(
+    () =>
+      childId && summarySource === "dashboard-summary"
+        ? mapSummarySessionToRecent(childId, latestSession)
+        : null,
+    [childId, latestSession, summarySource],
+  );
+
   useEffect(() => {
-    if (!childId) return;
+    if (!childId || summarySource === "dashboard-summary") return;
     let current = true;
     async function load(id: string) {
       const { sessions } = await sessionService.list(id, { limit: 1 });
@@ -40,7 +74,7 @@ export function FamilyReadingDesk({
       if (!current || book.id !== session.book_id) return;
       const resumable =
         !session.ended_at && !["FINISHED", "ABORTED"].includes(session.state);
-      setRecent({
+      setFallbackRecent({
         title: book.title,
         resumable,
         href: resumable
@@ -53,14 +87,20 @@ export function FamilyReadingDesk({
     return () => {
       current = false;
     };
-  }, [childId, sessionService]);
+  }, [childId, sessionService, summarySource]);
+
+  const recent =
+    summarySource === "dashboard-summary" ? summaryRecent : fallbackRecent;
 
   return (
-    <section className="family-reading-desk" aria-labelledby="desk-title">
+    <section
+      className="family-reading-desk order-2 md:order-1"
+      aria-labelledby="desk-title"
+    >
       <div className="desk-copy">
         <div className="desk-label">
           <BookOpen aria-hidden="true" size={17} />
-          {recent?.resumable ? "Sách đang đọc" : "Tủ sách gia đình"}
+          {recent?.resumable ? "Tiếp tục đọc" : "Tủ sách gia đình"}
         </div>
         <h2 id="desk-title">
           {recent?.resumable ? recent.title : "Hôm nay bé đọc gì?"}
@@ -70,17 +110,23 @@ export function FamilyReadingDesk({
             ? `Cùng ${child?.alias} tiếp tục buổi đọc còn dở.`
             : child
               ? `Mở tủ sách và chọn một cuốn cho ${child.alias}.`
-              : hasProfiles
-                ? "Chọn hồ sơ của bé để mở tủ sách riêng."
-                : "Tạo hồ sơ cho bé để mở cuốn sách đầu tiên."}
+              : isLoadingProfiles
+                ? "Đang tải hồ sơ gia đình để chuẩn bị tủ sách của bé…"
+                : hasProfiles
+                  ? "Chọn hồ sơ của bé để mở tủ sách riêng."
+                  : "Tạo hồ sơ cho bé để mở cuốn sách đầu tiên."}
         </p>
         <div className="desk-actions">
           {recent?.resumable ? (
             <ButtonLink href={recent.href} className="desk-primary">
               Đọc tiếp <ArrowRight aria-hidden="true" size={18} />
             </ButtonLink>
-          ) : hasProfiles ? (
-            <Button onClick={onChooseBook} className="desk-primary">
+          ) : hasProfiles || isLoadingProfiles ? (
+            <Button
+              onClick={onChooseBook}
+              className="desk-primary"
+              disabled={isLoadingProfiles && !child}
+            >
               Chọn sách <ArrowRight aria-hidden="true" size={18} />
             </Button>
           ) : (
@@ -90,7 +136,7 @@ export function FamilyReadingDesk({
           )}
           {recent?.resumable ? (
             <button
-              className="desk-text-link"
+              className="desk-text-link min-h-11 px-1"
               type="button"
               onClick={onChooseBook}
             >
@@ -110,8 +156,7 @@ export function FamilyReadingDesk({
           src="/images/reading-studio.webp"
           fill
           priority
-          unoptimized
-          sizes="(min-width: 1000px) 380px, 50vw"
+          sizes="(min-width: 1000px) 380px, 100vw"
           className="object-cover"
         />
       </div>

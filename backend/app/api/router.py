@@ -24,6 +24,7 @@ from app.api.routes import (
 from app.api.routes import admin_viread_training
 from app.api.routes import book_assets
 from app.api.routes import global_tasks
+from app.api.routes import internal_cron
 from app.api.routes import internal_ocr
 from app.api.routes import karaoke
 from app.api.routes import karaoke_processing
@@ -38,6 +39,7 @@ api_router.include_router(parent_private_book.router, prefix="/books", tags=["Pa
 api_router.include_router(book.router, prefix="/books", tags=["Books"])
 api_router.include_router(admin_ocr.router, prefix="/books", tags=["Admin OCR"])
 api_router.include_router(admin_viread_training.router, prefix="/books", tags=["Admin ViOCR Training"])
+api_router.include_router(internal_cron.router, prefix="/internal/cron", tags=["Internal Cron"])
 api_router.include_router(internal_ocr.router, prefix="/internal/ocr-jobs", tags=["Internal OCR Worker"])
 api_router.include_router(reading.router, prefix="/reading", tags=["Reading"])
 api_router.include_router(reading_management.router, prefix="/reading-management", tags=["Reading Management"])

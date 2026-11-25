@@ -162,6 +162,7 @@ class CatalogPagePreviewResponse(BaseModel):
     lifecycle_status: Literal["ACTIVE"]
     current_verified_revision_id: UUID
     preview_url: str
+    tts_audio_url: str | None = None
 
 
 class AdminCatalogBookResponse(BaseModel):

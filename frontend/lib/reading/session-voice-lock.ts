@@ -82,9 +82,9 @@ const LOCK_STORAGE_PREFIX = "viread.session-voice-lock.v1.";
 
 const DEFAULT_POLICY: VoicePolicyPreferences = {
   region: "north",
-  providerMode: "local_with_google_fallback",
-  allowGoogleSttFallback: true,
-  allowGoogleTtsFallback: true,
+  providerMode: "local_only",
+  allowGoogleSttFallback: false,
+  allowGoogleTtsFallback: false,
   modelVersion: DEFAULT_LOCAL_TTS_MODEL_VERSION,
 };
 
@@ -143,21 +143,13 @@ function sanitizePolicy(raw: unknown): VoicePolicyPreferences {
       ? rec.region
       : "north";
   const providerMode: VoiceProviderMode =
-    rec.providerMode === "local_only"
-      ? "local_only"
-      : "local_with_google_fallback";
+    rec.providerMode === "local_with_google_fallback"
+      ? "local_with_google_fallback"
+      : "local_only";
   const allowGoogleSttFallback =
-    providerMode === "local_only"
-      ? false
-      : rec.allowGoogleSttFallback === undefined
-        ? true
-        : Boolean(rec.allowGoogleSttFallback);
+    providerMode === "local_only" ? false : Boolean(rec.allowGoogleSttFallback);
   const allowGoogleTtsFallback =
-    providerMode === "local_only"
-      ? false
-      : rec.allowGoogleTtsFallback === undefined
-        ? true
-        : Boolean(rec.allowGoogleTtsFallback);
+    providerMode === "local_only" ? false : Boolean(rec.allowGoogleTtsFallback);
   const modelVersion =
     typeof rec.modelVersion === "string" &&
     /^[A-Za-z0-9._-]{1,80}$/.test(rec.modelVersion)

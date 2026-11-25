@@ -33,8 +33,11 @@ export function progressHref(
 
 export function formatProgressDuration(value: number | null): string {
   if (value === null) return "Chưa có dữ liệu";
-  if (value < 60000) return `${Math.floor(value / 1000)} giây`;
-  return `${Math.floor(value / 60000)} phút ${Math.floor((value % 60000) / 1000)} giây`;
+  const totalSeconds = Math.max(0, Math.floor(value / 1000));
+  if (totalSeconds < 60) return `${totalSeconds} giây`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds === 0 ? `${minutes} phút` : `${minutes} phút ${seconds} giây`;
 }
 
 export function formatProgressGeneratedAt(value: string): string {

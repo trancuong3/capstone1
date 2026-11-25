@@ -9,6 +9,7 @@ import {
 } from "@/lib/api/browser-auth";
 import { clearApiReadCache, runCoalescedApiGet } from "@/lib/api/read-cache";
 import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
+import { clearUserCache } from "@/lib/cache/user-query-cache";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
 export interface ChildService {
@@ -188,10 +189,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (method !== "GET") {
     clearApiReadCache();
+    clearUserCache();
     try {
       return await execute();
     } finally {
       clearApiReadCache();
+      clearUserCache();
     }
   }
 

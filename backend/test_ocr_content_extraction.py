@@ -7,10 +7,12 @@ AND `pytest` (`pytest backend/test_ocr_content_extraction.py`).
 from __future__ import annotations
 
 import base64
+import functools
 import io
 import json
 import math
 import os
+import random
 import sys
 import unicodedata
 import unittest
@@ -31,9 +33,18 @@ import cv2
 import numpy as np
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from hypothesis import given, settings as hp_settings, strategies as st
 from PIL import Image
 from sqlalchemy.exc import OperationalError
+
+try:
+    from hypothesis import given as _hp_given, settings as _hp_settings, strategies as st
+
+    HAS_HYPOTHESIS = True
+except ModuleNotFoundError:  # pragma: no cover - Ubuntu CI installs pinned requirements.txt without hypothesis
+    _hp_given = None
+    _hp_settings = None
+    st = None
+    HAS_HYPOTHESIS = False
 
 from app.api.deps import get_current_parent_id, get_db
 from app.api.routes.ocr_extraction import router as ocr_extraction_router
@@ -953,16 +964,14 @@ _VIET_SYLLABLES = [
 ]
 
 
-@st.composite
-def _page_words_strategy(draw):
-    line_count = draw(st.integers(min_value=1, max_value=6))
+def _generate_random_page_words(rng: random.Random) -> list[OcrWordInput]:
+    line_count = rng.randint(1, 6)
     words: list[OcrWordInput] = []
     word_cursor = 0
     for l_idx in range(line_count):
-        n_toks = draw(st.integers(min_value=1, max_value=7))
-        toks = [draw(st.sampled_from(_VIET_SYLLABLES)) for _ in range(n_toks)]
-        # Optionally NFD-encode some tokens to test Unicode preservation
-        if draw(st.booleans()):
+        n_toks = rng.randint(1, 7)
+        toks = [rng.choice(_VIET_SYLLABLES) for _ in range(n_toks)]
+        if rng.choice((False, True)):
             toks = [unicodedata.normalize("NFD", t) for t in toks]
         y_pos = round(0.03 + l_idx * (0.90 / max(1, line_count)), 4)
         line_words = make_line_words(
@@ -979,9 +988,58 @@ def _page_words_strategy(draw):
     return words
 
 
+if HAS_HYPOTHESIS and st is not None:
+
+    @st.composite
+    def _page_words_strategy(draw):
+        line_count = draw(st.integers(min_value=1, max_value=6))
+        words: list[OcrWordInput] = []
+        word_cursor = 0
+        for l_idx in range(line_count):
+            n_toks = draw(st.integers(min_value=1, max_value=7))
+            toks = [draw(st.sampled_from(_VIET_SYLLABLES)) for _ in range(n_toks)]
+            # Optionally NFD-encode some tokens to test Unicode preservation
+            if draw(st.booleans()):
+                toks = [unicodedata.normalize("NFD", t) for t in toks]
+            y_pos = round(0.03 + l_idx * (0.90 / max(1, line_count)), 4)
+            line_words = make_line_words(
+                " ".join(toks),
+                x=0.10,
+                y=min(0.95, y_pos),
+                w_total=0.76,
+                h=0.025,
+                line_index=l_idx,
+                start_idx=word_cursor,
+            )
+            words.extend(line_words)
+            word_cursor += len(line_words)
+        return words
+
+    def _property_words(max_examples: int = 40):
+        def _decorator(fn):
+            return _hp_settings(max_examples=max_examples, deadline=None)(
+                _hp_given(words=_page_words_strategy())(fn)
+            )
+
+        return _decorator
+
+else:
+
+    def _property_words(max_examples: int = 40):
+        def _decorator(fn):
+            @functools.wraps(fn)
+            def _wrapped(self):
+                rng = random.Random(f"viread-ocr-prop:{fn.__name__}")
+                for _ in range(max_examples):
+                    fn(self, _generate_random_page_words(rng))
+
+            return _wrapped
+
+        return _decorator
+
+
 class OcrExtractionPropertyTests(unittest.TestCase):
-    @hp_settings(max_examples=40, deadline=None)
-    @given(words=_page_words_strategy())
+    @_property_words(max_examples=40)
     def test_property_filtering_never_invents_characters(self, words: list[OcrWordInput]):
         res = extract_ocr_content(words, filter_mode="active")
         source_chars = set(
@@ -993,8 +1051,7 @@ class OcrExtractionPropertyTests(unittest.TestCase):
             f"Invented chars: {output_chars - source_chars}",
         )
 
-    @hp_settings(max_examples=40, deadline=None)
-    @given(words=_page_words_strategy())
+    @_property_words(max_examples=40)
     def test_property_keep_blocks_preserved_verbatim_before_proofreading(self, words: list[OcrWordInput]):
         res = extract_ocr_content(words, filter_mode="active")
         for blk in res.blocks:
@@ -1002,8 +1059,7 @@ class OcrExtractionPropertyTests(unittest.TestCase):
                 self.assertEqual(blk.display_text, blk.raw_text)
                 self.assertIn(blk.raw_text, res.canonical_text)
 
-    @hp_settings(max_examples=35, deadline=None)
-    @given(words=_page_words_strategy())
+    @_property_words(max_examples=35)
     def test_property_restore_restores_any_excluded_block_in_valid_order(self, words: list[OcrWordInput]):
         res = extract_ocr_content(words, filter_mode="active")
         if not res.blocks:
@@ -1037,8 +1093,7 @@ class OcrExtractionPropertyTests(unittest.TestCase):
             list(range(len(after_rest.canonical_words))),
         )
 
-    @hp_settings(max_examples=35, deadline=None)
-    @given(words=_page_words_strategy())
+    @_property_words(max_examples=35)
     def test_property_deterministic_output(self, words: list[OcrWordInput]):
         res1 = extract_ocr_content(words, filter_mode="active")
         res2 = extract_ocr_content(words, filter_mode="active")
@@ -1052,8 +1107,7 @@ class OcrExtractionPropertyTests(unittest.TestCase):
             [(w.word_id, w.reading_order, w.bbox) for w in res2.canonical_words],
         )
 
-    @hp_settings(max_examples=40, deadline=None)
-    @given(words=_page_words_strategy())
+    @_property_words(max_examples=40)
     def test_property_valid_bboxes_unique_word_ids_and_unicode_nfc(self, words: list[OcrWordInput]):
         res = extract_ocr_content(words, filter_mode="active")
         self.assertTrue(unicodedata.is_normalized("NFC", res.canonical_text))

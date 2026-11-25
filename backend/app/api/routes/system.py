@@ -19,11 +19,21 @@ from app.database.role_cache import get_cached_profile_role
 from app.models import AuditLog, ChildProfile, ConsentRecord, Profile, ProgressReport, ReadingSession
 from app.repositories.difficult_words_repository import DifficultWordsRepository
 from app.services.admin_ocr_local import LocalCorrectionError, LocalOcrConfig, LocalOcrCorrector
+from app.services.ocr_inference_job_service import is_remote_ocr_mode
 from app.services.runtime_diagnostics import (
     collect_ocr_health,
+    collect_remote_ocr_health,
     collect_worker_health,
+    collect_worker_queue_metrics,
+    derive_operational_state,
+    is_ocr_engine_ready_status,
     probe_storage_health,
 )
+from app.services.tts_audio_cache_service import (
+    TtsAudioCacheService,
+    is_tts_cache_enabled,
+)
+from app.services.worker_telemetry import get_worker_telemetry
 from app.services.voice_orchestrator import VoiceOrchestrator
 from app.services.difficult_words_service import (
     DifficultWordsService,
@@ -45,6 +55,7 @@ from app.schemas.difficult_words import (
     PracticeStatusLiteral,
 )
 from app.schemas.system import (
+    AdminAudioCacheSummaryRead,
     AdminAuditLogRead,
     AdminAuditPageRead,
     AdminHealthItemRead,
@@ -277,25 +288,64 @@ class ProgressRepository:
         self.db = db
 
     async def period_assessment(self, child_id, actor_id, start, end, generated_at):
-        from app.models import ReadingSession
-        from app.repositories.reading_content_repository import ReadingContentRepository
+        from app.models import ReadingComparisonReport, ReadingEvent, ReadingSession
         from app.services.reading_assessment import aggregate_period_assessment
+
         local_tz = timezone(timedelta(hours=7))
         begin = datetime.combine(start, datetime.min.time(), tzinfo=local_tz)
         finish = datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=local_tz)
         rows = await self.db.execute(
             select(ReadingSession)
             .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
-            .where(ChildProfile.ParentId == actor_id, ReadingSession.ChildId == child_id,
-                   ReadingSession.State == "COMPLETED", ReadingSession.StartedAt >= begin,
-                   ReadingSession.StartedAt < finish, ReadingSession.EndedAt <= generated_at)
+            .where(
+                ChildProfile.ParentId == actor_id,
+                ReadingSession.ChildId == child_id,
+                ReadingSession.State == "COMPLETED",
+                ReadingSession.StartedAt >= begin,
+                ReadingSession.StartedAt < finish,
+                ReadingSession.EndedAt <= generated_at,
+            )
             .order_by(ReadingSession.StartedAt, ReadingSession.Id)
         )
-        repository = ReadingContentRepository(self.db)
-        evidence = []
-        for session in rows.scalars().all():
-            evidence.append((session.Id, await repository.comparison_reports(session.Id),
-                             await repository.events_for_session(session.Id)))
+        sessions = list(rows.scalars().all())
+        if not sessions:
+            return aggregate_period_assessment([])
+
+        session_ids = [session.Id for session in sessions]
+        report_rows = await self.db.execute(
+            select(ReadingComparisonReport)
+            .where(ReadingComparisonReport.SessionId.in_(session_ids))
+            .order_by(
+                ReadingComparisonReport.SessionId,
+                ReadingComparisonReport.CreatedAt.desc(),
+                ReadingComparisonReport.Id.desc(),
+            )
+        )
+        reports_by_session: dict[UUID, list[ReadingComparisonReport]] = {}
+        for report in report_rows.scalars().all():
+            reports_by_session.setdefault(report.SessionId, []).append(report)
+
+        event_rows = await self.db.execute(
+            select(ReadingEvent)
+            .where(ReadingEvent.SessionId.in_(session_ids))
+            .order_by(
+                ReadingEvent.SessionId,
+                ReadingEvent.StartMs,
+                ReadingEvent.Id,
+            )
+        )
+        events_by_session: dict[UUID, list[ReadingEvent]] = {}
+        for event in event_rows.scalars().all():
+            events_by_session.setdefault(event.SessionId, []).append(event)
+
+        evidence = [
+            (
+                session.Id,
+                reports_by_session.get(session.Id, []),
+                events_by_session.get(session.Id, []),
+            )
+            for session in sessions
+        ]
         return aggregate_period_assessment(evidence)
 
     async def report(self, child_id: UUID, period_start: date, period_end: date, actor_id: UUID):
@@ -570,9 +620,12 @@ async def get_owned_progress_periods(
 
 
 def _difficult_words_service(db: AsyncSession) -> DifficultWordsService:
+    from app.api.routes.voice import get_voice_orchestrator
+
     return DifficultWordsService(
         DifficultWordsRepository(db),
         HistoryService(HistoryRepository(db)),
+        voice_provider=get_voice_orchestrator(),
     )
 
 
@@ -775,6 +828,9 @@ class AdminSystemRepository:
     async def probe_database(self):
         return await self.db.scalar(select(literal(1))) == 1
 
+    async def worker_queue_metrics(self):
+        return await collect_worker_queue_metrics(self.db)
+
 
 class AdminSystemService:
     def __init__(
@@ -958,7 +1014,127 @@ class AdminSystemService:
             except Exception:
                 return "UNAVAILABLE", "Không thể kiểm tra AI OCR cục bộ."
 
+        remote_ocr_mode = is_remote_ocr_mode()
+        remote_worker_desc = "remote_worker"
+        remote_ocr_ready = False
+        remote_snapshot: dict[str, object] = {}
+
+        def _build_remote_ocr_items(remote_info: dict[str, object]) -> list[dict[str, str]]:
+            nonlocal remote_worker_desc, remote_ocr_ready, remote_snapshot
+            remote_snapshot = remote_info
+            workers_list = list(remote_info.get("workers") or [])
+            online_workers = [w for w in workers_list if isinstance(w, dict) and w.get("online")]
+            primary = online_workers[0] if online_workers else (workers_list[0] if workers_list and isinstance(workers_list[0], dict) else None)
+            if primary:
+                wid = str(primary.get("worker_id") or "ocr-worker")
+                profile = str(primary.get("model_profile") or "").strip()
+                remote_worker_desc = f"{wid} ({profile})" if profile else wid
+            engines_map = dict(remote_info.get("engines") or (primary.get("engines") if primary else {}) or {})
+            remote_ocr_ready = bool(remote_info.get("ready", False))
+
+            items_out: list[dict[str, str]] = []
+            for key, label in (
+                ("paddleocr", "PaddleOCR"),
+                ("vietocr", "VietOCR"),
+                ("tesseract_vie", "Tesseract tiếng Việt"),
+            ):
+                eng = engines_map.get(key)
+                if isinstance(eng, dict) and online_workers:
+                    verified = bool(eng.get("inference_verified", False))
+                    loaded = bool(eng.get("loaded", False))
+                    installed = bool(eng.get("installed", False))
+                    raw_detail = str(eng.get("detail_status") or "")
+                    if verified or raw_detail == "healthy":
+                        items_out.append(
+                            dict(
+                                id=key,
+                                label=label,
+                                status="HEALTHY",
+                                detail_status="healthy",
+                                safe_message=f"Đã xác minh suy luận trên OCR worker độc lập {remote_worker_desc} (inference_verified).",
+                            )
+                        )
+                    elif loaded:
+                        items_out.append(
+                            dict(
+                                id=key,
+                                label=label,
+                                status="HEALTHY" if key == "tesseract_vie" else "DEGRADED",
+                                detail_status="loaded",
+                                safe_message=f"Đã nạp model trên OCR worker {remote_worker_desc}.",
+                            )
+                        )
+                    elif installed:
+                        items_out.append(
+                            dict(
+                                id=key,
+                                label=label,
+                                status="DEGRADED",
+                                detail_status="installed",
+                                safe_message=f"OCR worker {remote_worker_desc} đã cài thư viện nhưng chưa xác minh suy luận.",
+                            )
+                        )
+                    else:
+                        items_out.append(
+                            dict(
+                                id=key,
+                                label=label,
+                                status="DEGRADED",
+                                detail_status="unknown",
+                                safe_message=f"OCR worker {remote_worker_desc} chưa báo cáo trạng thái engine.",
+                            )
+                        )
+                else:
+                    items_out.append(
+                        dict(
+                            id=key,
+                            label=label,
+                            status="DEGRADED",
+                            detail_status="unknown",
+                            safe_message="Chưa có OCR worker độc lập online báo cáo engine này.",
+                        )
+                    )
+            vie_item = next((x for x in items_out if x["id"] == "tesseract_vie"), None)
+            if vie_item and vie_item["status"] == "HEALTHY":
+                tess_item = dict(
+                    id="tesseract",
+                    label="Tesseract",
+                    status="HEALTHY",
+                    detail_status="healthy",
+                    safe_message=f"Binary Tesseract sẵn sàng trên OCR worker độc lập {remote_worker_desc}.",
+                )
+            else:
+                tess_item = dict(
+                    id="tesseract",
+                    label="Tesseract",
+                    status="DEGRADED",
+                    detail_status="unknown",
+                    safe_message="Chưa xác minh binary Tesseract trên OCR worker độc lập.",
+                )
+            items_out.insert(2, tess_item)
+            return items_out
+
         async def _probe_ocr_engines():
+            if remote_ocr_mode:
+                try:
+                    remote_info = await asyncio.wait_for(collect_remote_ocr_health(), timeout=3)
+                    return _build_remote_ocr_items(remote_info)
+                except Exception:
+                    return [
+                        dict(
+                            id=key,
+                            label=label,
+                            status="DEGRADED",
+                            detail_status="unknown",
+                            safe_message="Chưa xác minh được trạng thái OCR worker độc lập.",
+                        )
+                        for key, label in (
+                            ("paddleocr", "PaddleOCR"),
+                            ("vietocr", "VietOCR"),
+                            ("tesseract", "Tesseract"),
+                            ("tesseract_vie", "Tesseract tiếng Việt"),
+                        )
+                    ]
             try:
                 return await asyncio.wait_for(asyncio.to_thread(collect_ocr_health), timeout=3)
             except Exception:
@@ -990,18 +1166,36 @@ class AdminSystemService:
                     safe_message="Chưa thể xác minh trạng thái Storage.",
                 )
 
-        db_res, ocr_res, voice_res, ocr_details_res, storage_res = await asyncio.gather(
+        async def _probe_audio_cache() -> dict[str, object]:
+            cache_svc = TtsAudioCacheService(getattr(self.repository, "db", None))
+            return await cache_svc.get_summary()
+
+        db_res, ocr_res, voice_res, ocr_details_res, storage_res, audio_cache_res = await asyncio.gather(
             _probe_db(),
             _probe_local_ocr(),
             self._probe_voice_health(),
             _probe_ocr_engines(),
             _probe_storage(),
+            _probe_audio_cache(),
             return_exceptions=True,
         )
 
-        for probe_res in (db_res, ocr_res, voice_res, ocr_details_res, storage_res):
+        for probe_res in (db_res, ocr_res, voice_res, ocr_details_res, storage_res, audio_cache_res):
             if isinstance(probe_res, asyncio.CancelledError):
                 raise probe_res
+
+        if isinstance(audio_cache_res, BaseException) or not isinstance(audio_cache_res, dict):
+            audio_cache_summary: dict[str, object] = {
+                "entry_count": 0,
+                "storage_used_bytes": 0,
+                "storage_quota_bytes": 150 * 1024 * 1024,
+                "daily_egress_bytes": 0,
+                "daily_egress_limit_bytes": 300 * 1024 * 1024,
+                "cache_hit_ratio": None,
+                "quota_exhausted": False,
+            }
+        else:
+            audio_cache_summary = audio_cache_res
 
         database_ready = False if isinstance(db_res, BaseException) else bool(db_res)
         if isinstance(ocr_res, BaseException):
@@ -1101,13 +1295,220 @@ class AdminSystemService:
             ),
         ]
 
+        if not is_tts_cache_enabled():
+            cache_item = AdminHealthItemRead(
+                id="tts_audio_cache",
+                label="TTS Audio Cache",
+                status="DEGRADED",
+                detail_status="disabled",
+                operational_state="Offline",
+                checked_at=checked_at,
+                safe_message="Bộ nhớ đệm TTS đang tắt theo cấu hình.",
+            )
+        elif bool(audio_cache_summary.get("quota_exhausted")):
+            cache_item = AdminHealthItemRead(
+                id="tts_audio_cache",
+                label="TTS Audio Cache",
+                status="DEGRADED",
+                detail_status="unknown",
+                operational_state="Quota exhausted",
+                checked_at=checked_at,
+                safe_message="Lưu lượng cache TTS hôm nay đã chạm ngưỡng giới hạn miễn phí.",
+                last_error="QUOTA_EXHAUSTED",
+            )
+        else:
+            cache_item = AdminHealthItemRead(
+                id="tts_audio_cache",
+                label="TTS Audio Cache",
+                status="HEALTHY",
+                detail_status="healthy",
+                operational_state="Healthy",
+                checked_at=checked_at,
+                safe_message=f"Bộ nhớ đệm TTS sẵn sàng ({int(audio_cache_summary.get('entry_count') or 0)} mục).",
+            )
+        items.append(cache_item)
+
         items.append(AdminHealthItemRead(**storage_details, checked_at=checked_at))
         items.extend(AdminHealthItemRead(**entry, checked_at=checked_at) for entry in ocr_details)
         if workers is not None:
+            metrics: dict[str, dict[str, object]] = {}
+            try:
+                raw_metrics = await asyncio.wait_for(
+                    self.repository.worker_queue_metrics(), timeout=2.0
+                )
+                if isinstance(raw_metrics, dict):
+                    metrics = raw_metrics
+            except Exception:
+                metrics = {}
+
+            raw_workers = collect_worker_health(workers)
+            for entry in raw_workers:
+                wid = str(entry.get("id") or "")
+                m = metrics.get(wid) or {}
+                if entry.get("last_success_at") is None and m.get("last_success_at") is not None:
+                    entry["last_success_at"] = m.get("last_success_at")
+                if entry.get("last_error") is None and m.get("last_error") is not None:
+                    entry["last_error"] = m.get("last_error")
+                if m.get("queue_depth") is not None:
+                    entry["queue_depth"] = int(m["queue_depth"])
+                oldest_age = m.get("oldest_pending_job_age_seconds")
+                if oldest_age is not None:
+                    entry["oldest_pending_job_age_seconds"] = float(oldest_age)
+                    if entry.get("status") == "HEALTHY" and float(oldest_age) > 900.0:
+                        entry["status"] = "DEGRADED"
+                        entry["last_error"] = entry.get("last_error") or "STALE_PENDING_JOBS"
+                        entry["safe_message"] = "Worker có tác vụ chờ xử lý quá 15 phút."
+
+            # Honest ocr_worker health entry (no false-green overrides)
+            ocr_m = metrics.get("ocr_worker") or {}
+            if remote_ocr_mode:
+                queue_info = dict(remote_snapshot.get("queue") or {})
+                workers_list = list(remote_snapshot.get("workers") or [])
+                online_workers = [w for w in workers_list if isinstance(w, dict) and w.get("online")]
+                primary = online_workers[0] if online_workers else (
+                    workers_list[0] if workers_list and isinstance(workers_list[0], dict) else None
+                )
+                hb_iso = primary.get("last_heartbeat_at") if primary else None
+                last_succ = None
+                if isinstance(hb_iso, str) and hb_iso:
+                    try:
+                        last_succ = datetime.fromisoformat(hb_iso)
+                    except ValueError:
+                        last_succ = None
+                if last_succ is None:
+                    succ_iso = queue_info.get("latest_succeeded_at")
+                    if isinstance(succ_iso, str) and succ_iso:
+                        try:
+                            last_succ = datetime.fromisoformat(succ_iso)
+                        except ValueError:
+                            last_succ = None
+                if last_succ is None:
+                    last_succ = ocr_m.get("last_success_at")  # type: ignore[assignment]
+                q_depth = (
+                    int(queue_info.get("pending_total", 0) or 0)
+                    + int(queue_info.get("active_total", 0) or 0)
+                    if queue_info
+                    else ocr_m.get("queue_depth")
+                )
+                oldest_ocr_age = (
+                    queue_info.get("oldest_pending_job_age_seconds")
+                    if "oldest_pending_job_age_seconds" in queue_info
+                    else ocr_m.get("oldest_pending_job_age_seconds")
+                )
+                if remote_ocr_ready:
+                    ocr_w_status = "HEALTHY"
+                    ocr_w_detail = "healthy"
+                    ocr_w_err = None
+                    ocr_w_msg = f"OCR worker {remote_worker_desc} online và đã xác minh suy luận."
+                elif online_workers:
+                    ocr_w_status = "DEGRADED"
+                    ocr_w_detail = "initialized"
+                    ocr_w_err = "OCR_ENGINES_NOT_READY"
+                    ocr_w_msg = f"OCR worker {remote_worker_desc} online nhưng engine chưa sẵn sàng."
+                else:
+                    has_backlog = bool(q_depth and int(q_depth) > 0)
+                    ocr_w_status = "UNAVAILABLE" if has_backlog else "DEGRADED"
+                    ocr_w_detail = "failed" if has_backlog else "disabled"
+                    ocr_w_err = "NO_ONLINE_OCR_WORKER"
+                    ocr_w_msg = "Chưa có OCR worker độc lập nào online."
+                items.append(
+                    AdminHealthItemRead(
+                        id="ocr_worker",
+                        label="OCR worker",
+                        status=ocr_w_status,
+                        detail_status=ocr_w_detail,
+                        checked_at=checked_at,
+                        safe_message=ocr_w_msg,
+                        last_success_at=last_succ,
+                        oldest_pending_job_age_seconds=oldest_ocr_age,
+                        queue_depth=q_depth,
+                        last_error=ocr_w_err,
+                    )
+                )
+            else:
+                local_ready = any(
+                    is_ocr_engine_ready_status(e.get("detail_status"))
+                    for e in ocr_details
+                    if e.get("id") in {"paddleocr", "vietocr"}
+                )
+                items.append(
+                    AdminHealthItemRead(
+                        id="ocr_worker",
+                        label="OCR worker",
+                        status="HEALTHY" if local_ready else "DEGRADED",
+                        detail_status="loaded" if local_ready else "installed",
+                        checked_at=checked_at,
+                        safe_message=(
+                            "OCR chạy trực tiếp trong tiến trình (local_inprocess)."
+                            if local_ready
+                            else "OCR local_inprocess chưa nạp model."
+                        ),
+                        last_success_at=ocr_m.get("last_success_at"),  # type: ignore[arg-type]
+                        oldest_pending_job_age_seconds=ocr_m.get("oldest_pending_job_age_seconds"),  # type: ignore[arg-type]
+                        queue_depth=ocr_m.get("queue_depth"),  # type: ignore[arg-type]
+                        last_error=ocr_m.get("last_error"),  # type: ignore[arg-type]
+                    )
+                )
+
             items.extend(
                 AdminHealthItemRead(**entry, checked_at=checked_at)
-                for entry in collect_worker_health(workers)
+                for entry in raw_workers
             )
+
+            # Report external/cron workers honestly
+            for ext_key, ext_label in (
+                ("reading_reminder", "Reading reminder worker"),
+                ("reading_presence", "Reading presence worker"),
+                ("karaoke_processing", "Karaoke processing worker"),
+            ):
+                ext_m = metrics.get(ext_key) or {}
+                ext_tel = get_worker_telemetry(ext_key)
+                ext_last_succ = ext_tel.get("last_success_at") or ext_m.get("last_success_at")
+                ext_last_err = ext_tel.get("last_error") or ext_m.get("last_error")
+                ext_q_depth = ext_m.get("queue_depth")
+                ext_oldest = ext_m.get("oldest_pending_job_age_seconds")
+                if ext_last_err:
+                    ext_status = "UNAVAILABLE"
+                    ext_detail = "failed"
+                    ext_msg = f"Worker gặp lỗi gần nhất: {ext_last_err}."
+                elif ext_oldest is not None and float(ext_oldest) > 900.0:
+                    ext_status = "DEGRADED"
+                    ext_detail = "unknown"
+                    ext_last_err = "STALE_PENDING_JOBS"
+                    ext_msg = "Có tác vụ chờ xử lý quá 15 phút."
+                elif ext_last_succ is not None:
+                    ext_status = "HEALTHY"
+                    ext_detail = "healthy"
+                    ext_msg = "Đã ghi nhận lần chạy thành công gần đây."
+                else:
+                    ext_status = "DEGRADED"
+                    ext_detail = "unknown"
+                    ext_msg = "Chưa ghi nhận lượt chạy cron/worker độc lập."
+                items.append(
+                    AdminHealthItemRead(
+                        id=ext_key,
+                        label=ext_label,
+                        status=ext_status,
+                        detail_status=ext_detail,
+                        checked_at=checked_at,
+                        safe_message=ext_msg,
+                        last_success_at=ext_last_succ,
+                        oldest_pending_job_age_seconds=ext_oldest,
+                        queue_depth=ext_q_depth,
+                        last_error=ext_last_err,
+                    )
+                )
+
+        cache_quota_exhausted = bool(audio_cache_summary.get("quota_exhausted"))
+        for item in items:
+            if item.operational_state is None:
+                item.operational_state = derive_operational_state(
+                    status=item.status,
+                    detail_status=item.detail_status,
+                    queue_depth=item.queue_depth,
+                    last_error=item.last_error,
+                    quota_exhausted=(item.id == "tts" and item.status != "HEALTHY" and cache_quota_exhausted),
+                )
 
         statuses = [item.status for item in items]
         overall = "HEALTHY" if all(s == "HEALTHY" for s in statuses) else "DEGRADED"
@@ -1116,6 +1517,7 @@ class AdminSystemService:
             overall_status=overall,
             checked_at=checked_at,
             services=items,
+            audio_cache=AdminAudioCacheSummaryRead(**audio_cache_summary),
         )
 
 

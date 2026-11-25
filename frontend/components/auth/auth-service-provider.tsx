@@ -4,6 +4,7 @@ import {
   createContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -13,12 +14,14 @@ import {
   type AuthFailureReason,
   type AuthService,
 } from "@/lib/api/auth-service";
+import { clearUserCache } from "@/lib/cache/user-query-cache";
 import { createSupabaseAuthService } from "@/lib/supabase/auth-service";
 import type { AuthSessionSnapshot, AuthStateEvent } from "@/types/auth";
 
 export const AuthServiceContext = createContext<AuthService | null>(null);
 
 export interface AuthRuntimeState {
+  hasProvider?: boolean;
   initializationFailure: AuthFailureReason | null;
   isPasswordRecovery: boolean;
   lastEvent: AuthStateEvent | null;
@@ -28,6 +31,7 @@ export interface AuthRuntimeState {
 }
 
 const defaultAuthRuntimeState: AuthRuntimeState = {
+  hasProvider: false,
   initializationFailure: null,
   isPasswordRecovery: false,
   lastEvent: null,
@@ -56,9 +60,11 @@ interface AuthServiceProviderProps {
 
 export function AuthServiceProvider({ children }: AuthServiceProviderProps) {
   const service = useMemo<AuthService>(() => createSupabaseAuthService(), []);
+  const lastUserIdRef = useRef<string | null>(null);
 
   const [runtime, setRuntime] = useState<AuthRuntimeState>(() => ({
     ...defaultAuthRuntimeState,
+    hasProvider: true,
     mode: "supabase",
     status: "initializing",
   }));
@@ -68,6 +74,20 @@ export function AuthServiceProvider({ children }: AuthServiceProviderProps) {
 
     const unsubscribe = service.onAuthStateChange((event, session) => {
       if (!isActive) return;
+
+      const nextUserId = session?.user?.id ?? null;
+      if (event === "SIGNED_OUT" || !nextUserId) {
+        clearUserCache();
+        lastUserIdRef.current = null;
+      } else if (
+        lastUserIdRef.current &&
+        lastUserIdRef.current !== nextUserId
+      ) {
+        clearUserCache(lastUserIdRef.current);
+        lastUserIdRef.current = nextUserId;
+      } else {
+        lastUserIdRef.current = nextUserId;
+      }
 
       setRuntime((current) => ({
         ...current,

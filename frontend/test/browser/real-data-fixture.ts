@@ -567,6 +567,23 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       return respond(route, { email_enabled: false, updated_at: timestamp });
     if (path.startsWith("/reading-presence/"))
       return respond(route, { ok: true, cancelled: 0 });
+    if (path === "/profiles/dashboard-summary")
+      return respond(route, {
+        profile: {
+          id: ids.parent,
+          role: "parent",
+          display_name: "Ba mẹ API",
+          created_at: timestamp,
+          email: "parent@example.test",
+          contact_phone: "+84900000000",
+          email_verified: true,
+          contact_info_status: "available",
+          avatar_url: null,
+          children: state.emptyChildren ? [] : [child],
+        },
+        children: state.emptyChildren ? [] : [child],
+        latest_sessions_by_child: {},
+      });
     if (path === "/profiles/me")
       return respond(route, {
         id: ids.parent,
@@ -1032,6 +1049,50 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
             safe_message: "Database đã phản hồi truy vấn đọc.",
           },
         ],
+      });
+    if (request.method() === "GET" && path === "/voice/status")
+      return respond(route, readyVoiceStatus("Binh"));
+    if (request.method() === "GET" && path === "/studio/tasks")
+      return respond(route, {
+        actor_id: ids.parent,
+        actor_role: "parent",
+        active_count: 0,
+        waiting_review_count: 0,
+        failed_count: 0,
+        completed_count: 0,
+        worker_online: true,
+        recommended_poll_ms: null,
+        tasks: [],
+      });
+    if (
+      request.method() === "GET" &&
+      /^\/studio\/books\/[^/]+\/assets$/.test(path)
+    )
+      return respond(route, {
+        book_id: ids.book,
+        title: book.title,
+        author: book.author,
+        min_grade: book.min_grade,
+        max_grade: book.max_grade,
+        visibility_scope: "CATALOG",
+        active_cover: null,
+        effective_cover_source: "METADATA_RENDER",
+        metadata_fallback: {
+          title: book.title,
+          author: book.author,
+          grade_label: `Lớp ${book.min_grade}–${book.max_grade}`,
+          accent_hex: "#2563EB",
+          surface_hex: "#EFF6FF",
+          motif: "storybook",
+          source_type: "METADATA_RENDER",
+        },
+        style_bible: null,
+        page_illustrations: [],
+        ai_image_provider_available: false,
+        ai_image_provider_name: null,
+        ai_image_provider_message_vi:
+          "Chưa cấu hình nhà cung cấp tạo ảnh AI miễn phí.",
+        v2_storage_degraded: false,
       });
     state.unexpected.push(`unknown:${path}`);
     return respond(route, {}, 404);

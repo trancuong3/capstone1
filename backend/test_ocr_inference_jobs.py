@@ -1050,6 +1050,311 @@ class TestOcrInferenceJobsAndResilience(unittest.TestCase):
         self.assertEqual(legacy_coerced, [0.1, 0.2, 0.12, 0.05])
         self.assertIsNotNone(ReadingContentService._valid_bbox(legacy_coerced))
 
+    def test_admin_system_health_reports_remote_ocr_worker_healthy(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.api.routes.system import AdminSystemService
+        from app.services.admin_ocr_local import LocalOcrConfig
+
+        async def _scenario() -> None:
+            repo = MagicMock()
+            repo.probe_database = AsyncMock(return_value=True)
+            voice = MagicMock()
+            voice.probe_tts = AsyncMock(return_value=("HEALTHY", "Local TTS (VieNeu-TTS) đang sẵn sàng."))
+            voice.probe_stt = AsyncMock(return_value=("HEALTHY", "Local STT (Sherpa-ONNX) đang sẵn sàng."))
+
+            remote_payload = {
+                "mode": "remote_worker",
+                "ready": True,
+                "heartbeat_ttl_seconds": 45,
+                "engines": {
+                    "paddleocr": {"status": "HEALTHY", "detail_status": "inference_verified", "installed": True, "loaded": True, "inference_verified": True},
+                    "vietocr": {"status": "HEALTHY", "detail_status": "inference_verified", "installed": True, "loaded": True, "inference_verified": True},
+                    "tesseract_vie": {"status": "HEALTHY", "detail_status": "inference_verified", "installed": True, "loaded": True, "inference_verified": True},
+                },
+                "workers": [
+                    {
+                        "worker_id": "win-ocr-c-test",
+                        "hostname": "c",
+                        "status": "IDLE",
+                        "online": True,
+                        "model_profile": "FLOW1_EXTERNAL_TRDG",
+                        "engines": {},
+                    }
+                ],
+                "queue": {},
+            }
+            running_mock = MagicMock()
+            running_mock.done.return_value = False
+            workers_arg = {
+                "viread_ocr_outbox": None,
+                "viread_ocr_training": None,
+                "book_quality": running_mock,
+                "admin_ai_workflow": running_mock,
+                "parent_book_submission": None,
+                "active_model_registry": None,
+                "local_trainer_process": None,
+            }
+
+            with (
+                patch("app.api.routes.system.is_remote_ocr_mode", return_value=True),
+                patch("app.api.routes.system.collect_remote_ocr_health", new=AsyncMock(return_value=remote_payload)),
+                patch("app.api.routes.system.LocalOcrConfig.from_environment", return_value=LocalOcrConfig()),
+                patch("app.api.routes.system.LocalOcrCorrector.probe", new=AsyncMock(return_value=("HEALTHY", "Local AI ready"))),
+                patch(
+                    "app.api.routes.system.probe_storage_health",
+                    return_value={"id": "storage", "label": "Supabase Storage", "status": "HEALTHY", "detail_status": "healthy", "safe_message": "Storage OK"},
+                ),
+            ):
+                health = await AdminSystemService(repo, voice).health(workers=workers_arg)
+
+            # Honest reporting: disabled/unobserved workers are NEVER false-greened to HEALTHY
+            self.assertEqual(health.overall_status, "DEGRADED")
+            by_id = {item.id: item for item in health.services}
+            self.assertEqual(by_id["paddleocr"].status, "HEALTHY")
+            self.assertEqual(by_id["paddleocr"].detail_status, "healthy")
+            self.assertIn("FLOW1_EXTERNAL_TRDG", by_id["paddleocr"].safe_message)
+            self.assertEqual(by_id["vietocr"].status, "HEALTHY")
+            self.assertEqual(by_id["tesseract"].status, "HEALTHY")
+            self.assertEqual(by_id["tesseract_vie"].status, "HEALTHY")
+            self.assertEqual(by_id["ocr_worker"].status, "HEALTHY")
+            self.assertEqual(by_id["ocr_worker"].detail_status, "healthy")
+            self.assertEqual(by_id["viread_ocr_outbox"].status, "DEGRADED")
+            self.assertEqual(by_id["viread_ocr_outbox"].detail_status, "disabled")
+            self.assertEqual(by_id["parent_book_submission"].status, "DEGRADED")
+            self.assertEqual(by_id["parent_book_submission"].detail_status, "disabled")
+            for expected_worker_id in (
+                "ocr_worker",
+                "parent_book_submission",
+                "book_quality",
+                "admin_ai_workflow",
+                "viread_ocr_outbox",
+                "viread_ocr_training",
+                "reading_reminder",
+                "reading_presence",
+                "karaoke_processing",
+                "active_model_registry",
+            ):
+                self.assertIn(expected_worker_id, by_id)
+
+        asyncio.run(_scenario())
+
+    def test_soft_delete_cancels_open_jobs_and_rejects_late_worker_completion_with_409(self) -> None:
+        async def _scenario() -> None:
+            state = InMemoryDbState()
+            admin_id = uuid4()
+            book_id = uuid4()
+            page_id = uuid4()
+            img_sha = "c" * 64
+            state.tables[Book].append(
+                Book(
+                    Id=book_id,
+                    Name="Sách thử",
+                    Title="Sách thử",
+                    Author="Tác giả",
+                    MinGrade=1,
+                    MaxGrade=3,
+                    LifecycleStatus="ACTIVE",
+                    VisibilityScope="CATALOG",
+                    IsDeleted=False,
+                    CreatedBy=admin_id,
+                )
+            )
+            state.tables[BookPage].append(
+                BookPage(
+                    Id=page_id,
+                    BookId=book_id,
+                    PageNumber=1,
+                    ImagePath="books/b/p1.png",
+                    Width=800,
+                    Height=1000,
+                    LifecycleStatus="PROCESSING",
+                    ProcessingMeta={},
+                )
+            )
+
+            db = FakeAsyncSession(state)
+            svc = OcrInferenceJobService(db)
+            job = await svc.enqueue_job(
+                job_kind=JOB_KIND_ADMIN_UPLOAD,
+                owner_user_id=admin_id,
+                book_id=book_id,
+                page_id=page_id,
+                image_path="books/b/p1.png",
+                image_sha256=img_sha,
+            )
+            await db.commit()
+            claimed = await svc.claim_next_job(worker_id="win-ocr-1")
+            assert claimed is not None
+
+            # Admin soft-deletes book while worker is mid-OCR
+            state.tables[Book][0].IsDeleted = True
+            state.tables[Book][0].DeletedAt = datetime.now(timezone.utc)
+            cancelled = await svc.cancel_for_book(book_id, reason="BOOK_SOFT_DELETED")
+            await db.commit()
+            self.assertEqual(cancelled, 1)
+            self.assertEqual(job.Status, "CANCELLED")
+            self.assertEqual(job.CancelledReason, "BOOK_SOFT_DELETED")
+
+            # Even if job hadn't been cancelled yet, _is_target_still_current catches IsDeleted
+            still_ok, stale_reason = await svc._is_target_still_current(job)
+            self.assertFalse(still_ok)
+            self.assertEqual(stale_reason, "BOOK_SOFT_DELETED")
+
+            from fastapi import HTTPException
+
+            with self.assertRaises(HTTPException) as ctx:
+                await svc.complete_job(
+                    job_id=job.Id,
+                    worker_id="win-ocr-1",
+                    fencing_token=int(claimed["fencing_token"]),
+                    source_sha256=img_sha,
+                    full_text="Trang đã xóa",
+                    words=[{"word_index": 0, "line_index": 0, "text": "Trang", "bbox": [0.1, 0.1, 0.2, 0.05]}],
+                    ocr_meta={},
+                    no_text_detected=False,
+                    model_profile="ORIGINAL",
+                    model_sha256="380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59",
+                    engine_diagnostics={},
+                    duration_ms=120,
+                )
+            self.assertEqual(ctx.exception.status_code, 409)
+            self.assertEqual(ctx.exception.detail["code"], "BOOK_SOFT_DELETED")
+            self.assertEqual(len(state.tables[PageRevision]), 0)
+
+        asyncio.run(_scenario())
+
+    def test_enqueue_job_reuses_tenant_safe_sha256_cache_and_isolates_tenants_and_models(self) -> None:
+        async def _scenario() -> None:
+            state = InMemoryDbState()
+            parent_a = uuid4()
+            parent_b = uuid4()
+            book_a = uuid4()
+            book_b = uuid4()
+            sub_a1 = uuid4()
+            sub_a2 = uuid4()
+            sub_b1 = uuid4()
+            img_sha = "d" * 64
+            model_sha_1 = "380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59"
+            model_sha_2 = "e" * 64
+
+            for bid, owner in ((book_a, parent_a), (book_b, parent_b)):
+                state.tables[Book].append(
+                    Book(
+                        Id=bid,
+                        Name="Sách riêng",
+                        Title="Sách riêng",
+                        MinGrade=1,
+                        MaxGrade=3,
+                        LifecycleStatus="ACTIVE",
+                        VisibilityScope="PARENT_PRIVATE",
+                        OwnerParentId=owner,
+                        ModerationStatus="ACTIVE",
+                        IsDeleted=False,
+                    )
+                )
+            for sid, bid, owner in (
+                (sub_a1, book_a, parent_a),
+                (sub_a2, book_a, parent_a),
+                (sub_b1, book_b, parent_b),
+            ):
+                state.tables[ParentBookPageSubmission].append(
+                    ParentBookPageSubmission(
+                        Id=sid,
+                        BookId=bid,
+                        OwnerParentId=owner,
+                        BatchId=uuid4(),
+                        BatchTotalPages=1,
+                        SourcePageNumber=1,
+                        SourceStoragePath=f"private/{owner}/{sid}.png",
+                        SourceSha256=img_sha,
+                        ImageWidth=800,
+                        ImageHeight=1000,
+                        WorkflowStatus="CHECKING",
+                        OcrStatus="PENDING",
+                        ProofreadStatus="PENDING",
+                        ToolCheckStatus="PENDING",
+                        SubmissionVersion=1,
+                        OptimisticLockVersion=1,
+                        TempExpiresAt=datetime.now(timezone.utc) + timedelta(hours=1),
+                    )
+                )
+
+            db = FakeAsyncSession(state)
+            svc = OcrInferenceJobService(db)
+            job1 = await svc.enqueue_job(
+                job_kind=JOB_KIND_PARENT_SUBMISSION,
+                owner_user_id=parent_a,
+                book_id=book_a,
+                submission_id=sub_a1,
+                image_path=f"private/{parent_a}/{sub_a1}.png",
+                image_sha256=img_sha,
+                expected_version=1,
+            )
+            self.assertEqual(job1.Status, "QUEUED")
+            claimed = await svc.claim_next_job(worker_id="win-ocr-1")
+            assert claimed is not None
+            await svc.complete_job(
+                job_id=job1.Id,
+                worker_id="win-ocr-1",
+                fencing_token=int(claimed["fencing_token"]),
+                source_sha256=img_sha,
+                full_text="Con mèo",
+                words=[
+                    {"word_index": 0, "line_index": 0, "text": "Con", "bbox": [0.1, 0.1, 0.1, 0.05]},
+                    {"word_index": 1, "line_index": 0, "text": "mèo", "bbox": [0.22, 0.1, 0.1, 0.05]},
+                ],
+                ocr_meta={"engine": "hybrid"},
+                no_text_detected=False,
+                model_profile="ORIGINAL",
+                model_sha256=model_sha_1,
+                engine_diagnostics={},
+                duration_ms=410,
+                schedule_post_ocr=False,
+            )
+
+            # Same tenant + same SHA-256 + same active model/config/pipeline -> 0 worker compute cache hit!
+            job2 = await svc.enqueue_job(
+                job_kind=JOB_KIND_PARENT_SUBMISSION,
+                owner_user_id=parent_a,
+                book_id=book_a,
+                submission_id=sub_a2,
+                image_path=f"private/{parent_a}/{sub_a2}.png",
+                image_sha256=img_sha,
+                expected_version=1,
+            )
+            self.assertEqual(job2.Status, "SUCCEEDED")
+            self.assertEqual(job2.WorkerId, "ocr-cache")
+            self.assertEqual(job2.DurationMs, 0)
+            self.assertEqual(job2.ResultPayload["words"], job1.ResultPayload["words"])
+
+            # Different tenant (Parent B) with same SHA-256 -> MUST NOT hit Parent A's cache!
+            job_other_tenant = await svc.enqueue_job(
+                job_kind=JOB_KIND_PARENT_SUBMISSION,
+                owner_user_id=parent_b,
+                book_id=book_b,
+                submission_id=sub_b1,
+                image_path=f"private/{parent_b}/{sub_b1}.png",
+                image_sha256=img_sha,
+                expected_version=1,
+            )
+            self.assertEqual(job_other_tenant.Status, "QUEUED")
+
+            # Same tenant, different active model SHA -> MUST NOT hit old model cache!
+            job_new_model = await svc.enqueue_job(
+                job_kind=JOB_KIND_PARENT_SUBMISSION,
+                owner_user_id=parent_a,
+                book_id=book_a,
+                submission_id=sub_a2,
+                image_path=f"private/{parent_a}/{sub_a2}.png",
+                image_sha256=img_sha,
+                expected_version=1,
+                processing_meta={"active_model_sha256": model_sha_2},
+            )
+            self.assertEqual(job_new_model.Status, "QUEUED")
+
+        asyncio.run(_scenario())
+
 
 if __name__ == "__main__":
     unittest.main()
