@@ -11,6 +11,7 @@ import { AuthRuntimeContext } from "@/components/auth/auth-service-provider";
 import { AppServicesContext } from "@/components/providers/app-services-provider";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import * as voiceStudioServiceModule from "@/lib/api/voice-studio-service";
 import { BookScannerScreen } from "@/components/reading/book-scanner-screen";
 import { buildSpeechServiceError } from "@/lib/api/speech-error";
 import {
@@ -468,5 +469,202 @@ describe("Hosted Audit Regressions (DEF-H01..DEF-H10)", () => {
     // Must query backend cache BEFORE falling back to browser speechSynthesis!
     expect(synthesizeMock).toHaveBeenCalledTimes(1);
     expect(speakMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("Wi-Fi-only phonics TTS tries backend precomputed phonics & cached catalog word BEFORE browser SpeechSynthesis", async () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_with_google_fallback",
+      allowGoogleTtsFallback: true,
+    });
+    setCachedVoiceEngineHealth({
+      local: {
+        configured: false,
+        available: false,
+        stt_ready: false,
+        tts_ready: false,
+        error_code: "LOCAL_VOICE_UNCONFIGURED",
+        stt_error_code: "LOCAL_VOICE_UNCONFIGURED",
+        tts_error_code: "LOCAL_VOICE_UNCONFIGURED",
+      },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    } as never);
+    const speakMock = vi.fn(
+      (utt: { onstart?: () => void; onend?: () => void }) => {
+        utt.onstart?.();
+        utt.onend?.();
+      },
+    );
+    vi.stubGlobal("speechSynthesis", {
+      speak: speakMock,
+      cancel: vi.fn(),
+      getVoices: () => [{ lang: "vi-VN", name: "Vietnamese" }],
+    });
+    vi.stubGlobal(
+      "SpeechSynthesisUtterance",
+      class {
+        text: string;
+        lang = "";
+        rate = 1;
+        voice: unknown = null;
+        onstart?: () => void;
+        onend?: () => void;
+        onerror?: () => void;
+        constructor(t: string) {
+          this.text = t;
+        }
+      },
+    );
+
+    const err503 = buildSpeechServiceError({
+      capability: "TTS_UNAVAILABLE",
+      status: 503,
+      providerCode: "LOCAL_VOICE_UNCONFIGURED",
+    });
+    const synthesizePhonicsMock = vi.fn().mockRejectedValue(err503);
+    const synthesizeMock = vi.fn().mockRejectedValue(err503);
+    const playback = new TtsPlayback(
+      {
+        synthesize: synthesizeMock,
+        synthesizePhonics: synthesizePhonicsMock,
+        transcribe: vi.fn(),
+      } as never,
+      {
+        listVoices: vi.fn(),
+        synthesizeTimed: vi.fn(),
+      } as never,
+    );
+    playback.setCacheContext({
+      bookId: "11111111-1111-4111-8111-111111111111",
+      pageId: "22222222-2222-4222-8222-222222222222",
+    });
+
+    await playback.playPhonicsLesson(
+      {
+        word: "mèo",
+        focusSyllable: "mèo",
+        syllables: ["mèo"],
+        steps: [
+          {
+            id: "s1",
+            index: 0,
+            kind: "whole_syllable",
+            displayText: "mèo",
+            spokenText: "mèo",
+            pauseAfterMs: 10,
+          },
+        ],
+      } as never,
+      {},
+    );
+    // Must NOT skip Render precomputed phonics & catalog word cache!
+    expect(synthesizePhonicsMock).toHaveBeenCalledTimes(1);
+    expect(synthesizeMock).toHaveBeenCalledTimes(1);
+    expect(speakMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("BookScannerScreen shows unreachable/waking banner (not offline) when /health returns probe_degraded=true", async () => {
+    const childId = "3aaf937b-e9ef-42e7-86a0-8df060b162bd";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: "ok",
+          ocr: {
+            mode: "remote_worker",
+            ready: false,
+            probe_degraded: true,
+            workers: [],
+          },
+        }),
+      }),
+    );
+
+    const childGet = vi.fn().mockResolvedValue({
+      id: childId,
+      parent_id: "parent-1",
+      alias: "Bé An",
+      grade: 2,
+      settings: {},
+      created_at: "2026-11-25T00:00:00Z",
+    });
+
+    render(
+      <AuthRuntimeContext.Provider
+        value={
+          {
+            hasProvider: true,
+            status: "authenticated",
+            session: { user: { id: "parent-1", email: "qa@example.invalid" } },
+            lastEvent: "INITIAL_SESSION",
+          } as never
+        }
+      >
+        <AppServicesContext.Provider
+          value={{ childService: { get: childGet } } as never}
+        >
+          <AppStoreProvider initialChildId={childId}>
+            <BookScannerScreen />
+          </AppStoreProvider>
+        </AppServicesContext.Provider>
+      </AuthRuntimeContext.Provider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("ocr-worker-offline-banner")).toBeTruthy();
+    });
+    const text = screen.getByTestId("ocr-worker-offline-banner").textContent;
+    expect(text).toContain("đang khởi động");
+    expect(text).not.toContain("Máy trạm OCR hiện đang ngoại tuyến");
+  });
+
+  it("ReadingVoiceSettings shows offline cache notice when local_worker_ready=false", async () => {
+    const listVoices = vi.fn().mockResolvedValue({
+      voices: [
+        {
+          voice_id: "local_north_truc_ly",
+          name: "Cô Trúc Ly",
+          gender: "female",
+          region: "north",
+          provider: "local",
+        },
+        {
+          voice_id: "local_south_thuc_doan",
+          name: "Cô Thục Đoan",
+          gender: "female",
+          region: "south",
+          provider: "local",
+        },
+      ],
+      default_voice_id: "local_north_truc_ly",
+      local_worker_ready: false,
+      google_tts_available: false,
+    });
+
+    vi.spyOn(
+      voiceStudioServiceModule,
+      "createVoiceStudioService",
+    ).mockReturnValue({
+      listVoices,
+      synthesizeTimed: vi.fn(),
+    } as never);
+
+    render(
+      <ReadingVoiceSettings onPreview={vi.fn()} onStopPreview={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Giọng đọc/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("voice-offline-cache-notice")).toBeTruthy();
+    });
+    expect(
+      screen.getByTestId("voice-offline-cache-notice").textContent,
+    ).toContain("Wi-Fi tự lập");
   });
 });

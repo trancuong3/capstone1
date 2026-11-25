@@ -811,7 +811,7 @@ async def get_health(request: Request) -> dict[str, object]:
 
     async def _probe_remote_ocr() -> dict[str, object]:
         try:
-            remote_info = await asyncio.wait_for(collect_remote_ocr_health(), timeout=3.5)
+            remote_info = await asyncio.wait_for(collect_remote_ocr_health(), timeout=6.0)
             return {
                 "mode": "remote_worker",
                 "ready": bool(remote_info.get("ready", False)),

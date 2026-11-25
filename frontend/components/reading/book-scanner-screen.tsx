@@ -182,10 +182,12 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           return;
         }
         const body = (await res.json()) as {
-          ocr?: { mode?: string; ready?: boolean };
+          ocr?: { mode?: string; ready?: boolean; probe_degraded?: boolean };
         };
         if (!active) return;
-        if (body?.ocr?.ready === false) {
+        if (body?.ocr?.probe_degraded) {
+          setOcrWorkerStatus("unreachable");
+        } else if (body?.ocr?.ready === false) {
           setOcrWorkerStatus("offline");
         } else {
           setOcrWorkerStatus("ready");

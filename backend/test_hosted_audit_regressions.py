@@ -563,6 +563,119 @@ class HostedAuditBackendRegressionTests(unittest.TestCase):
         self.assertEqual(len(resp_timeout.json()["voices"]), len(STATIC_LOCAL_VOICES))
         voice_route.clear_default_voice_orchestrators()
 
+    def test_single_word_and_phonics_misses_skip_page_timed_scan_and_timed_runs_once(self):
+        """Single-word and phonics catalog cache misses must not waste DB round-trips scanning full-page timed rows."""
+        page_id = uuid4()
+        target = ResolvedCacheTarget(
+            scope="CATALOG",
+            owner_parent_id=None,
+            book_id=uuid4(),
+            page_id=page_id,
+            page_revision_id=None,
+            can_store_on_miss=True,
+        )
+
+        def _make_svc():
+            svc = TtsAudioCacheService(None)
+            fake_db = MagicMock()
+            fake_db.commit = AsyncMock()
+            fake_db.rollback = AsyncMock()
+            fake_repo = MagicMock()
+            fake_repo.get_daily_usage = AsyncMock(
+                return_value={"bytes_served": 0, "hit_count": 0, "miss_count": 0}
+            )
+            fake_repo.get_active_entry = AsyncMock(return_value=None)
+            fake_repo.get_nearest_active_entry = AsyncMock(return_value=None)
+            fake_repo.get_active_timed_entries_for_page = AsyncMock(return_value=[])
+            fake_repo.record_hit = AsyncMock()
+            fake_repo.record_miss = AsyncMock()
+            svc.db = fake_db
+            svc.repo = fake_repo
+            return svc, fake_repo
+
+        # 1) Single-word miss: must NEVER scan full-page timed rows.
+        svc1, repo1 = _make_svc()
+        hit1 = asyncio.run(
+            svc1.lookup_cached_audio(
+                target=target,
+                normalized_text="Tạo,",
+                voice_id="local_north_truc_ly",
+                speed=0.9,
+                require_word_timings=False,
+            )
+        )
+        self.assertIsNone(hit1)
+        repo1.get_active_timed_entries_for_page.assert_not_awaited()
+
+        # 2) Phonics key miss: must NEVER scan full-page timed rows.
+        svc2, repo2 = _make_svc()
+        hit2 = asyncio.run(
+            svc2.lookup_cached_audio(
+                target=target,
+                normalized_text="phonics:v1:abc123",
+                voice_id="local_north_truc_ly",
+                speed=0.9,
+                require_word_timings=True,
+            )
+        )
+        self.assertIsNone(hit2)
+        repo2.get_active_timed_entries_for_page.assert_not_awaited()
+
+        # 3) Full-page timed miss: scans page timed rows at most ONCE (not twice).
+        svc3, repo3 = _make_svc()
+        hit3 = asyncio.run(
+            svc3.lookup_cached_audio(
+                target=target,
+                normalized_text="Xin chào các bạn nhỏ.",
+                voice_id="local_north_truc_ly",
+                speed=0.9,
+                require_word_timings=True,
+                allow_speed_fallback=True,
+            )
+        )
+        self.assertIsNone(hit3)
+        self.assertEqual(repo3.get_active_timed_entries_for_page.await_count, 1)
+
+    def test_health_remote_ocr_probe_has_sufficient_nullpool_timeout_budget(self):
+        """Render /health remote OCR probe must allocate >=5s timeout (matching DB probe) to avoid false probe_degraded."""
+        import app.sever as sever_mod
+
+        captured_timeouts: list[float] = []
+        real_wait_for = asyncio.wait_for
+
+        async def _spy_wait_for(coro, timeout=None):
+            if timeout is not None:
+                captured_timeouts.append(float(timeout))
+            return await real_wait_for(coro, timeout=timeout)
+
+        async def _ok_db(*, timeout: float = 6.0):
+            return {
+                "ok": True,
+                "dns_resolved": True,
+                "ssl_enabled": True,
+                "pool_class": "NullPool",
+                "pooler_mode": "transaction",
+                "latency_ms": 50,
+            }
+
+        async def _ok_ocr():
+            return {"ready": False, "engines": {}, "workers": [], "queue": {}, "heartbeat_ttl_seconds": 45}
+
+        req = MagicMock(spec=Request)
+        req.app = SimpleNamespace(state=SimpleNamespace(background_workers={}))
+        with (
+            patch.object(sever_mod, "is_remote_ocr_mode", return_value=True),
+            patch.object(sever_mod, "probe_database_connection", side_effect=_ok_db),
+            patch.object(sever_mod, "collect_remote_ocr_health", side_effect=_ok_ocr),
+            patch.object(sever_mod.asyncio, "wait_for", side_effect=_spy_wait_for),
+        ):
+            payload = asyncio.run(sever_mod.get_health(req))
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertNotIn("probe_degraded", payload["ocr"])
+        self.assertTrue(captured_timeouts)
+        self.assertGreaterEqual(captured_timeouts[0], 5.0)
+
 
 if __name__ == "__main__":
     unittest.main()
