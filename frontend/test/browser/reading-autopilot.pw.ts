@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { ids, installApiFixture } from "./real-data-fixture";
+import { ids, installApiFixture, readyVoiceStatus } from "./real-data-fixture";
 
 const EVIDENCE_DIR = resolve(process.cwd(), "../docs/reading/evidence");
 
@@ -324,9 +324,11 @@ async function installAutopilotSession(
     if (route.request().method() === "OPTIONS")
       return route.fulfill({ status: 204, headers: corsHeaders });
     const path = new URL(route.request().url()).pathname;
+    const isMale = options.voiceGender === "male";
+    const voiceId = isMale ? "local_north_thien_minh" : "fixture_vi";
+    if (path === "/voice/status" && route.request().method() === "GET")
+      return json(route, readyVoiceStatus(voiceId));
     if (path === "/voice/voices") {
-      const isMale = options.voiceGender === "male";
-      const voiceId = isMale ? "local_north_thien_minh" : "fixture_vi";
       return json(route, {
         default_voice_id: voiceId,
         voices: [

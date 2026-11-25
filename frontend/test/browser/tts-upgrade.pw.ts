@@ -1,5 +1,5 @@
-﻿import { expect, test, type Page, type Route } from "@playwright/test";
-import { ids, installApiFixture } from "./real-data-fixture";
+import { expect, test, type Page, type Route } from "@playwright/test";
+import { ids, installApiFixture, readyVoiceStatus } from "./real-data-fixture";
 
 interface Probe {
   audios: HTMLAudioElement[];
@@ -160,6 +160,8 @@ async function installReading(
     if (route.request().method() === "OPTIONS")
       return route.fulfill({ status: 204, headers });
     const path = new URL(route.request().url()).pathname;
+    if (path === "/voice/status" && route.request().method() === "GET")
+      return respond(route, readyVoiceStatus("voice_female"));
     if (path === "/voice/voices")
       return respond(route, {
         default_voice_id: "voice_female",
@@ -462,7 +464,12 @@ test("Phase 3: timed failure falls back to locked-voice short TTS without OS voi
   expect(await page.evaluate(() => window.__ttsProbe.utterances.length)).toBe(
     0,
   );
-  expect(fixture.prompts.map((p) => p.text)).toEqual([fixture.text]);
+  expect(fixture.prompts).toEqual([
+    expect.objectContaining({
+      text: fixture.text,
+      voice_id: fixture.requests[0]?.voice_id,
+    }),
+  ]);
   await page.screenshot({
     path: testInfo.outputPath("fallback-word-highlight.png"),
   });
@@ -482,6 +489,7 @@ test("Phase 3: timed failure falls back to locked-voice short TTS without OS voi
     "data-child-error-count",
     "0",
   );
+  expect(fixture.unexpected).toEqual([]);
   expect(fixture.writes).toEqual([]);
 });
 
@@ -507,5 +515,7 @@ test("Phase 3: unavailable TTS produces a safe recoverable error with zero OS vo
     "0",
   );
   expect(fixture.requests).toHaveLength(1);
+  expect(fixture.prompts).toHaveLength(1);
+  expect(fixture.unexpected).toEqual([]);
   expect(fixture.writes).toEqual([]);
 });

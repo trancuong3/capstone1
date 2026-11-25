@@ -1,5 +1,5 @@
 import { expect, type Page, type Route } from "@playwright/test";
-import { ids, installApiFixture } from "./real-data-fixture";
+import { ids, installApiFixture, readyVoiceStatus } from "./real-data-fixture";
 
 export const readingWords = ["Bé", "mèo", "đọc"].map((text, index) => ({
   word_id: `90000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
@@ -294,6 +294,8 @@ export async function installReadingExperience(
     if (route.request().method() === "OPTIONS")
       return route.fulfill({ status: 204, headers });
     const path = new URL(route.request().url()).pathname;
+    if (path === "/voice/status" && route.request().method() === "GET")
+      return respond(route, readyVoiceStatus("fixture_vi"));
     if (path === "/voice/voices")
       return respond(route, {
         default_voice_id: "fixture_vi",

@@ -143,19 +143,10 @@ function canUseGoogleTtsFallback(): boolean {
   );
 }
 
-function canUseBrowserSpeechSynthesis(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    "speechSynthesis" in window &&
-    typeof window.speechSynthesis?.speak === "function" &&
-    typeof SpeechSynthesisUtterance === "function"
-  );
-}
-
 function shouldSkipBackendTtsForBrowserFallback(operation: Operation): boolean {
   if (
     !canUseGoogleTtsFallback() ||
-    !canUseBrowserSpeechSynthesis() ||
+    !getVietnameseBrowserVoice() ||
     operation.voice.provider !== "local"
   ) {
     return false;
@@ -177,11 +168,16 @@ function shouldRetryBackendWithGoogleTts(operation: Operation): boolean {
   return health.google.tts_configured && !health.google.tts_cooldown;
 }
 
-function pickVietnameseBrowserVoice(
-  synth: SpeechSynthesis,
-): SpeechSynthesisVoice | null {
+function getVietnameseBrowserVoice(): SpeechSynthesisVoice | null {
+  if (
+    typeof window === "undefined" ||
+    typeof window.speechSynthesis?.speak !== "function" ||
+    typeof SpeechSynthesisUtterance !== "function"
+  ) {
+    return null;
+  }
   try {
-    const voices = synth.getVoices?.() ?? [];
+    const voices = window.speechSynthesis.getVoices?.() ?? [];
     const viVoices = voices.filter((v) =>
       (v.lang ?? "").toLowerCase().startsWith("vi"),
     );
@@ -490,10 +486,11 @@ export class TtsPlayback {
     } = {},
   ): Promise<number> {
     this.ensure(operation);
-    if (!canUseBrowserSpeechSynthesis()) throw unavailable();
     await this.waitIfPaused(operation);
     this.ensure(operation);
 
+    const voice = getVietnameseBrowserVoice();
+    if (!voice) throw unavailable();
     const synth = window.speechSynthesis;
     recordTtsEngineUsage({
       provider: "browser",
@@ -597,10 +594,7 @@ export class TtsPlayback {
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = "vi-VN";
       utterance.rate = operation.voice.speed;
-      const viVoice = pickVietnameseBrowserVoice(synth);
-      if (viVoice) {
-        utterance.voice = viVoice;
-      }
+      utterance.voice = voice;
 
       const media: ActiveMedia = {
         pause: () => {
@@ -836,7 +830,7 @@ export class TtsPlayback {
             nextPrefetch = null;
             this.ensure(operation);
             if (isAbort(error)) throw error;
-            if (canUseGoogleTtsFallback() && canUseBrowserSpeechSynthesis()) {
+            if (canUseGoogleTtsFallback() && getVietnameseBrowserVoice()) {
               useBrowserFallback = true;
               elapsed += await this.playBrowserSpeech(operation, chunk.text, {
                 onStart,
@@ -1008,7 +1002,7 @@ export class TtsPlayback {
                     if (isAbort(googleError)) throw googleError;
                   }
                 }
-                if (!synthesized && canUseBrowserSpeechSynthesis()) {
+                if (!synthesized && getVietnameseBrowserVoice()) {
                   await playPhonicsViaBrowser();
                   return;
                 }
@@ -1089,7 +1083,7 @@ export class TtsPlayback {
             } catch (error) {
               this.ensure(operation);
               if (isAbort(error)) throw error;
-              if (canUseGoogleTtsFallback() && canUseBrowserSpeechSynthesis()) {
+              if (canUseGoogleTtsFallback() && getVietnameseBrowserVoice()) {
                 options.onStepChange?.(step.index, step);
                 elapsed += await this.playBrowserSpeech(
                   operation,
@@ -1267,10 +1261,17 @@ export class TtsPlayback {
             this.cacheBytes -= invalid.audio.size;
             this.cache.delete(key);
           }
+          if (!completedChunks && fallback) {
+            // The short endpoint can still play the locked voice when timed
+            // synthesis fails. Restart the page only before any chunk played.
+            this.timedCooldownUntil = Date.now() + 15_000;
+            await fallback();
+            return;
+          }
           if (
             (!synthesizedTimedOk || !fallback) &&
             canUseGoogleTtsFallback() &&
-            canUseBrowserSpeechSynthesis()
+            getVietnameseBrowserVoice()
           ) {
             useBrowserFallback = true;
             elapsed += await this.playBrowserSpeech(
@@ -1286,10 +1287,6 @@ export class TtsPlayback {
             continue;
           }
           this.timedCooldownUntil = Date.now() + 15_000;
-          if (!completedChunks && fallback) {
-            await fallback();
-            return;
-          }
           this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
           throw unavailable();
         }
