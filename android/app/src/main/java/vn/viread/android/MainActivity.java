@@ -195,9 +195,14 @@ public final class MainActivity extends Activity {
         if (initialDeepLinkCallback != null) {
             loadTrustedUrl(initialDeepLinkCallback);
         } else if (state != null && webView.restoreState(state) != null) {
-            hasLoadedCleanPage = true;
-            startupOverlay.setVisibility(View.GONE);
-            webView.setVisibility(View.VISIBLE);
+            String restoredUrl = webView.getUrl();
+            if (restoredUrl != null && navigation.isTrusted(restoredUrl)) {
+                hasLoadedCleanPage = true;
+                startupOverlay.setVisibility(View.GONE);
+                webView.setVisibility(View.VISIBLE);
+            } else {
+                loadTrustedUrl(navigation.getOrigin());
+            }
         } else {
             loadTrustedUrl(navigation.getOrigin());
         }
