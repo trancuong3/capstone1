@@ -1,7 +1,9 @@
-# RELEASE GATE â€” ViRead Optimal Zero-Cost Release Candidate (`feat/viread-rc-zero-cost-20261125`)
+# RELEASE GATE — ViRead Zero-Cost Production Release (eat/viread-zero-cost-production-20261125)
 
-> **Release Gate Status:** `READY FOR OWNER REVIEW` (`NO-GO` for unattended 24/7 zero-cost cloud production; `GO` for isolated Staging merge & `CONDITIONAL GO` for Owner-attended Capstone Defense under Option 1-Hardened).  
-> **Strict Protection Notice:** Zero pushes to `origin`, zero merges into `main`, zero edits to Production Render (`capstone1-ssd8`), Vercel (`viread-frontend`), or Supabase (`akjxbkakbbabpblmsktm`), and zero modifications to `F:\c1\capstone1` or `F:\c1\capstone1-staging-release`.
+> **Release Gate Status:** `READY FOR OWNER REVIEW` — Zero-Cost Production Release (Option A: Browser WASM STT + TTS Cache + Local OCR Worker with Queue). PR #202 open at https://github.com/trancuong3/capstone1/pull/202
+> **Last updated:** 2026-11-25 by Antigravity agent
+> **HEAD:** `ec2f9dcf` (28 commits ahead of main)
+> **Tests:** 2739 frontend PASS | 1528+ backend PASS | Build: 50 routes PASS
 
 ---
 
@@ -95,3 +97,4 @@
 - [ ] **Approved Target Commit SHA:** `f6d2d96ddef994c61a78df47c8fcea9ccdb83400` *(or final Commit 2 RC SHA after docs)*
 - [ ] **Approved Scope:** Merge to `main` / Apply Supabase DDL (`20261124010000_ocr_inference_jobs.sql`) / Configure Render & Vercel Env / Deploy CF Cron
 - [ ] **Accepted Risk Disclosure:** Laptop-off returns `503` on Voice & queues OCR (under Option 1-Hardened); Supabase Free LPP disabled; real 6â€“7yo child voice accuracy unverified until live pilot; `Honor X9d` verification required in 15m canary.
+
