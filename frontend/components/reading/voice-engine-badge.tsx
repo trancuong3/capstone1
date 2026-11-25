@@ -39,12 +39,12 @@ function buildTooltip(kind: "STT" | "TTS", snap: EngineSourceSnapshot): string {
     return `${base} (Dự phòng: ${snap.fallbackReason})`;
   }
   if (snap.tier === "google_cloud") {
-    return `${base} (Đang dùng dự phòng Google Cloud)`;
+    return `${base} (Online · Đang dùng dự phòng Google Cloud API)`;
   }
   if (snap.tier === "browser_default") {
-    return `${base} (Dự phòng mặc định của trình duyệt)`;
+    return `${base} (Online · Dự phòng Google/Trình duyệt)`;
   }
-  return `${base} (Chạy trực tiếp trên máy này)`;
+  return `${base} (Offline · Chạy trực tiếp trên máy này)`;
 }
 
 export interface VoiceEngineBadgeProps {

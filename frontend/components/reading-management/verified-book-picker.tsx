@@ -12,6 +12,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { BookCover } from "@/components/books/book-cover";
 import { Button } from "@/components/common/button";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import type { BookListItemDTO } from "@/types/book";
 import type {
@@ -195,34 +196,16 @@ export function VerifiedBookPicker({
               </li>
             ))}
           </ul>
-          {pageCount > 1 ? (
-            <nav
-              aria-label="Trang thư viện sách"
-              className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3"
-            >
-              <Button
-                className="w-auto!"
-                size="compact"
-                variant="secondary"
-                disabled={activePage === 1}
-                onClick={() => setPage(activePage - 1)}
-              >
-                Trước
-              </Button>
-              <p className="text-sm text-muted">
-                Trang {activePage}/{pageCount}
-              </p>
-              <Button
-                className="w-auto!"
-                size="compact"
-                variant="secondary"
-                disabled={activePage === pageCount}
-                onClick={() => setPage(activePage + 1)}
-              >
-                Sau
-              </Button>
-            </nav>
-          ) : null}
+          <PaginationBar
+            ariaLabel="Trang thư viện sách"
+            className="mt-2"
+            compact
+            itemLabel="cuốn"
+            onPageChange={setPage}
+            page={activePage}
+            pageSize={PAGE_SIZE}
+            total={matches.length}
+          />
         </>
       )}
     </details>

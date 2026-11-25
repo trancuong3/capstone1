@@ -1,12 +1,13 @@
 "use client";
 
 import { BookMarked, BookOpenText, RefreshCw, SearchX } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { BookCard } from "@/components/books/book-card";
 import { BookChildHeader } from "@/components/books/book-child-header";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
@@ -27,6 +28,8 @@ type CatalogState =
   | { status: "ready"; books: BookListItemDTO[]; hasCatalog: boolean }
   | { status: "error" };
 
+const BOOKS_PAGE_SIZE = 12;
+
 export function BookLibraryScreen() {
   const authRuntime = useAuthRuntime();
   const currentUserId = authRuntime.session?.user?.id ?? "";
@@ -37,6 +40,9 @@ export function BookLibraryScreen() {
     status: "loading",
   });
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const knownNonEmptyCatalogRef = useRef(false);
   const [gradeSelection, setGradeSelection] = useState<{
     childId: string;
     grade: number | null;
@@ -60,6 +66,14 @@ export function BookLibraryScreen() {
     : null;
   const visibleSavedCollections =
     savedCollectionOwner === selectedChildId ? savedCollections : [];
+
+  useEffect(() => {
+    const delay = search.trim() ? 250 : 0;
+    const timer = globalThis.setTimeout(() => {
+      setDebouncedSearch(search);
+    }, delay);
+    return () => globalThis.clearTimeout(timer);
+  }, [search]);
 
   useEffect(() => {
     if (!selectedChildId) {
@@ -151,18 +165,19 @@ export function BookLibraryScreen() {
       try {
         const books = await bookService.list({
           grade: selectedGrade ?? undefined,
-          search,
+          search: debouncedSearch,
           include_private: true,
         });
-        // Only issue the unfiltered probe when the filtered list is empty so
-        // normal grade-filtered loads execute a single request.
-        const hasFilters = selectedGrade !== null || search.trim().length > 0;
+        const hasFilters =
+          selectedGrade !== null || debouncedSearch.trim().length > 0;
+        if (books.length > 0) {
+          knownNonEmptyCatalogRef.current = true;
+        }
         const hasCatalog =
-          books.length > 0 ||
-          (hasFilters &&
-            (await bookService.list({ include_private: true })).length > 0);
+          books.length > 0 || (hasFilters && knownNonEmptyCatalogRef.current);
 
         if (isActive) {
+          setPage(1);
           setCatalogState({
             status: "ready",
             books,
@@ -184,8 +199,8 @@ export function BookLibraryScreen() {
     bookService,
     childState.status,
     currentUserId,
+    debouncedSearch,
     requestKey,
-    search,
     selectedChildId,
     selectedGrade,
   ]);
@@ -243,7 +258,7 @@ export function BookLibraryScreen() {
       <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-6">
         <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-6">
           <div className="flex flex-col gap-2">
-            <h1 className="book-title min-w-0 text-4xl text-ink sm:text-5xl">
+            <h1 className="book-title min-w-0 break-words text-4xl text-ink sm:text-5xl">
               Tủ sách{child ? ` của ${child.alias}` : " của bé"}
             </h1>
             <div className="flex flex-wrap items-center gap-2">
@@ -376,21 +391,33 @@ export function BookLibraryScreen() {
         ) : null}
 
         {catalogState.status === "ready" && catalogState.books.length > 0 ? (
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {catalogState.books.map((book) => (
-              <BookCard
-                book={book}
-                key={book.id}
-                savedTypes={visibleSavedCollections
-                  .filter((item) => item.book_id === book.id)
-                  .map((item) => item.collection_type)}
-                collectionBusy={collectionBusyKey.startsWith(book.id + ":")}
-                onToggleCollection={(type) =>
-                  void toggleSavedCollection(book.id, type)
-                }
-              />
-            ))}
-          </div>
+          <>
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {catalogState.books
+                .slice((page - 1) * BOOKS_PAGE_SIZE, page * BOOKS_PAGE_SIZE)
+                .map((book) => (
+                  <BookCard
+                    book={book}
+                    key={book.id}
+                    savedTypes={visibleSavedCollections
+                      .filter((item) => item.book_id === book.id)
+                      .map((item) => item.collection_type)}
+                    collectionBusy={collectionBusyKey.startsWith(book.id + ":")}
+                    onToggleCollection={(type) =>
+                      void toggleSavedCollection(book.id, type)
+                    }
+                  />
+                ))}
+            </div>
+            <PaginationBar
+              ariaLabel="Phân trang thư viện sách"
+              itemLabel="cuốn sách"
+              onPageChange={setPage}
+              page={page}
+              pageSize={BOOKS_PAGE_SIZE}
+              total={catalogState.books.length}
+            />
+          </>
         ) : null}
       </div>
     </section>

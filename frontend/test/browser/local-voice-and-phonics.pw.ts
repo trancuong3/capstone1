@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { ids, installApiFixture } from "./real-data-fixture";
+import { ids, installApiFixture, readyVoiceStatus } from "./real-data-fixture";
 
 function silentWav(seconds: number): string {
   const bytes = Math.max(3200, Math.round(16_000 * 2 * seconds));
@@ -182,6 +182,8 @@ async function installVoiceAndPhonicsFixture(page: Page) {
     if (route.request().method() === "OPTIONS")
       return route.fulfill({ status: 204, headers: corsHeaders });
     const path = new URL(route.request().url()).pathname;
+    if (path === "/voice/status" && route.request().method() === "GET")
+      return respond(route, readyVoiceStatus("local_north_truc_ly"));
     if (path === "/voice/voices") {
       return respond(route, {
         default_voice_id: "local_north_truc_ly",
@@ -298,6 +300,11 @@ test("ReadingScreen: Bắc · Trung · Nam selector, local-first Google fallback
   await expect(dialog).toBeVisible();
 
   const localOnlyBtn = dialog.getByRole("button", { name: /Chỉ máy này/ });
+  const onlineBackupBtn = dialog.getByRole("button", {
+    name: /Máy này \+ Google dự phòng/,
+  });
+  await expect(onlineBackupBtn).toHaveAttribute("aria-pressed", "true");
+  await localOnlyBtn.click();
   await expect(localOnlyBtn).toHaveAttribute("aria-pressed", "true");
 
   await dialog.getByRole("button", { name: "Miền Trung" }).click();
@@ -308,15 +315,13 @@ test("ReadingScreen: Bắc · Trung · Nam selector, local-first Google fallback
   await dialog.getByRole("button", { name: "Chậm" }).click();
   await expect(dialog).toContainText("0,85×");
 
-  await dialog
-    .getByRole("button", { name: /Máy này \+ Google dự phòng/ })
-    .click();
+  await onlineBackupBtn.click();
   await expect(
     dialog.getByLabel(/Dự phòng Google cho Nhận diện giọng nói \(STT\)/),
-  ).toBeVisible();
+  ).toBeChecked();
   await expect(
     dialog.getByLabel(/Dự phòng Google cho Đọc mẫu \(TTS\)/),
-  ).toBeVisible();
+  ).toBeChecked();
 
   await localOnlyBtn.click();
   await dialog.getByRole("button", { name: "Đóng hộp thoại" }).click();

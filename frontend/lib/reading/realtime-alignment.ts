@@ -79,7 +79,7 @@ interface IndexedBookWord {
 }
 
 /** How far behind the cursor a re-read may start (restart / self-correction). */
-const REWIND_WINDOW = 8;
+const REWIND_WINDOW = 16;
 /** How far ahead two consecutive spoken words may re-anchor (line jump). */
 const REANCHOR_WINDOW = 30;
 

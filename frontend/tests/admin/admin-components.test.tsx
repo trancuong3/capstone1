@@ -195,12 +195,14 @@ describe("admin components", () => {
       ...adminBookListItemFixture.book,
       lifecycle_status: "RETIRED",
     });
-    vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
     const user = userEvent.setup();
 
     render(withAdminFixture(<AdminBooksScreen />, services));
     await screen.findByRole("button", { name: "Ngừng hoạt động" });
     await user.click(screen.getByRole("button", { name: "Ngừng hoạt động" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Xác nhận ngừng hoạt động" }),
+    );
 
     await waitFor(() => {
       expect(services.books.updateStatus).toHaveBeenCalledWith(

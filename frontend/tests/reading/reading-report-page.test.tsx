@@ -140,7 +140,6 @@ describe("per-session reading report page", () => {
 
   it("removes only the selected report after successful deletion", async () => {
     const user = userEvent.setup();
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     const first = savedReport("report-to-delete", "Bài đọc cần xóa.");
     const second = savedReport("report-to-keep", "Bài đọc được giữ.");
     api.getSessionReports.mockResolvedValue(reportsResponse([first, second]));
@@ -149,6 +148,9 @@ describe("per-session reading report page", () => {
 
     await screen.findByTestId("saved-report-report-to-delete");
     await user.click(screen.getAllByRole("button", { name: "Xóa báo cáo" })[0]);
+    await user.click(
+      await screen.findByRole("button", { name: "Xác nhận xóa" }),
+    );
 
     await waitFor(() => {
       expect(api.deleteReadingReport).toHaveBeenCalledWith("report-to-delete");
@@ -159,6 +161,5 @@ describe("per-session reading report page", () => {
     expect(screen.getByTestId("saved-report-report-to-keep")).toHaveTextContent(
       "Bài đọc được giữ.",
     );
-    confirm.mockRestore();
   });
 });

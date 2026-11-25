@@ -1,6 +1,23 @@
 import { expect, type Page, type Route } from "@playwright/test";
 import { createPlaywrightAuthFixtureHeaders } from "../../lib/auth/playwright-auth-fixture";
+import type { VoiceEngineHealthSnapshot } from "../../lib/reading/voice-engine-status";
 import type { ProcessingCapabilities } from "../../types/karaoke-processing";
+
+export function readyVoiceStatus(
+  defaultVoiceId: string,
+): VoiceEngineHealthSnapshot {
+  return {
+    default_mode: "local_only",
+    default_voice_id: defaultVoiceId,
+    local: { available: true, stt_ready: true, tts_ready: true },
+    google: {
+      stt_configured: false,
+      tts_configured: false,
+      stt_cooldown: false,
+      tts_cooldown: false,
+    },
+  };
+}
 
 export const ids = {
   parent: "11111111-1111-4111-8111-111111111111",

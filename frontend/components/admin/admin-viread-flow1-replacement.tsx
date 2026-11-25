@@ -12,6 +12,7 @@ import { useCallback, useState } from "react";
 
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
+import { ResponsiveTable } from "@/components/common/responsive-table";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import type { VireadTrainingOverview } from "@/lib/api/viread-training-service";
@@ -192,14 +193,15 @@ export function AdminVireadReliabilityPanel({
             const pGpu = dataset.gpu_infer_ms_per_line?.finetuned_full_pipeline;
 
             return (
-              <div
-                className="overflow-x-auto rounded-control border border-border"
+              <ResponsiveTable
+                ariaLabel={`Bảng kết quả tin cậy ${dataset.label}`}
+                className="rounded-control"
                 key={dataset.key}
               >
                 <div className="bg-sky/50 px-4 py-2 font-extrabold text-primary-hover">
                   {dataset.label}
                 </div>
-                <table className="w-full text-left text-sm">
+                <table className="w-full min-w-[640px] text-left text-sm">
                   <thead className="border-b border-border bg-slate-50 text-xs font-bold text-muted">
                     <tr>
                       <th className="px-4 py-2.5">Chỉ số đánh giá</th>
@@ -326,7 +328,7 @@ export function AdminVireadReliabilityPanel({
                     ) : null}
                   </tbody>
                 </table>
-              </div>
+              </ResponsiveTable>
             );
           })}
 

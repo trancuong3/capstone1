@@ -18,6 +18,10 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
+from app.services.local_voice_worker_bootstrap import (
+    ensure_local_voice_worker_running,
+    is_local_voice_worker_autostart_armed,
+)
 from app.request_context import get_request_id
 
 logger = logging.getLogger(__name__)
@@ -338,6 +342,47 @@ class LocalVoiceProvider:
             not in {"1", "true", "yes", "on"}
         )
         self._client: httpx.AsyncClient | None = None
+        self._recovery_task: asyncio.Task[bool] | None = None
+
+    def _schedule_background_recovery(self) -> None:
+        if not is_local_voice_worker_autostart_armed():
+            return
+        if self._recovery_task is not None and not self._recovery_task.done():
+            return
+        try:
+            task = asyncio.create_task(
+                ensure_local_voice_worker_running(base_url=self.base_url)
+            )
+        except RuntimeError:
+            return
+        self._recovery_task = task
+
+        def _on_done(done_task: asyncio.Task[bool]) -> None:
+            if self._recovery_task is done_task:
+                self._recovery_task = None
+            if not done_task.cancelled():
+                try:
+                    done_task.exception()
+                except Exception:
+                    pass
+
+        task.add_done_callback(_on_done)
+
+    async def _is_incompatible_auth_worker(self) -> bool:
+        if self._get_token():
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=1.5, trust_env=False) as client:
+                resp = await client.get(f"{self.base_url}/health")
+            if resp.status_code in (401, 403):
+                return True
+            if resp.status_code == 200:
+                payload = resp.json()
+                if isinstance(payload, dict) and bool(payload.get("auth_required")):
+                    return True
+        except Exception:
+            pass
+        return False
 
     def is_configured(self) -> bool:
         return bool(self.base_url)
@@ -348,7 +393,11 @@ class LocalVoiceProvider:
     def _get_token(self) -> str:
         if self._explicit_token is not None:
             return self._explicit_token
-        return (os.getenv("VIREAD_VOICE_WORKER_TOKEN") or "").strip()
+        return (
+            os.getenv("VIREAD_VOICE_WORKER_TOKEN")
+            or os.getenv("VIREAD_LOCAL_VOICE_WORKER_TOKEN")
+            or ""
+        ).strip()
 
     def _request_headers(self, *, include_auth: bool = True) -> dict[str, str]:
         headers: dict[str, str] = {}
@@ -402,6 +451,23 @@ class LocalVoiceProvider:
         )
         return self._client
 
+    async def _reset_client(self) -> None:
+        client = self._client
+        if client is None and self.base_url:
+            clients = _LOOP_CLIENTS.get(asyncio.get_running_loop())
+            if clients is not None:
+                client = clients.pop(self.base_url, None)
+        if client is None:
+            return
+        aclose = getattr(client, "aclose", None)
+        if callable(aclose):
+            self._client = None
+            if not getattr(client, "is_closed", False):
+                try:
+                    await aclose()
+                except Exception:
+                    pass
+
     async def aclose(self) -> None:
         if self._client is not None and not self._client.is_closed:
             await self._client.aclose()
@@ -424,7 +490,8 @@ class LocalVoiceProvider:
         headers = self._request_headers(include_auth=True)
         http_timeout = self._make_timeout(timeout)
         last_exc: Exception | None = None
-        for attempt in range(2):
+        retried_busy = False
+        for attempt in range(3):
             client = self._get_client()
             try:
                 resp = await client.post(
@@ -435,10 +502,21 @@ class LocalVoiceProvider:
                     data=data,
                     files=files,
                 )
-                if resp.status_code == 503 and attempt == 0:
+                if resp.status_code == 503 and attempt < 2 and not retried_busy:
                     worker_code = _extract_worker_error_code(resp)
                     if worker_code not in {"LOCAL_TTS_UNAVAILABLE", "LOCAL_STT_UNAVAILABLE"}:
+                        retried_busy = True
                         await asyncio.sleep(0.25)
+                        continue
+                if (
+                    resp.status_code in (400, 401, 403)
+                    and attempt == 0
+                    and self.can_autostart_loopback()
+                    and is_local_voice_worker_autostart_armed()
+                    and await self._is_incompatible_auth_worker()
+                ):
+                    await self._reset_client()
+                    if await ensure_local_voice_worker_running(base_url=self.base_url):
                         continue
                 return resp
             except httpx.ConnectTimeout as exc:
@@ -448,10 +526,17 @@ class LocalVoiceProvider:
                 last_exc = exc
                 if not self.is_loopback or attempt >= 1:
                     raise
+                if (
+                    self.can_autostart_loopback()
+                    and is_local_voice_worker_autostart_armed()
+                    and await ensure_local_voice_worker_running(base_url=self.base_url)
+                ):
+                    continue
                 await asyncio.sleep(0.15)
             except (httpx.RemoteProtocolError, httpx.ReadError) as exc:
                 last_exc = exc
                 if attempt == 0:
+                    await self._reset_client()
                     await asyncio.sleep(0.2)
                     continue
                 raise
@@ -493,6 +578,8 @@ class LocalVoiceProvider:
                     "latency_ms": latency_ms,
                 }
             if resp.status_code != 200:
+                if resp.status_code in (401, 403) and not self._get_token():
+                    self._schedule_background_recovery()
                 return {
                     "configured": True,
                     "available": False,
@@ -504,6 +591,15 @@ class LocalVoiceProvider:
                     "latency_ms": latency_ms,
                 }
             data = resp.json()
+            if bool(data.get("auth_required")) and not self._get_token():
+                self._schedule_background_recovery()
+                return {
+                    "available": False,
+                    "stt_ready": False,
+                    "tts_ready": False,
+                    "stt_model_version": None,
+                    "tts_model_version": None,
+                }
             stt = data.get("stt") or {}
             tts = data.get("tts") or {}
             stt_ready = bool(stt.get("ready"))
@@ -541,6 +637,9 @@ class LocalVoiceProvider:
                 "tts_error_code": "LOCAL_VOICE_TIMEOUT",
                 "latency_ms": int((time.perf_counter() - started) * 1000),
             }
+        except httpx.ConnectError:
+            self._schedule_background_recovery()
+            return {"available": False, "stt_ready": False, "tts_ready": False}
         except Exception:
             return {
                 "configured": True,

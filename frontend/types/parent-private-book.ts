@@ -371,6 +371,16 @@ export type ParentPrivateBookSummaryDTO = z.infer<
   typeof parentPrivateBookSummarySchema
 >;
 
+export const parentPrivateBookPageSchema = z.object({
+  items: z.array(parentPrivateBookSummarySchema),
+  total: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+  offset: z.number().int().nonnegative(),
+});
+export type ParentPrivateBookPageDTO = z.infer<
+  typeof parentPrivateBookPageSchema
+>;
+
 export const parentPrivateBookDetailSchema = z.object({
   book: parentPrivateBookSummarySchema,
   pages: z.array(parentPrivatePageSchema),

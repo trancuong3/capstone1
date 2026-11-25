@@ -31,6 +31,7 @@ import { ParentOcrContributionCard } from "@/components/books/parent-ocr-contrib
 import { AuthenticatedImage } from "@/components/common/authenticated-image";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
@@ -228,12 +229,17 @@ function lockReasonForSubmission(sub: ParentPageSubmissionDTO): string | null {
   return "Trang chưa đủ điều kiện để thêm vào sách đọc.";
 }
 
+const SUBMISSIONS_PAGE_SIZE = 10;
+const COMMITTED_PAGES_PAGE_SIZE = 12;
+
 interface ParentPrivateBookManagerProps {
   bookId: string;
+  returnPage?: number;
 }
 
 export function ParentPrivateBookManager({
   bookId,
+  returnPage = 1,
 }: ParentPrivateBookManagerProps) {
   const authRuntime = useAuthRuntime();
   const currentUserId = authRuntime.session?.user?.id ?? "";
@@ -242,6 +248,7 @@ export function ParentPrivateBookManager({
       key={`${currentUserId}:${bookId}`}
       bookId={bookId}
       currentUserId={currentUserId}
+      returnPage={returnPage}
     />
   );
 }
@@ -249,10 +256,14 @@ export function ParentPrivateBookManager({
 function ParentPrivateBookManagerContent({
   bookId,
   currentUserId,
+  returnPage = 1,
 }: ParentPrivateBookManagerProps & { currentUserId: string }) {
   const service = useParentPrivateBookService();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const detailRequestIdRef = useRef(0);
+  const backHref =
+    returnPage > 1 ? `/my-books?page=${Math.floor(returnPage)}` : "/my-books";
 
   const [detail, setDetail] = useState<ParentPrivateBookDetailDTO | null>(null);
   const [loading, setLoading] = useState(true);
@@ -261,6 +272,8 @@ function ParentPrivateBookManagerContent({
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [submissionsPage, setSubmissionsPage] = useState(1);
+  const [committedPage, setCommittedPage] = useState(1);
 
   // Upload form state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -316,6 +329,7 @@ function ParentPrivateBookManagerContent({
 
   const loadDetail = useCallback(
     async (silent = false) => {
+      const requestId = ++detailRequestIdRef.current;
       if (!silent) {
         setLoading(true);
       }
@@ -323,8 +337,10 @@ function ParentPrivateBookManagerContent({
       setNotFound(false);
       try {
         const data = await service.get(bookId);
+        if (requestId !== detailRequestIdRef.current) return;
         setDetail(data);
       } catch (error) {
+        if (requestId !== detailRequestIdRef.current) return;
         if (isServiceError(error) && error.status === 404) {
           setDetail(null);
           setNotFound(true);
@@ -344,7 +360,7 @@ function ParentPrivateBookManagerContent({
           );
         }
       } finally {
-        if (!silent) {
+        if (!silent && requestId === detailRequestIdRef.current) {
           setLoading(false);
         }
       }
@@ -354,17 +370,23 @@ function ParentPrivateBookManagerContent({
 
   useEffect(() => {
     clearPrivateMediaMemoryCache();
-    let active = true;
+    const requestId = ++detailRequestIdRef.current;
+    const controller = new AbortController();
     void service
-      .get(bookId)
+      .get(bookId, controller.signal)
       .then((data) => {
-        if (!active) return;
+        if (requestId !== detailRequestIdRef.current) return;
         setDetail(data);
         setNotFound(false);
         setLoadError(null);
       })
       .catch((error: unknown) => {
-        if (!active) return;
+        if (
+          controller.signal.aborted ||
+          requestId !== detailRequestIdRef.current
+        ) {
+          return;
+        }
         if (isServiceError(error) && error.status === 404) {
           setDetail(null);
           setNotFound(true);
@@ -378,10 +400,11 @@ function ParentPrivateBookManagerContent({
         }
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (requestId === detailRequestIdRef.current) setLoading(false);
       });
     return () => {
-      active = false;
+      detailRequestIdRef.current += 1;
+      controller.abort();
     };
   }, [bookId, currentUserId, service]);
 
@@ -625,7 +648,7 @@ function ParentPrivateBookManagerContent({
     setActionNotice(null);
     try {
       await service.delete(bookId);
-      router.push("/my-books");
+      router.push(backHref);
     } catch (error) {
       setActionError(
         errorText(error, "Không thể xóa sách riêng. Vui lòng thử lại."),
@@ -787,7 +810,7 @@ function ParentPrivateBookManagerContent({
         <EmptyState
           action={
             <ButtonLink
-              href="/my-books"
+              href={backHref}
               variant="secondary"
               className="max-w-64"
             >
@@ -840,18 +863,36 @@ function ParentPrivateBookManagerContent({
       Boolean(item.tool_check_error_code) ||
       item.workflow_status === "CHECK_FAILED",
   ).length;
-  const visibleSubmissions =
+  const filteredSubmissions =
     statusFilter === "ALL"
       ? activeSubmissions
       : activeSubmissions.filter(
           (item) => submissionFilterGroup(item) === statusFilter,
         );
+  const submissionsTotalPages = Math.max(
+    1,
+    Math.ceil(filteredSubmissions.length / SUBMISSIONS_PAGE_SIZE),
+  );
+  const safeSubmissionsPage = Math.min(submissionsPage, submissionsTotalPages);
+  const visibleSubmissions = filteredSubmissions.slice(
+    (safeSubmissionsPage - 1) * SUBMISSIONS_PAGE_SIZE,
+    safeSubmissionsPage * SUBMISSIONS_PAGE_SIZE,
+  );
+  const committedTotalPages = Math.max(
+    1,
+    Math.ceil(committedPages.length / COMMITTED_PAGES_PAGE_SIZE),
+  );
+  const safeCommittedPage = Math.min(committedPage, committedTotalPages);
+  const visibleCommittedPages = committedPages.slice(
+    (safeCommittedPage - 1) * COMMITTED_PAGES_PAGE_SIZE,
+    safeCommittedPage * COMMITTED_PAGES_PAGE_SIZE,
+  );
 
   return (
     <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 py-6 sm:px-8 sm:py-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Link
-          href="/my-books"
+          href={backHref}
           className="inline-flex min-h-10 items-center gap-1.5 text-sm font-bold text-primary hover:underline"
         >
           <ArrowLeft aria-hidden="true" className="size-4" />
@@ -861,6 +902,7 @@ function ParentPrivateBookManagerContent({
         <div className="flex flex-wrap items-center gap-2">
           <Button
             className="w-auto"
+            fullWidth={false}
             onClick={() => void loadDetail(false)}
             variant="secondary"
           >
@@ -871,12 +913,13 @@ function ParentPrivateBookManagerContent({
             <ButtonLink
               href={`/books/${encodeURIComponent(book.id)}`}
               className="w-auto"
+              fullWidth={false}
             >
               <BookOpen aria-hidden="true" className="size-4" />
               Mở đọc cùng bé
             </ButtonLink>
           ) : (
-            <Button className="w-auto" disabled type="button">
+            <Button className="w-auto" disabled fullWidth={false} type="button">
               <BookOpen aria-hidden="true" className="size-4" />
               Chưa mở đọc cùng bé
             </Button>
@@ -901,11 +944,13 @@ function ParentPrivateBookManagerContent({
                 {book.committed_page_count} trang đã thêm vào sách đọc
               </span>
             </div>
-            <h1 className="book-title mt-2 text-3xl text-ink sm:text-4xl">
+            <h1 className="book-title mt-2 break-words text-3xl text-ink sm:text-4xl">
               {book.title}
             </h1>
             {book.author ? (
-              <p className="mt-1 text-sm text-muted">Tác giả: {book.author}</p>
+              <p className="mt-1 break-words text-sm text-muted">
+                Tác giả: {book.author}
+              </p>
             ) : null}
             <p className="mt-2 text-xs text-muted">{book.privacy_notice}</p>
           </div>
@@ -1292,7 +1337,10 @@ function ParentPrivateBookManagerContent({
                         ? "border-primary bg-primary text-white"
                         : "border-border bg-canvas text-ink hover:bg-sky/50"
                     }`}
-                    onClick={() => setStatusFilter(pill.key)}
+                    onClick={() => {
+                      setStatusFilter(pill.key);
+                      setSubmissionsPage(1);
+                    }}
                     type="button"
                   >
                     {pill.label}
@@ -1306,7 +1354,7 @@ function ParentPrivateBookManagerContent({
                 aria-label="Tổng quan nhanh trạng thái các trang"
                 className="flex flex-wrap gap-1.5 border-t border-border pt-3"
               >
-                {activeSubmissions.map((sub) => {
+                {activeSubmissions.map((sub, index) => {
                   const chipStyle =
                     WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
                     "border-border bg-canvas text-ink";
@@ -1316,12 +1364,17 @@ function ParentPrivateBookManagerContent({
                       className={`inline-flex items-center gap-1 rounded-control border px-2 py-1 text-[11px] font-bold ${chipStyle}`}
                       onClick={() => {
                         setStatusFilter("ALL");
-                        const target = document.querySelector(
-                          `[data-submission-id="${sub.id}"]`,
+                        setSubmissionsPage(
+                          Math.floor(index / SUBMISSIONS_PAGE_SIZE) + 1,
                         );
-                        target?.scrollIntoView?.({
-                          behavior: "smooth",
-                          block: "nearest",
+                        requestAnimationFrame(() => {
+                          const target = document.querySelector(
+                            `[data-submission-id="${sub.id}"]`,
+                          );
+                          target?.scrollIntoView?.({
+                            behavior: "smooth",
+                            block: "nearest",
+                          });
                         });
                       }}
                       title={`Trang nguồn ${sub.source_page_number}: ${sub.workflow_status_label}`}
@@ -1368,352 +1421,302 @@ function ParentPrivateBookManagerContent({
             Không có trang nào thuộc nhóm trạng thái đang lọc.
           </div>
         ) : (
-          <div className="flex flex-col gap-4">
-            {visibleSubmissions.map((sub) => {
-              const badgeStyle =
-                WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
-                "border-border bg-canvas text-ink";
-              const lockReason = lockReasonForSubmission(sub);
-              const isEditing = editingSubId === sub.id;
-              const isReviewFormOpen = reviewFormSubId === sub.id;
-              const isSubBusy =
-                busyKey !== null && busyKey.endsWith(`:${sub.id}`);
+          <>
+            <div className="flex flex-col gap-4">
+              {visibleSubmissions.map((sub) => {
+                const badgeStyle =
+                  WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
+                  "border-border bg-canvas text-ink";
+                const lockReason = lockReasonForSubmission(sub);
+                const isEditing = editingSubId === sub.id;
+                const isReviewFormOpen = reviewFormSubId === sub.id;
+                const isSubBusy =
+                  busyKey !== null && busyKey.endsWith(`:${sub.id}`);
 
-              return (
-                <article
-                  key={sub.id}
-                  data-submission-id={sub.id}
-                  data-workflow-status={sub.workflow_status}
-                  className="flex flex-col gap-4 rounded-card border border-border bg-white p-5 shadow-sm"
-                >
-                  <div className="flex flex-col gap-4 lg:flex-row">
-                    {/* Private Authenticated Page Preview */}
-                    <div className="w-full shrink-0 lg:w-48">
-                      <div className="relative h-56 w-full overflow-hidden rounded-control border border-border bg-cream">
-                        <AuthenticatedImage
-                          alt={`Ảnh trang nguồn ${sub.source_page_number} của ${sub.source_file_name}`}
-                          className="h-full w-full object-contain p-2"
-                          src={sub.image_url}
-                        />
+                return (
+                  <article
+                    key={sub.id}
+                    data-submission-id={sub.id}
+                    data-workflow-status={sub.workflow_status}
+                    className="flex flex-col gap-4 rounded-card border border-border bg-white p-5 shadow-sm"
+                  >
+                    <div className="flex flex-col gap-4 lg:flex-row">
+                      {/* Private Authenticated Page Preview */}
+                      <div className="w-full shrink-0 lg:w-48">
+                        <div className="relative h-56 w-full overflow-hidden rounded-control border border-border bg-cream">
+                          <AuthenticatedImage
+                            alt={`Ảnh trang nguồn ${sub.source_page_number} của ${sub.source_file_name}`}
+                            className="h-full w-full object-contain p-2"
+                            src={sub.image_url}
+                          />
+                        </div>
+                        <p className="mt-1.5 truncate text-xs text-muted">
+                          {sub.source_file_name} · Trang nguồn{" "}
+                          {sub.source_page_number}/{sub.batch_total_pages}
+                        </p>
+                        <p className="text-[11px] font-mono text-muted">
+                          Phiên bản v{sub.submission_version}
+                          {sub.candidate_hash
+                            ? ` · #${sub.candidate_hash.slice(0, 8)}`
+                            : ""}
+                        </p>
                       </div>
-                      <p className="mt-1.5 truncate text-xs text-muted">
-                        {sub.source_file_name} · Trang nguồn{" "}
-                        {sub.source_page_number}/{sub.batch_total_pages}
-                      </p>
-                      <p className="text-[11px] font-mono text-muted">
-                        Phiên bản v{sub.submission_version}
-                        {sub.candidate_hash
-                          ? ` · #${sub.candidate_hash.slice(0, 8)}`
-                          : ""}
-                      </p>
-                    </div>
 
-                    {/* Details & Pipeline Stages */}
-                    <div className="flex min-w-0 flex-1 flex-col gap-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span
-                            className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-bold ${badgeStyle}`}
-                          >
-                            {sub.workflow_status_label}
-                          </span>
-                          {sub.is_image_only ? (
-                            <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-950">
-                              Trang chỉ có hình / không đọc được chữ
+                      {/* Details & Pipeline Stages */}
+                      <div className="flex min-w-0 flex-1 flex-col gap-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-bold ${badgeStyle}`}
+                            >
+                              {sub.workflow_status_label}
                             </span>
-                          ) : null}
-                          {sub.tool_check_policy_blocked ? (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-rose-400 bg-rose-100 px-2.5 py-0.5 text-xs font-bold text-rose-900">
-                              <ShieldAlert
-                                aria-hidden="true"
-                                className="size-3.5"
-                              />
-                              Chặn theo chính sách an toàn
-                            </span>
-                          ) : null}
-                        </div>
-
-                        {sub.workflow_status !== "ADDED_TO_BOOK" ? (
-                          <button
-                            aria-label={`Hủy trang nguồn ${sub.source_page_number}`}
-                            className="inline-flex min-h-9 items-center gap-1 rounded-control border border-border px-2.5 text-xs font-semibold text-muted hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
-                            disabled={isSubBusy}
-                            onClick={() => void handleCancelSubmission(sub)}
-                            type="button"
-                          >
-                            <Trash2 aria-hidden="true" className="size-3.5" />
-                            Hủy trang
-                          </button>
-                        ) : null}
-                      </div>
-
-                      {/* 3-Stage Status Strip */}
-                      <div
-                        aria-label="Tiến trình 3 bước kiểm tra"
-                        className="grid gap-2 sm:grid-cols-3"
-                      >
-                        <div className="rounded-control border border-border bg-canvas px-3 py-2 text-xs">
-                          <p className="font-bold text-ink">
-                            1. OCR tiếng Việt
-                          </p>
-                          <p className="mt-0.5 text-muted">
-                            {STAGE_LABELS[sub.ocr_status] ?? sub.ocr_status}
-                            {sub.ocr_error_code
-                              ? ` (${sub.ocr_error_code})`
-                              : ""}
-                          </p>
-                          {describeStageErrorHint(sub.ocr_error_code) ? (
-                            <p className="mt-1 text-[11px] font-medium text-rose-800">
-                              {describeStageErrorHint(sub.ocr_error_code)}
-                            </p>
-                          ) : null}
-                        </div>
-                        <div className="rounded-control border border-border bg-canvas px-3 py-2 text-xs">
-                          <p className="font-bold text-ink">2. Rà chính tả</p>
-                          <p className="mt-0.5 text-muted">
-                            {STAGE_LABELS[sub.proofread_status] ??
-                              sub.proofread_status}
-                            {sub.proofread_suggestions.length > 0
-                              ? ` · ${sub.proofread_suggestions.length} đề xuất`
-                              : ""}
-                            {sub.proofread_error_code
-                              ? ` (${sub.proofread_error_code})`
-                              : ""}
-                          </p>
-                          {describeStageErrorHint(sub.proofread_error_code) ? (
-                            <p className="mt-1 text-[11px] font-medium text-rose-800">
-                              {describeStageErrorHint(sub.proofread_error_code)}
-                            </p>
-                          ) : null}
-                        </div>
-                        <div className="rounded-control border border-border bg-canvas px-3 py-2 text-xs">
-                          <p className="font-bold text-ink">
-                            3. Tool Check an toàn
-                          </p>
-                          <p className="mt-0.5 text-muted">
-                            {STAGE_LABELS[sub.tool_check_status] ??
-                              sub.tool_check_status}
-                            {sub.tool_check_findings_count > 0
-                              ? ` · ${sub.tool_check_findings_count} cảnh báo`
-                              : ""}
-                            {sub.tool_check_error_code
-                              ? ` (${sub.tool_check_error_code})`
-                              : ""}
-                          </p>
-                          {describeStageErrorHint(sub.tool_check_error_code) ? (
-                            <p className="mt-1 text-[11px] font-medium text-rose-800">
-                              {describeStageErrorHint(
-                                sub.tool_check_error_code,
-                              )}
-                            </p>
-                          ) : null}
-                        </div>
-                      </div>
-
-                      {/* Tool Check Scope Disclosure */}
-                      <p className="rounded-control border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
-                        <strong>Phạm vi Tool Check:</strong>{" "}
-                        {describeToolCheckScope(sub.tool_check_scope)}
-                      </p>
-
-                      {/* Parent Notice from Tool Check (non-sensitive summary) */}
-                      {sub.tool_check_parent_notice ||
-                      sub.tool_check_findings_count > 0 ? (
-                        <div className="rounded-control border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
-                          <p className="flex items-center gap-1.5 font-bold">
-                            <AlertTriangle
-                              aria-hidden="true"
-                              className="size-4 shrink-0"
-                            />
-                            {sub.tool_check_findings_count > 0
-                              ? `Tool Check phát hiện ${sub.tool_check_findings_count} điểm cần người lớn xem xét.`
-                              : "Trang cần Admin xem xét trước khi thêm vào sách."}
-                          </p>
-                          {sub.tool_check_parent_notice ? (
-                            <p className="mt-1">
-                              {sub.tool_check_parent_notice}
-                            </p>
-                          ) : null}
-                        </div>
-                      ) : null}
-
-                      {/* Candidate Text Preview */}
-                      {sub.candidate_text ? (
-                        <div className="rounded-control border border-border bg-canvas/70 p-3">
-                          <p className="text-xs font-bold text-ink">
-                            Nội dung dự kiến thêm vào sách:
-                          </p>
-                          <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-ink">
-                            {sub.candidate_text}
-                          </p>
-                        </div>
-                      ) : null}
-
-                      {/* Spelling Suggestions */}
-                      {sub.proofread_suggestions.length > 0 ? (
-                        <div className="rounded-control border border-sky-200 bg-sky/40 p-3">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <p className="text-xs font-bold text-primary-hover">
-                              Đề xuất chính tả (
-                              {sub.proofread_suggestions.length})
-                              {sub.uncertain_word_indices.length > 0
-                                ? ` · ${sub.uncertain_word_indices.length} từ cần chú ý`
-                                : ""}
-                            </p>
-                            {sub.spelling_accepted ? (
-                              <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-800">
-                                <CheckCircle2
+                            {sub.is_image_only ? (
+                              <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-950">
+                                Trang chỉ có hình / không đọc được chữ
+                              </span>
+                            ) : null}
+                            {sub.tool_check_policy_blocked ? (
+                              <span className="inline-flex items-center gap-1 rounded-full border border-rose-400 bg-rose-100 px-2.5 py-0.5 text-xs font-bold text-rose-900">
+                                <ShieldAlert
                                   aria-hidden="true"
                                   className="size-3.5"
                                 />
-                                Đã chấp nhận đề xuất
+                                Chặn theo chính sách an toàn
                               </span>
-                            ) : (
-                              <Button
-                                className="min-h-9 w-auto px-3 text-xs"
-                                disabled={isSubBusy}
-                                onClick={() => void handleAcceptSpelling(sub)}
-                                type="button"
-                                variant="secondary"
-                              >
-                                Chấp nhận đề xuất chính tả
-                              </Button>
-                            )}
+                            ) : null}
                           </div>
-                          <ul className="mt-2 space-y-1 text-xs text-ink">
-                            {sub.proofread_suggestions
-                              .slice(0, 6)
-                              .map((s, idx) => (
-                                <li key={idx}>
-                                  <span className="line-through text-rose-700">
-                                    {s.original}
-                                  </span>{" "}
-                                  →{" "}
-                                  <span className="font-bold text-emerald-800">
-                                    {s.suggested}
-                                  </span>
-                                  {s.uncertain ? (
-                                    <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-900">
-                                      cần kiểm tra
-                                    </span>
-                                  ) : null}
-                                </li>
-                              ))}
-                          </ul>
-                        </div>
-                      ) : null}
 
-                      {/* Admin Decision Feedback */}
-                      {sub.admin_decision ? (
-                        <div
-                          className={`rounded-control border p-3 text-xs ${
-                            sub.admin_decision === "APPROVE"
-                              ? "border-emerald-300 bg-emerald-50 text-emerald-950"
-                              : "border-rose-300 bg-rose-50 text-rose-950"
-                          }`}
-                        >
-                          <p className="font-bold">
-                            Quyết định từ Admin:{" "}
-                            {sub.admin_decision === "APPROVE"
-                              ? "Đã phê duyệt đúng phiên bản này"
-                              : sub.admin_decision === "REQUEST_CHANGES"
-                                ? "Yêu cầu chỉnh sửa"
-                                : "Đã từ chối"}
-                          </p>
-                          {sub.admin_decision_reason ? (
-                            <p className="mt-1">
-                              Lý do: {sub.admin_decision_reason}
-                            </p>
+                          {sub.workflow_status !== "ADDED_TO_BOOK" ? (
+                            <button
+                              aria-label={`Hủy trang nguồn ${sub.source_page_number}`}
+                              className="inline-flex min-h-9 items-center gap-1 rounded-control border border-border px-2.5 text-xs font-semibold text-muted hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
+                              disabled={isSubBusy}
+                              onClick={() => void handleCancelSubmission(sub)}
+                              type="button"
+                            >
+                              <Trash2 aria-hidden="true" className="size-3.5" />
+                              Hủy trang
+                            </button>
                           ) : null}
                         </div>
-                      ) : null}
 
-                      {/* Inline Edit Text / Source Drawer */}
-                      {isEditing ? (
-                        <div className="rounded-control border border-primary/40 bg-canvas p-3">
-                          <p className="text-xs font-bold text-ink">
-                            Chỉnh sửa nội dung hoặc nguồn trang
-                          </p>
-                          <p className="mt-0.5 text-xs text-amber-900">
-                            Lưu ý: Chỉnh sửa sẽ tạo phiên bản mới, hủy kết quả
-                            kiểm tra / phê duyệt cũ và kiểm tra lại từ đầu (Rà
-                            chính tả → Tool Check an toàn).
-                          </p>
-                          <textarea
-                            aria-label="Chỉnh sửa văn bản trang"
-                            className="mt-2 min-h-24 w-full rounded-control border border-border bg-white p-2.5 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
-                            onChange={(event) =>
-                              setEditText(event.target.value)
-                            }
-                            value={editText}
-                          />
-                          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                            <select
-                              aria-label="Nguồn nội dung khi chỉnh sửa"
-                              className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
-                              onChange={(event) =>
-                                setEditSourceType(
-                                  event.target.value as SourceUsageType,
-                                )
-                              }
-                              value={editSourceType}
-                            >
-                              {SOURCE_USAGE_OPTIONS.map((opt) => (
-                                <option key={opt.value} value={opt.value}>
-                                  {opt.label}
-                                </option>
-                              ))}
-                            </select>
-                            <input
-                              aria-label="Ghi chú nguồn khi chỉnh sửa"
-                              className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
-                              onChange={(event) =>
-                                setEditSourceNote(event.target.value)
-                              }
-                              placeholder="Ghi chú nguồn…"
-                              value={editSourceNote}
-                            />
+                        {/* 3-Stage Status Strip */}
+                        <div
+                          aria-label="Tiến trình 3 bước kiểm tra"
+                          className="grid gap-2 sm:grid-cols-3"
+                        >
+                          <div className="rounded-control border border-border bg-canvas px-3 py-2 text-xs">
+                            <p className="font-bold text-ink">
+                              1. OCR tiếng Việt
+                            </p>
+                            <p className="mt-0.5 text-muted">
+                              {STAGE_LABELS[sub.ocr_status] ?? sub.ocr_status}
+                              {sub.ocr_error_code
+                                ? ` (${sub.ocr_error_code})`
+                                : ""}
+                            </p>
+                            {describeStageErrorHint(sub.ocr_error_code) ? (
+                              <p className="mt-1 text-[11px] font-medium text-rose-800">
+                                {describeStageErrorHint(sub.ocr_error_code)}
+                              </p>
+                            ) : null}
                           </div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            <Button
-                              className="min-h-10 w-auto px-4 text-xs"
-                              isLoading={busyKey === `edit:${sub.id}`}
-                              onClick={() => void handleSaveEdit(sub)}
-                              type="button"
-                            >
-                              Lưu phiên bản mới & kiểm tra lại
-                            </Button>
-                            <Button
-                              className="min-h-10 w-auto px-3 text-xs"
-                              onClick={() => setEditingSubId(null)}
-                              type="button"
-                              variant="secondary"
-                            >
-                              Đóng
-                            </Button>
+                          <div className="rounded-control border border-border bg-canvas px-3 py-2 text-xs">
+                            <p className="font-bold text-ink">2. Rà chính tả</p>
+                            <p className="mt-0.5 text-muted">
+                              {STAGE_LABELS[sub.proofread_status] ??
+                                sub.proofread_status}
+                              {sub.proofread_suggestions.length > 0
+                                ? ` · ${sub.proofread_suggestions.length} đề xuất`
+                                : ""}
+                              {sub.proofread_error_code
+                                ? ` (${sub.proofread_error_code})`
+                                : ""}
+                            </p>
+                            {describeStageErrorHint(
+                              sub.proofread_error_code,
+                            ) ? (
+                              <p className="mt-1 text-[11px] font-medium text-rose-800">
+                                {describeStageErrorHint(
+                                  sub.proofread_error_code,
+                                )}
+                              </p>
+                            ) : null}
+                          </div>
+                          <div className="rounded-control border border-border bg-canvas px-3 py-2 text-xs">
+                            <p className="font-bold text-ink">
+                              3. Tool Check an toàn
+                            </p>
+                            <p className="mt-0.5 text-muted">
+                              {STAGE_LABELS[sub.tool_check_status] ??
+                                sub.tool_check_status}
+                              {sub.tool_check_findings_count > 0
+                                ? ` · ${sub.tool_check_findings_count} cảnh báo`
+                                : ""}
+                              {sub.tool_check_error_code
+                                ? ` (${sub.tool_check_error_code})`
+                                : ""}
+                            </p>
+                            {describeStageErrorHint(
+                              sub.tool_check_error_code,
+                            ) ? (
+                              <p className="mt-1 text-[11px] font-medium text-rose-800">
+                                {describeStageErrorHint(
+                                  sub.tool_check_error_code,
+                                )}
+                              </p>
+                            ) : null}
                           </div>
                         </div>
-                      ) : null}
 
-                      {/* Inline Request Admin Review Drawer */}
-                      {isReviewFormOpen ? (
-                        <div className="rounded-control border border-amber-400 bg-amber-50/70 p-3">
-                          <p className="text-xs font-bold text-amber-950">
-                            Gửi phiên bản v{sub.submission_version} sang Admin
-                            xem xét
-                          </p>
-                          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                            <label className="flex flex-col gap-1 text-xs font-semibold text-ink">
-                              Nguồn nội dung
+                        {/* Tool Check Scope Disclosure */}
+                        <p className="rounded-control border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                          <strong>Phạm vi Tool Check:</strong>{" "}
+                          {describeToolCheckScope(sub.tool_check_scope)}
+                        </p>
+
+                        {/* Parent Notice from Tool Check (non-sensitive summary) */}
+                        {sub.tool_check_parent_notice ||
+                        sub.tool_check_findings_count > 0 ? (
+                          <div className="rounded-control border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+                            <p className="flex items-center gap-1.5 font-bold">
+                              <AlertTriangle
+                                aria-hidden="true"
+                                className="size-4 shrink-0"
+                              />
+                              {sub.tool_check_findings_count > 0
+                                ? `Tool Check phát hiện ${sub.tool_check_findings_count} điểm cần người lớn xem xét.`
+                                : "Trang cần Admin xem xét trước khi thêm vào sách."}
+                            </p>
+                            {sub.tool_check_parent_notice ? (
+                              <p className="mt-1">
+                                {sub.tool_check_parent_notice}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {/* Candidate Text Preview */}
+                        {sub.candidate_text ? (
+                          <div className="rounded-control border border-border bg-canvas/70 p-3">
+                            <p className="text-xs font-bold text-ink">
+                              Nội dung dự kiến thêm vào sách:
+                            </p>
+                            <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-ink">
+                              {sub.candidate_text}
+                            </p>
+                          </div>
+                        ) : null}
+
+                        {/* Spelling Suggestions */}
+                        {sub.proofread_suggestions.length > 0 ? (
+                          <div className="rounded-control border border-sky-200 bg-sky/40 p-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p className="text-xs font-bold text-primary-hover">
+                                Đề xuất chính tả (
+                                {sub.proofread_suggestions.length})
+                                {sub.uncertain_word_indices.length > 0
+                                  ? ` · ${sub.uncertain_word_indices.length} từ cần chú ý`
+                                  : ""}
+                              </p>
+                              {sub.spelling_accepted ? (
+                                <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-800">
+                                  <CheckCircle2
+                                    aria-hidden="true"
+                                    className="size-3.5"
+                                  />
+                                  Đã chấp nhận đề xuất
+                                </span>
+                              ) : (
+                                <Button
+                                  className="min-h-9 w-auto px-3 text-xs"
+                                  disabled={isSubBusy}
+                                  onClick={() => void handleAcceptSpelling(sub)}
+                                  type="button"
+                                  variant="secondary"
+                                >
+                                  Chấp nhận đề xuất chính tả
+                                </Button>
+                              )}
+                            </div>
+                            <ul className="mt-2 space-y-1 text-xs text-ink">
+                              {sub.proofread_suggestions
+                                .slice(0, 6)
+                                .map((s, idx) => (
+                                  <li key={idx}>
+                                    <span className="line-through text-rose-700">
+                                      {s.original}
+                                    </span>{" "}
+                                    →{" "}
+                                    <span className="font-bold text-emerald-800">
+                                      {s.suggested}
+                                    </span>
+                                    {s.uncertain ? (
+                                      <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-900">
+                                        cần kiểm tra
+                                      </span>
+                                    ) : null}
+                                  </li>
+                                ))}
+                            </ul>
+                          </div>
+                        ) : null}
+
+                        {/* Admin Decision Feedback */}
+                        {sub.admin_decision ? (
+                          <div
+                            className={`rounded-control border p-3 text-xs ${
+                              sub.admin_decision === "APPROVE"
+                                ? "border-emerald-300 bg-emerald-50 text-emerald-950"
+                                : "border-rose-300 bg-rose-50 text-rose-950"
+                            }`}
+                          >
+                            <p className="font-bold">
+                              Quyết định từ Admin:{" "}
+                              {sub.admin_decision === "APPROVE"
+                                ? "Đã phê duyệt đúng phiên bản này"
+                                : sub.admin_decision === "REQUEST_CHANGES"
+                                  ? "Yêu cầu chỉnh sửa"
+                                  : "Đã từ chối"}
+                            </p>
+                            {sub.admin_decision_reason ? (
+                              <p className="mt-1">
+                                Lý do: {sub.admin_decision_reason}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {/* Inline Edit Text / Source Drawer */}
+                        {isEditing ? (
+                          <div className="rounded-control border border-primary/40 bg-canvas p-3">
+                            <p className="text-xs font-bold text-ink">
+                              Chỉnh sửa nội dung hoặc nguồn trang
+                            </p>
+                            <p className="mt-0.5 text-xs text-amber-900">
+                              Lưu ý: Chỉnh sửa sẽ tạo phiên bản mới, hủy kết quả
+                              kiểm tra / phê duyệt cũ và kiểm tra lại từ đầu (Rà
+                              chính tả → Tool Check an toàn).
+                            </p>
+                            <textarea
+                              aria-label="Chỉnh sửa văn bản trang"
+                              className="mt-2 min-h-24 w-full rounded-control border border-border bg-white p-2.5 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
+                              onChange={(event) =>
+                                setEditText(event.target.value)
+                              }
+                              value={editText}
+                            />
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
                               <select
-                                aria-label="Nguồn nội dung gửi Admin"
+                                aria-label="Nguồn nội dung khi chỉnh sửa"
                                 className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
                                 onChange={(event) =>
-                                  setReviewSourceType(
+                                  setEditSourceType(
                                     event.target.value as SourceUsageType,
                                   )
                                 }
-                                value={reviewSourceType}
+                                value={editSourceType}
                               >
                                 {SOURCE_USAGE_OPTIONS.map((opt) => (
                                   <option key={opt.value} value={opt.value}>
@@ -1721,174 +1724,253 @@ function ParentPrivateBookManagerContent({
                                   </option>
                                 ))}
                               </select>
-                            </label>
-                            <label className="flex flex-col gap-1 text-xs font-semibold text-ink">
-                              Ghi chú nguồn
                               <input
-                                aria-label="Ghi chú nguồn gửi Admin"
+                                aria-label="Ghi chú nguồn khi chỉnh sửa"
                                 className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
                                 onChange={(event) =>
-                                  setReviewSourceNote(event.target.value)
+                                  setEditSourceNote(event.target.value)
                                 }
-                                placeholder="Ví dụ: Sách gia đình mua cho bé"
-                                value={reviewSourceNote}
+                                placeholder="Ghi chú nguồn…"
+                                value={editSourceNote}
+                              />
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <Button
+                                className="min-h-10 w-auto px-4 text-xs"
+                                isLoading={busyKey === `edit:${sub.id}`}
+                                onClick={() => void handleSaveEdit(sub)}
+                                type="button"
+                              >
+                                Lưu phiên bản mới & kiểm tra lại
+                              </Button>
+                              <Button
+                                className="min-h-10 w-auto px-3 text-xs"
+                                onClick={() => setEditingSubId(null)}
+                                type="button"
+                                variant="secondary"
+                              >
+                                Đóng
+                              </Button>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {/* Inline Request Admin Review Drawer */}
+                        {isReviewFormOpen ? (
+                          <div className="rounded-control border border-amber-400 bg-amber-50/70 p-3">
+                            <p className="text-xs font-bold text-amber-950">
+                              Gửi phiên bản v{sub.submission_version} sang Admin
+                              xem xét
+                            </p>
+                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                              <label className="flex flex-col gap-1 text-xs font-semibold text-ink">
+                                Nguồn nội dung
+                                <select
+                                  aria-label="Nguồn nội dung gửi Admin"
+                                  className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
+                                  onChange={(event) =>
+                                    setReviewSourceType(
+                                      event.target.value as SourceUsageType,
+                                    )
+                                  }
+                                  value={reviewSourceType}
+                                >
+                                  {SOURCE_USAGE_OPTIONS.map((opt) => (
+                                    <option key={opt.value} value={opt.value}>
+                                      {opt.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label className="flex flex-col gap-1 text-xs font-semibold text-ink">
+                                Ghi chú nguồn
+                                <input
+                                  aria-label="Ghi chú nguồn gửi Admin"
+                                  className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
+                                  onChange={(event) =>
+                                    setReviewSourceNote(event.target.value)
+                                  }
+                                  placeholder="Ví dụ: Sách gia đình mua cho bé"
+                                  value={reviewSourceNote}
+                                />
+                              </label>
+                            </div>
+                            <label className="mt-2 flex flex-col gap-1 text-xs font-semibold text-ink">
+                              Lời nhắn cho Admin (giải thích ngữ cảnh)
+                              <textarea
+                                aria-label="Lời nhắn cho Admin"
+                                className="min-h-20 rounded-control border border-border bg-white p-2 text-xs text-ink"
+                                onChange={(event) =>
+                                  setReviewRequestNote(event.target.value)
+                                }
+                                placeholder="Ví dụ: Đây là truyện ngụ ngôn lớp 2, mong Admin xem xét duyệt trang này."
+                                value={reviewRequestNote}
                               />
                             </label>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <Button
+                                className="min-h-10 w-auto px-4 text-xs"
+                                isLoading={busyKey === `review:${sub.id}`}
+                                onClick={() =>
+                                  void handleRequestAdminReview(sub)
+                                }
+                                type="button"
+                              >
+                                <Send aria-hidden="true" className="size-3.5" />
+                                Xác nhận gửi Admin
+                              </Button>
+                              <Button
+                                className="min-h-10 w-auto px-3 text-xs"
+                                onClick={() => setReviewFormSubId(null)}
+                                type="button"
+                                variant="secondary"
+                              >
+                                Hủy
+                              </Button>
+                            </div>
                           </div>
-                          <label className="mt-2 flex flex-col gap-1 text-xs font-semibold text-ink">
-                            Lời nhắn cho Admin (giải thích ngữ cảnh)
-                            <textarea
-                              aria-label="Lời nhắn cho Admin"
-                              className="min-h-20 rounded-control border border-border bg-white p-2 text-xs text-ink"
-                              onChange={(event) =>
-                                setReviewRequestNote(event.target.value)
-                              }
-                              placeholder="Ví dụ: Đây là truyện ngụ ngôn lớp 2, mong Admin xem xét duyệt trang này."
-                              value={reviewRequestNote}
-                            />
-                          </label>
-                          <div className="mt-3 flex flex-wrap gap-2">
+                        ) : null}
+
+                        {/* Primary Action Bar */}
+                        <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+                          {/* Add Page to Book — STRICTLY LOCKED unless can_add_to_book */}
+                          {sub.workflow_status !== "ADDED_TO_BOOK" ? (
                             <Button
-                              className="min-h-10 w-auto px-4 text-xs"
-                              isLoading={busyKey === `review:${sub.id}`}
-                              onClick={() => void handleRequestAdminReview(sub)}
+                              className="min-h-11 w-auto px-4 text-sm"
+                              disabled={
+                                !sub.can_add_to_book || isSubBusy || isSuspended
+                              }
+                              isLoading={busyKey === `add:${sub.id}`}
+                              onClick={() => void handleAddPage(sub)}
                               type="button"
                             >
-                              <Send aria-hidden="true" className="size-3.5" />
-                              Xác nhận gửi Admin
+                              <ShieldCheck
+                                aria-hidden="true"
+                                className="size-4"
+                              />
+                              Thêm trang vào sách
                             </Button>
+                          ) : (
+                            <span className="inline-flex min-h-10 items-center gap-1.5 rounded-control bg-teal-50 px-3 text-xs font-bold text-teal-900">
+                              <CheckCircle2
+                                aria-hidden="true"
+                                className="size-4"
+                              />
+                              Đã thêm vào sách đọc
+                            </span>
+                          )}
+
+                          {/* Escalate to Admin */}
+                          {sub.can_request_admin_review && !isReviewFormOpen ? (
                             <Button
-                              className="min-h-10 w-auto px-3 text-xs"
-                              onClick={() => setReviewFormSubId(null)}
+                              className="min-h-11 w-auto px-4 text-sm"
+                              disabled={isSubBusy || isSuspended}
+                              onClick={() => {
+                                setReviewFormSubId(sub.id);
+                                setReviewSourceType(sub.source_type);
+                                setReviewSourceNote(sub.source_note ?? "");
+                                setReviewRequestNote("");
+                              }}
                               type="button"
                               variant="secondary"
                             >
-                              Hủy
+                              <Send aria-hidden="true" className="size-4" />
+                              Gửi Admin xem xét
                             </Button>
-                          </div>
-                        </div>
-                      ) : null}
+                          ) : null}
 
-                      {/* Primary Action Bar */}
-                      <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
-                        {/* Add Page to Book — STRICTLY LOCKED unless can_add_to_book */}
-                        {sub.workflow_status !== "ADDED_TO_BOOK" ? (
-                          <Button
-                            className="min-h-11 w-auto px-4 text-sm"
-                            disabled={
-                              !sub.can_add_to_book || isSubBusy || isSuspended
-                            }
-                            isLoading={busyKey === `add:${sub.id}`}
-                            onClick={() => void handleAddPage(sub)}
-                            type="button"
-                          >
-                            <ShieldCheck
-                              aria-hidden="true"
-                              className="size-4"
-                            />
-                            Thêm trang vào sách
-                          </Button>
-                        ) : (
-                          <span className="inline-flex min-h-10 items-center gap-1.5 rounded-control bg-teal-50 px-3 text-xs font-bold text-teal-900">
-                            <CheckCircle2
-                              aria-hidden="true"
-                              className="size-4"
-                            />
-                            Đã thêm vào sách đọc
-                          </span>
-                        )}
-
-                        {/* Escalate to Admin */}
-                        {sub.can_request_admin_review && !isReviewFormOpen ? (
-                          <Button
-                            className="min-h-11 w-auto px-4 text-sm"
-                            disabled={isSubBusy || isSuspended}
-                            onClick={() => {
-                              setReviewFormSubId(sub.id);
-                              setReviewSourceType(sub.source_type);
-                              setReviewSourceNote(sub.source_note ?? "");
-                              setReviewRequestNote("");
-                            }}
-                            type="button"
-                            variant="secondary"
-                          >
-                            <Send aria-hidden="true" className="size-4" />
-                            Gửi Admin xem xét
-                          </Button>
-                        ) : null}
-
-                        {/* Stage-preserving Retry */}
-                        {sub.can_retry ? (
-                          <Button
-                            className="min-h-11 w-auto px-4 text-sm"
-                            disabled={isSubBusy || isSuspended}
-                            isLoading={busyKey === `retry:${sub.id}`}
-                            onClick={() => void handleRetry(sub)}
-                            type="button"
-                            variant="secondary"
-                          >
-                            <RotateCcw aria-hidden="true" className="size-4" />
-                            Thử lại kiểm tra
-                          </Button>
-                        ) : null}
-
-                        {/* Edit text / Replace image */}
-                        {sub.workflow_status !== "ADDED_TO_BOOK" &&
-                        !isSuspended ? (
-                          <>
+                          {/* Stage-preserving Retry */}
+                          {sub.can_retry ? (
                             <Button
-                              className="min-h-10 w-auto px-3 text-xs"
-                              disabled={isSubBusy}
-                              onClick={() => {
-                                setEditingSubId(sub.id);
-                                setEditText(sub.candidate_text ?? "");
-                                setEditSourceType(sub.source_type);
-                                setEditSourceNote(sub.source_note ?? "");
-                              }}
+                              className="min-h-11 w-auto px-4 text-sm"
+                              disabled={isSubBusy || isSuspended}
+                              isLoading={busyKey === `retry:${sub.id}`}
+                              onClick={() => void handleRetry(sub)}
                               type="button"
-                              variant="quiet"
+                              variant="secondary"
                             >
-                              <Pencil aria-hidden="true" className="size-3.5" />
-                              Sửa nội dung
-                            </Button>
-
-                            <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-control border border-border bg-white px-3 text-xs font-semibold text-ink hover:bg-canvas">
-                              <Upload aria-hidden="true" className="size-3.5" />
-                              Thay ảnh
-                              <input
-                                accept={ACCEPTED_UPLOAD_EXTENSIONS}
-                                aria-label={`Thay ảnh cho trang nguồn ${sub.source_page_number}`}
-                                className="sr-only"
-                                disabled={isSubBusy}
-                                onChange={(event) => {
-                                  const nextFile = event.target.files?.[0];
-                                  if (nextFile) {
-                                    void handleReplaceFile(sub, nextFile);
-                                  }
-                                  event.target.value = "";
-                                }}
-                                type="file"
+                              <RotateCcw
+                                aria-hidden="true"
+                                className="size-4"
                               />
-                            </label>
-                          </>
+                              Thử lại kiểm tra
+                            </Button>
+                          ) : null}
+
+                          {/* Edit text / Replace image */}
+                          {sub.workflow_status !== "ADDED_TO_BOOK" &&
+                          !isSuspended ? (
+                            <>
+                              <Button
+                                className="min-h-10 w-auto px-3 text-xs"
+                                disabled={isSubBusy}
+                                onClick={() => {
+                                  setEditingSubId(sub.id);
+                                  setEditText(sub.candidate_text ?? "");
+                                  setEditSourceType(sub.source_type);
+                                  setEditSourceNote(sub.source_note ?? "");
+                                }}
+                                type="button"
+                                variant="quiet"
+                              >
+                                <Pencil
+                                  aria-hidden="true"
+                                  className="size-3.5"
+                                />
+                                Sửa nội dung
+                              </Button>
+
+                              <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-control border border-border bg-white px-3 text-xs font-semibold text-ink hover:bg-canvas">
+                                <Upload
+                                  aria-hidden="true"
+                                  className="size-3.5"
+                                />
+                                Thay ảnh
+                                <input
+                                  accept={ACCEPTED_UPLOAD_EXTENSIONS}
+                                  aria-label={`Thay ảnh cho trang nguồn ${sub.source_page_number}`}
+                                  className="sr-only"
+                                  disabled={isSubBusy}
+                                  onChange={(event) => {
+                                    const nextFile = event.target.files?.[0];
+                                    if (nextFile) {
+                                      void handleReplaceFile(sub, nextFile);
+                                    }
+                                    event.target.value = "";
+                                  }}
+                                  type="file"
+                                />
+                              </label>
+                            </>
+                          ) : null}
+                        </div>
+
+                        {lockReason &&
+                        sub.workflow_status !== "ADDED_TO_BOOK" ? (
+                          <p className="text-xs font-medium text-amber-900">
+                            <Lock
+                              aria-hidden="true"
+                              className="mr-1 inline size-3.5 align-text-bottom"
+                            />
+                            {lockReason}
+                          </p>
                         ) : null}
                       </div>
-
-                      {lockReason && sub.workflow_status !== "ADDED_TO_BOOK" ? (
-                        <p className="text-xs font-medium text-amber-900">
-                          <Lock
-                            aria-hidden="true"
-                            className="mr-1 inline size-3.5 align-text-bottom"
-                          />
-                          {lockReason}
-                        </p>
-                      ) : null}
                     </div>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
+                  </article>
+                );
+              })}
+            </div>
+            <PaginationBar
+              ariaLabel="Phân trang các trang đang kiểm tra"
+              compact
+              itemLabel="trang"
+              onPageChange={setSubmissionsPage}
+              page={safeSubmissionsPage}
+              pageSize={SUBMISSIONS_PAGE_SIZE}
+              total={activeSubmissions.length}
+            />
+          </>
         )}
       </section>
 
@@ -1909,213 +1991,228 @@ function ParentPrivateBookManagerContent({
             được Admin duyệt), bấm <strong>Thêm trang vào sách</strong> ở trên.
           </p>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {committedPages.map((page) => {
-              const isEditingPage = editingPageId === page.page_id;
-              const isConfirmingDelete = confirmDeletePageId === page.page_id;
-              const isPageBusy =
-                busyKey !== null && busyKey.endsWith(`:${page.page_id}`);
-              return (
-                <article
-                  key={page.page_id}
-                  data-committed-page-id={page.page_id}
-                  className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 shadow-sm"
-                >
-                  <div className="h-40 w-full overflow-hidden rounded-control bg-cream">
-                    <AuthenticatedImage
-                      alt={`Ảnh trang ${page.page_number}`}
-                      className="h-full w-full object-contain p-2"
-                      src={page.image_url}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-sm font-bold text-ink">
-                      Trang {page.page_number}
-                    </p>
-                    <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-bold text-teal-800">
-                      Đang mở đọc
-                    </span>
-                  </div>
-                  {page.verified_text_preview ? (
-                    <p className="line-clamp-3 text-xs text-muted">
-                      {page.verified_text_preview}
-                    </p>
-                  ) : null}
+          <>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {visibleCommittedPages.map((page) => {
+                const isEditingPage = editingPageId === page.page_id;
+                const isConfirmingDelete = confirmDeletePageId === page.page_id;
+                const isPageBusy =
+                  busyKey !== null && busyKey.endsWith(`:${page.page_id}`);
+                return (
+                  <article
+                    key={page.page_id}
+                    data-committed-page-id={page.page_id}
+                    className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 shadow-sm"
+                  >
+                    <div className="h-40 w-full overflow-hidden rounded-control bg-cream">
+                      <AuthenticatedImage
+                        alt={`Ảnh trang ${page.page_number}`}
+                        className="h-full w-full object-contain p-2"
+                        src={page.image_url}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-bold text-ink">
+                        Trang {page.page_number}
+                      </p>
+                      <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-bold text-teal-800">
+                        Đang mở đọc
+                      </span>
+                    </div>
+                    {page.verified_text_preview ? (
+                      <p className="line-clamp-3 text-xs text-muted">
+                        {page.verified_text_preview}
+                      </p>
+                    ) : null}
 
-                  <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-border pt-2.5">
-                    {!isSuspended ? (
-                      <>
-                        <button
-                          aria-label={`Sửa nội dung trang ${page.page_number}`}
-                          className="inline-flex min-h-9 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas disabled:opacity-50"
-                          disabled={isPageBusy || busyKey !== null}
-                          onClick={() =>
-                            isEditingPage
-                              ? setEditingPageId(null)
-                              : startEditCommittedPage(page)
-                          }
-                          type="button"
-                        >
-                          <Pencil aria-hidden="true" className="size-3.5" />
-                          Sửa trang
-                        </button>
-                        <label className="inline-flex min-h-9 cursor-pointer items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas">
-                          <Upload aria-hidden="true" className="size-3.5" />
-                          Thay ảnh
-                          <input
-                            accept={ACCEPTED_UPLOAD_EXTENSIONS}
-                            aria-label={`Thay ảnh cho trang ${page.page_number}`}
-                            className="sr-only"
+                    <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-border pt-2.5">
+                      {!isSuspended ? (
+                        <>
+                          <button
+                            aria-label={`Sửa nội dung trang ${page.page_number}`}
+                            className="inline-flex min-h-9 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas disabled:opacity-50"
                             disabled={isPageBusy || busyKey !== null}
-                            onChange={(event) => {
-                              const nextFile = event.target.files?.[0];
-                              if (nextFile) {
-                                void handleReplaceCommittedPageFile(
-                                  page,
-                                  nextFile,
-                                );
-                              }
-                              event.target.value = "";
-                            }}
-                            type="file"
+                            onClick={() =>
+                              isEditingPage
+                                ? setEditingPageId(null)
+                                : startEditCommittedPage(page)
+                            }
+                            type="button"
+                          >
+                            <Pencil aria-hidden="true" className="size-3.5" />
+                            Sửa trang
+                          </button>
+                          <label className="inline-flex min-h-9 cursor-pointer items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas">
+                            <Upload aria-hidden="true" className="size-3.5" />
+                            Thay ảnh
+                            <input
+                              accept={ACCEPTED_UPLOAD_EXTENSIONS}
+                              aria-label={`Thay ảnh cho trang ${page.page_number}`}
+                              className="sr-only"
+                              disabled={isPageBusy || busyKey !== null}
+                              onChange={(event) => {
+                                const nextFile = event.target.files?.[0];
+                                if (nextFile) {
+                                  void handleReplaceCommittedPageFile(
+                                    page,
+                                    nextFile,
+                                  );
+                                }
+                                event.target.value = "";
+                              }}
+                              type="file"
+                            />
+                          </label>
+                        </>
+                      ) : null}
+                      <button
+                        aria-label={`Xóa trang ${page.page_number}`}
+                        className="inline-flex min-h-9 items-center gap-1 rounded-control border border-rose-200 bg-white px-2.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+                        disabled={isPageBusy || busyKey !== null}
+                        onClick={() => {
+                          setEditingPageId(null);
+                          setConfirmDeletePageId((prev) =>
+                            prev === page.page_id ? null : page.page_id,
+                          );
+                        }}
+                        type="button"
+                      >
+                        <Trash2 aria-hidden="true" className="size-3.5" />
+                        Xóa trang
+                      </button>
+                    </div>
+
+                    {isEditingPage ? (
+                      <div className="flex flex-col gap-2.5 rounded-control border border-amber-300 bg-amber-50/70 p-3 text-xs">
+                        <p className="font-bold text-amber-950">
+                          Lưu ý: Khi sửa trang đã thêm, trang sẽ tạm gỡ khỏi
+                          sách đọc và kiểm tra lại từ đầu (Rà chính tả → Tool
+                          Check an toàn).
+                        </p>
+                        <label className="flex flex-col gap-1 font-semibold text-ink">
+                          Số trang
+                          <input
+                            aria-label={`Số trang chỉnh sửa trang ${page.page_number}`}
+                            className="min-h-9 w-28 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
+                            min={1}
+                            onChange={(event) =>
+                              setEditPageNumber(
+                                Math.max(1, Number(event.target.value) || 1),
+                              )
+                            }
+                            type="number"
+                            value={editPageNumber}
                           />
                         </label>
-                      </>
-                    ) : null}
-                    <button
-                      aria-label={`Xóa trang ${page.page_number}`}
-                      className="inline-flex min-h-9 items-center gap-1 rounded-control border border-rose-200 bg-white px-2.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-                      disabled={isPageBusy || busyKey !== null}
-                      onClick={() => {
-                        setEditingPageId(null);
-                        setConfirmDeletePageId((prev) =>
-                          prev === page.page_id ? null : page.page_id,
-                        );
-                      }}
-                      type="button"
-                    >
-                      <Trash2 aria-hidden="true" className="size-3.5" />
-                      Xóa trang
-                    </button>
-                  </div>
-
-                  {isEditingPage ? (
-                    <div className="flex flex-col gap-2.5 rounded-control border border-amber-300 bg-amber-50/70 p-3 text-xs">
-                      <p className="font-bold text-amber-950">
-                        Lưu ý: Khi sửa trang đã thêm, trang sẽ tạm gỡ khỏi sách
-                        đọc và kiểm tra lại từ đầu (Rà chính tả → Tool Check an
-                        toàn).
-                      </p>
-                      <label className="flex flex-col gap-1 font-semibold text-ink">
-                        Số trang
-                        <input
-                          aria-label={`Số trang chỉnh sửa trang ${page.page_number}`}
-                          className="min-h-9 w-28 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
-                          min={1}
+                        <label className="flex flex-col gap-1 font-semibold text-ink">
+                          Nội dung văn bản trang
+                          <textarea
+                            aria-label={`Chỉnh sửa văn bản trang ${page.page_number}`}
+                            className="min-h-24 w-full rounded-control border border-border bg-white p-2 text-xs text-ink"
+                            onChange={(event) =>
+                              setEditPageText(event.target.value)
+                            }
+                            value={editPageText}
+                          />
+                        </label>
+                        <select
+                          aria-label={`Nguồn nội dung trang ${page.page_number}`}
+                          className="min-h-9 rounded-control border border-border bg-white px-2 text-xs text-ink"
                           onChange={(event) =>
-                            setEditPageNumber(
-                              Math.max(1, Number(event.target.value) || 1),
+                            setEditPageSourceType(
+                              event.target.value as SourceUsageType,
                             )
                           }
-                          type="number"
-                          value={editPageNumber}
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1 font-semibold text-ink">
-                        Nội dung văn bản trang
-                        <textarea
-                          aria-label={`Chỉnh sửa văn bản trang ${page.page_number}`}
-                          className="min-h-24 w-full rounded-control border border-border bg-white p-2 text-xs text-ink"
+                          value={editPageSourceType}
+                        >
+                          {SOURCE_USAGE_OPTIONS.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          aria-label={`Ghi chú nguồn trang ${page.page_number}`}
+                          className="min-h-9 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
                           onChange={(event) =>
-                            setEditPageText(event.target.value)
+                            setEditPageSourceNote(event.target.value)
                           }
-                          value={editPageText}
+                          placeholder="Ghi chú nguồn…"
+                          type="text"
+                          value={editPageSourceNote}
                         />
-                      </label>
-                      <select
-                        aria-label={`Nguồn nội dung trang ${page.page_number}`}
-                        className="min-h-9 rounded-control border border-border bg-white px-2 text-xs text-ink"
-                        onChange={(event) =>
-                          setEditPageSourceType(
-                            event.target.value as SourceUsageType,
-                          )
-                        }
-                        value={editPageSourceType}
-                      >
-                        {SOURCE_USAGE_OPTIONS.map((opt) => (
-                          <option key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        aria-label={`Ghi chú nguồn trang ${page.page_number}`}
-                        className="min-h-9 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
-                        onChange={(event) =>
-                          setEditPageSourceNote(event.target.value)
-                        }
-                        placeholder="Ghi chú nguồn…"
-                        type="text"
-                        value={editPageSourceNote}
-                      />
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          className="min-h-9 w-auto px-3 text-xs"
-                          isLoading={busyKey === `page-edit:${page.page_id}`}
-                          onClick={() => void handleSaveCommittedPageEdit(page)}
-                          type="button"
-                        >
-                          Lưu & kiểm tra lại
-                        </Button>
-                        <Button
-                          className="min-h-9 w-auto px-3 text-xs"
-                          onClick={() => setEditingPageId(null)}
-                          type="button"
-                          variant="secondary"
-                        >
-                          Hủy
-                        </Button>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            className="min-h-9 w-auto px-3 text-xs"
+                            isLoading={busyKey === `page-edit:${page.page_id}`}
+                            onClick={() =>
+                              void handleSaveCommittedPageEdit(page)
+                            }
+                            type="button"
+                          >
+                            Lưu & kiểm tra lại
+                          </Button>
+                          <Button
+                            className="min-h-9 w-auto px-3 text-xs"
+                            onClick={() => setEditingPageId(null)}
+                            type="button"
+                            variant="secondary"
+                          >
+                            Hủy
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                  ) : null}
+                    ) : null}
 
-                  {isConfirmingDelete ? (
-                    <div
-                      role="alertdialog"
-                      aria-label={`Xác nhận xóa trang ${page.page_number}`}
-                      className="flex flex-col gap-2 rounded-control border border-rose-300 bg-rose-50 p-3 text-xs text-rose-950"
-                    >
-                      <p className="font-bold">
-                        Xóa trang {page.page_number} ngay?
-                      </p>
-                      <p>
-                        Trang sẽ bị xóa khỏi sách đọc ngay lập tức và không cần
-                        kiểm tra lại các trang khác.
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          className="min-h-9 w-auto bg-rose-700 px-3 text-xs text-white hover:bg-rose-800"
-                          isLoading={busyKey === `page-delete:${page.page_id}`}
-                          onClick={() => void handleDeleteCommittedPage(page)}
-                          type="button"
-                        >
-                          Xác nhận xóa
-                        </Button>
-                        <Button
-                          className="min-h-9 w-auto px-3 text-xs"
-                          onClick={() => setConfirmDeletePageId(null)}
-                          type="button"
-                          variant="secondary"
-                        >
-                          Hủy
-                        </Button>
+                    {isConfirmingDelete ? (
+                      <div
+                        role="alertdialog"
+                        aria-label={`Xác nhận xóa trang ${page.page_number}`}
+                        className="flex flex-col gap-2 rounded-control border border-rose-300 bg-rose-50 p-3 text-xs text-rose-950"
+                      >
+                        <p className="font-bold">
+                          Xóa trang {page.page_number} ngay?
+                        </p>
+                        <p>
+                          Trang sẽ bị xóa khỏi sách đọc ngay lập tức và không
+                          cần kiểm tra lại các trang khác.
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            className="min-h-9 w-auto bg-rose-700 px-3 text-xs text-white hover:bg-rose-800"
+                            isLoading={
+                              busyKey === `page-delete:${page.page_id}`
+                            }
+                            onClick={() => void handleDeleteCommittedPage(page)}
+                            type="button"
+                          >
+                            Xác nhận xóa
+                          </Button>
+                          <Button
+                            className="min-h-9 w-auto px-3 text-xs"
+                            onClick={() => setConfirmDeletePageId(null)}
+                            type="button"
+                            variant="secondary"
+                          >
+                            Hủy
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                  ) : null}
-                </article>
-              );
-            })}
-          </div>
+                    ) : null}
+                  </article>
+                );
+              })}
+            </div>
+            <PaginationBar
+              ariaLabel="Phân trang các trang đã thêm vào sách"
+              compact
+              itemLabel="trang"
+              onPageChange={setCommittedPage}
+              page={safeCommittedPage}
+              pageSize={COMMITTED_PAGES_PAGE_SIZE}
+              total={committedPages.length}
+            />
+          </>
         )}
       </section>
     </section>

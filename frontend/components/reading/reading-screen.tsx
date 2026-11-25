@@ -3,6 +3,7 @@
 import {
   ArrowLeft,
   BookOpen,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   RefreshCw,
@@ -32,12 +33,24 @@ import {
   type SupportedPhonicsLessonPlan,
 } from "@/lib/reading/phonics-lesson";
 import {
+  getActiveSessionVoiceLock,
   getEffectiveTeacherPersona,
+  getVoicePolicyPreferences,
   lockSessionVoice,
   setActiveVoiceSession,
+  subscribeVoicePolicy,
 } from "@/lib/reading/session-voice-lock";
-import { recordSttEngineUsage } from "@/lib/reading/voice-engine-status";
-import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
+import {
+  fetchVoiceEngineHealth,
+  getVoiceEngineStatus,
+  mapLocalVoiceToGoogleBackup,
+  recordSttEngineUsage,
+  recordTtsEngineUsage,
+} from "@/lib/reading/voice-engine-status";
+import {
+  adaptTextToTeacherPersona,
+  resolveVoiceGender,
+} from "@/lib/reading/voice-persona";
 import {
   classifyRetryTranscript,
   classifyYesNoVoiceIntent,
@@ -300,6 +313,7 @@ function ReadingSessionScreen({
         : "connected",
     );
   const [confirmFinish, setConfirmFinish] = useState(false);
+  const [pageOptionsOpen, setPageOptionsOpen] = useState(false);
   const pickerShouldReturnToReading = useRef(false);
   const [pickerIndex, setPickerIndex] = useState<number | null>(null);
   const [tutorOpen, setTutorOpen] = useState(false);
@@ -685,6 +699,110 @@ function ReadingSessionScreen({
       }
     };
   }, [cancelRecording, sessionId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let controller: AbortController | null = null;
+
+    const probeVoiceStatus = () => {
+      controller?.abort();
+      controller = new AbortController();
+      const signal = controller.signal;
+      void fetchVoiceEngineHealth(signal).then((health) => {
+        if (cancelled || signal.aborted || !health) return;
+        const policy = getVoicePolicyPreferences();
+        const sttAllowsFallback =
+          policy.providerMode === "local_with_google_fallback" &&
+          policy.allowGoogleSttFallback;
+        const ttsAllowsFallback =
+          policy.providerMode === "local_with_google_fallback" &&
+          policy.allowGoogleTtsFallback;
+        const localSttDown = !health.local.available || !health.local.stt_ready;
+        const localTtsDown = !health.local.available || !health.local.tts_ready;
+
+        if (sttAllowsFallback && localSttDown) {
+          const useGoogleStt =
+            health.google.stt_configured && !health.google.stt_cooldown;
+          recordSttEngineUsage({
+            provider: useGoogleStt ? "google" : "browser",
+            fallbackUsed: true,
+            fallbackReason: "LOCAL_STT_UNAVAILABLE",
+          });
+        } else if (
+          !localSttDown ||
+          (!sttAllowsFallback && getVoiceEngineStatus().stt.fallbackUsed)
+        ) {
+          recordSttEngineUsage({
+            provider: "local",
+            fallbackUsed: false,
+            fallbackReason: null,
+          });
+        }
+
+        if (ttsAllowsFallback && localTtsDown) {
+          const useGoogleTts =
+            health.google.tts_configured && !health.google.tts_cooldown;
+          const activeLock = getActiveSessionVoiceLock();
+          if (useGoogleTts) {
+            const googleVoiceId = mapLocalVoiceToGoogleBackup(
+              activeLock?.voiceId ?? null,
+              activeLock?.region ?? policy.region,
+            );
+            recordTtsEngineUsage({
+              provider: "google",
+              fallbackUsed: true,
+              fallbackReason: "LOCAL_TTS_UNAVAILABLE",
+              voiceId: googleVoiceId,
+              voiceGender: resolveVoiceGender(googleVoiceId),
+            });
+          } else {
+            recordTtsEngineUsage({
+              provider: "browser",
+              fallbackUsed: true,
+              fallbackReason: "LOCAL_TTS_UNAVAILABLE",
+              voiceId: activeLock?.voiceId ?? null,
+              voiceGender: resolveVoiceGender(activeLock?.voiceId),
+            });
+          }
+        } else if (
+          !localTtsDown ||
+          (!ttsAllowsFallback && getVoiceEngineStatus().tts.fallbackUsed)
+        ) {
+          const activeLock = getActiveSessionVoiceLock();
+          recordTtsEngineUsage({
+            provider: "local",
+            fallbackUsed: false,
+            fallbackReason: null,
+            voiceId: activeLock?.voiceId ?? null,
+            voiceGender: resolveVoiceGender(activeLock?.voiceId),
+          });
+        }
+      });
+    };
+
+    probeVoiceStatus();
+    const unsubscribe = subscribeVoicePolicy(() => {
+      probeVoiceStatus();
+    });
+    const recoveryTimer =
+      typeof window !== "undefined"
+        ? window.setInterval(() => {
+            const status = getVoiceEngineStatus();
+            if (status.stt.fallbackUsed || status.tts.fallbackUsed) {
+              probeVoiceStatus();
+            }
+          }, 45_000)
+        : null;
+
+    return () => {
+      cancelled = true;
+      controller?.abort();
+      unsubscribe();
+      if (recoveryTimer !== null && typeof window !== "undefined") {
+        window.clearInterval(recoveryTimer);
+      }
+    };
+  }, [sessionId]);
 
   useEffect(() => {
     if (countdown === null) return;
@@ -1158,6 +1276,9 @@ function ReadingSessionScreen({
     setCompanionBubble(null);
     sentenceReinforcementRef.current.reset();
     setActiveSentenceReinforcement(null);
+    setActivePhonicsLesson(null);
+    setActivePhonicsStepIndex(null);
+    setPhonicsStatusHint(null);
     lastPreviewTranscriptRef.current = null;
     setPreviewSnapshot(null);
     lastPreviewWordIndexRef.current = -1;
@@ -1991,14 +2112,23 @@ function ReadingSessionScreen({
         const SpeechRec = resolveLocalFirstSpeechRecognitionConstructor(
           win,
           speechService,
-          () => ({
-            sessionId,
-            pageId: page?.page_id ?? null,
-            keyterms: (page?.words ?? [])
-              .map((w) => w.text.normalize("NFC").trim())
-              .filter(Boolean)
-              .slice(0, 40),
-          }),
+          () => {
+            const words = page?.words ?? [];
+            const cursorIdx = Math.max(
+              0,
+              alignmentEngineRef.current?.getSnapshot().currentWordIndex ?? 0,
+            );
+            const windowStart = Math.max(0, cursorIdx - 12);
+            const windowEnd = Math.min(words.length, cursorIdx + 48);
+            return {
+              sessionId,
+              pageId: page?.page_id ?? null,
+              keyterms: words
+                .slice(windowStart, windowEnd)
+                .map((w) => w.text.normalize("NFC").trim())
+                .filter(Boolean),
+            };
+          },
           () => speechRecorder.getStream?.()?.getAudioTracks()?.[0],
         ) as (new () => BrowserSpeechRecognition) | undefined;
         if (SpeechRec) {
@@ -2461,18 +2591,25 @@ function ReadingSessionScreen({
               armGrace(isLocalSegmentRec ? 1_850 : 1_400);
             }
 
-            // 4. Cập nhật nội dung transcript (tránh setState lặp khi interim giống hệt).
+            // 4. Cập nhật nội dung transcript (tránh setState lặp khi interim giống hệt,
+            // và không bao giờ nối final đè sau interim chưa chốt của cùng một câu).
             if (!mountedRef.current) return;
 
+            const committedTranscript = browserTranscriptCollectorRef.current
+              .getTranscript()
+              .trim();
             if (trimmedInterim) {
-              if (lastPreviewTranscriptRef.current !== trimmedInterim) {
-                lastPreviewTranscriptRef.current = trimmedInterim;
-                setLatestTranscript(trimmedInterim);
+              const liveDisplay = [committedTranscript, trimmedInterim]
+                .filter(Boolean)
+                .join(" ");
+              if (lastPreviewTranscriptRef.current !== liveDisplay) {
+                lastPreviewTranscriptRef.current = liveDisplay;
+                setLatestTranscript(liveDisplay);
               }
             } else if (latestFinalText.trim()) {
               lastPreviewTranscriptRef.current = null;
-              setLatestTranscript((previous) =>
-                [previous, latestFinalText.trim()].filter(Boolean).join(" "),
+              setLatestTranscript(
+                committedTranscript || latestFinalText.trim(),
               );
             }
 
@@ -2747,9 +2884,16 @@ function ReadingSessionScreen({
       words: readonly WordTimestamp[] | null;
     } | null = null;
 
+    const sttStatus = getVoiceEngineStatus().stt;
+    const alreadyUsingEmergencyBrowserStt =
+      Boolean(browserText) &&
+      sttStatus.tier === "browser_default" &&
+      sttStatus.fallbackReason === "LOCAL_STT_UNAVAILABLE";
+
     if (
       !passageContainsHelpRef.current &&
       !(handoff && browserText) &&
+      !alreadyUsingEmergencyBrowserStt &&
       recording &&
       recording.size > 0 &&
       !hasUnusableAudio(speechRecorder.getQuality?.())
@@ -5893,104 +6037,152 @@ function ReadingSessionScreen({
     );
   }
 
+  const hasTopBarContent = Boolean(
+    pageProgress ||
+    (pageNavigationError && pickerIndex === null) ||
+    speechPlayer.fallbackNotice,
+  );
+
+  const readingTopBar = hasTopBarContent ? (
+    <div className="flex flex-col gap-1 border-b border-border/80 pb-1.5">
+      {pageProgress ? (
+        <div className="flex flex-wrap items-center gap-1 sm:gap-2.5">
+          <div className="flex min-w-0 flex-nowrap items-center gap-1 sm:gap-1.5">
+            <Button
+              aria-label="Trang trước"
+              className="h-11! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! sm:gap-2! sm:px-2.5! sm:text-sm!"
+              disabled={
+                (isBusy && !speechPlayer.isPlaying) ||
+                uiState !== "reading" ||
+                pageProgress.current_index <= 0
+              }
+              onClick={() =>
+                void navigateWithinRange(pageProgress.current_index - 1)
+              }
+              variant="secondary"
+            >
+              <ChevronLeft
+                aria-hidden="true"
+                className="size-4 shrink-0 sm:size-5"
+              />
+              <span className="hidden sm:inline">Trang trước</span>
+              <span className="sm:hidden">Trước</span>
+            </Button>
+            <Button
+              aria-label="Trang tiếp theo"
+              className="h-11! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! sm:gap-2! sm:px-2.5! sm:text-sm!"
+              disabled={
+                (isBusy && !speechPlayer.isPlaying) ||
+                uiState !== "reading" ||
+                pageProgress.current_index >= pageProgress.total_pages - 1
+              }
+              onClick={() =>
+                void navigateWithinRange(pageProgress.current_index + 1)
+              }
+              variant="secondary"
+            >
+              <span className="hidden sm:inline">Trang tiếp theo</span>
+              <span className="sm:hidden">Tiếp</span>
+              <ChevronRight
+                aria-hidden="true"
+                className="size-4 shrink-0 sm:size-5"
+              />
+            </Button>
+            {pageProgress.persisted &&
+            pageProgress.pages[pageProgress.current_index]?.status !==
+              "COMPLETED" ? (
+              <Button
+                aria-label="Đánh dấu trang đã đọc xong"
+                className="h-11! w-auto! min-w-0 px-2! py-1! text-xs! sm:px-2.5! sm:text-sm!"
+                disabled={isBusy || uiState !== "reading"}
+                onClick={() => void confirmCurrentPageCompleted()}
+                variant="quiet"
+              >
+                <span className="hidden sm:inline">
+                  Đánh dấu trang đã đọc xong
+                </span>
+                <span className="sm:hidden">Xong trang</span>
+              </Button>
+            ) : null}
+          </div>
+
+          <button
+            type="button"
+            aria-label="Tùy chọn trang"
+            aria-expanded={pageOptionsOpen}
+            aria-controls="reading-page-options"
+            onClick={() => setPageOptionsOpen((open) => !open)}
+            className="ml-auto inline-flex min-h-11 shrink-0 items-center gap-1 rounded-control border border-border bg-white px-2 text-xs font-semibold text-ink hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:hidden"
+          >
+            <span>Tùy chọn</span>
+            <ChevronDown
+              aria-hidden="true"
+              className={`size-4 transition-transform ${pageOptionsOpen ? "rotate-180" : ""}`}
+            />
+          </button>
+
+          <div
+            id="reading-page-options"
+            className={`${pageOptionsOpen ? "flex" : "hidden"} w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-xs sm:ml-auto sm:flex sm:w-auto sm:pt-0 sm:text-sm`}
+          >
+            <p className="font-semibold text-ink">
+              Phạm vi đọc: Trang {pageProgress.start_page_number}–
+              {pageProgress.end_page_number}
+            </p>
+            <p className="text-muted" aria-live="polite">
+              Trang {pageProgress.current_page_number} ·{" "}
+              {pageProgress.current_index + 1}/{pageProgress.total_pages} trong
+              phạm vi · {pageProgress.completed_pages}/
+              {pageProgress.total_pages} trang đã hoàn thành
+            </p>
+            <VoiceEngineBadge compact />
+          </div>
+        </div>
+      ) : null}
+      {pageNavigationError && pickerIndex === null ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusMessage tone="info">{pageNavigationError}</StatusMessage>
+          {retryMode ? (
+            <Button
+              className="h-11! w-auto! px-3! py-1! text-sm!"
+              disabled={isBusy}
+              onClick={() => void beginRetryWord(retryPositionRef.current)}
+              variant="secondary"
+            >
+              Thử mở lại trang
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {speechPlayer.fallbackNotice ? (
+        <StatusMessage tone="warning">
+          {speechPlayer.fallbackNotice}
+        </StatusMessage>
+      ) : null}
+      {pageProgress &&
+      pageProgress.current_index === pageProgress.total_pages - 1 ? (
+        <p
+          className="text-xs font-semibold text-primary sm:text-sm"
+          role="status"
+        >
+          Bé đã đến trang cuối của phạm vi. Có thể kết thúc buổi đọc khi sẵn
+          sàng.
+        </p>
+      ) : null}
+    </div>
+  ) : null;
+
   return (
     <div
+      className="reading-shell"
+      data-reading-shell="true"
       data-canonical-state={canonicalState}
       data-child-error-count={safety.child_error_events.length}
       data-evidence-valid={safety.evidence_valid}
       data-scoring-active={safety.scoring_active}
     >
-      <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-2 px-4 py-4 sm:px-8">
-        {pageProgress ? (
-          <div className="flex flex-wrap items-center gap-3 border-b border-border pb-3 [&>div:first-child]:mr-auto">
-            <div className="min-w-0">
-              <p className="font-semibold text-ink">
-                Phạm vi đọc: Trang {pageProgress.start_page_number}–
-                {pageProgress.end_page_number}
-              </p>
-              <p className="text-sm text-muted" aria-live="polite">
-                Trang {pageProgress.current_page_number} ·{" "}
-                {pageProgress.current_index + 1}/{pageProgress.total_pages}{" "}
-                trong phạm vi · {pageProgress.completed_pages}/
-                {pageProgress.total_pages} trang đã hoàn thành
-              </p>
-              <VoiceEngineBadge compact className="mt-1" />
-            </div>
-            <div className="flex min-w-0 flex-wrap gap-2">
-              <Button
-                className="h-11! w-auto! min-w-0 px-2! py-1! text-sm!"
-                disabled={
-                  (isBusy && !speechPlayer.isPlaying) ||
-                  uiState !== "reading" ||
-                  pageProgress.current_index <= 0
-                }
-                onClick={() =>
-                  void navigateWithinRange(pageProgress.current_index - 1)
-                }
-                variant="secondary"
-              >
-                <ChevronLeft aria-hidden="true" className="size-5" />
-                Trang trước
-              </Button>
-              <Button
-                className="h-11! w-auto! min-w-0 px-2! py-1! text-sm!"
-                disabled={
-                  (isBusy && !speechPlayer.isPlaying) ||
-                  uiState !== "reading" ||
-                  pageProgress.current_index >= pageProgress.total_pages - 1
-                }
-                onClick={() =>
-                  void navigateWithinRange(pageProgress.current_index + 1)
-                }
-                variant="secondary"
-              >
-                Trang tiếp theo
-                <ChevronRight aria-hidden="true" className="size-5" />
-              </Button>
-            </div>
-            {pageProgress.persisted &&
-            pageProgress.pages[pageProgress.current_index]?.status !==
-              "COMPLETED" ? (
-              <Button
-                className="h-11! w-auto! px-2! py-1! text-sm!"
-                disabled={isBusy || uiState !== "reading"}
-                onClick={() => void confirmCurrentPageCompleted()}
-                variant="quiet"
-              >
-                Đánh dấu trang đã đọc xong
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-        {pageNavigationError && pickerIndex === null ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <StatusMessage tone="info">{pageNavigationError}</StatusMessage>
-            {retryMode ? (
-              <Button
-                disabled={isBusy}
-                onClick={() => void beginRetryWord(retryPositionRef.current)}
-                variant="secondary"
-              >
-                Thử mở lại trang
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-        {speechPlayer.fallbackNotice ? (
-          <StatusMessage tone="warning">
-            {speechPlayer.fallbackNotice}
-          </StatusMessage>
-        ) : null}
-        {pageProgress &&
-        pageProgress.current_index === pageProgress.total_pages - 1 ? (
-          <p className="text-sm font-semibold text-primary" role="status">
-            Bé đã đến trang cuối của phạm vi. Có thể kết thúc buổi đọc khi sẵn
-            sàng.
-          </p>
-        ) : null}
-      </div>
-
       <ReadingLayout
+        topBar={readingTopBar}
         audioLevel={speechRecorder.audioLevel}
         book={book}
         child={child}
@@ -6123,6 +6315,12 @@ function ReadingSessionScreen({
                   : handleReadCurrentWord
               }
               onStopAudio={stopAssistantAudio}
+              onClose={() => {
+                stopAssistantAudio();
+                setActivePhonicsLesson(null);
+                setActivePhonicsStepIndex(null);
+                setPhonicsStatusHint(null);
+              }}
               statusHint={phonicsStatusHint}
             />
           ) : null
@@ -6247,7 +6445,7 @@ function ReadingSessionScreen({
           closeOnEscape={!isBusy}
           onClose={closePagePicker}
         >
-          <div className="grid max-h-[45vh] grid-cols-3 gap-3 overflow-y-auto p-1">
+          <div className="grid max-h-[45vh] grid-cols-2 gap-3 overflow-y-auto p-1 sm:grid-cols-3">
             {pageProgress.pages.map((item, index) => (
               <button
                 key={item.page_id}

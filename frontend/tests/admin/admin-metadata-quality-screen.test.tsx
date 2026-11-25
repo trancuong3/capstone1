@@ -233,7 +233,7 @@ describe("AdminMetadataQualityScreen", () => {
       });
     });
     expect(
-      await screen.findByText("Hiển thị 11–20 trên 21 kết quả"),
+      await screen.findByText("Đang xem 11–20 / 21 kết quả"),
     ).toBeInTheDocument();
   });
 });

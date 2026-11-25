@@ -391,6 +391,9 @@ describe("karaoke admin library", () => {
       ),
     );
     fireEvent.click(await screen.findByRole("button", { name: "Ẩn bài hát" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Xác nhận ẩn bài hát" }),
+    );
     await waitFor(() =>
       expect(service.visibility).toHaveBeenCalledWith(
         songId,

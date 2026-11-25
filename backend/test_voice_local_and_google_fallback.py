@@ -31,6 +31,8 @@ from app.providers.local_voice_provider import (
     LocalPhonicsSpeech,
     LocalPhonicsStepTiming,
     LocalSynthesizedAudio,
+    LocalTimedSpeech,
+    LocalTimedWord,
     LocalTranscription,
     LocalVoiceProvider,
     LocalVoiceTechnicalError,
@@ -377,6 +379,133 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
         # Zero silent voice switching to Google!
         google.synthesize.assert_not_called()
 
+    def test_unlocked_tts_falls_back_to_matching_google_voice_when_local_worker_down(
+        self,
+    ) -> None:
+        wav_bytes = _make_pcm_wav(duration_ms=600)
+        local = LocalVoiceProvider()
+        local.synthesize = AsyncMock(  # type: ignore[method-assign]
+            side_effect=LocalVoiceTechnicalError(
+                status_code=503, code="LOCAL_TTS_UNAVAILABLE"
+            )
+        )
+        local.synthesize_timed = AsyncMock(  # type: ignore[method-assign]
+            side_effect=LocalVoiceTechnicalError(
+                status_code=503, code="LOCAL_TTS_UNAVAILABLE"
+            )
+        )
+        local.synthesize_phonics = AsyncMock(  # type: ignore[method-assign]
+            side_effect=LocalVoiceTechnicalError(
+                status_code=503, code="LOCAL_TTS_UNAVAILABLE"
+            )
+        )
+        google = GoogleCloudVoiceProvider(tts_api_key="google-tts-key")
+        google.synthesize = AsyncMock(  # type: ignore[method-assign]
+            return_value=LocalSynthesizedAudio(
+                content=wav_bytes,
+                content_type="audio/wav",
+                resolved_voice_id="google_vi_vn_wavenet_b",
+                region="south",
+                model_version="google-cloud-tts-v1",
+                provider="google",
+                used_fallback_voice=False,
+            )
+        )
+        google.synthesize_timed = AsyncMock(  # type: ignore[method-assign]
+            return_value=LocalTimedSpeech(
+                audio=wav_bytes,
+                content_type="audio/wav",
+                duration_seconds=0.6,
+                words=[LocalTimedWord(index=0, start=0.0, end=0.6)],
+                resolved_voice_id="google_vi_vn_neural2_a",
+                region="north",
+                model_version="google-cloud-tts-v1",
+                provider="google",
+                used_fallback_voice=False,
+            )
+        )
+        google.synthesize_phonics = AsyncMock(  # type: ignore[method-assign]
+            return_value=LocalPhonicsSpeech(
+                audio=wav_bytes,
+                content_type="audio/wav",
+                duration_seconds=0.6,
+                step_timings=[
+                    LocalPhonicsStepTiming(id="whole", index=0, start=0.0, end=0.6)
+                ],
+                resolved_voice_id="google_vi_vn_neural2_d",
+                region="north",
+                model_version="google-cloud-tts-v1",
+                provider="google",
+            )
+        )
+        orchestrator = VoiceOrchestrator(local_provider=local, google_provider=google)
+
+        with _make_app(orchestrator) as client:
+            # 1. Unlocked preview (no session_id) with Southern male local voice -> maps to google_vi_vn_wavenet_b
+            preview_resp = client.post(
+                "/voice/text-to-speech",
+                json={
+                    "text": "Chào con, hôm nay mình đọc bài nhé.",
+                    "voice_id": "local_south_thai_son",
+                    "speed": 0.9,
+                    "provider_mode": "local_with_google_fallback",
+                    "allow_google_tts": True,
+                },
+            )
+            # 2. Unlocked timed TTS with Northern female local voice -> maps to google_vi_vn_neural2_a
+            timed_resp = client.post(
+                "/voice/text-to-speech/timed",
+                json={
+                    "words": ["Chào"],
+                    "voice_id": "local_north_truc_ly",
+                    "speed": 1.0,
+                    "provider_mode": "local_with_google_fallback",
+                    "allow_google_tts": True,
+                },
+            )
+            # 3. Unlocked phonics TTS with Northern male local voice -> maps to google_vi_vn_neural2_d
+            phonics_resp = client.post(
+                "/voice/text-to-speech/phonics",
+                json={
+                    "voice_id": "local_north_thien_minh",
+                    "speed": 0.85,
+                    "provider_mode": "local_with_google_fallback",
+                    "allow_google_tts": True,
+                    "steps": [
+                        {"id": "whole", "spoken_text": "mốt.", "pause_after_ms": 200}
+                    ],
+                },
+            )
+
+        self.assertEqual(preview_resp.status_code, 200)
+        self.assertEqual(preview_resp.headers["x-voice-provider"], "google")
+        self.assertEqual(
+            preview_resp.headers["x-resolved-voice-id"], "google_vi_vn_wavenet_b"
+        )
+        self.assertEqual(preview_resp.headers["x-voice-fallback"], "1")
+        google.synthesize.assert_awaited_once_with(
+            text="Chào con, hôm nay mình đọc bài nhé.",
+            voice_id="google_vi_vn_wavenet_b",
+            speed=0.9,
+        )
+
+        self.assertEqual(timed_resp.status_code, 200)
+        timed_body = timed_resp.json()
+        self.assertEqual(timed_body["provider"], "google")
+        self.assertEqual(timed_body["resolved_voice_id"], "google_vi_vn_neural2_a")
+        self.assertTrue(timed_body["used_fallback_voice"])
+        google.synthesize_timed.assert_awaited_once_with(
+            words=["Chào"],
+            voice_id="google_vi_vn_neural2_a",
+            speed=1.0,
+        )
+
+        self.assertEqual(phonics_resp.status_code, 200)
+        phonics_body = phonics_resp.json()
+        self.assertEqual(phonics_body["provider"], "google")
+        self.assertEqual(phonics_body["resolved_voice_id"], "google_vi_vn_neural2_d")
+        google.synthesize_phonics.assert_awaited_once()
+
     def test_phonics_endpoint_returns_sample_accurate_steps_for_mot_in_locked_voice(
         self,
     ) -> None:
@@ -423,6 +552,186 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
         self.assertEqual(body["region"], "north")
         self.assertEqual(len(body["step_timings"]), 4)
         self.assertEqual(base64.b64decode(body["audio_base64"]), wav_bytes)
+
+    def test_get_health_marks_auth_required_worker_unavailable_without_token(
+        self,
+    ) -> None:
+        import asyncio
+
+        recorded_headers: list[dict[str, str] | None] = []
+
+        class AuthGatedHealthClient:
+            def __init__(self, **_kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def get(self, url, **kwargs):
+                recorded_headers.append(kwargs.get("headers"))
+                if url.endswith("/voices"):
+                    if not kwargs.get("headers"):
+                        return httpx.Response(401, json={"detail": "unauthorized"})
+                    return httpx.Response(
+                        200,
+                        json={
+                            "model_version": "vieneu-v3-turbo-onnx-fp32-3.8.5",
+                            "voices": [
+                                {
+                                    "voice_id": "local_north_truc_ly",
+                                    "name": "Cô Trúc Ly",
+                                    "region": "north",
+                                    "region_label": "Miền Bắc",
+                                    "gender": "female",
+                                    "is_default": True,
+                                }
+                            ],
+                        },
+                    )
+                return httpx.Response(
+                    200,
+                    json={
+                        "status": "ok",
+                        "auth_required": True,
+                        "stt": {"ready": True},
+                        "tts": {"ready": True},
+                    },
+                )
+
+        with patch(
+            "app.providers.local_voice_provider.httpx.AsyncClient",
+            AuthGatedHealthClient,
+        ):
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("VIREAD_LOCAL_VOICE_WORKER_TOKEN", None)
+                provider_no_token = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+                health_no_token = asyncio.run(provider_no_token.get_health())
+                voices_no_token, live_no_token = asyncio.run(
+                    provider_no_token.list_voices()
+                )
+
+            with patch.dict(
+                os.environ,
+                {"VIREAD_LOCAL_VOICE_WORKER_TOKEN": "secret-worker-tok"},
+                clear=False,
+            ):
+                provider_with_token = LocalVoiceProvider(
+                    base_url="http://127.0.0.1:8010"
+                )
+                health_with_token = asyncio.run(provider_with_token.get_health())
+                voices_with_token, live_with_token = asyncio.run(
+                    provider_with_token.list_voices()
+                )
+
+        self.assertEqual(
+            health_no_token,
+            {
+                "available": False,
+                "stt_ready": False,
+                "tts_ready": False,
+                "stt_model_version": None,
+                "tts_model_version": None,
+            },
+        )
+        self.assertFalse(live_no_token)
+        self.assertGreater(len(voices_no_token), 0)
+
+        self.assertTrue(health_with_token["available"])
+        self.assertTrue(health_with_token["stt_ready"])
+        self.assertTrue(health_with_token["tts_ready"])
+        self.assertTrue(live_with_token)
+        self.assertEqual(voices_with_token[0]["voice_id"], "local_north_truc_ly")
+        self.assertEqual(
+            recorded_headers[-1],
+            {
+                "X-ViRead-Voice-Token": "secret-worker-tok",
+            },
+        )
+
+    def test_transient_remote_protocol_error_resets_client_and_recovers_with_zero_google_calls(
+        self,
+    ) -> None:
+        import asyncio
+
+        created_clients: list[object] = []
+        closed_count = 0
+        post_attempts = 0
+
+        class FlakyKeepaliveClient:
+            def __init__(self, **_kwargs):
+                self.is_closed = False
+                created_clients.append(self)
+
+            async def post(self, url, **_kwargs):
+                nonlocal post_attempts
+                post_attempts += 1
+                if post_attempts == 1:
+                    raise httpx.RemoteProtocolError(
+                        "Server disconnected without sending a response.",
+                        request=httpx.Request("POST", url),
+                    )
+                if post_attempts == 2:
+                    return httpx.Response(503, json={"detail": "busy"})
+                return httpx.Response(
+                    200,
+                    json={
+                        "text": "hai mươi mốt",
+                        "language_code": "vi",
+                        "words": [
+                            {"text": "hai", "start": 0.0, "end": 0.2},
+                            {"text": "mươi", "start": 0.2, "end": 0.4},
+                            {"text": "mốt", "start": 0.4, "end": 0.7},
+                        ],
+                    },
+                )
+
+            async def aclose(self):
+                nonlocal closed_count
+                self.is_closed = True
+                closed_count += 1
+
+        local = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+        google = GoogleCloudVoiceProvider(stt_api_key="test-google-stt-key")
+        google.transcribe = AsyncMock()  # type: ignore[method-assign]
+        orchestrator = VoiceOrchestrator(local_provider=local, google_provider=google)
+
+        with (
+            patch(
+                "app.providers.local_voice_provider.httpx.AsyncClient",
+                FlakyKeepaliveClient,
+            ),
+            patch(
+                "app.providers.local_voice_provider.asyncio.sleep",
+                new=AsyncMock(),
+            ),
+        ):
+            result = asyncio.run(
+                orchestrator.transcribe(
+                    audio=b"RIFF-fake-wav",
+                    filename="seg.wav",
+                    content_type="audio/wav",
+                    language_code="vi",
+                    policy=VoicePolicyContext(
+                        provider_mode="local_with_google_fallback",
+                        allow_google_stt=True,
+                        session_id="sess-recover",
+                        page_id="page-1",
+                        turn_id="turn-1",
+                    ),
+                )
+            )
+
+        self.assertEqual(result.text, "hai mươi mốt")
+        self.assertEqual(result.provider, "local")
+        self.assertFalse(result.fallback_used)
+        self.assertEqual(post_attempts, 3)
+        # Stale keepalive client was closed and replaced with a brand-new client!
+        self.assertEqual(closed_count, 1)
+        self.assertEqual(len(created_clients), 2)
+        google.transcribe.assert_not_called()
 
 
 if __name__ == "__main__":

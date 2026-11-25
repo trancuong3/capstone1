@@ -62,6 +62,20 @@ describe("alignment hardening: self-correction, restart, jumps", () => {
     expect(e.finish().statusByWordId.get("w3")?.status).toBe("MATCH");
   });
 
+  it("replays a full 9-11 word Vietnamese sentence restart without falsely marking the next sentence red", () => {
+    const e = engineFor(
+      "Nhà em có một chú mèo tên là Miu Bộ lông của Miu mềm mượt",
+    );
+    e.addFinalTranscript("Nhà em có một chú em tên là Miu");
+    expect(status(e, "w5")).toBe("DELETE");
+    // Child notices 'mèo' was missed and restarts the entire 9-word sentence from 'Nhà'
+    e.addFinalTranscript("Nhà em có một chú mèo tên là Miu");
+    expect(status(e, "w5")).toBe("MATCH");
+    // Next sentence start ('Bộ', w9) must remain unread/current, NEVER red!
+    expect(status(e, "w9")).toBeUndefined();
+    expect(e.getSnapshot().currentWordIndex).toBe(9);
+  });
+
   it("jumps over a skipped line when two words only fit together further ahead", () => {
     const e = engineFor("Trời mưa to Mưa rơi trên mái nhà Mưa tạnh rồi");
     e.addFinalTranscript("Trời mưa to Mưa tạnh rồi");
