@@ -499,6 +499,11 @@ export class TtsPlayback {
     this.ensure(operation);
 
     const synth = window.speechSynthesis;
+    const viVoice = pickVietnameseBrowserVoice(synth);
+    if (!viVoice) {
+      this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+      throw unavailable();
+    }
     recordTtsEngineUsage({
       provider: "browser",
       fallbackUsed: true,
@@ -601,10 +606,7 @@ export class TtsPlayback {
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = "vi-VN";
       utterance.rate = operation.voice.speed;
-      const viVoice = pickVietnameseBrowserVoice(synth);
-      if (viVoice) {
-        utterance.voice = viVoice;
-      }
+      utterance.voice = viVoice;
 
       const media: ActiveMedia = {
         pause: () => {
@@ -1409,6 +1411,13 @@ export class TtsPlayback {
             this.cacheBytes -= invalid.audio.size;
             this.cache.delete(key);
           }
+          // Prefer the same locked voice via the short endpoint before
+          // switching providers, and never replay already completed chunks.
+          if (!completedChunks && fallback) {
+            this.timedCooldownUntil = Date.now() + 15_000;
+            await fallback();
+            return;
+          }
           if (
             (!synthesizedTimedOk || !fallback) &&
             canUseGoogleTtsFallback() &&
@@ -1428,10 +1437,6 @@ export class TtsPlayback {
             continue;
           }
           this.timedCooldownUntil = Date.now() + 15_000;
-          if (!completedChunks && fallback) {
-            await fallback();
-            return;
-          }
           this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
           throw unavailable();
         }

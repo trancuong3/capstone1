@@ -77,12 +77,21 @@ function buildContentSecurityPolicy(): string {
     connectSources.add("ws://localhost:*");
   }
 
+  // Local development serves page images and audio from the configured API.
+  // Never allow arbitrary HTTP origins or relax the production media policy.
+  const localMediaOrigin =
+    isDev &&
+    apiOrigin &&
+    /^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/.test(apiOrigin)
+      ? ` ${apiOrigin}`
+      : "";
+
   const directives = [
     "default-src 'self'",
     `script-src 'self' 'unsafe-inline' blob:${isDev ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' https: blob: data:",
-    "media-src 'self' https: blob: data:",
+    `img-src 'self' https: blob: data:${localMediaOrigin}`,
+    `media-src 'self' https: blob: data:${localMediaOrigin}`,
     "font-src 'self' data:",
     "worker-src 'self' blob:",
     `connect-src ${Array.from(connectSources).join(" ")}`,

@@ -528,6 +528,15 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     expect(synthesis.speak).not.toHaveBeenCalled();
   });
 
+  it("prefers the locked-voice short fallback when timed synthesis fails", async () => {
+    studio.synthesizeTimed.mockRejectedValueOnce(new Error("Timed unavailable"));
+    const { result } = renderHook(() => useSpeechPlayer());
+    const fallback = vi.fn(async () => {});
+    await result.current.playWithWordTimings(["bé"], {}, fallback);
+    expect(fallback).toHaveBeenCalledOnce();
+    expect(synthesis.speak).not.toHaveBeenCalled();
+  });
+
   it("does not replay a chunk automatically after an error partway through audio", async () => {
     const { result } = renderHook(() => useSpeechPlayer());
     const playback = result.current

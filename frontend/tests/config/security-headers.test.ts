@@ -14,6 +14,7 @@ describe("Next.js HTTP security headers", () => {
     } else {
       process.env.NEXT_PUBLIC_SUPABASE_URL = prevSupabaseUrl;
     }
+    vi.unstubAllEnvs();
     vi.resetModules();
   });
 
@@ -46,4 +47,32 @@ describe("Next.js HTTP security headers", () => {
     expect(csp).toContain("https://proj.supabase.co");
     expect(csp).toContain("https://*.supabase.co");
   });
+
+  it.each([
+    ["development", "http://127.0.0.1:8000", true],
+    ["development", "http://localhost:8000", true],
+    ["development", "http://localhost.evil.example:8000", false],
+    ["production", "http://127.0.0.1:8000", false],
+  ] as const)(
+    "limits HTTP media origins in %s for %s",
+    async (environment, origin, allowed) => {
+      vi.stubEnv("NODE_ENV", environment);
+      vi.stubEnv("NEXT_PUBLIC_API_URL", origin);
+      vi.resetModules();
+      const { default: config } = await import("@/next.config");
+      const rules = (await config.headers?.()) ?? [];
+      const csp =
+        rules[0]?.headers.find((h) => h.key === "Content-Security-Policy")
+          ?.value ?? "";
+      for (const directive of ["img-src", "media-src"]) {
+        const sources = csp
+          .split("; ")
+          .find((part) => part.startsWith(`${directive} `))
+          ?.split(" ");
+        expect(sources?.includes(origin)).toBe(allowed);
+        expect(sources).not.toContain("http:");
+        expect(sources).not.toContain("http://127.0.0.1:*");
+      }
+    },
+  );
 });
