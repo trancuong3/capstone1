@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createSpeechService } from "@/lib/api/speech-service";
+import {
+  createSpeechService,
+  getSynthesizedAudioMeta,
+} from "@/lib/api/speech-service";
 
 const { getSession, initialize, fetchMock } = vi.hoisted(() => ({
   getSession: vi.fn(),
@@ -395,6 +398,34 @@ describe("speech service", () => {
       code: "TTS_UNAVAILABLE",
       status: 503,
       retryable: true,
+    });
+  });
+
+  it("extracts X-TTS-Cached-Speed and X-TTS-Scope headers into synthesized audio metadata", async () => {
+    fetchMock.mockResolvedValue(
+      new Response("mp3-bytes", {
+        headers: {
+          "content-type": "audio/mpeg",
+          "x-tts-cache": "HIT",
+          "x-tts-provider": "precomputed_cache",
+          "x-tts-scope": "CATALOG",
+          "x-tts-cached-speed": "1.00",
+          "x-resolved-voice-id": "local_north_truc_ly",
+        },
+      }),
+    );
+
+    const blob = await createSpeechService().synthesize("mèo", {
+      speed: 0.9,
+      bookId: "book-1",
+      pageId: "page-1",
+    });
+
+    const meta = getSynthesizedAudioMeta(blob);
+    expect(meta).toMatchObject({
+      provider: "precomputed_cache",
+      resolvedVoiceId: "local_north_truc_ly",
+      cachedSpeed: 1.0,
     });
   });
 });

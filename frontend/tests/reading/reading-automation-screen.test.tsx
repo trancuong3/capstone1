@@ -435,7 +435,7 @@ describe("automatic reading flow on the reading screen", () => {
     const calls = speechPlayerMock.play.mock.calls;
     expect(calls).toEqual(
       expect.arrayContaining([
-        ["Cô đọc mẫu cho con nhé."],
+        ["Cô đọc mẫu cho con nhé.", { coaching: true }],
         ["nhỏ", { wordSample: true }],
         ["nhỏ", { wordSample: true, speedScale: 0.8 }],
         ["nhỏ đang"],

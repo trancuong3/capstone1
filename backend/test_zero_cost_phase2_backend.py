@@ -141,6 +141,7 @@ class _InMemoryTtsRepo:
         model_version: str | None,
         speed: float,
         audio_formats,
+        require_word_timings: bool = False,
     ):
         if scope == "PRIVATE" and owner_parent_id is None:
             return None
@@ -156,8 +157,39 @@ class _InMemoryTtsRepo:
             and (model_version is None or e.ModelVersion == model_version)
             and Decimal(str(e.Speed)) == q_speed
             and e.AudioFormat in audio_formats
+            and (not require_word_timings or e.WordTimingsJson is not None)
         ]
         matches.sort(key=lambda e: e.CreatedAt, reverse=True)
+        return matches[0] if matches else None
+
+    async def get_nearest_active_entry(
+        self,
+        *,
+        scope: str,
+        owner_parent_id: UUID | None,
+        content_sha256: str,
+        voice_id: str,
+        model_version: str | None,
+        speed: float,
+        audio_formats,
+        require_word_timings: bool = False,
+    ):
+        if scope == "PRIVATE" and owner_parent_id is None:
+            return None
+        q_speed = Decimal(f"{float(speed):.2f}")
+        matches = [
+            e
+            for e in self.entries.values()
+            if e.Status == "ACTIVE"
+            and e.Scope == scope
+            and (e.OwnerParentId == owner_parent_id if scope == "PRIVATE" else e.OwnerParentId is None)
+            and e.ContentSha256 == content_sha256
+            and e.VoiceId == voice_id
+            and (model_version is None or e.ModelVersion == model_version)
+            and e.AudioFormat in audio_formats
+            and (not require_word_timings or e.WordTimingsJson is not None)
+        ]
+        matches.sort(key=lambda e: (abs(Decimal(str(e.Speed)) - q_speed), -e.CreatedAt.timestamp()))
         return matches[0] if matches else None
 
     async def upsert_active_entry(self, **kwargs):
@@ -780,14 +812,15 @@ class ZeroCostPhase2BackendTests(unittest.IsolatedAsyncioTestCase):
                 "book_id": book_id,
                 "page_id": page_id,
                 "page_revision_id": rev_id,
+                "verified_text": "Con mèo",
                 "text": "Con mèo",
-                "tokens": ["Con", "mèo"],
+                "tokens": ["con", "mèo"],
             }
         ]
         with (
             patch.object(precompute, "_current_cache_bytes", new=AsyncMock(return_value=0)),
             patch.object(precompute, "_collect_page_targets", new=AsyncMock(return_value=sample_pages)),
-            patch.object(precompute, "_is_already_cached", new=AsyncMock(return_value=False)),
+            patch.object(precompute, "_load_existing_cache_keys", new=AsyncMock(return_value=set())),
         ):
             stats = await precompute.run_precompute(
                 scope="catalog",
@@ -800,10 +833,15 @@ class ZeroCostPhase2BackendTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(stats["synthesized"], 0)
             self.assertEqual(stats["errors"], 0)
 
+        pre_existing = {
+            ("CATALOG", None, canonical_tts_sha256("Con mèo")),
+            ("CATALOG", None, canonical_tts_sha256("con")),
+            ("CATALOG", None, canonical_tts_sha256("mèo")),
+        }
         with (
             patch.object(precompute, "_current_cache_bytes", new=AsyncMock(return_value=0)),
             patch.object(precompute, "_collect_page_targets", new=AsyncMock(return_value=sample_pages)),
-            patch.object(precompute, "_is_already_cached", new=AsyncMock(return_value=True)),
+            patch.object(precompute, "_load_existing_cache_keys", new=AsyncMock(return_value=pre_existing)),
         ):
             stats_hit = await precompute.run_precompute(
                 scope="catalog",
@@ -1086,13 +1124,8 @@ class ZeroCostPhase2BackendTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(susp_res["book_id"], str(book_id))
             inv_suspend.assert_awaited_once_with(private_db, book_id=book_id, commit=True)
 
-        # 3. precompute_book_tts_cache keys timed page synthesis on canonical_tts_text(" ".join(tokens))
-        seen_keys: list[str] = []
-
-        async def _capture_cached(*, target, normalized_text, voice_id, speed):
-            seen_keys.append(normalized_text)
-            return True
-
+        # 3. precompute_book_tts_cache keys timed page synthesis on splitSpeechText(VerifiedText)
+        #    preserving capitalization & punctuation, while single words use normalized tokens.
         sample_pages = [
             {
                 "scope": "CATALOG",
@@ -1100,22 +1133,727 @@ class ZeroCostPhase2BackendTests(unittest.IsolatedAsyncioTestCase):
                 "book_id": book_id,
                 "page_id": uuid4(),
                 "page_revision_id": uuid4(),
-                "text": "Xin, chào bé!",
-                "tokens": ["Xin", "chào", "bé"],
+                "verified_text": "Xin, chào bé!\nMèo ngủ.",
+                "text": "Xin, chào bé! Mèo ngủ.",
+                "tokens": ["xin", "chào", "bé", "mèo", "ngủ"],
             }
         ]
+        expected_timed_text = canonical_tts_text("Xin, chào bé! Mèo ngủ.")
+        expected_timed_key = ("CATALOG", None, canonical_tts_sha256(expected_timed_text))
         with (
             patch.object(precompute, "_current_cache_bytes", new=AsyncMock(return_value=0)),
             patch.object(precompute, "_collect_page_targets", new=AsyncMock(return_value=sample_pages)),
-            patch.object(precompute, "_is_already_cached", side_effect=_capture_cached),
+            patch.object(precompute, "_load_existing_cache_keys", new=AsyncMock(return_value={expected_timed_key})),
         ):
-            await precompute.run_precompute(
+            stats = await precompute.run_precompute(
                 scope="catalog",
                 dry_run=True,
                 include_words=False,
                 include_coaching=False,
             )
-        self.assertEqual(seen_keys, [canonical_tts_text(" ".join(["Xin", "chào", "bé"]))])
+        self.assertEqual(stats["planned"], 1)
+        self.assertEqual(stats["cached_hit"], 1)
+        self.assertEqual(
+            precompute.split_speech_text_chunks("Xin, chào bé!\nMèo ngủ."),
+            [["Xin,", "chào", "bé!", "Mèo", "ngủ."]],
+        )
+
+    async def test_sqlalchemy_real_queries_word_index_and_speed_fallback(self) -> None:
+        from sqlalchemy.dialects import postgresql
+        from app.repositories.tts_audio_cache_repository import TtsAudioCacheRepository
+
+        compiled_sqls: list[str] = []
+        rev_id = uuid4()
+        book_id = uuid4()
+        page_id = uuid4()
+
+        class _FakeResult:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def all(self):
+                return self._rows
+
+        call_idx = {"n": 0}
+
+        async def _recording_execute(stmt):
+            sql = str(stmt.compile(dialect=postgresql.dialect()))
+            compiled_sqls.append(sql)
+            call_idx["n"] += 1
+            if call_idx["n"] == 1:
+                return _FakeResult([SimpleNamespace(Id=rev_id, VerifiedText="Con mèo ngủ.")])
+            return _FakeResult(
+                [
+                    SimpleNamespace(PageRevisionId=rev_id, NormalizedText="con", Text="Con"),
+                    SimpleNamespace(PageRevisionId=rev_id, NormalizedText="mèo", Text="mèo"),
+                ]
+            )
+
+        async def _recording_scalar(stmt):
+            sql = str(stmt.compile(dialect=postgresql.dialect()))
+            compiled_sqls.append(sql)
+            return None
+
+        fake_db = MagicMock(spec=AsyncSession)
+        fake_db.execute = AsyncMock(side_effect=_recording_execute)
+        fake_db.scalar = AsyncMock(side_effect=_recording_scalar)
+
+        repo = TtsAudioCacheRepository(fake_db)
+        rows = await repo.get_verified_catalog_texts(
+            book_id=book_id,
+            page_id=page_id,
+            page_revision_id=rev_id,
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], "Con mèo ngủ.")
+        self.assertEqual(len(rows[0][1]), 2)
+        self.assertTrue(
+            any("pagerevisionwords.wordindex ASC" in sql for sql in compiled_sqls),
+            msg=f"Expected WordIndex ASC in compiled SQL, got: {compiled_sqls}",
+        )
+        self.assertFalse(any("wordorder" in sql.lower() for sql in compiled_sqls))
+
+        # Verify real SQLAlchemy compilation of exact + nearest speed fallback queries
+        await repo.get_active_entry(
+            scope="CATALOG",
+            owner_parent_id=None,
+            content_sha256="abc123",
+            voice_id=DEFAULT_LOCAL_VOICE_ID,
+            model_version=None,
+            speed=0.9,
+            audio_formats=["audio/mpeg"],
+            allow_speed_fallback=True,
+            require_word_timings=True,
+        )
+        self.assertTrue(
+            any("abs(tts_audio_cache_entries.speed -" in sql.lower() for sql in compiled_sqls),
+            msg=f"Expected ABS(speed - target) ORDER BY in compiled SQL, got: {compiled_sqls}",
+        )
+        self.assertTrue(
+            any("word_timings_json is not null" in sql.lower() for sql in compiled_sqls),
+            msg=f"Expected word_timings_json IS NOT NULL in compiled SQL, got: {compiled_sqls}",
+        )
+
+        # Also compile real SQLAlchemy queries in scripts/precompute_book_tts_cache.py
+        from scripts import precompute_book_tts_cache as precompute
+
+        precompute_sqls: list[str] = []
+        precompute_params: list[dict] = []
+
+        class _PrecomputeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def execute(self, stmt):
+                compiled = stmt.compile(dialect=postgresql.dialect())
+                precompute_sqls.append(str(compiled))
+                precompute_params.append(dict(compiled.params))
+                return _FakeResult([])
+
+        with patch.object(precompute, "AsyncSessionLocal", return_value=_PrecomputeSession()):
+            await precompute._load_existing_cache_keys(voice_id=DEFAULT_LOCAL_VOICE_ID, speed=0.9)
+        self.assertEqual(len(precompute_sqls), 1)
+        self.assertIn(Decimal("0.90"), precompute_params[0].values())
+
+    async def test_catalog_cache_hit_skips_allowlist_queries_while_private_keeps_isolation(self) -> None:
+        from fastapi import HTTPException
+
+        parent_a = uuid4()
+        parent_b = uuid4()
+        catalog_book = uuid4()
+        catalog_page = uuid4()
+        private_book = uuid4()
+        private_page = uuid4()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = _InMemoryTtsRepo(
+                books={
+                    catalog_book: {
+                        "book_id": catalog_book,
+                        "visibility_scope": "CATALOG",
+                        "owner_parent_id": None,
+                        "lifecycle_status": "ACTIVE",
+                        "moderation_status": "ACTIVE",
+                        "is_deleted": False,
+                    },
+                    private_book: {
+                        "book_id": private_book,
+                        "visibility_scope": "PARENT_PRIVATE",
+                        "owner_parent_id": parent_a,
+                        "lifecycle_status": "ACTIVE",
+                        "moderation_status": "ACTIVE",
+                        "is_deleted": False,
+                    },
+                },
+                pages={
+                    catalog_page: {
+                        "page_id": catalog_page,
+                        "book_id": catalog_book,
+                        "page_lifecycle_status": "ACTIVE",
+                        "visibility_scope": "CATALOG",
+                        "owner_parent_id": None,
+                        "lifecycle_status": "ACTIVE",
+                        "moderation_status": "ACTIVE",
+                        "is_deleted": False,
+                    },
+                    private_page: {
+                        "page_id": private_page,
+                        "book_id": private_book,
+                        "page_lifecycle_status": "ACTIVE",
+                        "visibility_scope": "PARENT_PRIVATE",
+                        "owner_parent_id": parent_a,
+                        "lifecycle_status": "ACTIVE",
+                        "moderation_status": "ACTIVE",
+                        "is_deleted": False,
+                    },
+                },
+                verified_texts={catalog_page: [("mèo", [("mèo", "mèo")])]},
+            )
+            allowlist_calls = {"count": 0}
+            orig_get_verified = repo.get_verified_catalog_texts
+
+            async def _counting_verified(**kwargs):
+                allowlist_calls["count"] += 1
+                return await orig_get_verified(**kwargs)
+
+            repo.get_verified_catalog_texts = _counting_verified  # type: ignore[method-assign]
+
+            with patch.dict(os.environ, {"VIREAD_LOCAL_STORAGE_DIR": tmpdir}, clear=False):
+                fake_db = MagicMock(spec=AsyncSession)
+                fake_db.commit = AsyncMock()
+                fake_db.rollback = AsyncMock()
+                seed_svc = TtsAudioCacheService(fake_db)
+                seed_svc.repo = repo  # type: ignore[assignment]
+                await seed_svc.store_cached_audio(
+                    target=ResolvedCacheTarget("CATALOG", None, catalog_book, catalog_page, None, True),
+                    normalized_text="mèo",
+                    voice_id=DEFAULT_LOCAL_VOICE_ID,
+                    model_version=LOCAL_TTS_MODEL_VERSION,
+                    speed=1.0,
+                    audio_bytes=b"ID3\x04\x00cat-word",
+                    source_content_type="audio/mpeg",
+                )
+                self.assertEqual(allowlist_calls["count"], 0)
+
+                def _make_svc(db_arg):
+                    s = TtsAudioCacheService(db_arg)
+                    s.repo = repo  # type: ignore[assignment]
+                    return s
+
+                offline_local = MagicMock()
+                offline_local.synthesize = AsyncMock(
+                    side_effect=LocalVoiceTechnicalError(status_code=503, code="LOCAL_VOICE_UNAVAILABLE")
+                )
+                orch = VoiceOrchestrator(local_provider=offline_local)
+                with patch("app.services.voice_orchestrator.TtsAudioCacheService", side_effect=_make_svc):
+                    # Cache HIT -> zero allowlist queries!
+                    res = await orch.synthesize(
+                        text="mèo",
+                        requested_voice_id=DEFAULT_LOCAL_VOICE_ID,
+                        speed=1.0,
+                        policy=VoicePolicyContext(
+                            actor_id=parent_a,
+                            book_id=catalog_book,
+                            page_id=str(catalog_page),
+                        ),
+                        db=fake_db,
+                    )
+                    self.assertTrue(res.cache_hit)
+                    self.assertEqual(allowlist_calls["count"], 0)
+
+                    # Cross-family PRIVATE book -> still 404 before lookup!
+                    with self.assertRaises(HTTPException) as ctx:
+                        await orch.synthesize(
+                            text="mèo",
+                            requested_voice_id=DEFAULT_LOCAL_VOICE_ID,
+                            speed=1.0,
+                            policy=VoicePolicyContext(
+                                actor_id=parent_b,
+                                book_id=private_book,
+                                page_id=str(private_page),
+                            ),
+                            db=fake_db,
+                        )
+                    self.assertEqual(ctx.exception.status_code, 404)
+
+    async def test_tts_cache_speed_fallback_headers_and_json(self) -> None:
+        parent_id = uuid4()
+        catalog_book = uuid4()
+        catalog_page = uuid4()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = _InMemoryTtsRepo(
+                books={
+                    catalog_book: {
+                        "book_id": catalog_book,
+                        "visibility_scope": "CATALOG",
+                        "owner_parent_id": None,
+                        "lifecycle_status": "ACTIVE",
+                        "moderation_status": "ACTIVE",
+                        "is_deleted": False,
+                    }
+                },
+                pages={
+                    catalog_page: {
+                        "page_id": catalog_page,
+                        "book_id": catalog_book,
+                        "page_lifecycle_status": "ACTIVE",
+                        "visibility_scope": "CATALOG",
+                        "owner_parent_id": None,
+                        "lifecycle_status": "ACTIVE",
+                        "moderation_status": "ACTIVE",
+                        "is_deleted": False,
+                    }
+                },
+            )
+            with patch.dict(os.environ, {"VIREAD_LOCAL_STORAGE_DIR": tmpdir}, clear=False):
+                fake_db = MagicMock(spec=AsyncSession)
+                fake_db.commit = AsyncMock()
+                fake_db.rollback = AsyncMock()
+                seed_svc = TtsAudioCacheService(fake_db)
+                seed_svc.repo = repo  # type: ignore[assignment]
+
+                # Seed word at 1.00 and timed page at 1.00 only
+                await seed_svc.store_cached_audio(
+                    target=ResolvedCacheTarget("CATALOG", None, catalog_book, catalog_page, None, True),
+                    normalized_text="mèo",
+                    voice_id=DEFAULT_LOCAL_VOICE_ID,
+                    model_version=LOCAL_TTS_MODEL_VERSION,
+                    speed=1.0,
+                    audio_bytes=b"ID3\x04\x00word-1p00",
+                    source_content_type="audio/mpeg",
+                )
+                await seed_svc.store_cached_audio(
+                    target=ResolvedCacheTarget("CATALOG", None, catalog_book, catalog_page, None, True),
+                    normalized_text="Con mèo.",
+                    voice_id=DEFAULT_LOCAL_VOICE_ID,
+                    model_version=LOCAL_TTS_MODEL_VERSION,
+                    speed=1.0,
+                    audio_bytes=b"ID3\x04\x00page-1p00",
+                    source_content_type="audio/mpeg",
+                    duration_seconds=1.0,
+                    word_timings_json=[
+                        {"index": 0, "start": 0.0, "end": 0.4},
+                        {"index": 1, "start": 0.4, "end": 1.0},
+                    ],
+                )
+
+                offline_local = MagicMock()
+                offline_local.synthesize = AsyncMock(
+                    side_effect=LocalVoiceTechnicalError(status_code=503, code="LOCAL_VOICE_UNCONFIGURED")
+                )
+                offline_local.synthesize_timed = AsyncMock(
+                    side_effect=LocalVoiceTechnicalError(status_code=503, code="LOCAL_VOICE_UNCONFIGURED")
+                )
+                orch = VoiceOrchestrator(local_provider=offline_local)
+
+                def _make_svc(db_arg):
+                    s = TtsAudioCacheService(db_arg)
+                    s.repo = repo  # type: ignore[assignment]
+                    return s
+
+                async def _override_actor():
+                    return parent_id
+
+                async def _override_db():
+                    yield fake_db
+
+                app.dependency_overrides[require_active_profile_id] = _override_actor
+                app.dependency_overrides[get_db] = _override_db
+
+                with (
+                    patch("app.api.routes.voice.get_voice_orchestrator", return_value=orch),
+                    patch("app.api.routes.voice_studio.get_voice_orchestrator", return_value=orch),
+                    patch("app.services.voice_orchestrator.TtsAudioCacheService", side_effect=_make_svc),
+                ):
+                    client = TestClient(app)
+
+                    # Request at 0.90 falls back to 1.00 cached clip and reports X-TTS-Scope + X-TTS-Cached-Speed
+                    r_word = client.post(
+                        "/voice/text-to-speech",
+                        json={
+                            "text": "mèo",
+                            "voice_id": DEFAULT_LOCAL_VOICE_ID,
+                            "speed": 0.9,
+                            "book_id": str(catalog_book),
+                            "page_id": str(catalog_page),
+                        },
+                    )
+                    self.assertEqual(r_word.status_code, 200, r_word.text)
+                    self.assertEqual(r_word.headers.get("X-TTS-Cache"), "HIT")
+                    self.assertEqual(r_word.headers.get("X-TTS-Scope"), "CATALOG")
+                    self.assertEqual(r_word.headers.get("X-TTS-Cached-Speed"), "1.00")
+                    self.assertEqual(r_word.content, b"ID3\x04\x00word-1p00")
+
+                    r_timed = client.post(
+                        "/voice/text-to-speech/timed",
+                        json={
+                            "words": ["Con", "mèo."],
+                            "voice_id": DEFAULT_LOCAL_VOICE_ID,
+                            "speed": 0.9,
+                            "book_id": str(catalog_book),
+                            "page_id": str(catalog_page),
+                        },
+                    )
+                    self.assertEqual(r_timed.status_code, 200, r_timed.text)
+                    self.assertEqual(r_timed.headers.get("X-TTS-Cache"), "HIT")
+                    self.assertEqual(r_timed.headers.get("X-TTS-Scope"), "CATALOG")
+                    self.assertEqual(r_timed.headers.get("X-TTS-Cached-Speed"), "1.00")
+                    self.assertEqual(r_timed.json()["cached_speed"], 1.0)
+
+                    # Now add an entry at 0.90 -> speed 0.90 prefers exact match, 0.75 picks nearest 0.90, 1.15 picks nearest 1.00
+                    await seed_svc.store_cached_audio(
+                        target=ResolvedCacheTarget("CATALOG", None, catalog_book, catalog_page, None, True),
+                        normalized_text="mèo",
+                        voice_id=DEFAULT_LOCAL_VOICE_ID,
+                        model_version=LOCAL_TTS_MODEL_VERSION,
+                        speed=0.9,
+                        audio_bytes=b"ID3\x04\x00word-0p90",
+                        source_content_type="audio/mpeg",
+                    )
+                    r_exact = client.post(
+                        "/voice/text-to-speech",
+                        json={
+                            "text": "mèo",
+                            "voice_id": DEFAULT_LOCAL_VOICE_ID,
+                            "speed": 0.9,
+                            "book_id": str(catalog_book),
+                            "page_id": str(catalog_page),
+                        },
+                    )
+                    self.assertEqual(r_exact.headers.get("X-TTS-Cached-Speed"), "0.90")
+                    self.assertEqual(r_exact.content, b"ID3\x04\x00word-0p90")
+
+                    r_slow = client.post(
+                        "/voice/text-to-speech",
+                        json={
+                            "text": "mèo",
+                            "voice_id": DEFAULT_LOCAL_VOICE_ID,
+                            "speed": 0.75,
+                            "book_id": str(catalog_book),
+                            "page_id": str(catalog_page),
+                        },
+                    )
+                    self.assertEqual(r_slow.headers.get("X-TTS-Cached-Speed"), "0.90")
+
+                    r_fast = client.post(
+                        "/voice/text-to-speech",
+                        json={
+                            "text": "mèo",
+                            "voice_id": DEFAULT_LOCAL_VOICE_ID,
+                            "speed": 1.15,
+                            "book_id": str(catalog_book),
+                            "page_id": str(catalog_page),
+                        },
+                    )
+                    self.assertEqual(r_fast.headers.get("X-TTS-Cached-Speed"), "1.00")
+
+    async def test_tts_cache_download_transient_error_preserves_active_entry_404_marks_stale(self) -> None:
+        from fastapi import HTTPException
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = _InMemoryTtsRepo()
+            fake_db = MagicMock(spec=AsyncSession)
+            fake_db.commit = AsyncMock()
+            fake_db.rollback = AsyncMock()
+            svc = TtsAudioCacheService(fake_db)
+            svc.repo = repo  # type: ignore[assignment]
+            target = ResolvedCacheTarget("COACHING", None, None, None, None, True)
+
+            with patch.dict(os.environ, {"VIREAD_LOCAL_STORAGE_DIR": tmpdir}, clear=False):
+                await svc.store_cached_audio(
+                    target=target,
+                    normalized_text="Cô đọc mẫu cho con nhé.",
+                    voice_id=DEFAULT_LOCAL_VOICE_ID,
+                    model_version=LOCAL_TTS_MODEL_VERSION,
+                    speed=0.9,
+                    audio_bytes=b"ID3\x04\x00coach-mp3",
+                    source_content_type="audio/mpeg",
+                )
+                entry_id = next(iter(repo.entries.keys()))
+
+                # 1. Transient network timeout -> MUST NOT mark STALE
+                with patch(
+                    "app.services.tts_audio_cache_service.download_object",
+                    side_effect=TimeoutError("transient network blip"),
+                ):
+                    hit_timeout = await svc.lookup_cached_audio(
+                        target=target,
+                        normalized_text="Cô đọc mẫu cho con nhé.",
+                        voice_id=DEFAULT_LOCAL_VOICE_ID,
+                        speed=0.9,
+                    )
+                self.assertIsNone(hit_timeout)
+                self.assertEqual(repo.entries[entry_id].Status, "ACTIVE")
+
+                # 2. Wrapped 503 with 502 upstream cause -> MUST NOT mark STALE
+                upstream_502 = RuntimeError("502 Bad Gateway")
+                upstream_502.status_code = 502  # type: ignore[attr-defined]
+                wrapped_502 = HTTPException(status_code=503, detail="storage error")
+                wrapped_502.__cause__ = upstream_502
+                with patch(
+                    "app.services.tts_audio_cache_service.download_object",
+                    side_effect=wrapped_502,
+                ):
+                    hit_502 = await svc.lookup_cached_audio(
+                        target=target,
+                        normalized_text="Cô đọc mẫu cho con nhé.",
+                        voice_id=DEFAULT_LOCAL_VOICE_ID,
+                        speed=0.9,
+                    )
+                self.assertIsNone(hit_502)
+                self.assertEqual(repo.entries[entry_id].Status, "ACTIVE")
+
+                # 3. Real 404 wrapped in storage_service HTTPException(503) -> MUST mark STALE
+                upstream_404 = RuntimeError({"statusCode": 404, "error": "not_found", "message": "Object not found"})
+                wrapped_404 = HTTPException(status_code=503, detail="storage error")
+                wrapped_404.__cause__ = upstream_404
+                with patch(
+                    "app.services.tts_audio_cache_service.download_object",
+                    side_effect=wrapped_404,
+                ):
+                    hit_404 = await svc.lookup_cached_audio(
+                        target=target,
+                        normalized_text="Cô đọc mẫu cho con nhé.",
+                        voice_id=DEFAULT_LOCAL_VOICE_ID,
+                        speed=0.9,
+                    )
+                self.assertIsNone(hit_404)
+                self.assertEqual(repo.entries[entry_id].Status, "STALE")
+
+    def test_cors_headers_on_unhandled_500_and_exposed_tts_headers(self) -> None:
+        from app.database.config import CORS_ALLOWED_ORIGINS
+
+        allowed_origin = CORS_ALLOWED_ORIGINS[0]
+
+        async def _override_actor():
+            return uuid4()
+
+        async def _override_db():
+            yield MagicMock(spec=AsyncSession)
+
+        boom_orch = MagicMock()
+        boom_orch.synthesize = AsyncMock(side_effect=RuntimeError("unexpected crash"))
+
+        app.dependency_overrides[require_active_profile_id] = _override_actor
+        app.dependency_overrides[get_db] = _override_db
+
+        with patch("app.api.routes.voice.get_voice_orchestrator", return_value=boom_orch):
+            client = TestClient(app, raise_server_exceptions=False)
+            r_allowed = client.post(
+                "/voice/text-to-speech",
+                headers={"Origin": allowed_origin},
+                json={"text": "xin chào"},
+            )
+            self.assertEqual(r_allowed.status_code, 500)
+            self.assertEqual(r_allowed.headers.get("Access-Control-Allow-Origin"), allowed_origin)
+            self.assertEqual(r_allowed.headers.get("Vary"), "Origin")
+
+            r_disallowed = client.post(
+                "/voice/text-to-speech",
+                headers={"Origin": "https://evil.example.com"},
+                json={"text": "xin chào"},
+            )
+            self.assertEqual(r_disallowed.status_code, 500)
+            self.assertIsNone(r_disallowed.headers.get("Access-Control-Allow-Origin"))
+
+        # Verify CORSMiddleware exposes the 4 TTS cache/speed headers on normal responses
+        ok_orch = MagicMock()
+        ok_orch.synthesize = AsyncMock(
+            return_value=LocalSynthesizedAudio(
+                content=b"ID3\x04\x00ok",
+                content_type="audio/mpeg",
+                resolved_voice_id=DEFAULT_LOCAL_VOICE_ID,
+                region="north",
+                model_version=LOCAL_TTS_MODEL_VERSION,
+                provider="precomputed_cache",
+                cache_hit=True,
+                cache_scope="CATALOG",
+                cached_speed=1.0,
+            )
+        )
+        with patch("app.api.routes.voice.get_voice_orchestrator", return_value=ok_orch):
+            client = TestClient(app)
+            r_ok = client.post(
+                "/voice/text-to-speech",
+                headers={"Origin": allowed_origin},
+                json={"text": "xin chào"},
+            )
+            self.assertEqual(r_ok.status_code, 200)
+            exposed = r_ok.headers.get("Access-Control-Expose-Headers", "")
+            for h in ("X-TTS-Cache", "X-TTS-Provider", "X-TTS-Scope", "X-TTS-Cached-Speed"):
+                self.assertIn(h, exposed)
+            self.assertEqual(r_ok.headers.get("X-TTS-Scope"), "CATALOG")
+            self.assertEqual(r_ok.headers.get("X-TTS-Cached-Speed"), "1.00")
+
+        # IntegrityError (DBAPIError) runs inside CORSMiddleware and must NOT duplicate Vary: Origin
+        from sqlalchemy.exc import IntegrityError
+
+        db_err_orch = MagicMock()
+        db_err_orch.synthesize = AsyncMock(
+            side_effect=IntegrityError("INSERT ...", {}, Exception("duplicate key"))
+        )
+        with patch("app.api.routes.voice.get_voice_orchestrator", return_value=db_err_orch):
+            client = TestClient(app, raise_server_exceptions=False)
+            r_integrity = client.post(
+                "/voice/text-to-speech",
+                headers={"Origin": allowed_origin},
+                json={"text": "xin chào"},
+            )
+            self.assertEqual(r_integrity.status_code, 500)
+            self.assertEqual(r_integrity.headers.get("Access-Control-Allow-Origin"), allowed_origin)
+            self.assertEqual(r_integrity.headers.get("Vary"), "Origin")
+
+    async def test_timed_speed_fallback_skips_timingless_entry_and_storage_api_404_marks_stale(self) -> None:
+        from fastapi import HTTPException
+        from scripts import precompute_book_tts_cache as precompute
+
+        parent_id = uuid4()
+        catalog_book = uuid4()
+        catalog_page = uuid4()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = _InMemoryTtsRepo(
+                books={
+                    catalog_book: {
+                        "book_id": catalog_book,
+                        "visibility_scope": "CATALOG",
+                        "owner_parent_id": None,
+                        "lifecycle_status": "ACTIVE",
+                        "moderation_status": "ACTIVE",
+                        "is_deleted": False,
+                    }
+                },
+                pages={
+                    catalog_page: {
+                        "page_id": catalog_page,
+                        "book_id": catalog_book,
+                        "page_lifecycle_status": "ACTIVE",
+                        "visibility_scope": "CATALOG",
+                        "owner_parent_id": None,
+                        "lifecycle_status": "ACTIVE",
+                        "moderation_status": "ACTIVE",
+                        "is_deleted": False,
+                    }
+                },
+            )
+            with patch.dict(os.environ, {"VIREAD_LOCAL_STORAGE_DIR": tmpdir}, clear=False):
+                fake_db = MagicMock(spec=AsyncSession)
+                fake_db.commit = AsyncMock()
+                fake_db.rollback = AsyncMock()
+                seed_svc = TtsAudioCacheService(fake_db)
+                seed_svc.repo = repo  # type: ignore[assignment]
+
+                # 1. Seed a plain (timing-less) entry at 1.00 and a timed entry at 0.90 for the same 1-word page "mèo"
+                await seed_svc.store_cached_audio(
+                    target=ResolvedCacheTarget("CATALOG", None, catalog_book, catalog_page, None, True),
+                    normalized_text="mèo",
+                    voice_id=DEFAULT_LOCAL_VOICE_ID,
+                    model_version=LOCAL_TTS_MODEL_VERSION,
+                    speed=1.0,
+                    audio_bytes=b"ID3\x04\x00plain-1p00",
+                    source_content_type="audio/mpeg",
+                    word_timings_json=None,
+                )
+                await seed_svc.store_cached_audio(
+                    target=ResolvedCacheTarget("CATALOG", None, catalog_book, catalog_page, None, True),
+                    normalized_text="mèo",
+                    voice_id=DEFAULT_LOCAL_VOICE_ID,
+                    model_version=LOCAL_TTS_MODEL_VERSION,
+                    speed=0.9,
+                    audio_bytes=b"ID3\x04\x00timed-0p90",
+                    source_content_type="audio/mpeg",
+                    duration_seconds=0.6,
+                    word_timings_json=[{"index": 0, "start": 0.0, "end": 0.6}],
+                )
+
+                offline_local = MagicMock()
+                offline_local.synthesize_timed = AsyncMock(
+                    side_effect=LocalVoiceTechnicalError(status_code=503, code="LOCAL_VOICE_UNCONFIGURED")
+                )
+                orch = VoiceOrchestrator(local_provider=offline_local)
+
+                def _make_svc(db_arg):
+                    s = TtsAudioCacheService(db_arg)
+                    s.repo = repo  # type: ignore[assignment]
+                    return s
+
+                with patch("app.services.voice_orchestrator.TtsAudioCacheService", side_effect=_make_svc):
+                    # Request /timed at speed 1.00 (and 1.10) must skip timing-less 1.00 and HIT timed 0.90!
+                    for req_speed in (1.0, 1.1):
+                        timed_hit = await orch.synthesize_timed(
+                            words=["mèo"],
+                            requested_voice_id=DEFAULT_LOCAL_VOICE_ID,
+                            speed=req_speed,
+                            policy=VoicePolicyContext(
+                                actor_id=parent_id,
+                                book_id=catalog_book,
+                                page_id=str(catalog_page),
+                            ),
+                            db=fake_db,
+                        )
+                        self.assertTrue(timed_hit.cache_hit)
+                        self.assertEqual(timed_hit.audio, b"ID3\x04\x00timed-0p90")
+                        self.assertEqual(timed_hit.cached_speed, 0.9)
+
+                # 2. Precompute must NOT skip a /timed page when only a timing-less entry exists at the same speed
+                plain_only_key = ("CATALOG", None, canonical_tts_sha256("mèo"))
+                sample_pages = [
+                    {
+                        "scope": "CATALOG",
+                        "owner_parent_id": None,
+                        "book_id": catalog_book,
+                        "page_id": catalog_page,
+                        "page_revision_id": uuid4(),
+                        "verified_text": "mèo",
+                        "text": "mèo",
+                        "tokens": ["mèo"],
+                    }
+                ]
+                with (
+                    patch.object(precompute, "_current_cache_bytes", new=AsyncMock(return_value=0)),
+                    patch.object(precompute, "_collect_page_targets", new=AsyncMock(return_value=sample_pages)),
+                    patch.object(
+                        precompute,
+                        "_load_existing_cache_keys",
+                        new=AsyncMock(return_value={plain_only_key: False}),
+                    ),
+                ):
+                    stats = await precompute.run_precompute(
+                        scope="catalog",
+                        dry_run=True,
+                        include_words=True,
+                        include_coaching=False,
+                    )
+                # Timed item (planned #1) needs synthesis (miss); single word item (planned #2) is satisfied by plain entry (hit)
+                self.assertEqual(stats["planned"], 2)
+                self.assertEqual(stats["cached_hit"], 1)
+
+                # 3. Supabase storage3 StorageApiError(message="The resource was not found", code="404", status=400) marks STALE
+                class _SupabaseStorage404(Exception):
+                    def __init__(self) -> None:
+                        super().__init__("{'statusCode': 400, 'error': 404, 'message': The resource was not found}")
+                        self.code = "404"
+                        self.status = 400
+                        self.message = "The resource was not found"
+
+                wrapped = HTTPException(status_code=503, detail="Could not read the image from Supabase Storage")
+                wrapped.__cause__ = _SupabaseStorage404()
+                target = ResolvedCacheTarget("CATALOG", None, catalog_book, catalog_page, None, True)
+                timed_entry_id = next(e.Id for e in repo.entries.values() if e.WordTimingsJson is not None)
+                with patch("app.services.tts_audio_cache_service.download_object", side_effect=wrapped):
+                    miss = await seed_svc.lookup_cached_audio(
+                        target=target,
+                        normalized_text="mèo",
+                        voice_id=DEFAULT_LOCAL_VOICE_ID,
+                        speed=0.9,
+                        require_word_timings=True,
+                    )
+                self.assertIsNone(miss)
+                self.assertEqual(repo.entries[timed_entry_id].Status, "STALE")
 
 
 if __name__ == "__main__":

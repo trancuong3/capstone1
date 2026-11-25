@@ -108,10 +108,126 @@ ALLOWED_COACHING_PHRASES_RAW: tuple[str, ...] = (
     "Hãy đọc chậm và rõ từng chữ nhé.",
     "Hãy đọc lại từ này nhé.",
     "Mình cùng đọc tiếp trang tiếp theo nào.",
+    # Real fixed coaching cues spoken by reading-screen.tsx & interactive-prompts.ts
+    "Cô đọc mẫu cho con nhé.",
+    "Đến lượt con đọc nhé.",
+    "Con nghe từ này nhé.",
+    "Con nghe cô đọc từ này nhé.",
+    "Mình cùng nghe từ này nào.",
+    "Mình đọc chậm hơn chút nhé.",
+    "Con nghe cô đọc thật chậm nha.",
+    "Mình đọc chậm từng tiếng nhé.",
+    "Không sao đâu. Con nghe cô đọc nhé.",
+    "Đến lượt con. Con đọc lại nhé.",
+    "Để cô đánh vần chậm giúp con nhé!",
+    "Mình đánh vần từng bước chữ này nha!",
+    "Cô tách từng âm giúp con dễ đọc nhé!",
+    "Con nghe cô đánh vần chậm từng âm nào!",
+    "Mình ghép từng tiếng cho dễ đọc nha con!",
+    "Cô đánh vần dẫn đường giúp con nhé!",
+    "Con đã cố gắng rất tốt rồi. Mình đọc tiếp nhé!",
+    "Không sao đâu, từ này mình luyện thêm sau. Đọc tiếp nào!",
+    "Con làm tốt lắm rồi. Mình sang từ tiếp theo nhé!",
+    "Con đọc xong trang này trôi chảy quá! Cô khen nhé!",
+    "Giỏi quá, mình lật sang trang tiếp theo nhé!",
+    "Tuyệt vời, con đọc rõ lắm! Mình sang trang mới nào!",
+    "Hoan hô con, trang này con đọc mượt mà quá!",
+    "Con đọc cả câu mượt mà quá! Mình đọc tiếp nào!",
+    "Giỏi lắm, cả câu trôi chảy rồi! Đọc tiếp nhé.",
+    "Tuyệt vời! Con đọc liền câu rõ ràng lắm.",
+    "Bé chọn đáp án nào?",
+    "Con chọn đáp án nào nhé?",
+    "Đúng rồi! Bé nhớ bài rất tốt.",
+    "Giỏi quá! Con trả lời chính xác rồi.",
+    "Tuyệt vời! Con hiểu câu chuyện rất rõ.",
+    "Gần đúng rồi, con nghe kỹ và thử chọn lại nhé.",
+    "Chưa chính xác lắm, bé nghĩ thêm chút rồi chọn lại nha.",
+    "Suýt đúng rồi! Con thử đáp án khác xem sao nhé.",
 )
 ALLOWED_COACHING_PHRASES: frozenset[str] = frozenset(
     canonical_tts_text(phrase) for phrase in ALLOWED_COACHING_PHRASES_RAW
 )
+
+
+_STORAGE_NOT_FOUND_CODES = frozenset(
+    {
+        "404",
+        "not_found",
+        "notfound",
+        "object_not_found",
+        "nosuchkey",
+        "no_such_key",
+        "no_such_object",
+        "bucketnotfound",
+        "no_such_bucket",
+    }
+)
+
+
+def _extract_numeric_http_status(exc: BaseException) -> int | None:
+    for attr in ("status_code", "status", "statusCode"):
+        val = getattr(exc, attr, None)
+        if val is not None:
+            try:
+                parsed = int(val)
+                if 100 <= parsed <= 599:
+                    return parsed
+            except (TypeError, ValueError):
+                pass
+    resp = getattr(exc, "response", None)
+    if resp is not None:
+        val = getattr(resp, "status_code", None)
+        if val is not None:
+            try:
+                parsed = int(val)
+                if 100 <= parsed <= 599:
+                    return parsed
+            except (TypeError, ValueError):
+                pass
+    for arg in getattr(exc, "args", ()):
+        if isinstance(arg, dict):
+            for key in ("statusCode", "status_code", "status"):
+                val = arg.get(key)
+                if val is not None:
+                    try:
+                        parsed = int(val)
+                        if 100 <= parsed <= 599:
+                            return parsed
+                    except (TypeError, ValueError):
+                        pass
+    return None
+
+
+def _is_storage_not_found_error(exc: BaseException) -> bool:
+    """Return True only for definite 404/not-found Storage errors, never transient 5xx/network errors."""
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    for _ in range(6):
+        if cur is None or id(cur) in seen:
+            break
+        seen.add(id(cur))
+        if isinstance(cur, FileNotFoundError):
+            return True
+        if _extract_numeric_http_status(cur) == 404:
+            return True
+        for attr in ("code", "error", "name"):
+            raw = getattr(cur, attr, None)
+            if raw is not None and str(raw).strip().lower() in _STORAGE_NOT_FOUND_CODES:
+                return True
+        for arg in getattr(cur, "args", ()):
+            if isinstance(arg, dict):
+                err_val = str(arg.get("error") or arg.get("code") or "").strip().lower()
+                if err_val in _STORAGE_NOT_FOUND_CODES:
+                    return True
+                msg_val = str(arg.get("message") or "").lower()
+                if "object not found" in msg_val or "not_found" in msg_val or "nosuchkey" in msg_val:
+                    return True
+        if not isinstance(cur, HTTPException):
+            msg = str(cur).lower()
+            if "object not found" in msg or "not_found" in msg or "nosuchkey" in msg:
+                return True
+        cur = cur.__cause__ or cur.__context__
+    return False
 
 
 def canonical_tts_sha256(normalized_text: str) -> str:
@@ -234,6 +350,7 @@ class ResolvedCacheTarget:
     page_id: UUID | None
     page_revision_id: UUID | None
     can_store_on_miss: bool
+    defer_allowlist_check: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +364,7 @@ class CachedTtsHit:
     scope: str
     storage_bucket: str
     storage_path: str
+    cached_speed: float | None = None
 
 
 class TtsAudioCacheService:
@@ -319,6 +437,7 @@ class TtsAudioCacheService:
                         stripped = piece.strip(punct)
                         if stripped:
                             allowed.add(stripped)
+                            allowed.add(stripped.lower())
             tokens: list[str] = []
             for norm_word, raw_word in word_pairs:
                 token = canonical_tts_text(str(norm_word or raw_word or ""))
@@ -329,6 +448,7 @@ class TtsAudioCacheService:
                 stripped_tok = token.strip(punct)
                 if stripped_tok:
                     allowed.add(stripped_tok)
+                    allowed.add(stripped_tok.lower())
             if tokens:
                 allowed.add(canonical_tts_text(" ".join(tokens)))
         return candidate in allowed
@@ -343,6 +463,7 @@ class TtsAudioCacheService:
         cache_scope: str | None = None,
         normalized_text: str | None = None,
         allow_cache_write: bool = False,
+        defer_allowlist_check: bool = False,
     ) -> ResolvedCacheTarget | None:
         canonical_query = canonical_tts_text(normalized_text) if normalized_text else ""
         if self.repo is not None and (
@@ -404,6 +525,18 @@ class TtsAudioCacheService:
                     page_id=resolved_page_id,
                     page_revision_id=page_revision_id,
                     can_store_on_miss=True,
+                )
+
+            if defer_allowlist_check and not allow_cache_write:
+                await self._end_read_tx()
+                return ResolvedCacheTarget(
+                    scope="CATALOG",
+                    owner_parent_id=None,
+                    book_id=resolved_book_id,
+                    page_id=resolved_page_id,
+                    page_revision_id=page_revision_id,
+                    can_store_on_miss=True,
+                    defer_allowlist_check=True,
                 )
 
             can_store_catalog = (
@@ -502,6 +635,8 @@ class TtsAudioCacheService:
         speed: float = 1.0,
         accept: str | None = None,
         audio_format: str | None = None,
+        allow_speed_fallback: bool = True,
+        require_word_timings: bool = False,
     ) -> CachedTtsHit | None:
         if not is_tts_cache_enabled() or self.repo is None or self.db is None:
             return None
@@ -516,15 +651,23 @@ class TtsAudioCacheService:
                 return None
             self._set_quota_exhausted(False)
 
-            entry = await self.repo.get_active_entry(
-                scope=target.scope,
-                owner_parent_id=target.owner_parent_id,
-                content_sha256=content_sha256,
-                voice_id=voice_id,
-                model_version=model_version,
-                speed=speed,
-                audio_formats=formats,
-            )
+            lookup_kwargs: dict[str, Any] = {
+                "scope": target.scope,
+                "owner_parent_id": target.owner_parent_id,
+                "content_sha256": content_sha256,
+                "voice_id": voice_id,
+                "model_version": model_version,
+                "speed": speed,
+                "audio_formats": formats,
+            }
+            if require_word_timings:
+                lookup_kwargs["require_word_timings"] = True
+
+            entry = await self.repo.get_active_entry(**lookup_kwargs)
+            if entry is None and allow_speed_fallback:
+                nearest_fn = getattr(self.repo, "get_nearest_active_entry", None)
+                if callable(nearest_fn):
+                    entry = await nearest_fn(**lookup_kwargs)
             if entry is None:
                 await self.repo.record_miss()
                 await self.db.commit()
@@ -541,6 +684,7 @@ class TtsAudioCacheService:
             entry_duration = entry.DurationSeconds
             entry_timings = entry.WordTimingsJson
             entry_scope = entry.Scope
+            entry_speed = float(entry.Speed) if entry.Speed is not None else float(speed)
 
             if daily_limit > 0 and (daily_usage["bytes_served"] + entry_byte_size) > daily_limit:
                 await self._end_read_tx()
@@ -556,8 +700,17 @@ class TtsAudioCacheService:
                     entry_path,
                     bucket_name=entry_bucket,
                 )
-            except Exception:
-                await self.repo.mark_entries_status([entry_id], status="STALE")
+            except Exception as exc:
+                if _is_storage_not_found_error(exc):
+                    await self.repo.mark_entries_status([entry_id], status="STALE")
+                else:
+                    log_diagnostic(
+                        logger,
+                        logging.WARNING,
+                        event="tts_cache_download_transient_error",
+                        stage="tts_cache",
+                        exception=exc,
+                    )
                 await self.repo.record_miss()
                 await self.db.commit()
                 self._record_runtime_miss()
@@ -577,6 +730,7 @@ class TtsAudioCacheService:
                 scope=entry_scope,
                 storage_bucket=entry_bucket,
                 storage_path=entry_path,
+                cached_speed=entry_speed,
             )
         except SQLAlchemyError as exc:
             await self._safe_rollback()
@@ -610,6 +764,34 @@ class TtsAudioCacheService:
             or self.db is None
         ):
             return False
+
+        if target.defer_allowlist_check:
+            if target.scope == "CATALOG":
+                if target.book_id is None:
+                    return False
+                try:
+                    allowed = await self._is_catalog_text_allowlisted(
+                        book_id=target.book_id,
+                        page_id=target.page_id,
+                        page_revision_id=target.page_revision_id,
+                        normalized_text=normalized_text,
+                    )
+                    await self._end_read_tx()
+                except SQLAlchemyError as exc:
+                    await self._safe_rollback()
+                    log_diagnostic(
+                        logger,
+                        logging.WARNING,
+                        event="tts_cache_allowlist_check_failed",
+                        stage="tts_cache",
+                        exception=exc,
+                    )
+                    return False
+                if not allowed:
+                    return False
+            elif target.scope == "COACHING":
+                if canonical_tts_text(normalized_text) not in ALLOWED_COACHING_PHRASES:
+                    return False
 
         compressed_bytes, stored_format = await asyncio.to_thread(
             transcode_to_mp3_64k,

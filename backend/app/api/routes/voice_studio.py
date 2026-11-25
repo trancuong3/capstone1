@@ -118,4 +118,5 @@ async def timed_text_to_speech(
         region=speech.region,
         model_version=speech.model_version,
         used_fallback_voice=speech.used_fallback_voice,
+        cached_speed=getattr(speech, "cached_speed", None),
     )

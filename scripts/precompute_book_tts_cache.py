@@ -10,7 +10,10 @@ import argparse
 import asyncio
 import logging
 import os
+import re
 import sys
+import unicodedata
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -20,10 +23,18 @@ BACKEND_ROOT = REPO_ROOT / "backend"
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+# Append voice-runtime site-packages as a fallback so PyAV (`av` / libmp3lame) is available
+# for 64 kbps MP3 compression without overriding backend ABI-pinned packages.
+_VOICE_SITE_PACKAGES = Path(
+    os.getenv("VIREAD_VOICE_RUNTIME_SITE_PACKAGES", r"F:\c1\tools\voice-runtime\.venv\Lib\site-packages")
+)
+if _VOICE_SITE_PACKAGES.is_dir() and str(_VOICE_SITE_PACKAGES) not in sys.path:
+    sys.path.append(str(_VOICE_SITE_PACKAGES))
+
 from sqlalchemy import select  # noqa: E402
 
 from app.database.session import AsyncSessionLocal, engine  # noqa: E402
-from app.models import Book, BookPage, PageRevision, PageRevisionWord  # noqa: E402
+from app.models import Book, BookPage, PageRevision, PageRevisionWord, TtsAudioCacheEntry  # noqa: E402
 from app.providers.local_voice_provider import (  # noqa: E402
     DEFAULT_LOCAL_VOICE_ID,
     LOCAL_TTS_MODEL_VERSION,
@@ -43,7 +54,67 @@ from app.services.voice_orchestrator import VoiceOrchestrator, VoicePolicyContex
 
 logger = logging.getLogger("viread.precompute_tts_cache")
 
+DEFAULT_PRECOMPUTE_SPEED = 0.9
 COACHING_PHRASES: tuple[str, ...] = ALLOWED_COACHING_PHRASES_RAW
+
+_TIMED_MAX_CHARACTERS = 5_000
+_TIMED_MAX_WORDS = 800
+_TOKEN_WITH_WS_RE = re.compile(r"\S+\s*")
+_SENTENCE_END_RE = re.compile(r'[.!?…]["”’\')\]]*\s*$')
+_PARA_BREAK_RE = re.compile(r"\n\s*\n")
+
+
+def normalize_vietnamese_word(value: str) -> str:
+    """Mirror frontend `normalizeVietnameseWord` (NFC, lowercase, strip leading/trailing P/S)."""
+    text = unicodedata.normalize("NFC", str(value or "")).lower().strip()
+    start = 0
+    end = len(text)
+    while start < end and unicodedata.category(text[start])[0] in {"P", "S"}:
+        start += 1
+    while end > start and unicodedata.category(text[end - 1])[0] in {"P", "S"}:
+        end -= 1
+    return unicodedata.normalize("NFC", text[start:end].strip())
+
+
+def split_speech_text_chunks(
+    text: str,
+    max_characters: int = _TIMED_MAX_CHARACTERS,
+    max_words: int = _TIMED_MAX_WORDS,
+) -> list[list[str]]:
+    """Mirror frontend `splitSpeechText(VerifiedText)` so `/timed` hashes match 1:1.
+
+    Preserves exact capitalization and punctuation from `VerifiedText` and splits
+    long pages at sentence/paragraph boundaries identically to `tts-text.ts`.
+    """
+    nfc_text = unicodedata.normalize("NFC", str(text or ""))
+    matches = list(_TOKEN_WITH_WS_RE.finditer(nfc_text))
+    chunks: list[list[str]] = []
+    first = 0
+    while first < len(matches):
+        start = 0 if first == 0 else matches[first].start()
+        nxt = first
+        sentence_end = -1
+        while nxt < len(matches) and (nxt - first) < max_words:
+            end = matches[nxt].end()
+            if (end - start) > max_characters:
+                break
+            segment = matches[nxt].group(0)
+            if _SENTENCE_END_RE.search(segment) or _PARA_BREAK_RE.search(segment):
+                sentence_end = nxt + 1
+            nxt += 1
+        if nxt == first:
+            nxt = first + 1
+        if nxt < len(matches) and sentence_end > first:
+            nxt = sentence_end
+        chunk_words = [
+            unicodedata.normalize("NFC", m.group(0).strip())
+            for m in matches[first:nxt]
+            if m.group(0).strip()
+        ]
+        if chunk_words:
+            chunks.append(chunk_words)
+        first = nxt
+    return chunks
 
 
 async def _collect_page_targets(
@@ -86,19 +157,30 @@ async def _collect_page_targets(
         rows = (await db.execute(query)).all()
         targets: list[dict[str, Any]] = []
         for row in rows:
-            text = canonical_tts_text(str(row.VerifiedText or ""))
+            raw_verified = unicodedata.normalize("NFC", str(row.VerifiedText or ""))
+            text = canonical_tts_text(raw_verified)
             if not text:
                 continue
             words_res = await db.execute(
                 select(PageRevisionWord.NormalizedText, PageRevisionWord.Text)
                 .where(PageRevisionWord.PageRevisionId == row.revision_id)
-                .order_by(PageRevisionWord.WordOrder.asc())
+                .order_by(PageRevisionWord.WordIndex.asc())
             )
-            tokens = [
-                canonical_tts_text(str(w.NormalizedText or w.Text or ""))
-                for w in words_res.all()
-                if canonical_tts_text(str(w.NormalizedText or w.Text or ""))
-            ]
+            tokens: list[str] = []
+            for w in words_res.all():
+                raw_norm = str(w.NormalizedText or "").strip()
+                norm = (
+                    normalize_vietnamese_word(raw_norm)
+                    if raw_norm
+                    else normalize_vietnamese_word(str(w.Text or ""))
+                )
+                if norm:
+                    tokens.append(norm)
+            if not tokens:
+                for piece in text.split():
+                    norm = normalize_vietnamese_word(piece)
+                    if norm:
+                        tokens.append(norm)
             entry_scope = "PRIVATE" if row.VisibilityScope == "PARENT_PRIVATE" else "CATALOG"
             targets.append(
                 {
@@ -107,6 +189,7 @@ async def _collect_page_targets(
                     "book_id": row.book_id,
                     "page_id": row.page_id,
                     "page_revision_id": row.revision_id,
+                    "verified_text": raw_verified,
                     "text": text,
                     "tokens": tokens,
                 }
@@ -114,26 +197,39 @@ async def _collect_page_targets(
         return targets
 
 
-async def _is_already_cached(
+async def _load_existing_cache_keys(
     *,
-    target: ResolvedCacheTarget,
-    normalized_text: str,
     voice_id: str,
     speed: float,
-) -> bool:
-    content_sha256 = canonical_tts_sha256(normalized_text)
+) -> dict[tuple[str, str | None, str], bool]:
+    formats = list(preferred_cache_formats(audio_format="mp3"))
+    q_speed = Decimal(f"{float(speed):.2f}")
     async with AsyncSessionLocal() as db:
-        repo = TtsAudioCacheRepository(db)
-        entry = await repo.get_active_entry(
-            scope=target.scope,
-            owner_parent_id=target.owner_parent_id,
-            content_sha256=content_sha256,
-            voice_id=voice_id,
-            model_version=None,
-            speed=speed,
-            audio_formats=preferred_cache_formats(audio_format="mp3"),
-        )
-        return entry is not None
+        rows = (
+            await db.execute(
+                select(
+                    TtsAudioCacheEntry.Scope,
+                    TtsAudioCacheEntry.OwnerParentId,
+                    TtsAudioCacheEntry.ContentSha256,
+                    TtsAudioCacheEntry.WordTimingsJson,
+                ).where(
+                    TtsAudioCacheEntry.Status == "ACTIVE",
+                    TtsAudioCacheEntry.VoiceId == voice_id,
+                    TtsAudioCacheEntry.Speed == q_speed,
+                    TtsAudioCacheEntry.AudioFormat.in_(formats),
+                )
+            )
+        ).all()
+        existing: dict[tuple[str, str | None, str], bool] = {}
+        for r in rows:
+            key = (
+                str(r.Scope),
+                str(r.OwnerParentId) if r.OwnerParentId is not None else None,
+                str(r.ContentSha256),
+            )
+            has_timings = bool(getattr(r, "WordTimingsJson", None))
+            existing[key] = existing.get(key, False) or has_timings
+        return existing
 
 
 async def _current_cache_bytes() -> int:
@@ -146,7 +242,7 @@ async def run_precompute(
     scope: str = "catalog",
     book_id: UUID | None = None,
     voice_id: str = DEFAULT_LOCAL_VOICE_ID,
-    speed: float = 1.0,
+    speed: float = DEFAULT_PRECOMPUTE_SPEED,
     dry_run: bool = False,
     limit: int | None = None,
     include_words: bool = True,
@@ -181,11 +277,19 @@ async def run_precompute(
                 page_revision_id=page["page_revision_id"],
                 can_store_on_miss=True,
             )
-            page_tokens = page["tokens"] or page["text"].split()
-            timed_key_text = canonical_tts_text(" ".join(page_tokens)) if page_tokens else page["text"]
-            items.append((target, timed_key_text, page_tokens, False))
+            raw_verified = str(page.get("verified_text") or page.get("text") or "")
+            timed_chunks = split_speech_text_chunks(raw_verified)
+            if not timed_chunks and page.get("tokens"):
+                timed_chunks = [list(page["tokens"])]
+            for page_tokens in timed_chunks:
+                timed_key_text = canonical_tts_text(" ".join(page_tokens))
+                if timed_key_text:
+                    items.append((target, timed_key_text, page_tokens, False))
             if include_words:
-                for token in page["tokens"]:
+                for raw_token in page.get("tokens") or []:
+                    token = normalize_vietnamese_word(raw_token)
+                    if not token:
+                        continue
                     dedup = (
                         page["scope"],
                         str(page["owner_parent_id"]) if page["owner_parent_id"] else None,
@@ -222,14 +326,29 @@ async def run_precompute(
         for phrase in COACHING_PHRASES:
             items.append((coaching_target, canonical_tts_text(phrase), None, False))
 
+    existing_keys = await _load_existing_cache_keys(voice_id=voice_id, speed=speed)
+
+    def _is_key_satisfied(key: tuple[str, str | None, str], *, needs_timings: bool) -> bool:
+        if isinstance(existing_keys, dict):
+            if key not in existing_keys:
+                return False
+            return existing_keys[key] if needs_timings else True
+        return key in existing_keys
+
+    def _mark_key_present(key: tuple[str, str | None, str], *, has_timings: bool) -> None:
+        if isinstance(existing_keys, dict):
+            existing_keys[key] = existing_keys.get(key, False) or has_timings
+        else:
+            existing_keys.add(key)
+
     for target, text, tokens, is_word_sample in items:
         stats["planned"] += 1
-        if await _is_already_cached(
-            target=target,
-            normalized_text=text,
-            voice_id=voice_id,
-            speed=speed,
-        ):
+        cache_key = (
+            target.scope,
+            str(target.owner_parent_id) if target.owner_parent_id is not None else None,
+            canonical_tts_sha256(text),
+        )
+        if _is_key_satisfied(cache_key, needs_timings=bool(tokens)):
             stats["cached_hit"] += 1
             continue
 
@@ -290,7 +409,17 @@ async def run_precompute(
                 )
                 if stored:
                     used_bytes += len(compressed)
+                    _mark_key_present(cache_key, has_timings=bool(word_timings))
                     stats["synthesized"] += 1
+                    if stats["synthesized"] == 1 or stats["synthesized"] % 10 == 0:
+                        logger.info(
+                            "precompute_progress synthesized=%d/%d fmt=%s last_bytes=%d total_kb=%.1f",
+                            stats["synthesized"],
+                            len(items),
+                            _fmt,
+                            len(compressed),
+                            used_bytes / 1024.0,
+                        )
                 else:
                     stats["errors"] += 1
         except Exception as exc:
@@ -310,7 +439,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--scope", choices=("catalog", "private", "all", "coaching"), default="catalog")
     parser.add_argument("--book-id", type=str, default=None)
     parser.add_argument("--voice-id", type=str, default=DEFAULT_LOCAL_VOICE_ID)
-    parser.add_argument("--speed", type=float, default=1.0)
+    parser.add_argument("--speed", type=float, default=DEFAULT_PRECOMPUTE_SPEED)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--worker-url", type=str, default=None)
     parser.add_argument("--no-words", action="store_true")

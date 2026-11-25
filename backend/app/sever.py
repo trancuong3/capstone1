@@ -638,9 +638,26 @@ async def database_connection_exception_handler(
     )
 
 
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Return a generic error while retaining a private traceback and request ID."""
+def _cors_error_headers(request: Request) -> dict[str, str]:
+    """Attach explicit CORS headers on unhandled 500s that bypass CORSMiddleware."""
+    origin = (request.headers.get("origin") or "").strip()
+    if origin and origin in CORS_ALLOWED_ORIGINS:
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Expose-Headers": "X-Request-ID, X-ViRead-Version",
+            "Vary": "Origin",
+        }
+    return {}
+
+
+async def _build_unhandled_500_response(
+    request: Request,
+    exc: Exception,
+    *,
+    include_cors_headers: bool,
+) -> JSONResponse:
+    """Return a generic 500 error while retaining a private traceback and request ID."""
     request_id = getattr(request.state, "request_id", uuid4().hex)
     log_diagnostic(
         logger,
@@ -653,14 +670,23 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
         method=request.method,
         route=_route_template(request),
     )
+    headers = {
+        "X-Request-ID": request_id,
+        "X-ViRead-Version": get_viread_app_version(),
+    }
+    if include_cors_headers:
+        headers.update(_cors_error_headers(request))
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error", "request_id": request_id},
-        headers={
-            "X-Request-ID": request_id,
-            "X-ViRead-Version": get_viread_app_version(),
-        },
+        headers=headers,
     )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Unhandled exceptions escape CORSMiddleware via ServerErrorMiddleware; attach CORS headers."""
+    return await _build_unhandled_500_response(request, exc, include_cors_headers=True)
 
 
 @app.exception_handler(DBAPIError)
@@ -683,7 +709,9 @@ async def database_api_exception_handler(
             route=_route_template(request),
             **metadata,
         )
-        return await unhandled_exception_handler(request, exc)
+        return await _build_unhandled_500_response(
+            request, exc, include_cors_headers=False
+        )
 
     original = exc.orig
     sqlstate = getattr(original, "sqlstate", None)
@@ -698,7 +726,9 @@ async def database_api_exception_handler(
     )
     if transient:
         return await database_connection_exception_handler(request, exc)
-    return await unhandled_exception_handler(request, exc)
+    return await _build_unhandled_500_response(
+        request, exc, include_cors_headers=False
+    )
 
 
 app.add_middleware(
@@ -717,6 +747,10 @@ app.add_middleware(
         "X-Voice-Model-Version",
         "X-Voice-Fallback",
         "X-Voice-Fallback-Reason",
+        "X-TTS-Cache",
+        "X-TTS-Provider",
+        "X-TTS-Scope",
+        "X-TTS-Cached-Speed",
     ],
 )
 

@@ -190,15 +190,21 @@ def _accepts_db_kwarg(fn: Any) -> bool:
 def _tts_cache_headers(speech_or_audio: Any) -> dict[str, str]:
     cache_hit = bool(getattr(speech_or_audio, "cache_hit", False))
     cache_scope = getattr(speech_or_audio, "cache_scope", None)
+    cached_speed = getattr(speech_or_audio, "cached_speed", None)
     if cache_hit:
         cache_control = "private, no-store" if cache_scope == "PRIVATE" else "private, max-age=86400"
     else:
         cache_control = "no-store"
-    return {
+    headers = {
         "Cache-Control": cache_control,
         "X-TTS-Cache": "HIT" if cache_hit else "MISS",
         "X-TTS-Provider": str(getattr(speech_or_audio, "provider", "local")),
     }
+    if cache_scope:
+        headers["X-TTS-Scope"] = str(cache_scope)
+    if cached_speed is not None:
+        headers["X-TTS-Cached-Speed"] = f"{float(cached_speed):.2f}"
+    return headers
 
 
 @router.get("/status")
@@ -345,6 +351,7 @@ async def phonics_text_to_speech(
         resolved_voice_id=speech.resolved_voice_id,
         region=speech.region,
         model_version=speech.model_version,
+        cached_speed=getattr(speech, "cached_speed", None),
     )
 
 
