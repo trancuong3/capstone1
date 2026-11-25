@@ -872,4 +872,380 @@ describe("PictureDescriptionScreen", () => {
       vi.useRealTimers();
     }
   });
+
+  it("supports all 6 teaching modes, target difficult-word badges, and PEER/CROWD follow-up question flow", async () => {
+    const evaluateBodies: Array<{
+      transcript_text: string;
+      input_mode: string;
+      teaching_mode?: string;
+      target_words?: string[];
+    }> = [];
+
+    const sessionWithTargets = {
+      ...baseSession,
+      teaching_mode: "OBSERVE",
+      target_words: ["hướng dương", "cuộn tròn"],
+      guide: {
+        ...baseSession.guide,
+        teaching_mode: "OBSERVE",
+        target_words: ["hướng dương", "cuộn tròn"],
+      },
+    };
+
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const path = new URL(url).pathname;
+      if (path === `/profiles/children/${TEST_CHILD_ID}`) {
+        return Response.json(childFixture);
+      }
+      if (path === "/games/picture-description/catalog") {
+        return Response.json(catalogPayload);
+      }
+      if (
+        path === "/games/picture-description/sessions" &&
+        (!init?.method || init.method === "GET")
+      ) {
+        return Response.json([]);
+      }
+      if (
+        path === "/games/picture-description/sessions" &&
+        init?.method === "POST"
+      ) {
+        return Response.json(sessionWithTargets, { status: 201 });
+      }
+      if (
+        path ===
+        `/games/picture-description/sessions/${TEST_SESSION_ID}/evaluate`
+      ) {
+        const body = JSON.parse(String(init?.body)) as {
+          transcript_text: string;
+          input_mode: string;
+          teaching_mode?: string;
+          target_words?: string[];
+        };
+        evaluateBodies.push(body);
+        const attempt = {
+          attempt_id: ATTEMPT_ID,
+          attempt_number: 1,
+          input_mode: body.input_mode,
+          transcript_text: body.transcript_text,
+          score_out_of_10: 9,
+          stars: 3,
+          evaluation_source: "AI",
+          provider_tier: "GEMINI_PRIMARY",
+          feedback: {
+            ...evaluatedFeedback,
+            teaching_mode: body.teaching_mode ?? "STORY",
+            scaffolding_step: "NEXT_CHALLENGE",
+            next_prompt_question:
+              "Nếu chú mèo cam tỉnh dậy, bé nghĩ chú sẽ nói gì với những bông hoa hướng dương?",
+            used_target_words: ["hướng dương"],
+            provider_tier: "GEMINI_PRIMARY",
+          },
+          created_at: "2026-11-25T08:05:00Z",
+        };
+        return Response.json({
+          session: {
+            ...sessionWithTargets,
+            status: "COMPLETED",
+            best_stars: 3,
+            best_score: 9,
+            attempts_count: 1,
+            attempts: [attempt],
+          },
+          latest_attempt: attempt,
+        });
+      }
+      throw new Error(`Unexpected test route ${path}`);
+    });
+
+    const user = userEvent.setup();
+    renderScreen();
+
+    await screen.findByText("Khu vườn đầy nắng");
+    await user.click(
+      screen.getByRole("button", { name: "Khám phá tranh này" }),
+    );
+    await screen.findByText("Chú mèo ngủ trưa trong vườn nắng");
+
+    // All 6 teaching mode pills render cleanly
+    for (const label of [
+      "Quan sát",
+      "Từ vựng",
+      "Ghép câu",
+      "Kể chuyện",
+      "Suy luận",
+      "Sáng tạo",
+    ]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+    }
+
+    // Target difficult words panel is visible
+    expect(screen.getByTestId("target-words-panel")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Từ khó mục tiêu bé đang luyện/i),
+    ).toBeInTheDocument();
+
+    // Switch to "Kể chuyện" (STORY) mode and submit
+    const storyPill = screen.getByRole("button", { name: "Kể chuyện" });
+    await user.click(storyPill);
+    expect(storyPill).toHaveAttribute("aria-pressed", "true");
+
+    const textarea = screen.getByLabelText("Nội dung bé mô tả bức tranh");
+    await user.type(
+      textarea,
+      "Một buổi sáng đầy nắng, chú mèo cam ngủ ngon bên những bông hoa hướng dương rực rỡ.",
+    );
+    await user.click(
+      screen.getByRole("button", { name: /Gửi cô giáo AI chấm bài/i }),
+    );
+
+    expect(
+      await screen.findByTestId("ai-followup-question"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Nếu chú mèo cam tỉnh dậy, bé nghĩ chú sẽ nói gì với những bông hoa hướng dương?",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Thử thách tiếp theo")).toBeInTheDocument();
+    expect(screen.getByTestId("used-target-words-result")).toHaveTextContent(
+      "hướng dương",
+    );
+    expect(evaluateBodies).toHaveLength(1);
+    expect(evaluateBodies[0].teaching_mode).toBe("STORY");
+    expect(evaluateBodies[0].target_words).toEqual([
+      "hướng dương",
+      "cuộn tròn",
+    ]);
+
+    // Click "Trả lời câu hỏi này" -> switches to Practice tab with follow-up prompt visible
+    await user.click(
+      screen.getByRole("button", { name: "Trả lời câu hỏi này" }),
+    );
+    expect(
+      await screen.findByTestId("practice-followup-banner"),
+    ).toHaveTextContent("chú mèo cam tỉnh dậy");
+  });
+
+  it("adapts scaffolding hints by grade: prominent audio-first for Grades 1-2, collapsed by default for Grades 4-5", async () => {
+    const grade5Child = { ...childFixture, grade: 5 };
+    const grade5Session = { ...baseSession, child_grade: 5 };
+
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const path = new URL(url).pathname;
+      if (path === `/profiles/children/${TEST_CHILD_ID}`) {
+        return Response.json(grade5Child);
+      }
+      if (path === "/games/picture-description/catalog") {
+        return Response.json(catalogPayload);
+      }
+      if (
+        path === "/games/picture-description/sessions" &&
+        (!init?.method || init.method === "GET")
+      ) {
+        return Response.json([]);
+      }
+      if (
+        path === "/games/picture-description/sessions" &&
+        init?.method === "POST"
+      ) {
+        return Response.json(grade5Session, { status: 201 });
+      }
+      throw new Error(`Unexpected test route ${path}`);
+    });
+
+    const user = userEvent.setup();
+    renderScreen();
+
+    await screen.findByText("Khu vườn đầy nắng");
+    await user.click(
+      screen.getByRole("button", { name: "Khám phá tranh này" }),
+    );
+    await screen.findByText("Chú mèo ngủ trưa trong vườn nắng");
+
+    // Grade 5 collapses hint chips by default with 1-tap expand toggle
+    const toggleBtn = screen.getByTestId("toggle-grade-hint-chips");
+    expect(toggleBtn).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("grade-hint-chips")).not.toBeInTheDocument();
+
+    // 1 tap expands hint chips immediately
+    await user.click(toggleBtn);
+    expect(toggleBtn).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("grade-hint-chips")).toBeInTheDocument();
+  });
+
+  it("enforces G10 anti-TTS-self-capture, background mic/TTS release with draft preservation, and duplicate submit guard", async () => {
+    setupDefaultResponses();
+
+    const synthesisMock = {
+      speaking: false,
+      cancel: vi.fn(() => {
+        synthesisMock.speaking = false;
+      }),
+      speak: vi.fn(),
+    };
+    Object.defineProperty(window, "speechSynthesis", {
+      configurable: true,
+      writable: true,
+      value: synthesisMock,
+    });
+
+    const recognitionState = {
+      onresult: null as ((event: unknown) => void) | null,
+      onend: null as (() => void) | null,
+      onerror: null as (() => void) | null,
+      start: vi.fn(),
+      stop: vi.fn(),
+      abort: vi.fn(),
+    };
+    class MockSpeechRecognition {
+      lang = "";
+      continuous = false;
+      interimResults = false;
+      set onresult(fn: ((event: unknown) => void) | null) {
+        recognitionState.onresult = fn;
+      }
+      get onresult() {
+        return recognitionState.onresult;
+      }
+      set onend(fn: (() => void) | null) {
+        recognitionState.onend = fn;
+      }
+      get onend() {
+        return recognitionState.onend;
+      }
+      set onerror(fn: (() => void) | null) {
+        recognitionState.onerror = fn;
+      }
+      get onerror() {
+        return recognitionState.onerror;
+      }
+      start = recognitionState.start;
+      stop = recognitionState.stop;
+      abort = recognitionState.abort;
+    }
+    vi.stubGlobal("SpeechRecognition", MockSpeechRecognition);
+
+    const user = userEvent.setup();
+    renderScreen();
+
+    await screen.findByText("Khu vườn đầy nắng");
+    await user.click(
+      screen.getByRole("button", { name: "Khám phá tranh này" }),
+    );
+    await screen.findByText("Chú mèo ngủ trưa trong vườn nắng");
+
+    // Grade 2 shows audio-first visual hints prominently
+    expect(screen.getByTestId("grade-hint-chips")).toBeInTheDocument();
+
+    // 1. Start mic recording and emit partial speech
+    await user.click(screen.getByRole("button", { name: /Nói bằng Micro/i }));
+    await waitFor(() => {
+      expect(recognitionState.start).toHaveBeenCalledTimes(1);
+    });
+    act(() => {
+      recognitionState.onresult?.({
+        resultIndex: 0,
+        results: [
+          {
+            isFinal: true,
+            0: { transcript: "Chú mèo cam nằm ngủ", confidence: 0.9 },
+          },
+        ],
+      });
+    });
+
+    // 2. Starting TTS immediately aborts active SpeechRecognition + recorder & preserves spoken draft
+    await user.click(screen.getByRole("button", { name: /Nghe chế độ/i }));
+    expect(recognitionState.abort).toHaveBeenCalled();
+    expect(recorderMock.cancel).toHaveBeenCalled();
+    const textarea = screen.getByLabelText(
+      "Nội dung bé mô tả bức tranh",
+    ) as HTMLTextAreaElement;
+    expect(textarea.value).toContain("Chú mèo cam nằm ngủ");
+
+    // Stray SpeechRecognition event during TTS MUST be ignored (never self-captured)
+    synthesisMock.speaking = true;
+    act(() => {
+      recognitionState.onresult?.({
+        resultIndex: 0,
+        results: [
+          {
+            isFinal: true,
+            0: { transcript: "Giọng cô giáo TTS giả", confidence: 0.99 },
+          },
+        ],
+      });
+    });
+    expect(screen.queryByText(/Giọng cô giáo TTS giả/)).not.toBeInTheDocument();
+
+    // 3. Clicking Record while speechSynthesis.speaking=true immediately cancels TTS and cools down before arming mic
+    synthesisMock.cancel.mockClear();
+    recorderMock.start.mockClear();
+    await user.click(screen.getByRole("button", { name: /Nói bằng Micro/i }));
+    expect(synthesisMock.cancel).toHaveBeenCalled();
+    await waitFor(
+      () => {
+        expect(recorderMock.start).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 1500 },
+    );
+
+    // 4. Android background event releases mic & cancels TTS safely without losing spoken draft
+    synthesisMock.cancel.mockClear();
+    recorderMock.cancel.mockClear();
+    act(() => {
+      recognitionState.onresult?.({
+        resultIndex: 0,
+        results: [
+          {
+            isFinal: true,
+            0: { transcript: "trên ghế gỗ", confidence: 0.92 },
+          },
+        ],
+      });
+      document.dispatchEvent(new Event("viread:android-background"));
+    });
+    expect(synthesisMock.cancel).toHaveBeenCalled();
+    expect(recorderMock.cancel).toHaveBeenCalled();
+    expect(textarea.value).toContain("trên ghế gỗ");
+
+    // 5. Offline submission preserves text draft cleanly with helpful message
+    const originalOnLine = navigator.onLine;
+    Object.defineProperty(navigator, "onLine", {
+      configurable: true,
+      get: () => false,
+    });
+    await user.click(
+      screen.getByRole("button", { name: /Gửi cô giáo AI chấm bài/i }),
+    );
+    expect(
+      await screen.findByText(/Bài kể của bé vẫn được giữ nguyên/i),
+    ).toBeInTheDocument();
+    expect(textarea.value).toContain("Chú mèo cam nằm ngủ");
+    Object.defineProperty(navigator, "onLine", {
+      configurable: true,
+      get: () => originalOnLine,
+    });
+
+    // 6. Rapid double-click on Evaluate suppresses duplicate submissions
+    let evalPosts = 0;
+    const prevImpl = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (
+        new URL(url).pathname ===
+        `/games/picture-description/sessions/${TEST_SESSION_ID}/evaluate`
+      ) {
+        evalPosts += 1;
+        await new Promise((resolve) => setTimeout(resolve, 60));
+      }
+      return prevImpl!(url, init);
+    });
+    const submitBtn = screen.getByRole("button", {
+      name: /Gửi cô giáo AI chấm bài/i,
+    });
+    await Promise.all([user.click(submitBtn), user.click(submitBtn)]);
+    await screen.findByText("9/10 điểm");
+    expect(evalPosts).toBe(1);
+  });
 });

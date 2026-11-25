@@ -10,11 +10,34 @@ import type {
   PictureSessionDTO,
   PictureSessionSummaryDTO,
   PictureSourceType,
+  PictureTeachingMode,
 } from "@/types/picture-description";
 
 const sourceTypeSchema = z.enum(["BOOK_PAGE", "CUSTOM_UPLOAD", "SAMPLE"]);
 const statusSchema = z.enum(["ACTIVE", "COMPLETED"]);
 const inputModeSchema = z.enum(["VOICE", "TEXT"]);
+const teachingModeSchema = z.enum([
+  "OBSERVE",
+  "VOCABULARY",
+  "SENTENCE",
+  "STORY",
+  "INFER",
+  "CREATE",
+]);
+const scaffoldingStepSchema = z.enum([
+  "PRAISE",
+  "EXPAND",
+  "PROMPT",
+  "NEXT_CHALLENGE",
+]);
+const providerTierSchema = z.enum([
+  "CURATED",
+  "GEMINI_PRIMARY",
+  "GEMINI_FALLBACK",
+  "GROQ_FREE",
+  "LOCAL_OLLAMA",
+  "DETERMINISTIC_FALLBACK",
+]);
 
 const sampleSchema = z.object({
   sample_key: z.string(),
@@ -49,6 +72,8 @@ const guideSchema = z.object({
   guiding_questions: z.array(z.string()),
   suggested_vocabulary: z.array(vocabSchema),
   model_sample_sentences: z.array(z.string()),
+  teaching_mode: teachingModeSchema.optional(),
+  target_words: z.array(z.string()).optional(),
 });
 
 const feedbackSchema = z.object({
@@ -61,6 +86,11 @@ const feedbackSchema = z.object({
   improvement_tip: z.string(),
   upgraded_sentences: z.array(z.string()),
   vocabulary_highlights: z.array(z.string()),
+  teaching_mode: teachingModeSchema.optional(),
+  scaffolding_step: scaffoldingStepSchema.nullish(),
+  next_prompt_question: z.string().nullish(),
+  used_target_words: z.array(z.string()).optional(),
+  provider_tier: providerTierSchema.nullish(),
 });
 
 const attemptSchema = z.object({
@@ -71,6 +101,7 @@ const attemptSchema = z.object({
   score_out_of_10: z.number().int().min(0).max(10),
   stars: z.number().int().min(0).max(3),
   evaluation_source: z.enum(["AI", "FALLBACK"]).optional().default("AI"),
+  provider_tier: providerTierSchema.nullish(),
   feedback: feedbackSchema,
   created_at: z.string(),
 });
@@ -89,6 +120,9 @@ const sessionSchema = z.object({
   best_stars: z.number().int().min(0).max(3),
   best_score: z.number().int().min(0).max(10),
   attempts_count: z.number().int().min(0),
+  teaching_mode: teachingModeSchema.optional(),
+  target_words: z.array(z.string()).optional(),
+  provider_tier: providerTierSchema.nullish(),
   guide: guideSchema,
   attempts: z.array(attemptSchema),
   created_at: z.string(),
@@ -124,11 +158,16 @@ export interface CreatePictureSessionInput {
   readonly sample_key?: string;
   readonly book_page_id?: string;
   readonly image_file?: File;
+  readonly teaching_mode?: PictureTeachingMode;
+  readonly target_words?: readonly string[];
+  readonly refresh_ai_guide?: boolean;
 }
 
 export interface EvaluatePictureInput {
   readonly transcript_text: string;
   readonly input_mode: PictureInputMode;
+  readonly teaching_mode?: PictureTeachingMode;
+  readonly target_words?: readonly string[];
 }
 
 export interface PictureDescriptionService {
@@ -230,6 +269,15 @@ export function createPictureDescriptionService(): PictureDescriptionService {
       }
       if (input.book_page_id) {
         form.append("book_page_id", input.book_page_id);
+      }
+      if (input.teaching_mode) {
+        form.append("teaching_mode", input.teaching_mode);
+      }
+      if (input.target_words && input.target_words.length > 0) {
+        form.append("target_words", JSON.stringify(input.target_words));
+      }
+      if (input.refresh_ai_guide) {
+        form.append("refresh_ai_guide", "true");
       }
       if (input.image_file) {
         form.append(

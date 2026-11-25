@@ -63,8 +63,10 @@ import type {
   PictureCatalogDTO,
   PictureInputMode,
   PictureSampleItemDTO,
+  PictureScaffoldingStep,
   PictureSessionDTO,
   PictureSessionSummaryDTO,
+  PictureTeachingMode,
 } from "@/types/picture-description";
 
 type SourceTab = "SAMPLE" | "CUSTOM_UPLOAD" | "BOOK_PAGE";
@@ -94,8 +96,85 @@ type BrowserSpeechRecognitionCtor = new () => BrowserSpeechRecognitionLike;
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const ACCEPTED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const TTS_MIC_COOLDOWN_MS = 280;
+const DUPLICATE_SUBMIT_WINDOW_MS = 1500;
 const defaultGameError =
   "Chưa kết nối được góc Kể chuyện qua tranh. Ba mẹ và bé hãy thử lại nhé.";
+
+const TEACHING_MODES: readonly {
+  readonly id: PictureTeachingMode;
+  readonly label: string;
+  readonly cue: string;
+  readonly audioHint: string;
+}[] = [
+  {
+    id: "OBSERVE",
+    label: "Quan sát",
+    cue: "Gọi tên nhân vật, con vật, đồ vật và màu sắc bé nhìn thấy.",
+    audioHint:
+      "Chế độ Quan sát: Bé hãy nhìn kỹ tranh và kể xem trong tranh có ai, có vật gì và màu sắc ra sao nhé.",
+  },
+  {
+    id: "VOCABULARY",
+    label: "Từ vựng",
+    cue: "Dùng các từ gợi ý hoặc từ khó mục tiêu vào câu kể thật tự nhiên.",
+    audioHint:
+      "Chế độ Từ vựng: Bé hãy chọn từ hay hoặc từ khó rồi đặt một câu trọn ý gắn với bức tranh nhé.",
+  },
+  {
+    id: "SENTENCE",
+    label: "Ghép câu",
+    cue: "Ghép thành câu trọn ý: Ai / Con gì + đang làm gì + ở đâu.",
+    audioHint:
+      "Chế độ Ghép câu: Bé hãy ghép thành một câu hoàn chỉnh xem ai đang làm gì và ở đâu nhé.",
+  },
+  {
+    id: "STORY",
+    label: "Kể chuyện",
+    cue: "Kể câu chuyện nhỏ có mở đầu, diễn biến và cảm xúc vui vẻ.",
+    audioHint:
+      "Chế độ Kể chuyện: Bé hãy kể thành một câu chuyện ngắn có mở đầu, hoạt động chính và cảm xúc nhé.",
+  },
+  {
+    id: "INFER",
+    label: "Suy luận",
+    cue: "Đoán xem vì sao nhân vật vui và điều gì có thể sắp xảy ra.",
+    audioHint:
+      "Chế độ Suy luận: Bé hãy nhìn gợi ý trong tranh để đoán xem vì sao lại như vậy và chuyện gì sắp xảy ra nhé.",
+  },
+  {
+    id: "CREATE",
+    label: "Sáng tạo",
+    cue: "Tưởng tượng lời thoại dễ thương hoặc đặt tên mới cho bức tranh.",
+    audioHint:
+      "Chế độ Sáng tạo: Bé hãy thử tưởng tượng nhân vật trong tranh đang nói gì hoặc đặt một cái tên thật hay nhé.",
+  },
+] as const;
+
+const TEACHING_MODE_BY_ID: Record<
+  PictureTeachingMode,
+  (typeof TEACHING_MODES)[number]
+> = {
+  OBSERVE: TEACHING_MODES[0],
+  VOCABULARY: TEACHING_MODES[1],
+  SENTENCE: TEACHING_MODES[2],
+  STORY: TEACHING_MODES[3],
+  INFER: TEACHING_MODES[4],
+  CREATE: TEACHING_MODES[5],
+};
+
+const SCAFFOLDING_STEP_LABELS: Record<PictureScaffoldingStep, string> = {
+  PROMPT: "Gợi mở quan sát",
+  EXPAND: "Mở rộng câu kể",
+  PRAISE: "Khen ngợi & nâng cao",
+  NEXT_CHALLENGE: "Thử thách tiếp theo",
+};
+
+const GRADE_1_2_VISUAL_HINT_CHIPS = [
+  { id: "who", badge: "1", text: "Có ai / con gì?" },
+  { id: "action", badge: "2", text: "Đang làm gì?" },
+  { id: "where", badge: "3", text: "Màu gì / ở đâu?" },
+] as const;
 
 const STORYTELLING_STEPS = [
   {
@@ -287,6 +366,12 @@ export function PictureDescriptionScreen() {
   const [selectedVocabWord, setSelectedVocabWord] = useState<string | null>(
     null,
   );
+  const [teachingMode, setTeachingMode] =
+    useState<PictureTeachingMode>("OBSERVE");
+  const [activeFollowUpQuestion, setActiveFollowUpQuestion] = useState<
+    string | null
+  >(null);
+  const [showGradeHintChips, setShowGradeHintChips] = useState(true);
   const [showHints, setShowHints] = useState(false);
   const [showSampleSentences, setShowSampleSentences] = useState(false);
   const [samplesPage, setSamplesPage] = useState(1);
@@ -315,6 +400,17 @@ export function PictureDescriptionScreen() {
   );
 
   const isRecordingVoiceRef = useRef(false);
+  const isTtsPlayingRef = useRef(false);
+  const lastTtsEndAtRef = useRef(0);
+  const micArmTokenRef = useRef(0);
+  const micCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const liveTranscriptRef = useRef("");
+  const isEvaluatingRef = useRef(false);
+  const lastSuccessfulSubmitRef = useRef<{ key: string; at: number } | null>(
+    null,
+  );
   const browserRecognitionRef = useRef<BrowserSpeechRecognitionLike | null>(
     null,
   );
@@ -344,15 +440,123 @@ export function PictureDescriptionScreen() {
     };
   });
 
-  useEffect(() => {
-    return () => {
+  const clearMicCooldown = useCallback(() => {
+    if (micCooldownTimerRef.current !== null) {
+      clearTimeout(micCooldownTimerRef.current);
+      micCooldownTimerRef.current = null;
+    }
+  }, []);
+
+  const abortActiveVoiceCapture = useCallback(
+    (options?: { preserveDraft?: boolean }) => {
+      micArmTokenRef.current += 1;
+      clearMicCooldown();
+      const wasActive =
+        isRecordingVoiceRef.current || browserRecognitionRef.current !== null;
       isRecordingVoiceRef.current = false;
+      setIsRecordingVoice(false);
+
+      const pendingLive = collapseDuplicateSpeech(
+        collectorRef.current.getTranscript() || liveTranscriptRef.current,
+      );
+      try {
+        browserRecognitionRef.current?.abort();
+      } catch {
+        // Ignore browser recognition abort errors.
+      }
+      browserRecognitionRef.current = null;
+      if (wasActive) {
+        unmountActionsRef.current.cancelRecorder();
+      }
+      if (options?.preserveDraft && pendingLive) {
+        setDescriptionText((previous) => {
+          const prefix = previous.trim();
+          if (!prefix) return pendingLive;
+          if (
+            normalizeSpeechUnit(prefix).endsWith(
+              normalizeSpeechUnit(pendingLive),
+            )
+          ) {
+            return prefix;
+          }
+          return `${prefix} ${pendingLive}`;
+        });
+        setInputMode("VOICE");
+      }
+      liveTranscriptRef.current = "";
+      setLiveTranscript("");
+      return wasActive;
+    },
+    [clearMicCooldown],
+  );
+
+  const stopSpeechPlayback = useCallback(() => {
+    const browserSpeaking =
+      typeof window !== "undefined" &&
+      "speechSynthesis" in window &&
+      Boolean(window.speechSynthesis.speaking);
+    if (isTtsPlayingRef.current || browserSpeaking) {
+      lastTtsEndAtRef.current = Date.now();
+    }
+    isTtsPlayingRef.current = false;
+    unmountActionsRef.current.stopSpeech();
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    setPlayingSpeechKey(null);
+  }, []);
+
+  useEffect(() => {
+    const suspendMediaOnBackground = () => {
+      stopSpeechPlayback();
+      const interruptedMic = abortActiveVoiceCapture({ preserveDraft: true });
+      if (interruptedMic) {
+        setVoiceMessage(
+          "Ứng dụng vừa tạm ẩn nên micro đã tắt an toàn. Lời kể của bé vẫn được giữ nguyên!",
+        );
+      }
+    };
+    const onVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.hidden) {
+        suspendMediaOnBackground();
+      }
+    };
+    const onAndroidBackground = () => {
+      suspendMediaOnBackground();
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityChange);
+      document.addEventListener(
+        "viread:android-background",
+        onAndroidBackground,
+      );
+    }
+    return () => {
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+        document.removeEventListener(
+          "viread:android-background",
+          onAndroidBackground,
+        );
+      }
+      micArmTokenRef.current += 1;
+      clearMicCooldown();
+      isRecordingVoiceRef.current = false;
+      isTtsPlayingRef.current = false;
       requestControllerRef.current?.abort();
-      browserRecognitionRef.current?.abort();
+      try {
+        browserRecognitionRef.current?.abort();
+      } catch {
+        // Ignore cleanup abort errors.
+      }
+      browserRecognitionRef.current = null;
       unmountActionsRef.current.stopSpeech();
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
       unmountActionsRef.current.cancelRecorder();
     };
-  }, []);
+  }, [abortActiveVoiceCapture, clearMicCooldown, stopSpeechPlayback]);
 
   useEffect(() => {
     if (!childId) return;
@@ -412,14 +616,6 @@ export function PictureDescriptionScreen() {
     return map;
   }, [catalogState]);
 
-  const stopSpeechPlayback = useCallback(() => {
-    speechPlayer.stop();
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-    }
-    setPlayingSpeechKey(null);
-  }, [speechPlayer]);
-
   const speakVietnamese = useCallback(
     async (text: string, key: string) => {
       const cleaned = text.trim();
@@ -429,25 +625,45 @@ export function PictureDescriptionScreen() {
         return;
       }
 
+      // G10 Anti-Self-Capture: Immediately abort any active mic / SpeechRecognition before TTS starts.
+      abortActiveVoiceCapture({ preserveDraft: true });
       stopSpeechPlayback();
+      isTtsPlayingRef.current = true;
       setPlayingSpeechKey(key);
 
       try {
         await speechPlayer.play(cleaned);
-        setPlayingSpeechKey((current) => (current === key ? null : current));
       } catch {
-        setPlayingSpeechKey(null);
+        // Ignore playback interruption / fallback errors.
+      } finally {
+        isTtsPlayingRef.current = false;
+        lastTtsEndAtRef.current = Date.now();
+        setPlayingSpeechKey((current) => (current === key ? null : current));
       }
     },
-    [playingSpeechKey, speechPlayer, stopSpeechPlayback],
+    [
+      abortActiveVoiceCapture,
+      playingSpeechKey,
+      speechPlayer,
+      stopSpeechPlayback,
+    ],
   );
 
   const openSession = useCallback(
     (loaded: PictureSessionDTO, initialTab: PracticeTab = "PRACTICE") => {
       stopSpeechPlayback();
-      isRecordingVoiceRef.current = false;
+      abortActiveVoiceCapture({ preserveDraft: false });
       const newestAttempt = loaded.attempts[0] ?? null;
+      const initialMode =
+        loaded.teaching_mode ?? loaded.guide.teaching_mode ?? "OBSERVE";
       setSession(loaded);
+      setTeachingMode(initialMode);
+      setActiveFollowUpQuestion(
+        newestAttempt?.feedback.next_prompt_question ?? null,
+      );
+      // Grade-adaptive scaffolding: prominent audio-first hints for Grades 1-2,
+      // collapsed by default for Grades 4-5 (expandable in 1 tap).
+      setShowGradeHintChips(loaded.child_grade < 4);
       setSelectedAttemptId(newestAttempt?.attempt_id ?? null);
       setPracticeTab(
         initialTab === "RESULT" && newestAttempt ? "RESULT" : "PRACTICE",
@@ -456,13 +672,15 @@ export function PictureDescriptionScreen() {
       setShowHints(false);
       setShowSampleSentences(false);
       setDescriptionText("");
+      liveTranscriptRef.current = "";
       setLiveTranscript("");
       setInputMode("TEXT");
       setActionError(null);
       setEvaluateError(null);
       setVoiceMessage(null);
+      lastSuccessfulSubmitRef.current = null;
     },
-    [stopSpeechPlayback],
+    [abortActiveVoiceCapture, stopSpeechPlayback],
   );
 
   const handleResumeSession = async (
@@ -493,7 +711,10 @@ export function PictureDescriptionScreen() {
     }
   };
 
-  const handleCreateSampleSession = async (sample: PictureSampleItemDTO) => {
+  const handleCreateSampleSession = async (
+    sample: PictureSampleItemDTO,
+    options?: { refreshAiGuide?: boolean },
+  ) => {
     if (!childId || !pictureService || isAnalyzing) return;
     requestControllerRef.current?.abort();
     const controller = new AbortController();
@@ -507,6 +728,7 @@ export function PictureDescriptionScreen() {
           child_id: childId,
           source_type: "SAMPLE",
           sample_key: sample.sample_key,
+          refresh_ai_guide: options?.refreshAiGuide,
         },
         controller.signal,
       );
@@ -630,11 +852,51 @@ export function PictureDescriptionScreen() {
 
   const startVoiceRecording = async () => {
     if (isRecordingVoice || isTranscribing || isEvaluating) return;
+
+    // G10 Anti-Self-Capture: Immediately cancel any active TTS playback before arming mic.
+    const browserSpeaking =
+      typeof window !== "undefined" &&
+      "speechSynthesis" in window &&
+      Boolean(window.speechSynthesis.speaking);
+    const wasTtsActive =
+      isTtsPlayingRef.current || speechPlayer.isPlaying || browserSpeaking;
     stopSpeechPlayback();
+
+    clearMicCooldown();
+    const armToken = ++micArmTokenRef.current;
+
     setVoiceMessage(null);
     setActionError(null);
+    liveTranscriptRef.current = "";
     setLiveTranscript("");
     collectorRef.current.reset();
+
+    const elapsedSinceTts =
+      lastTtsEndAtRef.current > 0
+        ? Date.now() - lastTtsEndAtRef.current
+        : Number.POSITIVE_INFINITY;
+    const cooldownRemainingMs = wasTtsActive
+      ? TTS_MIC_COOLDOWN_MS
+      : elapsedSinceTts < TTS_MIC_COOLDOWN_MS
+        ? TTS_MIC_COOLDOWN_MS - elapsedSinceTts
+        : 0;
+
+    if (cooldownRemainingMs > 0) {
+      setVoiceMessage("Đang đợi giọng đọc dừng hẳn rồi mở micro cho bé...");
+      await new Promise<void>((resolve) => {
+        micCooldownTimerRef.current = setTimeout(() => {
+          micCooldownTimerRef.current = null;
+          resolve();
+        }, cooldownRemainingMs);
+      });
+      if (
+        micArmTokenRef.current !== armToken ||
+        isTtsPlayingRef.current ||
+        (typeof document !== "undefined" && document.hidden)
+      ) {
+        return;
+      }
+    }
 
     try {
       await recorder.start();
@@ -644,6 +906,11 @@ export function PictureDescriptionScreen() {
       setVoiceMessage(
         "Không mở được micro trên thiết bị này. Bé có thể gõ câu mô tả vào ô bên dưới nhé.",
       );
+      return;
+    }
+
+    if (micArmTokenRef.current !== armToken || isTtsPlayingRef.current) {
+      recorder.cancel();
       return;
     }
 
@@ -663,13 +930,28 @@ export function PictureDescriptionScreen() {
         recognition.continuous = true;
         recognition.interimResults = true;
         recognition.onresult = (event) => {
+          // Never capture AI Teacher TTS audio into the child's transcript.
+          const synthesisSpeaking =
+            typeof window !== "undefined" &&
+            "speechSynthesis" in window &&
+            Boolean(window.speechSynthesis.speaking);
+          if (
+            !isRecordingVoiceRef.current ||
+            isTtsPlayingRef.current ||
+            synthesisSpeaking
+          ) {
+            return;
+          }
           collectorRef.current.addResults(event);
-          setLiveTranscript(collectLiveTranscript(collectorRef.current, event));
+          const nextLive = collectLiveTranscript(collectorRef.current, event);
+          liveTranscriptRef.current = nextLive;
+          setLiveTranscript(nextLive);
         };
         recognition.onend = () => {
           collectorRef.current.completeRecognitionCycle();
           if (
             isRecordingVoiceRef.current &&
+            !isTtsPlayingRef.current &&
             !recognitionFailed &&
             browserRecognitionRef.current === recognition
           ) {
@@ -698,7 +980,7 @@ export function PictureDescriptionScreen() {
     setIsTranscribing(true);
     setVoiceMessage("Đang chuyển giọng nói của bé bằng ElevenLabs...");
 
-    const liveSnapshot = liveTranscript;
+    const liveSnapshot = liveTranscriptRef.current || liveTranscript;
     try {
       browserRecognitionRef.current?.stop();
     } catch {
@@ -749,6 +1031,7 @@ export function PictureDescriptionScreen() {
       );
     } finally {
       setIsTranscribing(false);
+      liveTranscriptRef.current = "";
       setLiveTranscript("");
       browserRecognitionRef.current = null;
     }
@@ -769,13 +1052,16 @@ export function PictureDescriptionScreen() {
     setVoiceMessage(null);
     setActionError(null);
     setEvaluateError(null);
+    lastSuccessfulSubmitRef.current = null;
   };
 
   const handleEvaluate = async (
     overrideTranscript?: string,
     overrideMode?: PictureInputMode,
+    options?: { allowDuplicate?: boolean },
   ) => {
-    if (!session || !pictureService || isEvaluating) return;
+    if (!session || !pictureService || isEvaluating || isEvaluatingRef.current)
+      return;
     const rawText =
       overrideTranscript !== undefined ? overrideTranscript : descriptionText;
     const trimmed = rawText.trim();
@@ -786,11 +1072,38 @@ export function PictureDescriptionScreen() {
       return;
     }
 
+    const submitKey = `${session.session_id}:${teachingMode}:${normalizeSpeechUnit(trimmed)}`;
+    const now = Date.now();
+    if (
+      !options?.allowDuplicate &&
+      lastSuccessfulSubmitRef.current &&
+      lastSuccessfulSubmitRef.current.key === submitKey &&
+      now - lastSuccessfulSubmitRef.current.at < DUPLICATE_SUBMIT_WINDOW_MS
+    ) {
+      return;
+    }
+
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      setEvaluateError(
+        "Thiết bị đang mất mạng. Bài kể của bé vẫn được giữ nguyên — khi có mạng lại bé bấm Thử chấm lại ngay nhé!",
+      );
+      return;
+    }
+
     stopSpeechPlayback();
+    abortActiveVoiceCapture({ preserveDraft: false });
     requestControllerRef.current?.abort();
     const controller = new AbortController();
     requestControllerRef.current = controller;
 
+    const sessionTargetWords = Array.from(
+      new Set([
+        ...(session.target_words ?? []),
+        ...(session.guide.target_words ?? []),
+      ]),
+    );
+
+    isEvaluatingRef.current = true;
     setActionError(null);
     setEvaluateError(null);
     setIsEvaluating(true);
@@ -800,22 +1113,32 @@ export function PictureDescriptionScreen() {
         {
           transcript_text: trimmed,
           input_mode: overrideMode ?? inputMode,
+          teaching_mode: teachingMode,
+          ...(sessionTargetWords.length > 0
+            ? { target_words: sessionTargetWords }
+            : {}),
         },
         controller.signal,
       );
       if (controller.signal.aborted) return;
+      lastSuccessfulSubmitRef.current = { key: submitKey, at: Date.now() };
       setSession(response.session);
       setSelectedAttemptId(response.latest_attempt.attempt_id);
+      setActiveFollowUpQuestion(
+        response.latest_attempt.feedback.next_prompt_question ?? null,
+      );
       setVoiceMessage(null);
       setEvaluateError(null);
       setPracticeTab("RESULT");
       setCatalogRefreshKey((value) => value + 1);
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
+      lastSuccessfulSubmitRef.current = null;
       setEvaluateError(
         isServiceError(error) ? error.message : defaultGameError,
       );
     } finally {
+      isEvaluatingRef.current = false;
       setIsEvaluating(false);
     }
   };
@@ -869,11 +1192,23 @@ export function PictureDescriptionScreen() {
   const hasSubmittedAttempt = Boolean(
     session && (session.attempts_count >= 1 || latestAttempt),
   );
+  const effectiveGrade = session?.child_grade ?? selectedChild.grade;
+  const isLowerGrade = effectiveGrade <= 2;
+  const isUpperGrade = effectiveGrade >= 4;
+  const activeModeSpec = TEACHING_MODE_BY_ID[teachingMode];
+  const targetWords = session
+    ? Array.from(
+        new Set([
+          ...(session.target_words ?? []),
+          ...(session.guide.target_words ?? []),
+        ]),
+      )
+    : [];
+  const usedTargetWordsCount = targetWords.filter((word) =>
+    descriptionContainsTerm(descriptionText, word),
+  ).length;
   const draftWordCount = countMeaningfulWords(descriptionText);
-  const draftReadiness = readinessHint(
-    draftWordCount,
-    session?.child_grade ?? selectedChild.grade,
-  );
+  const draftReadiness = readinessHint(draftWordCount, effectiveGrade);
   const usedVocabCount = session
     ? session.guide.suggested_vocabulary.filter((item) =>
         descriptionContainsTerm(descriptionText, item.word),
@@ -910,14 +1245,10 @@ export function PictureDescriptionScreen() {
           <Button
             onClick={() => {
               stopSpeechPlayback();
-              isRecordingVoiceRef.current = false;
-              browserRecognitionRef.current?.abort();
-              browserRecognitionRef.current = null;
-              recorder.cancel();
-              setIsRecordingVoice(false);
-              setLiveTranscript("");
+              abortActiveVoiceCapture({ preserveDraft: false });
               setShowHints(false);
               setShowSampleSentences(false);
+              setActiveFollowUpQuestion(null);
               setPracticeTab("PRACTICE");
               setSession(null);
               setSelectedAttemptId(null);
@@ -1095,7 +1426,9 @@ export function PictureDescriptionScreen() {
                                   {hasPriorAttempt ? (
                                     <Button
                                       onClick={() =>
-                                        void handleCreateSampleSession(sample)
+                                        void handleCreateSampleSession(sample, {
+                                          refreshAiGuide: true,
+                                        })
                                       }
                                       size="compact"
                                       type="button"
@@ -1398,23 +1731,102 @@ export function PictureDescriptionScreen() {
             </div>
 
             <div className="rounded-control bg-sky/25 p-3.5">
-              <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
-                Bố cục 3 bước kể chuyện hay
-              </p>
-              <ol className="mt-2 grid gap-2 sm:grid-cols-3">
-                {STORYTELLING_STEPS.map((item) => (
-                  <li
-                    className="rounded-control bg-white/90 p-2.5 text-xs shadow-2xs"
-                    key={item.step}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
+                  {isLowerGrade
+                    ? "Gợi ý trực quan cho bé (Lớp 1–2)"
+                    : "Bố cục 3 bước kể chuyện hay"}
+                </p>
+                {isUpperGrade ? (
+                  <button
+                    aria-expanded={showGradeHintChips}
+                    className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-xs font-extrabold text-primary shadow-2xs transition-colors hover:bg-sky"
+                    data-testid="toggle-grade-hint-chips"
+                    onClick={() => setShowGradeHintChips((value) => !value)}
+                    type="button"
                   >
-                    <span className="font-extrabold text-primary">
-                      Bước {item.step}:
-                    </span>{" "}
-                    <span className="font-bold text-ink">{item.title}</span>
-                    <p className="mt-0.5 text-muted">{item.detail}</p>
-                  </li>
-                ))}
-              </ol>
+                    {showGradeHintChips ? (
+                      <>
+                        <ChevronUp aria-hidden="true" className="size-3.5" />
+                        Thu gọn gợi ý khung kể
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown aria-hidden="true" className="size-3.5" />
+                        Mở gợi ý khung kể
+                      </>
+                    )}
+                  </button>
+                ) : null}
+              </div>
+
+              {showGradeHintChips ? (
+                <div
+                  className="mt-2 space-y-2.5"
+                  data-testid="grade-hint-chips"
+                >
+                  {isLowerGrade ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-primary/20 bg-white px-3 py-2">
+                      <div className="flex flex-wrap gap-1.5">
+                        {GRADE_1_2_VISUAL_HINT_CHIPS.map((chip) => (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full bg-sky/50 px-2.5 py-1 text-xs font-extrabold text-ink"
+                            key={chip.id}
+                          >
+                            <span className="inline-flex size-4 items-center justify-center rounded-full bg-primary text-[10px] text-white">
+                              {chip.badge}
+                            </span>
+                            {chip.text}
+                          </span>
+                        ))}
+                      </div>
+                      <Button
+                        onClick={() =>
+                          void speakVietnamese(
+                            activeModeSpec.audioHint,
+                            `mode-audio:${teachingMode}`,
+                          )
+                        }
+                        size="compact"
+                        type="button"
+                        variant="secondary"
+                      >
+                        {playingSpeechKey === `mode-audio:${teachingMode}` ? (
+                          <>
+                            <VolumeX aria-hidden="true" className="size-3.5" />
+                            Dừng nghe
+                          </>
+                        ) : (
+                          <>
+                            <Volume2 aria-hidden="true" className="size-3.5" />
+                            Nghe hướng dẫn
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  ) : null}
+                  <ol className="grid gap-2 sm:grid-cols-3">
+                    {STORYTELLING_STEPS.map((item) => (
+                      <li
+                        className="rounded-control bg-white/90 p-2.5 text-xs shadow-2xs"
+                        key={item.step}
+                      >
+                        <span className="font-extrabold text-primary">
+                          Bước {item.step}:
+                        </span>{" "}
+                        <span className="font-bold text-ink">{item.title}</span>
+                        <p className="mt-0.5 text-muted">{item.detail}</p>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              ) : (
+                <p className="mt-1.5 text-xs font-semibold text-muted">
+                  Gợi ý khung kể đang được thu gọn cho Lớp {effectiveGrade} để
+                  bé tự do diễn đạt — bấm &ldquo;Mở gợi ý khung kể&rdquo; bất cứ
+                  lúc nào nhé!
+                </p>
+              )}
             </div>
           </div>
 
@@ -1480,6 +1892,158 @@ export function PictureDescriptionScreen() {
 
             {practiceTab === "PRACTICE" ? (
               <>
+                {/* Teaching Mode Selector Pills (6 Pedagogical Modes V4.0) */}
+                <section
+                  aria-label="Chế độ luyện tập cùng cô giáo AI"
+                  className="rounded-card border border-border bg-white p-4 shadow-sm"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
+                      Chế độ học cùng cô giáo AI
+                    </p>
+                    <Button
+                      onClick={() =>
+                        void speakVietnamese(
+                          activeModeSpec.audioHint,
+                          `mode-cue:${teachingMode}`,
+                        )
+                      }
+                      size="compact"
+                      type="button"
+                      variant="secondary"
+                    >
+                      {playingSpeechKey === `mode-cue:${teachingMode}` ? (
+                        <>
+                          <VolumeX aria-hidden="true" className="size-3.5" />
+                          Dừng đọc
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 aria-hidden="true" className="size-3.5" />
+                          Nghe chế độ
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                  <div
+                    className="mt-2.5 flex flex-wrap gap-2"
+                    data-testid="teaching-mode-pills"
+                    role="group"
+                    aria-label="Chọn chế độ luyện kể chuyện"
+                  >
+                    {TEACHING_MODES.map((mode) => {
+                      const active = teachingMode === mode.id;
+                      return (
+                        <button
+                          aria-pressed={active}
+                          className={
+                            "min-h-9 rounded-full border px-3.5 py-1.5 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary " +
+                            (active
+                              ? "border-primary bg-primary text-white shadow-2xs"
+                              : "border-border bg-sky/30 text-ink hover:border-primary hover:bg-sky")
+                          }
+                          key={mode.id}
+                          onClick={() => setTeachingMode(mode.id)}
+                          type="button"
+                        >
+                          {mode.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-2 text-xs font-semibold text-muted">
+                    {activeModeSpec.cue}
+                  </p>
+
+                  {targetWords.length > 0 ? (
+                    <div
+                      className="mt-3 border-t border-border pt-3"
+                      data-testid="target-words-panel"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
+                          Từ khó mục tiêu bé đang luyện ({usedTargetWordsCount}/
+                          {targetWords.length})
+                        </p>
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap gap-2">
+                        {targetWords.map((word) => {
+                          const used = descriptionContainsTerm(
+                            descriptionText,
+                            word,
+                          );
+                          return (
+                            <button
+                              className={
+                                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-extrabold transition-colors " +
+                                (used
+                                  ? "border-success-ink/40 bg-success-surface text-success-ink"
+                                  : "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100")
+                              }
+                              key={word}
+                              onClick={() =>
+                                void speakVietnamese(
+                                  word,
+                                  `target-word:${word}`,
+                                )
+                              }
+                              type="button"
+                            >
+                              {used ? (
+                                <CheckCircle2
+                                  aria-hidden="true"
+                                  className="size-3.5"
+                                />
+                              ) : (
+                                <Volume2
+                                  aria-hidden="true"
+                                  className="size-3.5"
+                                />
+                              )}
+                              {word}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                </section>
+
+                {/* Active PEER/CROWD Follow-Up Prompt when Child Replies to AI Teacher */}
+                {activeFollowUpQuestion ? (
+                  <section
+                    aria-label="Câu hỏi gợi mở tiếp theo của cô giáo"
+                    className="rounded-card border border-amber-300/70 bg-amber-50/70 p-4"
+                    data-testid="practice-followup-banner"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-amber-900">
+                        <Sparkles aria-hidden="true" className="size-4" />
+                        Câu hỏi tiếp theo của cô giáo
+                      </p>
+                      <Button
+                        onClick={() =>
+                          void speakVietnamese(
+                            activeFollowUpQuestion,
+                            "practice-followup",
+                          )
+                        }
+                        size="compact"
+                        type="button"
+                        variant="secondary"
+                      >
+                        <Volume2 aria-hidden="true" className="size-3.5" />
+                        {playingSpeechKey === "practice-followup"
+                          ? "Dừng"
+                          : "Nghe câu hỏi"}
+                      </Button>
+                    </div>
+                    <p className="mt-1.5 text-sm font-bold text-ink">
+                      {activeFollowUpQuestion}
+                    </p>
+                  </section>
+                ) : null}
+
                 {/* Coaching Reminder from Previous Attempt so Child Knows What to Improve */}
                 {latestAttempt ? (
                   <section
@@ -2020,6 +2584,16 @@ export function PictureDescriptionScreen() {
                     <span className="text-xs font-bold text-muted">
                       Lượt #{activeAttempt.attempt_number}
                     </span>
+                    {activeAttempt.feedback.teaching_mode ? (
+                      <span className="rounded-full bg-sky px-2.5 py-0.5 text-xs font-extrabold text-primary">
+                        Chế độ:{" "}
+                        {
+                          TEACHING_MODE_BY_ID[
+                            activeAttempt.feedback.teaching_mode
+                          ].label
+                        }
+                      </span>
+                    ) : null}
                     {scoreDelta !== null && scoreDelta > 0 ? (
                       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-extrabold text-emerald-800">
                         <TrendingUp aria-hidden="true" className="size-3.5" />+
@@ -2067,6 +2641,7 @@ export function PictureDescriptionScreen() {
                             void handleEvaluate(
                               activeAttempt.transcript_text,
                               activeAttempt.input_mode,
+                              { allowDuplicate: true },
                             )
                           }
                           size="compact"
@@ -2193,6 +2768,34 @@ export function PictureDescriptionScreen() {
                     </div>
                   ) : null}
 
+                  {activeAttempt.feedback.used_target_words &&
+                  activeAttempt.feedback.used_target_words.length > 0 ? (
+                    <div
+                      className="mt-3 border-t border-border pt-3"
+                      data-testid="used-target-words-result"
+                    >
+                      <p className="text-xs font-extrabold uppercase tracking-wide text-success-ink">
+                        Từ khó mục tiêu bé đã dùng rất tốt
+                      </p>
+                      <div className="mt-1.5 flex flex-wrap gap-2">
+                        {activeAttempt.feedback.used_target_words.map(
+                          (word) => (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-success-surface px-3 py-1 text-xs font-extrabold text-success-ink"
+                              key={word}
+                            >
+                              <CheckCircle2
+                                aria-hidden="true"
+                                className="size-3.5"
+                              />
+                              {word}
+                            </span>
+                          ),
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+
                   {activeAttempt.feedback.vocabulary_highlights.length > 0 ? (
                     <div className="mt-3 border-t border-border pt-3">
                       <p className="text-xs font-extrabold uppercase tracking-wide text-muted">
@@ -2224,6 +2827,70 @@ export function PictureDescriptionScreen() {
                     </div>
                   ) : null}
                 </div>
+
+                {activeAttempt.feedback.next_prompt_question ? (
+                  <div
+                    className="mt-4 rounded-control border border-primary/30 bg-sky/25 p-4"
+                    data-testid="ai-followup-question"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-primary">
+                          <Sparkles aria-hidden="true" className="size-4" />
+                          Câu hỏi gợi mở tiếp theo của cô giáo
+                        </p>
+                        {activeAttempt.feedback.scaffolding_step ? (
+                          <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-extrabold text-ink shadow-2xs">
+                            {
+                              SCAFFOLDING_STEP_LABELS[
+                                activeAttempt.feedback.scaffolding_step
+                              ]
+                            }
+                          </span>
+                        ) : null}
+                      </div>
+                      <Button
+                        onClick={() =>
+                          void speakVietnamese(
+                            activeAttempt.feedback.next_prompt_question ?? "",
+                            `followup:${activeAttempt.attempt_id}`,
+                          )
+                        }
+                        size="compact"
+                        type="button"
+                        variant="secondary"
+                      >
+                        <Volume2 aria-hidden="true" className="size-3.5" />
+                        {playingSpeechKey ===
+                        `followup:${activeAttempt.attempt_id}`
+                          ? "Dừng nghe"
+                          : "Nghe câu hỏi"}
+                      </Button>
+                    </div>
+                    <p className="mt-2 text-sm font-bold text-ink">
+                      {activeAttempt.feedback.next_prompt_question}
+                    </p>
+                    <div className="mt-3">
+                      <Button
+                        onClick={() => {
+                          stopSpeechPlayback();
+                          setActiveFollowUpQuestion(
+                            activeAttempt.feedback.next_prompt_question ?? null,
+                          );
+                          setDescriptionText("");
+                          setInputMode("TEXT");
+                          setVoiceMessage(null);
+                          setPracticeTab("PRACTICE");
+                        }}
+                        size="compact"
+                        type="button"
+                        variant="secondary"
+                      >
+                        Trả lời câu hỏi này
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="mt-4 flex flex-wrap justify-end gap-2.5">
                   <Button

@@ -11,9 +11,14 @@ from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
 from PIL import Image, ImageOps, UnidentifiedImageError
+from sqlalchemy import insert
 
 from app.diagnostic_logging import log_diagnostic
-from app.models import PictureDescriptionAttempt, PictureDescriptionSession
+from app.models import (
+    LearningSkillEvidence,
+    PictureDescriptionAttempt,
+    PictureDescriptionSession,
+)
 from app.repositories.picture_description_repository import (
     AttemptProjection,
     PictureDescriptionRepository,
@@ -34,11 +39,22 @@ from app.schemas.picture_description import (
     PictureSessionSummaryRead,
     PictureVocabItem,
     SourceType,
+    TeachingMode,
+    _normalize_target_words,
 )
 from app.services.picture_description_ai import (
     GeminiPictureDescriptionAI,
     PictureAiError,
+    PictureDescriptionAiConfig,
+    PictureSafetyError,
+    TEACHING_MODE_SPECS,
+    _build_next_prompt_question,
+    _count_meaningful_words,
+    _select_scaffolding_step,
+    build_deterministic_picture_guide,
+    detect_used_target_words,
     evaluate_description_with_guide_fallback,
+    resolve_provider_tier,
 )
 from app.services.storage_service import (
     StorageUploadFailure,
@@ -305,12 +321,20 @@ class PictureDescriptionService:
         raw = await asyncio.to_thread(self._download_fn, session.ImagePath)
         return _normalize_mime_type(raw, session.ImageMimeType)
 
-    @staticmethod
-    def _to_attempt_read(attempt: AttemptProjection) -> PictureAttemptRead:
+    def _ai_config(self) -> PictureDescriptionAiConfig | None:
+        cfg = getattr(self.ai_client, "config", None)
+        return cfg if isinstance(cfg, PictureDescriptionAiConfig) else None
+
+    def _to_attempt_read(self, attempt: AttemptProjection) -> PictureAttemptRead:
         feedback = PictureEvaluationFeedbackRead.model_validate(attempt.FeedbackPayload)
         evaluation_source: EvaluationSource = (
             "FALLBACK" if attempt.AiModelUsed == "guide-fallback" else "AI"
         )
+        provider_tier = feedback.provider_tier or resolve_provider_tier(
+            attempt.AiModelUsed, self._ai_config()
+        )
+        if feedback.provider_tier is None:
+            feedback = feedback.model_copy(update={"provider_tier": provider_tier})
         return PictureAttemptRead(
             attempt_id=attempt.Id,
             attempt_number=attempt.AttemptNumber,
@@ -319,6 +343,7 @@ class PictureDescriptionService:
             score_out_of_10=attempt.ScoreOutOf10,
             stars=attempt.Stars,
             evaluation_source=evaluation_source,
+            provider_tier=provider_tier,
             feedback=feedback,
             created_at=attempt.CreatedAt,
         )
@@ -329,6 +354,7 @@ class PictureDescriptionService:
         attempts: list[AttemptProjection],
     ) -> PictureSessionRead:
         guide = PictureGuideRead.model_validate(session.PromptPayload)
+        provider_tier = resolve_provider_tier(session.AiModelUsed, self._ai_config())
         return PictureSessionRead(
             session_id=session.Id,
             child_id=session.ChildProfileId,
@@ -347,6 +373,9 @@ class PictureDescriptionService:
             best_stars=session.BestStars,
             best_score=session.BestScore,
             attempts_count=session.AttemptsCount,
+            teaching_mode=guide.teaching_mode,
+            target_words=list(guide.target_words),
+            provider_tier=provider_tier,
             guide=guide,
             attempts=[self._to_attempt_read(item) for item in attempts],
             created_at=session.CreatedAt,
@@ -456,6 +485,79 @@ class PictureDescriptionService:
         await self.repository.db.rollback()
         return await asyncio.to_thread(self._to_session_read, session, attempts)
 
+    async def _record_learning_skill_evidence(
+        self,
+        *,
+        child_id: UUID,
+        parent_id: UUID,
+        attempt_id: UUID,
+        child_grade: int,
+        input_mode: InputMode,
+        feedback: PictureEvaluationFeedbackRead,
+        model_used: str | None,
+    ) -> None:
+        """Persist compact skill evidence into learning_skill_evidence (gracefully skipping if unmigrated)."""
+        active_mode: TeachingMode = (
+            feedback.teaching_mode if feedback.teaching_mode in TEACHING_MODE_SPECS else "OBSERVE"
+        )
+        primary_skill = TEACHING_MODE_SPECS[active_mode].skill_key
+        skill_keys: list[str] = [primary_skill]
+        if feedback.used_target_words and primary_skill != "vocabulary_naming":
+            skill_keys.append("vocabulary_naming")
+
+        is_fallback = (
+            feedback.provider_tier == "DETERMINISTIC_FALLBACK"
+            or model_used == "guide-fallback"
+        )
+        evidence_type = "ESTIMATED" if is_fallback else "OBSERVED"
+        confidence = 0.55 if is_fallback else 0.85
+        score_normalized = round(max(0.0, min(1.0, float(feedback.score_out_of_10) / 10.0)), 3)
+        difficulty_level = max(1, min(5, int(child_grade)))
+        practice_words = list(feedback.used_target_words or feedback.vocabulary_highlights[:5])
+        metadata = {
+            "teaching_mode": active_mode,
+            "scaffolding_step": feedback.scaffolding_step,
+            "provider_tier": feedback.provider_tier,
+            "stars": int(feedback.stars),
+            "input_mode": input_mode,
+        }
+
+        now = datetime.now(timezone.utc)
+        rows = [
+            {
+                "Id": uuid4(),
+                "ChildId": child_id,
+                "ParentId": parent_id,
+                "SkillKey": skill_key,
+                "SourceModule": "PICTURE_DESCRIPTION",
+                "SourceRecordId": str(attempt_id),
+                "EvidenceType": evidence_type,
+                "ScoreNormalized": score_normalized,
+                "Confidence": confidence,
+                "DifficultyLevel": difficulty_level,
+                "PracticeWords": practice_words,
+                "MetadataJson": metadata,
+                "CreatedAt": now,
+            }
+            for skill_key in skill_keys
+        ]
+        try:
+            await self.repository.db.execute(insert(LearningSkillEvidence), rows)
+            await self.repository.db.commit()
+        except Exception as exc:
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="picture_learning_skill_evidence_skipped",
+                stage="learning_skill_evidence",
+                exception=exc,
+                reason_code="TABLE_UNAVAILABLE_OR_SKIPPED",
+            )
+            try:
+                await self.repository.db.rollback()
+            except Exception:
+                pass
+
     async def create_session(
         self,
         actor_id: UUID,
@@ -465,11 +567,18 @@ class PictureDescriptionService:
         sample_key: str | None = None,
         book_page_id: UUID | None = None,
         upload_bytes: bytes | None = None,
+        teaching_mode: TeachingMode = "OBSERVE",
+        target_words: list[str] | None = None,
+        refresh_ai_guide: bool = False,
     ) -> PictureSessionRead:
         await self._require_parent(actor_id)
         child = await self._owned_child(actor_id, child_id)
         child_grade = int(child.Grade)
         session_id = uuid4()
+        active_mode: TeachingMode = (
+            teaching_mode if teaching_mode in TEACHING_MODE_SPECS else "OBSERVE"
+        )
+        cleaned_targets = _normalize_target_words(target_words)
 
         resolved_book_id: UUID | None = None
         resolved_book_page_id: UUID | None = None
@@ -477,6 +586,8 @@ class PictureDescriptionService:
         storage_path: str
         uploaded_new_object = False
         context_hint: str | None = None
+        image_bytes: bytes | None = None
+        image_mime = "image/jpeg"
 
         sample_spec: SamplePictureSpec | None = None
 
@@ -490,11 +601,11 @@ class PictureDescriptionService:
                 )
             await self.repository.db.rollback()
             sample_spec = spec
-            image_bytes = _load_sample_bytes(spec)
-            image_mime = "image/jpeg"
             storage_path = spec.storage_ref
             resolved_sample_key = spec.sample_key
             context_hint = f"{spec.title}: {spec.description}"
+            if refresh_ai_guide:
+                image_bytes = _load_sample_bytes(spec)
 
         elif source_type == "BOOK_PAGE":
             if book_page_id is None:
@@ -535,30 +646,86 @@ class PictureDescriptionService:
                 detail="INVALID_SOURCE_TYPE",
             )
 
-        # Release any DB lock completely before calling Gemini Vision!
-        try:
-            guide, model_used = await self.ai_client.analyze_picture(
-                image_bytes=image_bytes,
-                mime_type=image_mime,
-                child_grade=child_grade,
-                context_hint=context_hint,
+        # Static built-in samples serve curated default_guide directly with ZERO outbound cloud calls
+        # unless the caller explicitly requests refresh_ai_guide=True.
+        if source_type == "SAMPLE" and sample_spec is not None and not refresh_ai_guide:
+            guide = sample_spec.default_guide.model_copy(
+                update={
+                    "teaching_mode": active_mode,
+                    "target_words": cleaned_targets,
+                }
             )
-        except PictureAiError as exc:
-            if source_type == "SAMPLE" and sample_spec is not None and exc.retryable:
-                log_diagnostic(
-                    logger,
-                    logging.WARNING,
-                    event="picture_sample_curated_guide_fallback",
-                    stage="picture_analyze",
-                    reason_code=exc.code,
-                    sample_key=sample_spec.sample_key,
+            model_used = "curated-sample-v4"
+        else:
+            assert image_bytes is not None
+            # Release any DB lock completely before calling Vision AI!
+            try:
+                guide, model_used = await self.ai_client.analyze_picture(
+                    image_bytes=image_bytes,
+                    mime_type=image_mime,
+                    child_grade=child_grade,
+                    context_hint=context_hint,
+                    teaching_mode=active_mode,
+                    target_words=cleaned_targets,
                 )
-                guide = sample_spec.default_guide
-                model_used = "builtin-sample-guide"
-            else:
-                raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+            except PictureSafetyError as exc:
+                # CRITICAL SAFETY INVARIANT: Never bypass UNSAFE_PICTURE!
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="UNSAFE_PICTURE",
+                ) from exc
+            except PictureAiError as exc:
+                if exc.code == "UNSAFE_PICTURE":
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                        detail="UNSAFE_PICTURE",
+                    ) from exc
+                if exc.code == "AI_AUTH_FAILED":
+                    raise HTTPException(
+                        status_code=exc.status_code,
+                        detail=exc.detail,
+                    ) from exc
+                if source_type == "SAMPLE" and sample_spec is not None and (
+                    exc.retryable or exc.code == "AI_NOT_CONFIGURED"
+                ):
+                    log_diagnostic(
+                        logger,
+                        logging.WARNING,
+                        event="picture_sample_curated_guide_fallback",
+                        stage="picture_analyze",
+                        reason_code=exc.code,
+                        sample_key=sample_spec.sample_key,
+                    )
+                    guide = sample_spec.default_guide.model_copy(
+                        update={
+                            "teaching_mode": active_mode,
+                            "target_words": cleaned_targets,
+                        }
+                    )
+                    model_used = "curated-sample-v4"
+                elif source_type == "BOOK_PAGE" and (
+                    exc.retryable or exc.code == "AI_NOT_CONFIGURED"
+                ):
+                    log_diagnostic(
+                        logger,
+                        logging.WARNING,
+                        event="picture_analyze_deterministic_guide_fallback",
+                        stage="picture_analyze",
+                        reason_code=exc.code,
+                        source_type=source_type,
+                    )
+                    guide = build_deterministic_picture_guide(
+                        child_grade=child_grade,
+                        context_hint=context_hint,
+                        teaching_mode=active_mode,
+                        target_words=cleaned_targets,
+                    )
+                    model_used = "guide-fallback"
+                else:
+                    raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
         if source_type == "CUSTOM_UPLOAD":
+            assert image_bytes is not None
             try:
                 await asyncio.to_thread(
                     self._upload_fn,
@@ -621,6 +788,15 @@ class PictureDescriptionService:
             )
 
         guide = PictureGuideRead.model_validate(session.PromptPayload)
+        active_mode: TeachingMode = (
+            payload.teaching_mode
+            if payload.teaching_mode in TEACHING_MODE_SPECS
+            else guide.teaching_mode
+        )
+        active_target_words = _normalize_target_words(
+            payload.target_words if payload.target_words is not None else list(guide.target_words)
+        )
+
         previous_transcript: str | None = None
         previous_score: int | None = None
         previous_tip: str | None = None
@@ -650,9 +826,25 @@ class PictureDescriptionService:
                 previous_transcript=previous_transcript,
                 previous_score=previous_score,
                 previous_tip=previous_tip,
+                teaching_mode=active_mode,
+                target_words=active_target_words,
+                scene_summary=guide.scene_summary,
+                suggested_vocabulary=guide.suggested_vocabulary,
             )
+        except PictureSafetyError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="UNSAFE_PICTURE",
+            ) from exc
         except PictureAiError as exc:
-            if exc.retryable:
+            if exc.code == "UNSAFE_PICTURE":
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="UNSAFE_PICTURE",
+                ) from exc
+            if exc.code == "AI_AUTH_FAILED":
+                raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+            if exc.retryable or exc.code == "AI_NOT_CONFIGURED":
                 log_diagnostic(
                     logger,
                     logging.WARNING,
@@ -665,9 +857,45 @@ class PictureDescriptionService:
                     child_grade=session.ChildGrade,
                     child_transcript=payload.transcript_text,
                     previous_score=previous_score,
+                    teaching_mode=active_mode,
+                    target_words=active_target_words,
                 )
             else:
                 raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+        # Guarantee consistent V4 pedagogical fields even when mocked AI clients return legacy payloads.
+        used_target_words = (
+            list(feedback.used_target_words)
+            if feedback.used_target_words
+            else detect_used_target_words(payload.transcript_text, active_target_words)
+        )
+        scaffolding_step = feedback.scaffolding_step or _select_scaffolding_step(
+            is_relevant=feedback.is_relevant,
+            score=feedback.score_out_of_10,
+            stars=feedback.stars,
+            word_count=_count_meaningful_words(payload.transcript_text),
+            grade=session.ChildGrade,
+        )
+        next_prompt_question = feedback.next_prompt_question or _build_next_prompt_question(
+            teaching_mode=active_mode,
+            scaffolding_step=scaffolding_step,
+            grade=session.ChildGrade,
+            missed_details=feedback.missed_details,
+            target_words=active_target_words,
+            used_target_words=used_target_words,
+        )
+        provider_tier = feedback.provider_tier or resolve_provider_tier(
+            model_used, self._ai_config()
+        )
+        feedback = feedback.model_copy(
+            update={
+                "teaching_mode": active_mode,
+                "scaffolding_step": scaffolding_step,
+                "next_prompt_question": next_prompt_question,
+                "used_target_words": used_target_words,
+                "provider_tier": provider_tier,
+            }
+        )
 
         now = datetime.now(timezone.utc)
         new_best_stars = max(int(session.BestStars), int(feedback.stars))
@@ -710,6 +938,16 @@ class PictureDescriptionService:
             ) from exc
         all_attempts = await self.repository.list_attempts(updated_session.Id)
         await self.repository.db.rollback()
+
+        await self._record_learning_skill_evidence(
+            child_id=updated_session.ChildProfileId,
+            parent_id=actor_id,
+            attempt_id=saved_attempt.Id,
+            child_grade=updated_session.ChildGrade,
+            input_mode=input_mode,
+            feedback=feedback,
+            model_used=model_used,
+        )
 
         session_read = await asyncio.to_thread(
             self._to_session_read, updated_session, all_attempts
