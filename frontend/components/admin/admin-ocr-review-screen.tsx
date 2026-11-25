@@ -23,6 +23,7 @@ import {
   type CSSProperties,
 } from "react";
 import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
+import { SmartOcrBlockReviewLoader } from "@/components/admin/smart-ocr-block-review";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
@@ -4147,6 +4148,18 @@ export function AdminOcrReviewScreen({
                   <RefreshCw aria-hidden className="size-4" /> Tải lại dữ liệu
                 </Button>
               </Card>
+            </div>
+          </details>
+          <details className="rounded-card border border-border bg-white p-4">
+            <summary className="cursor-pointer font-bold text-ink">
+              Phân loại khối chữ thông minh (V2)
+            </summary>
+            <div className="mt-4">
+              <SmartOcrBlockReviewLoader
+                pageId={pageId}
+                pageImageUrl={image.preview_url}
+                pageNumber={image.page_number}
+              />
             </div>
           </details>
         </div>
