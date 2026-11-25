@@ -680,6 +680,7 @@ class TtsAudioCacheService:
             entry = await self.repo.get_active_entry(**lookup_kwargs)
             folded: str | None = None
             folded_sha256: str | None = None
+            page_fallback_entry = None
             if entry is None and target.scope == "CATALOG":
                 folded = folded_catalog_tts_text(normalized_text)
                 if folded and folded != canonical_tts_text(normalized_text):
@@ -687,24 +688,50 @@ class TtsAudioCacheService:
                     entry = await self.repo.get_active_entry(
                         **{**lookup_kwargs, "content_sha256": folded_sha256}
                     )
-                if (
-                    entry is None
-                    and folded
+                can_search_page_timed = (
+                    bool(folded)
                     and target.page_id is not None
-                    and callable(getattr(self.repo, "get_active_timed_entries_for_page", None))
-                ):
-                    candidates = await self.repo.get_active_timed_entries_for_page(
-                        scope=target.scope,
-                        page_id=target.page_id,
-                        voice_id=voice_id,
-                        model_version=model_version,
-                        speed=speed,
-                        audio_formats=formats,
+                    and not normalized_text.startswith("phonics:")
+                    and (require_word_timings or " " in folded)
+                    and callable(
+                        getattr(self.repo, "get_active_timed_entries_for_page", None)
                     )
+                )
+                if entry is None and can_search_page_timed:
+                    try:
+                        candidates = await self.repo.get_active_timed_entries_for_page(
+                            scope=target.scope,
+                            page_id=target.page_id,
+                            voice_id=voice_id,
+                            model_version=model_version,
+                            speed=speed,
+                            audio_formats=formats,
+                            allow_speed_fallback=allow_speed_fallback,
+                        )
+                    except TypeError:
+                        candidates = await self.repo.get_active_timed_entries_for_page(
+                            scope=target.scope,
+                            page_id=target.page_id,
+                            voice_id=voice_id,
+                            model_version=model_version,
+                            speed=speed,
+                            audio_formats=formats,
+                        )
                     for candidate in candidates or []:
                         cand_text = getattr(candidate, "NormalizedText", None)
-                        if isinstance(cand_text, str) and folded_catalog_tts_text(cand_text) == folded:
-                            entry = candidate
+                        if (
+                            isinstance(cand_text, str)
+                            and folded_catalog_tts_text(cand_text) == folded
+                        ):
+                            cand_speed = getattr(candidate, "Speed", None)
+                            if (
+                                cand_speed is None
+                                or abs(float(cand_speed) - float(speed)) < 1e-6
+                                or not allow_speed_fallback
+                            ):
+                                entry = candidate
+                            elif page_fallback_entry is None:
+                                page_fallback_entry = candidate
                             break
             if entry is None and allow_speed_fallback:
                 nearest_fn = getattr(self.repo, "get_nearest_active_entry", None)
@@ -714,30 +741,8 @@ class TtsAudioCacheService:
                         entry = await nearest_fn(
                             **{**lookup_kwargs, "content_sha256": folded_sha256}
                         )
-                if (
-                    entry is None
-                    and target.scope == "CATALOG"
-                    and folded
-                    and target.page_id is not None
-                    and callable(getattr(self.repo, "get_active_timed_entries_for_page", None))
-                ):
-                    try:
-                        candidates = await self.repo.get_active_timed_entries_for_page(
-                            scope=target.scope,
-                            page_id=target.page_id,
-                            voice_id=voice_id,
-                            model_version=model_version,
-                            speed=speed,
-                            audio_formats=formats,
-                            allow_speed_fallback=True,
-                        )
-                    except TypeError:
-                        candidates = []
-                    for candidate in candidates or []:
-                        cand_text = getattr(candidate, "NormalizedText", None)
-                        if isinstance(cand_text, str) and folded_catalog_tts_text(cand_text) == folded:
-                            entry = candidate
-                            break
+                if entry is None and page_fallback_entry is not None:
+                    entry = page_fallback_entry
             if entry is None:
                 await self.repo.record_miss()
                 await self.db.commit()

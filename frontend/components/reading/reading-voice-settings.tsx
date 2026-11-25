@@ -665,6 +665,18 @@ export function ReadingVoiceSettings({
                 })}
               </div>
             )}
+            {loadState.status === "ready" &&
+            loadState.data.local_worker_ready === false ? (
+              <p
+                className="rounded-control border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs leading-relaxed text-amber-950"
+                data-testid="voice-offline-cache-notice"
+              >
+                Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có
+                sẵn âm thanh dựng trước cho giọng mặc định; để nghe trực tiếp
+                các giọng vùng miền khác hãy bật máy trạm giọng đọc hoặc bật chế
+                độ dự phòng bên dưới.
+              </p>
+            ) : null}
           </section>
 
           <section

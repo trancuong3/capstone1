@@ -1556,7 +1556,22 @@ export class TtsPlayback {
           options.onEnded?.();
         };
 
-        if (shouldSkipBackendTtsForBrowserFallback(operation)) {
+        const hasPhonicsCacheTarget = Boolean(
+          options.bookId ||
+          options.pageId ||
+          options.pageRevisionId ||
+          options.cacheScope === "CATALOG" ||
+          options.cacheScope === "COACHING" ||
+          this.defaultCacheContext?.bookId ||
+          this.defaultCacheContext?.pageId ||
+          this.defaultCacheContext?.pageRevisionId,
+        );
+        if (
+          shouldSkipBackendTtsForBrowserFallback(
+            operation,
+            hasPhonicsCacheTarget,
+          )
+        ) {
           await playPhonicsViaBrowser();
           return;
         }
