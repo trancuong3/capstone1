@@ -88,7 +88,6 @@ import {
 } from "@/lib/reading/browser-transcript-collector";
 import { ReadingStatusDialog } from "@/components/reading/reading-status-dialog";
 import { SessionComplete } from "@/components/reading/session-complete";
-import { clearApiReadCache } from "@/lib/api/read-cache";
 import { unlockAudioNow } from "@/lib/reading/android-audio-unlock";
 
 function describePlaybackError(error: unknown): string | null {
@@ -6134,19 +6133,29 @@ function ReadingSessionScreen({
           if (typeof services.readingService?.getCurrentPage !== "function") {
             return null;
           }
-          clearApiReadCache();
           try {
-            const nextPage =
-              await services.readingService.getCurrentPage(sessionId);
-            if (!mountedRef.current || nextPage.page_id !== targetPageId) {
+            const nextPage = await services.readingService.getCurrentPage(
+              sessionId,
+              { bypassCache: true },
+            );
+            const nextUrl = nextPage.image_url;
+            if (
+              !mountedRef.current ||
+              nextPage.page_id !== targetPageId ||
+              nextPage.page_revision_id !== page.page_revision_id ||
+              !nextUrl ||
+              nextUrl === page.image_url
+            ) {
               return null;
             }
             setPage((current) =>
-              current && current.page_id === targetPageId
-                ? { ...current, image_url: nextPage.image_url }
+              current?.page_id === targetPageId &&
+              current.page_revision_id === page.page_revision_id &&
+              current.image_url === page.image_url
+                ? { ...current, image_url: nextUrl }
                 : current,
             );
-            return nextPage.image_url;
+            return nextUrl;
           } catch {
             return null;
           }

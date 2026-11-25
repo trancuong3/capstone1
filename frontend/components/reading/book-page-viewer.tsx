@@ -246,7 +246,7 @@ function PageSurface(
     ) {
       void Promise.resolve(onRefreshImageUrl(page.page_id))
         .then((nextUrl) => {
-          if (nextUrl) {
+          if (nextUrl && nextUrl !== activeImageUrl) {
             setImage(null);
             setRefreshedImageUrl(nextUrl);
             return;

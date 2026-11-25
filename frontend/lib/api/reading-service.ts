@@ -38,7 +38,10 @@ export interface ReadingService {
     input: ReadingSessionCreateDTO,
   ): Promise<ReadingSessionCreateResponseDTO>;
   get(sessionId: string): Promise<ReadingSessionSummaryDTO>;
-  getCurrentPage(sessionId: string): Promise<ReadingPageDTO>;
+  getCurrentPage(
+    sessionId: string,
+    options?: { readonly bypassCache?: boolean },
+  ): Promise<ReadingPageDTO>;
   getPageProgress(sessionId: string): Promise<ReadingSessionPageProgressDTO>;
   navigateToPage(
     sessionId: string,
@@ -273,10 +276,12 @@ export function createReadingService(): ReadingService {
       };
     },
 
-    async getCurrentPage(sessionId: string): Promise<ReadingPageDTO> {
+    async getCurrentPage(sessionId, options): Promise<ReadingPageDTO> {
       return requestApi(
         `/reading/sessions/${encodeURIComponent(sessionId)}/page`,
         readingPageDtoSchema,
+        undefined,
+        options,
       );
     },
 
