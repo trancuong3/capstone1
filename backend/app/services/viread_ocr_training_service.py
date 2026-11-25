@@ -544,9 +544,75 @@ class VireadOcrTrainingService:
             if hasattr(self.db, "execute")
             else None
         )
-        from app.services.ocr_engine import get_loaded_vietocr_runtime_status
+        from app.services.ocr_inference_job_service import (
+            is_remote_ocr_mode,
+            worker_heartbeat_ttl_seconds,
+        )
 
-        loaded_runtime = get_loaded_vietocr_runtime_status()
+        if is_remote_ocr_mode():
+            loaded_runtime = {
+                "initialized": False,
+                "initialization_status": "worker_offline",
+                "initialization_error": None,
+                "loaded_profile": None,
+                "loaded_checkpoint_sha256": None,
+                "loaded_config_sha256": None,
+                "verified_runtime_proof": False,
+                "remote_worker_online": False,
+                "remote_worker_id": None,
+            }
+            if hasattr(self.db, "execute"):
+                try:
+                    from app.repositories.ocr_inference_job_repository import (
+                        OcrInferenceJobRepository,
+                    )
+
+                    now_utc = datetime.now(timezone.utc)
+                    ttl = timedelta(seconds=worker_heartbeat_ttl_seconds())
+                    workers = await OcrInferenceJobRepository(self.db).list_worker_heartbeats(
+                        limit=20
+                    )
+                    for w in workers:
+                        if w.LastHeartbeatAt is None:
+                            continue
+                        hb_at = (
+                            w.LastHeartbeatAt
+                            if w.LastHeartbeatAt.tzinfo is not None
+                            else w.LastHeartbeatAt.replace(tzinfo=timezone.utc)
+                        )
+                        if (now_utc - hb_at) <= ttl and str(w.Status or "").upper() != "OFFLINE":
+                            engines_map = dict(w.Engines or {})
+                            viet_info = (
+                                engines_map.get("vietocr")
+                                if isinstance(engines_map.get("vietocr"), dict)
+                                else {}
+                            )
+                            is_init = bool(
+                                w.ModelSha256
+                                or viet_info.get("loaded")
+                                or viet_info.get("inference_verified")
+                            )
+                            loaded_runtime = {
+                                "initialized": is_init,
+                                "initialization_status": "success" if is_init else "not_initialized",
+                                "initialization_error": w.LastError,
+                                "loaded_profile": w.ModelProfile,
+                                "loaded_checkpoint_sha256": w.ModelSha256,
+                                "loaded_config_sha256": None,
+                                "verified_runtime_proof": bool(w.ModelSha256),
+                                "remote_worker_online": True,
+                                "remote_worker_id": w.WorkerId,
+                            }
+                            break
+                except Exception as exc:
+                    logger.warning(
+                        "Could not read remote OCR worker heartbeats for runtime status: %s",
+                        type(exc).__name__,
+                    )
+        else:
+            from app.services.ocr_engine import get_loaded_vietocr_runtime_status
+
+            loaded_runtime = get_loaded_vietocr_runtime_status()
         desired_sha = active.get("checkpoint_sha256") if active else ORIGINAL_SHA256
         desired_profile = active.get("profile") if active else "ORIGINAL"
         loaded_sha = loaded_runtime.get("loaded_checkpoint_sha256")
@@ -2546,12 +2612,21 @@ class VireadOcrTrainingService:
                     logger.warning("Could not delete orphan shard %s: %s", obj_path, del_err)
             raise
 
-        from app.services.ocr_engine import evict_cached_viread_checkpoint, set_active_viread_model_cache
-        set_active_viread_model_cache({
-            "checkpoint_sha256": checkpoint_sha256,
-            "storage_path": manifest_path,
-            "profile": "FLOW1_EXTERNAL_TRDG",
-        })
+        from app.services.ocr_inference_job_service import is_remote_ocr_mode
+
+        evict_cached_viread_checkpoint = None
+        if not is_remote_ocr_mode():
+            from app.services.ocr_engine import (
+                evict_cached_viread_checkpoint as _evict_cached,
+                set_active_viread_model_cache,
+            )
+
+            evict_cached_viread_checkpoint = _evict_cached
+            set_active_viread_model_cache({
+                "checkpoint_sha256": checkpoint_sha256,
+                "storage_path": manifest_path,
+                "profile": "FLOW1_EXTERNAL_TRDG",
+            })
         invalidate_overview_manifest_cache()
 
         cleanup_status = {
@@ -2578,7 +2653,7 @@ class VireadOcrTrainingService:
                 cleanup_status["warning"] = f"Storage deletion warning: {exc}"
                 logger.warning("Failed deleting previous model storage objects: %s", exc)
 
-            if old_checkpoint_sha256:
+            if old_checkpoint_sha256 and evict_cached_viread_checkpoint is not None:
                 try:
                     evicted = evict_cached_viread_checkpoint(old_checkpoint_sha256)
                     cleanup_status["local_cache_deleted"] = evicted
@@ -3052,12 +3127,16 @@ class VireadOcrTrainingService:
             """, {"provider": next_provider, "drive_id": next_drive_id})
             await self.repo.commit()
             invalidate_overview_manifest_cache()
-            from app.services.ocr_engine import set_active_viread_model_cache
-            set_active_viread_model_cache({
-                "checkpoint_sha256": next_sha,
-                "storage_path": next_path,
-                "profile": next_profile,
-            })
+            from app.services.ocr_inference_job_service import is_remote_ocr_mode
+
+            if not is_remote_ocr_mode():
+                from app.services.ocr_engine import set_active_viread_model_cache
+
+                set_active_viread_model_cache({
+                    "checkpoint_sha256": next_sha,
+                    "storage_path": next_path,
+                    "profile": next_profile,
+                })
         except Exception:
             await self.repo.rollback()
             raise

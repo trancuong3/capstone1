@@ -22,6 +22,7 @@ from app.schemas.reading import (
     ReadingSessionPageProgressDTO,
     ReadingSessionPageProgressItem,
 )
+from app.services.catalog_tts_cache import resolve_verified_catalog_tts_url
 from app.services.storage_service import create_signed_image_url
 from app.services.word_box_geometry import has_verified_geometry
 
@@ -1201,6 +1202,10 @@ class ReadingContentService:
         page_number = page.PageNumber
         page_width = int(page.Width)
         page_height = int(page.Height)
+        is_verified_revision = (
+            getattr(revision, "VerificationStatus", None) == "VERIFIED"
+            or page.CurrentVerifiedRevisionId == page_revision_id
+        )
         processing_meta = getattr(revision, "ProcessingMeta", None)
         if not isinstance(processing_meta, dict):
             processing_meta = {}
@@ -1248,6 +1253,11 @@ class ReadingContentService:
         elif book_is_private is None:
             book_is_private = False
 
+        is_verified_revision = (
+            getattr(revision, "VerificationStatus", None) == "VERIFIED"
+            or page.CurrentVerifiedRevisionId == page_revision_id
+        )
+
         await self.repository.db.rollback()
 
         image_url = None
@@ -1277,6 +1287,13 @@ class ReadingContentService:
                 if isinstance(item, int) and not isinstance(item, bool) and item >= 0
             })
 
+        tts_audio_url = resolve_verified_catalog_tts_url(
+            is_public_catalog=not bool(book_is_private),
+            is_verified=is_verified_revision,
+            text=text_content,
+            processing_meta=processing_meta,
+        )
+
         return ReadingPageDTO(
             page_id=page_id,
             page_revision_id=page_revision_id,
@@ -1287,6 +1304,7 @@ class ReadingContentService:
             width=page_width,
             height=page_height,
             image_url=image_url,
+            tts_audio_url=tts_audio_url,
             image_overlay_safe=has_verified_geometry(
                 processing_meta.get("word_box_geometry"),
                 [word.model_dump() for word in words], page_width, page_height,

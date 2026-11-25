@@ -234,6 +234,19 @@ async def enqueue_admin_page_ocr_job(
     )
 
 
+@router.post("/admin/catalog/{book_id}/documents/jobs", status_code=202)
+async def enqueue_admin_document_ocr_jobs(
+    book_id: UUID,
+    document: UploadFile = File(...),
+    upload_id: UUID | None = Form(default=None),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminOcrService(db).enqueue_upload_document_jobs(
+        actor_id, book_id, document, upload_id=upload_id
+    )
+
+
 @router.post("/admin/pages/{page_id}/reupload-ocr/jobs", status_code=202)
 async def enqueue_admin_reupload_ocr_job(
     page_id: UUID,

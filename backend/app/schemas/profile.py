@@ -186,6 +186,51 @@ class ProfileResponse(ProfileBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+# ==========================================
+# 4. RESPONSE CHO DASHBOARD SUMMARY (CONSOLIDATED)
+# ==========================================
+
+class DashboardProfileSummary(BaseModel):
+    """Lightweight parent summary without external Supabase Auth contact lookup."""
+
+    id: UUID
+    display_name: Optional[str] = None
+    role: str
+    created_at: datetime
+    contact_phone: Optional[str] = None
+    avatar_url: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DashboardLatestSessionSummary(BaseModel):
+    """Latest reading session + book title per child for instant FamilyReadingDesk hydration."""
+
+    session_id: UUID
+    child_id: UUID
+    book_id: UUID
+    book_title: str
+    state: str
+    started_at: datetime
+    ended_at: Optional[datetime] = None
+    duration_ms: Optional[int] = Field(default=None, ge=0)
+    resumable: bool
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DashboardSummaryResponse(BaseModel):
+    """Consolidated dashboard payload eliminating N+1 avatar signing and serial session/book calls."""
+
+    profile: DashboardProfileSummary
+    children: List[ChildProfileResponse] = Field(default_factory=list)
+    latest_sessions_by_child: Dict[str, DashboardLatestSessionSummary] = Field(
+        default_factory=dict
+    )
+
+    model_config = ConfigDict(extra="forbid")
+
+
 # =========================================================
 # ADMIN: PARENT CRUD REQUEST SCHEMAS
 # =========================================================

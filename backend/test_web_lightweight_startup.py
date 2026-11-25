@@ -135,6 +135,9 @@ print(json.dumps({"forbidden_loaded": forbidden}))
             called_workers.append("started")
             await stop_event.wait()
 
+        # 1. When VIREAD_WEB_DISABLE_HEAVY_WORKERS=true (Render Free 512 MiB light web):
+        #    ALL background/polling workers AND local voice bootstrap MUST be gated off.
+        mock_voice_bootstrap = AsyncMock(return_value=False)
         with (
             patch.dict(
                 os.environ,
@@ -142,6 +145,50 @@ print(json.dumps({"forbidden_loaded": forbidden}))
                     "VIREAD_OCR_MODE": "remote_worker",
                     "VIREAD_WEB_DISABLE_HEAVY_WORKERS": "true",
                     "VIREAD_OCR_WARMUP_ENABLED": "true",
+                    "PARENT_BOOK_WORKER_ENABLED": "true",
+                    "VIREAD_OCR_OUTBOX_WORKER_ENABLED": "true",
+                    "VIREAD_OCR_AUTO_TRAINING_WORKER_ENABLED": "true",
+                    "BOOK_QUALITY_SCAN_WORKER_ENABLED": "true",
+                    "ADMIN_AI_WORKFLOW_WORKER_ENABLED": "true",
+                    "BACKGROUND_WORKER_STARTUP_DELAY_SECONDS": "0",
+                },
+                clear=False,
+            ),
+            patch.object(sever_mod, "APP_ENVIRONMENT", "staging"),
+            patch.object(sever_mod, "warmup_ocr_engines", side_effect=AssertionError("should not warmup")),
+            patch.object(sever_mod, "run_active_viread_model_worker", side_effect=AssertionError("should not poll active model")),
+            patch.object(sever_mod, "run_viread_ocr_outbox_worker", new=_fake_worker),
+            patch.object(sever_mod, "run_viread_ocr_training_auto_worker", new=_fake_worker),
+            patch.object(sever_mod, "run_parent_book_submission_worker", new=_fake_worker),
+            patch.object(sever_mod, "run_book_quality_worker", new=_fake_worker),
+            patch.object(sever_mod, "run_admin_ai_workflow_worker", new=_fake_worker),
+            patch.object(sever_mod, "ensure_local_voice_worker_running", mock_voice_bootstrap),
+            patch.object(sever_mod, "probe_database_connection", AsyncMock(return_value={
+                "ok": True, "dns_resolved": True, "ssl_enabled": True,
+                "pool_class": "NullPool", "pooler_mode": "transaction", "latency_ms": 2.0,
+                "error_type": None,
+            })),
+        ):
+            with TestClient(sever_mod.app) as client:
+                state = client.app.state.background_workers
+                self.assertIsNone(state["viread_ocr_outbox"])
+                self.assertIsNone(state["viread_ocr_training"])
+                self.assertIsNone(state["parent_book_submission"])
+                self.assertIsNone(state["book_quality"])
+                self.assertIsNone(state["admin_ai_workflow"])
+                self.assertIsNone(state["local_voice_bootstrap"])
+                self.assertIsNone(state["active_model_registry"])
+                self.assertIsNone(state["local_trainer_process"])
+            mock_voice_bootstrap.assert_not_awaited()
+
+        # 2. When VIREAD_OCR_MODE=remote_worker AND VIREAD_WEB_DISABLE_HEAVY_WORKERS=false:
+        #    ML/OCR workers remain disabled while lightweight pollers can run if enabled.
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "VIREAD_OCR_MODE": "remote_worker",
+                    "VIREAD_WEB_DISABLE_HEAVY_WORKERS": "false",
                     "PARENT_BOOK_WORKER_ENABLED": "true",
                     "VIREAD_OCR_OUTBOX_WORKER_ENABLED": "true",
                     "VIREAD_OCR_AUTO_TRAINING_WORKER_ENABLED": "true",
@@ -171,36 +218,6 @@ print(json.dumps({"forbidden_loaded": forbidden}))
                 self.assertIsNotNone(state["parent_book_submission"])
                 self.assertIsNone(state["active_model_registry"])
                 self.assertIsNone(state["local_trainer_process"])
-
-        # Gated strictly by their own env flags when disabled:
-        with (
-            patch.dict(
-                os.environ,
-                {
-                    "VIREAD_OCR_MODE": "remote_worker",
-                    "VIREAD_WEB_DISABLE_HEAVY_WORKERS": "true",
-                    "PARENT_BOOK_WORKER_ENABLED": "false",
-                    "VIREAD_OCR_OUTBOX_WORKER_ENABLED": "false",
-                    "VIREAD_OCR_AUTO_TRAINING_WORKER_ENABLED": "false",
-                    "BACKGROUND_WORKER_STARTUP_DELAY_SECONDS": "0",
-                },
-                clear=False,
-            ),
-            patch.object(sever_mod, "APP_ENVIRONMENT", "staging"),
-            patch.object(sever_mod, "run_book_quality_worker", new=_fake_worker),
-            patch.object(sever_mod, "run_admin_ai_workflow_worker", new=_fake_worker),
-            patch.object(sever_mod, "ensure_local_voice_worker_running", AsyncMock(return_value=False)),
-            patch.object(sever_mod, "probe_database_connection", AsyncMock(return_value={
-                "ok": True, "dns_resolved": True, "ssl_enabled": True,
-                "pool_class": "NullPool", "pooler_mode": "transaction", "latency_ms": 2.0,
-                "error_type": None,
-            })),
-        ):
-            with TestClient(sever_mod.app) as client:
-                state = client.app.state.background_workers
-                self.assertIsNone(state["viread_ocr_outbox"])
-                self.assertIsNone(state["viread_ocr_training"])
-                self.assertIsNone(state["parent_book_submission"])
 
     def test_health_never_marks_installed_as_ready_and_exposes_version_header(self):
         import app.sever as sever_mod

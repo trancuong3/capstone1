@@ -200,9 +200,8 @@ async def ensure_local_voice_worker_running(
     global _last_failed_attempt_monotonic
 
     resolved_url = _resolve_base_url(base_url)
-    if await _is_worker_healthy(resolved_url):
-        return True
-
+    # Check autostart eligibility BEFORE dialing /health so non-Windows/Render/disabled
+    # deployments never burn 1.5s probing unreachable loopback on startup.
     eligible, reason = should_autostart_local_voice_worker(base_url=resolved_url)
     if not eligible:
         logger.debug(
@@ -211,6 +210,9 @@ async def ensure_local_voice_worker_running(
             resolved_url,
         )
         return False
+
+    if await _is_worker_healthy(resolved_url):
+        return True
 
     lock = _get_lock()
     async with lock:

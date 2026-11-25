@@ -35,6 +35,7 @@ RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu 
     && python -c "import cv2, numpy, google.protobuf, pytesseract; assert numpy.__version__ == '1.26.4'; assert google.protobuf.__version__ == '3.20.2'; assert cv2.__version__ == '4.10.0'"
 
 COPY ocr_worker /app/ocr_worker
+COPY ai/vietocr_v2/original_artifact.json /app/ai/vietocr_v2/original_artifact.json
 COPY backend/app/services/ocr_engine.py /app/backend/app/services/ocr_engine.py
 COPY backend/app/services/ocr_adjudication.py /app/backend/app/services/ocr_adjudication.py
 COPY backend/app/services/ocr_punctuation.py /app/backend/app/services/ocr_punctuation.py

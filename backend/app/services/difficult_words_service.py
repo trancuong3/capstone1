@@ -17,7 +17,6 @@ from app.api.routes.reading import HistoryService
 from app.models import ReadingEvent
 from app.models.difficult_word_practice import DifficultWordPracticeAttempt
 from app.providers.elevenlabs_voice_provider import (
-    ElevenLabsVoiceProvider,
     Transcription,
     VoiceProviderError,
 )
@@ -555,11 +554,16 @@ class DifficultWordsService:
         self,
         repository: DifficultWordsRepository,
         access: HistoryService,
-        voice_provider: ElevenLabsVoiceProvider | None = None,
+        voice_provider: Any | None = None,
     ):
         self.repository = repository
         self.access = access
-        self.voice_provider = voice_provider or ElevenLabsVoiceProvider()
+        if voice_provider is not None:
+            self.voice_provider = voice_provider
+        else:
+            from app.api.routes.voice import get_voice_orchestrator
+
+            self.voice_provider = get_voice_orchestrator()
 
     def _window_bounds(
         self,
@@ -1541,7 +1545,9 @@ class DifficultWordsService:
                 detail="DIFFICULT_WORD_ATTEMPT_ALREADY_COMPLETED",
             )
 
-        if not audio_bytes:
+        if not audio_bytes and not (
+            isinstance(browser_transcript, str) and browser_transcript.strip()
+        ):
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="EMPTY_AUDIO",
