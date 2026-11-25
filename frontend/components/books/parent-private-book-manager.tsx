@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Clock3,
   FileUp,
+  Image as ImageIcon,
   Lock,
   Pencil,
   RefreshCw,
@@ -27,6 +28,8 @@ import {
   type FormEvent,
 } from "react";
 
+import { BookCover } from "@/components/books/book-cover";
+import { BookCoverStudio } from "@/components/books/book-cover-studio";
 import { ParentOcrContributionCard } from "@/components/books/parent-ocr-contribution-card";
 import { AuthenticatedImage } from "@/components/common/authenticated-image";
 import { Button, ButtonLink } from "@/components/common/button";
@@ -44,6 +47,7 @@ import {
 import { isServiceError } from "@/lib/api/service-error";
 import { preprocessScanImage } from "@/lib/reading/scan-image-preprocess";
 import { CHILD_GRADES } from "@/types/child";
+import type { BookPresentationAssetDTO } from "@/types/book-assets";
 import {
   SOURCE_USAGE_OPTIONS,
   type ParentPageSubmissionDTO,
@@ -309,7 +313,10 @@ function ParentPrivateBookManagerContent({
   const [reviewSourceNote, setReviewSourceNote] = useState("");
   const [reviewRequestNote, setReviewRequestNote] = useState("");
 
-  // Book Edit & Delete state
+  // Book Edit, Cover Studio & Delete state
+  const [showCoverStudio, setShowCoverStudio] = useState(false);
+  const [activeCoverAsset, setActiveCoverAsset] =
+    useState<BookPresentationAssetDTO | null>(null);
   const [showEditBookForm, setShowEditBookForm] = useState(false);
   const [editBookTitle, setEditBookTitle] = useState("");
   const [editBookAuthor, setEditBookAuthor] = useState("");
@@ -951,41 +958,78 @@ function ParentPrivateBookManagerContent({
 
       <header className="flex flex-col gap-4 rounded-card border border-border bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-0.5 text-xs font-bold text-emerald-800">
-                <Lock aria-hidden="true" className="size-3" />
-                Sách riêng của gia đình
-              </span>
-              <span className="text-xs font-semibold text-muted">
-                Lớp {book.min_grade}
-                {book.min_grade !== book.max_grade ? `–${book.max_grade}` : ""}
-              </span>
-              <span className="text-xs text-muted">·</span>
-              <span className="text-xs font-semibold text-ink">
-                {book.committed_page_count} trang đã thêm vào sách đọc
-              </span>
+          <div className="flex min-w-0 flex-1 items-start gap-4">
+            <BookCover
+              author={book.author}
+              book={{
+                id: book.id,
+                title: book.title,
+                author: book.author,
+                min_grade: book.min_grade,
+                max_grade: book.max_grade,
+                lifecycle_status: book.lifecycle_status,
+                visibility_scope: book.visibility_scope,
+              }}
+              coverSourceType={activeCoverAsset?.source_type ?? null}
+              coverUrl={activeCoverAsset?.media_url ?? null}
+              showTitle={false}
+              size="small"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-0.5 text-xs font-bold text-emerald-800">
+                  <Lock aria-hidden="true" className="size-3" />
+                  Sách riêng của gia đình
+                </span>
+                <span className="text-xs font-semibold text-muted">
+                  Lớp {book.min_grade}
+                  {book.min_grade !== book.max_grade
+                    ? `–${book.max_grade}`
+                    : ""}
+                </span>
+                <span className="text-xs text-muted">·</span>
+                <span className="text-xs font-semibold text-ink">
+                  {book.committed_page_count} trang đã thêm vào sách đọc
+                </span>
+              </div>
+              <h1 className="book-title mt-2 break-words text-3xl text-ink sm:text-4xl">
+                {book.title}
+              </h1>
+              {book.author ? (
+                <p className="mt-1 break-words text-sm text-muted">
+                  Tác giả: {book.author}
+                </p>
+              ) : null}
+              <p className="mt-2 text-xs text-muted">{book.privacy_notice}</p>
             </div>
-            <h1 className="book-title mt-2 break-words text-3xl text-ink sm:text-4xl">
-              {book.title}
-            </h1>
-            {book.author ? (
-              <p className="mt-1 break-words text-sm text-muted">
-                Tác giả: {book.author}
-              </p>
-            ) : null}
-            <p className="mt-2 text-xs text-muted">{book.privacy_notice}</p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <Button
               className="min-h-10 w-auto px-3 text-xs"
               disabled={isSuspended || busyKey !== null}
-              onClick={() =>
-                showEditBookForm
-                  ? setShowEditBookForm(false)
-                  : openEditBookForm()
-              }
+              onClick={() => {
+                setShowEditBookForm(false);
+                setConfirmDeleteBook(false);
+                setShowCoverStudio((open) => !open);
+              }}
+              type="button"
+              variant="secondary"
+            >
+              <ImageIcon aria-hidden="true" className="size-3.5" />
+              {showCoverStudio ? "Đóng ảnh bìa" : "Đổi ảnh bìa"}
+            </Button>
+            <Button
+              className="min-h-10 w-auto px-3 text-xs"
+              disabled={isSuspended || busyKey !== null}
+              onClick={() => {
+                setShowCoverStudio(false);
+                if (showEditBookForm) {
+                  setShowEditBookForm(false);
+                } else {
+                  openEditBookForm();
+                }
+              }}
               type="button"
               variant="secondary"
             >
@@ -997,6 +1041,7 @@ function ParentPrivateBookManagerContent({
               className="inline-flex min-h-10 items-center gap-1.5 rounded-control border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
               disabled={busyKey !== null}
               onClick={() => {
+                setShowCoverStudio(false);
                 setShowEditBookForm(false);
                 setConfirmDeleteBook((open) => !open);
               }}
@@ -1007,6 +1052,23 @@ function ParentPrivateBookManagerContent({
             </button>
           </div>
         </div>
+
+        {showCoverStudio ? (
+          <BookCoverStudio
+            actorRole="parent"
+            author={book.author}
+            autoLoad
+            bookId={book.id}
+            bookTitle={book.title}
+            initialCoverSourceType={activeCoverAsset?.source_type ?? null}
+            initialCoverUrl={activeCoverAsset?.media_url ?? null}
+            maxGrade={book.max_grade}
+            minGrade={book.min_grade}
+            onCoverUpdated={(asset) => {
+              setActiveCoverAsset(asset);
+            }}
+          />
+        ) : null}
 
         {showEditBookForm ? (
           <form

@@ -6,6 +6,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
 import { AdminBookForm } from "@/components/admin/admin-book-form";
+import { BookCover } from "@/components/books/book-cover";
+import { BookCoverStudio } from "@/components/books/book-cover-studio";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
@@ -14,6 +16,7 @@ import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { isServiceError } from "@/lib/api/service-error";
 import type { AdminBookCreateDTO, AdminBookDTO } from "@/types/admin";
+import type { BookPresentationAssetDTO } from "@/types/book-assets";
 
 const issueLabels: Record<string, string> = {
   MISSING_TITLE: "Thiếu tiêu đề",
@@ -26,12 +29,14 @@ interface AdminBookEditorScreenProps {
   bookId: string;
   returnTo?: "detail" | "metadata-quality";
   issue?: string;
+  defaultCoverStudioOpen?: boolean;
 }
 
 export function AdminBookEditorScreen({
   bookId,
   returnTo = "detail",
   issue,
+  defaultCoverStudioOpen = false,
 }: AdminBookEditorScreenProps) {
   const { books } = useAdminServices();
   const router = useRouter();
@@ -40,6 +45,11 @@ export function AdminBookEditorScreen({
   const [error, setError] = useState<"not-found" | "safe" | null>(null);
   const [statusBusy, setStatusBusy] = useState(false);
   const [confirmLifecycleOpen, setConfirmLifecycleOpen] = useState(false);
+  const [coverStudioOpen, setCoverStudioOpen] = useState(
+    defaultCoverStudioOpen,
+  );
+  const [activeCoverAsset, setActiveCoverAsset] =
+    useState<BookPresentationAssetDTO | null>(null);
   const [notice, setNotice] = useState<{
     tone: "info" | "error";
     title: string;
@@ -219,10 +229,67 @@ export function AdminBookEditorScreen({
           {notice.message}
         </StatusMessage>
       ) : null}
+      <Card className="w-full bg-white sm:px-8 sm:py-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-4">
+            <BookCover
+              author={book.author}
+              book={{
+                id: book.id,
+                title: book.title.trim() ? book.title : "Chưa có tiêu đề",
+                author: book.author,
+                min_grade: book.min_grade,
+                max_grade: book.max_grade,
+                lifecycle_status: book.lifecycle_status,
+              }}
+              coverSourceType={activeCoverAsset?.source_type ?? null}
+              coverUrl={activeCoverAsset?.media_url ?? null}
+              showTitle={false}
+              size="small"
+            />
+            <div className="min-w-0">
+              <h2 className="text-xl font-extrabold text-ink">Ảnh bìa sách</h2>
+              <p className="mt-0.5 text-xs text-muted">
+                Cập nhật ảnh bìa (tải lên, cắt 3:4, xoay hoặc tạo bìa AI) mà
+                không làm thay đổi các trang đọc hay revision đã xác minh.
+              </p>
+            </div>
+          </div>
+          <Button
+            className="sm:w-auto"
+            fullWidth={false}
+            onClick={() => setCoverStudioOpen((open) => !open)}
+            size="compact"
+            type="button"
+            variant="secondary"
+          >
+            {coverStudioOpen ? "Đóng Cover Studio" : "Mở Cover Studio"}
+          </Button>
+        </div>
+        {coverStudioOpen ? (
+          <div className="mt-4">
+            <BookCoverStudio
+              actorRole="admin"
+              author={book.author}
+              autoLoad
+              bookId={bookId}
+              bookTitle={book.title.trim() ? book.title : "Chưa có tiêu đề"}
+              initialCoverSourceType={activeCoverAsset?.source_type ?? null}
+              initialCoverUrl={activeCoverAsset?.media_url ?? null}
+              maxGrade={book.max_grade}
+              minGrade={book.min_grade}
+              onCoverUpdated={(asset) => setActiveCoverAsset(asset)}
+            />
+          </div>
+        ) : null}
+      </Card>
       <Card className="w-full bg-white sm:px-8 sm:py-8">
         <h2 className="text-2xl font-extrabold text-ink">Thông tin sách</h2>
         <AdminBookForm
+          bookId={bookId}
           cancelHref={cancelHref}
+          coverSourceType={activeCoverAsset?.source_type ?? null}
+          coverUrl={activeCoverAsset?.media_url ?? null}
           initial={initial}
           onSubmit={saveMetadata}
           submitLabel="Lưu metadata"

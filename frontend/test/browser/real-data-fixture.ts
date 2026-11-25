@@ -1052,6 +1052,50 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       });
     if (request.method() === "GET" && path === "/voice/status")
       return respond(route, readyVoiceStatus("Binh"));
+    if (request.method() === "GET" && path === "/studio/tasks")
+      return respond(route, {
+        actor_id: ids.parent,
+        actor_role: "parent",
+        active_count: 0,
+        waiting_review_count: 0,
+        failed_count: 0,
+        completed_count: 0,
+        worker_online: true,
+        recommended_poll_ms: null,
+        tasks: [],
+      });
+    if (
+      request.method() === "GET" &&
+      /^\/studio\/books\/[^/]+\/assets$/.test(path)
+    )
+      return respond(route, {
+        book_id: ids.book,
+        title: book.title,
+        author: book.author,
+        min_grade: book.min_grade,
+        max_grade: book.max_grade,
+        visibility_scope: "CATALOG",
+        active_cover: null,
+        effective_cover_source: "METADATA_RENDER",
+        metadata_fallback: {
+          palette_id: "sky-blue",
+          primary_color: "#1D4ED8",
+          secondary_color: "#DBEAFE",
+          accent_color: "#F59E0B",
+          motif: "storybook",
+          title: book.title,
+          author: book.author,
+          grade_label: `Lớp ${book.min_grade}–${book.max_grade}`,
+          source_type: "METADATA_RENDER",
+        },
+        style_bible: null,
+        page_illustrations: [],
+        ai_image_provider_available: false,
+        ai_image_provider_name: null,
+        ai_image_provider_message_vi:
+          "Chưa cấu hình nhà cung cấp tạo ảnh AI miễn phí.",
+        v2_storage_degraded: false,
+      });
     state.unexpected.push(`unknown:${path}`);
     return respond(route, {}, 404);
   });
