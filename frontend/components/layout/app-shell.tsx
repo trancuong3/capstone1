@@ -46,6 +46,8 @@ import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
 import { clearGlobalTasksMemoryCache } from "@/lib/api/global-tasks-service";
 import {
   clearUserCache,
+  DEFAULT_USER_CACHE_TTL_MS,
+  PERSISTENT_USER_CACHE_MAX_STALE_MS,
   readUserCacheWithStale,
   writeUserCache,
 } from "@/lib/cache/user-query-cache";
@@ -119,15 +121,10 @@ export function AppShell({ children }: AppShellProps) {
   const previousUserIdRef = useRef<string | undefined>(undefined);
 
   const user = authRuntime.session?.user ?? null;
-  const userId = user?.id ?? null;
+  const userId = user?.id ?? authRuntime.initialUserId ?? null;
 
-  const initialSummary = useMemo(
-    () =>
-      readUserCacheWithStale<DashboardSummaryDTO>(userId, "dashboard-summary")
-        ?.data ?? null,
-    [userId],
-  );
-
+  const [cachedSummary, setCachedSummary] =
+    useState<DashboardSummaryDTO | null>(null);
   const [fetchedProfile, setFetchedProfile] = useState<ParentProfileDTO | null>(
     null,
   );
@@ -146,29 +143,30 @@ export function AppShell({ children }: AppShellProps) {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [hasSignOutError, setHasSignOutError] = useState(false);
 
-  const profile = fetchedProfile ?? initialSummary?.profile ?? null;
-  const availableChildren =
-    fetchedChildren.length > 0
-      ? fetchedChildren
-      : (initialSummary?.children ?? []);
+  const profile = fetchedProfile ?? cachedSummary?.profile ?? null;
+  const availableChildren = useMemo(
+    () =>
+      fetchedChildren.length > 0
+        ? fetchedChildren
+        : (cachedSummary?.children ?? []),
+    [cachedSummary?.children, fetchedChildren],
+  );
 
+  const selectedChildId = appStore?.selectedChildId ?? null;
+  const validatedSelectedChild = appStore?.validatedSelectedChild ?? null;
   const selectedChild = useMemo(() => {
-    const selectedId = appStore?.selectedChildId ?? null;
     if (
-      appStore?.validatedSelectedChild &&
-      (!selectedId || appStore.validatedSelectedChild.id === selectedId)
+      validatedSelectedChild &&
+      (!selectedChildId || validatedSelectedChild.id === selectedChildId)
     ) {
-      return appStore.validatedSelectedChild;
+      return validatedSelectedChild;
     }
-    if (!selectedId) return null;
+    if (!selectedChildId) return null;
     return (
-      availableChildren.find((candidate) => candidate.id === selectedId) ?? null
+      availableChildren.find((candidate) => candidate.id === selectedChildId) ??
+      null
     );
-  }, [
-    appStore?.selectedChildId,
-    appStore?.validatedSelectedChild,
-    availableChildren,
-  ]);
+  }, [availableChildren, selectedChildId, validatedSelectedChild]);
 
   const isAccountMenuVisible =
     accountMenu.isOpen && accountMenu.pathname === pathname;
@@ -205,23 +203,39 @@ export function AppShell({ children }: AppShellProps) {
     let isActive = true;
 
     const loadProfileAndSummary = async () => {
+      const cached =
+        readUserCacheWithStale<DashboardSummaryDTO>(
+          userId,
+          "dashboard-summary",
+          DEFAULT_USER_CACHE_TTL_MS,
+          PERSISTENT_USER_CACHE_MAX_STALE_MS,
+        )?.data ?? null;
+      if (isActive) {
+        setCachedSummary(cached);
+      }
+
       try {
         if (typeof profileService.getDashboardSummary === "function") {
           const summary = await profileService.getDashboardSummary();
           if (!isActive) return;
           setFetchedProfile(summary.profile);
           setFetchedChildren(summary.children);
+          setCachedSummary(summary);
           const ownerId = userId ?? summary.profile?.id ?? null;
           if (ownerId) {
-            writeUserCache(ownerId, "dashboard-summary", summary);
-            writeUserCache(ownerId, "children", summary.children);
+            writeUserCache(ownerId, "dashboard-summary", summary, {
+              persist: "local",
+            });
+            writeUserCache(ownerId, "children", summary.children, {
+              persist: "local",
+            });
           }
           return;
         }
         const nextProfile = await profileService.get();
         if (isActive) setFetchedProfile(nextProfile);
       } catch {
-        if (isActive && !initialSummary) {
+        if (isActive && !cached) {
           setFetchedProfile(null);
         }
       }
@@ -232,14 +246,14 @@ export function AppShell({ children }: AppShellProps) {
     return () => {
       isActive = false;
     };
-  }, [initialSummary, profileService, userId]);
+  }, [profileService, userId]);
 
   useEffect(() => {
     function handleProfileUpdated(event: Event) {
       const detail = (event as CustomEvent<{ displayName?: unknown }>).detail;
       if (typeof detail?.displayName !== "string") return;
       setFetchedProfile((current) => {
-        const base = current ?? initialSummary?.profile ?? null;
+        const base = current ?? cachedSummary?.profile ?? null;
         return base
           ? { ...base, display_name: detail.displayName as string }
           : base;
@@ -263,7 +277,7 @@ export function AppShell({ children }: AppShellProps) {
       );
       window.removeEventListener("viread:immersive-mode", handleImmersiveMode);
     };
-  }, [initialSummary?.profile, pathname]);
+  }, [cachedSummary?.profile, pathname]);
 
   useEffect(() => {
     if (!isAccountMenuVisible) return;

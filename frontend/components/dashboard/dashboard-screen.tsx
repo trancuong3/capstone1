@@ -13,14 +13,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import {
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 
 import { AuthRuntimeContext } from "@/components/auth/auth-service-provider";
 import { ChildProfileCard } from "@/components/children/child-profile-card";
@@ -30,6 +23,8 @@ import { StatusMessage } from "@/components/common/status-message";
 import { useAppStore } from "@/components/providers/app-store-provider";
 import { useProfileService } from "@/hooks/use-profile-service";
 import {
+  DEFAULT_USER_CACHE_TTL_MS,
+  PERSISTENT_USER_CACHE_MAX_STALE_MS,
   readUserCacheWithStale,
   writeUserCache,
 } from "@/lib/cache/user-query-cache";
@@ -55,7 +50,8 @@ export function DashboardScreen() {
   const searchParams = useSearchParams();
   const profileService = useProfileService();
   const authRuntime = useContext(AuthRuntimeContext);
-  const userId = authRuntime?.session?.user?.id ?? null;
+  const userId =
+    authRuntime?.session?.user?.id ?? authRuntime?.initialUserId ?? null;
 
   const {
     selectedChildId,
@@ -64,24 +60,8 @@ export function DashboardScreen() {
     setValidatedSelectedChild,
   } = useAppStore();
 
-  const initialCachedSummary = useMemo(
-    () =>
-      readUserCacheWithStale<DashboardSummaryDTO>(userId, "dashboard-summary")
-        ?.data ?? null,
-    [userId],
-  );
-
   const [requestKey, setRequestKey] = useState(0);
-  const [state, setState] = useState<DashboardState>(() =>
-    initialCachedSummary
-      ? {
-          status: "ready",
-          children: initialCachedSummary.children,
-          latestSessionsByChild: initialCachedSummary.latest_sessions_by_child,
-          summarySource: initialCachedSummary.source,
-        }
-      : { status: "loading" },
-  );
+  const [state, setState] = useState<DashboardState>({ status: "loading" });
   const [selectionPrompt, setSelectionPrompt] = useState(false);
   const selectionSectionRef = useRef<HTMLElement | null>(null);
   const focusRequestHandledRef = useRef(false);
@@ -108,6 +88,8 @@ export function DashboardScreen() {
       const cached = readUserCacheWithStale<DashboardSummaryDTO>(
         userId,
         "dashboard-summary",
+        DEFAULT_USER_CACHE_TTL_MS,
+        PERSISTENT_USER_CACHE_MAX_STALE_MS,
       )?.data;
 
       if (cached && isActive) {
@@ -127,8 +109,12 @@ export function DashboardScreen() {
 
         const cacheOwnerId = userId ?? summary.profile?.id ?? null;
         if (cacheOwnerId) {
-          writeUserCache(cacheOwnerId, "dashboard-summary", summary);
-          writeUserCache(cacheOwnerId, "children", summary.children);
+          writeUserCache(cacheOwnerId, "dashboard-summary", summary, {
+            persist: "local",
+          });
+          writeUserCache(cacheOwnerId, "children", summary.children, {
+            persist: "local",
+          });
         }
 
         setState({
@@ -326,7 +312,7 @@ export function DashboardScreen() {
         <>
           <div className="mt-4 grid grid-cols-2 gap-2.5 md:hidden">
             <Link
-              className="flex min-h-12 items-center gap-2.5 rounded-card border border-border bg-white px-3.5 py-3 text-sm font-bold text-ink shadow-xs transition-colors hover:bg-sky/40 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              className="flex min-h-12 items-center gap-2 rounded-card border border-border bg-white px-3 py-3 text-sm font-bold text-ink shadow-xs transition-colors hover:bg-sky/40 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
               href={
                 selectedChild
                   ? `/reports?childId=${encodeURIComponent(selectedChild.id)}`
@@ -337,10 +323,10 @@ export function DashboardScreen() {
                 aria-hidden="true"
                 className="size-5 shrink-0 text-primary"
               />
-              <span className="truncate">Tiến bộ gần đây</span>
+              <span className="truncate">Xem tiến bộ</span>
             </Link>
             <Link
-              className="flex min-h-12 items-center gap-2.5 rounded-card border border-border bg-white px-3.5 py-3 text-sm font-bold text-ink shadow-xs transition-colors hover:bg-warning-surface/50 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              className="flex min-h-12 items-center gap-2 rounded-card border border-border bg-white px-3 py-3 text-sm font-bold text-ink shadow-xs transition-colors hover:bg-warning-surface/50 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
               href={
                 selectedChild
                   ? `/reports/difficult-words?childId=${encodeURIComponent(selectedChild.id)}`

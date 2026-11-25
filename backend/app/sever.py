@@ -785,6 +785,16 @@ app.add_middleware(
     ],
 )
 
+def _remote_ocr_health_timeout_seconds() -> float:
+    raw = (os.getenv("VIREAD_HEALTH_OCR_TIMEOUT_SECONDS") or "").strip()
+    if raw:
+        try:
+            return max(2.5, min(15.0, float(raw)))
+        except ValueError:
+            pass
+    return 8.0
+
+
 @app.get("/health", tags=["System"])
 async def get_health(request: Request) -> dict[str, object]:
     """Read-only liveness/readiness check (SELECT 1 + worker states, zero secrets)."""
@@ -809,9 +819,13 @@ async def get_health(request: Request) -> dict[str, object]:
         ),
     }
 
+    ocr_timeout = _remote_ocr_health_timeout_seconds()
+
     async def _probe_remote_ocr() -> dict[str, object]:
         try:
-            remote_info = await asyncio.wait_for(collect_remote_ocr_health(), timeout=6.0)
+            remote_info = await asyncio.wait_for(
+                collect_remote_ocr_health(), timeout=ocr_timeout
+            )
             return {
                 "mode": "remote_worker",
                 "ready": bool(remote_info.get("ready", False)),
@@ -867,10 +881,32 @@ async def get_health(request: Request) -> dict[str, object]:
         }
 
     # Run DB probe and OCR readiness probe concurrently so NullPool handshakes don't stack.
-    db_probe, ocr_payload = await asyncio.gather(
-        probe_database_connection(timeout=6.0),
+    db_probe_res, ocr_payload = await asyncio.gather(
+        probe_database_connection(timeout=max(6.0, ocr_timeout)),
         _probe_remote_ocr() if is_remote_ocr_mode() else _probe_local_ocr(),
+        return_exceptions=True,
     )
+    if isinstance(db_probe_res, BaseException):
+        db_probe: dict[str, object] = {
+            "ok": False,
+            "dns_resolved": False,
+            "ssl_enabled": False,
+            "pool_class": type(engine.pool).__name__,
+            "pooler_mode": "unknown",
+            "latency_ms": 0,
+        }
+    else:
+        db_probe = db_probe_res
+    if isinstance(ocr_payload, BaseException):
+        ocr_payload = {
+            "mode": "remote_worker" if is_remote_ocr_mode() else "local_inprocess",
+            "ready": False,
+            "engines": {},
+            "workers": [],
+            "queue": {},
+            "heartbeat_ttl_seconds": worker_heartbeat_ttl_seconds(),
+            "probe_degraded": True,
+        }
 
     return {
         "status": "ok" if db_probe["ok"] else "degraded",

@@ -557,7 +557,8 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
     if (path === "/health")
       return respond(route, {
         status: "ok",
-        ocr: { mode: "remote_worker", ready: true },
+        ocr_mode: "remote_worker",
+        ocr: { mode: "remote_worker", ready: true, workers: [], queue: {} },
       });
     expect(request.headers().authorization).toMatch(/^Bearer /);
     if (

@@ -310,25 +310,46 @@ class ProfileService:
         }
 
     async def get_dashboard_summary(self, parent_id: UUID) -> dict[str, Any]:
-        """Consolidated dashboard read: minimal SQL queries, zero Auth Admin HTTP, batched signed URLs."""
-        profile = await self.repository.get_by_id(parent_id)
-        if profile is None:
-            raise ProfileNotFoundError()
-        _ensure_active_profile(profile)
+        """Consolidated dashboard read: 1 SQL query, zero Auth Admin HTTP, batched signed URLs."""
+        if getattr(type(self.repository), "get_dashboard_summary_rows", None) is not None:
+            rows = await self.repository.get_dashboard_summary_rows(parent_id)
+            if not rows:
+                raise ProfileNotFoundError()
+            profile = rows[0][0]
+            _ensure_active_profile(profile)
+            seen_children: set[UUID] = set()
+            children_unsorted: list[Any] = []
+            latest_rows: list[tuple[Any, str]] = []
+            for _prof, child, session, book_title in rows:
+                if child is not None and child.Id not in seen_children:
+                    seen_children.add(child.Id)
+                    children_unsorted.append(child)
+                    if session is not None and book_title is not None:
+                        latest_rows.append((session, book_title))
+            children = sorted(
+                children_unsorted,
+                key=lambda child: (child.CreatedAt, str(child.Id)),
+                reverse=True,
+            )
+        else:
+            profile = await self.repository.get_by_id(parent_id)
+            if profile is None:
+                raise ProfileNotFoundError()
+            _ensure_active_profile(profile)
 
-        children = sorted(
-            profile.children,
-            key=lambda child: (child.CreatedAt, str(child.Id)),
-            reverse=True,
-        )
-        child_ids = [child.Id for child in children]
-        latest_rows = (
-            await self.repository.get_latest_sessions_by_child_ids(parent_id, child_ids)
-            if child_ids
-            else []
-        )
+            children = sorted(
+                profile.children,
+                key=lambda child: (child.CreatedAt, str(child.Id)),
+                reverse=True,
+            )
+            child_ids = [child.Id for child in children]
+            latest_rows = (
+                await self.repository.get_latest_sessions_by_child_ids(parent_id, child_ids)
+                if child_ids
+                else []
+            )
 
-        # Snapshot ORM attributes before closing read transaction prior to Storage signing.
+        # Snapshot ORM attributes before releasing read transaction prior to Storage signing.
         contact_phone_value = getattr(profile, "ContactPhone", None)
         contact_phone = (
             contact_phone_value.strip() or None
@@ -366,13 +387,6 @@ class ProfileService:
             for session, book_title in latest_rows
         }
 
-        repo_db = getattr(self.repository, "db", None)
-        if repo_db is not None and callable(getattr(repo_db, "rollback", None)):
-            try:
-                await repo_db.rollback()
-            except Exception:
-                pass
-
         paths_to_sign = [
             p
             for p in [
@@ -381,7 +395,16 @@ class ProfileService:
             ]
             if p is not None
         ]
-        signed_map = await batch_sign_avatar_paths(paths_to_sign)
+        if paths_to_sign:
+            repo_db = getattr(self.repository, "db", None)
+            if repo_db is not None and callable(getattr(repo_db, "rollback", None)):
+                try:
+                    await repo_db.rollback()
+                except Exception:
+                    pass
+            signed_map = await batch_sign_avatar_paths(paths_to_sign)
+        else:
+            signed_map = {}
 
         return {
             "profile": {

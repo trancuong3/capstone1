@@ -3,7 +3,7 @@
 from typing import Sequence
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -127,6 +127,55 @@ class ProfileRepository:
             .where(ranked.c.rn == 1)
         )
         return [(session, str(book_title or "")) for session, book_title in result.all()]
+
+    async def get_dashboard_summary_rows(
+        self,
+        parent_id: UUID,
+    ) -> list[tuple[Profile, ChildProfile | None, ReadingSession | None, str | None]]:
+        """Return profile, owned children, and each child's latest session + book title in 1 SQL query."""
+        ranked = (
+            select(
+                ReadingSession.Id.label("session_id"),
+                ReadingSession.ChildId.label("child_id"),
+                func.row_number()
+                .over(
+                    partition_by=ReadingSession.ChildId,
+                    order_by=(
+                        ReadingSession.StartedAt.desc(),
+                        ReadingSession.Id.desc(),
+                    ),
+                )
+                .label("rn"),
+            )
+            .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
+            .where(ChildProfile.ParentId == parent_id)
+            .subquery()
+        )
+        stmt = (
+            select(Profile, ChildProfile, ReadingSession, Book.Title)
+            .outerjoin(ChildProfile, ChildProfile.ParentId == Profile.Id)
+            .outerjoin(
+                ranked,
+                and_(
+                    ranked.c.child_id == ChildProfile.Id,
+                    ranked.c.rn == 1,
+                ),
+            )
+            .outerjoin(ReadingSession, ReadingSession.Id == ranked.c.session_id)
+            .outerjoin(Book, Book.Id == ReadingSession.BookId)
+            .where(Profile.Id == parent_id)
+            .order_by(ChildProfile.CreatedAt.desc(), ChildProfile.Id.desc())
+        )
+        result = await self.db.execute(stmt)
+        return [
+            (
+                profile,
+                child,
+                session,
+                str(book_title) if book_title is not None else None,
+            )
+            for profile, child, session, book_title in result.all()
+        ]
 
     async def delete_by_id(self, profile_id: UUID) -> bool:
         profile = await self.get_by_id(profile_id)
