@@ -8,6 +8,7 @@ import inspect
 import json
 import logging
 import os
+import unicodedata
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -51,6 +52,8 @@ logger = logging.getLogger("viread.voice_routes")
 router = APIRouter()
 
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
+MAX_STT_KEYTERMS = 50
+MAX_STT_KEYTERM_CHARS = 80
 ALLOWED_AUDIO_PREFIXES = ("audio/", "video/", "application/octet-stream")
 ALLOWED_AUDIO_EXTENSIONS = (
     ".webm",
@@ -281,6 +284,8 @@ async def speech_to_text(
 ) -> SpeechToTextResponse:
     """Transcribe an uploaded recording local-first without persisting child audio."""
 
+    validated_keyterms = _validate_stt_keyterms(keyterms)
+
     filename = (file.filename or "").lower()
     is_valid_prefix = bool(
         file.content_type and file.content_type.startswith(ALLOWED_AUDIO_PREFIXES)
@@ -326,7 +331,7 @@ async def speech_to_text(
             filename=file.filename or "recording.webm",
             content_type=content_type,
             language_code=language_code,
-            keyterms=keyterms,
+            keyterms=validated_keyterms,
             actor_id=actor_id,
             policy=policy,
         )
@@ -374,12 +379,26 @@ def _extract_ws_handshake_auth(websocket: WebSocket) -> tuple[str | None, str | 
     return token, accepted_subprotocol
 
 
+async def _verify_ws_active_profile(actor_id: UUID) -> UUID:
+    """Verify the authenticated WebSocket user maps to an active profile."""
+    async with AsyncSessionLocal() as db:
+        role = await get_cached_profile_role(db, actor_id)
+    if role not in ("parent", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+    return actor_id
+
+
 async def _verify_ws_parent_id(
     websocket: WebSocket,
     *,
     token: str | None,
 ) -> UUID:
-    override = websocket.app.dependency_overrides.get(get_current_parent_id)
+    override = websocket.app.dependency_overrides.get(
+        require_active_profile_id
+    ) or websocket.app.dependency_overrides.get(get_current_parent_id)
     if override is not None:
         result = override()
         if inspect.isawaitable(result):
@@ -392,7 +411,8 @@ async def _verify_ws_parent_id(
             detail="Authentication required",
         )
     credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-    return await asyncio.to_thread(get_current_parent_id, credentials)
+    actor_id = await asyncio.to_thread(get_current_parent_id, credentials)
+    return await _verify_ws_active_profile(actor_id)
 
 
 def open_local_stt_ws(url: str, headers: dict[str, str]):
@@ -412,7 +432,10 @@ def open_local_stt_ws(url: str, headers: dict[str, str]):
 async def speech_to_text_stream(websocket: WebSocket) -> None:
     """Authenticated WebSocket proxy to the local streaming STT worker (zero audio/text logs)."""
     handshake_token, accepted_subprotocol = _extract_ws_handshake_auth(websocket)
-    has_override = get_current_parent_id in websocket.app.dependency_overrides
+    has_override = (
+        require_active_profile_id in websocket.app.dependency_overrides
+        or get_current_parent_id in websocket.app.dependency_overrides
+    )
 
     pending_start_payload: dict[str, Any] | None = None
     if has_override or handshake_token is not None:

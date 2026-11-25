@@ -100,7 +100,12 @@ const MemoWordToken = memo(function WordToken({
             "min-h-11 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
           !readOnly && "cursor-pointer select-none",
           wordPresentationClasses[presentationState],
-          isCurrent && "font-semibold ring-2 ring-primary/45 shadow-xs",
+          isCurrent &&
+            presentationState !== "current" &&
+            (presentationState === "incorrect"
+              ? "shadow-xs"
+              : "font-semibold ring-2 ring-primary/45 shadow-xs"),
+          isCurrent && presentationState === "current" && "shadow-xs",
           presentationState === "incorrect" &&
             "font-semibold border-b-2 border-red-500",
           presentationState === "unread" &&
@@ -189,7 +194,7 @@ export function BookPageContent(props: BookPageContentProps) {
   useEffect(() => {
     onWordClickRef.current = onWordClick;
     registerWordNodeRef.current = registerWordNode;
-  });
+  }, [onWordClick, registerWordNode]);
 
   const registerNode = useCallback(
     (wordId: string, node: HTMLSpanElement | null) => {
@@ -206,14 +211,20 @@ export function BookPageContent(props: BookPageContentProps) {
   const activeWordId = previewSnapshot
     ? previewSnapshot.currentWordId
     : currentWordId;
+  const activeWordIdRef = useRef(activeWordId);
+  useEffect(() => {
+    activeWordIdRef.current = activeWordId;
+  }, [activeWordId]);
 
   const isManagedByParent = Boolean(registerWordNode);
   const effectiveScrollRef = scrollContainerRef ?? panelRef;
 
   const getActiveWordNode = useCallback(
     () =>
-      activeWordId ? (wordNodesRef.current.get(activeWordId) ?? null) : null,
-    [activeWordId],
+      activeWordIdRef.current
+        ? (wordNodesRef.current.get(activeWordIdRef.current) ?? null)
+        : null,
+    [],
   );
 
   const { isDetached, resumeAutoFollow } = useReadingAutoScroll({

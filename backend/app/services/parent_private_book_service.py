@@ -9,6 +9,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, UploadFile, status
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +28,7 @@ from app.policies.book_access import (
     MODERATION_SUSPENDED,
     VISIBILITY_PARENT_PRIVATE,
     admin_submission_image_url,
+    is_private_book_readable_by,
     private_page_image_url,
     private_submission_image_url,
 )
@@ -616,13 +618,24 @@ class ParentPrivateBookService:
         for sub in all_subs:
             subs_by_book.setdefault(sub.BookId, []).append(sub)
 
+        readable_ids: set[UUID] | None = None
+        if not ready_only and isinstance(getattr(self, "db", None), AsyncSession):
+            readable_rows = await self.db.execute(
+                select(Book.Id).where(
+                    Book.Id.in_(book_ids),
+                    is_private_book_readable_by(actor_id),
+                )
+            )
+            readable_ids = set(readable_rows.scalars().all())
+
         results: list[ParentPrivateBookSummaryRead] = []
         for book in books:
-            readable = (
-                True
-                if ready_only
-                else await self.repo.is_private_book_readable(book.Id, actor_id)
-            )
+            if ready_only:
+                readable = True
+            elif readable_ids is not None:
+                readable = book.Id in readable_ids
+            else:
+                readable = await self.repo.is_private_book_readable(book.Id, actor_id)
             results.append(
                 self._serialize_book_summary(
                     book,
@@ -758,11 +771,13 @@ class ParentPrivateBookService:
             committed_map = await self.repo.committed_page_counts([book.Id])
             submissions = await self.repo.list_submissions_for_book(book.Id)
             readable = await self.repo.is_private_book_readable(book.Id, actor_id)
+            contrib_map = await self._load_contribution_states([book])
             return self._serialize_book_summary(
                 book,
                 committed_count=committed_map.get(book.Id, 0),
                 submissions=submissions,
                 readable_for_children=readable,
+                ocr_contribution=contrib_map.get(book.Id),
             )
 
         # Snapshot committed pages into plain tuples BEFORE rollback so Storage I/O runs outside DB write locks
@@ -2561,7 +2576,19 @@ class ParentPrivateBookService:
             "REJECTED": 0,
             "SUSPENDED": 0,
         }
-        queue_items: list[AdminUserBookQueueItemRead] = []
+        priority_order = {
+            "PENDING_ADMIN": 0,
+            "NEEDS_ADMIN_REVIEW": 1,
+            "CHECK_FAILED": 2,
+            "REJECTED": 3,
+            "NEEDS_RECHECK": 4,
+            "APPROVED_READY_TO_ADD": 5,
+            "ADDED_TO_BOOK": 6,
+            "PASSED_READY_TO_ADD": 7,
+            "CHECKING": 8,
+        }
+        selected_rows: list[tuple[Book, list[ParentBookPageSubmission], str, ParentBookPageSubmission | None]] = []
+        primary_sub_ids: list[UUID] = []
         for book in books:
             subs = subs_by_book.get(book.Id, [])
             q_status = self._classify_admin_queue_status(book, subs)
@@ -2571,28 +2598,40 @@ class ParentPrivateBookService:
             if status_filter is not None and q_status != status_filter:
                 continue
 
-            # Pick most relevant submission for primary "Mở để duyệt" CTA
-            priority_order = {
-                "PENDING_ADMIN": 0,
-                "NEEDS_ADMIN_REVIEW": 1,
-                "CHECK_FAILED": 2,
-                "REJECTED": 3,
-                "NEEDS_RECHECK": 4,
-                "APPROVED_READY_TO_ADD": 5,
-                "ADDED_TO_BOOK": 6,
-                "PASSED_READY_TO_ADD": 7,
-                "CHECKING": 8,
-            }
             sorted_subs = sorted(
                 subs,
                 key=lambda s: (priority_order.get(s.WorkflowStatus, 9), -s.UpdatedAt.timestamp()),
             )
             primary_sub = sorted_subs[0] if sorted_subs else None
-            latest_req = (
-                await self.repo.get_open_moderation_request(primary_sub.Id)
-                if primary_sub is not None
-                else None
+            if primary_sub is not None:
+                primary_sub_ids.append(primary_sub.Id)
+            selected_rows.append((book, subs, q_status, primary_sub))
+
+        open_req_by_sub: dict[UUID, ParentBookModerationRequest] = {}
+        if primary_sub_ids and isinstance(getattr(self, "db", None), AsyncSession):
+            req_rows = await self.db.execute(
+                select(ParentBookModerationRequest)
+                .where(
+                    ParentBookModerationRequest.SubmissionId.in_(primary_sub_ids),
+                    ParentBookModerationRequest.Status == "PENDING_ADMIN",
+                )
+                .order_by(
+                    ParentBookModerationRequest.SubmissionId,
+                    ParentBookModerationRequest.CreatedAt.desc(),
+                    ParentBookModerationRequest.Id.desc(),
+                )
             )
+            for req in req_rows.scalars().all():
+                open_req_by_sub.setdefault(req.SubmissionId, req)
+
+        queue_items: list[AdminUserBookQueueItemRead] = []
+        for book, subs, q_status, primary_sub in selected_rows:
+            if primary_sub is None:
+                latest_req = None
+            elif isinstance(getattr(self, "db", None), AsyncSession):
+                latest_req = open_req_by_sub.get(primary_sub.Id)
+            else:
+                latest_req = await self.repo.get_open_moderation_request(primary_sub.Id)
             queue_items.append(
                 AdminUserBookQueueItemRead(
                     book_id=book.Id,

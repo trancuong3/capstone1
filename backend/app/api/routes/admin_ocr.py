@@ -95,7 +95,7 @@ async def upload_admin_page(
     db: AsyncSession = Depends(get_db),
 ):
     detail = await AdminOcrService(db).upload_page(
-        actor_id, book_id, image, upload_id=upload_id
+        actor_id, book_id, image, upload_id=upload_id, page_number=page_number
     )
     # OCR is complete and persisted at this point. Enqueue this page's durable
     # proofreading workflow immediately so book processing can advance page by

@@ -159,4 +159,227 @@ begin
 end;
 $rollback_check$;
 
-\echo 'PASS: disposable PostgreSQL query indexes, idempotence, explain plans, and rollback'
+-- ---------------------------------------------------------------------------
+-- DEF-005: Verify 20261125120000_security_hardening_and_hot_fk_indexes.sql
+-- and its rollback with pre-populated representative rows, idempotence, and
+-- data preservation across all 10 hot FK tables.
+-- ---------------------------------------------------------------------------
+create table public.profiles (
+  id uuid primary key,
+  role text not null default 'parent'
+);
+
+create table public.childprofiles (
+  id uuid primary key,
+  parentid uuid not null references public.profiles(id) on delete cascade
+);
+
+create table public.books (
+  id uuid primary key,
+  visibility_scope text not null default 'CATALOG',
+  owner_parent_id uuid references public.profiles(id) on delete cascade
+);
+
+create table public.bookpages (
+  id uuid primary key,
+  bookid uuid not null references public.books(id) on delete cascade,
+  pagenumber smallint not null
+);
+
+alter table public.readingsessions
+  add column if not exists bookid uuid references public.books(id) on delete cascade;
+
+alter table public.readingevents
+  add column if not exists pageid uuid references public.bookpages(id) on delete cascade;
+
+create table public.readingsessionpages (
+  id uuid primary key,
+  sessionid uuid not null references public.readingsessions(id) on delete cascade,
+  pageid uuid not null references public.bookpages(id) on delete restrict,
+  constraint uq_readingsessionpages_session_page unique (sessionid, pageid)
+);
+
+create table public.progressreports (
+  id uuid primary key,
+  childid uuid not null references public.childprofiles(id) on delete cascade
+);
+
+create table public.comprehensionquestions (
+  id uuid primary key,
+  sessionid uuid not null references public.readingsessions(id) on delete cascade
+);
+
+create table public.comprehensionanswers (
+  id uuid primary key,
+  questionid uuid not null references public.comprehensionquestions(id) on delete cascade
+);
+
+create table public.readingplans (
+  id uuid primary key,
+  childid uuid not null references public.childprofiles(id) on delete cascade,
+  bookid uuid references public.books(id) on delete set null
+);
+
+create table public.readingreminderemaildeliveries (
+  id uuid primary key,
+  occurrenceid uuid not null
+);
+
+-- Pre-populate representative rows and link existing 20k sessions / 30k events.
+insert into public.profiles (id, role) values
+  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1', 'parent'),
+  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2', 'parent');
+
+insert into public.childprofiles (id, parentid) values
+  ('33333333-3333-4333-8333-333333333333', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1'),
+  ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2');
+
+insert into public.books (id, visibility_scope, owner_parent_id)
+select
+  ('40000000-0000-4000-8000-' || lpad(to_hex(g), 12, '0'))::uuid,
+  case when g = 1 then 'PARENT_PRIVATE' else 'CATALOG' end,
+  case when g = 1 then 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1'::uuid else null end
+from generate_series(1, 200) as g;
+
+insert into public.bookpages (id, bookid, pagenumber)
+select
+  ('50000000-0000-4000-8000-' || lpad(to_hex(g), 12, '0'))::uuid,
+  ('40000000-0000-4000-8000-' || lpad(to_hex(((g - 1) % 200) + 1), 12, '0'))::uuid,
+  (((g - 1) % 10) + 1)::smallint
+from generate_series(1, 400) as g;
+
+update public.readingsessions
+   set bookid = ('40000000-0000-4000-8000-' || lpad(to_hex((abs(hashtext(id::text)) % 200) + 1), 12, '0'))::uuid;
+
+update public.readingevents
+   set pageid = ('50000000-0000-4000-8000-' || lpad(to_hex((abs(hashtext(id::text)) % 400) + 1), 12, '0'))::uuid;
+
+insert into public.readingsessionpages (id, sessionid, pageid) values
+  ('60000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', '50000000-0000-4000-8000-000000000001');
+
+insert into public.progressreports (id, childid) values
+  ('70000000-0000-4000-8000-000000000001', '33333333-3333-4333-8333-333333333333');
+
+insert into public.comprehensionquestions (id, sessionid) values
+  ('80000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001');
+
+insert into public.comprehensionanswers (id, questionid) values
+  ('90000000-0000-4000-8000-000000000001', '80000000-0000-4000-8000-000000000001');
+
+insert into public.readingplans (id, childid, bookid) values
+  ('a0000000-0000-4000-8000-000000000001', '33333333-3333-4333-8333-333333333333', '40000000-0000-4000-8000-000000000001');
+
+insert into public.readingreminderemaildeliveries (id, occurrenceid) values
+  ('b0000000-0000-4000-8000-000000000001', 'c0000000-0000-4000-8000-000000000001');
+
+create temp table def005_row_counts as
+select 'profiles' as tbl, count(*)::bigint as cnt from public.profiles
+union all select 'childprofiles', count(*) from public.childprofiles
+union all select 'books', count(*) from public.books
+union all select 'bookpages', count(*) from public.bookpages
+union all select 'readingsessions', count(*) from public.readingsessions
+union all select 'readingsessionpages', count(*) from public.readingsessionpages
+union all select 'readingevents', count(*) from public.readingevents
+union all select 'progressreports', count(*) from public.progressreports
+union all select 'comprehensionquestions', count(*) from public.comprehensionquestions
+union all select 'comprehensionanswers', count(*) from public.comprehensionanswers
+union all select 'readingplans', count(*) from public.readingplans
+union all select 'readingreminderemaildeliveries', count(*) from public.readingreminderemaildeliveries;
+
+-- Run DEF-005 migration TWICE to verify idempotence.
+\ir ../migrations/20261125120000_security_hardening_and_hot_fk_indexes.sql
+\ir ../migrations/20261125120000_security_hardening_and_hot_fk_indexes.sql
+
+analyze public.readingsessions;
+analyze public.readingevents;
+
+do $def005_post_migration$
+declare
+  idx_name text;
+  p json;
+begin
+  foreach idx_name in array array[
+    'public.idx_childprofiles_parentid',
+    'public.idx_readingsessions_bookid',
+    'public.idx_readingsessionpages_pageid',
+    'public.idx_readingevents_pageid',
+    'public.idx_progressreports_childid',
+    'public.idx_books_owner_parent_id',
+    'public.idx_comprehensionquestions_sessionid',
+    'public.idx_comprehensionanswers_questionid',
+    'public.idx_readingplans_bookid',
+    'public.idx_readingreminderemaildeliveries_occurrenceid'
+  ] loop
+    if to_regclass(idx_name) is null then
+      raise exception 'DEF-005 index missing after migration: %', idx_name;
+    end if;
+  end loop;
+
+  execute 'explain (analyze, format json)
+    select id from public.readingsessions
+    where bookid = ''40000000-0000-4000-8000-000000000001''::uuid' into p;
+  if p::text not like '%idx_readingsessions_bookid%' then
+    raise exception 'Expected idx_readingsessions_bookid in plan: %', p::text;
+  end if;
+
+  execute 'explain (analyze, format json)
+    select id from public.readingevents
+    where pageid = ''50000000-0000-4000-8000-000000000001''::uuid' into p;
+  if p::text not like '%idx_readingevents_pageid%' then
+    raise exception 'Expected idx_readingevents_pageid in plan: %', p::text;
+  end if;
+end;
+$def005_post_migration$;
+
+-- Run DEF-005 rollback TWICE to verify idempotence and data preservation.
+\ir ../rollbacks/20261125120000_security_hardening_and_hot_fk_indexes_rollback.sql
+\ir ../rollbacks/20261125120000_security_hardening_and_hot_fk_indexes_rollback.sql
+
+do $def005_post_rollback$
+declare
+  idx_name text;
+  mismatches integer;
+begin
+  foreach idx_name in array array[
+    'public.idx_childprofiles_parentid',
+    'public.idx_readingsessions_bookid',
+    'public.idx_readingsessionpages_pageid',
+    'public.idx_readingevents_pageid',
+    'public.idx_progressreports_childid',
+    'public.idx_books_owner_parent_id',
+    'public.idx_comprehensionquestions_sessionid',
+    'public.idx_comprehensionanswers_questionid',
+    'public.idx_readingplans_bookid',
+    'public.idx_readingreminderemaildeliveries_occurrenceid'
+  ] loop
+    if to_regclass(idx_name) is not null then
+      raise exception 'DEF-005 index still present after rollback: %', idx_name;
+    end if;
+  end loop;
+
+  with current_counts as (
+    select 'profiles' as tbl, count(*)::bigint as cnt from public.profiles
+    union all select 'childprofiles', count(*) from public.childprofiles
+    union all select 'books', count(*) from public.books
+    union all select 'bookpages', count(*) from public.bookpages
+    union all select 'readingsessions', count(*) from public.readingsessions
+    union all select 'readingsessionpages', count(*) from public.readingsessionpages
+    union all select 'readingevents', count(*) from public.readingevents
+    union all select 'progressreports', count(*) from public.progressreports
+    union all select 'comprehensionquestions', count(*) from public.comprehensionquestions
+    union all select 'comprehensionanswers', count(*) from public.comprehensionanswers
+    union all select 'readingplans', count(*) from public.readingplans
+    union all select 'readingreminderemaildeliveries', count(*) from public.readingreminderemaildeliveries
+  )
+  select count(*) into mismatches
+    from def005_row_counts before_cnt
+    full outer join current_counts after_cnt using (tbl)
+   where before_cnt.cnt is distinct from after_cnt.cnt;
+
+  if mismatches <> 0 then
+    raise exception 'DEF-005 migration/rollback altered row counts (% mismatches)', mismatches;
+  end if;
+end;
+$def005_post_rollback$;
+
+\echo 'PASS: disposable PostgreSQL query indexes, DEF-005 hot FK indexes, idempotence, explain plans, and rollback'

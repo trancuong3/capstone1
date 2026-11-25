@@ -9,9 +9,12 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from sqlalchemy import select
+
 from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
 from app.database.session import AsyncSessionLocal
 from app.diagnostic_logging import log_diagnostic
+from app.models import ParentBookPageSubmission
 from app.repositories.parent_private_book_repository import ParentPrivateBookRepository
 from app.services.ocr_inference_job_service import is_heavy_workers_disabled, is_remote_ocr_mode
 from app.services.storage_service import delete_object
@@ -36,15 +39,37 @@ def _poll_seconds() -> float:
 
 
 async def cleanup_expired_temp_submissions(*, now: datetime | None = None, limit: int = 50) -> int:
-    """Delete expired temporary staging files that are NOT awaiting Admin review or committed."""
+    """Lock and cancel expired temp staging rows in DB first, then delete Storage objects."""
     cutoff = now or datetime.now(timezone.utc)
-    cleaned = 0
+    targets: list[tuple] = []
     async with AsyncSessionLocal() as db:
-        repo = ParentPrivateBookRepository(db)
-        expired = await repo.list_expired_temp_submissions(cutoff, limit=limit)
-        targets = [(row.Id, row.SourceStoragePath) for row in expired]
-        await db.rollback()
+        result = await db.execute(
+            select(ParentBookPageSubmission)
+            .where(
+                ParentBookPageSubmission.CommittedPageId.is_(None),
+                ParentBookPageSubmission.WorkflowStatus.not_in(
+                    ("PENDING_ADMIN", "ADDED_TO_BOOK", "CANCELLED")
+                ),
+                ParentBookPageSubmission.TempExpiresAt < cutoff,
+            )
+            .order_by(ParentBookPageSubmission.TempExpiresAt.asc(), ParentBookPageSubmission.Id.asc())
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        expired = list(result.scalars().all())
+        for row in expired:
+            targets.append((row.Id, row.SourceStoragePath))
+            row.WorkflowStatus = "CANCELLED"
+            row.WorkerId = None
+            row.LeaseExpiresAt = None
+            row.RetryAfter = None
+            row.UpdatedAt = cutoff
+        if targets:
+            await db.commit()
+        else:
+            await db.rollback()
 
+    cleaned = 0
     for sub_id, storage_path in targets:
         try:
             await asyncio.to_thread(
@@ -52,6 +77,7 @@ async def cleanup_expired_temp_submissions(*, now: datetime | None = None, limit
                 storage_path,
                 bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
             )
+            cleaned += 1
         except Exception as exc:
             log_diagnostic(
                 logger,
@@ -61,23 +87,6 @@ async def cleanup_expired_temp_submissions(*, now: datetime | None = None, limit
                 submission_id=str(sub_id),
                 exception=exc,
             )
-            continue
-
-        async with AsyncSessionLocal() as db:
-            repo = ParentPrivateBookRepository(db)
-            locked = await repo.get_submission(sub_id, lock=True)
-            if (
-                locked is not None
-                and locked.CommittedPageId is None
-                and locked.WorkflowStatus not in ("PENDING_ADMIN", "ADDED_TO_BOOK")
-                and locked.TempExpiresAt < cutoff
-            ):
-                locked.WorkflowStatus = "CANCELLED"
-                locked.UpdatedAt = cutoff
-                await db.commit()
-                cleaned += 1
-            else:
-                await db.rollback()
     return cleaned
 
 

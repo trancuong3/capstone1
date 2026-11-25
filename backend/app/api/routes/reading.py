@@ -3,7 +3,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, or_, select
 from typing import List
 from uuid import UUID
-from app.api.deps import get_db, get_current_parent_id
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from PIL import Image, UnidentifiedImageError
+from sqlalchemy import and_, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import get_current_parent_id, get_db
 from app.models import (
     Book,
     BookPage,
@@ -278,6 +284,24 @@ class HistoryRepository:
     async def answer(self, question_id: UUID):
         return await self.db.scalar(select(ComprehensionAnswer).where(ComprehensionAnswer.QuestionId == question_id).order_by(ComprehensionAnswer.CreatedAt.desc(), ComprehensionAnswer.Id.desc()).limit(1))
 
+    async def answers_for_questions(self, question_ids: list[UUID]) -> dict[UUID, ComprehensionAnswer]:
+        """Batch-load the newest comprehension answer for each question ID."""
+        if not question_ids:
+            return {}
+        result = await self.db.execute(
+            select(ComprehensionAnswer)
+            .where(ComprehensionAnswer.QuestionId.in_(question_ids))
+            .order_by(
+                ComprehensionAnswer.QuestionId,
+                ComprehensionAnswer.CreatedAt.desc(),
+                ComprehensionAnswer.Id.desc(),
+            )
+        )
+        answers: dict[UUID, ComprehensionAnswer] = {}
+        for row in result.scalars().all():
+            answers.setdefault(row.QuestionId, row)
+        return answers
+
 
 class HistoryService:
     def __init__(self, repository: HistoryRepository):
@@ -405,8 +429,17 @@ class HistoryService:
 
         comprehension = []
         question_partial = False
+        answers_by_question: dict[UUID, ComprehensionAnswer] | None = None
+        if isinstance(HistoryRepository, type) and isinstance(self.repository, HistoryRepository):
+            answers_by_question = await self.repository.answers_for_questions(
+                [question.Id for question in questions]
+            )
         for question in questions:
-            answer = await self.repository.answer(question.Id)
+            answer = (
+                answers_by_question.get(question.Id)
+                if answers_by_question is not None
+                else await self.repository.answer(question.Id)
+            )
             source_span = None
             try:
                 source_span = SessionSourceSpanRead.model_validate(question.SourceSpan)
@@ -558,33 +591,110 @@ async def delete_reading_report(
 
 
 #Kadepham
-import os
-import httpx
 from fastapi import UploadFile, File
 from app.models.book import BookPage, PageRevision, PageRevisionWord
 from app.schemas.reading import CameraPageMatchRead, ReadingPageRead, ReadingPageWordRead
 from app.services.storage_service import download_object
 from app.services.vision_page_matcher import vision_page_matcher
 
+MAX_CAMERA_FRAME_BYTES = 8 * 1024 * 1024
+MAX_CAMERA_FRAME_PIXELS = 40_000_000
+MAX_CAMERA_CANDIDATE_PAGES = 100
+MAX_CAMERA_STORAGE_CONCURRENCY = 8
+_CAMERA_READ_CHUNK_BYTES = 256 * 1024
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+
+
+def _is_safe_storage_object_path(image_path: str) -> bool:
+    """Allow only relative storage object keys; block URLs, local paths, and traversal."""
+    if not isinstance(image_path, str):
+        return False
+    stripped = image_path.strip()
+    if not stripped:
+        return False
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in stripped):
+        return False
+    lowered = stripped.lower()
+    if lowered.startswith(("http://", "https://", "file:", "ftp:", "data:")) or "://" in lowered:
+        return False
+    if stripped.startswith(("/", "\\")) or "\\" in stripped or _WINDOWS_DRIVE_RE.match(stripped):
+        return False
+    segments = [seg for seg in stripped.split("/") if seg]
+    if not segments or any(seg in (".", "..") for seg in segments):
+        return False
+    return True
+
+
+async def _read_and_validate_camera_frame(file: UploadFile) -> bytes:
+    """Chunk-read uploaded camera image up to 8 MB and verify valid image dimensions."""
+    chunks: list[bytes] = []
+    total_bytes = 0
+    try:
+        while True:
+            chunk = await file.read(_CAMERA_READ_CHUNK_BYTES)
+            if not chunk:
+                break
+            total_bytes += len(chunk)
+            if total_bytes > MAX_CAMERA_FRAME_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail="Uploaded camera frame exceeds the 8 MB limit",
+                )
+            chunks.append(chunk)
+    finally:
+        await file.close()
+
+    data = b"".join(chunks)
+    if not data:
+        raise HTTPException(status_code=422, detail="Uploaded camera frame is empty")
+
+    try:
+        with Image.open(BytesIO(data)) as image:
+            if image.width <= 0 or image.height <= 0 or image.width * image.height > MAX_CAMERA_FRAME_PIXELS:
+                raise HTTPException(status_code=422, detail="Uploaded image dimensions exceed allowed bounds")
+            image.verify()
+        with Image.open(BytesIO(data)) as verified_image:
+            verified_image.load()
+    except HTTPException:
+        raise
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
+        raise HTTPException(status_code=422, detail="Invalid or corrupt camera image") from None
+
+    return data
+
 
 async def _fetch_stored_page_bytes(
     image_path: str, *, bucket_name: str | None = None
 ) -> bytes | None:
-    """Đọc ảnh gốc của trang sách từ Supabase Storage, URL hoặc file local."""
-    if not image_path:
+    """Read stored page image strictly from Supabase Storage using validated object keys."""
+    if not _is_safe_storage_object_path(image_path):
         return None
     try:
-        if image_path.startswith(("http://", "https://")):
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(image_path)
-                return resp.content if resp.status_code == 200 else None
-        if os.path.exists(image_path):
-            with open(image_path, "rb") as f:
-                return f.read()
-        import asyncio
-        return await asyncio.to_thread(download_object, image_path, bucket_name=bucket_name)
+        return await asyncio.to_thread(
+            download_object, image_path.strip(), bucket_name=bucket_name
+        )
     except Exception:
         return None
+
+
+async def _fetch_candidate_pages(rows) -> list[dict]:
+    """Fetch bounded stored page images with a concurrency cap."""
+    from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
+    from app.policies.book_access import is_book_private
+
+    bounded_rows = list(rows)[:MAX_CAMERA_CANDIDATE_PAGES]
+    semaphore = asyncio.Semaphore(MAX_CAMERA_STORAGE_CONCURRENCY)
+
+    async def _load_one(page_orm, book_row):
+        bucket = SUPABASE_PRIVATE_BOOKS_BUCKET if is_book_private(book_row) else None
+        async with semaphore:
+            img_bytes = await _fetch_stored_page_bytes(page_orm.ImagePath, bucket_name=bucket)
+        if not img_bytes:
+            return None
+        return {"page_orm": page_orm, "image_bytes": img_bytes}
+
+    loaded = await asyncio.gather(*(_load_one(p, b) for p, b in bounded_rows))
+    return [item for item in loaded if item is not None]
 
 
 def _normalize_bbox_tuple(raw_bbox: object) -> tuple[float, float, float, float]:
@@ -711,17 +821,7 @@ async def match_book_page_from_camera(
     if not rows:
         raise HTTPException(status_code=404, detail="Resource not found")
 
-    candidate_pages = []
-    for p, book_row in rows:
-        bucket = SUPABASE_PRIVATE_BOOKS_BUCKET if is_book_private(book_row) else None
-        img_bytes = await _fetch_stored_page_bytes(p.ImagePath, bucket_name=bucket)
-        if img_bytes:
-            candidate_pages.append(
-                {
-                    "page_orm": p,
-                    "image_bytes": img_bytes,
-                }
-            )
+    candidate_pages = await _fetch_candidate_pages(rows)
 
     if not candidate_pages:
         raise HTTPException(
@@ -843,17 +943,7 @@ async def match_page_global_from_camera(
     if not rows:
         raise HTTPException(status_code=404, detail="No active books or pages found")
 
-    candidate_pages = []
-    for p, book_row in rows:
-        bucket = SUPABASE_PRIVATE_BOOKS_BUCKET if is_book_private(book_row) else None
-        img_bytes = await _fetch_stored_page_bytes(p.ImagePath, bucket_name=bucket)
-        if img_bytes:
-            candidate_pages.append(
-                {
-                    "page_orm": p,
-                    "image_bytes": img_bytes,
-                }
-            )
+    candidate_pages = await _fetch_candidate_pages(rows)
 
     if not candidate_pages:
         raise HTTPException(

@@ -5,9 +5,14 @@ from sqlalchemy import select
 from typing import List
 from uuid import UUID
 
-from app.api.deps import get_db, get_current_parent_id
+from app.api.deps import (
+    get_current_parent_id,
+    get_db,
+    require_active_profile_id,
+    require_parent_id,
+)
 from app.database.config import SUPABASE_AVATAR_BUCKET
-from app.models import ChildProfile
+from app.models import ChildProfile, Profile
 from app.repositories.profile_repository import ProfileRepository
 from app.services.profile_service import (
     ProfileAccessDeniedError,
@@ -79,8 +84,11 @@ class ChildProfileRepository:
     async def list_by_parent(self, parent_id: UUID):
         result = await self.db.execute(
             select(ChildProfile)
+            .join(Profile, Profile.Id == ChildProfile.ParentId)
             .where(
-                ChildProfile.ParentId == parent_id
+                ChildProfile.ParentId == parent_id,
+                Profile.Active == 1,
+                Profile.Role == "parent",
             )
             .order_by(
                 ChildProfile.CreatedAt.desc()
@@ -96,9 +104,12 @@ class ChildProfileRepository:
     ):
         result = await self.db.execute(
             select(ChildProfile)
+            .join(Profile, Profile.Id == ChildProfile.ParentId)
             .where(
                 ChildProfile.Id == child_id,
                 ChildProfile.ParentId == parent_id,
+                Profile.Active == 1,
+                Profile.Role == "parent",
             )
         )
 
@@ -286,7 +297,7 @@ router = APIRouter()
 async def get_all_children(
     db: AsyncSession = Depends(get_db),
     current_parent_id: UUID = Depends(
-        get_current_parent_id
+        require_parent_id
     ),
 ):
     """
@@ -310,7 +321,7 @@ async def create_child(
     child_in: ChildProfileCreate,
     db: AsyncSession = Depends(get_db),
     current_parent_id: UUID = Depends(
-        get_current_parent_id
+        require_parent_id
     ),
 ):
     """
@@ -334,7 +345,7 @@ async def get_child(
     child_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_parent_id: UUID = Depends(
-        get_current_parent_id
+        require_parent_id
     ),
 ):
     """
@@ -369,7 +380,7 @@ async def update_child(
     child_in: ChildProfileUpdate,
     db: AsyncSession = Depends(get_db),
     current_parent_id: UUID = Depends(
-        get_current_parent_id
+        require_parent_id
     ),
 ):
     """
@@ -404,7 +415,7 @@ async def delete_child(
     child_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_parent_id: UUID = Depends(
-        get_current_parent_id
+        require_parent_id
     ),
 ):
     """
@@ -479,7 +490,7 @@ async def get_current_profile(
 async def upload_current_parent_avatar(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    current_parent_id: UUID = Depends(get_current_parent_id),
+    current_parent_id: UUID = Depends(require_active_profile_id),
 ):
     repository = ProfileRepository(db)
     service = AvatarService(repository, ChildProfileRepository(db))
@@ -512,7 +523,7 @@ async def upload_current_parent_avatar(
 )
 async def remove_current_parent_avatar(
     db: AsyncSession = Depends(get_db),
-    current_parent_id: UUID = Depends(get_current_parent_id),
+    current_parent_id: UUID = Depends(require_active_profile_id),
 ):
     repository = ProfileRepository(db)
     service = AvatarService(repository, ChildProfileRepository(db))
@@ -538,7 +549,7 @@ async def upload_child_avatar(
     child_id: UUID,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    current_parent_id: UUID = Depends(get_current_parent_id),
+    current_parent_id: UUID = Depends(require_parent_id),
 ):
     child_repository = ChildProfileRepository(db)
     service = AvatarService(ProfileRepository(db), child_repository)
@@ -577,7 +588,7 @@ async def upload_child_avatar(
 async def remove_child_avatar(
     child_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_parent_id: UUID = Depends(get_current_parent_id),
+    current_parent_id: UUID = Depends(require_parent_id),
 ):
     child_repository = ChildProfileRepository(db)
     service = AvatarService(ProfileRepository(db), child_repository)

@@ -555,4 +555,70 @@ describe("hands-free voice comprehension quiz flow (G24)", () => {
     );
     expect(submitAnswer).toHaveBeenCalledTimes(2);
   });
+
+  it("guarantees single submit on rapid clicks and duplicate STT final results", async () => {
+    let now = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+
+    const q1 = makeQuizQuestion(1, 1, "Ai nấu cơm cho bé?", [
+      "Bác gấu",
+      "Chú thỏ",
+      "Mẹ của bé",
+    ]);
+    let resolveSubmit!: (val: unknown) => void;
+    const submitAnswer = vi.fn().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSubmit = resolve;
+        }),
+    );
+    servicesHook.mockReturnValue({
+      comprehensionService: {
+        getQuestion: vi.fn().mockResolvedValueOnce(q1),
+        submitAnswer,
+      },
+    } as unknown as ReadingServices);
+
+    const onComplete = vi.fn();
+    render(
+      <ComprehensionQuestion
+        child={childFixture}
+        onComplete={onComplete}
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    await waitFor(() => expect(QuizRecognition.instances).toHaveLength(1));
+    const rec = lastRec();
+    now += 2_000;
+
+    // Duplicate final STT results fired back-to-back must only submit once
+    act(() => {
+      rec.say("đáp án B");
+      rec.say("đáp án B");
+    });
+    expect(submitAnswer).toHaveBeenCalledTimes(1);
+
+    // Rapid clicks while first submit is still in flight must not double-submit
+    const btnA = screen.getByRole("button", { name: /Bác gấu/ });
+    const btnC = screen.getByRole("button", { name: /Mẹ của bé/ });
+    fireEvent.click(btnA);
+    fireEvent.click(btnC);
+    expect(submitAnswer).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveSubmit({
+        answer_id: "ans-1",
+        question_id: q1.question.id,
+        submitted_answer: "Chú thỏ",
+        is_correct: true,
+        score: 1,
+        feedback_code: "CORRECT",
+      });
+    });
+
+    // Clicking again after correct answer is solved must not re-submit
+    fireEvent.click(btnC);
+    expect(submitAnswer).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1,9 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useAppStore } from "@/components/providers/app-store-provider";
+import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useChildService } from "@/hooks/use-child-service";
 import { isServiceError } from "@/lib/api/service-error";
 import type { ChildProfileDTO } from "@/types/child";
@@ -16,6 +17,7 @@ type ChildLoadState =
 
 export function useValidatedSelectedChild() {
   const { replace } = useRouter();
+  const authRuntime = useAuthRuntime();
   const childService = useChildService();
   const {
     selectedChildId,
@@ -28,12 +30,22 @@ export function useValidatedSelectedChild() {
     status: "loading",
     childId: null,
   });
+  const requestEpochRef = useRef(0);
+  const consumedQueryChildRef = useRef(false);
+  const waitingForAuthInit =
+    Boolean(authRuntime.hasProvider) && authRuntime.status === "initializing";
 
   useEffect(() => {
+    if (waitingForAuthInit) {
+      return;
+    }
+
     let active = true;
+    const requestEpoch = ++requestEpochRef.current;
 
     if (!selectedChildId) {
-      if (typeof window !== "undefined") {
+      if (!consumedQueryChildRef.current && typeof window !== "undefined") {
+        consumedQueryChildRef.current = true;
         const queryChildId = new URLSearchParams(window.location.search)
           .get("childId")
           ?.trim();
@@ -50,11 +62,12 @@ export function useValidatedSelectedChild() {
       };
     }
 
+    consumedQueryChildRef.current = true;
     const requestChildId = selectedChildId;
     void childService
       .get(selectedChildId)
       .then((child) => {
-        if (!active) return;
+        if (!active || requestEpoch !== requestEpochRef.current) return;
         if (child.id !== requestChildId) {
           clearSelectedChild();
           setState({ status: "redirecting", childId: null });
@@ -65,7 +78,7 @@ export function useValidatedSelectedChild() {
         setState({ status: "ready", childId: requestChildId, child });
       })
       .catch((error: unknown) => {
-        if (!active) return;
+        if (!active || requestEpoch !== requestEpochRef.current) return;
         if (
           isServiceError(error) &&
           ["AUTH_REQUIRED", "FORBIDDEN", "RESOURCE_NOT_FOUND"].includes(
@@ -91,16 +104,19 @@ export function useValidatedSelectedChild() {
     selectChild,
     selectedChildId,
     setValidatedSelectedChild,
+    waitingForAuthInit,
   ]);
 
   const visibleState = useMemo<ChildLoadState>(
     () =>
-      selectedChildId
-        ? state.childId === selectedChildId
-          ? state
-          : { status: "loading", childId: selectedChildId }
-        : { status: "redirecting", childId: null },
-    [selectedChildId, state],
+      waitingForAuthInit
+        ? { status: "loading", childId: selectedChildId }
+        : selectedChildId
+          ? state.childId === selectedChildId
+            ? state
+            : { status: "loading", childId: selectedChildId }
+          : { status: "redirecting", childId: null },
+    [selectedChildId, state, waitingForAuthInit],
   );
 
   return {

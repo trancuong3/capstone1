@@ -378,12 +378,15 @@ export function ReadingVoiceSettings({
     <>
       <Button
         aria-haspopup="dialog"
-        className="min-h-14 min-w-0 gap-2 px-3 text-base"
+        className="min-h-11 min-w-0 gap-2 px-2.5 py-1.5 text-sm sm:min-h-14 sm:px-3 sm:py-2 sm:text-button"
         disabled={disabled}
         onClick={open}
         variant="quiet"
       >
-        <SlidersHorizontal aria-hidden="true" className="size-6 shrink-0" />
+        <SlidersHorizontal
+          aria-hidden="true"
+          className="size-5 shrink-0 sm:size-6"
+        />
         <span className="max-w-full text-center whitespace-normal break-words">
           Giọng đọc
         </span>

@@ -99,6 +99,42 @@ export interface PageWordEvidence {
   > | null;
 }
 
+interface ComparisonWordLookups {
+  readonly saved: ReadonlyMap<
+    string,
+    "CORRECT" | "MISPRONUNCIATION" | "OMISSION" | "UNCERTAIN"
+  >;
+  readonly aligned: ReadonlyMap<number | null, string>;
+  readonly repeats: ReadonlySet<number>;
+  readonly pauses: ReadonlySet<number | null | undefined>;
+}
+
+const comparisonLookupCache = new WeakMap<object, ComparisonWordLookups>();
+
+function getComparisonLookups(
+  comparison: NonNullable<PageWordEvidence["comparisonResult"]>,
+): ComparisonWordLookups {
+  const cached = comparisonLookupCache.get(comparison);
+  if (cached) return cached;
+  const lookups: ComparisonWordLookups = {
+    saved: new Map(
+      comparison.summary.initial_assessment?.map((word) => [
+        word.word_id,
+        word.status,
+      ]),
+    ),
+    aligned: new Map(
+      comparison.alignment.map((item) => [item.book_index, item.status]),
+    ),
+    repeats: new Set(comparison.summary.repeated_book_indices),
+    pauses: new Set(
+      comparison.summary.hesitations.map((pause) => pause.before_book_index),
+    ),
+  };
+  comparisonLookupCache.set(comparison, lookups);
+  return lookups;
+}
+
 export function wordStateForPage(props: PageWordEvidence) {
   const { page, comparisonResult, previewSnapshot } = props;
   const comparison =
@@ -106,19 +142,7 @@ export function wordStateForPage(props: PageWordEvidence) {
     comparisonResult.page_revision_id === page.page_revision_id
       ? comparisonResult
       : null;
-  const saved = new Map(
-    comparison?.summary.initial_assessment?.map((word) => [
-      word.word_id,
-      word.status,
-    ]),
-  );
-  const aligned = new Map(
-    comparison?.alignment.map((item) => [item.book_index, item.status]),
-  );
-  const repeats = new Set(comparison?.summary.repeated_book_indices);
-  const pauses = new Set(
-    comparison?.summary.hesitations.map((pause) => pause.before_book_index),
-  );
+  const lookups = comparison ? getComparisonLookups(comparison) : null;
   const activeId = previewSnapshot
     ? previewSnapshot.currentWordId
     : props.currentWordId;
@@ -131,7 +155,7 @@ export function wordStateForPage(props: PageWordEvidence) {
     if (props.assistedWordIds?.has(id)) return "assisted";
     // The saved first pass wins over transcript re-alignment. Older reports
     // only have alignment entries, whose indices refer to token positions.
-    const status = saved.get(id) ?? aligned.get(index);
+    const status = lookups?.saved.get(id) ?? lookups?.aligned.get(index);
     if (
       status === "MISPRONUNCIATION" ||
       status === "SUBSTITUTE" ||
@@ -146,8 +170,9 @@ export function wordStateForPage(props: PageWordEvidence) {
       return "omission";
     if (status === "UNCERTAIN" && props.uncertainWordIds?.has(id))
       return "uncertain";
-    if (props.repeatedWordIds?.has(id) || repeats.has(index)) return "repeated";
-    if (props.hesitationWordIds?.has(id) || pauses.has(index))
+    if (props.repeatedWordIds?.has(id) || lookups?.repeats.has(index))
+      return "repeated";
+    if (props.hesitationWordIds?.has(id) || lookups?.pauses.has(index))
       return "hesitation";
     if (
       status === "CORRECT" ||

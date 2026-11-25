@@ -1352,7 +1352,13 @@ class AdminOcrService:
         return changed
 
     async def upload_page(
-        self, actor_id: UUID, book_id: UUID, file: UploadFile, *, upload_id: UUID | None = None,
+        self,
+        actor_id: UUID,
+        book_id: UUID,
+        file: UploadFile,
+        *,
+        upload_id: UUID | None = None,
+        page_number: int | None = None,
     ) -> AdminRevisionDetailRead:
         started_at = time.perf_counter()
         log_diagnostic(
@@ -1375,6 +1381,7 @@ class AdminOcrService:
             width=width,
             height=height,
             upload_id=upload_id,
+            page_number=page_number,
             started_at=started_at,
         )
         return result
@@ -1390,6 +1397,7 @@ class AdminOcrService:
         width: int,
         height: int,
         upload_id: UUID | None = None,
+        page_number: int | None = None,
         started_at: float | None = None,
     ) -> tuple[int, AdminRevisionDetailRead]:
         started_at = started_at if started_at is not None else time.perf_counter()
@@ -1420,18 +1428,32 @@ class AdminOcrService:
                         raise HTTPException(status_code=409, detail="Upload outcome requires review; reload before retrying")
                     return int(existing.PageNumber), await self.revision_detail(existing, saved_revision)
 
-            await self._renumber_active_pages(book_id, lock=True)
-            page_number = await self.repo.next_active_page_number(book_id)
-            if page_number > 32767:
-                raise HTTPException(
-                    status_code=422,
-                    detail="The book has reached the maximum number of pages",
-                )
+            if page_number is not None:
+                if page_number < 1 or page_number > 32767:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Page number must be between 1 and 32767",
+                    )
+                existing_pages = await self.repo.active_pages_for_renumber(book_id, lock=True)
+                if any(p.PageNumber == page_number for p in existing_pages):
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Page number {page_number} already exists",
+                    )
+                resolved_page_number = page_number
+            else:
+                await self._renumber_active_pages(book_id, lock=True)
+                resolved_page_number = await self.repo.next_active_page_number(book_id)
+                if resolved_page_number > 32767:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="The book has reached the maximum number of pages",
+                    )
 
             page = BookPage(
                 Id=page_id,
                 BookId=book_id,
-                PageNumber=page_number,
+                PageNumber=resolved_page_number,
                 ImagePath=object_path,
                 Width=width,
                 Height=height,

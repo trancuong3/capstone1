@@ -15,6 +15,11 @@ import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useHydrated } from "@/hooks/use-hydrated";
 import { AuthServiceError, type OAuthProvider } from "@/lib/api/auth-service";
+import {
+  AUTH_NEXT_COOKIE,
+  isSafeRelativeNextCandidate,
+  sanitizeNextPath,
+} from "@/lib/auth/route-policy";
 import type { AuthMockScenario, LoginRequest } from "@/types/auth";
 
 const loginSchema = z.object({
@@ -28,8 +33,32 @@ const loginSchema = z.object({
 
 interface LoginFormProps {
   isAuthCallback?: boolean;
+  nextPath?: string | null;
   scenario: AuthMockScenario;
   oauthError?: "email_required" | "oauth_failed" | null;
+}
+
+function setOAuthNextCookie(nextPath: string | null | undefined) {
+  if (typeof document === "undefined") return;
+  const safeNext = isSafeRelativeNextCandidate(nextPath);
+  const secure =
+    typeof window !== "undefined" && window.location.protocol === "https:"
+      ? "; Secure"
+      : "";
+  if (!safeNext) {
+    document.cookie = `${AUTH_NEXT_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
+    return;
+  }
+  document.cookie = `${AUTH_NEXT_COOKIE}=${encodeURIComponent(safeNext)}; Path=/; Max-Age=600; SameSite=Lax${secure}`;
+}
+
+function clearOAuthNextCookie() {
+  if (typeof document === "undefined") return;
+  const secure =
+    typeof window !== "undefined" && window.location.protocol === "https:"
+      ? "; Secure"
+      : "";
+  document.cookie = `${AUTH_NEXT_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
 }
 
 type Notice = { tone: "error"; message: string } | null;
@@ -70,6 +99,7 @@ function FacebookMark() {
 
 export function LoginForm({
   isAuthCallback = false,
+  nextPath = null,
   oauthError = null,
   scenario,
 }: LoginFormProps) {
@@ -146,9 +176,10 @@ export function LoginForm({
       throw new Error("The signed-in account has no application role.");
     }
 
-    replace(role === "admin" ? "/admin/books" : "/dashboard");
+    clearOAuthNextCookie();
+    replace(sanitizeNextPath(nextPath, role));
     refresh();
-  }, [authService, refresh, replace]);
+  }, [authService, nextPath, refresh, replace]);
 
   useEffect(() => {
     if (
@@ -189,11 +220,13 @@ export function LoginForm({
   const handleSocialSignIn = async (provider: OAuthProvider) => {
     setNotice(null);
     setSocialLoading(provider);
+    setOAuthNextCookie(nextPath);
 
     try {
       await authService.signInWithOAuth(provider);
       setSocialLoading(null);
     } catch {
+      clearOAuthNextCookie();
       setSocialLoading(null);
       setNotice({
         tone: "error",

@@ -20,6 +20,8 @@ export default async function warmRoutes(): Promise<void> {
       "/forgot-password",
       "/reset-password",
       "/dashboard",
+      "/my-books",
+      `/my-books/${book}`,
       "/profile",
       "/settings",
       "/help-support",

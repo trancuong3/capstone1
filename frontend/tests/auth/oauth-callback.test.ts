@@ -265,4 +265,43 @@ describe("OAuth callback", () => {
       }
     }
   });
+
+  it("restores safe deep link from OAuth next cookie, clears the cookie, and enforces role", async () => {
+    const parentHarness = makeSupabase({ role: "parent" });
+    createServerSupabaseClientMock.mockResolvedValue(parentHarness.client);
+
+    const parentReq = new NextRequest(new URL(CALLBACK_PATH, APP_ORIGIN), {
+      headers: {
+        cookie: "viread_auth_next=%2Fbooks%2Fb1%3Fpage%3D2",
+      },
+    });
+    const parentResp = await GET(parentReq);
+    expect(parentResp.headers.get("location")).toBe(
+      `${APP_ORIGIN}/books/b1?page=2`,
+    );
+    expect(parentResp.cookies.get("viread_auth_next")?.value).toBe("");
+
+    const crossRoleReq = new NextRequest(new URL(CALLBACK_PATH, APP_ORIGIN), {
+      headers: {
+        cookie: "viread_auth_next=%2Fadmin%2Fparents",
+      },
+    });
+    const crossRoleResp = await GET(crossRoleReq);
+    expect(crossRoleResp.headers.get("location")).toBe(
+      `${APP_ORIGIN}/dashboard`,
+    );
+
+    const adminHarness = makeSupabase({ role: "admin" });
+    createServerSupabaseClientMock.mockResolvedValue(adminHarness.client);
+    const adminReq = new NextRequest(new URL(CALLBACK_PATH, APP_ORIGIN), {
+      headers: {
+        cookie: "viread_auth_next=%2Fadmin%2Fparents%3Fpage%3D3",
+      },
+    });
+    const adminResp = await GET(adminReq);
+    expect(adminResp.headers.get("location")).toBe(
+      `${APP_ORIGIN}/admin/parents?page=3`,
+    );
+    expect(adminResp.cookies.get("viread_auth_next")?.value).toBe("");
+  });
 });

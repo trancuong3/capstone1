@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from app.api.deps import get_current_parent_id, get_db
 from app.api.routes.admin_ocr import router as admin_ocr_router
+from app.api.routes.book import router as book_router
 from app.api.routes.admin_viread_training import _require_training_worker_token, _safe_runtime
 from app.schemas.admin_ocr import (
     AdminBookCreateRequest,

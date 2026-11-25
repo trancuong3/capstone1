@@ -236,6 +236,66 @@ describe("comprehension-voice-matcher", () => {
     });
   });
 
+  it("blocks Vietnamese homophone nouns as bare letters and resolves content without false conflicts", () => {
+    // Bare homophones must never hijack Choice C/D when spoken without an explicit marker
+    const deRes = analyzeComprehensionVoiceInput("dê", ANIMAL_CHOICES);
+    expect(["NONE", "AMBIGUOUS"]).toContain(deRes.type);
+    expect(deRes).not.toMatchObject({ type: "CHOICE", choice: { id: "D" } });
+
+    const xeRes = analyzeComprehensionVoiceInput("xe", ANIMAL_CHOICES);
+    expect(["NONE", "AMBIGUOUS"]).toContain(xeRes.type);
+    expect(xeRes).not.toMatchObject({ type: "CHOICE", choice: { id: "C" } });
+
+    // "đề" in "đề bài nói xe đạp" must not trigger a CONFLICT with Choice D
+    expect(
+      analyzeComprehensionVoiceInput("đề bài nói xe đạp", ANIMAL_CHOICES),
+    ).toMatchObject({
+      type: "CHOICE",
+      choice: { id: "B", label: "Xe đạp" },
+      matchedBy: "content",
+    });
+
+    // When Choice A contains "dê", "Con dê trắng" picks A (never CONFLICT or D)
+    const goatChoices: readonly ComprehensionChoiceUI[] = [
+      { id: "A", label: "Con dê trắng", value: "Con dê trắng" },
+      { id: "B", label: "Con mèo", value: "Con mèo" },
+      { id: "C", label: "Con gà", value: "Con gà" },
+      { id: "D", label: "Con vịt", value: "Con vịt" },
+    ];
+    expect(
+      analyzeComprehensionVoiceInput("Con dê trắng", goatChoices),
+    ).toMatchObject({
+      type: "CHOICE",
+      choice: { id: "A", label: "Con dê trắng" },
+      matchedBy: "content",
+    });
+    expect(
+      analyzeComprehensionVoiceInput("đáp án dê", ANIMAL_CHOICES),
+    ).not.toMatchObject({ type: "CHOICE", choice: { id: "D" } });
+
+    // Explicit marker + homophone absent from all visible choice labels matches letter
+    const nonHomophoneChoices: readonly ComprehensionChoiceUI[] = [
+      { id: "A", label: "Con mèo", value: "Con mèo" },
+      { id: "B", label: "Con cá", value: "Con cá" },
+      { id: "C", label: "Con gà", value: "Con gà" },
+      { id: "D", label: "Con vịt", value: "Con vịt" },
+    ];
+    expect(
+      analyzeComprehensionVoiceInput("chọn xe", nonHomophoneChoices),
+    ).toMatchObject({
+      type: "CHOICE",
+      choice: { id: "C" },
+      matchedBy: "letter",
+    });
+    expect(
+      analyzeComprehensionVoiceInput("đáp án dê", nonHomophoneChoices),
+    ).toMatchObject({
+      type: "CHOICE",
+      choice: { id: "D" },
+      matchedBy: "letter",
+    });
+  });
+
   it("maps choice letters for speech", () => {
     expect(choiceLetterForSpeech(SHUFFLED_CHOICES[0], 0)).toBe("A");
     expect(choiceLetterForSpeech({ id: "", label: "X", value: "X" }, 2)).toBe(

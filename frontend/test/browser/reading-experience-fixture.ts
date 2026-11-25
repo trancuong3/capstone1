@@ -294,6 +294,22 @@ export async function installReadingExperience(
     if (route.request().method() === "OPTIONS")
       return route.fulfill({ status: 204, headers });
     const path = new URL(route.request().url()).pathname;
+    if (path === "/voice/status")
+      return respond(route, {
+        default_mode: "local_only",
+        default_voice_id: "fixture_vi",
+        local: {
+          available: !options.sttUnavailable,
+          stt_ready: !options.sttUnavailable,
+          tts_ready: true,
+        },
+        google: {
+          stt_configured: false,
+          tts_configured: false,
+          stt_cooldown: false,
+          tts_cooldown: false,
+        },
+      });
     if (path === "/voice/voices")
       return respond(route, {
         default_voice_id: "fixture_vi",

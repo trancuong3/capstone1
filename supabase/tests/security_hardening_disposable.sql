@@ -22,11 +22,12 @@ create role supabase_auth_admin nologin;
 create schema auth;
 grant usage on schema auth to authenticated, supabase_auth_admin;
 
--- Minimal Auth representation with the exact fields used by the real trigger.
+-- Minimal Auth representation with the exact fields used by the real triggers.
 create table auth.users (
   id uuid primary key,
   email text,
-  raw_user_meta_data jsonb not null default '{}'::jsonb
+  raw_user_meta_data jsonb not null default '{}'::jsonb,
+  raw_app_meta_data jsonb not null default '{}'::jsonb
 );
 grant insert on auth.users to supabase_auth_admin;
 
@@ -122,23 +123,54 @@ grant execute on function public.handle_new_readalong_user()
 grant execute on function public.rls_auto_enable()
   to public, anon, authenticated, service_role;
 
+-- Drifted role-sync trigger function (without search_path lock and with broad
+-- EXECUTE grants) to verify DEF-005 hardening and trigger continuity.
+create or replace function public.sync_profile_role_to_auth_metadata()
+returns trigger
+language plpgsql
+security definer
+as $sync_role$
+begin
+  update auth.users
+     set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)
+                             || pg_catalog.jsonb_build_object('role', new.role)
+   where id = new.id;
+  return new;
+end;
+$sync_role$;
+
+drop trigger if exists on_profile_role_sync_auth on public.profiles;
+create trigger on_profile_role_sync_auth
+  after insert or update of role on public.profiles
+  for each row
+  execute function public.sync_profile_role_to_auth_metadata();
+
+grant execute on function public.sync_profile_role_to_auth_metadata()
+  to public, anon, authenticated, service_role;
+
 do $baseline$
 begin
   if not has_column_privilege('authenticated', 'public.profiles', 'role', 'UPDATE')
     or not has_function_privilege('anon',
       'public.handle_new_readalong_user()'::regprocedure, 'EXECUTE')
     or not has_function_privilege('anon',
-      'public.rls_auto_enable()'::regprocedure, 'EXECUTE') then
+      'public.rls_auto_enable()'::regprocedure, 'EXECUTE')
+    or not has_function_privilege('anon',
+      'public.sync_profile_role_to_auth_metadata()'::regprocedure, 'EXECUTE')
+    or not has_function_privilege('authenticated',
+      'public.sync_profile_role_to_auth_metadata()'::regprocedure, 'EXECUTE') then
     raise exception 'The fixture must represent the vulnerable production grants';
   end if;
 end;
 $baseline$;
 
--- Execute the actual proposed migration (not a duplicate implementation).
+-- Execute the actual proposed migrations (not duplicate implementations).
 \ir ../migrations/20261120100000_supabase_security_hardening.sql
 
--- Idempotence: rerunning the migration must remain safe.
+-- Idempotence: rerunning the migrations must remain safe.
 \ir ../migrations/20261120100000_supabase_security_hardening.sql
+\ir ../migrations/20261125120000_security_hardening_and_hot_fk_indexes.sql
+\ir ../migrations/20261125120000_security_hardening_and_hot_fk_indexes.sql
 
 do $rights$
 begin
@@ -150,11 +182,26 @@ begin
        'public.rls_auto_enable()'::regprocedure, 'EXECUTE')
     or has_function_privilege('authenticated',
        'public.rls_auto_enable()'::regprocedure, 'EXECUTE')
+    or has_function_privilege('anon',
+       'public.sync_profile_role_to_auth_metadata()'::regprocedure, 'EXECUTE')
+    or has_function_privilege('authenticated',
+       'public.sync_profile_role_to_auth_metadata()'::regprocedure, 'EXECUTE')
     or not has_function_privilege('service_role',
        'public.handle_new_readalong_user()'::regprocedure, 'EXECUTE')
     or not has_function_privilege('service_role',
-       'public.rls_auto_enable()'::regprocedure, 'EXECUTE') then
+       'public.rls_auto_enable()'::regprocedure, 'EXECUTE')
+    or not has_function_privilege('service_role',
+       'public.sync_profile_role_to_auth_metadata()'::regprocedure, 'EXECUTE') then
     raise exception 'Definer EXECUTE privilege test failed';
+  end if;
+  if not exists (
+    select 1
+    from pg_proc p
+    cross join lateral unnest(coalesce(p.proconfig, array[]::text[])) as cfg
+    where p.oid = 'public.sync_profile_role_to_auth_metadata()'::regprocedure
+      and cfg in ('search_path=', 'search_path=""', 'search_path=pg_catalog', 'search_path=pg_catalog, pg_temp')
+  ) then
+    raise exception 'sync_profile_role_to_auth_metadata search_path lock test failed';
   end if;
   if has_column_privilege('authenticated', 'public.profiles', 'role', 'UPDATE')
     or has_column_privilege('authenticated', 'public.profiles', 'active', 'UPDATE')
@@ -183,6 +230,11 @@ begin
         and role='parent' and active=1
         and displayname='Ba mẹ thử nghiệm') then
     raise exception 'Auth signup trigger no longer creates a parent profile';
+  end if;
+  if not exists (select 1 from auth.users
+      where id='11111111-1111-4111-8111-111111111111'::uuid
+        and raw_app_meta_data ->> 'role' = 'parent') then
+    raise exception 'sync_profile_role_to_auth_metadata did not sync signup role to auth.users';
   end if;
 end;
 $signup_check$;
@@ -306,6 +358,44 @@ begin
 end;
 $final$;
 
+-- Verify role-sync trigger on profile role update and minimal-DB rollback safety.
+set role supabase_auth_admin;
+insert into auth.users(id, email, raw_user_meta_data)
+values('33333333-3333-4333-8333-333333333333',
+       'role-sync@example.invalid',
+       '{"display_name":"Role Sync User"}'::jsonb);
+reset role;
+
+update public.profiles
+   set role = 'admin'
+ where id = '33333333-3333-4333-8333-333333333333'::uuid;
+
+do $role_sync_check$
+begin
+  if not exists (
+    select 1 from auth.users
+     where id = '33333333-3333-4333-8333-333333333333'::uuid
+       and raw_app_meta_data ->> 'role' = 'admin'
+  ) then
+    raise exception 'sync_profile_role_to_auth_metadata did not sync role update to auth.users';
+  end if;
+end;
+$role_sync_check$;
+
+\ir ../rollbacks/20261125120000_security_hardening_and_hot_fk_indexes_rollback.sql
+\ir ../rollbacks/20261125120000_security_hardening_and_hot_fk_indexes_rollback.sql
+
+do $post_rollback_security$
+begin
+  if has_function_privilege('anon',
+       'public.sync_profile_role_to_auth_metadata()'::regprocedure, 'EXECUTE')
+    or has_function_privilege('authenticated',
+       'public.sync_profile_role_to_auth_metadata()'::regprocedure, 'EXECUTE') then
+    raise exception 'Rollback must not reopen client EXECUTE on SECURITY DEFINER functions';
+  end if;
+end;
+$post_rollback_security$;
+
 -- The dedicated CI database is destroyed by the workflow. Never use real users.
 reset request.jwt.claim.sub;
-\echo 'PASS: Supabase SECURITY DEFINER, Auth signup, RLS, IDOR and profile grants'
+\echo 'PASS: Supabase SECURITY DEFINER, Auth signup, role sync, RLS, IDOR and profile grants'

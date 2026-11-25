@@ -18,7 +18,7 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from app.api.deps import get_current_parent_id
+from app.api.deps import require_active_profile_id
 from app.api.routes import voice as voice_routes
 from app.providers.local_voice_provider import (
     LOCAL_STT_MODEL_VERSION,
@@ -132,7 +132,7 @@ class VoiceStreamProxyTests(unittest.TestCase):
         )
         voice_routes.get_voice_orchestrator = lambda: orchestrator  # type: ignore[assignment]
         if override_auth:
-            app.dependency_overrides[get_current_parent_id] = lambda: ACTOR_ID
+            app.dependency_overrides[require_active_profile_id] = lambda: ACTOR_ID
         return TestClient(app)
 
     def test_ws_stream_proxies_control_binary_pcm_and_interim_final_messages(self) -> None:
@@ -198,7 +198,13 @@ class VoiceStreamProxyTests(unittest.TestCase):
                 )
             return ACTOR_ID
 
-        with patch("app.api.routes.voice.get_current_parent_id", _fake_verify):
+        with (
+            patch("app.api.routes.voice.get_current_parent_id", _fake_verify),
+            patch(
+                "app.api.routes.voice._verify_ws_active_profile",
+                AsyncMock(return_value=ACTOR_ID),
+            ),
+        ):
             with self._build_client(override_auth=False) as client:
                 # 1. Missing/invalid token on first frame -> 4401 error + close
                 with client.websocket_connect("/voice/stt-stream") as ws:
@@ -247,7 +253,13 @@ class VoiceStreamProxyTests(unittest.TestCase):
                 raise HTTPException(status_code=401, detail="bad")
             return ACTOR_ID
 
-        with patch("app.api.routes.voice.get_current_parent_id", _fake_verify):
+        with (
+            patch("app.api.routes.voice.get_current_parent_id", _fake_verify),
+            patch(
+                "app.api.routes.voice._verify_ws_active_profile",
+                AsyncMock(return_value=ACTOR_ID),
+            ),
+        ):
             with self._build_client(override_auth=False) as client:
                 with client.websocket_connect(
                     "/voice/stt-stream",

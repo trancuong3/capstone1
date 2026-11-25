@@ -442,6 +442,7 @@ function ReadingSessionScreen({
   const automationRuntimeRef = useRef<ReadingAutomationRuntime | null>(null);
   const automationStateRef = useRef<AutomationState | null>(null);
   const lastTrailingMismatchRef = useRef<RealtimeWordMismatch | null>(null);
+  const lastGivenUpWordForEncourageRef = useRef<string | null>(null);
   const selfCorrectedPraiseNotedRef = useRef<Set<string>>(new Set());
   const disambiguationPendingRef = useRef<{
     readonly candidates: readonly [ReadingPageWordDTO, ReadingPageWordDTO];
@@ -675,12 +676,7 @@ function ReadingSessionScreen({
   useEffect(() => {
     mountedRef.current = true;
     lockSessionVoice(sessionId);
-    return () => {
-      mountedRef.current = false;
-      setActiveVoiceSession(null);
-      automationRuntimeRef.current?.dispatch({ type: "SESSION_END" });
-      automationRuntimeRef.current?.dispose();
-      automationRuntimeRef.current = null;
+    const cleanupMicrophoneOnLeave = () => {
       listeningGenerationRef.current += 1;
       isListeningActiveRef.current = false;
       retryModeRef.current = false;
@@ -703,6 +699,19 @@ function ReadingSessionScreen({
       } catch {
         // Safe ignore
       }
+    };
+    const handlePageHide = () => {
+      cleanupMicrophoneOnLeave();
+    };
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      mountedRef.current = false;
+      window.removeEventListener("pagehide", handlePageHide);
+      setActiveVoiceSession(null);
+      automationRuntimeRef.current?.dispatch({ type: "SESSION_END" });
+      automationRuntimeRef.current?.dispose();
+      automationRuntimeRef.current = null;
+      cleanupMicrophoneOnLeave();
     };
   }, [cancelRecording, sessionId]);
 
@@ -1350,7 +1359,12 @@ function ReadingSessionScreen({
     const pending = beginListening();
     listeningStartRef.current = pending;
     try {
-      return await pending;
+      const ok = await beginListening();
+      resolvePending(ok);
+      return ok;
+    } catch (error) {
+      rejectPending(error);
+      throw error;
     } finally {
       isStartingListeningRef.current = false;
       if (listeningStartRef.current === pending)
@@ -1464,6 +1478,14 @@ function ReadingSessionScreen({
           const engine = alignmentEngineRef.current;
           const activePage = page;
           if (!engine || !activePage || !mountedRef.current) return;
+          if (
+            effect.kind !== "encourage" &&
+            effect.kind !== "clarify" &&
+            (engine.getSnapshot().spellingInProgress ||
+              sentenceReinforcementRef.current.getActive() !== null)
+          ) {
+            return;
+          }
           if (effect.kind === "prompt") {
             const track = speechRecorder.getStream?.()?.getAudioTracks()?.[0];
             if (track && track.readyState !== "live") return;
@@ -1482,6 +1504,7 @@ function ReadingSessionScreen({
         giveUpWord: (wordId) => {
           gaveUpWordIdsRef.current.add(wordId);
           helpedWordIdsRef.current.add(wordId);
+          lastGivenUpWordForEncourageRef.current = wordId;
           const engine = alignmentEngineRef.current;
           if (engine) {
             applyRealtimeSnapshot(engine.giveUpWord(wordId));
@@ -1514,6 +1537,7 @@ function ReadingSessionScreen({
       automationRef.current,
       {
         ...AUTO_HELP_LADDER_CONFIG,
+        maxAttemptsPerWord: 3,
         hesitationMinMs: 9_000,
         hesitationMaxMs: 9_000,
         selfCorrectWindowMs: 1_500,
@@ -1591,19 +1615,29 @@ function ReadingSessionScreen({
     }
 
     if (effect.kind === "encourage") {
+      const givenUpId = lastGivenUpWordForEncourageRef.current;
+      lastGivenUpWordForEncourageRef.current = null;
+      const encourageWord = givenUpId
+        ? capturePage.words.find((entry) => entry.word_id === givenUpId)
+        : word;
+      const encourageMismatch =
+        encourageWord &&
+        lastTrailingMismatchRef.current?.wordId === encourageWord.word_id
+          ? lastTrailingMismatchRef.current
+          : mismatch;
       await playAssistantAudio(
         async () => {
           if (!isCurrent()) return;
           const style = coachingStyleRef.current;
           const text =
-            mismatch && word
+            encourageMismatch && encourageWord
               ? style === "gentle"
                 ? promptSelectorRef.current.next("comfortGiveUpEffort", {
-                    word: word.text,
+                    word: encourageWord.text,
                   })
                 : promptSelectorRef.current.next("encourageMoveOn")
               : "Con đã cố gắng rất tốt rồi. Mình đọc tiếp nhé!";
-          if (mismatch && word) {
+          if (encourageMismatch && encourageWord) {
             setCompanionBubble({
               mood: "comforting",
               title: adaptPersona("Cô giáo tự hào về sự kiên trì của bé!"),
@@ -1612,14 +1646,14 @@ function ReadingSessionScreen({
           }
           setLatestTranscript(text);
           await speakGuarded(text);
-          if (!isCurrent() || !word) return;
-          gaveUpWordIdsRef.current.add(word.word_id);
-          helpedWordIdsRef.current.add(word.word_id);
+          if (!isCurrent() || !encourageWord) return;
+          gaveUpWordIdsRef.current.add(encourageWord.word_id);
+          helpedWordIdsRef.current.add(encourageWord.word_id);
           pageHelpWordRef.current = null;
-          applyRealtimeSnapshot(engine.giveUpWord(word.word_id));
+          applyRealtimeSnapshot(engine.giveUpWord(encourageWord.word_id));
           const reinforced = maybeArmSentenceReinforcement(
             capturePage,
-            word.word_id,
+            encourageWord.word_id,
             "helped",
           );
           if (reinforced && isCurrent()) {
@@ -1709,6 +1743,32 @@ function ReadingSessionScreen({
               await speakGuarded("Cô đọc mẫu cho con nhé.");
               if (!isCurrent()) return;
               await speakGuarded(word.text, { wordSample: true });
+              if (!isCurrent()) return;
+              await speakGuarded("Đến lượt con đọc nhé.");
+            }
+          } else if (effect.kind === "phrase") {
+            // Round 3: praise persistence and model the phrase in context
+            const phrase = phraseWords.map((entry) => entry.text).join(" ");
+            if (mismatch) {
+              const style = coachingStyleRef.current;
+              const step3Text =
+                style === "gentle"
+                  ? promptSelectorRef.current.next("comfortStep3Phrase", {
+                      phrase,
+                    })
+                  : `Mình đọc cả cụm “${phrase}” nhé.`;
+              setCompanionBubble({
+                mood: "teaching",
+                title: adaptPersona("Cô giáo cổ vũ bé · Đọc nối cụm từ"),
+                message: step3Text,
+              });
+              setLatestTranscript(`${step3Text} “${phrase}”`);
+              await speakGuarded(step3Text);
+              if (!isCurrent()) return;
+              await speakGuarded(phrase);
+            } else {
+              setLatestTranscript(`Mình đọc nối cụm “${phrase}” nhé.`);
+              await speakGuarded(phrase);
               if (!isCurrent()) return;
               await speakGuarded("Đến lượt con đọc nhé.");
             }
@@ -3389,6 +3449,52 @@ function ReadingSessionScreen({
     return playAssistantAudio(() =>
       speechPlayer.playWithWordTimings(sample.split(" "), {}),
     );
+  }
+
+  function clearRetryCaptureTimeout(): void {
+    if (retryCaptureTimeoutRef.current !== null) {
+      window.clearTimeout(retryCaptureTimeoutRef.current);
+      retryCaptureTimeoutRef.current = null;
+    }
+  }
+
+  function cancelRetryRecognition(preserveProcessing = false): void {
+    // Vô hiệu hóa callback và request thuộc lượt retry cũ.
+    retryAttemptIdRef.current += 1;
+    retryResumeAfterAssistantAudioRef.current = null;
+
+    retryAbortControllerRef.current?.abort();
+    retryAbortControllerRef.current = null;
+
+    retryListeningWantedRef.current = false;
+    retryShouldRestartRef.current = false;
+    isListeningActiveRef.current = false;
+
+    if (!preserveProcessing) {
+      retryProcessingRef.current = false;
+    }
+
+    clearRetryCaptureTimeout();
+
+    const recognition = recognitionRef.current;
+    recognitionRef.current = null;
+
+    if (recognition) {
+      try {
+        recognition.stop();
+      } catch {
+        // Recognition có thể đã kết thúc.
+      }
+    }
+
+    if (retryRecorderActiveRef.current) {
+      retryRecorderActiveRef.current = false;
+      speechRecorder.cancel({ retainStream: true });
+    }
+
+    if (mountedRef.current) {
+      setIsMicRecording(false);
+    }
   }
 
   function stopAssistantAudio(): void {
@@ -5763,6 +5869,7 @@ function ReadingSessionScreen({
 
     finishStartedRef.current = true;
     setIsBusy(true);
+    speechRecorder.cancel();
 
     try {
       // REST là nguồn dữ liệu chính thức để kết thúc session.
@@ -6157,6 +6264,7 @@ function ReadingSessionScreen({
     // Dừng nhận diện và kết thúc session ngay.
     if (retryModeRef.current || retryMode) {
       cancelRetryRecognition();
+      speechRecorder.cancel();
 
       await completeReadingSession();
       return;
@@ -6366,11 +6474,18 @@ function ReadingSessionScreen({
             id="reading-page-options"
             className={`${pageOptionsOpen ? "flex" : "hidden"} w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-xs sm:ml-auto sm:flex sm:w-auto sm:pt-0 sm:text-sm`}
           >
-            <p className="font-semibold text-ink">
+            <p
+              data-reading-range-label="true"
+              className="font-semibold text-ink"
+            >
               Phạm vi đọc: Trang {pageProgress.start_page_number}–
               {pageProgress.end_page_number}
             </p>
-            <p className="text-muted" aria-live="polite">
+            <p
+              data-reading-page-summary="true"
+              className="text-muted"
+              aria-live="polite"
+            >
               Trang {pageProgress.current_page_number} ·{" "}
               {pageProgress.current_index + 1}/{pageProgress.total_pages} trong
               phạm vi · {pageProgress.completed_pages}/
@@ -6403,6 +6518,7 @@ function ReadingSessionScreen({
       {pageProgress &&
       pageProgress.current_index === pageProgress.total_pages - 1 ? (
         <p
+          data-reading-end-hint="true"
           className="text-xs font-semibold text-primary sm:text-sm"
           role="status"
         >

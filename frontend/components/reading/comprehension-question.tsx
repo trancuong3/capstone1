@@ -181,8 +181,7 @@ export function ComprehensionQuestion({
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
+    const cleanupVoice = () => {
       flowGenRef.current += 1;
       clearRemindTimer();
       clearVoiceSettleTimer();
@@ -203,6 +202,15 @@ export function ComprehensionQuestion({
         }
       }
       speechPlayerRef.current.stop();
+    };
+    const handlePageHide = () => {
+      cleanupVoice();
+    };
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      mountedRef.current = false;
+      window.removeEventListener("pagehide", handlePageHide);
+      cleanupVoice();
     };
   }, [clearRemindTimer, clearVoiceSettleTimer]);
 

@@ -87,11 +87,18 @@ export const getAppIdentity = cache(async (): Promise<AppIdentity | null> => {
   return { id: subject, role };
 });
 
-export async function requireAppRole(requiredRole: ParentRole) {
+export async function requireAppRole(
+  requiredRole: ParentRole,
+  nextPath?: string,
+) {
   const identity = await getAppIdentity();
 
   if (!identity) {
-    redirect(requiredRole === "admin" ? "/admin/login" : "/login");
+    const requestHeaders = await headers();
+    const resolvedNext =
+      nextPath ?? requestHeaders.get("x-viread-next") ?? undefined;
+    const loginPath = requiredRole === "admin" ? "/admin/login" : "/login";
+    redirect(buildLoginRedirectPath(loginPath, resolvedNext));
   }
 
   if (identity.role !== requiredRole) {

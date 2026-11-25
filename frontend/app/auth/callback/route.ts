@@ -1,5 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import {
+  AUTH_NEXT_COOKIE,
+  isSafeRelativeNextCandidate,
+  sanitizeNextPath,
+} from "@/lib/auth/route-policy";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 const SAFE_HOST_HEADER_RE = /^[a-zA-Z0-9.-]+(?::\d{1,5})?$/;
@@ -92,13 +97,34 @@ function resolvePublicOrigin(request: NextRequest): string {
   return configuredSiteOrigin ?? requestOrigin;
 }
 
+function readRequestedNext(request: NextRequest): string | null {
+  const queryNext = request.nextUrl.searchParams.get("next");
+  if (queryNext !== null) {
+    return queryNext;
+  }
+  const cookieNext = request.cookies.get(AUTH_NEXT_COOKIE)?.value;
+  if (!cookieNext) return null;
+  try {
+    return decodeURIComponent(cookieNext);
+  } catch {
+    return cookieNext;
+  }
+}
+
 function redirectToLogin(
   request: NextRequest,
   oauthError: "email_required" | "oauth_failed",
+  requestedNext: string | null,
 ) {
   const url = new URL("/login", resolvePublicOrigin(request));
   url.searchParams.set("oauth_error", oauthError);
-  return NextResponse.redirect(url);
+  const safeNext = isSafeRelativeNextCandidate(requestedNext);
+  if (safeNext) {
+    url.searchParams.set("next", safeNext);
+  }
+  const response = NextResponse.redirect(url);
+  response.cookies.delete(AUTH_NEXT_COOKIE);
+  return response;
 }
 
 async function signOutQuietly(
@@ -116,6 +142,7 @@ export async function GET(request: NextRequest) {
   const providerError = request.nextUrl.searchParams.get("error");
   const appShell = request.nextUrl.searchParams.get("app_shell");
   const userAgent = request.headers.get("user-agent") ?? "";
+  const requestedNext = readRequestedNext(request);
 
   // When OAuth finishes in Android's external browser, hand the untouched PKCE
   // code back into the ViRead Android WebView (which owns the PKCE code_verifier)
@@ -129,8 +156,9 @@ export async function GET(request: NextRequest) {
     } else {
       deepLinkParams.set("error", "oauth_failed");
     }
-    if (request.nextUrl.searchParams.get("next") === "/profile") {
-      deepLinkParams.set("next", "/profile");
+    const safeNext = isSafeRelativeNextCandidate(requestedNext);
+    if (safeNext) {
+      deepLinkParams.set("next", safeNext);
     }
     return NextResponse.redirect(
       `viread://auth/callback?${deepLinkParams.toString()}`,
@@ -140,7 +168,7 @@ export async function GET(request: NextRequest) {
   // Providers can redirect back with an OAuth error instead of an auth code.
   // Never reflect the provider's raw error text or details into the UI.
   if (providerError || !code) {
-    return redirectToLogin(request, "oauth_failed");
+    return redirectToLogin(request, "oauth_failed", requestedNext);
   }
 
   const supabase = await createServerSupabaseClient();
@@ -149,7 +177,7 @@ export async function GET(request: NextRequest) {
 
   if (exchangeError) {
     await signOutQuietly(supabase);
-    return redirectToLogin(request, "oauth_failed");
+    return redirectToLogin(request, "oauth_failed", requestedNext);
   }
 
   const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -159,7 +187,7 @@ export async function GET(request: NextRequest) {
   // has not been granted the email permission. Do not keep such a session.
   if (!userData.user || userError || !email) {
     await signOutQuietly(supabase);
-    return redirectToLogin(request, "email_required");
+    return redirectToLogin(request, "email_required", requestedNext);
   }
 
   // The role comes only from the active database profile, never provider metadata.
@@ -181,20 +209,13 @@ export async function GET(request: NextRequest) {
 
   if (profileError || !role) {
     await signOutQuietly(supabase);
-    return redirectToLogin(request, "oauth_failed");
+    return redirectToLogin(request, "oauth_failed", requestedNext);
   }
 
-  // Email-change confirmations can safely return to the Profile page.
-  // Other Auth/OAuth flows retain their established role-based destination.
-  const requestedNext = request.nextUrl.searchParams.get("next");
-  const destination =
-    requestedNext === "/profile"
-      ? "/profile"
-      : role === "admin"
-        ? "/admin/books"
-        : "/dashboard";
-
-  return NextResponse.redirect(
+  const destination = sanitizeNextPath(requestedNext, role);
+  const response = NextResponse.redirect(
     new URL(destination, resolvePublicOrigin(request)),
   );
+  response.cookies.delete(AUTH_NEXT_COOKIE);
+  return response;
 }

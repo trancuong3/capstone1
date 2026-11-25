@@ -10,6 +10,7 @@ from app.models import (
     ChildProfile,
     ComprehensionAnswer,
     ComprehensionQuestion,
+    Profile,
     ReadingEvent,
     ReadingSession,
 )
@@ -35,8 +36,13 @@ class ChildProgressRepository:
 
     async def owned_child(self, child_id: UUID, parent_id: UUID) -> ChildProfile | None:
         return await self.db.scalar(
-            select(ChildProfile).where(
-                ChildProfile.Id == child_id, ChildProfile.ParentId == parent_id
+            select(ChildProfile)
+            .join(Profile, Profile.Id == ChildProfile.ParentId)
+            .where(
+                ChildProfile.Id == child_id,
+                ChildProfile.ParentId == parent_id,
+                Profile.Active == 1,
+                Profile.Role == "parent",
             )
         )
 

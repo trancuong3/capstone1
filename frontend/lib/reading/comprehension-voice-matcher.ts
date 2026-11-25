@@ -38,16 +38,27 @@ export type ComprehensionVoiceAnalysis =
       readonly clarificationPrompt: string;
     };
 
-const LETTER_ALIASES: readonly (readonly string[])[] = [
+const PRIMARY_LETTER_ALIASES: readonly (readonly string[])[] = [
   // Index 0 -> A (IMPORTANT: NEVER include Vietnamese particles "à/á/ả/ã/ạ"!)
   ["a"],
   // Index 1 -> B
-  ["b", "bê", "bờ", "be", "bề"],
+  ["b", "bê", "bề"],
   // Index 2 -> C
-  ["c", "xê", "cê", "sê", "cờ", "xe", "se"],
+  ["c", "xê", "cê", "sê"],
   // Index 3 -> D
-  ["d", "đê", "dê", "dờ", "đờ", "de", "đề"],
+  ["d", "đê", "dờ", "đờ"],
 ];
+
+// Common Vietnamese homophone nouns that must never match as a choice letter
+// unless preceded by an explicit choice marker and absent from all visible options.
+const HOMOPHONE_LETTER_ALIASES: readonly (readonly string[])[] = [
+  [],
+  ["bờ", "be"],
+  ["cờ", "xe", "se"],
+  ["dê", "đề", "de"],
+];
+
+const SINGLE_TOKEN_EXPLICIT_MARKERS = new Set(["chọn", "câu", "chữ", "ý"]);
 
 const ORDINAL_ALIASES: readonly (readonly string[])[] = [
   ["một", "1", "nhất", "đầu"],
@@ -297,6 +308,7 @@ function extractSelfCorrectedTail(normalized: string): {
 function matchLetterIndex(
   tokens: readonly string[],
   choices: readonly ComprehensionChoiceUI[],
+  visibleChoiceTokens: ReadonlySet<string>,
 ): { index: number | "ambiguous" | -1; hasExplicitMarker: boolean } {
   if (!tokens.length || tokens.length > 8) {
     return { index: -1, hasExplicitMarker: false };
@@ -309,15 +321,15 @@ function matchLetterIndex(
   let hasExplicitMarker = false;
   let unknownNonPrefix = 0;
 
-  for (const token of tokens) {
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
     if (CHOICE_MARKER_TOKENS.has(token)) hasExplicitMarker = true;
-    let found = -1;
-    for (let idx = 0; idx < LETTER_ALIASES.length; idx += 1) {
-      if (idx < choices.length && LETTER_ALIASES[idx].includes(token)) {
-        found = idx;
-        break;
-      }
-    }
+    const found = resolveLetterIndexAt(
+      tokens,
+      i,
+      choices.length,
+      visibleChoiceTokens,
+    );
     if (found >= 0) {
       matchedIndexes.add(found);
     } else if (!CHOICE_PREFIX_WORDS.has(token)) {
@@ -503,17 +515,18 @@ function matchContentChoice(
 function findInlineLetterIndex(
   tokens: readonly string[],
   choices: readonly ComprehensionChoiceUI[],
+  visibleChoiceTokens: ReadonlySet<string>,
 ): number | "ambiguous" | -1 {
   const matched = new Set<number>();
-  for (const token of tokens) {
-    for (
-      let idx = 0;
-      idx < choices.length && idx < LETTER_ALIASES.length;
-      idx += 1
-    ) {
-      if (LETTER_ALIASES[idx].includes(token)) {
-        matched.add(idx);
-      }
+  for (let i = 0; i < tokens.length; i += 1) {
+    const found = resolveLetterIndexAt(
+      tokens,
+      i,
+      choices.length,
+      visibleChoiceTokens,
+    );
+    if (found >= 0) {
+      matched.add(found);
     }
   }
   if (matched.size > 1) return "ambiguous";
@@ -591,6 +604,7 @@ export function analyzeComprehensionVoiceInput(
     };
   }
 
+  const visibleChoiceTokens = collectVisibleChoiceTokens(choices);
   const inlineLetter =
     contentRes.kind === "unique"
       ? findInlineLetterIndex(
@@ -599,9 +613,10 @@ export function analyzeComprehensionVoiceInput(
             tokenizeVietnameseText(contentRes.choice.label),
           ),
           choices,
+          visibleChoiceTokens,
         )
-      : findInlineLetterIndex(tokens, choices);
-  const pureLetter = matchLetterIndex(tokens, choices);
+      : findInlineLetterIndex(tokens, choices, visibleChoiceTokens);
+  const pureLetter = matchLetterIndex(tokens, choices, visibleChoiceTokens);
 
   // Conflict check: spoken both a letter ("A") and a DIFFERENT option's text ("bạn An")
   if (
