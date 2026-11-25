@@ -212,7 +212,7 @@ export function ReadingLayout({
             aria-label="Nghe đánh vần"
             onClick={onSpellWord}
             disabled={controlsDisabled}
-            className="hidden min-h-12 shrink-0 items-center gap-1 rounded-control border border-primary/30 bg-sky/60 px-2.5 text-xs font-semibold text-primary hover:bg-sky disabled:opacity-55 sm:inline-flex sm:min-h-11 sm:gap-2 sm:px-3 sm:text-sm"
+            className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-control border border-primary/30 bg-sky/60 px-2 text-xs font-semibold text-primary hover:bg-sky disabled:opacity-55 sm:gap-2 sm:px-3 sm:text-sm"
           >
             <Volume2 aria-hidden="true" className="size-4 shrink-0" />
             <span>
@@ -225,7 +225,7 @@ export function ReadingLayout({
           aria-label="Nhờ gia sư giúp đọc"
           onClick={onHelp}
           disabled={controlsDisabled || retryMode}
-          className="inline-flex min-h-12 min-w-12 shrink-0 items-center justify-center gap-1 rounded-control px-2.5 text-xs font-semibold text-ink hover:bg-sky disabled:opacity-55 sm:min-h-11 sm:gap-2 sm:px-3 sm:text-sm"
+          className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-control px-2 text-xs font-semibold text-ink hover:bg-sky disabled:opacity-55 sm:gap-2 sm:px-3 sm:text-sm"
         >
           <CircleHelp
             aria-hidden="true"

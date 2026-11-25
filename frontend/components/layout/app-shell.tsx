@@ -434,8 +434,8 @@ export function AppShell({ children }: AppShellProps) {
                         aria-haspopup="listbox"
                         aria-label={
                           selectedChild
-                            ? `Đang chọn hồ sơ ${selectedChild.alias}, bấm để đổi hồ sơ bé`
-                            : "Chọn hồ sơ bé"
+                            ? `Bé đang chọn: ${selectedChild.alias}, bấm để đổi`
+                            : "Đổi nhanh bé"
                         }
                         className="inline-flex min-h-12 max-w-[164px] items-center gap-1.5 rounded-full border border-border bg-sky/70 px-3 text-xs font-bold text-primary-hover transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
                         onClick={() =>

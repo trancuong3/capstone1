@@ -210,47 +210,47 @@ describe("ComprehensionQuestion rec.onerror + rec.onend infinite restart loop fi
   });
 });
 
-describe("Child Focus Mobile UI (ReadingControls sheet + DifficultWords immersive mode)", () => {
-  it("opens mobile Thêm slide-up sheet with Tạm dừng, Đánh vần, and Giọng đọc", async () => {
+describe("Child Focus Mobile UI (ReadingControls 1-tap dock + DifficultWords immersive mode)", () => {
+  it("renders 1-tap mobile-first dock with Bé đọc, Nghe mẫu, Tạm dừng, Giọng đọc, Chọn trang, and Xong", async () => {
     const user = userEvent.setup();
     const onPause = vi.fn();
-    const onSpellWord = vi.fn();
     render(
       <ReadingControls
+        onChoosePage={vi.fn()}
         onFinish={vi.fn()}
         onHelp={vi.fn()}
         onPause={onPause}
-        onSpellWord={onSpellWord}
+        onSpellWord={vi.fn()}
         voiceSettings={
           <ReadingVoiceSettings onPreview={vi.fn()} onStopPreview={vi.fn()} />
         }
       />,
     );
 
-    const moreBtn = screen.getByRole("button", {
-      name: "Mở thêm tùy chọn buổi đọc",
+    const nav = screen.getByRole("navigation", { name: "Điều khiển buổi đọc" });
+    expect(
+      within(nav).getByRole("button", {
+        name: "Bé đọc với nhận diện giọng nói",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(nav).getByRole("button", { name: "Nghe đọc mẫu cả trang" }),
+    ).toBeInTheDocument();
+    expect(
+      within(nav).getByRole("button", { name: "Giọng đọc" }),
+    ).toBeInTheDocument();
+    expect(
+      within(nav).getByRole("button", { name: "Chọn trang" }),
+    ).toBeInTheDocument();
+    expect(
+      within(nav).getByRole("button", { name: "Kết thúc buổi đọc" }),
+    ).toBeInTheDocument();
+
+    const pauseBtn = within(nav).getByRole("button", {
+      name: "Tạm dừng buổi đọc",
     });
-    await user.click(moreBtn);
-
-    const sheet = screen.getByTestId("reading-mobile-more-sheet");
-    expect(sheet).toBeInTheDocument();
-    expect(
-      within(sheet).getByRole("button", { name: "Tạm dừng buổi đọc" }),
-    ).toBeInTheDocument();
-    expect(
-      within(sheet).getByRole("button", { name: "Đánh vần từ hiện tại" }),
-    ).toBeInTheDocument();
-    expect(
-      within(sheet).getByRole("button", { name: "Giọng đọc" }),
-    ).toBeInTheDocument();
-
-    await user.click(
-      within(sheet).getByRole("button", { name: "Đánh vần từ hiện tại" }),
-    );
-    expect(onSpellWord).toHaveBeenCalledTimes(1);
-    expect(
-      screen.queryByTestId("reading-mobile-more-sheet"),
-    ).not.toBeInTheDocument();
+    await user.click(pauseBtn);
+    expect(onPause).toHaveBeenCalledTimes(1);
   });
 
   it("dispatches viread:immersive-mode on DifficultWords practice enter/exit and renders min-h-12 word chips", async () => {

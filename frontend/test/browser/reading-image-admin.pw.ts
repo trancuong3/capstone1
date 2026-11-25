@@ -65,6 +65,17 @@ test("Admin uploads two real PNGs, keeps page images distinct and replaces only 
         next_page_number: 1,
       });
     }
+    if (
+      url.pathname === `/books/admin/catalog/${ids.book}/pages/jobs` ||
+      url.pathname.endsWith("/reupload-ocr/jobs")
+    ) {
+      return route.fulfill({
+        status: 404,
+        headers,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Not Found" }),
+      });
+    }
     if (url.pathname === `/books/admin/catalog/${ids.book}/pages`) {
       if (route.request().method() === "POST") {
         uploads.push(route.request().postData() ?? "");

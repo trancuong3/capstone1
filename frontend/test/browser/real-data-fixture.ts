@@ -567,6 +567,23 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       return respond(route, { email_enabled: false, updated_at: timestamp });
     if (path.startsWith("/reading-presence/"))
       return respond(route, { ok: true, cancelled: 0 });
+    if (path === "/profiles/dashboard-summary")
+      return respond(route, {
+        profile: {
+          id: ids.parent,
+          role: "parent",
+          display_name: "Ba mẹ API",
+          created_at: timestamp,
+          email: "parent@example.test",
+          contact_phone: "+84900000000",
+          email_verified: true,
+          contact_info_status: "available",
+          avatar_url: null,
+          children: state.emptyChildren ? [] : [child],
+        },
+        children: state.emptyChildren ? [] : [child],
+        latest_sessions_by_child: {},
+      });
     if (path === "/profiles/me")
       return respond(route, {
         id: ids.parent,

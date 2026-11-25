@@ -121,15 +121,14 @@ export const ADMIN_MOBILE_PRIMARY_TABS: readonly MobileNavTabItem[] = [
     label: "Chất lượng",
     icon: ClipboardCheck,
   },
-] as const;
-
-export const ADMIN_MOBILE_MORE_ITEMS: readonly MobileMoreSheetItem[] = [
   {
     href: "/admin/karaoke",
     label: "Bài hát",
-    description: "Quản lý danh mục bài hát karaoke",
     icon: Music2,
   },
+] as const;
+
+export const ADMIN_MOBILE_MORE_ITEMS: readonly MobileMoreSheetItem[] = [
   {
     href: "/admin/audit-logs",
     label: "Nhật ký",

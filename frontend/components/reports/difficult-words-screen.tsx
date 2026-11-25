@@ -462,49 +462,25 @@ export function DifficultWordsScreen({
                   );
                 })}
               </div>
-
-              <div
-                aria-label="Chọn nhanh khoảng thời gian"
-                className="flex items-center gap-2 overflow-x-auto pb-0.5"
-                role="group"
-              >
-                {([30, 90, 180] as const).map((days) => {
-                  const active = periodDays === days;
-                  return (
-                    <button
-                      aria-pressed={active}
-                      className={`min-h-10 shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-bold transition-colors ${
-                        active
-                          ? "border-[#0E6D76] bg-[#DDF3F5] text-[#0E6D76]"
-                          : "border-[#DCE8E4] bg-white text-[#526970]"
-                      }`}
-                      key={days}
-                      onClick={() => setPeriodDays(days)}
-                      type="button"
-                    >
-                      {days} ngày
-                    </button>
-                  );
-                })}
-              </div>
             </div>
 
+            <SelectField
+              aria-label="Chọn khoảng thời gian"
+              label="Khoảng thời gian"
+              onChange={(event) => {
+                const parsed = Number.parseInt(event.target.value, 10);
+                if (Number.isSafeInteger(parsed) && parsed > 0) {
+                  setPeriodDays(parsed);
+                }
+              }}
+              value={String(periodDays)}
+            >
+              <option value="30">30 ngày gần nhất</option>
+              <option value="90">90 ngày gần nhất</option>
+              <option value="180">180 ngày gần nhất</option>
+            </SelectField>
+
             <div className="hidden sm:contents">
-              <SelectField
-                aria-label="Chọn khoảng thời gian"
-                label="Khoảng thời gian"
-                onChange={(event) => {
-                  const parsed = Number.parseInt(event.target.value, 10);
-                  if (Number.isSafeInteger(parsed) && parsed > 0) {
-                    setPeriodDays(parsed);
-                  }
-                }}
-                value={String(periodDays)}
-              >
-                <option value="30">30 ngày gần nhất</option>
-                <option value="90">90 ngày gần nhất</option>
-                <option value="180">180 ngày gần nhất</option>
-              </SelectField>
               <SelectField
                 aria-label="Lọc theo trạng thái luyện"
                 label="Trạng thái luyện"

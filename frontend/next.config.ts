@@ -70,19 +70,28 @@ function buildContentSecurityPolicy(): string {
     connectSources.add(apiOrigin);
     connectSources.add(apiOrigin.replace(/^http/, "ws"));
   }
+  const imgMediaSources = new Set<string>([
+    "'self'",
+    "https:",
+    "blob:",
+    "data:",
+  ]);
   if (isDev || isLocalApi) {
     connectSources.add("http://127.0.0.1:*");
     connectSources.add("http://localhost:*");
     connectSources.add("ws://127.0.0.1:*");
     connectSources.add("ws://localhost:*");
+    imgMediaSources.add("http://127.0.0.1:*");
+    imgMediaSources.add("http://localhost:*");
   }
 
+  const imgMediaList = Array.from(imgMediaSources).join(" ");
   const directives = [
     "default-src 'self'",
     `script-src 'self' 'unsafe-inline' blob:${isDev ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' https: blob: data:",
-    "media-src 'self' https: blob: data:",
+    `img-src ${imgMediaList}`,
+    `media-src ${imgMediaList}`,
     "font-src 'self' data:",
     "worker-src 'self' blob:",
     `connect-src ${Array.from(connectSources).join(" ")}`,
