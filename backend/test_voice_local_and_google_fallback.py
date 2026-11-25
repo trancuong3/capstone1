@@ -7,7 +7,7 @@ import io
 import os
 import unittest
 import wave
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import httpx
@@ -20,7 +20,7 @@ os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_current_parent_id
+from app.api.deps import get_current_parent_id, get_db
 from app.api.routes import voice as voice_routes
 from app.api.routes import voice_studio as studio_routes
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
@@ -62,7 +62,10 @@ def _make_app(orchestrator: VoiceOrchestrator) -> TestClient:
     app = FastAPI()
     app.include_router(voice_routes.router, prefix="/voice")
     app.include_router(studio_routes.router, prefix="/voice")
+    active_db = MagicMock()
+    active_db.scalar = AsyncMock(return_value="parent")
     app.dependency_overrides[get_current_parent_id] = lambda: ACTOR_ID
+    app.dependency_overrides[get_db] = lambda: active_db
     voice_routes.get_voice_orchestrator = lambda: orchestrator  # type: ignore[assignment]
     studio_routes.get_voice_orchestrator = lambda: orchestrator  # type: ignore[assignment]
     return TestClient(app)

@@ -1202,7 +1202,11 @@ export function DifficultWordPracticePanel({
                     isReplaySampleRequest(text, word.display_text) ||
                     isWordHelpRequest(text, word.display_text) ||
                     text.normalize("NFC").trim().toLowerCase() ===
-                      word.display_text.normalize("NFC").trim().toLowerCase())
+                      word.display_text.normalize("NFC").trim().toLowerCase() ||
+                    (usedPhonicsRef.current &&
+                      phonicsLesson.supported &&
+                      evaluatePostPhonicsAttempt(text, phonicsLesson).kind ===
+                        "SPELLING_STEP_ONLY"))
                 ) {
                   return true;
                 }

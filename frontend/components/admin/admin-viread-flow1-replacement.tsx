@@ -264,10 +264,10 @@ export function AdminVireadReliabilityPanel({
 
             return (
               <div key={dataset.key}>
+                <div className="mb-2.5 rounded-control bg-sky/50 px-3.5 py-2 text-sm font-extrabold text-primary-hover md:mb-0 md:rounded-b-none md:px-4">
+                  {dataset.label}
+                </div>
                 <div className="space-y-2.5 md:hidden">
-                  <div className="rounded-control bg-sky/50 px-3.5 py-2 text-sm font-extrabold text-primary-hover">
-                    {dataset.label}
-                  </div>
                   {mobileRows.map((row) => (
                     <article
                       className="rounded-card border border-border bg-white p-3.5"
@@ -314,11 +314,8 @@ export function AdminVireadReliabilityPanel({
                 <div className="hidden md:block">
                   <ResponsiveTable
                     ariaLabel={`Bảng kết quả tin cậy ${dataset.label}`}
-                    className="rounded-control"
+                    className="rounded-b-control rounded-t-none border-t-0"
                   >
-                    <div className="bg-sky/50 px-4 py-2 font-extrabold text-primary-hover">
-                      {dataset.label}
-                    </div>
                     <table className="w-full min-w-[640px] text-left text-sm">
                       <thead className="border-b border-border bg-slate-50 text-xs font-bold text-muted">
                         <tr>

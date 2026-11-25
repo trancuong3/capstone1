@@ -16,7 +16,7 @@ os.environ["SUPABASE_KEY"] = "isolated-test-key"
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_current_parent_id
+from app.api.deps import get_current_parent_id, get_db
 from app.api.routes import voice as voice_routes
 from app.providers.elevenlabs_voice_provider import (
     SynthesizedAudio,
@@ -33,7 +33,10 @@ def make_client(authenticated: bool = True) -> TestClient:
     app = FastAPI()
     app.include_router(voice_routes.router, prefix="/voice")
     if authenticated:
+        active_db = MagicMock()
+        active_db.scalar = AsyncMock(return_value="parent")
         app.dependency_overrides[get_current_parent_id] = lambda: ACTOR_ID
+        app.dependency_overrides[get_db] = lambda: active_db
     return TestClient(app)
 
 

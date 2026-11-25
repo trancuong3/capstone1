@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useContext, useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import { AuthRuntimeContext } from "@/components/auth/auth-service-provider";
 import { useAppStore } from "@/components/providers/app-store-provider";
@@ -67,6 +67,10 @@ export function useValidatedSelectedChild() {
     }
     return findCachedChild(userId, selectedChildId);
   }, [selectedChildId, userId, validatedSelectedChild]);
+  const immediateChildRef = useRef<ChildProfileDTO | null>(immediateChild);
+  useEffect(() => {
+    immediateChildRef.current = immediateChild;
+  }, [immediateChild]);
 
   useEffect(() => {
     let active = true;
@@ -90,7 +94,7 @@ export function useValidatedSelectedChild() {
     }
 
     const requestChildId = selectedChildId;
-    const hadImmediateChild = Boolean(immediateChild);
+    const hadImmediateChild = Boolean(immediateChildRef.current);
 
     void childService
       .get(selectedChildId)
@@ -133,7 +137,6 @@ export function useValidatedSelectedChild() {
   }, [
     childService,
     clearSelectedChild,
-    immediateChild,
     retryKey,
     replace,
     selectChild,
