@@ -105,7 +105,7 @@ class AdminHealthConcurrencyAndVoiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(elapsed, 0.55, f"probes appeared sequential ({elapsed:.3f}s)")
         mock_orch_cls.return_value.get_status.assert_awaited_once()
         ids = [item.id for item in report.services]
-        self.assertEqual(ids[:6], ["api", "database", "local_ocr", "tts", "stt", "storage"])
+        self.assertEqual(ids[:7], ["api", "database", "local_ocr", "tts", "stt", "tts_audio_cache", "storage"])
         self.assertEqual(report.overall_status, "HEALTHY")
 
     async def test_admin_health_isolates_single_probe_exception(self) -> None:

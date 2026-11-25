@@ -73,7 +73,7 @@ describe("Next.js HTTP security headers", () => {
       const { default: config } = await import("@/next.config");
       const rules = (await config.headers?.()) ?? [];
       const csp =
-        rules[0]?.headers.find((h) => h.key === "Content-Security-Policy")
+        rules[1]?.headers.find((h) => h.key === "Content-Security-Policy")
           ?.value ?? "";
       for (const directive of ["img-src", "media-src"]) {
         const sources = csp

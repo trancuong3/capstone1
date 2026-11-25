@@ -583,6 +583,8 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
         tts_cooldown: false,
       },
     });
+    // Worker is down — synthesize must reject so play() throws instead of hanging
+    speech.synthesize.mockRejectedValueOnce(new Error("local worker unavailable"));
     const { result } = renderHook(() => useSpeechPlayer());
     await expect(result.current.play("Bé đọc sách.")).rejects.toThrow();
     expect(synthesis.speak).not.toHaveBeenCalled();
