@@ -161,8 +161,8 @@ class InternalCronDispatchAndWorkersTests(unittest.TestCase):
             fake_repo.claim_next_checking_submission.await_args.kwargs.get("only_post_ocr")
         )
         post_ocr.assert_awaited_once_with(fake_sub.Id)
-        self.assertNotIn("torch", sys.modules)
-        self.assertNotIn("paddleocr", sys.modules)
+        # Import isolation is checked in a clean subprocess by test_web_lightweight_startup.
+
 
 
 def _valid_camera_jpeg() -> bytes:

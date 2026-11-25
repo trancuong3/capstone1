@@ -1920,10 +1920,8 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
               ) {
                 throw err;
               }
-              if (
-                isTechnicalSttUnavailabilityError(err) &&
-                this.recordTechnicalFailureAndMaybeFallback()
-              ) {
+              if (isTechnicalSttUnavailabilityError(err)) {
+                this.recordTechnicalFailureAndMaybeFallback();
                 throw err;
               }
               await new Promise((resolve) => setTimeout(resolve, 250));
@@ -1960,8 +1958,10 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         deliverFinalText(text);
       })
       .catch((err) => {
-        if (isTechnicalSttUnavailabilityError(err)) {
-          this.recordTechnicalFailureAndMaybeFallback();
+        if (isTechnicalSttUnavailabilityError(err) && !this.usingBrowserFallback) {
+          this.active = false;
+          this.teardownAudioGraph();
+          this.onerror?.({ error: "stt-unavailable" });
         }
       })
       .finally(() => {

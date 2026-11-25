@@ -259,8 +259,6 @@ class VoiceOrchestrator:
                 ctx.session_id or "-",
                 get_request_id(),
             )
-            return audio
-        except LocalVoiceTechnicalError as local_err:
             if not self._can_fallback_unlocked_tts(ctx):
                 logger.warning(
                     "tts_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",

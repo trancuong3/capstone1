@@ -54,6 +54,10 @@ function Resolve-VoiceWorkerToken([string]$explicitToken) {
     if ($envToken -and $envToken.Trim()) {
         return $envToken.Trim()
     }
+    $legacyToken = [Environment]::GetEnvironmentVariable("VIREAD_LOCAL_VOICE_WORKER_TOKEN", "Process")
+    if ($legacyToken -and $legacyToken.Trim()) {
+        return $legacyToken.Trim()
+    }
     $backendEnv = Join-Path $repoRoot "backend\.env"
     if (Test-Path $backendEnv) {
         foreach ($line in (Get-Content $backendEnv -Encoding UTF8)) {
@@ -96,7 +100,7 @@ try {
     $health = Invoke-RestMethod -Uri "http://${BindHost}:${Port}/health" -Headers $healthHeaders -TimeoutSec 3
     if ($health -and $health.status -eq "ok") {
         $authRequired = [bool]($health.PSObject.Properties["auth_required"] -and $health.auth_required)
-        if ($authRequired -and (-not $workerToken)) {
+        if ($authRequired -and (-not $effectiveToken)) {
             $incompatibleWorker = $true
         } else {
             $existingConn = Test-PortListening $Port

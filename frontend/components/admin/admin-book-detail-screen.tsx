@@ -52,27 +52,35 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       setItems(null);
       setPagesUnavailable(false);
       try {
-        const nextBook = await books.get(bookId);
+        const bookPromise = books.get(bookId);
+        const pagesPromise = pages
+          .list(bookId)
+          .then((list) => ({ ok: true as const, list }))
+          .catch((cause: unknown) => ({ ok: false as const, cause }));
+
+        const nextBook = await bookPromise;
         if (requestId !== requestIdRef.current) return;
         setBook(nextBook);
-        let nextPages: readonly AdminPageListItemUI[];
-        try {
-          nextPages = (await pages.list(bookId)).filter(
-            (item) => item.processing.lifecycle_status === "ACTIVE",
-          );
-        } catch (cause) {
-          if (isServiceError(cause) && [501, 503].includes(cause.status)) {
-            if (requestId !== requestIdRef.current) return;
+
+        const pagesOutcome = await pagesPromise;
+        if (requestId !== requestIdRef.current) return;
+        if (!pagesOutcome.ok) {
+          if (
+            isServiceError(pagesOutcome.cause) &&
+            [501, 503].includes(pagesOutcome.cause.status)
+          ) {
             setPagesUnavailable(true);
             setItems([]);
             return;
           }
-          throw cause;
+          throw pagesOutcome.cause;
         }
-        if (requestId !== requestIdRef.current) return;
+
+        const nextPages = pagesOutcome.list.filter(
+          (item) => item.processing.lifecycle_status === "ACTIVE",
+        );
         const maxPage = Math.max(1, Math.ceil(nextPages.length / pageSize));
         setPageNumber((current) => Math.min(current, maxPage));
-        setBook(nextBook);
         setItems(nextPages);
       } catch (cause) {
         if (requestId !== requestIdRef.current) return;

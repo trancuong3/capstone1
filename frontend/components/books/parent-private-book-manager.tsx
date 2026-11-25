@@ -1441,6 +1441,11 @@ function ParentPrivateBookManagerContent({
                                 ? ` (${sub.ocr_error_code})`
                                 : ""}
                             </p>
+                            {describeStageErrorHint(sub.ocr_error_code) ? (
+                              <p className="mt-1 text-[11px] font-medium text-rose-800">
+                                {describeStageErrorHint(sub.ocr_error_code)}
+                              </p>
+                            ) : null}
                           </div>
                           <div className="rounded-control border border-border bg-canvas px-3 py-2 text-xs">
                             <p className="font-bold text-ink">2. Rà chính tả</p>
@@ -1454,6 +1459,15 @@ function ParentPrivateBookManagerContent({
                                 ? ` (${sub.proofread_error_code})`
                                 : ""}
                             </p>
+                            {describeStageErrorHint(
+                              sub.proofread_error_code,
+                            ) ? (
+                              <p className="mt-1 text-[11px] font-medium text-rose-800">
+                                {describeStageErrorHint(
+                                  sub.proofread_error_code,
+                                )}
+                              </p>
+                            ) : null}
                           </div>
                           <div className="rounded-control border border-border bg-canvas px-3 py-2 text-xs">
                             <p className="font-bold text-ink">
@@ -1469,6 +1483,15 @@ function ParentPrivateBookManagerContent({
                                 ? ` (${sub.tool_check_error_code})`
                                 : ""}
                             </p>
+                            {describeStageErrorHint(
+                              sub.tool_check_error_code,
+                            ) ? (
+                              <p className="mt-1 text-[11px] font-medium text-rose-800">
+                                {describeStageErrorHint(
+                                  sub.tool_check_error_code,
+                                )}
+                              </p>
+                            ) : null}
                           </div>
                         </div>
 
