@@ -1,6 +1,6 @@
 "use client";
 
-import { History, RefreshCw } from "lucide-react";
+import { BarChart3, History, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ChildSelector } from "@/components/reports/child-selector";
@@ -13,9 +13,11 @@ import { StatusMessage } from "@/components/common/status-message";
 import { useReportServices } from "@/hooks/use-report-services";
 import { isServiceError } from "@/lib/api/service-error";
 import {
+  groupSessionHistoryByDay,
   historyPageFromCursor,
   mapSessionHistoryItem,
 } from "@/lib/utils/report-mappers";
+import type { BookDetailDTO } from "@/types/book";
 import type { ChildProfileDTO } from "@/types/child";
 import type { SessionHistoryItemViewModelUI } from "@/types/reports";
 
@@ -58,16 +60,28 @@ export function SessionHistoryScreen({
           if (active) setState({ status: "no-children" });
           return;
         }
-        const child = requestedChildId
-          ? await childService.get(requestedChildId)
+        const matchedChild = requestedChildId
+          ? children.find((item) => item.id === requestedChildId)
           : children[0];
+        const child = matchedChild
+          ? matchedChild
+          : await childService.get(requestedChildId!);
         const history = await sessionService.list(child.id, {
           cursor: currentPage > 1 ? `page-${currentPage}` : undefined,
           limit: 10,
         });
+
+        // Deduplicate historical book metadata requests per unique book_id on
+        // the current page so repeated reads of the same book issue one request.
+        const bookPromises = new Map<string, Promise<BookDetailDTO>>();
         const items = await Promise.all(
           history.sessions.map(async (session) => {
-            const book = await sessionService.getBook(session.id);
+            let bookPromise = bookPromises.get(session.book_id);
+            if (!bookPromise) {
+              bookPromise = sessionService.getBook(session.id);
+              bookPromises.set(session.book_id, bookPromise);
+            }
+            const book = await bookPromise;
             if (book.id !== session.book_id)
               throw new Error("Invalid historical book response");
             return mapSessionHistoryItem(session, child, book);
@@ -107,11 +121,11 @@ export function SessionHistoryScreen({
       <section
         aria-busy="true"
         aria-label="Đang tải lịch sử đọc"
-        className="mx-auto flex max-w-[1280px] flex-col gap-6"
+        className="mx-auto flex w-full max-w-[1120px] flex-col gap-5"
       >
-        <Skeleton className="h-32 rounded-card" />
-        <Skeleton className="h-40 rounded-card" />
-        <Skeleton className="h-40 rounded-card" />
+        <Skeleton className="h-24 rounded-card" />
+        <Skeleton className="h-16 rounded-card" />
+        <Skeleton className="h-64 rounded-card" />
       </section>
     );
   }
@@ -121,7 +135,7 @@ export function SessionHistoryScreen({
       <EmptyState
         headingLevel={1}
         action={<ButtonLink href="/children/new">Tạo hồ sơ bé</ButtonLink>}
-        description="Tạo hồ sơ để bắt đầu lưu các buổi đọc."
+        description="Tạo hồ sơ để bắt đầu lưu lại các buổi đọc của bé."
         icon={<History aria-hidden="true" className="size-10 text-primary" />}
         title="Chưa có hồ sơ bé"
       />
@@ -135,7 +149,7 @@ export function SessionHistoryScreen({
           Dữ liệu đang chờ bổ sung
         </h1>
         <StatusMessage tone="info">
-          Dữ liệu của mục này chưa sẵn sàng theo định dạng hiện tại. Không có dữ
+          Dữ liệu lịch sử đọc hiện chưa sẵn sàng. Hệ thống không hiển thị dữ
           liệu mẫu thay thế.
         </StatusMessage>
         <Button
@@ -143,7 +157,7 @@ export function SessionHistoryScreen({
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
-          <RefreshCw aria-hidden="true" className="size-5" /> Thử lại
+          <RefreshCw aria-hidden="true" className="size-4" /> Thử lại
         </Button>
         <ButtonLink
           className="sm:w-auto sm:self-start"
@@ -154,6 +168,7 @@ export function SessionHistoryScreen({
         </ButtonLink>
       </section>
     );
+
   if (state.status === "not-found") {
     return (
       <StatusMessage title="Không tìm thấy lịch sử" tone="error">
@@ -173,7 +188,7 @@ export function SessionHistoryScreen({
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
-          <RefreshCw aria-hidden="true" className="size-5" />
+          <RefreshCw aria-hidden="true" className="size-4" />
           Thử lại
         </Button>
       </div>
@@ -183,19 +198,41 @@ export function SessionHistoryScreen({
   const childQuery = `childId=${encodeURIComponent(state.child.id)}`;
   const nextPage =
     state.nextCursor === null ? null : historyPageFromCursor(state.nextCursor);
+  const dayGroups = groupSessionHistoryByDay(state.items);
+
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 pb-4">
       <ReportPageHeader
-        description="Các buổi đọc được sắp xếp từ mới nhất; chỉ hiển thị dữ liệu của gia đình mình."
-        eyebrow="Hành trình đọc"
-        title="Lịch sử buổi đọc"
+        action={
+          <ButtonLink
+            className="sm:w-auto"
+            href={`/reports?${childQuery}`}
+            variant="secondary"
+          >
+            <BarChart3 aria-hidden="true" className="size-4" />
+            Xem tiến bộ
+          </ButtonLink>
+        }
+        description="Các buổi đọc gần nhất được nhóm theo ngày (giờ Việt Nam). Chạm vào một buổi để xem báo cáo đối chiếu."
+        eyebrow={`Đang xem · ${state.child.alias} (Lớp ${state.child.grade})`}
+        title="Lịch sử đọc"
       />
-      <div className="w-full">
-        <ChildSelector
-          childrenProfiles={state.children}
-          selectedChildId={state.child.id}
-        />
+
+      <div className="flex flex-col justify-between gap-3 rounded-card border border-border bg-white p-3.5 sm:flex-row sm:items-end sm:p-4">
+        <div className="w-full sm:max-w-sm">
+          <ChildSelector
+            childrenProfiles={state.children}
+            selectedChildId={state.child.id}
+          />
+        </div>
+        {state.items.length > 0 ? (
+          <p className="text-xs font-semibold text-muted tabular-nums">
+            Hiển thị {state.items.length} buổi trên trang {currentPage} · Mới
+            nhất trước
+          </p>
+        ) : null}
       </div>
+
       {state.items.length === 0 ? (
         <EmptyState
           action={
@@ -203,7 +240,7 @@ export function SessionHistoryScreen({
               Chọn sách để đọc
             </ButtonLink>
           }
-          description="Các buổi đọc được lưu của bé sẽ xuất hiện ở đây, kể cả buổi đang thực hiện."
+          description="Các buổi đọc của bé sẽ được lưu lại tại đây, bao gồm cả những buổi đang thực hiện."
           icon={<History aria-hidden="true" className="size-10 text-primary" />}
           title={
             currentPage > 1
@@ -212,48 +249,72 @@ export function SessionHistoryScreen({
           }
         />
       ) : (
-        <div className="flex flex-col gap-4">
-          {state.items.map((item) => (
-            <SessionHistoryItem
-              item={item}
-              key={item.session.id}
-              page={currentPage}
-            />
+        <div className="flex flex-col gap-5">
+          {dayGroups.map((group) => (
+            <section
+              aria-labelledby={`history-day-${group.dayKey}`}
+              className="space-y-2"
+              key={group.dayKey}
+            >
+              <div className="flex items-baseline justify-between gap-2 px-1">
+                <h2
+                  className="text-sm font-extrabold text-ink"
+                  id={`history-day-${group.dayKey}`}
+                >
+                  {group.heading}
+                </h2>
+                <span className="text-xs font-semibold text-muted tabular-nums">
+                  {group.items.length} buổi
+                </span>
+              </div>
+              <div className="divide-y divide-border overflow-hidden rounded-card border border-border bg-white">
+                {group.items.map((item) => (
+                  <SessionHistoryItem
+                    item={item}
+                    key={item.session.id}
+                    page={currentPage}
+                  />
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       )}
-      <nav
-        aria-label="Phân trang lịch sử"
-        className="flex flex-col-reverse items-center gap-3 sm:flex-row sm:justify-between"
-      >
-        {currentPage > 1 ? (
-          <ButtonLink
-            className="sm:w-auto sm:min-w-40"
-            href={`/sessions?${childQuery}&page=${currentPage - 1}`}
-            variant="secondary"
-          >
-            Trang trước
-          </ButtonLink>
-        ) : (
-          <span />
-        )}
-        {currentPage > 1 || nextPage !== null ? (
+
+      {currentPage > 1 || nextPage !== null ? (
+        <nav
+          aria-label="Phân trang lịch sử"
+          className="flex flex-col-reverse items-center gap-3 pt-1 sm:flex-row sm:justify-between"
+        >
+          {currentPage > 1 ? (
+            <ButtonLink
+              className="sm:w-auto sm:min-w-36"
+              href={`/sessions?${childQuery}&page=${currentPage - 1}`}
+              variant="secondary"
+            >
+              Trang trước
+            </ButtonLink>
+          ) : (
+            <span className="hidden sm:block sm:min-w-36" />
+          )}
           <span
             aria-current="page"
             className="text-sm font-bold text-muted tabular-nums"
           >
             Trang {currentPage}
           </span>
-        ) : null}
-        {nextPage !== null ? (
-          <ButtonLink
-            className="sm:w-auto sm:min-w-40"
-            href={`/sessions?${childQuery}&page=${nextPage}`}
-          >
-            Trang sau
-          </ButtonLink>
-        ) : null}
-      </nav>
+          {nextPage !== null ? (
+            <ButtonLink
+              className="sm:w-auto sm:min-w-36"
+              href={`/sessions?${childQuery}&page=${nextPage}`}
+            >
+              Trang sau
+            </ButtonLink>
+          ) : (
+            <span className="hidden sm:block sm:min-w-36" />
+          )}
+        </nav>
+      ) : null}
     </section>
   );
 }

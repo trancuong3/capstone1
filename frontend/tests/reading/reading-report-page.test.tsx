@@ -162,4 +162,64 @@ describe("per-session reading report page", () => {
       "Bài đọc được giữ.",
     );
   });
+
+  it("renders a single Báo cáo đọc heading, groups multi-page sessions by page switcher, and protects immutable v1 first-pass reports", async () => {
+    const user = userEvent.setup();
+    const page1FirstPass = {
+      ...savedReport("rep-p1-v1", "Trang 1 lượt đầu"),
+      page_id: "11111111-1111-4111-8111-111111111111",
+      page_revision_id: "11111111-1111-4111-8111-111111111112",
+      created_at: "2026-11-02T10:00:00Z",
+      summary: {
+        ...savedReport("rep-p1-v1", "").summary,
+        assessment_version: 1,
+      },
+    };
+    const page1Retry = {
+      ...savedReport("rep-p1-retry", "Trang 1 đối chiếu bổ sung"),
+      page_id: "11111111-1111-4111-8111-111111111111",
+      page_revision_id: "11111111-1111-4111-8111-111111111112",
+      created_at: "2026-11-02T10:01:00Z",
+    };
+    const page2Report = {
+      ...savedReport("rep-p2-v1", "Trang 2 lượt đầu"),
+      page_id: "22222222-2222-4222-8222-222222222221",
+      page_revision_id: "22222222-2222-4222-8222-222222222222",
+      created_at: "2026-11-02T10:03:00Z",
+      summary: {
+        ...savedReport("rep-p2-v1", "").summary,
+        assessment_version: 1,
+      },
+    };
+    api.getSessionReports.mockResolvedValue(
+      reportsResponse([page1Retry, page1FirstPass, page2Report]),
+    );
+
+    render(<ReadingReportPage />);
+
+    expect(
+      await screen.findByTestId("saved-report-rep-p1-v1"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("heading", { name: "Báo cáo đọc" }),
+    ).toHaveLength(1);
+    expect(
+      screen.getByText("Kết quả lượt đầu được giữ nguyên"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Các lượt đối chiếu khác của trang này (1)"),
+    ).toBeInTheDocument();
+    // Page 2 is not stacked vertically below Page 1; user switches cleanly.
+    expect(
+      screen.queryByTestId("saved-report-rep-p2-v1"),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Trang 2" }));
+    expect(
+      await screen.findByTestId("saved-report-rep-p2-v1"),
+    ).toHaveTextContent("Trang 2 lượt đầu");
+    expect(
+      screen.queryByTestId("saved-report-rep-p1-v1"),
+    ).not.toBeInTheDocument();
+  });
 });

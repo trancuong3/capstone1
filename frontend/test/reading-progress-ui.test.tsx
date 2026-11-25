@@ -224,7 +224,7 @@ describe("Saved reading progress UI", () => {
     );
     expect(screen.queryByText("4 buổi")).not.toBeInTheDocument();
     await screen.findByRole("heading", {
-      name: `Cùng nhìn lại hành trình của ${second.alias}`,
+      name: `Tiến bộ của ${second.alias}`,
     });
     await act(async () =>
       resolve(Response.json({ ...report, completed_sessions: 999 })),
@@ -232,8 +232,117 @@ describe("Saved reading progress UI", () => {
     expect(screen.queryByText("999 buổi")).not.toBeInTheDocument();
     expect(
       screen.getByRole("heading", {
-        name: `Cùng nhìn lại hành trình của ${second.alias}`,
+        name: `Tiến bộ của ${second.alias}`,
       }),
     ).toBeInTheDocument();
+  });
+
+  it("renders at most one ReadingAssessmentSummary when both saved report and rolling AI assessment include reading_assessment", async () => {
+    const assessmentBlock = {
+      first_pass_correct: 40,
+      first_pass_incorrect: 5,
+      self_corrected_words: 3,
+      unresolved_words: 2,
+      retry_attempts: 6,
+      skipped_after_retry_limit: 0,
+      recognition_uncertain: 1,
+    };
+    current = {
+      ...report,
+      assessment: assessmentBlock,
+    };
+    fetchMock.mockImplementation(async (url: string) => {
+      if (
+        url.includes("/tutor/children/") &&
+        url.includes("progress-assessment")
+      ) {
+        return Response.json({
+          child_id: TEST_CHILD_ID,
+          period_start: "2026-09-02",
+          period_end: "2026-10-01",
+          days: 30,
+          generated_at: "2026-10-01T10:00:00+07:00",
+          data_status: "OK",
+          score: {
+            overall: 82,
+            previous_overall: 76,
+            delta: 6,
+            grade: "GOOD",
+            grade_label: "Tốt",
+            components: [
+              {
+                key: "ACCURACY",
+                label: "Đọc đúng",
+                score: 88,
+                previous_score: 82,
+                detail: "Đọc tốt",
+              },
+            ],
+          },
+          metrics: {
+            reading_assessment: assessmentBlock,
+            sessions: 4,
+            active_days: 3,
+            reading_minutes: 30,
+            books: 2,
+            pages_compared: 6,
+            words_read: 45,
+            coverage_pct: 90,
+            accuracy_pct: 88.9,
+            skipped_rate_pct: 4,
+            substitution_rate_pct: 6,
+            hesitations: 2,
+            repeated_words: 1,
+            hesitations_per_100_words: 4.4,
+            words_per_minute: 55,
+            comprehension_answered: 4,
+            comprehension_first_try_pct: 75,
+            comprehension_by_type: [],
+            retry_confirmed: 3,
+            retry_failed: 2,
+          },
+          weekly: [],
+          difficult_words: [],
+          assessment: {
+            source: "AI",
+            model: "gemini-test",
+            headline: "Bé đọc ổn định",
+            summary: "Nhận xét tổng hợp 30 ngày.",
+            strengths: ["Đều đặn"],
+            weaknesses: [],
+            actions: [],
+            practice_words: [],
+            encouragement: "Tiếp tục phát huy!",
+          },
+          ai_cached: true,
+        });
+      }
+      return respond(url);
+    });
+
+    render(
+      <AppServicesProvider scenario="default">
+        <ProgressReportScreen />
+      </AppServicesProvider>,
+    );
+    await screen.findByText("Bé đọc ổn định");
+    expect(
+      screen.getAllByRole("region", { name: "Kết quả lượt đầu và luyện lại" }),
+    ).toHaveLength(1);
+  });
+
+  it("skips latest progress request when saved periods list is empty to avoid unnecessary 404", async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      url.includes("/periods")
+        ? Response.json({ items: [], next_cursor: null })
+        : respond(url),
+    );
+    renderReport();
+    await screen.findByText("Chưa có báo cáo đã lưu");
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).endsWith(`/system/progress/${TEST_CHILD_ID}`),
+      ),
+    ).toBe(false);
   });
 });

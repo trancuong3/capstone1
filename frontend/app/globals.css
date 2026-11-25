@@ -792,20 +792,22 @@ button:disabled {
   border-radius: 0;
 }
 .report-metrics {
-  padding: 12px 0;
-  border-block: 1px solid var(--ra-color-border);
+  padding: 0;
 }
 .report-metric {
-  padding: 12px 16px;
+  padding: 14px 14px;
 }
-.report-metric > p:first-of-type {
-  font-weight: 750;
-  font-size: 36px;
+@media (min-width: 48rem) {
+  .report-metric {
+    padding: 18px 20px;
+  }
+}
+.report-metric > p[data-metric-value="true"]:not([data-unavailable="true"]) {
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
 .history-entry {
-  padding: 20px 0;
-  border-bottom: 1px solid var(--ra-color-border);
+  padding: 14px 16px;
 }
 .activity-library > div > article {
   border: 0;

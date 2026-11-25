@@ -342,7 +342,7 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
       </AppServicesProvider>,
     );
     await screen.findByRole("heading", {
-      name: `Cùng nhìn lại hành trình của ${child.alias}`,
+      name: `Tiến bộ của ${child.alias}`,
     });
     expect(screen.getByText("2 buổi")).toBeInTheDocument();
     expect(screen.getByText("Chưa đủ kỳ so sánh")).toBeInTheDocument();

@@ -1,14 +1,12 @@
 "use client";
 
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { ArrowLeft, ChevronDown, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button, ButtonLink } from "@/components/common/button";
-import { Card } from "@/components/common/card";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
-import { ReportPageHeader } from "@/components/reports/report-page-header";
 import { SessionEventList } from "@/components/reports/session-event-list";
 import { SessionReadingReports } from "@/components/reports/session-reading-reports";
 import { useReportServices } from "@/hooks/use-report-services";
@@ -17,6 +15,7 @@ import {
   formatHistoryDateTime,
   formatHistoryDuration,
   formatPercent,
+  getHistoryStatePresentation,
   historyStateLabel,
 } from "@/lib/utils/report-mappers";
 import type { BookDetailDTO } from "@/types/book";
@@ -89,12 +88,14 @@ export function SessionDetailScreen({
       <section
         aria-busy="true"
         aria-label="Đang tải chi tiết buổi đọc"
-        className="mx-auto flex max-w-[1280px] flex-col gap-6"
+        className="mx-auto flex w-full max-w-[1120px] flex-col gap-5"
       >
+        <Skeleton className="h-28 rounded-card" />
         <Skeleton className="h-32 rounded-card" />
-        <Skeleton className="h-72 rounded-card" />
+        <Skeleton className="h-80 rounded-card" />
       </section>
     );
+
   if (state.status === "unavailable")
     return (
       <section className="mx-auto flex w-full max-w-[960px] flex-col gap-4">
@@ -110,7 +111,7 @@ export function SessionDetailScreen({
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
-          <RefreshCw aria-hidden="true" className="size-5" /> Thử lại
+          <RefreshCw aria-hidden="true" className="size-4" /> Thử lại
         </Button>
         <ButtonLink
           className="sm:w-auto sm:self-start"
@@ -121,6 +122,7 @@ export function SessionDetailScreen({
         </ButtonLink>
       </section>
     );
+
   if (state.status === "not-found")
     return (
       <div className="mx-auto flex max-w-[960px] flex-col gap-4">
@@ -135,11 +137,12 @@ export function SessionDetailScreen({
           href="/sessions"
           variant="secondary"
         >
-          <ArrowLeft aria-hidden="true" className="size-5" />
+          <ArrowLeft aria-hidden="true" className="size-4" />
           Về lịch sử
         </ButtonLink>
       </div>
     );
+
   if (state.status === "error")
     return (
       <div className="mx-auto flex max-w-[960px] flex-col gap-4">
@@ -151,7 +154,7 @@ export function SessionDetailScreen({
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
-          <RefreshCw aria-hidden="true" className="size-5" />
+          <RefreshCw aria-hidden="true" className="size-4" />
           Thử lại
         </Button>
       </div>
@@ -172,144 +175,293 @@ export function SessionDetailScreen({
       : null;
   const returnHref = `/sessions?childId=${encodeURIComponent(detail.child_id)}${returnPage === null ? "" : `&page=${returnPage}`}`;
   const availability = detail.availability;
+  const statePresentation = getHistoryStatePresentation(detail.state);
+
+  const pageTitle =
+    detail.state === "FINISHED"
+      ? rangeIsPartial
+        ? "Buổi đọc đã lưu"
+        : "Buổi đọc đã hoàn thành"
+      : detail.state === "ABORTED"
+        ? "Buổi đọc đã dừng"
+        : `Buổi đọc: ${historyStateLabel(detail.state)}`;
+
+  const showComprehensionSectionDirectly =
+    detail.comprehension.length > 0 || availability.comprehension !== "absent";
+
+  const summaryItems: readonly (readonly [string, string])[] = [
+    ["Thời lượng phiên", formatHistoryDuration(detail.duration_ms)],
+    ...(detail.selected_range_pages == null
+      ? []
+      : ([
+          ["Trang trong phạm vi", `${detail.selected_range_pages} trang`],
+          [
+            "Trang đã xác nhận hoàn thành",
+            detail.pages_completed == null
+              ? "Chưa ghi nhận"
+              : `${detail.pages_completed} trang`,
+          ],
+        ] as const)),
+    [
+      "Độ chính xác",
+      metrics?.accuracy_percent == null
+        ? "Chưa ghi nhận"
+        : formatPercent(metrics.accuracy_percent),
+    ],
+    [
+      "Tốc độ đọc",
+      metrics?.reading_wpm == null
+        ? "Chưa ghi nhận"
+        : `${metrics.reading_wpm} từ/phút`,
+    ],
+    [
+      "Điểm trôi chảy",
+      detail.fluency_assessment?.score == null
+        ? availability.fluency === "absent"
+          ? "Chưa đánh giá"
+          : "Chưa có điểm hiển thị"
+        : String(detail.fluency_assessment.score),
+    ],
+  ];
+
+  const comprehensionSection = (
+    <section
+      aria-labelledby="session-comprehension-heading"
+      className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 sm:p-6"
+    >
+      <h2
+        className="text-xl font-extrabold text-ink"
+        id="session-comprehension-heading"
+      >
+        Câu hỏi đọc hiểu
+      </h2>
+      {availability.comprehension === "unsupported" ||
+      availability.comprehension === "partial" ? (
+        <StatusMessage tone="info">
+          Có dữ liệu đọc hiểu đã lưu nhưng một phần định dạng chưa được hỗ trợ.{" "}
+          {availability.comprehension === "partial"
+            ? "Nội dung đọc được vẫn hiển thị bên dưới."
+            : "Chưa thể hiển thị nội dung của nhóm này."}
+        </StatusMessage>
+      ) : null}
+      {detail.comprehension.length === 0 &&
+      availability.comprehension === "absent" ? (
+        <p className="rounded-control border border-border bg-canvas px-4 py-4 text-sm text-muted">
+          Buổi đọc này không có câu hỏi đọc hiểu.
+        </p>
+      ) : (
+        <>
+          <ul className="divide-y divide-border rounded-control border border-border">
+            {detail.comprehension
+              .slice(
+                (comprehensionPage - 1) * COMPREHENSION_PAGE_SIZE,
+                comprehensionPage * COMPREHENSION_PAGE_SIZE,
+              )
+              .map(({ answer, question }) => {
+                const answerStatusLabel = answer
+                  ? answer.is_correct === true
+                    ? "Đúng"
+                    : answer.is_correct === false
+                      ? "Chưa đúng"
+                      : "Chưa chấm"
+                  : null;
+                const answerBadgeClass =
+                  answer?.is_correct === true
+                    ? "bg-success-surface text-success-ink"
+                    : answer?.is_correct === false
+                      ? "bg-warning-surface text-warning"
+                      : "bg-canvas text-muted ring-1 ring-inset ring-border";
+
+                return (
+                  <li className="space-y-1.5 p-4" key={question.id}>
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <p className="break-words font-bold text-ink">
+                        {question.prompt}
+                      </p>
+                      {answerStatusLabel ? (
+                        <span
+                          className={`shrink-0 rounded-control px-2.5 py-0.5 text-xs font-bold ${answerBadgeClass}`}
+                        >
+                          {answerStatusLabel}
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="text-xs font-semibold text-muted">
+                      Độ khó đã lưu: {question.difficulty ?? "Chưa ghi nhận"}
+                    </p>
+                    <p className="break-words text-sm text-ink">
+                      {answer
+                        ? `Trả lời: ${answer.submitted_answer} · ${answerStatusLabel}`
+                        : question.answered
+                          ? "Đã lưu câu trả lời nhưng định dạng chưa được hỗ trợ."
+                          : "Chưa có câu trả lời"}
+                    </p>
+                  </li>
+                );
+              })}
+          </ul>
+          <PaginationBar
+            ariaLabel="Phân trang câu hỏi đọc hiểu"
+            compact
+            itemLabel="câu hỏi"
+            onPageChange={setComprehensionPage}
+            page={comprehensionPage}
+            pageSize={COMPREHENSION_PAGE_SIZE}
+            total={detail.comprehension.length}
+          />
+        </>
+      )}
+    </section>
+  );
+
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
-      <ReportPageHeader
-        action={
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 pb-4">
+      <header className="flex flex-col justify-between gap-4 border-b border-border pb-5 lg:flex-row lg:items-end">
+        <div className="min-w-0 max-w-3xl space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={`inline-flex items-center rounded-control px-2.5 py-0.5 text-xs font-bold ${statePresentation.badgeClassName}`}
+            >
+              {statePresentation.label}
+            </span>
+            {rangeIsPartial ? (
+              <span className="inline-flex items-center rounded-control border border-warning/25 bg-warning-surface px-2.5 py-0.5 text-xs font-bold text-warning">
+                Hoàn thành một phần
+              </span>
+            ) : null}
+          </div>
+          <h1 className="book-title text-3xl text-ink sm:text-[38px]">
+            {pageTitle}
+          </h1>
+          <p className="text-base font-bold text-ink">
+            {state.book.title}
+            <span className="font-semibold text-muted">
+              {" "}
+              · {state.child.alias}
+            </span>
+          </p>
+          <dl className="flex flex-wrap gap-x-6 gap-y-1 text-xs font-semibold text-muted">
+            <div className="flex gap-1.5">
+              <dt>Bắt đầu:</dt>
+              <dd className="tabular-nums text-ink">
+                {formatHistoryDateTime(detail.started_at)}
+              </dd>
+            </div>
+            <div className="flex gap-1.5">
+              <dt>Kết thúc:</dt>
+              <dd className="tabular-nums text-ink">
+                {detail.ended_at === null
+                  ? "Chưa lưu giờ kết thúc"
+                  : formatHistoryDateTime(detail.ended_at)}
+              </dd>
+            </div>
+          </dl>
+        </div>
+
+        <div className="flex shrink-0 flex-wrap gap-2">
           <ButtonLink
             className="sm:w-auto"
             href={returnHref}
             variant="secondary"
           >
-            <ArrowLeft aria-hidden="true" className="size-5" />
+            <ArrowLeft aria-hidden="true" className="size-4" />
             Lịch sử
           </ButtonLink>
-        }
-        description={`${state.child.alias} · ${state.book.title}`}
-        eyebrow="Chi tiết buổi đọc"
-        title={
-          detail.state === "FINISHED"
-            ? rangeIsPartial
-              ? "Buổi đọc đã lưu"
-              : "Buổi đọc đã hoàn thành"
-            : detail.state === "ABORTED"
-              ? "Buổi đọc đã dừng"
-              : `Buổi đọc: ${historyStateLabel(detail.state)}`
-        }
-      />
+        </div>
+      </header>
+
       {rangeIsPartial ? (
         <StatusMessage title="Một phần phạm vi chưa hoàn thành" tone="info">
-          Phạm vi đã chọn có {detail.selected_range_pages} trang, nhưng mới có{" "}
-          {detail.pages_completed ?? 0} trang được xác nhận hoàn thành. Lịch sử
-          vẫn được giữ nguyên và không tính các trang chưa đọc là hoàn thành.
+          Phạm vi đã chọn có {detail.selected_range_pages} trang, mới có{" "}
+          {detail.pages_completed ?? 0} trang được xác nhận hoàn thành. Các
+          trang chưa đọc không được tính là hoàn thành.
         </StatusMessage>
       ) : null}
+
       {detail.state !== "FINISHED" && detail.state !== "ABORTED" ? (
         <StatusMessage title="Dữ liệu đang dở dang" tone="warning">
           Buổi đọc chưa kết thúc nên thời lượng, chỉ số trôi chảy và báo cáo có
-          thể chưa có.
+          thể chưa đầy đủ.
         </StatusMessage>
       ) : null}
+
       {detail.state === "FINISHED" && detail.ended_at === null ? (
         <StatusMessage tone="info">
           Buổi đọc đã hoàn thành nhưng chưa lưu giờ kết thúc; chưa có dữ liệu
           thời lượng.
         </StatusMessage>
       ) : null}
+
       <section
-        className="rounded-card border border-border bg-white p-4 sm:p-5"
         aria-labelledby="session-overview-heading"
+        className="rounded-card border border-border bg-white"
       >
-        <h2
-          id="session-overview-heading"
-          className="book-title text-2xl text-ink"
-        >
-          Tóm tắt buổi đọc
-        </h2>
-        <dl className="mt-3 flex flex-wrap gap-x-8 gap-y-2 text-sm text-muted [&_dd]:font-semibold [&_dd]:text-ink">
-          <div>
-            <dt className="font-semibold">Bắt đầu (giờ Việt Nam)</dt>
-            <dd>{formatHistoryDateTime(detail.started_at)}</dd>
-          </div>
-          <div>
-            <dt className="font-semibold">Kết thúc (giờ Việt Nam)</dt>
-            <dd>
-              {detail.ended_at === null
-                ? "Chưa lưu giờ kết thúc"
-                : formatHistoryDateTime(detail.ended_at)}
-            </dd>
-          </div>
-        </dl>
+        <div className="border-b border-border px-4 py-3.5 sm:px-6">
+          <h2
+            className="text-lg font-extrabold text-ink"
+            id="session-overview-heading"
+          >
+            Tóm tắt buổi đọc
+          </h2>
+        </div>
+
         {availability.fluency === "unsupported" ||
         availability.fluency === "partial" ? (
-          <StatusMessage tone="info">
-            Có dữ liệu đánh giá đã lưu nhưng định dạng chưa được hỗ trợ đầy đủ.
-            Chỉ hiển thị điểm/chỉ số đọc được, không tự quy đổi dữ liệu thiếu.
-          </StatusMessage>
+          <div className="px-4 pt-4 sm:px-6">
+            <StatusMessage tone="info">
+              Có dữ liệu đánh giá đã lưu nhưng định dạng chưa được hỗ trợ đầy
+              đủ. Chỉ hiển thị điểm và chỉ số đọc được, không tự quy đổi dữ liệu
+              thiếu.
+            </StatusMessage>
+          </div>
         ) : null}
-        <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-4 sm:grid-cols-3">
-          {[
-            ["Thời lượng phiên", formatHistoryDuration(detail.duration_ms)],
-            ...(detail.selected_range_pages == null
-              ? []
-              : [
-                  [
-                    "Trang trong phạm vi",
-                    `${detail.selected_range_pages} trang`,
-                  ],
-                  [
-                    "Trang đã xác nhận hoàn thành",
-                    detail.pages_completed == null
-                      ? "Chưa ghi nhận"
-                      : `${detail.pages_completed} trang`,
-                  ],
-                ]),
-            [
-              "Độ chính xác",
-              metrics?.accuracy_percent == null
-                ? "Chưa ghi nhận"
-                : formatPercent(metrics.accuracy_percent),
-            ],
-            [
-              "Tốc độ đọc",
-              metrics?.reading_wpm == null
-                ? "Chưa ghi nhận"
-                : `${metrics.reading_wpm} từ/phút`,
-            ],
-            [
-              "Điểm trôi chảy",
-              detail.fluency_assessment?.score == null
-                ? availability.fluency === "absent"
-                  ? "Chưa đánh giá"
-                  : "Chưa có điểm hiển thị"
-                : String(detail.fluency_assessment.score),
-            ],
-          ].map(([label, value]) => (
-            <div key={label}>
-              <dt className="text-sm font-semibold text-muted">{label}</dt>
-              <dd
-                className={
-                  value.startsWith("Chưa")
-                    ? "mt-1 font-semibold text-muted"
-                    : "mt-1 text-xl font-extrabold leading-snug text-primary"
-                }
-              >
-                {value}
-              </dd>
-            </div>
-          ))}
+
+        <dl className="grid grid-cols-2 sm:grid-cols-3">
+          {summaryItems.map(([label, value], index) => {
+            const isMissing = value.startsWith("Chưa");
+            const cellBorders = [
+              "border-border p-3.5 sm:px-6 sm:py-4",
+              index % 2 === 0 ? "border-r sm:border-r-0" : "",
+              index >= 2 ? "border-t" : "",
+              index === 2 ? "sm:border-t-0" : "",
+              index >= 3 ? "sm:border-t" : "",
+              index % 3 !== 2 ? "sm:border-r" : "sm:border-r-0",
+            ]
+              .filter(Boolean)
+              .join(" ");
+            return (
+              <div className={cellBorders} key={label}>
+                <dt className="text-xs font-bold text-muted">{label}</dt>
+                <dd
+                  className={
+                    isMissing
+                      ? "mt-1 text-sm font-semibold text-muted"
+                      : "mt-1 text-xl font-extrabold leading-snug tabular-nums text-primary"
+                  }
+                >
+                  {value}
+                </dd>
+              </div>
+            );
+          })}
         </dl>
       </section>
-      <Card className="bg-white">
-        <SessionReadingReports sessionId={sessionId} />
-      </Card>
-      <details className="rounded-card border border-border bg-white p-4 sm:p-6">
-        <summary className="cursor-pointer font-semibold text-primary">
-          Thông tin khác của buổi đọc
+
+      <SessionReadingReports sessionId={sessionId} />
+
+      {showComprehensionSectionDirectly ? comprehensionSection : null}
+
+      <details className="group rounded-card border border-border bg-white p-4 sm:p-6">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 font-extrabold text-primary">
+          <span>Thông tin khác của buổi đọc</span>
+          <ChevronDown
+            aria-hidden="true"
+            className="size-4 shrink-0 transition-transform group-open:rotate-180"
+          />
         </summary>
-        <div className="mt-4 flex flex-col gap-4">
-          <Card className="bg-white">
-            <h2 className="text-2xl font-semibold text-ink">
+        <div className="mt-4 flex flex-col gap-5 border-t border-border pt-4">
+          <section className="flex flex-col gap-3">
+            <h2 className="text-xl font-extrabold text-ink">
               Sự kiện trong buổi đọc
             </h2>
             {availability.events === "unsupported" ||
@@ -339,68 +491,9 @@ export function SessionDetailScreen({
                 />
               </>
             ) : null}
-          </Card>
-          <Card className="bg-white">
-            <h2 className="text-2xl font-semibold text-ink">
-              Câu hỏi đọc hiểu
-            </h2>
-            {availability.comprehension === "unsupported" ||
-            availability.comprehension === "partial" ? (
-              <StatusMessage tone="info">
-                Có dữ liệu đọc hiểu đã lưu nhưng một phần định dạng chưa được hỗ
-                trợ.{" "}
-                {availability.comprehension === "partial"
-                  ? "Nội dung đọc được vẫn hiển thị bên dưới."
-                  : "Chưa thể hiển thị nội dung của nhóm này."}
-              </StatusMessage>
-            ) : null}
-            {detail.comprehension.length === 0 &&
-            availability.comprehension === "absent" ? (
-              <p className="rounded-control bg-sky p-5 text-body text-muted">
-                Buổi đọc này không có câu hỏi đọc hiểu.
-              </p>
-            ) : (
-              <>
-                <ul className="flex flex-col gap-3">
-                  {detail.comprehension
-                    .slice(
-                      (comprehensionPage - 1) * COMPREHENSION_PAGE_SIZE,
-                      comprehensionPage * COMPREHENSION_PAGE_SIZE,
-                    )
-                    .map(({ answer, question }) => (
-                      <li
-                        className="rounded-control border border-border p-4"
-                        key={question.id}
-                      >
-                        <p className="break-words font-semibold text-ink">
-                          {question.prompt}
-                        </p>
-                        <p className="mt-2 text-label text-muted">
-                          Độ khó đã lưu:{" "}
-                          {question.difficulty ?? "Chưa ghi nhận"}
-                        </p>
-                        <p className="mt-2 break-words text-label text-muted">
-                          {answer
-                            ? `Trả lời: ${answer.submitted_answer} · ${answer.is_correct === true ? "Đúng" : answer.is_correct === false ? "Chưa đúng" : "Chưa chấm"}`
-                            : question.answered
-                              ? "Đã lưu câu trả lời nhưng định dạng chưa được hỗ trợ."
-                              : "Chưa có câu trả lời"}
-                        </p>
-                      </li>
-                    ))}
-                </ul>
-                <PaginationBar
-                  ariaLabel="Phân trang câu hỏi đọc hiểu"
-                  compact
-                  itemLabel="câu hỏi"
-                  onPageChange={setComprehensionPage}
-                  page={comprehensionPage}
-                  pageSize={COMPREHENSION_PAGE_SIZE}
-                  total={detail.comprehension.length}
-                />
-              </>
-            )}
-          </Card>
+          </section>
+
+          {!showComprehensionSectionDirectly ? comprehensionSection : null}
         </div>
       </details>
     </section>
