@@ -1345,11 +1345,6 @@ function ParentPrivateBookManagerContent({
                   WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
                   "border-border bg-canvas text-ink";
                 const lockReason = lockReasonForSubmission(sub);
-                const errorHint = describeStageErrorHint(
-                  sub.ocr_error_code ??
-                    sub.proofread_error_code ??
-                    sub.tool_check_error_code,
-                );
                 const isEditing = editingSubId === sub.id;
                 const isReviewFormOpen = reviewFormSubId === sub.id;
                 const isSubBusy =
@@ -1362,9 +1357,6 @@ function ParentPrivateBookManagerContent({
                     data-workflow-status={sub.workflow_status}
                     className="flex flex-col gap-4 rounded-card border border-border bg-white p-5 shadow-sm"
                   >
-                    {errorHint ? (
-                      <p className="text-sm text-muted">{errorHint}</p>
-                    ) : null}
                     <div className="flex flex-col gap-4 lg:flex-row">
                       {/* Private Authenticated Page Preview */}
                       <div className="w-full shrink-0 lg:w-48">
