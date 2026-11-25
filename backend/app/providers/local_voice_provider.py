@@ -208,6 +208,7 @@ class LocalSynthesizedAudio:
     used_fallback_voice: bool = False
     cache_hit: bool = False
     cache_scope: str | None = None
+    cached_speed: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +231,7 @@ class LocalTimedSpeech:
     used_fallback_voice: bool = False
     cache_hit: bool = False
     cache_scope: str | None = None
+    cached_speed: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -252,6 +254,7 @@ class LocalPhonicsSpeech:
     provider: str = "local"
     cache_hit: bool = False
     cache_scope: str | None = None
+    cached_speed: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

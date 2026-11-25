@@ -123,3 +123,4 @@ class TimedSpeechRead(BaseModel):
     region: str | None = None
     model_version: str | None = None
     used_fallback_voice: bool = False
+    cached_speed: float | None = None

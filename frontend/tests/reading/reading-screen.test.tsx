@@ -462,9 +462,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       act(() => first.say(["Bé mèo", "Con không biết đọc từ này ạ."]));
       await waitFor(() => expect(Recognition.instances).toHaveLength(2));
       expect(speechPlayerMock.play.mock.calls).toEqual([
-        ["Cô đọc mẫu cho con nhé."],
+        ["Cô đọc mẫu cho con nhé.", { coaching: true }],
         ["nhỏ", { wordSample: true }],
-        ["Đến lượt con đọc nhé."],
+        ["Đến lượt con đọc nhé.", { coaching: true }],
       ]);
       expect(speechServiceMock.transcribe).not.toHaveBeenCalled();
       // Policy change (automatic reading flow): a repeated request is not

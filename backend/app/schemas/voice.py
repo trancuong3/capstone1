@@ -123,6 +123,7 @@ class PhonicsSpeechRead(BaseModel):
     resolved_voice_id: str
     region: str = "north"
     model_version: str
+    cached_speed: float | None = None
 
 
 class SpeechWord(BaseModel):

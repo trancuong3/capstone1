@@ -258,6 +258,7 @@ class VoiceOrchestrator:
             cache_scope=ctx.cache_scope,
             normalized_text=normalized_text,
             allow_cache_write=False,
+            defer_allowlist_check=True,
         )
         return svc, target
 
@@ -330,6 +331,7 @@ class VoiceOrchestrator:
                     used_fallback_voice=False,
                     cache_hit=True,
                     cache_scope=hit.scope,
+                    cached_speed=hit.cached_speed,
                 )
 
         # Local voice locked: NEVER switch to Google or to another local voice!
@@ -430,6 +432,7 @@ class VoiceOrchestrator:
                 speed=speed,
                 accept=ctx.accept,
                 audio_format=ctx.audio_format,
+                require_word_timings=True,
             )
             if (
                 hit is not None
@@ -465,6 +468,7 @@ class VoiceOrchestrator:
                     used_fallback_voice=False,
                     cache_hit=True,
                     cache_scope=hit.scope,
+                    cached_speed=hit.cached_speed,
                 )
 
         try:
@@ -566,6 +570,7 @@ class VoiceOrchestrator:
                 speed=speed,
                 accept=ctx.accept,
                 audio_format=ctx.audio_format,
+                require_word_timings=True,
             )
             if (
                 hit is not None
@@ -601,6 +606,7 @@ class VoiceOrchestrator:
                     provider="precomputed_cache",
                     cache_hit=True,
                     cache_scope=hit.scope,
+                    cached_speed=hit.cached_speed,
                 )
 
         try:

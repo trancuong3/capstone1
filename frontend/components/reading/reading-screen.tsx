@@ -1765,11 +1765,11 @@ function ReadingSessionScreen({
               setLatestTranscript(
                 adaptPersona(`Con nghe cô đọc từ “${word.text}” nhé.`),
               );
-              await speakGuarded("Cô đọc mẫu cho con nhé.");
+              await speakGuarded("Cô đọc mẫu cho con nhé.", { coaching: true });
               if (!isCurrent()) return;
               await speakGuarded(word.text, { wordSample: true });
               if (!isCurrent()) return;
-              await speakGuarded("Đến lượt con đọc nhé.");
+              await speakGuarded("Đến lượt con đọc nhé.", { coaching: true });
             }
           } else if (effect.kind === "phrase") {
             // Round 3: praise persistence and model the phrase in context
@@ -1795,7 +1795,7 @@ function ReadingSessionScreen({
               setLatestTranscript(`Mình đọc nối cụm “${phrase}” nhé.`);
               await speakGuarded(phrase);
               if (!isCurrent()) return;
-              await speakGuarded("Đến lượt con đọc nhé.");
+              await speakGuarded("Đến lượt con đọc nhé.", { coaching: true });
             }
           } else {
             // Round 2: model/phonics + invite returning to meaningful phrase
@@ -1814,7 +1814,7 @@ function ReadingSessionScreen({
               });
               setLatestTranscript(`${phonicsGuide} · “${phrase}”`);
               if (style === "gentle") {
-                await speakGuarded(intro);
+                await speakGuarded(intro, { coaching: true });
                 if (!isCurrent()) return;
               }
               await speakGuarded(phonicsGuide);
@@ -1838,7 +1838,7 @@ function ReadingSessionScreen({
                 await speakGuarded(phrase);
                 if (!isCurrent()) return;
               }
-              await speakGuarded("Đến lượt con đọc nhé.");
+              await speakGuarded("Đến lượt con đọc nhé.", { coaching: true });
             }
           }
         },
@@ -1926,6 +1926,11 @@ function ReadingSessionScreen({
       .playWithWordTimings(words, mergedOptions, () =>
         speechPlayer.play(sampleText, {
           ...(precomputedUrl ? { precomputedAudioUrl: precomputedUrl } : {}),
+          bookId: options.bookId,
+          pageId: options.pageId,
+          pageRevisionId: options.pageRevisionId,
+          isPrivateBook: options.isPrivateBook,
+          cacheScope: options.cacheScope ?? "CATALOG",
           onPlay: () => options.onPlay?.(),
           onEnded: options.onEnded,
         }),
@@ -2076,7 +2081,7 @@ function ReadingSessionScreen({
           async () => {
             if (!isCurrent()) return;
             setLatestTranscript(doneText);
-            await speakGuarded(doneText);
+            await speakGuarded(doneText, { coaching: true });
           },
           true,
           false,
@@ -2189,7 +2194,7 @@ function ReadingSessionScreen({
           if (!isCurrent()) return;
           const invite = `Giờ con đọc trọn tiếng “${plan.focusSyllable}” nhé.`;
           setPhonicsStatusHint(invite);
-          await speakGuarded("Đến lượt con đọc nhé.");
+          await speakGuarded("Đến lượt con đọc nhé.", { coaching: true });
         },
         true,
         false,
