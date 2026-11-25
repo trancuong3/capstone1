@@ -3269,9 +3269,8 @@ function ReadingSessionScreen({
       assistantAudioPlayingRef.current = true;
       await play();
     } catch (error) {
-      playbackFailed = !(
-        error instanceof Error && error.name === "AbortError"
-      );
+      const aborted = error instanceof Error && error.name === "AbortError";
+      playbackFailed = !aborted;
       throw error;
     } finally {
       if (generation === assistantAudioGenerationRef.current) {
@@ -3289,6 +3288,7 @@ function ReadingSessionScreen({
           // If a child stops a retry sample early (for example from voice
           // settings), restore capture after the TTS promise has settled.
           await startRetryRecognition(retryCandidate);
+          return;
         }
 
         const shouldResume = assistantAudioResumeRequestedRef.current;
