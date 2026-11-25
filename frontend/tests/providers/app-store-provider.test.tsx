@@ -7,10 +7,7 @@ import {
   AppStoreProvider,
   useAppStore,
 } from "@/components/providers/app-store-provider";
-import {
-  clearApiReadCache,
-  runCoalescedApiGet,
-} from "@/lib/api/read-cache";
+import { clearApiReadCache, runCoalescedApiGet } from "@/lib/api/read-cache";
 
 function StoreControls() {
   const { selectedChildId, selectChild, clearSelectedChild } = useAppStore();
