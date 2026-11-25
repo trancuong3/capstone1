@@ -284,7 +284,7 @@ class AdminSystemTests(unittest.IsolatedAsyncioTestCase):
             [item.id for item in result.services],
             [
                 "api", "database", "local_ocr", "tts", "stt",
-                "storage", "paddleocr", "vietocr", "tesseract", "tesseract_vie",
+                "tts_audio_cache", "storage", "paddleocr", "vietocr", "tesseract", "tesseract_vie",
             ],
         )
         local_probe.assert_awaited_once()
