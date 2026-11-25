@@ -1,0 +1,30 @@
+{
+  "contention_and_races": {
+    "concurrent_enqueue_ms": 1287.63,
+    "fencing_priority_order_admin_first": true,
+    "fencing_reclaim_token": 2,
+    "fencing_reclaim_attempt": 2,
+    "stale_worker_status": 409,
+    "stale_worker_code": "Fencing token mismatch; worker lease superseded.",
+    "reclaimed_job_terminal_status": "SUCCEEDED",
+    "soft_delete_race_late_complete_status": 409,
+    "soft_delete_race_late_complete_code": "BOOK_SOFT_DELETED",
+    "soft_delete_book_remains_deleted": true,
+    "soft_delete_job_status": "CANCELLED",
+    "stuck_checking_count": 0
+  },
+  "dump_restore_and_rollback": {
+    "pg_dump_seconds": 0.67,
+    "pg_dump_bytes": 0,
+    "psql_restore_seconds": 15.933,
+    "src_tables": 60,
+    "dst_tables": 60,
+    "src_ocr_jobs": 4,
+    "dst_ocr_jobs": 4,
+    "integrity_match": true,
+    "rollback_pre_active_jobs": 2,
+    "rollback_drained_jobs": 2,
+    "rollback_post_active_jobs": 0,
+    "rollback_seconds": 0.1
+  }
+}

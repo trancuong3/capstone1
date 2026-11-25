@@ -16,8 +16,9 @@ import {
 } from "@/lib/reading/ocr-text-reflow";
 import { useReadingAutoScroll } from "@/lib/reading/use-reading-auto-scroll";
 import {
+  getWordHighlightTier,
+  getWordPresentationLabel,
   wordPresentationClasses,
-  wordPresentationLabels,
   type PageWordEvidence,
   type WordPresentationState,
   wordStateForPage,
@@ -111,6 +112,7 @@ const MemoWordToken = memo(function WordToken({
         data-page-revision-id={pageRevisionId}
         data-word-id={word.word_id}
         data-reading-state={presentationState}
+        data-reading-tier={getWordHighlightTier(presentationState, isCurrent)}
         aria-current={isCurrent ? "true" : undefined}
         aria-label={readOnly ? undefined : word.text}
         aria-describedby={
@@ -133,8 +135,14 @@ const MemoWordToken = memo(function WordToken({
         {word.text}
         {!readOnly ? (
           <span hidden id={`text-word-state-${pageRevisionId}-${word.word_id}`}>
-            {wordPresentationLabels[presentationState]}
+            {getWordPresentationLabel(presentationState)}
           </span>
+        ) : null}
+        {presentationState === "preview-correct" ? (
+          <span
+            aria-hidden="true"
+            className="ml-1 inline-block size-1.5 rounded-full bg-emerald-600 align-middle"
+          />
         ) : null}
         {presentationState === "self-corrected" ? (
           <span aria-hidden="true" className="ml-1 text-sm">

@@ -20,7 +20,8 @@ import { invalidateBrowserTokenCache } from "@/lib/api/browser-auth";
 import { canOverlayPage, containImage } from "@/lib/reading/page-presentation";
 import { useReadingAutoScroll } from "@/lib/reading/use-reading-auto-scroll";
 import {
-  wordPresentationLabels,
+  getWordHighlightTier,
+  getWordPresentationLabel,
   type WordPresentationState,
   type PageWordEvidence,
   wordStateForPage,
@@ -39,16 +40,18 @@ interface BookPageViewerProps extends PageWordEvidence {
 
 const OVERLAY_COLORS: Record<WordPresentationState, string> = {
   unread: "",
-  current: "bg-yellow-300/25 ring-2 ring-yellow-500",
-  "preview-correct": "bg-green-300/15 ring-1 ring-green-600/60",
-  correct: "bg-green-300/25 ring-1 ring-green-600",
+  current: "bg-yellow-300/25 ring-2 ring-amber-600 border-b-2 border-primary",
+  "preview-correct":
+    "bg-emerald-300/15 ring-1 ring-emerald-600/70 border-b-2 border-dashed border-emerald-600",
+  correct:
+    "bg-green-300/25 ring-1 ring-green-600 border-b-2 border-solid border-emerald-700",
   incorrect: "bg-red-300/25 ring-1 ring-red-600",
   repeated: "bg-purple-300/25 ring-1 ring-purple-600",
   hesitation: "bg-purple-300/25 ring-1 ring-purple-600",
   omission: "bg-red-300/25 ring-1 ring-red-600",
   "self-corrected": "bg-green-300/25 ring-2 ring-green-700 ring-offset-1",
   unresolved: "bg-red-300/25 ring-2 ring-red-700",
-  assisted: "bg-sky-300/25 ring-2 ring-sky-600",
+  assisted: "bg-sky-300/25 ring-2 ring-sky-600 border-b-2 border-dotted border-sky-700",
   uncertain: "bg-slate-300/20 ring-1 ring-slate-500",
 };
 
@@ -89,6 +92,7 @@ const MemoOverlayWordButton = memo(function OverlayWordButton({
       aria-current={isCurrent ? "true" : undefined}
       data-word-id={word.word_id}
       data-reading-state={state}
+      data-reading-tier={getWordHighlightTier(state, isCurrent)}
       data-page-revision-id={pageRevisionId}
       data-bbox={word.bbox.join(",")}
       onClick={handleClick}
@@ -105,7 +109,7 @@ const MemoOverlayWordButton = memo(function OverlayWordButton({
     >
       <span className="sr-only">{word.text}</span>
       <span hidden id={`image-word-state-${pageRevisionId}-${word.word_id}`}>
-        {wordPresentationLabels[state]}
+        {getWordPresentationLabel(state)}
       </span>
       {[
         "self-corrected",

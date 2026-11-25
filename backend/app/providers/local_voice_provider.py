@@ -18,11 +18,11 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
+from app.request_context import get_request_id
 from app.services.local_voice_worker_bootstrap import (
     ensure_local_voice_worker_running,
     is_local_voice_worker_autostart_armed,
 )
-from app.request_context import get_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -345,7 +345,7 @@ class LocalVoiceProvider:
         self._recovery_task: asyncio.Task[bool] | None = None
 
     def _schedule_background_recovery(self) -> None:
-        if not is_local_voice_worker_autostart_armed():
+        if not self.is_loopback or not is_local_voice_worker_autostart_armed():
             return
         if self._recovery_task is not None and not self._recovery_task.done():
             return
@@ -369,7 +369,7 @@ class LocalVoiceProvider:
         task.add_done_callback(_on_done)
 
     async def _is_incompatible_auth_worker(self) -> bool:
-        if self._get_token():
+        if not self.base_url or not self.is_loopback or self._get_token():
             return False
         try:
             async with httpx.AsyncClient(timeout=1.5, trust_env=False) as client:
@@ -407,6 +407,7 @@ class LocalVoiceProvider:
         if include_auth:
             token = self._get_token()
             if token:
+                headers["Authorization"] = f"Bearer {token}"
                 headers["X-ViRead-Voice-Token"] = token
         return headers
 
@@ -417,7 +418,7 @@ class LocalVoiceProvider:
         return httpx.Timeout(read, connect=connect, write=min(15.0, read), pool=5.0)
 
     def _get_client(self) -> httpx.AsyncClient:
-        if self._client is not None and not self._client.is_closed:
+        if self._client is not None and not getattr(self._client, "is_closed", False):
             return self._client
         if self.base_url:
             try:
@@ -427,7 +428,7 @@ class LocalVoiceProvider:
                     by_url = {}
                     _LOOP_CLIENTS[loop] = by_url
                 shared = by_url.get(self.base_url)
-                if shared is not None and not shared.is_closed:
+                if shared is not None and not getattr(shared, "is_closed", False):
                     return shared
                 shared = httpx.AsyncClient(
                     trust_env=False,
@@ -452,26 +453,30 @@ class LocalVoiceProvider:
         return self._client
 
     async def _reset_client(self) -> None:
-        client = self._client
-        if client is None and self.base_url:
-            clients = _LOOP_CLIENTS.get(asyncio.get_running_loop())
-            if clients is not None:
-                client = clients.pop(self.base_url, None)
-        if client is None:
-            return
-        aclose = getattr(client, "aclose", None)
-        if callable(aclose):
+        clients_to_close: list[Any] = []
+        if self._client is not None and callable(getattr(self._client, "aclose", None)):
+            clients_to_close.append(self._client)
             self._client = None
-            if not getattr(client, "is_closed", False):
+        if self.base_url:
+            try:
+                loop = asyncio.get_running_loop()
+                by_url = _LOOP_CLIENTS.get(loop)
+                if by_url is not None:
+                    shared = by_url.pop(self.base_url, None)
+                    if shared is not None and shared not in clients_to_close:
+                        clients_to_close.append(shared)
+            except RuntimeError:
+                pass
+        for client in clients_to_close:
+            aclose = getattr(client, "aclose", None)
+            if callable(aclose) and not getattr(client, "is_closed", False):
                 try:
                     await aclose()
                 except Exception:
                     pass
 
     async def aclose(self) -> None:
-        if self._client is not None and not self._client.is_closed:
-            await self._client.aclose()
-            self._client = None
+        await self._reset_client()
 
     async def _post_with_retry(
         self,
@@ -481,6 +486,7 @@ class LocalVoiceProvider:
         json: dict[str, Any] | None = None,
         data: dict[str, Any] | None = None,
         files: dict[str, Any] | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> httpx.Response:
         if not self.base_url:
             raise LocalVoiceTechnicalError(
@@ -488,9 +494,11 @@ class LocalVoiceProvider:
             )
         url = f"{self.base_url}{path}"
         headers = self._request_headers(include_auth=True)
+        if extra_headers:
+            headers.update(extra_headers)
         http_timeout = self._make_timeout(timeout)
+        backoffs = (0.25, 0.6)
         last_exc: Exception | None = None
-        retried_busy = False
         for attempt in range(3):
             client = self._get_client()
             try:
@@ -502,21 +510,24 @@ class LocalVoiceProvider:
                     data=data,
                     files=files,
                 )
-                if resp.status_code == 503 and attempt < 2 and not retried_busy:
+                if resp.status_code == 503 and attempt < 2:
                     worker_code = _extract_worker_error_code(resp)
                     if worker_code not in {"LOCAL_TTS_UNAVAILABLE", "LOCAL_STT_UNAVAILABLE"}:
-                        retried_busy = True
-                        await asyncio.sleep(0.25)
+                        await asyncio.sleep(backoffs[attempt])
                         continue
                 if (
                     resp.status_code in (400, 401, 403)
                     and attempt == 0
-                    and self.can_autostart_loopback()
+                    and self.is_loopback
+                    and not self._get_token()
                     and is_local_voice_worker_autostart_armed()
                     and await self._is_incompatible_auth_worker()
                 ):
                     await self._reset_client()
-                    if await ensure_local_voice_worker_running(base_url=self.base_url):
+                    recovered = await ensure_local_voice_worker_running(
+                        base_url=self.base_url
+                    )
+                    if recovered:
                         continue
                 return resp
             except httpx.ConnectTimeout as exc:
@@ -524,20 +535,27 @@ class LocalVoiceProvider:
                 raise exc
             except httpx.ConnectError as exc:
                 last_exc = exc
-                if not self.is_loopback or attempt >= 1:
+                await self._reset_client()
+                if not self.is_loopback or attempt >= 2:
                     raise
-                if (
-                    self.can_autostart_loopback()
-                    and is_local_voice_worker_autostart_armed()
-                    and await ensure_local_voice_worker_running(base_url=self.base_url)
-                ):
-                    continue
-                await asyncio.sleep(0.15)
+                if is_local_voice_worker_autostart_armed():
+                    recovered = await ensure_local_voice_worker_running(
+                        base_url=self.base_url
+                    )
+                    if recovered:
+                        continue
+                await asyncio.sleep(backoffs[attempt])
             except (httpx.RemoteProtocolError, httpx.ReadError) as exc:
                 last_exc = exc
-                if attempt == 0:
-                    await self._reset_client()
-                    await asyncio.sleep(0.2)
+                await self._reset_client()
+                if attempt < 2:
+                    await asyncio.sleep(backoffs[attempt])
+                    continue
+                raise
+            except httpx.TimeoutException as exc:
+                last_exc = exc
+                if attempt < 2:
+                    await asyncio.sleep(backoffs[attempt])
                     continue
                 raise
         assert last_exc is not None
@@ -562,7 +580,7 @@ class LocalVoiceProvider:
             client = self._get_client()
             resp = await client.get(
                 f"{self.base_url}/health",
-                headers=self._request_headers(include_auth=False),
+                headers=self._request_headers(include_auth=self.is_loopback),
                 timeout=self._make_timeout(3.0, 3.0),
             )
             latency_ms = int((time.perf_counter() - started) * 1000)
@@ -594,11 +612,16 @@ class LocalVoiceProvider:
             if bool(data.get("auth_required")) and not self._get_token():
                 self._schedule_background_recovery()
                 return {
+                    "configured": True,
                     "available": False,
                     "stt_ready": False,
                     "tts_ready": False,
+                    "error_code": "LOCAL_VOICE_UNAVAILABLE",
+                    "stt_error_code": "LOCAL_STT_UNAVAILABLE",
+                    "tts_error_code": "LOCAL_TTS_UNAVAILABLE",
                     "stt_model_version": None,
                     "tts_model_version": None,
+                    "latency_ms": latency_ms,
                 }
             stt = data.get("stt") or {}
             tts = data.get("tts") or {}
@@ -639,7 +662,16 @@ class LocalVoiceProvider:
             }
         except httpx.ConnectError:
             self._schedule_background_recovery()
-            return {"available": False, "stt_ready": False, "tts_ready": False}
+            return {
+                "configured": True,
+                "available": False,
+                "stt_ready": False,
+                "tts_ready": False,
+                "error_code": "LOCAL_VOICE_UNAVAILABLE",
+                "stt_error_code": "LOCAL_STT_UNAVAILABLE",
+                "tts_error_code": "LOCAL_TTS_UNAVAILABLE",
+                "latency_ms": int((time.perf_counter() - started) * 1000),
+            }
         except Exception:
             return {
                 "configured": True,
@@ -720,18 +752,25 @@ class LocalVoiceProvider:
         voice_id: str | None = None,
         speed: float = 1.0,
         word_sample: bool = False,
+        accept: str | None = None,
+        audio_format: str | None = None,
     ) -> LocalSynthesizedAudio:
         target_voice, migrated_legacy = self._resolve_target_voice_id(voice_id)
+        body: dict[str, Any] = {
+            "text": text,
+            "voice_id": target_voice,
+            "speed": speed,
+            "word_sample": word_sample,
+        }
+        if audio_format:
+            body["audio_format"] = audio_format
+        extra_headers = {"Accept": accept} if accept else None
         try:
             resp = await self._post_with_retry(
                 "/tts",
                 timeout=25.0,
-                json={
-                    "text": text,
-                    "voice_id": target_voice,
-                    "speed": speed,
-                    "word_sample": word_sample,
-                },
+                json=body,
+                extra_headers=extra_headers,
             )
         except LocalVoiceTechnicalError:
             raise
@@ -777,19 +816,26 @@ class LocalVoiceProvider:
         words: list[str],
         voice_id: str | None = None,
         speed: float = 1.0,
+        accept: str | None = None,
+        audio_format: str | None = None,
     ) -> LocalTimedSpeech:
         target_voice, _ = self._resolve_target_voice_id(voice_id)
         passage_text = " ".join(words)
+        body: dict[str, Any] = {
+            "text": passage_text,
+            "voice_id": target_voice,
+            "speed": speed,
+            "word_sample": False,
+        }
+        if audio_format:
+            body["audio_format"] = audio_format
+        extra_headers = {"Accept": accept} if accept else None
         try:
             resp = await self._post_with_retry(
                 "/tts/timed",
                 timeout=45.0,
-                json={
-                    "text": passage_text,
-                    "voice_id": target_voice,
-                    "speed": speed,
-                    "word_sample": False,
-                },
+                json=body,
+                extra_headers=extra_headers,
             )
         except LocalVoiceTechnicalError:
             raise
@@ -865,17 +911,24 @@ class LocalVoiceProvider:
         steps: list[dict[str, Any]],
         voice_id: str | None = None,
         speed: float = 1.0,
+        accept: str | None = None,
+        audio_format: str | None = None,
     ) -> LocalPhonicsSpeech:
         target_voice, _ = self._resolve_target_voice_id(voice_id)
+        body: dict[str, Any] = {
+            "steps": steps,
+            "voice_id": target_voice,
+            "speed": speed,
+        }
+        if audio_format:
+            body["audio_format"] = audio_format
+        extra_headers = {"Accept": accept} if accept else None
         try:
             resp = await self._post_with_retry(
                 "/tts/phonics",
                 timeout=25.0,
-                json={
-                    "steps": steps,
-                    "voice_id": target_voice,
-                    "speed": speed,
-                },
+                json=body,
+                extra_headers=extra_headers,
             )
         except LocalVoiceTechnicalError:
             raise
@@ -947,12 +1000,24 @@ class LocalVoiceProvider:
         filename: str,
         content_type: str,
         language_code: str | None = "vi",
+        source: str | None = None,
+        session_id: str | None = None,
+        turn_id: str | None = None,
     ) -> LocalTranscription:
+        form_data: dict[str, Any] = {
+            "language": (language_code or "vi").strip() or "vi",
+        }
+        if source:
+            form_data["source"] = source.strip()[:40]
+        if session_id:
+            form_data["session_id"] = session_id.strip()[:80]
+        if turn_id:
+            form_data["turn_id"] = turn_id.strip()[:80]
         try:
             resp = await self._post_with_retry(
                 "/stt",
                 timeout=18.0,
-                data={"language": (language_code or "vi").strip() or "vi"},
+                data=form_data,
                 files={"audio_file": (filename, audio, content_type)},
             )
         except LocalVoiceTechnicalError:

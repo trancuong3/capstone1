@@ -1,11 +1,9 @@
 /**
- * Voice answer & command matcher for hands-free comprehension questions (G24).
+ * Voice answer & command resolver for hands-free comprehension questions.
  *
- * Understands how Vietnamese Grade-1 children answer multiple-choice questions:
- *  - Letters & Vietnamese letter names: "A", "B", "bê", "C", "xê", "D", "đê"
- *  - Natural phrases: "đáp án A", "câu bê", "con chọn xê", "câu một / hai / ba"
- *  - Speaking the answer content directly (when unambiguous against other options)
- *  - Commands: "đọc lại" / "nghe lại" (replay), "dừng lại" (pause voice), "tiếp theo"
+ * STRICT ANSWER-KEY ISOLATION:
+ * Only ever receives `(transcript, visibleChoices)`. It NEVER knows which choice
+ * is the correct answer; grading happens purely on the server after selection.
  */
 
 import { tokenizeVietnameseText } from "@/lib/reading/vietnamese-text";
@@ -15,15 +13,33 @@ export type ComprehensionVoiceMatch =
   | {
       readonly type: "CHOICE";
       readonly choice: ComprehensionChoiceUI;
-      readonly matchedBy: "letter" | "ordinal" | "content";
+      readonly matchedBy: "letter" | "ordinal" | "content" | "letter_and_content";
     }
   | { readonly type: "REPLAY" }
   | { readonly type: "STOP" }
   | { readonly type: "NONE" };
 
+export type ComprehensionVoiceAnalysis =
+  | ComprehensionVoiceMatch
+  | {
+      readonly type: "CONFLICT";
+      readonly letterChoice: ComprehensionChoiceUI;
+      readonly contentChoice: ComprehensionChoiceUI;
+      readonly clarificationPrompt: string;
+    }
+  | {
+      readonly type: "AMBIGUOUS";
+      readonly candidates: readonly ComprehensionChoiceUI[];
+      readonly clarificationPrompt: string;
+    }
+  | {
+      readonly type: "NEGATED";
+      readonly clarificationPrompt: string;
+    };
+
 const LETTER_ALIASES: readonly (readonly string[])[] = [
-  // Index 0 -> A
-  ["a", "à", "á", "ả", "ã", "ạ"],
+  // Index 0 -> A (IMPORTANT: NEVER include Vietnamese particles "à/á/ả/ã/ạ"!)
+  ["a"],
   // Index 1 -> B
   ["b", "bê", "bờ", "be", "bề"],
   // Index 2 -> C
@@ -39,37 +55,64 @@ const ORDINAL_ALIASES: readonly (readonly string[])[] = [
   ["bốn", "4", "tư"],
 ];
 
-const CHOICE_PREFIX_WORDS = new Set([
+const CHOICE_MARKER_TOKENS = new Set([
   "đáp",
   "án",
   "câu",
   "chọn",
+  "phương",
+  "chữ",
+  "số",
+  "thứ",
+  "ý",
+  "là",
+]);
+
+const FILLER_OR_POLITE_WORDS = new Set([
+  "dạ",
+  "vâng",
+  "thưa",
+  "ạ",
+  "nhé",
+  "nha",
+  "ơi",
+  "à",
+  "ờ",
+  "ừ",
+  "ừm",
+  "nhỉ",
+  "ha",
+  "hử",
+  "cô",
+  "thầy",
   "con",
   "bé",
   "em",
-  "là",
-  "chữ",
-  "phương",
-  "số",
-  "thứ",
+  "mình",
+  "tớ",
   "cái",
-  "ý",
-  "nhé",
-  "nha",
-  "ạ",
-  "ơi",
-  "cô",
-  "thầy",
+  "cho",
+  "với",
+  "thôi",
+  "của",
+]);
+
+const CHOICE_PREFIX_WORDS = new Set([
+  ...CHOICE_MARKER_TOKENS,
+  ...FILLER_OR_POLITE_WORDS,
 ]);
 
 const REPLAY_PHRASES = [
+  "đọc lại giúp con",
+  "đọc lại cho con",
+  "cô đọc lại giúp con",
+  "thầy đọc lại giúp con",
+  "cô đọc lại",
+  "thầy đọc lại",
   "đọc lại",
   "nghe lại",
   "nhắc lại",
   "nói lại",
-  "đọc lại giúp con",
-  "cô đọc lại",
-  "thầy đọc lại",
 ];
 
 const STOP_PHRASES = [
@@ -77,7 +120,27 @@ const STOP_PHRASES = [
   "tạm dừng",
   "nghỉ một chút",
   "thôi không nghe",
+  "tạm nghỉ",
 ];
+
+const CORRECTION_PIVOTS: readonly string[] = [
+  "à không",
+  "ơ không",
+  "ồ không",
+  "à nhầm",
+  "nhầm rồi",
+  "ý con là",
+  "ý bé là",
+  "ý em là",
+  "đổi sang",
+  "đổi lại",
+  "sửa lại",
+  "chọn lại",
+  "mà là",
+];
+
+const NEGATION_RE =
+  /(?:^|\s)(?:không\s+chọn|không\s+phải(?:\s+là)?|chẳng\s+chọn|chẳng\s+phải|đừng\s+chọn|không\s+lấy|không\s+đúng)(?:\s|$)/u;
 
 const CHOICE_LETTER_SPOKEN: readonly string[] = ["A", "B", "C", "D"];
 
@@ -94,21 +157,57 @@ function normalizePhrase(text: string): string {
   return tokenizeVietnameseText(text).join(" ");
 }
 
+/**
+ * When the child self-corrects mid-turn (e.g. "A… à không, con chọn B" or
+ * "không phải Lan, mà là bạn An"), discard the retracted clause before the pivot
+ * and keep only the final committed clause.
+ */
+function extractSelfCorrectedTail(normalized: string): {
+  readonly clause: string;
+  readonly hadRevision: boolean;
+} {
+  let latestEnd = -1;
+  for (const pivot of CORRECTION_PIVOTS) {
+    const idx = normalized.lastIndexOf(pivot);
+    if (idx !== -1) {
+      const end = idx + pivot.length;
+      if (end > latestEnd) latestEnd = end;
+    }
+  }
+  if (latestEnd !== -1) {
+    const tail = normalized.slice(latestEnd).trim();
+    if (tail) return { clause: tail, hadRevision: true };
+  }
+  // Pattern: "không phải <X> con chọn <Y>"
+  const notMatch = /^(?:con |bé |em )?không\s+(?:chọn|phải)\s+.+?\s+(?:con\s+|bé\s+|em\s+)?(?:chọn|là)\s+(.+)$/u.exec(
+    normalized,
+  );
+  if (notMatch?.[1]) {
+    return { clause: notMatch[1].trim(), hadRevision: true };
+  }
+  return { clause: normalized, hadRevision: false };
+}
+
 function matchLetterIndex(
   tokens: readonly string[],
-): number | "ambiguous" | -1 {
-  if (!tokens.length || tokens.length > 6) return -1;
-
-  // Reject hesitation/choice-questioning phrases like "a hay bê"
-  if (tokens.includes("hay") || tokens.includes("hoặc")) return "ambiguous";
+  choices: readonly ComprehensionChoiceUI[],
+): { index: number | "ambiguous" | -1; hasExplicitMarker: boolean } {
+  if (!tokens.length || tokens.length > 8) {
+    return { index: -1, hasExplicitMarker: false };
+  }
+  if (tokens.includes("hay") || tokens.includes("hoặc")) {
+    return { index: "ambiguous", hasExplicitMarker: false };
+  }
 
   const matchedIndexes = new Set<number>();
+  let hasExplicitMarker = false;
   let unknownNonPrefix = 0;
 
   for (const token of tokens) {
+    if (CHOICE_MARKER_TOKENS.has(token)) hasExplicitMarker = true;
     let found = -1;
     for (let idx = 0; idx < LETTER_ALIASES.length; idx += 1) {
-      if (LETTER_ALIASES[idx].includes(token)) {
+      if (idx < choices.length && LETTER_ALIASES[idx].includes(token)) {
         found = idx;
         break;
       }
@@ -120,22 +219,22 @@ function matchLetterIndex(
     }
   }
 
-  if (matchedIndexes.size > 1) return "ambiguous";
+  if (matchedIndexes.size > 1) return { index: "ambiguous", hasExplicitMarker };
   if (matchedIndexes.size === 1 && unknownNonPrefix === 0) {
-    return [...matchedIndexes][0];
+    return { index: [...matchedIndexes][0], hasExplicitMarker };
   }
-  return -1;
+  return { index: -1, hasExplicitMarker };
 }
 
 function matchOrdinalIndex(
   tokens: readonly string[],
+  choices: readonly ComprehensionChoiceUI[],
 ): number | "ambiguous" | -1 {
-  if (!tokens.length || tokens.length > 6) return -1;
+  if (!tokens.length || tokens.length > 8) return -1;
   if (tokens.includes("hay") || tokens.includes("hoặc")) return "ambiguous";
 
   // Require an explicit marker ("câu", "đáp án", "số", "chọn", "thứ") so
-  // reading an option that happens to contain the word "một" or "hai" isn't
-  // misclassified as ordinal #1/#2.
+  // numeric option labels ("1", "2", "3") are matched as content when bare.
   const hasMarker = tokens.some((t) =>
     ["câu", "số", "thứ", "chọn", "án"].includes(t),
   );
@@ -146,7 +245,7 @@ function matchOrdinalIndex(
   for (const token of tokens) {
     let found = -1;
     for (let idx = 0; idx < ORDINAL_ALIASES.length; idx += 1) {
-      if (ORDINAL_ALIASES[idx].includes(token)) {
+      if (idx < choices.length && ORDINAL_ALIASES[idx].includes(token)) {
         found = idx;
         break;
       }
@@ -168,24 +267,46 @@ function matchOrdinalIndex(
 function matchContentChoice(
   tokens: readonly string[],
   choices: readonly ComprehensionChoiceUI[],
-): ComprehensionChoiceUI | null {
-  if (!tokens.length) return null;
-  const spokenSet = new Set(tokens);
-  const spokenJoined = tokens.join(" ");
+):
+  | { kind: "unique"; choice: ComprehensionChoiceUI }
+  | { kind: "ambiguous"; candidates: readonly ComprehensionChoiceUI[] }
+  | { kind: "none" } {
+  if (!tokens.length) return { kind: "none" };
+  const strippedTokens = tokens.filter((t) => !CHOICE_PREFIX_WORDS.has(t));
+  const evalTokens = strippedTokens.length ? strippedTokens : tokens;
+  const evalSet = new Set(evalTokens);
+  const fullJoined = tokens.join(" ");
+  const strippedJoined = evalTokens.join(" ");
 
   let best: { choice: ComprehensionChoiceUI; score: number } | null = null;
   let secondScore = 0;
+  const candidatesSharingToken: ComprehensionChoiceUI[] = [];
 
   for (const choice of choices) {
     const labelTokens = tokenizeVietnameseText(choice.label);
     if (!labelTokens.length) continue;
 
-    // Exact normalized label match (e.g. "đúng", "sai", "con mèo")
-    const labelJoined = labelTokens.join(" ");
+    // Track partial distinct token overlap across choices to catch e.g. "Bạn" -> [Bạn Lan, Bạn An]
+    const meaningfulLabelTokens = labelTokens.filter(
+      (t) => !FILLER_OR_POLITE_WORDS.has(t),
+    );
     if (
-      spokenJoined === labelJoined ||
-      (labelTokens.length >= 2 && spokenJoined.includes(labelJoined))
+      meaningfulLabelTokens.some((t) => evalSet.has(t)) &&
+      evalTokens.some((t) => meaningfulLabelTokens.includes(t))
     ) {
+      candidatesSharingToken.push(choice);
+    }
+
+    const labelJoined = labelTokens.join(" ");
+    const exactMatch =
+      fullJoined === labelJoined ||
+      strippedJoined === labelJoined ||
+      (labelTokens.length >= 2 &&
+        (fullJoined.includes(labelJoined) ||
+          strippedJoined.includes(labelJoined)));
+
+    if (exactMatch) {
+      // Check that no conflicting trailing non-prefix token changes the meaning
       if (!best || 1 > best.score) {
         secondScore = best ? best.score : 0;
         best = { choice, score: 1 };
@@ -195,14 +316,13 @@ function matchContentChoice(
       continue;
     }
 
-    // Token overlap score (for multi-word answers spoken slightly differently)
     if (labelTokens.length >= 2) {
       let overlap = 0;
       for (const word of labelTokens) {
-        if (spokenSet.has(word)) overlap += 1;
+        if (evalSet.has(word)) overlap += 1;
       }
       const recall = overlap / labelTokens.length;
-      const precision = overlap / tokens.length;
+      const precision = overlap / evalTokens.length;
       const score =
         recall >= 0.6 && precision >= 0.5 ? (recall + precision) / 2 : 0;
       if (score > 0) {
@@ -216,56 +336,141 @@ function matchContentChoice(
     }
   }
 
-  // Must be clearly better than the runner-up so ambiguous speech never auto-picks
   if (best && best.score - secondScore >= 0.2) {
-    return best.choice;
+    return { kind: "unique", choice: best.choice };
   }
-  return null;
+  if (candidatesSharingToken.length >= 2) {
+    return { kind: "ambiguous", candidates: candidatesSharingToken };
+  }
+  return { kind: "none" };
+}
+
+function findInlineLetterIndex(
+  tokens: readonly string[],
+  choices: readonly ComprehensionChoiceUI[],
+): number | "ambiguous" | -1 {
+  const matched = new Set<number>();
+  for (const token of tokens) {
+    for (let idx = 0; idx < choices.length && idx < LETTER_ALIASES.length; idx += 1) {
+      if (LETTER_ALIASES[idx].includes(token)) {
+        matched.add(idx);
+      }
+    }
+  }
+  if (matched.size > 1) return "ambiguous";
+  if (matched.size === 1) return [...matched][0];
+  return -1;
 }
 
 /**
- * Resolve a child's spoken utterance against the active question's choices.
+ * Full diagnostic resolver separating fillers, commands, negations,
+ * self-corrections, ambiguous partial words, letter+content conflicts, and clear picks.
  */
-export function matchComprehensionVoiceInput(
+export function analyzeComprehensionVoiceInput(
   transcript: string,
   choices: readonly ComprehensionChoiceUI[],
-): ComprehensionVoiceMatch {
-  const tokens = tokenizeVietnameseText(transcript);
-  if (!tokens.length) return { type: "NONE" };
-  const normalized = normalizePhrase(transcript);
+): ComprehensionVoiceAnalysis {
+  const rawTokens = tokenizeVietnameseText(transcript);
+  if (!rawTokens.length) return { type: "NONE" };
+  const rawNormalized = rawTokens.join(" ");
 
   if (
     REPLAY_PHRASES.some(
-      (phrase) => normalized === phrase || normalized.includes(phrase),
+      (phrase) => rawNormalized === phrase || rawNormalized.includes(phrase),
     )
   ) {
     return { type: "REPLAY" };
   }
   if (
     STOP_PHRASES.some(
-      (phrase) => normalized === phrase || normalized.includes(phrase),
+      (phrase) => rawNormalized === phrase || rawNormalized.includes(phrase),
     )
   ) {
     return { type: "STOP" };
   }
 
-  // 1. Try content match FIRST when exact label matches (e.g. "Đúng" / "Sai"
-  // or "Con cá" so a word like "ba" inside an option text isn't hijacked).
-  const byContent = matchContentChoice(tokens, choices);
-  if (byContent) {
-    return { type: "CHOICE", choice: byContent, matchedBy: "content" };
+  const { clause } = extractSelfCorrectedTail(rawNormalized);
+  const tokens = tokenizeVietnameseText(clause);
+  if (!tokens.length) return { type: "NONE" };
+
+  // Reject pure polite fillers / hesitation sounds ("ạ", "à...", "dạ", "ờ")
+  if (tokens.every((t) => FILLER_OR_POLITE_WORDS.has(t))) {
+    return { type: "NONE" };
   }
 
-  // 2. Letter match ("A", "bê", "đáp án xê", "con chọn B")
-  const letterIdx = matchLetterIndex(tokens);
-  if (letterIdx === "ambiguous") return { type: "NONE" };
-  if (letterIdx >= 0 && letterIdx < choices.length) {
-    return { type: "CHOICE", choice: choices[letterIdx], matchedBy: "letter" };
+  // Explicitly detect hesitations ("A hay B nhỉ?", "A hoặc B")
+  if (tokens.includes("hay") || tokens.includes("hoặc")) {
+    return {
+      type: "AMBIGUOUS",
+      candidates: choices.slice(0, 2),
+      clarificationPrompt:
+        "Con đang phân vân phải không? Mình nghĩ thêm rồi nói một đáp án con chọn nhé.",
+    };
   }
 
-  // 3. Ordinal match ("câu một", "đáp án hai", "chọn số 3")
-  const ordinalIdx = matchOrdinalIndex(tokens);
-  if (ordinalIdx === "ambiguous") return { type: "NONE" };
+  // Negation without positive correction ("con không chọn bạn An") must never submit
+  if (NEGATION_RE.test(clause)) {
+    return {
+      type: "NEGATED",
+      clarificationPrompt: "Vậy con muốn chọn đáp án nào nhé?",
+    };
+  }
+
+  const contentRes = matchContentChoice(tokens, choices);
+  const inlineLetter = findInlineLetterIndex(tokens, choices);
+  const pureLetter = matchLetterIndex(tokens, choices);
+
+  // Conflict check: spoken both a letter ("A") and a DIFFERENT option's text ("bạn An")
+  if (
+    contentRes.kind === "unique" &&
+    typeof inlineLetter === "number" &&
+    inlineLetter >= 0 &&
+    inlineLetter < choices.length
+  ) {
+    const letterChoice = choices[inlineLetter];
+    if (letterChoice.id !== contentRes.choice.id) {
+      return {
+        type: "CONFLICT",
+        letterChoice,
+        contentChoice: contentRes.choice,
+        clarificationPrompt: `Con chọn ${letterChoice.label} hay ${contentRes.choice.label}?`,
+      };
+    }
+    return {
+      type: "CHOICE",
+      choice: contentRes.choice,
+      matchedBy: "letter_and_content",
+    };
+  }
+
+  if (contentRes.kind === "unique") {
+    // Also verify no extra unconsumed choice content words create hidden conflict
+    return { type: "CHOICE", choice: contentRes.choice, matchedBy: "content" };
+  }
+
+  if (pureLetter.index === "ambiguous") {
+    return {
+      type: "AMBIGUOUS",
+      candidates: choices.slice(0, 2),
+      clarificationPrompt: "Con nhắc lại một chữ cái đáp án rõ hơn nhé.",
+    };
+  }
+  if (pureLetter.index >= 0 && pureLetter.index < choices.length) {
+    return {
+      type: "CHOICE",
+      choice: choices[pureLetter.index],
+      matchedBy: "letter",
+    };
+  }
+
+  const ordinalIdx = matchOrdinalIndex(tokens, choices);
+  if (ordinalIdx === "ambiguous") {
+    return {
+      type: "AMBIGUOUS",
+      candidates: choices.slice(0, 2),
+      clarificationPrompt: "Con nói rõ số đáp án mình chọn nhé.",
+    };
+  }
   if (ordinalIdx >= 0 && ordinalIdx < choices.length) {
     return {
       type: "CHOICE",
@@ -274,5 +479,37 @@ export function matchComprehensionVoiceInput(
     };
   }
 
+  if (contentRes.kind === "ambiguous") {
+    const names = contentRes.candidates
+      .slice(0, 2)
+      .map((c) => c.label)
+      .join(" hay ");
+    return {
+      type: "AMBIGUOUS",
+      candidates: contentRes.candidates,
+      clarificationPrompt: `Con chọn ${names}?`,
+    };
+  }
+
+  return { type: "NONE" };
+}
+
+/**
+ * Resolve a child's spoken utterance against the active question's choices.
+ * Returns simple discriminated union (`CHOICE | REPLAY | STOP | NONE`) compatible with
+ * existing unit test contracts.
+ */
+export function matchComprehensionVoiceInput(
+  transcript: string,
+  choices: readonly ComprehensionChoiceUI[],
+): ComprehensionVoiceMatch {
+  const analysis = analyzeComprehensionVoiceInput(transcript, choices);
+  if (
+    analysis.type === "CHOICE" ||
+    analysis.type === "REPLAY" ||
+    analysis.type === "STOP"
+  ) {
+    return analysis;
+  }
   return { type: "NONE" };
 }

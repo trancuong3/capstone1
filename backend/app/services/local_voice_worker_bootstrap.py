@@ -6,7 +6,7 @@ up the loopback voice worker (`127.0.0.1:8010`) via the idempotent
 `scripts/windows/Start-ViReadVoiceWorker.ps1` launcher when provisioned.
 
 Never runs in tests, on Render/production, on non-Windows hosts, or when
-`VIREAD_LOCAL_VOICE_WORKER_AUTOSTART=false`.
+`VIREAD_LOCAL_VOICE_WORKER_AUTOSTART=false` / `VIREAD_DISABLE_VOICE_AUTOSTART=true`.
 """
 
 from __future__ import annotations
@@ -74,6 +74,14 @@ def _resolve_base_url(base_url: str | None = None) -> str:
     return raw.strip().rstrip("/") or DEFAULT_LOCAL_VOICE_WORKER_URL
 
 
+def _resolve_worker_token() -> str:
+    return (
+        os.getenv("VIREAD_VOICE_WORKER_TOKEN")
+        or os.getenv("VIREAD_LOCAL_VOICE_WORKER_TOKEN")
+        or ""
+    ).strip()
+
+
 def _resolve_voice_runtime_dir() -> Path:
     raw = (os.getenv("VIREAD_VOICE_RUNTIME_DIR") or "").strip()
     if raw:
@@ -126,13 +134,18 @@ def should_autostart_local_voice_worker(
     if eff_render.strip():
         return False, "render_environment"
 
-    eff_autostart = (
-        os.getenv("VIREAD_LOCAL_VOICE_WORKER_AUTOSTART", "true")
-        if autostart_env is None
-        else autostart_env
-    )
+    if autostart_env is None:
+        disable_flag = os.getenv("VIREAD_DISABLE_VOICE_AUTOSTART", "").strip().lower()
+        if disable_flag in {"1", "true", "yes", "on"}:
+            return False, "autostart_disabled"
+        eff_autostart = os.getenv("VIREAD_LOCAL_VOICE_WORKER_AUTOSTART", "true")
+    else:
+        eff_autostart = autostart_env
     if eff_autostart.strip().lower() in {"0", "false", "no", "off"}:
         return False, "autostart_disabled"
+
+    if app_environment is None and os.getenv("APP_ENVIRONMENT", "").strip().lower() in {"test", "production"}:
+        return False, f"app_environment_{os.getenv('APP_ENVIRONMENT', '').strip().lower()}"
 
     resolved_url = _resolve_base_url(base_url)
     if parse_loopback_worker_endpoint(resolved_url) is None:
@@ -151,11 +164,7 @@ def should_autostart_local_voice_worker(
 
 
 async def _is_worker_healthy(base_url: str) -> bool:
-    worker_token = (
-        os.getenv("VIREAD_VOICE_WORKER_TOKEN")
-        or os.getenv("VIREAD_LOCAL_VOICE_WORKER_TOKEN")
-        or ""
-    ).strip()
+    worker_token = _resolve_worker_token()
     headers = (
         {
             "Authorization": f"Bearer {worker_token}",

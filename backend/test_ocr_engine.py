@@ -83,9 +83,28 @@ class DualEngineOcrTests(unittest.TestCase):
         self.assertEqual(ocr_engine.clean_ocr_punctuation("Thật sao...3?"), 'Thật sao...?"')
 
     def test_is_vietocr_reliable_filters_hallucination(self):
-        """VietOCR Transformer lặp từ tự hồi quy sẽ bị từ chối."""
+        """VietOCR Transformer lặp từ tự hồi quy và control token sẽ bị từ chối."""
         self.assertFalse(ocr_engine.is_vietocr_reliable("từ từ từ", "từ hôm qua"))
+        self.assertFalse(ocr_engine.is_vietocr_reliable("trang ti<pad>f một", "Trang TIFF một"))
         self.assertTrue(ocr_engine.is_vietocr_reliable("Xin chào bạn", "Xin chao ban"))
+
+    def test_sanitize_vietocr_prediction_strips_seq2seq_control_tokens(self):
+        """Control token seq2seq (<pad>/<sos>/<eos>/<unk>) không được làm bẩn văn bản OCR."""
+        cleaned, had_ctrl = ocr_engine._sanitize_vietocr_prediction("trang ti<pad>f một")
+        self.assertEqual(cleaned, "trang tif một")
+        self.assertTrue(had_ctrl)
+
+        cleaned_wrapped, had_wrapped = ocr_engine._sanitize_vietocr_prediction("<sos>Trang TIFF một<eos>")
+        self.assertEqual(cleaned_wrapped, "Trang TIFF một")
+        self.assertTrue(had_wrapped)
+
+        cleaned_only_ctrl, had_only = ocr_engine._sanitize_vietocr_prediction(" <pad> <eos> ")
+        self.assertIsNone(cleaned_only_ctrl)
+        self.assertTrue(had_only)
+
+        cleaned_clean, had_clean = ocr_engine._sanitize_vietocr_prediction("Trang TIFF một")
+        self.assertEqual(cleaned_clean, "Trang TIFF một")
+        self.assertFalse(had_clean)
 
     def test_empty_paddle_output_raises_no_text_detected(self):
         """Khi PaddleOCR không phát hiện được chữ nào, phải ném ngoại lệ OcrNoTextDetected."""

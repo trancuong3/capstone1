@@ -385,7 +385,13 @@ class ParentPrivateBookService:
             source_format=sub.SourceFormat,
             image_width=int(sub.ImageWidth),
             image_height=int(sub.ImageHeight),
-            image_url=private_submission_image_url(sub.BookId, sub.Id, base_url=base_url),
+            image_url=private_submission_image_url(
+                sub.BookId,
+                sub.Id,
+                base_url=base_url,
+                storage_path=sub.SourceStoragePath,
+                owner_id=sub.OwnerParentId,
+            ),
             source_type=sub.SourceType,  # type: ignore[arg-type]
             source_type_label=SOURCE_TYPE_LABELS.get(sub.SourceType, sub.SourceType),
             source_note=sub.SourceNote,
@@ -688,6 +694,8 @@ class ParentPrivateBookService:
                     page.Id,
                     revision_id=page.CurrentVerifiedRevisionId,
                     base_url=base_url,
+                    storage_path=page.ImagePath,
+                    owner_id=book.OwnerParentId,
                 ),
                 created_at=page.CreatedAt,
             )
@@ -2718,7 +2726,11 @@ class ParentPrivateBookService:
             source_sha256=sub.SourceSha256,
             image_width=int(sub.ImageWidth),
             image_height=int(sub.ImageHeight),
-            image_url=admin_submission_image_url(sub.Id, base_url=base_url),
+            image_url=admin_submission_image_url(
+                sub.Id,
+                base_url=base_url,
+                storage_path=sub.SourceStoragePath,
+            ),
             workflow_status=sub.WorkflowStatus,  # type: ignore[arg-type]
             workflow_status_label=WORKFLOW_STATUS_LABELS.get(sub.WorkflowStatus, sub.WorkflowStatus),
             request_status=latest_req.Status if latest_req else None,

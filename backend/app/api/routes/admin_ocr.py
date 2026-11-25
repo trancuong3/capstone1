@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_parent_id, get_db
 from app.diagnostic_logging import log_diagnostic
-from app.schemas.admin_book import AdminBookWriteRequest
 from app.schemas.admin_ocr import (
     AdminOcrCreateDraftRequest,
     AdminOcrDraftRequest,
@@ -26,13 +25,10 @@ from app.schemas.admin_ai_workflow import (
     AdminAiWorkflowRead,
 )
 from app.schemas.book import (
-    AdminBookMetadataResponse,
     AdminDocumentUploadResponse,
     AdminPageLifecycleRead,
     AdminRevisionDetailRead,
 )
-from app.repositories.admin_book_repository import AdminBookRepository
-from app.services.admin_book_service import AdminBookService
 from app.services.admin_ocr_service import AdminOcrService
 from app.services.admin_ocr_jobs import (
     AdminOcrCorrectionJob,
@@ -87,15 +83,6 @@ def _job_read(job: AdminOcrCorrectionJob) -> AdminOcrAiCorrectionJobRead:
         updated_at=job.updated_at,
     )
 
-
-
-@router.post("/admin/catalog", response_model=AdminBookMetadataResponse, status_code=201)
-async def create_admin_book(
-    payload: AdminBookWriteRequest,
-    actor_id: UUID = Depends(get_current_parent_id),
-    db: AsyncSession = Depends(get_db),
-):
-    return await AdminBookService(AdminBookRepository(db)).create(actor_id, payload)
 
 
 @router.post("/admin/catalog/{book_id}/pages", response_model=AdminRevisionDetailRead, status_code=201)

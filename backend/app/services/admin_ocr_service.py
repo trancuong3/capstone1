@@ -2848,7 +2848,9 @@ class AdminOcrService:
                         (event_type, page_id, revision_id, actor_id, payload)
                     VALUES ('VERIFIED_REVISION', :page_id, :revision_id, :actor_id,
                             CAST(:payload AS jsonb))
-                    ON CONFLICT (event_type, revision_id) DO NOTHING
+                    ON CONFLICT (event_type, revision_id)
+                        WHERE event_type = 'VERIFIED_REVISION'
+                    DO NOTHING
                 """),
                 {
                     "page_id": page.Id,
@@ -3663,7 +3665,11 @@ class AdminOcrService:
             },
         )
         await self.db.commit()
-        completed = await job_service.wait_for_job_completion(job.Id)
+        completed = (
+            job
+            if job.Status == "SUCCEEDED"
+            else await job_service.wait_for_job_completion(job.Id)
+        )
         if completed.Status != "SUCCEEDED":
             if (completed.ErrorCode or "").upper() == "NO_TEXT_DETECTED":
                 raise OcrNoTextDetected("No usable text was detected")
@@ -3718,7 +3724,11 @@ class AdminOcrService:
             },
         )
         await self.db.commit()
-        completed = await job_service.wait_for_job_completion(job.Id)
+        completed = (
+            job
+            if job.Status == "SUCCEEDED"
+            else await job_service.wait_for_job_completion(job.Id)
+        )
         if completed.Status != "SUCCEEDED":
             if (completed.ErrorCode or "").upper() == "NO_TEXT_DETECTED":
                 raise OcrNoTextDetected("No usable text was detected")
@@ -3773,7 +3783,11 @@ class AdminOcrService:
             processing_meta={"expected_page_image_path": expected_page_image_path},
         )
         await self.db.commit()
-        completed = await job_service.wait_for_job_completion(job.Id)
+        completed = (
+            job
+            if job.Status == "SUCCEEDED"
+            else await job_service.wait_for_job_completion(job.Id)
+        )
         if completed.Status != "SUCCEEDED":
             if (completed.ErrorCode or "").upper() == "NO_TEXT_DETECTED":
                 raise OcrNoTextDetected("No usable text was detected")
@@ -3997,7 +4011,9 @@ class AdminOcrService:
         if book_id is None or page_id is None:
             return {"stale_reason": "MISSING_BOOK_OR_PAGE_TARGET"}
         book = await self.repo.book(book_id, lock=True)
-        if book is None or book.LifecycleStatus != "ACTIVE":
+        if book is None or getattr(book, "IsDeleted", False):
+            return {"stale_reason": "BOOK_SOFT_DELETED"}
+        if book.LifecycleStatus != "ACTIVE":
             return {"stale_reason": "BOOK_INACTIVE_OR_DELETED"}
         page = await self.repo.page(page_id, lock=True)
         if page is None:

@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 VoiceProviderMode = Literal["local_only", "local_with_google_fallback"]
+AudioFormatPreference = Literal["wav", "mp3", "ogg"]
 
 
 def _validate_safe_id(value: str | None, *, max_len: int = 100) -> str | None:
@@ -33,6 +34,7 @@ class TextToSpeechRequest(BaseModel):
     provider_mode: VoiceProviderMode = "local_only"
     allow_google_tts: bool = False
     session_id: str | None = Field(default=None, max_length=80)
+    audio_format: AudioFormatPreference | None = None
 
     @field_validator("text")
     @classmethod
@@ -82,6 +84,7 @@ class PhonicsSpeechRequest(BaseModel):
     provider_mode: VoiceProviderMode = "local_only"
     allow_google_tts: bool = False
     session_id: str | None = Field(default=None, max_length=80)
+    audio_format: AudioFormatPreference | None = None
 
     @field_validator("voice_id")
     @classmethod

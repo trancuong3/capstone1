@@ -5,10 +5,10 @@ param(
     [int]$Port = 8010,
     [string]$TtsPrecision = "int8",
     [int]$StartupTimeoutSeconds = 90,
-    [switch]$ReplaceIncompatibleWorker = $false,
     [string]$VoiceWorkerToken = "",
     [ValidateSet("AboveNormal", "High", "Normal")]
-    [string]$Priority = "AboveNormal"
+    [string]$Priority = "AboveNormal",
+    [switch]$ReplaceIncompatibleWorker = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -105,7 +105,7 @@ try {
             if ($existingConn) {
                 Set-ProcessTreePriority ([int]$existingConn.OwningProcess) $Priority
             }
-            Write-Host "ViRead Local Voice Worker is already healthy on http://${BindHost}:${Port}"
+            Write-Host "ViRead Local Voice Worker is already healthy on http://${BindHost}:${Port} (priority=$Priority)"
             exit 0
         }
     }
@@ -116,7 +116,7 @@ if ($existing) {
     $ownerPid = [int]$existing.OwningProcess
     $ownerCmd = Get-ProcessCommandLine $ownerPid
     if ($incompatibleWorker) {
-        [Console]::Error.WriteLine("Incompatible voice worker detected on port $Port (auth_required=true without VIREAD_LOCAL_VOICE_WORKER_TOKEN). Owning PID=${ownerPid}, CommandLine=${ownerCmd}")
+        [Console]::Error.WriteLine("Incompatible voice worker detected on port $Port (auth_required=true without VIREAD_VOICE_WORKER_TOKEN). Owning PID=${ownerPid}, CommandLine=${ownerCmd}")
         if ($ReplaceIncompatibleWorker) {
             Write-Host "Stopping incompatible worker PID=${ownerPid} (-ReplaceIncompatibleWorker specified)..."
             Stop-Process -Id $ownerPid -Force -ErrorAction SilentlyContinue
@@ -130,7 +130,7 @@ if ($existing) {
                 exit 4
             }
         } else {
-            [Console]::Error.WriteLine("Re-run with -ReplaceIncompatibleWorker to replace it, or stop PID=${ownerPid} / configure VIREAD_LOCAL_VOICE_WORKER_TOKEN.")
+            [Console]::Error.WriteLine("Re-run with -ReplaceIncompatibleWorker to replace it, or stop PID=${ownerPid} / configure VIREAD_VOICE_WORKER_TOKEN.")
             exit 4
         }
     } else {

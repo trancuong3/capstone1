@@ -537,4 +537,58 @@ describe("LocalSegmentSpeechRecognition 503 Offline -> Online browser fallback",
       ),
     ).toBe(false);
   });
+
+  it("reduces rolling interim HTTP amplification via VAD voiced gating and speech-pause boundaries", async () => {
+    const sources: string[] = [];
+    const transcribe = vi.fn(
+      async (_blob: Blob, opts?: { source?: string }) => {
+        sources.push(opts?.source ?? "unknown");
+        return { text: "nhà em có một", language_code: "vi" };
+      },
+    );
+    const rec = new LocalSegmentSpeechRecognition(
+      { transcribe } as unknown as SpeechService,
+      () => ({
+        sessionId: "sess-vad",
+        pageId: "p-1",
+        keyterms: SCREENSHOT_KEYTERMS,
+      }),
+    );
+
+    const internal = rec as unknown as {
+      active: boolean;
+      consumeSamples16k: (chunk: Float32Array) => void;
+    };
+    internal.active = true;
+
+    const frame = 640; // 40ms @ 16kHz
+    const voiced = new Float32Array(frame).fill(0.05);
+    const silent = new Float32Array(frame).fill(0);
+
+    // 1.6s continuous speech (40 frames) -> gated to <= 4 interims (was 10+ at 160ms step)
+    for (let i = 0; i < 40; i += 1) {
+      internal.consumeSamples16k(voiced);
+      await Promise.resolve();
+    }
+    const interimsAfterContinuous = sources.filter(
+      (s) => s === "local_live_interim",
+    ).length;
+    expect(interimsAfterContinuous).toBeGreaterThanOrEqual(2);
+    expect(interimsAfterContinuous).toBeLessThanOrEqual(4);
+
+    // 600ms trailing silence -> VAD prevents redundant re-uploads over silence, then flushes once
+    for (let i = 0; i < 15; i += 1) {
+      internal.consumeSamples16k(silent);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const totalInterims = sources.filter(
+      (s) => s === "local_live_interim",
+    ).length;
+    const totalFinals = sources.filter(
+      (s) => s === "local_live_segment",
+    ).length;
+    expect(totalInterims).toBeLessThanOrEqual(4);
+    expect(totalFinals).toBe(1);
+  });
 });

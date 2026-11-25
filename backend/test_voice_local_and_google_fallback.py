@@ -12,6 +12,7 @@ from uuid import UUID
 
 import httpx
 
+os.environ.setdefault("APP_ENVIRONMENT", "test")
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:1/test")
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
@@ -561,6 +562,8 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
         recorded_headers: list[dict[str, str] | None] = []
 
         class AuthGatedHealthClient:
+            is_closed = False
+
             def __init__(self, **_kwargs):
                 pass
 
@@ -569,6 +572,9 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
 
             async def __aexit__(self, *_args):
                 return None
+
+            async def aclose(self):
+                self.is_closed = True
 
             async def get(self, url, **kwargs):
                 recorded_headers.append(kwargs.get("headers"))
@@ -606,6 +612,7 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
             AuthGatedHealthClient,
         ):
             with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("VIREAD_VOICE_WORKER_TOKEN", None)
                 os.environ.pop("VIREAD_LOCAL_VOICE_WORKER_TOKEN", None)
                 provider_no_token = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
                 health_no_token = asyncio.run(provider_no_token.get_health())
@@ -615,7 +622,7 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
 
             with patch.dict(
                 os.environ,
-                {"VIREAD_LOCAL_VOICE_WORKER_TOKEN": "secret-worker-tok"},
+                {"VIREAD_VOICE_WORKER_TOKEN": "secret-worker-tok"},
                 clear=False,
             ):
                 provider_with_token = LocalVoiceProvider(
@@ -626,16 +633,11 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
                     provider_with_token.list_voices()
                 )
 
-        self.assertEqual(
-            health_no_token,
-            {
-                "available": False,
-                "stt_ready": False,
-                "tts_ready": False,
-                "stt_model_version": None,
-                "tts_model_version": None,
-            },
-        )
+        self.assertFalse(health_no_token["available"])
+        self.assertFalse(health_no_token["stt_ready"])
+        self.assertFalse(health_no_token["tts_ready"])
+        self.assertIsNone(health_no_token["stt_model_version"])
+        self.assertIsNone(health_no_token["tts_model_version"])
         self.assertFalse(live_no_token)
         self.assertGreater(len(voices_no_token), 0)
 
@@ -647,6 +649,7 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
         self.assertEqual(
             recorded_headers[-1],
             {
+                "Authorization": "Bearer secret-worker-tok",
                 "X-ViRead-Voice-Token": "secret-worker-tok",
             },
         )

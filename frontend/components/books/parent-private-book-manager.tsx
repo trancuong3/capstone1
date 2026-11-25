@@ -1968,7 +1968,7 @@ function ParentPrivateBookManagerContent({
               onPageChange={setSubmissionsPage}
               page={safeSubmissionsPage}
               pageSize={SUBMISSIONS_PAGE_SIZE}
-              total={activeSubmissions.length}
+              total={filteredSubmissions.length}
             />
           </>
         )}

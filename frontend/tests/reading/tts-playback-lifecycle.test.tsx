@@ -650,4 +650,31 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     act(() => a1.finish());
     await normalPhrase;
   });
+
+  it("plays audio/mpeg directly and falls back to WAV if compressed TTS decode fails", async () => {
+    const mp3Blob = new Blob(["fake-mp3"], { type: "audio/mpeg" });
+    const wavBlob = new Blob(["fake-wav"], { type: "audio/wav" });
+    speech.synthesize
+      .mockResolvedValueOnce(mp3Blob)
+      .mockResolvedValueOnce(wavBlob);
+
+    const { result } = renderHook(() => useSpeechPlayer());
+    const playPromise = result.current.play("Xin chào bé yêu.");
+
+    // First attempt receives audio/mpeg and hits WebView decode error before start
+    const mp3Audio = await audioAt(0);
+    act(() => {
+      mp3Audio.onerror?.();
+    });
+
+    // Player automatically re-requests explicit audioFormat: "wav" and completes cleanly
+    const wavAudio = await audioAt(1);
+    expect(speech.synthesize).toHaveBeenNthCalledWith(
+      2,
+      "Xin chào bé yêu.",
+      expect.objectContaining({ audioFormat: "wav" }),
+    );
+    act(() => wavAudio.finish());
+    await playPromise;
+  });
 });
