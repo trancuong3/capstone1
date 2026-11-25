@@ -253,7 +253,7 @@ export function BookLibraryScreen() {
       <BookChildHeader
         child={child}
         fullBleedDesktop
-        mobileLabel="Cùng bé chọn một cuốn sách"
+        mobileLabel="Chọn sách cho bé"
       />
 
       {collectionNotice ? (

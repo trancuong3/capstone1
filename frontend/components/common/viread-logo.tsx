@@ -26,6 +26,7 @@ export function ViReadLogo({
       aria-label={ariaLabel}
       className={cn(
         "group inline-flex min-h-11 shrink-0 items-center gap-2 rounded-control text-primary transition-opacity hover:opacity-85 focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+        compact && "min-w-11 justify-center",
         className,
       )}
       href={href}

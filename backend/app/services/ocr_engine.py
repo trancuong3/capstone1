@@ -270,6 +270,21 @@ def _scan_vietocr_snapshot(
     }
 
 
+def _resolve_predictor_device(predictor: Any | None) -> str:
+    cfg = getattr(predictor, "config", None) if predictor is not None else None
+    if isinstance(cfg, dict):
+        raw_device = str(cfg.get("device") or "").strip().lower()
+        if raw_device:
+            return "cuda" if raw_device.startswith("cuda") else raw_device
+    if torch is not None:
+        try:
+            if torch.cuda.is_available():
+                return "cuda"
+        except Exception:
+            pass
+    return "cpu"
+
+
 def _attach_vietocr_provenance(
     result: dict[str, object],
     snapshot: dict[str, Any] | None,
@@ -293,14 +308,17 @@ def _attach_vietocr_provenance(
             "model_load_status": "not_run",
             "fallback_reason": skipped_reason or snapshot.get("fallback_reason") or "tesseract_fallback",
         }
-    elif status == "error" and not snapshot.get("fallback_reason"):
-        snapshot = {**snapshot, "fallback_reason": "vietocr_inference_error"}
-    elif status == "no_result" and not snapshot.get("fallback_reason"):
-        snapshot = {**snapshot, "fallback_reason": "vietocr_no_result"}
-    elif (snapshot.get("model_load_status") == "unavailable"
-          or status in {"not_installed", "not_initialized", "disabled"}):
-        if not snapshot.get("fallback_reason"):
-            snapshot = {**snapshot, "fallback_reason": "vietocr_unavailable"}
+        metadata.setdefault("runtime_device", "cpu")
+    else:
+        metadata.setdefault("runtime_device", _resolve_predictor_device(_vietocr_engine))
+        if status == "error" and not snapshot.get("fallback_reason"):
+            snapshot = {**snapshot, "fallback_reason": "vietocr_inference_error"}
+        elif status == "no_result" and not snapshot.get("fallback_reason"):
+            snapshot = {**snapshot, "fallback_reason": "vietocr_no_result"}
+        elif (snapshot.get("model_load_status") == "unavailable"
+              or status in {"not_installed", "not_initialized", "disabled"}):
+            if not snapshot.get("fallback_reason"):
+                snapshot = {**snapshot, "fallback_reason": "vietocr_unavailable"}
     metadata["vietocr_runtime_provenance"] = {
         **snapshot,
         "model_inference_status": status,

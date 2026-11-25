@@ -16,11 +16,13 @@ describe("user-query-cache", () => {
     vi.setSystemTime(new Date("2026-11-25T10:00:00Z"));
     clearUserCache();
     window.sessionStorage.clear();
+    window.localStorage.clear();
   });
 
   afterEach(() => {
     clearUserCache();
     window.sessionStorage.clear();
+    window.localStorage.clear();
     vi.useRealTimers();
   });
 
@@ -115,5 +117,42 @@ describe("user-query-cache", () => {
     clearUserCache();
     expect(readUserCache("user-b", "dashboard-summary")).toBeNull();
     expect(window.sessionStorage.getItem("unrelated_key")).toBe("keep-me");
+  });
+
+  it("persists opted-in SWR entries across sessionStorage resets while preserving strict isolation and logout purge", () => {
+    window.localStorage.setItem("keep_local_key", "stay");
+    writeUserCache(
+      "user-a",
+      "dashboard-summary",
+      { children: [{ id: "c1", alias: "Bé An" }] },
+      { persist: "local" },
+    );
+    writeUserCache(
+      "user-a",
+      "private-storage",
+      {
+        url: "https://proj.supabase.co/storage/v1/object/sign/viread-private-books/book/1.png",
+      },
+      { persist: "local" },
+    );
+
+    expect(readUserCache("user-a", "private-storage")).toBeNull();
+
+    // Simulate Android cold launch (memory + sessionStorage wiped, localStorage survives).
+    const storageKey = `${USER_CACHE_STORAGE_PREFIX}user-a:dashboard-summary`;
+    const persistedRaw = window.localStorage.getItem(storageKey);
+    expect(persistedRaw).not.toBeNull();
+    clearUserCache();
+    window.sessionStorage.clear();
+    window.localStorage.setItem(storageKey, persistedRaw!);
+
+    expect(readUserCache("user-b", "dashboard-summary")).toBeNull();
+    expect(readUserCache("user-a", "dashboard-summary")).toEqual({
+      children: [{ id: "c1", alias: "Bé An" }],
+    });
+
+    clearUserCache("user-a");
+    expect(window.localStorage.getItem(storageKey)).toBeNull();
+    expect(window.localStorage.getItem("keep_local_key")).toBe("stay");
   });
 });

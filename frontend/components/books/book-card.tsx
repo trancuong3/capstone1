@@ -57,7 +57,7 @@ export function BookCard({
                 }
                 aria-pressed={saved}
                 className={
-                  "flex min-h-10 flex-1 items-center justify-center gap-1 rounded-control px-2 text-label font-semibold " +
+                  "flex min-h-11 flex-1 items-center justify-center gap-1 rounded-control px-2 text-label font-semibold " +
                   (saved
                     ? "bg-sky text-primary"
                     : "border border-border text-ink hover:bg-canvas")
