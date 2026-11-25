@@ -269,11 +269,11 @@ describe("reading voice settings", () => {
     await user.click(screen.getByRole("button", { name: /Giọng đọc/ }));
     await screen.findByRole("radio", { name: /Cô Trúc Ly/ });
 
-    // Default mode is local_with_google_fallback ("Máy này + Google dự phòng") with automatic Online fallback ON
+    // Privacy-first default mode is local_only ("Chỉ máy này") with Google fallbacks OFF
     expect(getVoicePolicyPreferences()).toMatchObject({
-      providerMode: "local_with_google_fallback",
-      allowGoogleSttFallback: true,
-      allowGoogleTtsFallback: true,
+      providerMode: "local_only",
+      allowGoogleSttFallback: false,
+      allowGoogleTtsFallback: false,
     });
 
     // Switch region tabs: Miền Trung -> auto-selects Central voice
@@ -286,7 +286,17 @@ describe("reading voice settings", () => {
     expect(getVoicePolicyPreferences().region).toBe("south");
     expect(getSpeechPreferences().voiceId).toBe("local_south_thuc_doan");
 
-    // Parent can explicitly switch to "Chỉ máy này" (local_only) -> turns both Google fallbacks OFF
+    // Parent can explicitly enable "Máy này + Google dự phòng" -> enables BOTH STT & TTS fallbacks
+    await user.click(
+      screen.getByRole("button", { name: /Máy này \+ Google dự phòng/ }),
+    );
+    expect(getVoicePolicyPreferences()).toMatchObject({
+      providerMode: "local_with_google_fallback",
+      allowGoogleSttFallback: true,
+      allowGoogleTtsFallback: true,
+    });
+
+    // Switching back to "Chỉ máy này" (local_only) -> turns both Google fallbacks OFF
     await user.click(screen.getByRole("button", { name: /Chỉ máy này/ }));
     expect(getVoicePolicyPreferences()).toMatchObject({
       providerMode: "local_only",

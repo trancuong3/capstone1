@@ -658,6 +658,34 @@ function ReadingSessionScreen({
     }
   }
 
+  const setSpeechCacheContext = speechPlayer.setCacheContext;
+  const activeCacheBookId =
+    loadState.status === "ready" ? loadState.data.book.id : null;
+  const activeCacheIsPrivate =
+    loadState.status === "ready"
+      ? loadState.data.book.visibility_scope === "PARENT_PRIVATE"
+      : undefined;
+  const activeCachePageId = page?.page_id ?? null;
+  const activeCachePageRevisionId = page?.page_revision_id ?? null;
+
+  useEffect(() => {
+    setSpeechCacheContext?.({
+      bookId: activeCacheBookId,
+      pageId: activeCachePageId,
+      pageRevisionId: activeCachePageRevisionId,
+      isPrivateBook: activeCacheIsPrivate,
+    });
+    return () => {
+      setSpeechCacheContext?.(null);
+    };
+  }, [
+    setSpeechCacheContext,
+    activeCacheBookId,
+    activeCacheIsPrivate,
+    activeCachePageId,
+    activeCachePageRevisionId,
+  ]);
+
   useEffect(() => {
     mountedRef.current = true;
     lockSessionVoice(sessionId);
@@ -689,9 +717,11 @@ function ReadingSessionScreen({
       cleanupMicrophoneOnLeave();
     };
     window.addEventListener("pagehide", handlePageHide);
+    document.addEventListener("viread:android-background", handlePageHide);
     return () => {
       mountedRef.current = false;
       window.removeEventListener("pagehide", handlePageHide);
+      document.removeEventListener("viread:android-background", handlePageHide);
       setActiveVoiceSession(null);
       automationRuntimeRef.current?.dispatch({ type: "SESSION_END" });
       automationRuntimeRef.current?.dispose();

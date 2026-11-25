@@ -28,8 +28,9 @@ from fastapi import (
     status,
 )
 from fastapi.security import HTTPAuthorizationCredentials
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_parent_id, require_active_profile_id
+from app.api.deps import get_current_parent_id, get_db, require_active_profile_id
 from app.database.role_cache import get_cached_profile_role
 from app.database.session import AsyncSessionLocal
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
@@ -104,7 +105,11 @@ def get_voice_orchestrator() -> VoiceOrchestrator:
     worker_url = (
         os.getenv("VIREAD_LOCAL_VOICE_WORKER_URL") or "http://127.0.0.1:8010"
     ).strip().rstrip("/") or "http://127.0.0.1:8010"
-    worker_token = (os.getenv("VIREAD_LOCAL_VOICE_WORKER_TOKEN") or "").strip()
+    worker_token = (
+        os.getenv("VIREAD_VOICE_WORKER_TOKEN")
+        or os.getenv("VIREAD_LOCAL_VOICE_WORKER_TOKEN")
+        or ""
+    ).strip()
     key = (worker_url, worker_token)
     cached = _DEFAULT_ORCHESTRATORS.get(key)
     if cached is None:
@@ -172,6 +177,30 @@ def _extract_audio_accept(request: Request) -> str | None:
     return None
 
 
+def _accepts_db_kwarg(fn: Any) -> bool:
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return "db" in params or any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+
+
+def _tts_cache_headers(speech_or_audio: Any) -> dict[str, str]:
+    cache_hit = bool(getattr(speech_or_audio, "cache_hit", False))
+    cache_scope = getattr(speech_or_audio, "cache_scope", None)
+    if cache_hit:
+        cache_control = "private, no-store" if cache_scope == "PRIVATE" else "private, max-age=86400"
+    else:
+        cache_control = "no-store"
+    return {
+        "Cache-Control": cache_control,
+        "X-TTS-Cache": "HIT" if cache_hit else "MISS",
+        "X-TTS-Provider": str(getattr(speech_or_audio, "provider", "local")),
+    }
+
+
 @router.get("/status")
 async def voice_status(
     response: Response,
@@ -188,7 +217,8 @@ async def voice_status(
 async def text_to_speech(
     payload: TextToSpeechRequest,
     request: Request,
-    _actor_id: UUID = Depends(require_active_profile_id),
+    actor_id: UUID = Depends(require_active_profile_id),
+    db: AsyncSession = Depends(get_db),
     _rate_limited: None = Depends(
         rate_limit("voice_tts", default_max=60, default_window=60.0, actor_dependency=require_active_profile_id)
     ),
@@ -199,17 +229,26 @@ async def text_to_speech(
         provider_mode=payload.provider_mode,
         allow_google_tts=payload.allow_google_tts,
         session_id=payload.session_id,
+        page_id=str(payload.page_id) if payload.page_id is not None else None,
         accept=_extract_audio_accept(request),
         audio_format=payload.audio_format,
+        actor_id=actor_id,
+        book_id=payload.book_id,
+        page_revision_id=payload.page_revision_id,
+        cache_scope=payload.cache_scope,
     )
+    orchestrator = get_voice_orchestrator()
+    synth_kwargs: dict[str, Any] = {
+        "text": payload.text,
+        "requested_voice_id": payload.voice_id,
+        "speed": payload.speed,
+        "word_sample": payload.word_sample,
+        "policy": policy,
+    }
+    if _accepts_db_kwarg(orchestrator.synthesize):
+        synth_kwargs["db"] = db
     try:
-        audio = await get_voice_orchestrator().synthesize(
-            text=payload.text,
-            requested_voice_id=payload.voice_id,
-            speed=payload.speed,
-            word_sample=payload.word_sample,
-            policy=policy,
-        )
+        audio = await orchestrator.synthesize(**synth_kwargs)
     except VoiceProviderError as error:
         raise provider_http_exception(error) from None
 
@@ -223,8 +262,9 @@ async def text_to_speech(
         if g_meta is not None:
             voice_gender = str(g_meta.get("gender") or "female")
 
+    cache_headers = _tts_cache_headers(audio)
     headers = {
-        "Cache-Control": "no-store",
+        **cache_headers,
         "X-Voice-Provider": audio.provider,
         "X-Resolved-Voice-Id": audio.resolved_voice_id,
         "X-Voice-Region": audio.region,
@@ -243,7 +283,9 @@ async def text_to_speech(
 async def phonics_text_to_speech(
     payload: PhonicsSpeechRequest,
     request: Request,
-    _actor_id: UUID = Depends(require_active_profile_id),
+    response: Response,
+    actor_id: UUID = Depends(require_active_profile_id),
+    db: AsyncSession = Depends(get_db),
     _rate_limited: None = Depends(
         rate_limit("voice_tts", default_max=60, default_window=60.0, actor_dependency=require_active_profile_id)
     ),
@@ -254,25 +296,37 @@ async def phonics_text_to_speech(
         provider_mode=payload.provider_mode,
         allow_google_tts=payload.allow_google_tts,
         session_id=payload.session_id,
+        page_id=str(payload.page_id) if payload.page_id is not None else None,
         accept=_extract_audio_accept(request),
         audio_format=payload.audio_format,
+        actor_id=actor_id,
+        book_id=payload.book_id,
+        page_revision_id=payload.page_revision_id,
+        cache_scope=payload.cache_scope,
     )
+    orchestrator = get_voice_orchestrator()
+    phonics_kwargs: dict[str, Any] = {
+        "steps": [
+            {
+                "id": s.id,
+                "spoken_text": s.spoken_text,
+                "pause_after_ms": s.pause_after_ms,
+            }
+            for s in payload.steps
+        ],
+        "requested_voice_id": payload.voice_id,
+        "speed": payload.speed,
+        "policy": policy,
+    }
+    if _accepts_db_kwarg(orchestrator.synthesize_phonics):
+        phonics_kwargs["db"] = db
     try:
-        speech = await get_voice_orchestrator().synthesize_phonics(
-            steps=[
-                {
-                    "id": s.id,
-                    "spoken_text": s.spoken_text,
-                    "pause_after_ms": s.pause_after_ms,
-                }
-                for s in payload.steps
-            ],
-            requested_voice_id=payload.voice_id,
-            speed=payload.speed,
-            policy=policy,
-        )
+        speech = await orchestrator.synthesize_phonics(**phonics_kwargs)
     except VoiceProviderError as error:
         raise provider_http_exception(error) from None
+
+    for h_name, h_val in _tts_cache_headers(speech).items():
+        response.headers[h_name] = h_val
 
     return PhonicsSpeechRead(
         audio_base64=base64.b64encode(speech.audio).decode("ascii"),

@@ -89,6 +89,10 @@ export interface TimedSpeechOptions {
   readonly voiceId?: string | null;
   readonly speed?: number;
   readonly audioFormat?: TtsAudioFormat;
+  readonly bookId?: string | null;
+  readonly pageId?: string | null;
+  readonly pageRevisionId?: string | null;
+  readonly cacheScope?: "CATALOG" | "PRIVATE" | "COACHING" | null;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
 }
@@ -243,6 +247,12 @@ export function createVoiceStudioService(): VoiceStudioService {
             ...(activeLock?.sessionId
               ? { session_id: activeLock.sessionId }
               : {}),
+            ...(options.bookId ? { book_id: options.bookId } : {}),
+            ...(options.pageId ? { page_id: options.pageId } : {}),
+            ...(options.pageRevisionId
+              ? { page_revision_id: options.pageRevisionId }
+              : {}),
+            ...(options.cacheScope ? { cache_scope: options.cacheScope } : {}),
           }),
         },
         options.signal,

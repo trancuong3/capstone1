@@ -210,7 +210,11 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     expect(result.current.fallbackNotice).toMatch(/không tự đổi giọng/i);
   });
 
-  it("auto-falls back to Online browser TTS on default policy with zero 503 spam when cached voice health reports local down and Google unconfigured", async () => {
+  it("auto-falls back to Online browser TTS when Google fallback is opted-in with zero 503 spam on local outage", async () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_with_google_fallback",
+      allowGoogleTtsFallback: true,
+    });
     class FakeUtterance {
       text: string;
       lang = "";
@@ -256,7 +260,11 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     );
   });
 
-  it("auto-falls back to browser TTS immediately on 503 without wasting a second Google backend call when Google Cloud TTS is unconfigured", async () => {
+  it("auto-falls back to browser TTS immediately on 503 when Google fallback is opted-in without wasting a second Google backend call", async () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_with_google_fallback",
+      allowGoogleTtsFallback: true,
+    });
     class FakeUtterance {
       text: string;
       lang = "";
@@ -302,6 +310,10 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
   });
 
   it("never permanently locks into Online TTS — resumes Local Offline VieNeu-TTS automatically once local recovers", async () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_with_google_fallback",
+      allowGoogleTtsFallback: true,
+    });
     class FakeUtterance {
       text: string;
       lang = "";

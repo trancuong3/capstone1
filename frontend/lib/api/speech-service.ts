@@ -11,11 +11,20 @@ import {
 } from "@/lib/api/speech-error";
 import { withRequestDeadline } from "@/lib/api/request-deadline";
 import {
+  DEFAULT_LOCAL_VOICE_ID,
   getActiveSessionVoiceLock,
   getVoicePolicyPreferences,
+  inferModelVersionForVoiceId,
   type VoiceProviderMode,
 } from "@/lib/reading/session-voice-lock";
 import { setSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
+import {
+  buildTtsBrowserCacheKey,
+  getCachedTtsAudio,
+  putCachedTtsAudio,
+  shouldPersistTtsCacheEntry,
+  type TtsCacheScope,
+} from "@/lib/reading/tts-audio-cache";
 import {
   getPreferredTtsAcceptHeader,
   type TtsAudioFormat,
@@ -86,6 +95,11 @@ export interface TextToSpeechOptions {
   readonly providerMode?: VoiceProviderMode;
   readonly allowGoogleTts?: boolean;
   readonly sessionId?: string | null;
+  readonly bookId?: string | null;
+  readonly pageId?: string | null;
+  readonly pageRevisionId?: string | null;
+  readonly cacheScope?: TtsCacheScope | null;
+  readonly isPrivateBook?: boolean;
   readonly timeoutMs?: number;
 }
 
@@ -262,6 +276,54 @@ export function createSpeechService(): SpeechService {
         options.allowGoogleTts ?? policy.allowGoogleTtsFallback;
       const activeLock = getActiveSessionVoiceLock();
       const sessionId = options.sessionId ?? activeLock?.sessionId ?? null;
+      const cacheScope: TtsCacheScope =
+        options.cacheScope ?? (options.isPrivateBook ? "PRIVATE" : "CATALOG");
+      const canUseBrowserCache =
+        typeof indexedDB !== "undefined" &&
+        shouldPersistTtsCacheEntry({
+          scope: cacheScope,
+          isPrivateBook: options.isPrivateBook,
+        });
+      const cacheVoiceId =
+        options.voiceId ?? activeLock?.voiceId ?? DEFAULT_LOCAL_VOICE_ID;
+      const browserCacheKey = canUseBrowserCache
+        ? buildTtsBrowserCacheKey({
+            kind: options.wordSample ? "phonics" : "short",
+            textOrTokens: normalizedText,
+            voiceId: cacheVoiceId,
+            modelVersion:
+              activeLock?.modelVersion ??
+              inferModelVersionForVoiceId(cacheVoiceId),
+            speed: options.speed ?? activeLock?.speed ?? 1,
+            format: options.audioFormat ?? "auto",
+            scope: cacheScope,
+          })
+        : null;
+
+      if (browserCacheKey) {
+        const cachedAudio = await getCachedTtsAudio(browserCacheKey);
+        options.signal?.throwIfAborted();
+        if (cachedAudio && cachedAudio.size > 0) {
+          const voiceGender = resolveVoiceGender(cacheVoiceId, null);
+          setSynthesizedAudioMeta(cachedAudio, {
+            resolvedVoiceId: cacheVoiceId,
+            usedFallbackVoice: false,
+            provider: "precomputed_cache",
+            region: activeLock?.region ?? null,
+            modelVersion:
+              activeLock?.modelVersion ??
+              inferModelVersionForVoiceId(cacheVoiceId),
+          });
+          recordTtsEngineUsage({
+            provider: "precomputed_cache",
+            fallbackUsed: false,
+            fallbackReason: null,
+            voiceId: cacheVoiceId,
+            voiceGender,
+          });
+          return cachedAudio;
+        }
+      }
 
       return withRequestDeadline(
         async (signal) => {
@@ -287,6 +349,14 @@ export function createSpeechService(): SpeechService {
                 ...(mode !== "local_only" ? { provider_mode: mode } : {}),
                 ...(allowGoogleTts ? { allow_google_tts: true } : {}),
                 ...(sessionId ? { session_id: sessionId } : {}),
+                ...(options.bookId ? { book_id: options.bookId } : {}),
+                ...(options.pageId ? { page_id: options.pageId } : {}),
+                ...(options.pageRevisionId
+                  ? { page_revision_id: options.pageRevisionId }
+                  : {}),
+                ...(options.cacheScope
+                  ? { cache_scope: options.cacheScope }
+                  : {}),
               }),
             },
             signal,
@@ -302,8 +372,16 @@ export function createSpeechService(): SpeechService {
             response.headers.get("x-resolved-voice-id")?.trim() || null;
           const usedFallbackVoice =
             response.headers.get("x-voice-fallback") === "1";
+          const ttsCacheHeader =
+            response.headers.get("x-tts-cache")?.trim().toUpperCase() || null;
+          const headerProvider =
+            response.headers.get("x-tts-provider")?.trim() ||
+            response.headers.get("x-voice-provider")?.trim() ||
+            "local";
           const provider =
-            response.headers.get("x-voice-provider")?.trim() || "local";
+            ttsCacheHeader === "HIT" && headerProvider === "local"
+              ? "precomputed_cache"
+              : headerProvider;
           const fallbackReason =
             response.headers.get("x-voice-fallback-reason")?.trim() || null;
           const voiceGender = resolveVoiceGender(
@@ -325,6 +403,34 @@ export function createSpeechService(): SpeechService {
             voiceId: resolvedVoiceId ?? options.voiceId ?? null,
             voiceGender,
           });
+          const headerScopeRaw = response.headers
+            .get("x-tts-scope")
+            ?.trim()
+            .toUpperCase();
+          const effectiveScope: TtsCacheScope =
+            headerScopeRaw === "PRIVATE" ||
+            headerScopeRaw === "COACHING" ||
+            headerScopeRaw === "CATALOG"
+              ? headerScopeRaw
+              : cacheScope;
+          if (
+            browserCacheKey &&
+            !usedFallbackVoice &&
+            provider !== "google" &&
+            shouldPersistTtsCacheEntry({
+              scope: effectiveScope,
+              cacheControl: response.headers.get("cache-control"),
+              isPrivateBook: options.isPrivateBook,
+            })
+          ) {
+            void putCachedTtsAudio({
+              key: browserCacheKey,
+              audio,
+              scope: effectiveScope,
+              cacheControl: response.headers.get("cache-control"),
+              isPrivateBook: options.isPrivateBook,
+            });
+          }
           return audio;
         },
         options.signal,
@@ -371,6 +477,14 @@ export function createSpeechService(): SpeechService {
                 ...(mode !== "local_only" ? { provider_mode: mode } : {}),
                 ...(allowGoogleTts ? { allow_google_tts: true } : {}),
                 ...(sessionId ? { session_id: sessionId } : {}),
+                ...(options.bookId ? { book_id: options.bookId } : {}),
+                ...(options.pageId ? { page_id: options.pageId } : {}),
+                ...(options.pageRevisionId
+                  ? { page_revision_id: options.pageRevisionId }
+                  : {}),
+                ...(options.cacheScope
+                  ? { cache_scope: options.cacheScope }
+                  : {}),
               }),
             },
             signal,

@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import base64
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_active_profile_id
-from app.api.routes.voice import _extract_audio_accept, get_voice_orchestrator, provider_http_exception
+from app.api.deps import get_db, require_active_profile_id
+from app.api.routes.voice import (
+    _accepts_db_kwarg,
+    _extract_audio_accept,
+    _tts_cache_headers,
+    get_voice_orchestrator,
+    provider_http_exception,
+)
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
 from app.schemas.voice_studio import (
     TimedSpeechRead,
@@ -60,31 +68,42 @@ async def timed_text_to_speech(
     payload: TimedSpeechRequest,
     request: Request,
     response: Response,
-    _actor_id: UUID = Depends(require_active_profile_id),
+    actor_id: UUID = Depends(require_active_profile_id),
+    db: AsyncSession = Depends(get_db),
     _rate_limited: None = Depends(
         rate_limit("voice_tts", default_max=60, default_window=60.0, actor_dependency=require_active_profile_id)
     ),
 ) -> TimedSpeechRead:
     """Synthesize a page in the locked voice and return per-word start/end times."""
 
-    response.headers["Cache-Control"] = "no-store"
-
     policy = VoicePolicyContext(
         provider_mode=payload.provider_mode,
         allow_google_tts=payload.allow_google_tts,
         session_id=payload.session_id,
+        page_id=str(payload.page_id) if payload.page_id is not None else None,
         accept=_extract_audio_accept(request),
         audio_format=payload.audio_format,
+        actor_id=actor_id,
+        book_id=payload.book_id,
+        page_revision_id=payload.page_revision_id,
+        cache_scope=payload.cache_scope,
     )
+    orchestrator = get_voice_orchestrator()
+    timed_kwargs: dict[str, Any] = {
+        "words": payload.words,
+        "requested_voice_id": payload.voice_id,
+        "speed": payload.speed,
+        "policy": policy,
+    }
+    if _accepts_db_kwarg(orchestrator.synthesize_timed):
+        timed_kwargs["db"] = db
     try:
-        speech = await get_voice_orchestrator().synthesize_timed(
-            words=payload.words,
-            requested_voice_id=payload.voice_id,
-            speed=payload.speed,
-            policy=policy,
-        )
+        speech = await orchestrator.synthesize_timed(**timed_kwargs)
     except VoiceProviderError as error:
         raise provider_http_exception(error) from None
+
+    for h_name, h_val in _tts_cache_headers(speech).items():
+        response.headers[h_name] = h_val
 
     return TimedSpeechRead(
         audio_base64=base64.b64encode(speech.audio).decode("ascii"),

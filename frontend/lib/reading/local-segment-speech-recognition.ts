@@ -13,6 +13,10 @@
 
 import { ServiceError } from "@/lib/api/service-error";
 import type { SpeechService } from "@/lib/api/speech-service";
+import {
+  detectBrowserWasmSttSupport,
+  getBrowserWasmSttClient,
+} from "@/lib/reading/browser-wasm-stt";
 import { getVoicePolicyPreferences } from "@/lib/reading/session-voice-lock";
 import { tokenizeVietnameseText } from "@/lib/reading/vietnamese-text";
 import {
@@ -547,6 +551,8 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private uploadChain: Promise<void> = Promise.resolve();
   private browserFallbackRec: SegmentSpeechRecognitionLike | null = null;
   private usingBrowserFallback = false;
+  private usingWasmStt = false;
+  private wasmFallbackReason: string | null = null;
   private browserBaseOffset = 0;
   private consecutiveTechnicalFailures = 0;
 
@@ -581,6 +587,8 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.active = true;
     this.stopping = false;
     this.usingBrowserFallback = false;
+    this.usingWasmStt = false;
+    this.wasmFallbackReason = null;
     this.browserFallbackRec = null;
     this.browserBaseOffset = 0;
     this.abortController = new AbortController();
@@ -612,32 +620,67 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           fallbackReason: null,
         });
       }
-    } else if (
-      policy.providerMode === "local_with_google_fallback" &&
-      policy.allowGoogleSttFallback
-    ) {
-      const confirmedLocalDownNoGoogle =
+    } else {
+      const confirmedLocalDown =
         freshHealth !== null &&
-        (!freshHealth.local.available || !freshHealth.local.stt_ready) &&
-        (!freshHealth.google.stt_configured || freshHealth.google.stt_cooldown);
+        (!freshHealth.local.available || !freshHealth.local.stt_ready);
       const now = Date.now();
-      const withinEmergencyCooldown =
+      const withinWasmCooldown =
         lastLocalSttOutageAt > 0 &&
         now - lastLocalSttOutageAt < LOCAL_OUTAGE_RETRY_MS &&
-        getVoiceEngineStatus().stt.tier === "browser_default";
+        getVoiceEngineStatus().stt.tier === "browser_wasm";
 
-      if (confirmedLocalDownNoGoogle || withinEmergencyCooldown) {
-        if (confirmedLocalDownNoGoogle) {
+      if (
+        (confirmedLocalDown || withinWasmCooldown) &&
+        detectBrowserWasmSttSupport().supported
+      ) {
+        if (confirmedLocalDown) {
           lastLocalSttOutageAt = now;
         }
-        if (this.tryActivateBrowserFallback()) {
-          return;
+        this.usingWasmStt = true;
+        this.wsDisabledForRun = true;
+        this.wasmFallbackReason = confirmedLocalDown
+          ? "LOCAL_STT_UNAVAILABLE"
+          : null;
+        recordSttEngineUsage({
+          provider: "wasm",
+          fallbackUsed: true,
+          fallbackReason: this.wasmFallbackReason,
+        });
+        void getBrowserWasmSttClient()
+          .init(this.abortController.signal)
+          .catch(() => undefined);
+      } else if (
+        policy.providerMode === "local_with_google_fallback" &&
+        policy.allowGoogleSttFallback
+      ) {
+        const confirmedLocalDownNoGoogle =
+          confirmedLocalDown &&
+          (!freshHealth.google.stt_configured ||
+            freshHealth.google.stt_cooldown);
+        const withinEmergencyCooldown =
+          lastLocalSttOutageAt > 0 &&
+          now - lastLocalSttOutageAt < LOCAL_OUTAGE_RETRY_MS &&
+          getVoiceEngineStatus().stt.tier === "browser_default";
+
+        if (confirmedLocalDownNoGoogle || withinEmergencyCooldown) {
+          if (confirmedLocalDownNoGoogle) {
+            lastLocalSttOutageAt = now;
+          }
+          if (this.tryActivateBrowserFallback()) {
+            return;
+          }
+        } else if (
+          lastLocalSttOutageAt > 0 &&
+          now - lastLocalSttOutageAt >= LOCAL_OUTAGE_RETRY_MS
+        ) {
+          // Emergency cooldown TTL elapsed -> automatically re-try Local Offline STT!
+          lastLocalSttOutageAt = 0;
         }
       } else if (
         lastLocalSttOutageAt > 0 &&
         now - lastLocalSttOutageAt >= LOCAL_OUTAGE_RETRY_MS
       ) {
-        // Emergency cooldown TTL elapsed -> automatically re-try Local Offline STT!
         lastLocalSttOutageAt = 0;
       }
     }
@@ -727,6 +770,21 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       this.consecutiveTechnicalFailures >= EMERGENCY_FAILURE_THRESHOLD
     ) {
       lastLocalSttOutageAt = Date.now();
+      if (detectBrowserWasmSttSupport().supported) {
+        this.usingWasmStt = true;
+        this.wsDisabledForRun = true;
+        this.wasmFallbackReason = "LOCAL_STT_UNAVAILABLE";
+        this.closeSttWebSocket();
+        recordSttEngineUsage({
+          provider: "wasm",
+          fallbackUsed: true,
+          fallbackReason: "LOCAL_STT_UNAVAILABLE",
+        });
+        void getBrowserWasmSttClient()
+          .init(this.abortController?.signal)
+          .catch(() => undefined);
+        return true;
+      }
       return this.tryActivateBrowserFallback();
     }
     return false;
@@ -915,22 +973,34 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     ) {
       return null;
     }
-    const wavBlob = encodeFloat32ToWav16kBlob(pending.audioToEncode);
     const signal = this.abortController?.signal;
-    const res = await this.speechService.transcribe(wavBlob, {
-      filename: "segment.wav",
-      languageCode: "vi",
-      keyterms: pending.keyterms,
-      sessionId: pending.sessionId,
-      pageId: pending.pageId,
-      turnId: pending.turnId,
-      source: "local_live_segment",
-      signal,
-      timeoutMs: 12_000,
-    });
-    this.consecutiveTechnicalFailures = 0;
-    lastLocalSttOutageAt = 0;
-    const rawText = (res.text ?? "").normalize("NFC").trim();
+    let rawText = "";
+    if (this.usingWasmStt) {
+      const wasmRes = await getBrowserWasmSttClient().transcribeSamples(
+        pending.audioToEncode,
+        {
+          signal,
+          timeoutMs: 20_000,
+        },
+      );
+      rawText = (wasmRes.text ?? "").normalize("NFC").trim();
+    } else {
+      const wavBlob = encodeFloat32ToWav16kBlob(pending.audioToEncode);
+      const res = await this.speechService.transcribe(wavBlob, {
+        filename: "segment.wav",
+        languageCode: "vi",
+        keyterms: pending.keyterms,
+        sessionId: pending.sessionId,
+        pageId: pending.pageId,
+        turnId: pending.turnId,
+        source: "local_live_segment",
+        signal,
+        timeoutMs: 12_000,
+      });
+      this.consecutiveTechnicalFailures = 0;
+      lastLocalSttOutageAt = 0;
+      rawText = (res.text ?? "").normalize("NFC").trim();
+    }
     if (!rawText) return null;
     return reconcileSegmentTranscriptWithInterims(
       rawText,
@@ -1658,26 +1728,34 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.interimInFlight = true;
     const gen = this.interimGeneration;
     const activeSegmentInterims = this.segmentInterims;
-    const wavBlob = encodeFloat32ToWav16kBlob(combined);
     const ctx = this.getContext?.() ?? {};
     const interimTurnId = nextTurnId(ctx.pageId ?? "live", ++this.turnSeq);
+    const usedWasm = this.usingWasmStt;
 
-    void this.speechService
-      .transcribe(wavBlob, {
-        filename: "interim.wav",
-        languageCode: "vi",
-        keyterms: ctx.keyterms,
-        sessionId: ctx.sessionId ?? null,
-        pageId: ctx.pageId ?? null,
-        turnId: interimTurnId,
-        source: "local_live_interim",
-        signal: interimCtrl.signal,
-        timeoutMs: 3_500,
-      })
+    const interimPromise: Promise<{ text: string }> = usedWasm
+      ? getBrowserWasmSttClient().transcribeSamples(combined, {
+          signal: interimCtrl.signal,
+          timeoutMs: 4_000,
+        })
+      : this.speechService.transcribe(encodeFloat32ToWav16kBlob(combined), {
+          filename: "interim.wav",
+          languageCode: "vi",
+          keyterms: ctx.keyterms,
+          sessionId: ctx.sessionId ?? null,
+          pageId: ctx.pageId ?? null,
+          turnId: interimTurnId,
+          source: "local_live_interim",
+          signal: interimCtrl.signal,
+          timeoutMs: 3_500,
+        });
+
+    void interimPromise
       .then((res) => {
         if (interimCtrl.signal.aborted) return;
-        this.consecutiveTechnicalFailures = 0;
-        lastLocalSttOutageAt = 0;
+        if (!usedWasm) {
+          this.consecutiveTechnicalFailures = 0;
+          lastLocalSttOutageAt = 0;
+        }
         const text = (res.text ?? "").normalize("NFC").trim();
         if (!text) return;
         if (activeSegmentInterims[activeSegmentInterims.length - 1] !== text) {
@@ -1895,9 +1973,29 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           }
         })
       : (() => {
-          const wavBlob = encodeFloat32ToWav16kBlob(audioToEncode);
-          const transcribeOnce = () =>
-            this.speechService.transcribe(wavBlob, {
+          const transcribeWithWasm = async () => {
+            const wasmRes = await getBrowserWasmSttClient().transcribeSamples(
+              audioToEncode,
+              {
+                signal,
+                timeoutMs: 20_000,
+              },
+            );
+            recordSttEngineUsage({
+              provider: "wasm",
+              fallbackUsed: true,
+              fallbackReason:
+                this.wasmFallbackReason ?? "LOCAL_STT_UNAVAILABLE",
+            });
+            return { text: wasmRes.text, fromWasm: true as const };
+          };
+
+          const transcribeOnce = async () => {
+            if (this.usingWasmStt) {
+              return transcribeWithWasm();
+            }
+            const wavBlob = encodeFloat32ToWav16kBlob(audioToEncode);
+            const res = await this.speechService.transcribe(wavBlob, {
               filename: "segment.wav",
               languageCode: "vi",
               keyterms: ctx.keyterms,
@@ -1908,6 +2006,8 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
               signal,
               timeoutMs: 12_000,
             });
+            return { text: res.text, fromWasm: false as const };
+          };
 
           const transcribeWithRetry = async () => {
             try {
@@ -1921,10 +2021,16 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
               ) {
                 throw err;
               }
+              if (this.usingWasmStt) {
+                throw err;
+              }
               if (
                 isTechnicalSttUnavailabilityError(err) &&
                 this.recordTechnicalFailureAndMaybeFallback()
               ) {
+                if (this.usingWasmStt) {
+                  return transcribeWithWasm();
+                }
                 throw err;
               }
               await new Promise((resolve) => setTimeout(resolve, 250));
@@ -1941,8 +2047,10 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           };
 
           return transcribeWithRetry().then((res) => {
-            this.consecutiveTechnicalFailures = 0;
-            lastLocalSttOutageAt = 0;
+            if (!res.fromWasm) {
+              this.consecutiveTechnicalFailures = 0;
+              lastLocalSttOutageAt = 0;
+            }
             const rawText = (res.text ?? "").normalize("NFC").trim();
             if (!rawText) return null;
             return reconcileSegmentTranscriptWithInterims(

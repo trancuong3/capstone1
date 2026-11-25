@@ -61,6 +61,8 @@ function buildContentSecurityPolicy(): string {
     "blob:",
     "https://*.supabase.co",
     "wss://*.supabase.co",
+    "https://huggingface.co",
+    "https://*.hf.co",
   ]);
   if (supabaseOrigin) {
     connectSources.add(supabaseOrigin);
@@ -88,7 +90,7 @@ function buildContentSecurityPolicy(): string {
 
   const directives = [
     "default-src 'self'",
-    `script-src 'self' 'unsafe-inline' blob:${isDev ? " 'unsafe-eval'" : ""}`,
+    `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:${isDev ? " 'unsafe-eval'" : ""}`,
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' https: blob: data:${localMediaOrigin}`,
     `media-src 'self' https: blob: data:${localMediaOrigin}`,
@@ -113,6 +115,15 @@ const nextConfig: NextConfig = {
   ...(turbopackRoot ? { turbopack: { root: turbopackRoot } } : {}),
   async headers() {
     return [
+      {
+        source: "/wasm/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
       {
         source: "/:path*",
         headers: [

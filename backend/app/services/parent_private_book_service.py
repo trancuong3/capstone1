@@ -33,6 +33,7 @@ from app.policies.book_access import (
     private_submission_image_url,
 )
 from app.repositories.parent_private_book_repository import ParentPrivateBookRepository
+from app.services.tts_audio_cache_service import invalidate_tts_cache_best_effort
 from app.schemas.parent_private_book import (
     SOURCE_TYPE_LABELS,
     WORKFLOW_STATUS_LABELS,
@@ -1054,6 +1055,7 @@ class ParentPrivateBookService:
             },
         )
         await self.repo.commit()
+        await invalidate_tts_cache_best_effort(self.db, book_id=book.Id, commit=True)
 
         # Best-effort cleanup of staging objects not referenced by moderation history
         preserved_paths = await self.repo.list_moderation_storage_paths_for_book(book_id)
@@ -1431,7 +1433,9 @@ class ParentPrivateBookService:
             )
             raise
 
-        return self._serialize_submission(locked_book, sub, base_url=base_url)
+        resp = self._serialize_submission(locked_book, sub, base_url=base_url)
+        await invalidate_tts_cache_best_effort(self.db, page_id=page_id, commit=True)
+        return resp
 
     async def delete_committed_page(
         self, actor_id: UUID, book_id: UUID, page_id: UUID
@@ -1477,16 +1481,17 @@ class ParentPrivateBookService:
             },
         )
         await self.repo.commit()
-
         committed_map = await self.repo.committed_page_counts([book.Id])
         readable = await self.repo.is_private_book_readable(book.Id, actor_id)
-        return ParentDeletePrivatePageResponse(
+        resp = ParentDeletePrivatePageResponse(
             status="deleted",
             book_id=book.Id,
             page_id=page_id,
             committed_page_count=committed_map.get(book.Id, 0),
             readable_for_children=readable,
         )
+        await invalidate_tts_cache_best_effort(self.db, page_id=page_id, commit=True)
+        return resp
 
     # ------------------------------------------------------------------
     # Parent Page Submission (Upload -> Staging -> Check Queue)
@@ -3086,10 +3091,12 @@ class ParentPrivateBookService:
         if is_remote_ocr_mode() and isinstance(self.db, AsyncSession):
             await OcrInferenceJobService(self.db).cancel_for_book(book.Id, reason="BOOK_SUSPENDED")
         await self.repo.commit()
-        return {
+        result = {
             "book_id": str(book.Id),
             "moderation_status": MODERATION_SUSPENDED,
             "suspended_at": now.isoformat(),
             "reason": payload.reason,
             "audit_log_id": str(audit.Id),
         }
+        await invalidate_tts_cache_best_effort(self.db, book_id=book.Id, commit=True)
+        return result

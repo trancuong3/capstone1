@@ -23,6 +23,7 @@ function getTierStyles(tier: VoiceEngineTier): {
         dot: "bg-orange-500",
         chip: "border-orange-200 bg-orange-50/90 text-orange-900",
       };
+    case "browser_wasm":
     case "local_offline":
     case "idle":
     default:
@@ -43,6 +44,9 @@ function buildTooltip(kind: "STT" | "TTS", snap: EngineSourceSnapshot): string {
   }
   if (snap.tier === "browser_default") {
     return `${base} (Online · Dự phòng Google/Trình duyệt)`;
+  }
+  if (snap.tier === "browser_wasm") {
+    return `${base} (Offline · Nhận diện trên thiết bị bằng WASM)`;
   }
   return `${base} (Offline · Chạy trực tiếp trên máy này)`;
 }

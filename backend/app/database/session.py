@@ -221,6 +221,7 @@ _running_test_cli = any(
 _use_null_pool = (
     APP_ENVIRONMENT == "test"
     or _running_test_cli
+    or DATABASE_POOLER_MODE == "transaction"
     or (
         DATABASE_POOLER_MODE == "local"
         and (sqlalchemy_database_url.host or "") in {"127.0.0.1", "localhost", "::1"}

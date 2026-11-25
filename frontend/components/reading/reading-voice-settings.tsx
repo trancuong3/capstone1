@@ -696,7 +696,7 @@ export function ReadingVoiceSettings({
                       : "text-muted",
                   )}
                 >
-                  Chạy 100% local, không gọi Google
+                  Chạy 100% nội bộ (máy chủ + trình duyệt), không gọi Google
                 </span>
               </button>
               <button

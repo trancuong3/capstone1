@@ -173,8 +173,6 @@ describe("speech service", () => {
         method: "POST",
         body: JSON.stringify({
           text: "Bé đọc cùng mình nhé.",
-          provider_mode: "local_with_google_fallback",
-          allow_google_tts: true,
         }),
         cache: "no-store",
         credentials: "omit",

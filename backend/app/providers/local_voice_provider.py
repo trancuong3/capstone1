@@ -206,6 +206,8 @@ class LocalSynthesizedAudio:
     model_version: str
     provider: str = "local"
     used_fallback_voice: bool = False
+    cache_hit: bool = False
+    cache_scope: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -226,6 +228,8 @@ class LocalTimedSpeech:
     model_version: str
     provider: str = "local"
     used_fallback_voice: bool = False
+    cache_hit: bool = False
+    cache_scope: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,6 +250,8 @@ class LocalPhonicsSpeech:
     region: str
     model_version: str
     provider: str = "local"
+    cache_hit: bool = False
+    cache_scope: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

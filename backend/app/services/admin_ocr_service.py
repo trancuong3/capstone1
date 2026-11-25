@@ -43,6 +43,7 @@ from app.services.document_rasterizer_service import (
     rasterize_uploaded_document,
 )
 from app.services.ocr_adjudication import adjudicate_word
+from app.services.tts_audio_cache_service import invalidate_tts_cache_best_effort
 from app.services.ocr_punctuation import punctuation_status
 from app.services.ocr_evidence import (
     HYBRID_OCR_EVIDENCE_CONTRACT,
@@ -2895,7 +2896,9 @@ class AdminOcrService:
         )
         if response_page is None or response_revision is None:
             raise RuntimeError("Verified OCR revision disappeared before response serialization")
-        return await self.revision_detail(response_page, response_revision)
+        detail = await self.revision_detail(response_page, response_revision)
+        await invalidate_tts_cache_best_effort(self.db, page_id=response_page_id, commit=True)
+        return detail
 
     async def _verified_retry_response(
         self,
@@ -3501,12 +3504,14 @@ class AdminOcrService:
         except Exception:
             await self.db.rollback()
             raise
-        return AdminPageLifecycleRead(
+        resp = AdminPageLifecycleRead(
             page_id=page.Id,
             book_id=page.BookId,
             page_number=page.PageNumber,
             lifecycle_status="RETIRED",
         )
+        await invalidate_tts_cache_best_effort(self.db, page_id=page_id, commit=True)
+        return resp
 
     async def ai_correct_text(
         self,
