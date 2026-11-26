@@ -1132,26 +1132,39 @@ async def stream_viread_colab_job_artifact(
     # Release DB transaction before streaming potentially large files over HTTP.
     await db.commit()
     try:
-        meta = await asyncio.to_thread(router_store.get_metadata, claims.reference)
+        if hasattr(router_store, "open_stream_with_metadata"):
+            meta, chunk_iterator = await asyncio.to_thread(
+                router_store.open_stream_with_metadata,
+                claims.reference,
+                expected_sha256=claims.expected_sha256,
+            )
+        else:
+            meta = await asyncio.to_thread(router_store.get_metadata, claims.reference)
+            if meta.trashed:
+                raise HTTPException(status_code=404, detail="Requested training artifact is unavailable")
+            chunk_iterator = router_store.open_stream(
+                claims.reference,
+                expected_sha256=claims.expected_sha256,
+                preloaded_meta=meta,
+            )
     except TrainingStorageError as exc:
         raise HTTPException(status_code=exc.http_status or 503, detail=f"{exc.code}: {exc}") from exc
     if meta.trashed:
         raise HTTPException(status_code=404, detail="Requested training artifact is unavailable")
 
-    def _chunk_iterator():
-        yield from router_store.open_stream(
-            claims.reference,
-            expected_sha256=claims.expected_sha256,
-            preloaded_meta=meta,
-        )
+    headers = {
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if meta.sha256:
+        headers["X-ViRead-SHA256"] = meta.sha256
+    if meta.size_bytes is not None:
+        headers["Content-Length"] = str(meta.size_bytes)
 
     return StreamingResponse(
-        _chunk_iterator(),
+        chunk_iterator,
         media_type=meta.content_type or "application/octet-stream",
-        headers={
-            "Cache-Control": "no-store",
-            "X-Content-Type-Options": "nosniff",
-        },
+        headers=headers,
     )
 
 

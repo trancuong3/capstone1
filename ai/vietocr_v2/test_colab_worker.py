@@ -9,6 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import requests
+
 from .colab_worker import ColabWorker, verify_worker_source_lock
 from .contracts import sha256_file
 
@@ -306,6 +308,92 @@ class ColabWorkerTests(unittest.TestCase):
             self.assertEqual(rid, created_run_id)
             self.assertEqual(job["run_id"], created_run_id)
             self.assertEqual(rstatus, "CANDIDATE")
+            worker.session.close()
+
+    def test_fetch_artifact_retries_on_http_503_and_truncated_200(self):
+        payload = b"valid-vietnamese-line-png-bytes"
+        expected_sha = hashlib.sha256(payload).hexdigest()
+
+        def _make_resp(status_code: int, chunks: list[bytes], *, content_length: int | None = None):
+            resp = Mock()
+            resp.status_code = status_code
+            resp.headers = {"Content-Length": str(content_length)} if content_length is not None else {}
+            if status_code >= 400:
+                http_err = requests.HTTPError(f"HTTP {status_code}")
+                http_err.response = resp
+                resp.raise_for_status.side_effect = http_err
+            else:
+                resp.raise_for_status.return_value = None
+            resp.iter_content.return_value = iter(chunks)
+            resp.__enter__ = lambda s: s
+            resp.__exit__ = lambda s, *args: None
+            return resp
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = ColabWorker("https://viread.example", "t" * 48, temp_dir)
+            worker.artifact_fetch_max_attempts = 5
+            worker.artifact_fetch_retry_base_seconds = 0.01
+            destination = Path(temp_dir) / "sample.png"
+            responses = [
+                _make_resp(503, []),
+                _make_resp(200, []),
+                _make_resp(200, [b"abc"], content_length=len(payload)),
+                _make_resp(200, [payload], content_length=len(payload)),
+            ]
+            with (
+                patch.object(worker.session, "get", side_effect=responses) as mock_get,
+                patch("ai.vietocr_v2.colab_worker.time.sleep") as mock_sleep,
+            ):
+                worker._fetch_artifact(
+                    "/books/admin/viread-training/worker/jobs/j/artifact-stream?worker_id=w&token=tok",
+                    destination,
+                    expected_sha,
+                )
+            self.assertEqual(mock_get.call_count, 4)
+            self.assertEqual(mock_sleep.call_count, 3)
+            self.assertEqual(destination.read_bytes(), payload)
+            self.assertFalse(destination.with_suffix(".png.download").exists())
+            worker.session.close()
+
+    def test_fetch_artifact_fails_fast_on_http_403_and_exhausts_corrupt_sha(self):
+        def _make_resp(status_code: int, body: bytes):
+            resp = Mock()
+            resp.status_code = status_code
+            resp.headers = {"Content-Length": str(len(body))}
+            if status_code >= 400:
+                http_err = requests.HTTPError(f"HTTP {status_code}")
+                http_err.response = resp
+                resp.raise_for_status.side_effect = http_err
+            else:
+                resp.raise_for_status.return_value = None
+            resp.iter_content.return_value = iter([body] if body else [])
+            resp.__enter__ = lambda s: s
+            resp.__exit__ = lambda s, *args: None
+            return resp
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = ColabWorker("https://viread.example", "t" * 48, temp_dir)
+            worker.artifact_fetch_max_attempts = 3
+            worker.artifact_fetch_retry_base_seconds = 0.01
+
+            with (
+                patch.object(worker.session, "get", return_value=_make_resp(403, b"forbidden")) as get_403,
+                patch("ai.vietocr_v2.colab_worker.time.sleep") as sleep_403,
+            ):
+                with self.assertRaises(requests.HTTPError):
+                    worker._fetch_artifact("/books/admin/viread-training/worker/jobs/j/artifact-stream", Path(temp_dir) / "a.png", "a" * 64)
+            self.assertEqual(get_403.call_count, 1)
+            sleep_403.assert_not_called()
+
+            with (
+                patch.object(worker.session, "get", side_effect=lambda *a, **kw: _make_resp(200, b"corrupt")) as get_bad,
+                patch("ai.vietocr_v2.colab_worker.time.sleep") as sleep_bad,
+            ):
+                with self.assertRaises(ValueError) as sha_err:
+                    worker._fetch_artifact("/books/admin/viread-training/worker/jobs/j/artifact-stream", Path(temp_dir) / "b.png", "a" * 64)
+            self.assertEqual(str(sha_err.exception), "DOWNLOADED_OBJECT_HASH_MISMATCH")
+            self.assertEqual(get_bad.call_count, 3)
+            self.assertEqual(sleep_bad.call_count, 2)
             worker.session.close()
 
 
