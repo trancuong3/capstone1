@@ -18,6 +18,8 @@ export type DifficultWordRecognitionSource =
 
 export interface DifficultWordSourceDTO {
   readonly book_id?: UUID | null;
+  readonly visibility_scope?: "PUBLIC_CATALOG" | "PARENT_PRIVATE" | string | null;
+  readonly is_private_book?: boolean | null;
   readonly book_title?: string | null;
   readonly book_author?: string | null;
   readonly min_grade?: number | null;
