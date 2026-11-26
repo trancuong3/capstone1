@@ -61,7 +61,7 @@ export async function installReadingExperience(
   const headers = {
     "access-control-allow-origin": "http://127.0.0.1:3106",
     "access-control-allow-headers": "authorization,content-type,accept",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
   };
   const respond = (route: Route, body: unknown, status = 200) =>
     route.fulfill({
@@ -310,6 +310,21 @@ export async function installReadingExperience(
           tts_cooldown: false,
         },
       });
+    if (
+      path === "/voice/session-lock" &&
+      ["POST", "PUT", "DELETE"].includes(route.request().method())
+    ) {
+      const body = (route.request().postDataJSON() ?? {}) as Record<
+        string,
+        unknown
+      >;
+      return respond(route, {
+        session_id: body.session_id ?? ids.session,
+        voice_id: body.voice_id ?? "fixture_vi",
+        provider: body.provider ?? "local",
+        locked: true,
+      });
+    }
     if (path === "/voice/voices")
       return respond(route, {
         default_voice_id: "fixture_vi",

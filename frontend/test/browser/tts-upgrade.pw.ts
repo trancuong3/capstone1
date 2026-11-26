@@ -59,7 +59,7 @@ async function installReading(
     "access-control-allow-origin": "http://127.0.0.1:3106",
     "access-control-allow-headers":
       "authorization,content-type,accept,x-voice-policy-mode,x-allow-google-stt-fallback,x-allow-google-tts-fallback,x-voice-region,x-voice-session-id,x-voice-page-id,x-voice-turn-id",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
     "access-control-expose-headers":
       "x-voice-provider,x-resolved-voice-id,x-voice-region,x-voice-model-version,x-voice-fallback",
   };
@@ -162,7 +162,10 @@ async function installReading(
     const path = new URL(route.request().url()).pathname;
     if (path === "/voice/status" && route.request().method() === "GET")
       return respond(route, readyVoiceStatus("voice_female"));
-    if (path === "/voice/session-lock" && route.request().method() === "POST") {
+    if (
+      path === "/voice/session-lock" &&
+      ["POST", "PUT", "DELETE"].includes(route.request().method())
+    ) {
       const body = (route.request().postDataJSON() ?? {}) as Record<
         string,
         unknown

@@ -184,7 +184,10 @@ async function installVoiceAndPhonicsFixture(page: Page) {
     const path = new URL(route.request().url()).pathname;
     if (path === "/voice/status" && route.request().method() === "GET")
       return respond(route, readyVoiceStatus("local_north_truc_ly"));
-    if (path === "/voice/session-lock" && route.request().method() === "POST") {
+    if (
+      path === "/voice/session-lock" &&
+      ["POST", "PUT", "DELETE"].includes(route.request().method())
+    ) {
       const body = (route.request().postDataJSON() ?? {}) as Record<
         string,
         unknown

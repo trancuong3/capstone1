@@ -712,6 +712,7 @@ for (const routeGroup of ["parent", "admin"] as const) {
     test.setTimeout(360_000);
     const readingFixture = await installReadingExperience(page);
     const api = readingFixture.api;
+    api.previewStatus = 200;
     const adminSong = songDetail();
     const adminDraft = adminSong.draft!;
     await page
