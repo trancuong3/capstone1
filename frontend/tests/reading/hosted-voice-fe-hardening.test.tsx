@@ -329,6 +329,33 @@ describe("Hosted Voice FE Hardening (STT-01..STT-10 & TTS-03..TTS-09)", () => {
       expect(acceptedLengths).toHaveLength(2);
       expect(acceptedLengths[1]).toBeLessThan(Math.round(0.85 * sr));
       expect(acceptedLengths[1]).toBeGreaterThan(Math.round(0.65 * sr));
+
+      // 20Hz sub-rumble hum stripped by 60Hz HPF must return "" with zero Sherpa decode
+      // even when unfiltered client VAD passes voicedDurationMs > 0.
+      const hum20 = new Float32Array(Math.round(0.5 * sr));
+      for (let i = 0; i < hum20.length; i += 1) {
+        hum20[i] = 0.004 * Math.sin((2 * Math.PI * 20 * i) / sr);
+      }
+      await onmessage({
+        data: {
+          type: "transcribe",
+          id: "hpf-hum-silence",
+          samples: hum20,
+          sampleRate: sr,
+          voicedDurationMs: 300,
+        },
+      });
+      expect(acceptedLengths).toHaveLength(2);
+      expect(workerGlobal.postMessage).toHaveBeenLastCalledWith({
+        type: "result",
+        id: "hpf-hum-silence",
+        text: "",
+        decodeMs: 0,
+      });
+
+      // Zod v4 jitless config prevents Function("") CSP eval violations in production
+      const { z } = await import("@/lib/zod-config");
+      expect(z.config().jitless).toBe(true);
     });
 
     it("falls back from failing Tier-1 WASM to Tier-3 Web Speech when allowed, and falls back in evaluateRecordedShortWord on 503", async () => {

@@ -140,6 +140,7 @@ test("Parent empty catalog and detail route require a selected child", async ({
   await expect(
     page.getByRole("heading", { name: "Thư viện đang được cập nhật" }),
   ).toBeVisible();
+  await page.evaluate(() => window.sessionStorage.clear());
   await page.goto(`/books/${ids.page}`);
   await expect(page).toHaveURL(
     /\/dashboard\?focus=child-selection&reason=missing$/,

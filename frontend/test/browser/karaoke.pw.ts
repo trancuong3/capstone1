@@ -373,7 +373,7 @@ test("dashboard → selected child → library → native player → leave stops
   expect(state.unexpected).toEqual([]);
   expect(base.unexpected).toEqual([]);
 });
-test("refresh requires child reselection and ignores a foreign child_id in URL", async ({
+test("refresh preserves same-tab child, ignores a foreign child_id in URL, and new tab requires child selection", async ({
   page,
 }) => {
   const { state } = await fixture(page);
@@ -384,12 +384,18 @@ test("refresh requires child reselection and ignores a foreign child_id in URL",
   await expect(
     page.getByRole("heading", { name: "Bài hát do admin xuất bản" }),
   ).toBeVisible();
-  const before = state.requests.length;
+  await page.goto(`/karaoke/${songId}?child_id=${lineId}`);
+  await expect(
+    page.getByRole("heading", { name: "Bài hát do admin xuất bản" }),
+  ).toBeVisible();
+  expect(state.requests.some((req) => req.includes(lineId))).toBe(false);
+  const beforeFreshTab = state.requests.length;
+  await page.evaluate(() => window.sessionStorage.clear());
   await page.goto(`/karaoke/${songId}?child_id=${lineId}`);
   await expect(page).toHaveURL(
     /\/dashboard\?focus=child-selection&reason=missing/,
   );
-  expect(state.requests).toHaveLength(before);
+  expect(state.requests).toHaveLength(beforeFreshTab);
 });
 test("admin cannot enter the parent karaoke area", async ({ page }) => {
   const { state } = await fixture(page);

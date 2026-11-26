@@ -324,6 +324,8 @@ describe("AppStoreProvider", () => {
     ).toBe("child-one");
 
     // Switching parent account must clear previous user's persisted selection (zero leakage)
+    // and broadcast null for parent-1 so other open tabs clear parent-1's child too.
+    const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
     rerender(
       <AuthRuntimeContext.Provider value={makeAuthRuntime("parent-2")}>
         <AppStoreProvider>
@@ -335,6 +337,17 @@ describe("AppStoreProvider", () => {
     expect(
       window.sessionStorage.getItem("viread:selected-child:parent-1"),
     ).toBeNull();
+    expect(
+      setItemSpy.mock.calls.some(([key, value]) => {
+        if (key !== "viread:selected-child-signal") return false;
+        const parsed = JSON.parse(value) as {
+          userId: string;
+          childId: string | null;
+        };
+        return parsed.userId === "parent-1" && parsed.childId === null;
+      }),
+    ).toBe(true);
+    setItemSpy.mockRestore();
 
     // Select for parent-2 then sign out -> wipes sessionStorage cleanly
     await user.click(screen.getByRole("button", { name: "Select two" }));
