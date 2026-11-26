@@ -641,7 +641,15 @@ class VoiceWorkerContractTests(unittest.TestCase):
             worker._TTS_TIMED_MEM_CACHE.clear()
             synth_calls: list[tuple[str, str, float, str]] = []
 
-            def _fake_timed_sync(_engine, text_nfc, preset, speed, *, preferred_media_type="audio/wav"):
+            def _fake_timed_sync(
+                _engine,
+                text_nfc,
+                preset,
+                speed,
+                *,
+                precision_override: str | None = None,
+                preferred_media_type="audio/wav",
+            ):
                 synth_calls.append((preset.voice_id, text_nfc, speed, preferred_media_type))
                 return {
                     "audio_base64": "UklGRg==",

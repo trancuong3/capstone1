@@ -31,9 +31,7 @@ export function ChildProfileCard({
         <span className="block break-words text-base font-bold leading-tight text-ink md:text-xl">
           {child.alias}
         </span>
-        <span className="text-xs text-muted md:text-sm">
-          Lớp {child.grade}
-        </span>
+        <span className="text-xs text-muted md:text-sm">Lớp {child.grade}</span>
       </span>
       {selected ? (
         <span className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-primary md:text-sm">

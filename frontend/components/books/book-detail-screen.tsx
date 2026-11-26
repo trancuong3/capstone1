@@ -267,7 +267,11 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
   if (state.status === "loading") {
     return (
       <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-3 py-3 sm:gap-6 sm:px-8 sm:py-8">
-        <BookChildHeader child={null} hideOnMobile mobileLabel="Đang tải sách" />
+        <BookChildHeader
+          child={null}
+          hideOnMobile
+          mobileLabel="Đang tải sách"
+        />
         <div
           aria-busy="true"
           aria-label="Đang tải chi tiết sách"
@@ -292,7 +296,11 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
 
     return (
       <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-3 py-3 sm:gap-6 sm:px-8 sm:py-8">
-        <BookChildHeader child={null} hideOnMobile mobileLabel="Chi tiết sách" />
+        <BookChildHeader
+          child={null}
+          hideOnMobile
+          mobileLabel="Chi tiết sách"
+        />
         <div className="mx-auto w-full max-w-[720px]">
           <EmptyState
             headingLevel={1}
@@ -324,7 +332,11 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
   if (state.status === "error") {
     return (
       <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-3 py-3 sm:gap-6 sm:px-8 sm:py-8">
-        <BookChildHeader child={null} hideOnMobile mobileLabel="Chi tiết sách" />
+        <BookChildHeader
+          child={null}
+          hideOnMobile
+          mobileLabel="Chi tiết sách"
+        />
         <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4">
           <StatusMessage title="Chưa tải được chi tiết sách" tone="error">
             Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.

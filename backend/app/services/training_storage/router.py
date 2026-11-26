@@ -15,6 +15,7 @@ from typing import BinaryIO
 from app.services.training_storage.base import (
     ArtifactMetadata,
     DriveNotConnectedError,
+    DriveNotFoundError,
     StorageHealthStatus,
     StorageQuotaStatus,
     StoredArtifact,
@@ -32,7 +33,7 @@ from app.services.training_storage.references import (
 )
 from app.services.training_storage.supabase_legacy_store import SupabaseLegacyTrainingStore
 
-DEFAULT_WORKER_STREAM_TOKEN_TTL = 1800  # 30 minutes
+DEFAULT_WORKER_STREAM_TOKEN_TTL = 7200  # 2 hours
 
 
 def flow2_storage_provider_setting() -> StorageProvider:
@@ -249,6 +250,31 @@ class TrainingArtifactStoreRouter:
             chunk_size=chunk_size,
             expected_sha256=expected_sha256,
         )
+
+    def open_stream_with_metadata(
+        self,
+        reference: str,
+        *,
+        chunk_size: int = 1024 * 1024,
+        expected_sha256: str | None = None,
+    ) -> tuple[ArtifactMetadata, Iterator[bytes]]:
+        store = self.store_for_reference(reference)
+        if isinstance(store, GoogleAppsScriptDriveStore):
+            return store.open_stream_with_metadata(
+                reference,
+                chunk_size=chunk_size,
+                expected_sha256=expected_sha256,
+            )
+        meta = store.get_metadata(reference)
+        if meta.trashed:
+            raise DriveNotFoundError("Drive artifact is trashed")
+        stream = self.open_stream(
+            reference,
+            chunk_size=chunk_size,
+            expected_sha256=expected_sha256,
+            preloaded_meta=meta,
+        )
+        return meta, stream
 
     def download_to_path(
         self,

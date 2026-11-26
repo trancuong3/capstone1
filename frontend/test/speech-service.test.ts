@@ -51,7 +51,13 @@ describe("speech service", () => {
       .synthesize("Bé đọc.", { timeoutMs: 100 })
       .catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(101);
-    expect(await result).toMatchObject({ name: "TimeoutError" });
+    expect(await result).toMatchObject({
+      name: "ServiceError",
+      status: 504,
+      code: "TTS_UNAVAILABLE",
+      provider_code: "LOCAL_TTS_TIMEOUT",
+      retryable: true,
+    });
     restore({ error: null });
     await vi.advanceTimersByTimeAsync(0);
     expect(fetchMock).not.toHaveBeenCalled();

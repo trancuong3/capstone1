@@ -102,10 +102,7 @@ export function FamilyReadingDesk({
           <BookOpen aria-hidden="true" size={16} />
           {recent?.resumable ? "Tiếp tục đọc" : "Tủ sách gia đình"}
         </div>
-        <h2
-          id="desk-title"
-          className="max-md:my-1.5! max-md:text-xl!"
-        >
+        <h2 id="desk-title" className="max-md:my-1.5! max-md:text-xl!">
           {recent?.resumable ? recent.title : "Hôm nay bé đọc gì?"}
         </h2>
         <p className="max-md:text-sm!">

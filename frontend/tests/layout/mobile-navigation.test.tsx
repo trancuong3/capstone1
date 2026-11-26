@@ -306,10 +306,9 @@ describe("MobileBottomNav, AppShell and AdminLayout mobile UX", () => {
 
     const mobileNav = screen.getByTestId("mobile-bottom-nav");
     expect(mobileNav).toBeInTheDocument();
-    expect(within(mobileNav).getByRole("link", { name: "Sách" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
+    expect(
+      within(mobileNav).getByRole("link", { name: "Sách" }),
+    ).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("banner").className).toContain("xl:hidden");
     expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
 

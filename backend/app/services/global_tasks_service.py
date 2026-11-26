@@ -310,6 +310,8 @@ class GlobalTasksService:
                 initial_checkpoints=payload.initial_checkpoints,
             )
             await self.db.commit()
+            if created:
+                notify_smart_studio_worker()
         except SQLAlchemyError as exc:
             await self.db.rollback()
             if _is_missing_table_error(exc):
@@ -703,6 +705,15 @@ class GlobalTasksService:
         if reclaimed_studio or failed_studio or cancelled_expired or stale_fenced:
             await self.db.commit()
 
+        # Also reap expired remote OCR worker leases so crashed workers never strand jobs.
+        try:
+            from app.services.ocr_inference_job_service import OcrInferenceJobService
+
+            await OcrInferenceJobService(self.db).reap_expired_leases(now=current)
+        except SQLAlchemyError as exc:
+            if not _is_missing_table_error(exc):
+                raise
+
         # Also reclaim any orphaned R-01 ParentBookPageSubmission rows stuck in CHECKING!
         parent_reconcile = {"reclaimed_count": 0, "failed_count": 0}
         try:
@@ -733,10 +744,35 @@ class GlobalTasksService:
         active_only: bool = False,
     ) -> GlobalTaskListResponse:
         """Aggregate all durable workflows strictly isolated to `(actor_id, actor_role)`."""
+        in_tx_fn = getattr(self.db, "in_transaction", None)
+        was_in_tx = bool(in_tx_fn()) if callable(in_tx_fn) else False
         actor_role = await self.require_actor_role(actor_id)
         worker_online = await self.repo.is_remote_ocr_worker_online(
             ttl_seconds=worker_heartbeat_ttl_seconds()
         )
+        if worker_online is False:
+            from app.services.remote_ocr_wakeup import (
+                is_remote_worker_wakeup_configured,
+                peek_cached_remote_ocr_worker_health,
+                probe_configured_remote_ocr_worker_health,
+            )
+
+            if is_remote_worker_wakeup_configured():
+                valid_cache, cached_probe = peek_cached_remote_ocr_worker_health()
+                if valid_cache:
+                    worker_online = bool(cached_probe and cached_probe.get("online"))
+                else:
+                    if not was_in_tx and not (
+                        getattr(self.db, "new", None)
+                        or getattr(self.db, "dirty", None)
+                        or getattr(self.db, "deleted", None)
+                    ):
+                        try:
+                            await self.db.rollback()
+                        except Exception:
+                            pass
+                    probe = await probe_configured_remote_ocr_worker_health()
+                    worker_online = bool(probe and probe.get("online"))
 
         studio_jobs = await self.repo.list_studio_jobs_for_actor(
             actor_id=actor_id,
@@ -1354,20 +1390,76 @@ async def process_one_smart_studio_job(
         return True
 
 
+_SMART_STUDIO_WAKE_EVENTS: dict[int, asyncio.Event] = {}
+
+
+def _get_smart_studio_wake_event() -> asyncio.Event:
+    loop_id = id(asyncio.get_running_loop())
+    ev = _SMART_STUDIO_WAKE_EVENTS.get(loop_id)
+    if ev is None:
+        ev = asyncio.Event()
+        _SMART_STUDIO_WAKE_EVENTS[loop_id] = ev
+    return ev
+
+
+def notify_smart_studio_worker() -> None:
+    """Wake `run_smart_studio_worker_loop` immediately when a Smart Studio job is queued."""
+    try:
+        _get_smart_studio_wake_event().set()
+    except RuntimeError:
+        return
+
+
 async def run_smart_studio_worker_loop(
     stop_event: asyncio.Event,
     *,
-    poll_interval_seconds: float = 5.0,
-    reconcile_interval_seconds: float = 60.0,
+    poll_interval_seconds: float | None = None,
+    reconcile_interval_seconds: float | None = None,
     worker_id: str = "smart-studio-web-worker",
 ) -> None:
     """Lightweight durable background worker for Smart Studio jobs + periodic R-01 reconciliation."""
-    from app.database.session import AsyncSessionLocal
+    import os
 
+    from app.database.session import AsyncSessionLocal
+    from app.services.ocr_inference_job_service import is_heavy_workers_disabled
+
+    light_web_tier = is_heavy_workers_disabled()
+    if poll_interval_seconds is None:
+        default_poll = 60.0 if light_web_tier else 5.0
+        try:
+            effective_poll = max(
+                1.0,
+                float(
+                    os.getenv("SMART_STUDIO_WORKER_POLL_SECONDS", str(default_poll))
+                ),
+            )
+        except ValueError:
+            effective_poll = default_poll
+    else:
+        effective_poll = max(0.05, float(poll_interval_seconds))
+
+    if reconcile_interval_seconds is None:
+        default_reconcile = 300.0 if light_web_tier else 60.0
+        try:
+            effective_reconcile = max(
+                15.0,
+                float(
+                    os.getenv(
+                        "SMART_STUDIO_RECONCILE_SECONDS", str(default_reconcile)
+                    )
+                ),
+            )
+        except ValueError:
+            effective_reconcile = default_reconcile
+    else:
+        effective_reconcile = max(1.0, float(reconcile_interval_seconds))
+
+    wake_event = _get_smart_studio_wake_event()
     last_reconcile_at = 0.0
     while not stop_event.is_set():
+        wake_event.clear()
         now_mono = time.monotonic()
-        if (now_mono - last_reconcile_at) >= reconcile_interval_seconds or last_reconcile_at == 0.0:
+        if (now_mono - last_reconcile_at) >= effective_reconcile or last_reconcile_at == 0.0:
             try:
                 async with AsyncSessionLocal() as db:
                     await GlobalTasksService(db).reconcile_stale_jobs()
@@ -1383,12 +1475,27 @@ async def run_smart_studio_worker_loop(
                 processed = await process_one_smart_studio_job(db, worker_id=worker_id)
         except asyncio.CancelledError:
             raise
+        except SQLAlchemyError as exc:
+            if _is_missing_table_error(exc):
+                logger.debug("smart_studio_worker_table_missing_sleeping")
+            else:
+                logger.debug("smart_studio_worker_poll_skipped", exc_info=True)
         except Exception:
             logger.debug("smart_studio_worker_poll_skipped", exc_info=True)
 
         if processed:
             continue
+
+        stop_wait = asyncio.create_task(stop_event.wait())
+        wake_wait = asyncio.create_task(wake_event.wait())
         try:
-            await asyncio.wait_for(stop_event.wait(), timeout=poll_interval_seconds)
-        except asyncio.TimeoutError:
-            continue
+            await asyncio.wait(
+                {stop_wait, wake_wait},
+                timeout=effective_poll,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            for waiter in (stop_wait, wake_wait):
+                if not waiter.done():
+                    waiter.cancel()
+            await asyncio.gather(stop_wait, wake_wait, return_exceptions=True)

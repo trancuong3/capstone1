@@ -106,7 +106,7 @@ describe("DEF-011 multi-tab and session-scoped child selection sync", () => {
     window.localStorage.clear();
   });
 
-  it("does not persist selectedChildId across cold mounts and clears across users/logout", async () => {
+  it("persists selectedChildId per user and clears across user switches and logout", async () => {
     const user = userEvent.setup();
     const { rerender } = render(
       <AuthRuntimeContext.Provider value={makeRuntime("user-1")}>
@@ -120,14 +120,14 @@ describe("DEF-011 multi-tab and session-scoped child selection sync", () => {
     expect(screen.getByLabelText("Selected child")).toHaveTextContent(
       "child-a",
     );
-    expect(
-      window.localStorage.getItem("viread:selected-child:user-1"),
-    ).toBeNull();
+    expect(window.localStorage.getItem("viread:selected-child:user-1")).toBe(
+      "child-a",
+    );
     expect(
       window.localStorage.getItem("viread:selected-child-signal"),
     ).toBeNull();
 
-    // Switch to another user directly -> must not inherit user-1 selection
+    // Switch to another user directly -> must clear previous user and never inherit user-1 selection
     rerender(
       <AuthRuntimeContext.Provider value={makeRuntime("user-2")}>
         <AppStoreProvider>
@@ -135,6 +135,9 @@ describe("DEF-011 multi-tab and session-scoped child selection sync", () => {
         </AppStoreProvider>
       </AuthRuntimeContext.Provider>,
     );
+    expect(
+      window.localStorage.getItem("viread:selected-child:user-1"),
+    ).toBeNull();
     expect(screen.getByLabelText("Selected child")).toHaveTextContent("none");
 
     // Select child-b for user-2, then sign out -> clears in-memory selection and broadcasts null
@@ -251,7 +254,7 @@ describe("DEF-011 multi-tab and session-scoped child selection sync", () => {
     expect(screen.getByLabelText("Selected child")).toHaveTextContent("none");
   });
 
-  it("cold mount without explicit childId does not auto-restore a prior tab selection", async () => {
+  it("restores persisted child selection on cold mount for the same user and isolates other users", async () => {
     const user = userEvent.setup();
     const firstMount = render(
       <AuthRuntimeContext.Provider value={makeRuntime("user-1")}>
@@ -266,9 +269,22 @@ describe("DEF-011 multi-tab and session-scoped child selection sync", () => {
     );
     firstMount.unmount();
 
-    // Fresh cold mount (e.g. direct navigation to /books/<id> without ?childId=)
-    render(
+    // Fresh cold mount for the same user restores persisted selection
+    const sameUserMount = render(
       <AuthRuntimeContext.Provider value={makeRuntime("user-1")}>
+        <AppStoreProvider>
+          <StoreInspector />
+        </AppStoreProvider>
+      </AuthRuntimeContext.Provider>,
+    );
+    expect(screen.getByLabelText("Selected child")).toHaveTextContent(
+      "child-a",
+    );
+    sameUserMount.unmount();
+
+    // Cold mount for a different user must never inherit user-1 selection
+    render(
+      <AuthRuntimeContext.Provider value={makeRuntime("user-2")}>
         <AppStoreProvider>
           <StoreInspector />
         </AppStoreProvider>

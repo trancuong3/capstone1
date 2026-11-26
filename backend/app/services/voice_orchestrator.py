@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import math
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, replace
@@ -78,10 +79,27 @@ _turn_results: "OrderedDict[tuple[str, str, str, str], tuple[float, LocalTranscr
 )
 _turn_inflight: dict[tuple[str, str, str, str], asyncio.Future[LocalTranscription]] = {}
 
+_SESSION_LOCK_MAX = 1024
+_SESSION_LOCK_TTL_SECONDS = 4 * 3600.0
+_session_voice_locks: "OrderedDict[tuple[str, str], tuple[float, str, str]]" = OrderedDict()
+
 
 def clear_voice_orchestrator_caches() -> None:
     _turn_results.clear()
     _turn_inflight.clear()
+    _session_voice_locks.clear()
+
+
+def _prune_session_voice_locks(now: float) -> None:
+    expired = [
+        key
+        for key, (ts, _, _) in _session_voice_locks.items()
+        if now - ts > _SESSION_LOCK_TTL_SECONDS
+    ]
+    for key in expired:
+        _session_voice_locks.pop(key, None)
+    while len(_session_voice_locks) > _SESSION_LOCK_MAX:
+        _session_voice_locks.popitem(last=False)
 
 
 def _prune_turn_cache(now: float) -> None:
@@ -96,26 +114,29 @@ def _prune_turn_cache(now: float) -> None:
         _turn_results.popitem(last=False)
 
 
-def _map_local_voice_to_google_backup(voice_id: str) -> str:
+def _resolve_local_voice_region_gender(voice_id: str) -> tuple[str, str]:
     region = "north"
     gender = "female"
     for item in STATIC_LOCAL_VOICES:
         if item.get("voice_id") == voice_id:
             region = str(item.get("region") or "north")
             gender = str(item.get("gender") or "female")
-            break
-    else:
-        lower = voice_id.lower()
-        if "south" in lower or "nam" in lower:
-            region = "south"
-        elif "central" in lower or "trung" in lower:
-            region = "central"
-        if any(
-            marker in lower
-            for marker in ("thien_minh", "quang_son", "thai_son", "_male")
-        ):
-            gender = "male"
+            return region, gender
+    lower = voice_id.lower()
+    if "south" in lower or "nam" in lower:
+        region = "south"
+    elif "central" in lower or "trung" in lower:
+        region = "central"
+    if any(
+        marker in lower
+        for marker in ("thien_minh", "quang_son", "thai_son", "_male")
+    ):
+        gender = "male"
+    return region, gender
 
+
+def _map_local_voice_to_google_backup(voice_id: str) -> str:
+    region, gender = _resolve_local_voice_region_gender(voice_id)
     if region == "south":
         return (
             "google_vi_vn_wavenet_b"
@@ -127,6 +148,17 @@ def _map_local_voice_to_google_backup(voice_id: str) -> str:
         if gender == "male"
         else "google_vi_vn_neural2_a"
     )
+
+
+def _map_local_voice_to_google_backup_with_reason(voice_id: str) -> tuple[str, str]:
+    region, _gender = _resolve_local_voice_region_gender(voice_id)
+    backup_id = _map_local_voice_to_google_backup(voice_id)
+    reason = (
+        "central_mapped_to_north_google"
+        if region == "central"
+        else "local_tts_unavailable"
+    )
+    return backup_id, reason
 
 
 class VoiceOrchestrator:
@@ -351,6 +383,49 @@ class VoiceOrchestrator:
             and not self.google.is_tts_in_cooldown()
         )
 
+    def _enforce_session_voice_lock(
+        self,
+        ctx: VoicePolicyContext,
+        voice_id: str,
+    ) -> None:
+        """Enforce server-side 'Một buổi, một giọng' lock across TTS turns within a session."""
+        raw_sid = (ctx.session_id or "").strip()[:80]
+        if not raw_sid:
+            return
+        if voice_id.startswith("google_"):
+            canonical_voice = voice_id
+            requested_provider = "google"
+        else:
+            canonical_voice, _ = LocalVoiceProvider._resolve_target_voice_id(voice_id)
+            requested_provider = "local"
+
+        now = time.monotonic()
+        _prune_session_voice_locks(now)
+        lock_key = (str(ctx.actor_id or "-"), raw_sid)
+        existing = _session_voice_locks.get(lock_key)
+        if existing is not None:
+            _ts, locked_voice_id, locked_provider = existing
+            if locked_provider != requested_provider or locked_voice_id != canonical_voice:
+                logger.warning(
+                    "tts_session_voice_lock_rejected session=%s locked=%s(%s) requested=%s(%s) request_id=%s",
+                    raw_sid,
+                    locked_voice_id,
+                    locked_provider,
+                    canonical_voice,
+                    requested_provider,
+                    get_request_id(),
+                )
+                raise VoiceProviderError(
+                    status_code=409,
+                    code="SESSION_VOICE_LOCKED",
+                )
+            _session_voice_locks.move_to_end(lock_key)
+            _session_voice_locks[lock_key] = (now, locked_voice_id, locked_provider)
+            return
+
+        _session_voice_locks[lock_key] = (now, canonical_voice, requested_provider)
+        _session_voice_locks.move_to_end(lock_key)
+
     async def synthesize(
         self,
         *,
@@ -364,6 +439,8 @@ class VoiceOrchestrator:
         ctx = policy or VoicePolicyContext()
         voice_id = (requested_voice_id or "").strip() or DEFAULT_LOCAL_VOICE_ID
         t0 = time.perf_counter()
+
+        self._enforce_session_voice_lock(ctx, voice_id)
 
         if voice_id.startswith("google_"):
             self._validate_google_tts_allowed(ctx)
@@ -453,15 +530,20 @@ class VoiceOrchestrator:
                     get_request_id(),
                 )
                 raise
-            backup_voice_id = _map_local_voice_to_google_backup(voice_id)
+            backup_voice_id, backup_reason = _map_local_voice_to_google_backup_with_reason(voice_id)
             t_google = time.perf_counter()
             audio = await self.google.synthesize(
                 text=text, voice_id=backup_voice_id, speed=speed
             )
-            fallback_audio = replace(audio, used_fallback_voice=True)
+            fallback_audio = replace(
+                audio,
+                used_fallback_voice=True,
+                fallback_reason=backup_reason,
+            )
             logger.info(
-                "tts_ok provider=google fallback=1 reason=%s voice=%s ms=%.1f session=- request_id=%s",
+                "tts_ok provider=google fallback=1 reason=%s backup_reason=%s voice=%s ms=%.1f session=- request_id=%s",
                 local_err.code,
+                backup_reason,
                 fallback_audio.resolved_voice_id,
                 (time.perf_counter() - t_google) * 1000,
                 get_request_id(),
@@ -474,16 +556,47 @@ class VoiceOrchestrator:
         words: list[str],
         raw_timings: list[dict[str, Any]],
         cached_text: str | None = None,
+        duration_seconds: float | None = None,
     ) -> list[LocalTimedWord] | None:
+        if not words or not raw_timings:
+            return None
+
+        parsed_raw: list[tuple[float, float]] = []
+        max_end = 0.0
+        for item in raw_timings:
+            if not isinstance(item, dict):
+                return None
+            try:
+                s_val = float(item["start"])
+                e_val = float(item["end"])
+            except (KeyError, TypeError, ValueError):
+                return None
+            if not (math.isfinite(s_val) and math.isfinite(e_val)) or s_val < 0 or e_val < 0:
+                return None
+            max_end = max(max_end, s_val, e_val)
+            parsed_raw.append((s_val, max(s_val, e_val)))
+
+        if duration_seconds is not None:
+            if not math.isfinite(float(duration_seconds)) or float(duration_seconds) <= 0.0:
+                if max_end <= 0.0:
+                    return None
+                effective_duration = max_end
+            else:
+                effective_duration = float(duration_seconds)
+        else:
+            effective_duration = max_end
+            if effective_duration <= 0.0:
+                return None
+
         if len(raw_timings) == len(words):
-            return [
-                LocalTimedWord(
-                    index=int(item["index"]),
-                    start=float(item["start"]),
-                    end=float(item["end"]),
-                )
-                for item in raw_timings
-            ]
+            clamped: list[LocalTimedWord] = []
+            prev_end = 0.0
+            for idx, (s_val, e_val) in enumerate(parsed_raw):
+                start = round(max(prev_end, min(effective_duration, s_val)), 3)
+                end = round(max(start, min(effective_duration, e_val)), 3)
+                clamped.append(LocalTimedWord(index=idx, start=start, end=end))
+                prev_end = end
+            return clamped
 
         req_spoken: list[tuple[int, str]] = []
         for idx, token in enumerate(words):
@@ -493,11 +606,11 @@ class VoiceOrchestrator:
         if not req_spoken:
             return None
 
-        matched_by_req_idx: dict[int, dict[str, Any]] = {}
+        matched_by_req_idx: dict[int, tuple[float, float]] = {}
         cached_tokens = canonical_tts_text(cached_text).split() if cached_text else []
-        if cached_tokens and len(cached_tokens) == len(raw_timings):
-            cached_spoken: list[tuple[str, dict[str, Any]]] = []
-            for tok, timing in zip(cached_tokens, raw_timings):
+        if cached_tokens and len(cached_tokens) == len(parsed_raw):
+            cached_spoken: list[tuple[str, tuple[float, float]]] = []
+            for tok, timing in zip(cached_tokens, parsed_raw):
                 folded_tok = folded_catalog_tts_text(tok)
                 if folded_tok:
                     cached_spoken.append((folded_tok, timing))
@@ -508,8 +621,8 @@ class VoiceOrchestrator:
                 return None
             for (req_idx, _), (_, timing) in zip(req_spoken, cached_spoken):
                 matched_by_req_idx[req_idx] = timing
-        elif len(raw_timings) == len(req_spoken):
-            for (req_idx, _), timing in zip(req_spoken, raw_timings):
+        elif len(parsed_raw) == len(req_spoken):
+            for (req_idx, _), timing in zip(req_spoken, parsed_raw):
                 matched_by_req_idx[req_idx] = timing
         else:
             return None
@@ -517,14 +630,15 @@ class VoiceOrchestrator:
         aligned: list[LocalTimedWord] = []
         prev_end = 0.0
         for idx in range(len(words)):
-            item = matched_by_req_idx.get(idx)
-            if item is not None:
-                start = max(prev_end, float(item["start"]))
-                end = max(start, float(item["end"]))
+            pair = matched_by_req_idx.get(idx)
+            if pair is not None:
+                start = round(max(prev_end, min(effective_duration, pair[0])), 3)
+                end = round(max(start, min(effective_duration, pair[1])), 3)
                 aligned.append(LocalTimedWord(index=idx, start=start, end=end))
                 prev_end = end
             else:
-                aligned.append(LocalTimedWord(index=idx, start=prev_end, end=prev_end))
+                zero = round(min(effective_duration, prev_end), 3)
+                aligned.append(LocalTimedWord(index=idx, start=zero, end=zero))
         return aligned
 
     async def synthesize_timed(
@@ -539,6 +653,8 @@ class VoiceOrchestrator:
         ctx = policy or VoicePolicyContext()
         voice_id = (requested_voice_id or "").strip() or DEFAULT_LOCAL_VOICE_ID
         t0 = time.perf_counter()
+
+        self._enforce_session_voice_lock(ctx, voice_id)
 
         if voice_id.startswith("google_"):
             self._validate_google_tts_allowed(ctx)
@@ -569,10 +685,18 @@ class VoiceOrchestrator:
                 words=words,
                 raw_timings=hit.word_timings_json,
                 cached_text=getattr(hit, "normalized_text", None),
+                duration_seconds=hit.duration_seconds,
             )
         else:
             timings = None
+        safe_duration = 0.0
         if hit is not None and timings is not None:
+            raw_dur = hit.duration_seconds
+            if raw_dur is not None and math.isfinite(float(raw_dur)) and float(raw_dur) > 0.0:
+                safe_duration = round(float(raw_dur), 3)
+            else:
+                safe_duration = round(max((t.end for t in timings), default=0.0), 3)
+        if hit is not None and timings is not None and safe_duration > 0.0:
             logger.info(
                 "tts_timed_ok provider=precomputed_cache scope=%s voice=%s words=%d ms=%.1f session=%s request_id=%s",
                 hit.scope,
@@ -585,7 +709,7 @@ class VoiceOrchestrator:
             return LocalTimedSpeech(
                 audio=hit.content,
                 content_type=hit.content_type,
-                duration_seconds=float(hit.duration_seconds or 0.0),
+                duration_seconds=safe_duration,
                 words=timings,
                 resolved_voice_id=hit.resolved_voice_id,
                 region=self._voice_region(hit.resolved_voice_id),
@@ -644,17 +768,22 @@ class VoiceOrchestrator:
                     get_request_id(),
                 )
                 raise
-            backup_voice_id = _map_local_voice_to_google_backup(voice_id)
+            backup_voice_id, backup_reason = _map_local_voice_to_google_backup_with_reason(voice_id)
             timed = await self.google.synthesize_timed(
                 words=words, voice_id=backup_voice_id, speed=speed
             )
             logger.info(
-                "tts_timed_ok provider=google fallback=1 reason=%s voice=%s session=- request_id=%s",
+                "tts_timed_ok provider=google fallback=1 reason=%s backup_reason=%s voice=%s session=- request_id=%s",
                 local_err.code,
+                backup_reason,
                 timed.resolved_voice_id,
                 get_request_id(),
             )
-            return replace(timed, used_fallback_voice=True)
+            return replace(
+                timed,
+                used_fallback_voice=True,
+                fallback_reason=backup_reason,
+            )
 
     async def synthesize_phonics(
         self,
@@ -668,6 +797,8 @@ class VoiceOrchestrator:
         ctx = policy or VoicePolicyContext()
         voice_id = (requested_voice_id or "").strip() or DEFAULT_LOCAL_VOICE_ID
         t0 = time.perf_counter()
+
+        self._enforce_session_voice_lock(ctx, voice_id)
 
         if voice_id.startswith("google_"):
             self._validate_google_tts_allowed(ctx)
@@ -698,37 +829,63 @@ class VoiceOrchestrator:
             and isinstance(hit.word_timings_json, list)
             and len(hit.word_timings_json) == len(steps)
         ):
-            timings = [
-                LocalPhonicsStepTiming(
-                    id=str(item["id"]),
-                    index=int(item["index"]),
-                    start=float(item["start"]),
-                    end=float(item["end"]),
+            raw_dur = hit.duration_seconds
+            max_step_end = max(
+                (
+                    float(item.get("end", 0.0))
+                    for item in hit.word_timings_json
+                    if isinstance(item, dict)
+                ),
+                default=0.0,
+            )
+            safe_dur = (
+                round(float(raw_dur), 3)
+                if raw_dur is not None and math.isfinite(float(raw_dur)) and float(raw_dur) > 0.0
+                else round(max_step_end, 3)
+            )
+            if safe_dur > 0.0:
+                timings: list[LocalPhonicsStepTiming] = []
+                prev_end = 0.0
+                for idx, item in enumerate(hit.word_timings_json):
+                    start = round(
+                        max(prev_end, min(safe_dur, float(item.get("start", 0.0)))),
+                        3,
+                    )
+                    end = round(
+                        max(start, min(safe_dur, float(item.get("end", start)))),
+                        3,
+                    )
+                    timings.append(
+                        LocalPhonicsStepTiming(
+                            id=str(item.get("id") or steps[idx]["id"]),
+                            index=int(item.get("index", idx)),
+                            start=start,
+                            end=end,
+                        )
+                    )
+                    prev_end = end
+                logger.info(
+                    "tts_phonics_ok provider=precomputed_cache scope=%s voice=%s steps=%d ms=%.1f session=%s request_id=%s",
+                    hit.scope,
+                    hit.resolved_voice_id,
+                    len(steps),
+                    (time.perf_counter() - t0) * 1000,
+                    ctx.session_id or "-",
+                    get_request_id(),
                 )
-                for item in hit.word_timings_json
-            ]
-            logger.info(
-                "tts_phonics_ok provider=precomputed_cache scope=%s voice=%s steps=%d ms=%.1f session=%s request_id=%s",
-                hit.scope,
-                hit.resolved_voice_id,
-                len(steps),
-                (time.perf_counter() - t0) * 1000,
-                ctx.session_id or "-",
-                get_request_id(),
-            )
-            return LocalPhonicsSpeech(
-                audio=hit.content,
-                content_type=hit.content_type,
-                duration_seconds=float(hit.duration_seconds or 0.0),
-                step_timings=timings,
-                resolved_voice_id=hit.resolved_voice_id,
-                region=self._voice_region(hit.resolved_voice_id),
-                model_version=hit.model_version,
-                provider="precomputed_cache",
-                cache_hit=True,
-                cache_scope=hit.scope,
-                cached_speed=hit.cached_speed,
-            )
+                return LocalPhonicsSpeech(
+                    audio=hit.content,
+                    content_type=hit.content_type,
+                    duration_seconds=safe_dur,
+                    step_timings=timings,
+                    resolved_voice_id=hit.resolved_voice_id,
+                    region=self._voice_region(hit.resolved_voice_id),
+                    model_version=hit.model_version,
+                    provider="precomputed_cache",
+                    cache_hit=True,
+                    cache_scope=hit.scope,
+                    cached_speed=hit.cached_speed,
+                )
 
         try:
             speech = await self.local.synthesize_phonics(
@@ -781,17 +938,18 @@ class VoiceOrchestrator:
                     get_request_id(),
                 )
                 raise
-            backup_voice_id = _map_local_voice_to_google_backup(voice_id)
+            backup_voice_id, backup_reason = _map_local_voice_to_google_backup_with_reason(voice_id)
             phonics = await self.google.synthesize_phonics(
                 steps=steps, voice_id=backup_voice_id, speed=speed
             )
             logger.info(
-                "tts_phonics_ok provider=google fallback=1 reason=%s voice=%s session=- request_id=%s",
+                "tts_phonics_ok provider=google fallback=1 reason=%s backup_reason=%s voice=%s session=- request_id=%s",
                 local_err.code,
+                backup_reason,
                 phonics.resolved_voice_id,
                 get_request_id(),
             )
-            return phonics
+            return replace(phonics, fallback_reason=backup_reason)
 
     async def transcribe(
         self,
@@ -839,7 +997,7 @@ class VoiceOrchestrator:
                 keyterms=keyterms,
                 ctx=ctx,
             )
-            if dedup_key is not None:
+            if dedup_key is not None and not getattr(result, "superseded", False):
                 _turn_results[dedup_key] = (time.monotonic(), result)
             if fut is not None and not fut.done():
                 fut.set_result(result)

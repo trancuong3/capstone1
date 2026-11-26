@@ -515,7 +515,9 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
 
     await waitFor(() => {
       expect(
-        screen.getByText(/Worker nền Web bị tắt \(dùng nút kích hoạt bên dưới\)/i),
+        screen.getByText(
+          /Worker nền Web bị tắt \(dùng nút kích hoạt bên dưới\)/i,
+        ),
       ).toBeInTheDocument();
     });
 
@@ -525,11 +527,15 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
     ).not.toBeDisabled();
 
     await user.click(
-      screen.getByRole("button", { name: /Tạo snapshot & Xếp hàng train Luồng 2/i }),
+      screen.getByRole("button", {
+        name: /Tạo snapshot & Xếp hàng train Luồng 2/i,
+      }),
     );
     await waitFor(() => {
       expect(mockService.triggerFlow2).toHaveBeenCalledTimes(1);
-      expect(screen.getByText(/141 train \/ 83 validation/i)).toBeInTheDocument();
+      expect(
+        screen.getByText(/141 train \/ 83 validation/i),
+      ).toBeInTheDocument();
     });
   });
 });

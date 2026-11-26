@@ -75,14 +75,15 @@ class DatabaseEngineConfigurationTests(unittest.TestCase):
         env["SUPABASE_URL"] = "https://x.supabase.co"
         env["SUPABASE_KEY"] = "test-key"
         env.pop("DATABASE_CONCURRENCY_LIMIT", None)
+        env.pop("DATABASE_FORCE_NULL_POOL", None)
         code = (
             "import sys; sys.path.insert(0, r'" + str(BACKEND_ROOT) + "');"
             "from sqlalchemy.pool import NullPool, QueuePool;"
             "from app.database import session;"
             "pool = session.engine.pool;"
             "assert isinstance(pool, QueuePool) and not isinstance(pool, NullPool), type(pool);"
-            "assert pool.size() == 4, pool.size();"
-            "assert pool._max_overflow == 4, pool._max_overflow;"
+            "assert pool.size() == 2, pool.size();"
+            "assert pool._max_overflow == 2, pool._max_overflow;"
             "assert pool._recycle == 300, pool._recycle;"
             "assert pool._pre_ping is True, pool._pre_ping;"
             "assert pool._pool.use_lifo is True, pool._pool.use_lifo;"
@@ -99,6 +100,24 @@ class DatabaseEngineConfigurationTests(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0, msg=proc.stderr or proc.stdout)
         self.assertIn("QUEUEPOOL_OK", proc.stdout)
+
+        env_forced = {**env, "DATABASE_FORCE_NULL_POOL": "true"}
+        code_null = (
+            "import sys; sys.path.insert(0, r'" + str(BACKEND_ROOT) + "');"
+            "from sqlalchemy.pool import NullPool;"
+            "from app.database import session;"
+            "assert isinstance(session.engine.pool, NullPool), type(session.engine.pool);"
+            "print('FORCE_NULLPOOL_OK')"
+        )
+        proc_null = subprocess.run(
+            [sys.executable, "-c", code_null],
+            env=env_forced,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc_null.returncode, 0, msg=proc_null.stderr or proc_null.stdout)
+        self.assertIn("FORCE_NULLPOOL_OK", proc_null.stdout)
 
     def test_test_env_and_local_loopback_keep_null_pool(self):
         import certifi

@@ -333,9 +333,19 @@ describe("ReadingScreen fencing, EchoGuard onsetAt, audioQuality, self-correctio
       guard.evaluate({ text: "Bé mèo", receivedAt: 2_300, onsetAt: 1_750 }),
     ).toMatchObject({ accept: false, reason: "onset-during-playback" });
 
-    // Onset past endedAt + onsetGraceMs (1800 + 250 = 2050) is accepted immediately
+    // Reverb bleed repeating exact TTS within 800ms tail-overlap window (+320ms) is rejected
     expect(
       guard.evaluate({ text: "Bé mèo", receivedAt: 2_300, onsetAt: 2_120 }),
+    ).toMatchObject({ accept: false, reason: "tail-overlap" });
+
+    // Non-overlapping child speech past onsetGraceMs is accepted immediately
+    expect(
+      guard.evaluate({ text: "Con chó", receivedAt: 2_300, onsetAt: 2_120 }),
+    ).toMatchObject({ accept: true, reason: "ok" });
+
+    // Exact repeat past 800ms tail-overlap window (1800 + 800 = 2600) is accepted
+    expect(
+      guard.evaluate({ text: "Bé mèo", receivedAt: 2_900, onsetAt: 2_650 }),
     ).toMatchObject({ accept: true, reason: "ok" });
   });
 

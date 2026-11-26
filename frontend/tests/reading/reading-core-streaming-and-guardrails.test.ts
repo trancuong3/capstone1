@@ -239,19 +239,25 @@ describe("LocalSegmentSpeechRecognition WS /voice/stt-stream & HTTP fallback", (
       expect(FakeWebSocket.instances).toHaveLength(1);
       const ws = FakeWebSocket.instances[0];
       expect(ws.url).toBe("wss://localhost:8443/_viread_api/voice/stt-stream");
-      expect(ws.protocols).toEqual(["viread-stt-v1", "bearer.jwt-token-123"]);
+      expect(ws.protocols).toEqual(["viread-stt-v1"]);
 
       ws.triggerOpen();
+      const authMsg = JSON.parse(String(ws.sent[0]));
+      expect(authMsg).toEqual({
+        type: "auth",
+        token: "jwt-token-123",
+      });
       ws.triggerMessage({ type: "ready" });
-      const startMsg = JSON.parse(String(ws.sent[0]));
+      const startMsg = JSON.parse(String(ws.sent[1]));
       expect(startMsg).toMatchObject({
         type: "start",
         session_id: "sess-ws",
         page_id: "page-ws",
         sample_rate: 16_000,
         language: "vi",
-        token: "jwt-token-123",
+        vad_mode: "client",
       });
+      expect(startMsg.token).toBeUndefined();
 
       // Push 1024 voiced samples (~64ms @ 16kHz) -> expect 2048-byte Int16 PCM frame
       const voiced = new Float32Array(1024);

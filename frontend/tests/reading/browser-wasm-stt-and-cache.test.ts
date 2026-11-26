@@ -159,13 +159,15 @@ describe("Browser WASM STT worker, client & 50MB TTS IndexedDB cache", () => {
     vi.unstubAllGlobals();
   });
 
-  it("enforces worker conditional padding (>=1.2s gets +5,600 zeros; <1.2s unpadded), NFC lowercase, zero book text, and free()", async () => {
+  it("enforces worker lead padding, voiced-duration-gated trailing pad, child-voice AGC, beam search, db.close(), NFC lowercase, zero book text, and free()", async () => {
     const workerSrc = fs.readFileSync(
       path.resolve(__dirname, "../../public/workers/sherpa-stt-worker.js"),
       "utf8",
     );
 
     const acceptedLengths: number[] = [];
+    const acceptedWaveforms: Float32Array[] = [];
+    const recognizerConfigs: Array<Record<string, unknown>> = [];
     const freedStreams: number[] = [];
     let recognizerFreed = false;
     const posted: unknown[] = [];
@@ -197,10 +199,14 @@ describe("Browser WASM STT worker, client & 50MB TTS IndexedDB cache", () => {
           FS_createDataFile: vi.fn(),
         }),
       OfflineRecognizer: class {
+        constructor(config: Record<string, unknown>) {
+          recognizerConfigs.push(config);
+        }
         createStream() {
           return {
             acceptWaveform: (_sr: number, wav: Float32Array) => {
               acceptedLengths.push(wav.length);
+              acceptedWaveforms.push(new Float32Array(wav));
             },
             free: () => freedStreams.push(1),
           };
@@ -216,7 +222,6 @@ describe("Browser WASM STT worker, client & 50MB TTS IndexedDB cache", () => {
       crypto: {
         subtle: {
           digest: async (_alg: string, buf: ArrayBuffer) => {
-            // Map length back to expected file hash for worker verification check
             const entry = Object.entries(expectedSizes).find(
               ([, len]) => len === buf.byteLength,
             );
@@ -273,33 +278,86 @@ describe("Browser WASM STT worker, client & 50MB TTS IndexedDB cache", () => {
       data: Record<string, unknown>;
     }) => Promise<void>;
 
-    // Short isolated word (< 1.2s = 19,200 samples) stays unpadded
+    const makeSine = (len: number, amp = 0.005, freq = 320) => {
+      const arr = new Float32Array(len);
+      for (let i = 0; i < len; i += 1) {
+        arr[i] = amp * Math.sin((2 * Math.PI * freq * i) / 16000);
+      }
+      return arr;
+    };
+
+    // 1. Short isolated word with 0.45s pre-roll (total 1.21s = 19,360 samples, voicedDurationMs = 600 < 1200)
+    //    MUST receive 0.18s lead pad (2880) and ZERO trailing pad (prevents collocation hallucinations!)
     await onmessage({
       data: {
         type: "transcribe",
-        id: "short-1",
-        samples: new Float32Array(8000).fill(0.1),
+        id: "short-preroll",
+        samples: makeSine(19360, 0.005),
         sampleRate: 16000,
+        voicedDurationMs: 600,
       },
     });
     expect(
       posted.filter((m) => (m as { type?: string }).type === "error"),
     ).toEqual([]);
-    expect(acceptedLengths[0]).toBe(8000);
+    expect(acceptedLengths[0]).toBe(2880 + 19360);
+    // Child-voice AGC lifts quiet 0.005 sine wave above 0.05!
+    const boostedPeak = acceptedWaveforms[0].reduce(
+      (max, v) => Math.max(max, Math.abs(v)),
+      0,
+    );
+    expect(boostedPeak).toBeGreaterThan(0.05);
 
-    // Longer segment (>= 1.2s = 19,200 samples) receives +5,600 zero samples (0.35s)
+    // 2. Longer sentence (voicedDurationMs = 1400 >= 1200) receives lead pad (2880) + trailing pad (5600)
     await onmessage({
       data: {
         type: "transcribe",
         id: "long-1",
-        samples: new Float32Array(19200).fill(0.1),
+        samples: makeSine(24000, 0.08),
+        sampleRate: 16000,
+        voicedDurationMs: 1400,
+      },
+    });
+    expect(acceptedLengths[1]).toBe(2880 + 24000 + 5600);
+    expect(freedStreams).toHaveLength(2);
+    expect(recognizerConfigs[0]).toMatchObject({
+      decodingMethod: "modified_beam_search",
+      blankPenalty: -0.05,
+    });
+    expect(posted.find((p) => (p as { id?: string }).id === "long-1")).toEqual(
+      expect.objectContaining({ type: "result", text: "con mèo ngủ" }),
+    );
+
+    // 3. Pure 0.5s all-zero silence (and low-level silent hum with voicedDurationMs=0)
+    //    MUST short-circuit to "" before invoking Sherpa decode() (never hallucinate "vâng")!
+    await onmessage({
+      data: {
+        type: "transcribe",
+        id: "silence-zeros",
+        samples: new Float32Array(8000),
+        sampleRate: 16000,
+        voicedDurationMs: 0,
+      },
+    });
+    await onmessage({
+      data: {
+        type: "transcribe",
+        id: "silence-dc",
+        samples: new Float32Array(8000).fill(0.02),
         sampleRate: 16000,
       },
     });
-    expect(acceptedLengths[1]).toBe(19200 + 5600);
+    expect(acceptedLengths).toHaveLength(2);
     expect(freedStreams).toHaveLength(2);
-    expect(posted.find((p) => (p as { id?: string }).id === "long-1")).toEqual(
-      expect.objectContaining({ type: "result", text: "con mèo ngủ" }),
+    expect(
+      posted.find((p) => (p as { id?: string }).id === "silence-zeros"),
+    ).toEqual(
+      expect.objectContaining({ type: "result", text: "", decodeMs: 0 }),
+    );
+    expect(
+      posted.find((p) => (p as { id?: string }).id === "silence-dc"),
+    ).toEqual(
+      expect.objectContaining({ type: "result", text: "", decodeMs: 0 }),
     );
 
     // Worker source must never inject expected book text into OfflineRecognizer
@@ -414,26 +472,34 @@ describe("Browser WASM STT worker, client & 50MB TTS IndexedDB cache", () => {
     rec2.abort();
   });
 
-  it("caches CATALOG/COACHING TTS in 50MB LRU IndexedDB and NEVER persists PRIVATE or no-store responses", async () => {
+  it("caches CATALOG/COACHING TTS in 50MB LRU IndexedDB gated on X-TTS-Scope (decoupled from Cache-Control: no-store) and NEVER persists PRIVATE", async () => {
     expect(shouldPersistTtsCacheEntry({ scope: "CATALOG" })).toBe(true);
     expect(shouldPersistTtsCacheEntry({ scope: "COACHING" })).toBe(true);
     expect(shouldPersistTtsCacheEntry({ scope: "PRIVATE" })).toBe(false);
+    expect(shouldPersistTtsCacheEntry({ scope: undefined })).toBe(false);
     expect(
       shouldPersistTtsCacheEntry({ scope: "CATALOG", isPrivateBook: true }),
     ).toBe(false);
+    // Decoupled from HTTP Cache-Control: no-store when explicitly scoped CATALOG/COACHING
     expect(
       shouldPersistTtsCacheEntry({
         scope: "CATALOG",
         cacheControl: "no-store, max-age=0",
       }),
+    ).toBe(true);
+    expect(
+      shouldPersistTtsCacheEntry({
+        scope: "PRIVATE",
+        cacheControl: "no-store, max-age=0",
+      }),
     ).toBe(false);
 
-    // First CATALOG fetch hits backend & caches in IndexedDB (when not Cache-Control: no-store)
+    // First CATALOG fetch hits backend (even with Cache-Control: no-store) & caches in IndexedDB
     fetchMock.mockResolvedValueOnce(
       new Response("catalog-mp3", {
         headers: {
           "content-type": "audio/mpeg",
-          "cache-control": "private, max-age=86400",
+          "cache-control": "no-store",
           "x-tts-scope": "CATALOG",
         },
       }),

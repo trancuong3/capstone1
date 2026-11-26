@@ -484,7 +484,43 @@ async def collect_remote_ocr_health() -> dict[str, Any]:
         elif online and not latest_online_engines and engine_summary:
             latest_online_engines = engine_summary
 
-    return {
+    # Outside the DB session: merge passive `<worker>/health` probe (60s RAM cache) so a
+    # Hugging Face Space in Quiet Standby reports accurate readiness and resets HF's 48h timer.
+    from app.services.remote_ocr_wakeup import (
+        is_remote_worker_wakeup_configured,
+        peek_remote_ocr_probe_degraded,
+        probe_configured_remote_ocr_worker_health,
+    )
+
+    remote_probe_degraded = False
+    if is_remote_worker_wakeup_configured():
+        passive_probe = await probe_configured_remote_ocr_worker_health()
+        if isinstance(passive_probe, dict) and passive_probe.get("online"):
+            probe_wid = str(passive_probe.get("worker_id") or "hf-ocr-space")
+            existing_idx = next(
+                (
+                    idx
+                    for idx, item in enumerate(serialized_workers)
+                    if item.get("worker_id") == probe_wid
+                ),
+                None,
+            )
+            if existing_idx is None:
+                serialized_workers.insert(0, passive_probe)
+            elif not serialized_workers[existing_idx].get("online"):
+                serialized_workers[existing_idx] = passive_probe
+
+            probe_engines = dict(passive_probe.get("engines") or {})
+            if bool(passive_probe.get("ready")):
+                any_online_ready = True
+                if not latest_online_engines and probe_engines:
+                    latest_online_engines = probe_engines
+            elif not latest_online_engines and probe_engines:
+                latest_online_engines = probe_engines
+        if not any_online_ready and peek_remote_ocr_probe_degraded():
+            remote_probe_degraded = True
+
+    out: dict[str, Any] = {
         "mode": "remote_worker",
         "ready": any_online_ready,
         "heartbeat_ttl_seconds": ttl_seconds,
@@ -492,3 +528,6 @@ async def collect_remote_ocr_health() -> dict[str, Any]:
         "workers": serialized_workers,
         "queue": queue,
     }
+    if remote_probe_degraded:
+        out["probe_degraded"] = True
+    return out

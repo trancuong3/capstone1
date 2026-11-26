@@ -16,7 +16,9 @@ export function ReadingProgress({
   currentWord,
 }: ReadingProgressProps) {
   const progressPercent =
-    wordCount > 0 ? Math.min(100, Math.round((readCount / wordCount) * 100)) : 0;
+    wordCount > 0
+      ? Math.min(100, Math.round((readCount / wordCount) * 100))
+      : 0;
 
   return (
     <div className="mx-auto w-full max-w-[1104px]">

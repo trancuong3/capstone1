@@ -58,6 +58,8 @@ interface BrowserSpeechRecognitionResult {
   readonly onsetAt?: number | null;
   readonly sessionId?: string | null;
   readonly pageId?: string | null;
+  readonly turnId?: string;
+  readonly segmentId?: string;
   readonly 0?: BrowserSpeechRecognitionAlternative;
 }
 interface BrowserSpeechRecognitionEvent {
@@ -428,6 +430,22 @@ export function ComprehensionQuestion({
       let fatalError = false;
       let consecutiveRestarts = 0;
       let maxEpochSeen = -1;
+      const seenFinalTurnIds = new Set<string>();
+      const SETTLE_IGNORED_POLITE = new Set([
+        "ạ",
+        "nhé",
+        "nha",
+        "ơi",
+        "à",
+        "ờ",
+        "ừ",
+        "ừm",
+        "nhỉ",
+        "ha",
+        "dạ",
+        "vâng",
+        "thưa",
+      ]);
 
       const isItemFencedIn = (
         item: BrowserSpeechRecognitionResult,
@@ -516,8 +534,15 @@ export function ComprehensionQuestion({
           if (!item?.isFinal) continue;
           processedUpTo = idx;
           if (!isItemFencedIn(item)) continue;
+          const turnKey = item.turnId ?? item.segmentId;
+          if (turnKey) {
+            if (seenFinalTurnIds.has(turnKey)) continue;
+            seenFinalTurnIds.add(turnKey);
+          }
           clearVoiceSettleTimer();
-          const transcript = item[0]?.transcript?.trim() ?? "";
+          const transcript = (item[0]?.transcript ?? "")
+            .normalize("NFC")
+            .trim();
           if (!transcript) continue;
           armReminder();
           const confidence = item[0]?.confidence;
@@ -589,11 +614,15 @@ export function ComprehensionQuestion({
           }
           if (analysis.type === "CHOICE") {
             setPreviewChoiceId(analysis.choice.id);
-            const wordCount = transcript.split(/\s+/u).filter(Boolean).length;
-            // Bare single-letter utterance ("A") waits 850ms so cross-segment
+            const meaningfulWords = transcript
+              .toLowerCase()
+              .replace(/[^\p{L}\p{M}\p{N}\s]/gu, " ")
+              .split(/\s+/u)
+              .filter((w) => w && !SETTLE_IGNORED_POLITE.has(w));
+            // Bare single-letter utterance ("A", "A ạ") waits 850ms so cross-segment
             // self-correction ("A" -> "à không, con chọn B") can retract cleanly.
             const settleMs =
-              analysis.matchedBy === "letter" && wordCount === 1
+              analysis.matchedBy === "letter" && meaningfulWords.length <= 1
                 ? BARE_LETTER_SETTLE_MS
                 : 0;
             if (settleMs > 0) {
@@ -655,6 +684,9 @@ export function ComprehensionQuestion({
             return;
           }
           consecutiveRestarts += 1;
+          // Reset index cursor for the new recognition cycle so results starting
+          // at resultIndex=0 after restart are never skipped.
+          processedUpTo = -1;
           try {
             rec.start();
           } catch {

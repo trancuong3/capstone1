@@ -1,0 +1,95 @@
+# Render Infrastructure-as-Code Blueprint for ViRead Lightweight Web API
+#
+# Deployment Notes:
+# - Uses `backend/requirements-web.txt` (excludes Torch/Paddle/VietOCR/Tesseract)
+#   to fit safely inside Render Free 512 MiB RAM.
+# - Region `singapore` is strongly recommended to co-locate with Vercel (`sin1`)
+#   and APAC Supabase, avoiding ~2.5s+ cross-ocean RTT observed from `oregon`
+#   (`gcp-us-west1`). Existing services provisioned in `oregon` require recreating
+#   in `singapore` to change regions.
+# - Upload the Supabase CA certificate as a Render Secret File mounted at
+#   `/etc/secrets/supabase-root.crt`.
+# - Never commit real secrets, tokens, passwords, or database URLs in this file.
+
+services:
+  - type: web
+    name: viread-backend
+    runtime: python
+    plan: free
+    # Recommended: singapore (co-located with Vercel sin1 & APAC Supabase)
+    region: singapore
+    autoDeploy: true
+    branch: main
+    buildCommand: pip install --no-cache-dir -r backend/requirements-web.txt
+    startCommand: cd backend && uvicorn app.sever:app --host 0.0.0.0 --port "$PORT" --workers 1
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+      - key: APP_ENVIRONMENT
+        value: production
+      - key: DATABASE_POOLER_MODE
+        value: transaction
+      - key: DATABASE_SSL_REQUIRED
+        value: "true"
+      - key: DATABASE_SSL_ROOT_CERT
+        value: /etc/secrets/supabase-root.crt
+      - key: DATABASE_CONCURRENCY_LIMIT
+        value: "8"
+      - key: DATABASE_CONCURRENCY_WAIT_TIMEOUT
+        value: "5"
+      - key: DATABASE_CONNECT_TIMEOUT
+        value: "10"
+      - key: DATABASE_COMMAND_TIMEOUT
+        value: "30"
+      - key: VIREAD_OCR_MODE
+        value: remote_worker
+      - key: VIREAD_WEB_DISABLE_HEAVY_WORKERS
+        value: "true"
+      - key: VIREAD_ENABLE_LIGHTWEIGHT_WORKERS
+        value: "false"
+      - key: VIREAD_ENABLE_SMART_STUDIO_WORKER
+        value: "false"
+      - key: VIREAD_DOCUMENT_RASTER_FORMAT
+        value: jpeg
+      - key: VIREAD_DOCUMENT_RASTER_JPEG_QUALITY
+        value: "85"
+      - key: VIREAD_ROLE_CACHE_TTL_SECONDS
+        value: "60.0"
+      - key: VIREAD_HEALTH_OCR_TIMEOUT_SECONDS
+        value: "8.0"
+      # Secrets and environment-specific URLs (configure in Render Dashboard only)
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: VIREAD_OCR_WORKER_TOKEN
+        sync: false
+      - key: VIREAD_OCR_REMOTE_WORKER_URL
+        sync: false
+      - key: VIREAD_HF_SPACE_TOKEN
+        sync: false
+      - key: VIREAD_VOICE_WORKER_TOKEN
+        sync: false
+      - key: VIREAD_CRON_DISPATCH_TOKEN
+        sync: false
+      - key: VIREAD_LOCAL_VOICE_WORKER_URL
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_APP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false

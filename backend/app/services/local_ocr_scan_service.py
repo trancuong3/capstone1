@@ -17,7 +17,7 @@ import time
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Any
 from uuid import UUID, uuid4
@@ -369,6 +369,17 @@ class LocalOcrScanService:
         if child_id is not None:
             if not await self.repository.child_belongs_to_parent(child_id, actor_id):
                 raise HTTPException(status_code=404, detail="Child profile not found")
+
+        # Release read-only auth transaction before image processing & remote /health check.
+        if not (
+            getattr(self.repository.db, "new", None)
+            or getattr(self.repository.db, "dirty", None)
+            or getattr(self.repository.db, "deleted", None)
+        ):
+            try:
+                await self.repository.db.rollback()
+            except Exception:
+                pass
 
         clean_bytes, image_sha256 = await self._validate_and_normalize_image(file)
 
@@ -746,6 +757,17 @@ class LocalOcrScanService:
             if not await self.repository.child_belongs_to_parent(child_id, actor_id):
                 raise HTTPException(status_code=404, detail="Child profile not found")
 
+        # Release read-only auth transaction before image processing & remote /health check.
+        if not (
+            getattr(self.repository.db, "new", None)
+            or getattr(self.repository.db, "dirty", None)
+            or getattr(self.repository.db, "deleted", None)
+        ):
+            try:
+                await self.repository.db.rollback()
+            except Exception:
+                pass
+
         clean_bytes, image_sha256 = await self._validate_and_normalize_image(file)
         with Image.open(BytesIO(clean_bytes)) as img:
             width, height = img.size
@@ -950,17 +972,39 @@ class LocalOcrScanService:
         ):
             raise HTTPException(status_code=404, detail="Scan OCR job not found")
 
+        if str(job.Status or "").upper() == "QUEUED":
+            from app.services.remote_ocr_wakeup import (
+                maybe_nudge_ocr_wakeup_for_stale_queued_job,
+            )
+
+            maybe_nudge_ocr_wakeup_for_stale_queued_job(
+                job_id=job.Id,
+                created_at=job.CreatedAt,
+                reason="local_scan_poll_nudge",
+            )
+
         if job.Status in ("SUCCEEDED", "DEAD_LETTER", "CANCELLED"):
             await job_service._cleanup_local_scan_temp_object(job)
             try:
                 await self.repository.db.commit()
             except Exception:
                 await self.repository.db.rollback()
+                job = await job_service.repo.get(job_id) or job
 
-        worker_online = await job_service.has_online_worker()
-        return await self._serialize_scan_job(
-            job, worker_online=worker_online, request_id=request_id
+        serialized = await self._serialize_scan_job(
+            job, worker_online=False, request_id=request_id
         )
+        if not (
+            getattr(self.repository.db, "new", None)
+            or getattr(self.repository.db, "dirty", None)
+            or getattr(self.repository.db, "deleted", None)
+        ):
+            try:
+                await self.repository.db.rollback()
+            except Exception:
+                pass
+        worker_online = await job_service.has_online_worker()
+        return serialized.model_copy(update={"worker_online": worker_online})
 
     async def cancel_scan_page_job(
         self,
@@ -984,7 +1028,65 @@ class LocalOcrScanService:
 
         await job_service.cancel_job(job_id, reason="USER_CANCELLED")
         refreshed = await job_service.repo.get(job_id) or job
-        worker_online = await job_service.has_online_worker()
-        return await self._serialize_scan_job(
-            refreshed, worker_online=worker_online, request_id=request_id
+        serialized = await self._serialize_scan_job(
+            refreshed, worker_online=False, request_id=request_id
         )
+        if not (
+            getattr(self.repository.db, "new", None)
+            or getattr(self.repository.db, "dirty", None)
+            or getattr(self.repository.db, "deleted", None)
+        ):
+            try:
+                await self.repository.db.rollback()
+            except Exception:
+                pass
+        worker_online = await job_service.has_online_worker()
+        return serialized.model_copy(update={"worker_online": worker_online})
+
+
+async def cleanup_expired_local_scan_objects(
+    max_age_hours: int = 24,
+    *,
+    now: datetime | None = None,
+    limit: int = 100,
+    db: Any | None = None,
+) -> int:
+    """Sweep temporary `local-scans/` objects in private Storage older than max_age_hours."""
+    from sqlalchemy import select
+    from app.database.session import AsyncSessionLocal
+
+    current = now or datetime.now(timezone.utc)
+    cutoff = current - timedelta(hours=max(1, int(max_age_hours)))
+    cleaned = 0
+
+    async def _sweep(session: Any) -> int:
+        nonlocal cleaned
+        query = (
+            select(OcrInferenceJob)
+            .where(
+                OcrInferenceJob.JobKind == JOB_KIND_LOCAL_SCAN,
+                OcrInferenceJob.CreatedAt <= cutoff,
+            )
+            .order_by(OcrInferenceJob.CreatedAt.asc())
+            .limit(max(1, min(int(limit), 500)))
+        )
+        rows = list((await session.scalars(query)).all())
+        job_svc = OcrInferenceJobService(session)
+        changed = False
+        for row in rows:
+            image_path = str(getattr(row, "ImagePath", "") or "")
+            meta = dict(getattr(row, "ProcessingMeta", None) or {})
+            if not image_path.startswith("local-scans/") or meta.get("temp_image_cleaned"):
+                continue
+            await job_svc._cleanup_local_scan_temp_object(row)
+            if (getattr(row, "ProcessingMeta", None) or {}).get("temp_image_cleaned"):
+                cleaned += 1
+                changed = True
+        if changed:
+            await session.commit()
+        return cleaned
+
+    if db is not None:
+        return await _sweep(db)
+    async with AsyncSessionLocal() as session:
+        return await _sweep(session)

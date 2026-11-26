@@ -265,14 +265,14 @@ export function DashboardScreen() {
             (selectionRequired ? " family-profiles-prompt" : "")
           }
         >
-          <h2
-            id="child-selection-title"
-            className="max-md:text-base!"
-          >
+          <h2 id="child-selection-title" className="max-md:text-base!">
             Chọn hồ sơ trẻ
           </h2>
           {selectionRequired && children.length > 0 ? (
-            <p role="status" className="family-selection-notice max-md:text-xs!">
+            <p
+              role="status"
+              className="family-selection-notice max-md:text-xs!"
+            >
               {invalidSelection
                 ? "Hồ sơ đã thay đổi hoặc không còn khả dụng. Vui lòng chọn lại hồ sơ trẻ."
                 : "Vui lòng chọn hồ sơ trẻ trước khi bắt đầu đọc hoặc chơi."}
@@ -360,10 +360,7 @@ export function DashboardScreen() {
             className="family-tools max-md:mt-3!"
           >
             <div className="family-tools-heading max-md:items-center! max-md:pb-1.5!">
-              <h2
-                id="reading-actions-title"
-                className="max-md:text-lg!"
-              >
+              <h2 id="reading-actions-title" className="max-md:text-lg!">
                 Hoạt động đọc sách
               </h2>
               <Link

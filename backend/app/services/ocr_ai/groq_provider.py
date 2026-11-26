@@ -143,6 +143,7 @@ class GroqOcrProvider:
                 provider=self.name,
                 code="PROVIDER_QUOTA",
                 status_code=503,
+                disables_family=True,
                 **diagnostic,
             )
         if status_code >= 500:
@@ -150,6 +151,7 @@ class GroqOcrProvider:
                 provider=self.name,
                 code="PROVIDER_UNAVAILABLE",
                 status_code=503,
+                disables_family=True,
                 **diagnostic,
             )
         if status_code == 404:

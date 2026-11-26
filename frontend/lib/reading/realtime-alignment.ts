@@ -1030,6 +1030,18 @@ export class RealtimeAlignmentEngine {
         return;
       }
 
+      // Two consecutive words that fit together ahead (deferred multi-word/function-word
+      // lookahead or line jump): confirm the skip with 2-token evidence.
+      const anchor = this.findReanchor(
+        this.currentBookIndex,
+        pending.token,
+        token,
+      );
+      if (anchor !== -1) {
+        this.jumpTo(anchor, pending.spokenIndex, spokenIndex);
+        return;
+      }
+
       const nextMatchedIndex = this.findAhead(token);
 
       if (nextMatchedIndex !== -1) {
@@ -1049,18 +1061,6 @@ export class RealtimeAlignmentEngine {
         this.currentBookIndex += 1;
 
         this.processTokenAtCurrentPosition(token, spokenIndex);
-        return;
-      }
-
-      // Two consecutive words that only fit together further ahead: the child
-      // jumped over a line. Skip what was not read and follow the new position.
-      const anchor = this.findReanchor(
-        this.currentBookIndex,
-        pending.token,
-        token,
-      );
-      if (anchor !== -1) {
-        this.jumpTo(anchor, pending.spokenIndex, spokenIndex);
         return;
       }
 
@@ -1101,7 +1101,7 @@ export class RealtimeAlignmentEngine {
       return;
     }
 
-    // Chưa đủ bằng chứng để kết luận SUBSTITUTE. Chờ thêm một từ.
+    // Chưa đủ bằng chứng để kết luận SUBSTITUTE hoặc multi-word DELETE. Chờ thêm một từ.
     this.mismatchSeq += 1;
     this.pendingToken = { token, spokenIndex, seq: this.mismatchSeq };
   }
@@ -1112,7 +1112,11 @@ export class RealtimeAlignmentEngine {
     spokenIndex: number,
   ): void {
     if (matchedIndex === this.bookWords.length - 1) {
-      for (let index = this.currentBookIndex; index < matchedIndex; index += 1) {
+      for (
+        let index = this.currentBookIndex;
+        index < matchedIndex;
+        index += 1
+      ) {
         this.setWordStatus(index, "DELETE");
       }
       this.setWordStatus(matchedIndex, "MATCH");
@@ -1340,6 +1344,17 @@ export class RealtimeAlignmentEngine {
       return;
     }
 
+    const ahead = this.findAhead(pending.token);
+    if (ahead !== -1) {
+      for (let index = this.currentBookIndex; index < ahead; index += 1) {
+        this.setWordStatus(index, "DELETE");
+      }
+      this.setWordStatus(ahead, "MATCH");
+      this.spokenToBookIndex.set(pending.spokenIndex, ahead);
+      this.currentBookIndex = ahead + 1;
+      return;
+    }
+
     this.setWordStatus(this.currentBookIndex, "SUBSTITUTE");
     this.spokenToBookIndex.set(pending.spokenIndex, this.currentBookIndex);
     this.currentBookIndex += 1;
@@ -1361,8 +1376,10 @@ export class RealtimeAlignmentEngine {
   }
 
   /**
-   * Nếu từ vừa nói giống từ sách ngay trước con trỏ,
-   * xem đó là một lần đọc lặp.
+   * Nếu từ vừa nói giống từ sách ngay trước con trỏ:
+   * - Nếu từ đó đang bị đánh dấu SUBSTITUTE hoặc DELETE và trang chưa kết thúc,
+   *   nâng cấp thành MATCH (bé tự sửa ngay từ vừa đọc sai ở cursor-1).
+   * - Ngược lại, ghi nhận là lần đọc lặp.
    */
   private tryMarkRepeatedWord(token: string, spokenIndex: number): boolean {
     const previousIndex = this.currentBookIndex - 1;
@@ -1373,6 +1390,18 @@ export class RealtimeAlignmentEngine {
 
     if (previousWord.normalizedText !== token) {
       return false;
+    }
+
+    const existingStatus = this.statusByWordId.get(previousWord.wordId)?.status;
+    if (
+      !this.finished &&
+      (existingStatus === "SUBSTITUTE" || existingStatus === "DELETE")
+    ) {
+      this.setWordStatus(previousIndex, "MATCH");
+      this.correctedWordIds.add(previousWord.wordId);
+      this.trailingMismatch = null;
+      this.spokenToBookIndex.set(spokenIndex, previousIndex);
+      return true;
     }
 
     this.repeatedWordIds.add(previousWord.wordId);

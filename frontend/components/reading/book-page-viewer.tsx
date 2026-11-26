@@ -532,10 +532,7 @@ function PageSurface(
       }
     >
       <header
-        className={cn(
-          "reader-bookplate",
-          !isV2ModeEnabled && "hidden sm:flex",
-        )}
+        className={cn("reader-bookplate", !isV2ModeEnabled && "hidden sm:flex")}
         data-v2-mode={isV2ModeEnabled ? "true" : undefined}
       >
         <div className="min-w-0">

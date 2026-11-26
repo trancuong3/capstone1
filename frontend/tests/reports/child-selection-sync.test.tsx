@@ -220,9 +220,9 @@ describe("Child selection store sync does not revert mid-navigation external swi
       await waitReady();
 
       await waitFor(() => {
-        expect(
-          screen.getByLabelText("Store selected child"),
-        ).toHaveTextContent(CHILD_A.id);
+        expect(screen.getByLabelText("Store selected child")).toHaveTextContent(
+          CHILD_A.id,
+        );
       });
       expect(window.localStorage.getItem(storageKey)).toBe(CHILD_A.id);
 

@@ -163,8 +163,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
   const initialStoreChildIdRef = useRef(appStore?.selectedChildId ?? "");
   const [children, setChildren] = useState<ChildProfileDTO[]>([]);
   const [childId, setChildId] = useState(
-    requestedChildId ?? initialStoreChildIdRef.current ?? "",
+    () => requestedChildId ?? appStore?.selectedChildId ?? "",
   );
+  const [prevRequestedChildId, setPrevRequestedChildId] =
+    useState(requestedChildId);
   const [mobileTab, setMobileTab] = useState<
     "plans" | "goals" | "reminders" | "collections"
   >("plans");
@@ -288,31 +290,46 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
   const syncStoreChildren = appStore?.syncAvailableChildren;
   const syncedChildIdRef = useRef<string | null>(null);
 
+  const resetForChildChange = useCallback((nextChildId: string) => {
+    setChildId(nextChildId);
+    setGoals([]);
+    setPlans([]);
+    setCollections([]);
+    setReminders([]);
+    setDue([]);
+    setBooks([]);
+    setActiveForm(null);
+    setEditingGoalId("");
+    setEditingPlanId("");
+    setEditingReminderId("");
+    setError("");
+    setSuccess("");
+    setPlansPage(1);
+    setGoalsPage(1);
+    setCollectionsPage(1);
+    setCollectionFilter("ALL");
+    setRemindersPage(1);
+    setDuePage(1);
+  }, []);
+
+  if (requestedChildId !== prevRequestedChildId) {
+    setPrevRequestedChildId(requestedChildId);
+    if (
+      requestedChildId &&
+      requestedChildId !== childId &&
+      children.some((item) => item.id === requestedChildId)
+    ) {
+      resetForChildChange(requestedChildId);
+    }
+  }
+
   const handleSelectChild = useCallback(
     (nextChildId: string) => {
       if (nextChildId === childId) return;
       requestIdRef.current += 1;
-      setChildId(nextChildId);
-      setGoals([]);
-      setPlans([]);
-      setCollections([]);
-      setReminders([]);
-      setDue([]);
-      setBooks([]);
-      setActiveForm(null);
-      setEditingGoalId("");
-      setEditingPlanId("");
-      setEditingReminderId("");
-      setError("");
-      setSuccess("");
-      setPlansPage(1);
-      setGoalsPage(1);
-      setCollectionsPage(1);
-      setCollectionFilter("ALL");
-      setRemindersPage(1);
-      setDuePage(1);
+      resetForChildChange(nextChildId);
     },
-    [childId],
+    [childId, resetForChildChange],
   );
 
   useEffect(() => {
@@ -328,9 +345,11 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
           ? items.find((child) => child.id === preferredId)
           : undefined;
         setChildId((current) =>
-          current && items.some((child) => child.id === current)
-            ? current
-            : (preferred?.id ?? items[0]?.id ?? ""),
+          requestedChildId && preferred
+            ? preferred.id
+            : current && items.some((child) => child.id === current)
+              ? current
+              : (preferred?.id ?? items[0]?.id ?? ""),
         );
       })
       .catch(() => {
@@ -356,17 +375,6 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     selectStoreChild?.(selectedChild.id);
     setStoreValidatedChild?.(selectedChild);
   }, [selectStoreChild, selectedChild, setStoreValidatedChild]);
-
-  useEffect(() => {
-    if (
-      !requestedChildId ||
-      requestedChildId === childId ||
-      !children.some((item) => item.id === requestedChildId)
-    ) {
-      return;
-    }
-    handleSelectChild(requestedChildId);
-  }, [childId, children, handleSelectChild, requestedChildId]);
 
   useEffect(() => {
     if (!childId) {
@@ -1125,7 +1133,11 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               [
                 { key: "plans", label: "Kế hoạch", count: plans.length },
                 { key: "goals", label: "Mục tiêu", count: goals.length },
-                { key: "reminders", label: "Lịch nhắc", count: reminders.length },
+                {
+                  key: "reminders",
+                  label: "Lịch nhắc",
+                  count: reminders.length,
+                },
                 {
                   key: "collections",
                   label: "Sách lưu",

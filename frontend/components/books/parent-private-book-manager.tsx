@@ -134,6 +134,10 @@ function describeToolCheckScope(scope: ToolCheckScopeDTO): string {
   }
   if (scope.local_ai_enforced) {
     parts.push("chạy mô hình cục bộ (Ollama local)");
+  } else {
+    parts.push(
+      "soát chính tả & kiểm tra an toàn qua dịch vụ AI đám mây bảo mật",
+    );
   }
   if (!scope.image_visual_safety_checked) {
     parts.push("chưa tự động phân tích hình ảnh minh họa");
@@ -414,28 +418,118 @@ function ParentPrivateBookManagerContent({
     };
   }, [bookId, currentUserId, service]);
 
-  // Auto-poll while any submission is CHECKING + inspect OCR worker online state
+  // Auto-poll while any submission is CHECKING with exponential backoff (3s -> 15s),
+  // in-flight overlap guard, tab-visibility pause, and throttled /health checks (<= 1/30s).
   const hasCheckingSubmission = Boolean(
     detail?.submissions.some((sub) => sub.workflow_status === "CHECKING"),
   );
+  const pollInFlightRef = useRef(false);
+  const lastHealthCheckAtRef = useRef(0);
+  const workerOnlineRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    workerOnlineRef.current = ocrWorkerHealth?.workerOnline ?? null;
+  }, [ocrWorkerHealth]);
+
   useEffect(() => {
     if (!hasCheckingSubmission) return;
     let active = true;
-    const pollWorkerStatus = () => {
-      void fetchOcrWorkerHealth().then((snapshot) => {
-        if (active && snapshot) {
-          setOcrWorkerHealth(snapshot);
-        }
-      });
+    let timerId: number | null = null;
+    let idleTicks = 0;
+    const BASE_POLL_MS = 3_000;
+    const MAX_POLL_MS = 15_000;
+    const HEALTH_POLL_MIN_INTERVAL_MS = 30_000;
+
+    const clearTimer = () => {
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+        timerId = null;
+      }
     };
-    pollWorkerStatus();
-    const timer = window.setInterval(() => {
-      void loadDetail(true);
-      pollWorkerStatus();
-    }, 2500);
+    const maybePollWorkerHealth = async (force = false) => {
+      const now = Date.now();
+      if (
+        !force &&
+        now - lastHealthCheckAtRef.current < HEALTH_POLL_MIN_INTERVAL_MS
+      ) {
+        return;
+      }
+      lastHealthCheckAtRef.current = now;
+      const snapshot = await fetchOcrWorkerHealth();
+      if (active && snapshot) {
+        setOcrWorkerHealth(snapshot);
+      }
+    };
+
+    const nextDelayMs = () => {
+      const offline = workerOnlineRef.current === false;
+      const step = offline
+        ? Math.min(4, idleTicks + 1)
+        : Math.min(3, idleTicks);
+      return Math.min(
+        MAX_POLL_MS,
+        Math.round(BASE_POLL_MS * Math.pow(1.6, step)),
+      );
+    };
+
+    const scheduleNext = (delayMs: number) => {
+      clearTimer();
+      if (!active) return;
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
+      timerId = window.setTimeout(() => {
+        void runTick();
+      }, delayMs);
+    };
+
+    const runTick = async () => {
+      if (!active) return;
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
+      if (pollInFlightRef.current) {
+        scheduleNext(nextDelayMs());
+        return;
+      }
+      pollInFlightRef.current = true;
+      try {
+        void maybePollWorkerHealth(false).catch(() => undefined);
+        await loadDetail(true);
+        idleTicks += 1;
+      } finally {
+        pollInFlightRef.current = false;
+      }
+      scheduleNext(nextDelayMs());
+    };
+
+    const onVisibilityChange = () => {
+      if (!active) return;
+      if (document.visibilityState === "hidden") {
+        clearTimer();
+      } else {
+        idleTicks = 0;
+        scheduleNext(300);
+      }
+    };
+
+    void maybePollWorkerHealth(true);
+    scheduleNext(BASE_POLL_MS);
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityChange);
+    }
+
     return () => {
       active = false;
-      window.clearInterval(timer);
+      clearTimer();
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+      }
     };
   }, [hasCheckingSubmission, loadDetail]);
 
@@ -1292,6 +1386,12 @@ function ParentPrivateBookManagerContent({
             Hỗ trợ JPEG, PNG, WebP, BMP, TIFF, PDF, DOCX · tối đa{" "}
             <strong>30 trang mỗi tệp</strong> (≤ 50 MB). Mỗi trang tự động chạy:{" "}
             <strong>OCR → Rà chính tả → Tool Check an toàn</strong>.
+          </p>
+          <p className="mt-1 text-xs text-muted">
+            Minh bạch quyền riêng tư: Sách riêng chỉ hiển thị trong tài khoản
+            gia đình; văn bản trang sách tải lên được rà soát chính tả và an
+            toàn trẻ em tự động (mô hình cục bộ hoặc dịch vụ AI đám mây bảo mật
+            tùy cấu hình máy chủ) và mặc định không dùng để huấn luyện OCR.
           </p>
         </div>
 

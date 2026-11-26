@@ -129,6 +129,8 @@ describe("DifficultWordPracticePanel – autoStart", () => {
     // Keep the coaching cue separate from pronunciation playback.
     expect(play).toHaveBeenNthCalledWith(1, "Con đọc từ trên màn hình nhé.", {
       coaching: true,
+      isPrivateBook: false,
+      cacheScope: "COACHING",
     });
   });
 

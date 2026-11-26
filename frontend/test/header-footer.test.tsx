@@ -190,8 +190,28 @@ describe("shared header and footer", () => {
     ).not.toBeInTheDocument();
   });
 
-  it.each(["/books", "/books/book-1", "/reading/session-1"])(
-    "keeps one immersive landmark without duplicate parent navigation on %s",
+  it("keeps one immersive landmark without duplicate parent navigation on /reading/session-1", () => {
+    navigationMock.pathname = "/reading/session-1";
+    const { container } = render(
+      withAuthFixture(
+        <AppShell>
+          <h1>Không gian đọc</h1>
+        </AppShell>,
+        createAuthServiceFixture(),
+      ),
+    );
+    expect(container.querySelector("header")).toBeNull();
+    expect(
+      screen.queryByRole("navigation", { name: "Điều hướng dành cho ba mẹ" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("main")).toHaveLength(1);
+    expect(screen.getByRole("main")).toHaveAttribute("id", "main-content");
+    expect(screen.getByRole("main")).toHaveTextContent("Không gian đọc");
+  });
+
+  it.each(["/books", "/books/book-1"])(
+    "keeps compact mobile shell without desktop header or footer on %s",
     (pathname) => {
       navigationMock.pathname = pathname;
       const { container } = render(
@@ -202,10 +222,9 @@ describe("shared header and footer", () => {
           createAuthServiceFixture(),
         ),
       );
-      expect(container.querySelector("header")).toBeNull();
-      expect(
-        screen.queryByRole("navigation", { name: "Điều hướng dành cho ba mẹ" }),
-      ).not.toBeInTheDocument();
+      const header = container.querySelector("header");
+      expect(header).not.toBeNull();
+      expect(header?.className).toContain("xl:hidden");
       expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
       expect(screen.getAllByRole("main")).toHaveLength(1);
       expect(screen.getByRole("main")).toHaveAttribute("id", "main-content");

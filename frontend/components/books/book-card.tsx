@@ -79,8 +79,7 @@ export function BookCard({
                 <Icon
                   aria-hidden="true"
                   className={
-                    "size-4 shrink-0 sm:hidden" +
-                    (saved ? " fill-current" : "")
+                    "size-4 shrink-0 sm:hidden" + (saved ? " fill-current" : "")
                   }
                 />
                 <span className="sr-only sm:not-sr-only">
