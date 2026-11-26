@@ -15,7 +15,11 @@ from app.services.admin_ocr_local import (
 )
 from app.services.ocr_ai.base import OcrCorrectionProvider
 from app.services.ocr_ai.config import OcrCorrectionConfig
-from app.services.ocr_ai.exceptions import OcrOrchestrationError, OcrProviderError
+from app.services.ocr_ai.exceptions import (
+    OcrConfigurationError,
+    OcrOrchestrationError,
+    OcrProviderError,
+)
 from app.services.ocr_ai.gemini_provider import GeminiOcrProvider
 from app.services.ocr_ai.groq_provider import GroqOcrProvider
 from app.services.ocr_ai.ollama_provider import OllamaOcrProvider
@@ -86,7 +90,7 @@ class OcrCorrectionOrchestrator:
                     timeout_seconds=self.config.cloud_timeout_seconds,
                 )
             )
-        if self.config.local_enabled or not providers:
+        if self.config.local_enabled:
             providers.append(OllamaOcrProvider(self.config.local))
         return tuple(providers)
 
@@ -101,6 +105,8 @@ class OcrCorrectionOrchestrator:
         on_uncertain_tokens: Callable[[int, tuple[int, ...]], None] | None = None,
         word_normalizer: Callable[[str], str] | None = None,
     ) -> str:
+        if not self.providers:
+            raise OcrConfigurationError("NO_AI_PROVIDER_CONFIGURED")
         try:
             plan = chunk_ocr_text(
                 text,

@@ -620,6 +620,8 @@ async def process_submission_stages(
         uncertain_global: set[int] = set()
 
         def on_event(evt: dict[str, Any]) -> None:
+            if evt.get("status") == "started":
+                return
             provider_events.append({
                 "provider": str(evt.get("provider") or "unknown"),
                 "model": evt.get("model"),

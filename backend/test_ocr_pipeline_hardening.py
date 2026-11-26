@@ -28,9 +28,11 @@ from app.services.document_rasterizer_service import (
     spool_upload_file,
 )
 from app.services.local_ocr_scan_service import cleanup_expired_local_scan_objects
+from app.services.ocr_ai.child_safety import ChildSafetyOrchestrator
 from app.services.ocr_ai.config import OcrCorrectionConfig
-from app.services.ocr_ai.exceptions import OcrOrchestrationError
+from app.services.ocr_ai.exceptions import OcrConfigurationError, OcrOrchestrationError
 from app.services.ocr_ai.orchestrator import OcrCorrectionOrchestrator
+from app.services.parent_private_book_service import _build_scope
 from app.services.ocr_inference_job_service import (
     JOB_KIND_ADMIN_UPLOAD,
     JOB_KIND_LOCAL_SCAN,
@@ -818,6 +820,264 @@ class TestOcrPipelineHardening(unittest.TestCase):
             # Peak Python heap allocation must stay well below 40 MiB (vs ~348 MiB before streaming!)
             self.assertLess(peak_pdf_bytes, 40 * 1024 * 1024)
             self.assertLess(peak_docx_bytes, 40 * 1024 * 1024)
+
+        asyncio.run(_scenario())
+
+    def test_hosted_flags_ignore_leftover_local_ocr_base_url_for_admin_and_parent(self):
+        hosted_cases = (
+            {"RENDER": "true"},
+            {"VIREAD_WEB_DISABLE_HEAVY_WORKERS": "true"},
+            {"VIREAD_OCR_MODE": "remote_worker"},
+        )
+        for hosted_env in hosted_cases:
+            env = {
+                "LOCAL_OCR_BASE_URL": "http://127.0.0.1:11434",
+                "LOCAL_OCR_ENABLED": "",
+                "OCR_CLOUD_CORRECTION_ENABLED": "true",
+                "GEMINI_API_KEY": "test-gemini-key",
+                "PRIVATE_BOOK_ALLOW_CLOUD_AI": "",
+                **hosted_env,
+            }
+            with self.subTest(hosted_env=hosted_env), patch.dict(os.environ, env, clear=True):
+                self.assertFalse(OcrCorrectionConfig.local_ollama_enabled())
+                self.assertTrue(OcrCorrectionConfig.private_book_allow_cloud_ai())
+
+                admin_cfg = OcrCorrectionConfig.from_environment()
+                parent_cfg = OcrCorrectionConfig.from_environment_for_private_book()
+                for cfg in (admin_cfg, parent_cfg):
+                    self.assertFalse(cfg.local_enabled)
+                    self.assertTrue(cfg.gemini_enabled)
+                    proofread_orch = OcrCorrectionOrchestrator(cfg)
+                    safety_orch = ChildSafetyOrchestrator(cfg)
+                    self.assertNotIn("ollama", [p.family for p in proofread_orch.providers])
+                    self.assertNotIn("ollama", [p.family for p in safety_orch.providers])
+
+        override_env = {
+            "RENDER": "true",
+            "LOCAL_OCR_BASE_URL": "http://127.0.0.1:11434",
+            "LOCAL_OCR_ENABLED": "true",
+            "OCR_CLOUD_CORRECTION_ENABLED": "true",
+            "GEMINI_API_KEY": "test-gemini-key",
+        }
+        with patch.dict(os.environ, override_env, clear=True):
+            self.assertTrue(OcrCorrectionConfig.local_ollama_enabled())
+            cfg = OcrCorrectionConfig.from_environment()
+            self.assertTrue(cfg.local_enabled)
+            self.assertIn("ollama", [p.family for p in OcrCorrectionOrchestrator(cfg).providers])
+            self.assertIn("ollama", [p.family for p in ChildSafetyOrchestrator(cfg).providers])
+
+    def test_no_ai_provider_configured_fails_fast_without_retry(self):
+        async def _scenario() -> None:
+            self.assertIsNone(OcrConfigurationError("local ollama model missing").code)
+            self.assertEqual(
+                OcrConfigurationError("NO_AI_PROVIDER_CONFIGURED").code,
+                "NO_AI_PROVIDER_CONFIGURED",
+            )
+
+            cases = (
+                {
+                    "RENDER": "true",
+                    "LOCAL_OCR_BASE_URL": "http://127.0.0.1:11434",
+                    "LOCAL_OCR_ENABLED": "",
+                    "OCR_CLOUD_CORRECTION_ENABLED": "false",
+                    "PRIVATE_BOOK_ALLOW_CLOUD_AI": "",
+                },
+                {
+                    "RENDER": "true",
+                    "LOCAL_OCR_BASE_URL": "http://127.0.0.1:11434",
+                    "LOCAL_OCR_ENABLED": "",
+                    "OCR_CLOUD_CORRECTION_ENABLED": "true",
+                    "GEMINI_API_KEY": "test-gemini-key",
+                    "PRIVATE_BOOK_ALLOW_CLOUD_AI": "false",
+                },
+            )
+            for env in cases:
+                with self.subTest(env=env), patch.dict(os.environ, env, clear=True):
+                    cfg = OcrCorrectionConfig.from_environment_for_private_book()
+                    self.assertFalse(cfg.local_enabled)
+                    proof_orch = OcrCorrectionOrchestrator(cfg)
+                    safety_orch = ChildSafetyOrchestrator(cfg)
+                    self.assertEqual(proof_orch.providers, ())
+                    self.assertEqual(safety_orch.providers, [])
+                    with self.assertRaises(OcrConfigurationError) as proof_exc:
+                        await proof_orch.correct("Xin chào", _make_png_bytes(), [(0.1, 0.1, 0.2, 0.05), (0.35, 0.1, 0.2, 0.05)])
+                    self.assertEqual(proof_exc.exception.code, "NO_AI_PROVIDER_CONFIGURED")
+                    with self.assertRaises(OcrConfigurationError) as safety_exc:
+                        await safety_orch.analyze("Xin chào")
+                    self.assertEqual(safety_exc.exception.code, "NO_AI_PROVIDER_CONFIGURED")
+
+            now = datetime.now(timezone.utc)
+            img_bytes = _make_png_bytes()
+            img_sha = hashlib.sha256(img_bytes).hexdigest()
+            text = "Xin chào"
+            words = [
+                {"word_index": 0, "line_index": 0, "text": "Xin", "bbox": [0.1, 0.1, 0.2, 0.05]},
+                {"word_index": 1, "line_index": 0, "text": "chào", "bbox": [0.35, 0.1, 0.2, 0.05]},
+            ]
+            sub = ParentBookPageSubmission(
+                Id=uuid4(),
+                BookId=uuid4(),
+                OwnerParentId=self.parent_id,
+                BatchId=uuid4(),
+                BatchTotalPages=1,
+                SourcePageNumber=1,
+                SourceStoragePath="private/no-ai.png",
+                SourceSha256=img_sha,
+                ImageWidth=320,
+                ImageHeight=180,
+                SourceType="SELF_AUTHORED",
+                WorkflowStatus="CHECKING",
+                OcrStatus="COMPLETED",
+                OcrText=text,
+                OcrWordsJson=words,
+                ProofreadStatus="PENDING",
+                ToolCheckStatus="PENDING",
+                CandidateText=text,
+                CandidateWordsJson=words,
+                CandidateHash=compute_candidate_hash(text, source_sha256=img_sha),
+                SubmissionVersion=1,
+                OptimisticLockVersion=1,
+                TempExpiresAt=now + timedelta(days=1),
+            )
+            self.state.tables[ParentBookPageSubmission].append(sub)
+
+            attempts = 0
+
+            class _UnconfiguredProofread:
+                async def correct(self, *_args, **_kwargs):
+                    nonlocal attempts
+                    attempts += 1
+                    raise OcrConfigurationError("NO_AI_PROVIDER_CONFIGURED")
+
+            with patch(
+                "app.services.ocr_inference_job_service.AsyncSessionLocal",
+                lambda: _DummySessionCtx(self.state),
+            ):
+                res = await run_parent_submission_post_ocr(
+                    sub.Id,
+                    proofread_orchestrator=_UnconfiguredProofread(),
+                    download_bytes=lambda _path: img_bytes,
+                )
+
+            self.assertEqual(attempts, 1)
+            self.assertEqual(res["status"], "CHECK_FAILED")
+            self.assertEqual(res["error_code"], "NO_AI_PROVIDER_CONFIGURED")
+            self.assertEqual(sub.WorkflowStatus, "CHECK_FAILED")
+            self.assertEqual(sub.ProofreadErrorCode, "NO_AI_PROVIDER_CONFIGURED")
+
+        asyncio.run(_scenario())
+
+    def test_post_ocr_skips_started_provider_events_and_build_scope_defaults(self):
+        async def _scenario() -> None:
+            now = datetime.now(timezone.utc)
+            img_bytes = _make_png_bytes()
+            img_sha = hashlib.sha256(img_bytes).hexdigest()
+            text = "Chú mèo con"
+            words = [
+                {"word_index": 0, "line_index": 0, "text": "Chú", "bbox": [0.1, 0.1, 0.1, 0.05]},
+                {"word_index": 1, "line_index": 0, "text": "mèo", "bbox": [0.22, 0.1, 0.1, 0.05]},
+                {"word_index": 2, "line_index": 0, "text": "con", "bbox": [0.34, 0.1, 0.1, 0.05]},
+            ]
+            sub = ParentBookPageSubmission(
+                Id=uuid4(),
+                BookId=uuid4(),
+                OwnerParentId=self.parent_id,
+                BatchId=uuid4(),
+                BatchTotalPages=1,
+                SourcePageNumber=1,
+                SourceStoragePath="private/events.png",
+                SourceSha256=img_sha,
+                ImageWidth=320,
+                ImageHeight=180,
+                SourceType="SELF_AUTHORED",
+                WorkflowStatus="CHECKING",
+                OcrStatus="COMPLETED",
+                OcrText=text,
+                OcrWordsJson=words,
+                ProofreadStatus="PENDING",
+                ToolCheckStatus="PENDING",
+                CandidateText=text,
+                CandidateWordsJson=words,
+                CandidateHash=compute_candidate_hash(text, source_sha256=img_sha),
+                SubmissionVersion=1,
+                OptimisticLockVersion=1,
+                TempExpiresAt=now + timedelta(days=1),
+            )
+            self.state.tables[ParentBookPageSubmission].append(sub)
+
+            class _EventProofread:
+                async def correct(self, txt, *_args, on_provider_event=None, **_kwargs):
+                    assert on_provider_event is not None
+                    on_provider_event(
+                        {
+                            "provider": "gemini_3_5",
+                            "model": "gemini-3.5-flash-lite",
+                            "chunk_id": 0,
+                            "status": "started",
+                            "availability": None,
+                            "error_code": None,
+                            "duration_ms": 0,
+                        }
+                    )
+                    on_provider_event(
+                        {
+                            "provider": "gemini_3_5",
+                            "model": "gemini-3.5-flash-lite",
+                            "chunk_id": 0,
+                            "status": "succeeded",
+                            "availability": True,
+                            "error_code": None,
+                            "duration_ms": 42,
+                        }
+                    )
+                    return txt
+
+            class _OkSafety:
+                async def analyze(self, _txt):
+                    return {
+                        "suitability": "SUITABLE",
+                        "findings": [],
+                        "provider_events": [
+                            {"provider": "gemini_primary", "chunk_id": 0, "availability": True}
+                        ],
+                    }
+
+            with patch(
+                "app.services.ocr_inference_job_service.AsyncSessionLocal",
+                lambda: _DummySessionCtx(self.state),
+            ):
+                res = await run_parent_submission_post_ocr(
+                    sub.Id,
+                    proofread_orchestrator=_EventProofread(),
+                    safety_orchestrator=_OkSafety(),
+                    download_bytes=lambda _path: img_bytes,
+                )
+
+            self.assertEqual(res["status"], "PASSED_READY_TO_ADD")
+            self.assertEqual(len(sub.ProofreadProviderEventsJson), 1)
+            self.assertEqual(sub.ProofreadProviderEventsJson[0]["availability"], True)
+            self.assertEqual(sub.ProofreadProviderEventsJson[0]["duration_ms"], 42)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "RENDER": "true",
+                    "OCR_CLOUD_CORRECTION_ENABLED": "true",
+                    "LOCAL_OCR_ENABLED": "",
+                    "PRIVATE_BOOK_ALLOW_CLOUD_AI": "",
+                },
+                clear=True,
+            ):
+                self.assertFalse(_build_scope({}).local_ai_enforced)
+                self.assertTrue(_build_scope({"local_ai_enforced": True}).local_ai_enforced)
+
+            with patch.dict(
+                os.environ,
+                {"PRIVATE_BOOK_ALLOW_CLOUD_AI": "false"},
+                clear=True,
+            ):
+                self.assertTrue(_build_scope({}).local_ai_enforced)
+                self.assertFalse(_build_scope({"local_ai_enforced": False}).local_ai_enforced)
 
         asyncio.run(_scenario())
 
