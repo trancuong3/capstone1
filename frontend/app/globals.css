@@ -458,7 +458,7 @@
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 12px 16px 24px;
+  padding: 12px 16px 64px;
 }
 .reader-cover-art {
   width: 48px;
@@ -508,7 +508,7 @@
     align-self: stretch;
     min-height: 0;
     height: 100%;
-    padding: 20px clamp(24px, 3vw, 44px) 28px;
+    padding: 20px clamp(24px, 3vw, 44px) 72px;
   }
   .reader-sheet[data-render-mode="image-overlay"] .reader-bookplate {
     padding: 10px 20px;

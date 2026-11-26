@@ -607,6 +607,13 @@ async def lifespan(_app: FastAPI):
             pass
 
         try:
+            from app.services.storage_service import aclose_storage_http_clients
+
+            await aclose_storage_http_clients()
+        except (asyncio.CancelledError, Exception):
+            pass
+
+        try:
             await engine.dispose()
         except asyncio.CancelledError:
             pass

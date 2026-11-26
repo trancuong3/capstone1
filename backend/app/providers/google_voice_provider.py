@@ -7,6 +7,7 @@ Never logs audio bytes, child transcripts, or secret values.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import io
@@ -15,9 +16,15 @@ import struct
 import time
 import unicodedata
 import wave
+import weakref
 from typing import Any
 
 import httpx
+
+_ORIGINAL_HTTPX_ASYNC_CLIENT = httpx.AsyncClient
+_GOOGLE_LOOP_CLIENTS: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, httpx.AsyncClient]" = (
+    weakref.WeakKeyDictionary()
+)
 
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
 from app.providers.local_voice_provider import (
@@ -199,6 +206,75 @@ class GoogleCloudVoiceProvider:
             if access_token is not None
             else os.getenv("GOOGLE_CLOUD_ACCESS_TOKEN", "").strip()
         )
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_shared_client(self) -> httpx.AsyncClient:
+        try:
+            loop = asyncio.get_running_loop()
+            shared = _GOOGLE_LOOP_CLIENTS.get(loop)
+            if shared is not None and not getattr(shared, "is_closed", False):
+                return shared
+            shared = _ORIGINAL_HTTPX_ASYNC_CLIENT(
+                http2=True,
+                timeout=GOOGLE_TIMEOUT_SECONDS,
+                trust_env=False,
+                limits=httpx.Limits(
+                    max_connections=20,
+                    max_keepalive_connections=10,
+                    keepalive_expiry=30.0,
+                ),
+            )
+            _GOOGLE_LOOP_CLIENTS[loop] = shared
+            return shared
+        except RuntimeError:
+            pass
+        if self._client is None or getattr(self._client, "is_closed", False):
+            self._client = _ORIGINAL_HTTPX_ASYNC_CLIENT(
+                http2=True,
+                timeout=GOOGLE_TIMEOUT_SECONDS,
+                trust_env=False,
+                limits=httpx.Limits(
+                    max_connections=20,
+                    max_keepalive_connections=10,
+                    keepalive_expiry=30.0,
+                ),
+            )
+        return self._client
+
+    async def _post_google(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        json: dict[str, Any],
+    ) -> httpx.Response:
+        if httpx.AsyncClient is _ORIGINAL_HTTPX_ASYNC_CLIENT:
+            client = self._get_shared_client()
+            return await client.post(url, headers=headers, json=json)
+        async with httpx.AsyncClient(
+            timeout=GOOGLE_TIMEOUT_SECONDS, trust_env=False
+        ) as client:
+            return await client.post(url, headers=headers, json=json)
+
+    async def aclose(self) -> None:
+        clients: list[httpx.AsyncClient] = []
+        if self._client is not None:
+            clients.append(self._client)
+            self._client = None
+        try:
+            loop = asyncio.get_running_loop()
+            shared = _GOOGLE_LOOP_CLIENTS.pop(loop, None)
+            if shared is not None and shared not in clients:
+                clients.append(shared)
+        except RuntimeError:
+            pass
+        for client in clients:
+            aclose = getattr(client, "aclose", None)
+            if callable(aclose) and not getattr(client, "is_closed", False):
+                try:
+                    await aclose()
+                except Exception:
+                    pass
 
     def is_stt_configured(self) -> bool:
         return bool(self._stt_api_key or self._access_token)
@@ -273,14 +349,11 @@ class GoogleCloudVoiceProvider:
         }
 
         try:
-            async with httpx.AsyncClient(
-                timeout=GOOGLE_TIMEOUT_SECONDS, trust_env=False
-            ) as client:
-                resp = await client.post(
-                    GOOGLE_STT_ENDPOINT,
-                    headers=self._auth_headers("stt"),
-                    json=body,
-                )
+            resp = await self._post_google(
+                GOOGLE_STT_ENDPOINT,
+                headers=self._auth_headers("stt"),
+                json=body,
+            )
         except httpx.TimeoutException as exc:
             _stt_cooldown_until = time.monotonic() + 30.0
             raise VoiceProviderError(
@@ -362,14 +435,15 @@ class GoogleCloudVoiceProvider:
             fallback_reason=fallback_reason,
         )
 
-    async def _synthesize_wav_raw(
+    async def _synthesize_audio_raw(
         self,
         *,
         text: str,
         voice_id: str,
         speed: float,
         for_phonics_step: bool = False,
-    ) -> tuple[bytes, dict[str, Any]]:
+        audio_encoding: str = "LINEAR16",
+    ) -> tuple[bytes, str, dict[str, Any]]:
         global _tts_cooldown_until
 
         if not self.is_tts_configured():
@@ -386,28 +460,28 @@ class GoogleCloudVoiceProvider:
         normalized_text = normalize_vietnamese_tts_text(
             text, for_phonics_step=for_phonics_step
         ) or unicodedata.normalize("NFC", text.strip())
+        enc = "MP3" if audio_encoding == "MP3" else "LINEAR16"
+        audio_config: dict[str, Any] = {
+            "audioEncoding": enc,
+            "speakingRate": round(min(1.3, max(0.7, float(speed))), 2),
+        }
+        if enc == "LINEAR16":
+            audio_config["sampleRateHertz"] = 24000
         body = {
             "input": {"text": normalized_text},
             "voice": {
                 "languageCode": "vi-VN",
                 "name": meta["google_name"],
             },
-            "audioConfig": {
-                "audioEncoding": "LINEAR16",
-                "sampleRateHertz": 24000,
-                "speakingRate": round(min(1.3, max(0.7, float(speed))), 2),
-            },
+            "audioConfig": audio_config,
         }
 
         try:
-            async with httpx.AsyncClient(
-                timeout=GOOGLE_TIMEOUT_SECONDS, trust_env=False
-            ) as client:
-                resp = await client.post(
-                    GOOGLE_TTS_ENDPOINT,
-                    headers=self._auth_headers("tts"),
-                    json=body,
-                )
+            resp = await self._post_google(
+                GOOGLE_TTS_ENDPOINT,
+                headers=self._auth_headers("tts"),
+                json=body,
+            )
         except httpx.TimeoutException as exc:
             _tts_cooldown_until = time.monotonic() + 30.0
             raise VoiceProviderError(
@@ -442,17 +516,35 @@ class GoogleCloudVoiceProvider:
                 raise VoiceProviderError(
                     status_code=502, code="GOOGLE_TTS_EMPTY_AUDIO"
                 )
-            wav_bytes = base64.b64decode(audio_b64, validate=True)
+            audio_bytes = base64.b64decode(audio_b64, validate=True)
         except VoiceProviderError:
             raise
         except (ValueError, TypeError, binascii.Error) as exc:
             raise VoiceProviderError(
                 status_code=502, code="GOOGLE_TTS_INVALID_RESPONSE"
             ) from exc
-        if not wav_bytes:
+        if not audio_bytes:
             raise VoiceProviderError(
                 status_code=502, code="GOOGLE_TTS_EMPTY_AUDIO"
             )
+        content_type = "audio/mpeg" if enc == "MP3" else "audio/wav"
+        return audio_bytes, content_type, meta
+
+    async def _synthesize_wav_raw(
+        self,
+        *,
+        text: str,
+        voice_id: str,
+        speed: float,
+        for_phonics_step: bool = False,
+    ) -> tuple[bytes, dict[str, Any]]:
+        wav_bytes, _, meta = await self._synthesize_audio_raw(
+            text=text,
+            voice_id=voice_id,
+            speed=speed,
+            for_phonics_step=for_phonics_step,
+            audio_encoding="LINEAR16",
+        )
         return wav_bytes, meta
 
     async def synthesize(
@@ -461,13 +553,25 @@ class GoogleCloudVoiceProvider:
         text: str,
         voice_id: str,
         speed: float = 1.0,
+        accept: str | None = None,
+        audio_format: str | None = None,
     ) -> LocalSynthesizedAudio:
-        wav_bytes, meta = await self._synthesize_wav_raw(
-            text=text, voice_id=voice_id, speed=speed
+        want_mp3 = False
+        if audio_format:
+            want_mp3 = audio_format.strip().lower() == "mp3"
+        elif accept:
+            lower_accept = accept.lower()
+            if ("audio/mpeg" in lower_accept or "audio/mp3" in lower_accept) and "audio/wav" not in lower_accept:
+                want_mp3 = True
+        audio_bytes, content_type, meta = await self._synthesize_audio_raw(
+            text=text,
+            voice_id=voice_id,
+            speed=speed,
+            audio_encoding="MP3" if want_mp3 else "LINEAR16",
         )
         return LocalSynthesizedAudio(
-            content=wav_bytes,
-            content_type="audio/wav",
+            content=audio_bytes,
+            content_type=content_type,
             resolved_voice_id=meta["voice_id"],
             region=meta["region"],
             model_version=GOOGLE_TTS_MODEL_VERSION,
@@ -536,13 +640,21 @@ class GoogleCloudVoiceProvider:
         cursor_samples = 0
         timings: list[LocalPhonicsStepTiming] = []
 
-        for idx, step in enumerate(steps):
-            wav_bytes, _ = await self._synthesize_wav_raw(
-                text=str(step["spoken_text"]),
-                voice_id=voice_id,
-                speed=speed,
-                for_phonics_step=True,
-            )
+        sem = asyncio.Semaphore(4)
+
+        async def _synth_step(step: dict[str, Any]) -> bytes:
+            async with sem:
+                wav_bytes, _ = await self._synthesize_wav_raw(
+                    text=str(step["spoken_text"]),
+                    voice_id=voice_id,
+                    speed=speed,
+                    for_phonics_step=True,
+                )
+                return wav_bytes
+
+        step_wavs = await asyncio.gather(*(_synth_step(step) for step in steps))
+
+        for idx, (step, wav_bytes) in enumerate(zip(steps, step_wavs)):
             try:
                 _, step_sr, pcm = _wav_duration_and_pcm(wav_bytes)
             except (wave.Error, EOFError, struct.error, ValueError) as exc:

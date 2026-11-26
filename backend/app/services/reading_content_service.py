@@ -16,13 +16,17 @@ from app.schemas.reading import (
     ReadingEventCreate,
     ReadingPageDTO,
     ReadingPageWordDTO,
+    ReadingPageWordTimingDTO,
     ReadingSessionCreate,
     SessionSummaryRead,
     ReadingPageNavigationCreate,
     ReadingSessionPageProgressDTO,
     ReadingSessionPageProgressItem,
 )
-from app.services.catalog_tts_cache import resolve_verified_catalog_tts_url
+from app.services.catalog_tts_cache import (
+    get_catalog_tts_default_voice_id,
+    resolve_verified_catalog_tts_url,
+)
 from app.services.storage_service import create_signed_image_url
 from app.services.word_box_geometry import has_verified_geometry
 
@@ -1256,6 +1260,88 @@ class ReadingContentService:
             or page.CurrentVerifiedRevisionId == page_revision_id
         )
 
+        tts_audio_url = resolve_verified_catalog_tts_url(
+            is_public_catalog=not bool(book_is_private),
+            is_verified=is_verified_revision,
+            text=text_content,
+            processing_meta=processing_meta,
+        )
+        tts_word_timings: list[ReadingPageWordTimingDTO] | None = None
+        tts_voice_id: str | None = None
+        tts_cached_speed: float | None = None
+
+        if tts_audio_url and not bool(book_is_private) and is_verified_revision:
+            raw_timings = None
+            catalog_tts_meta = processing_meta.get("catalog_tts")
+            if isinstance(catalog_tts_meta, dict):
+                meta_voice = catalog_tts_meta.get("voice_id")
+                if isinstance(meta_voice, str) and meta_voice.strip():
+                    tts_voice_id = meta_voice.strip()
+                meta_speed = catalog_tts_meta.get("speed")
+                if isinstance(meta_speed, (int, float)) and math.isfinite(float(meta_speed)) and float(meta_speed) > 0:
+                    tts_cached_speed = round(float(meta_speed), 2)
+                if isinstance(catalog_tts_meta.get("word_timings"), list):
+                    raw_timings = catalog_tts_meta.get("word_timings")
+
+            if raw_timings is None:
+                try:
+                    from app.repositories.tts_audio_cache_repository import TtsAudioCacheRepository
+
+                    db_session = getattr(self.repository, "db", None)
+                    if (
+                        db_session is not None
+                        and isinstance(self.repository, ReadingContentRepository)
+                        and callable(getattr(db_session, "begin_nested", None))
+                    ):
+                        lookup_voice = tts_voice_id or get_catalog_tts_default_voice_id()
+                        async with db_session.begin_nested():
+                            meta_row = await TtsAudioCacheRepository(
+                                db_session
+                            ).get_page_precomputed_timed_metadata(
+                                page_id=page_id,
+                                page_revision_id=page_revision_id,
+                                voice_id=lookup_voice,
+                            )
+                            if meta_row is not None:
+                                raw_timings, found_voice, found_speed = meta_row
+                                tts_voice_id = found_voice
+                                if found_speed is not None and math.isfinite(found_speed) and found_speed > 0:
+                                    tts_cached_speed = round(float(found_speed), 2)
+                except Exception:
+                    raw_timings = None
+
+            if isinstance(raw_timings, list) and len(raw_timings) == len(words):
+                parsed_timings: list[ReadingPageWordTimingDTO] = []
+                valid_timings = True
+                for idx, item in enumerate(raw_timings):
+                    if not isinstance(item, dict):
+                        valid_timings = False
+                        break
+                    try:
+                        start_val = float(item.get("start", -1.0))
+                        end_val = float(item.get("end", -1.0))
+                    except (TypeError, ValueError):
+                        valid_timings = False
+                        break
+                    if (
+                        not (math.isfinite(start_val) and math.isfinite(end_val))
+                        or start_val < 0.0
+                        or end_val < start_val
+                    ):
+                        valid_timings = False
+                        break
+                    parsed_timings.append(
+                        ReadingPageWordTimingDTO(
+                            index=idx,
+                            start=round(start_val, 3),
+                            end=round(end_val, 3),
+                        )
+                    )
+                if valid_timings and parsed_timings:
+                    tts_word_timings = parsed_timings
+                    if not tts_voice_id:
+                        tts_voice_id = get_catalog_tts_default_voice_id()
+
         await self.repository.db.rollback()
 
         image_url = None
@@ -1313,13 +1399,6 @@ class ReadingContentService:
             illustration_url = None
             illustration_text_free = False
 
-        tts_audio_url = resolve_verified_catalog_tts_url(
-            is_public_catalog=not bool(book_is_private),
-            is_verified=is_verified_revision,
-            text=text_content,
-            processing_meta=processing_meta,
-        )
-
         return ReadingPageDTO(
             page_id=page_id,
             page_revision_id=page_revision_id,
@@ -1331,6 +1410,9 @@ class ReadingContentService:
             height=page_height,
             image_url=image_url,
             tts_audio_url=tts_audio_url,
+            tts_word_timings=tts_word_timings,
+            tts_voice_id=tts_voice_id,
+            tts_cached_speed=tts_cached_speed,
             image_overlay_safe=has_verified_geometry(
                 processing_meta.get("word_box_geometry"),
                 [word.model_dump() for word in words], page_width, page_height,

@@ -57,6 +57,7 @@ export interface EchoSegment {
   readonly text: string;
   readonly receivedAt: number;
   readonly onsetAt?: number | null;
+  readonly audioEndedAt?: number | null;
 }
 
 interface PlaybackRecord {
@@ -103,18 +104,50 @@ export class EchoGuard {
   }
 
   evaluate(segment: EchoSegment): EchoVerdict {
-    const active = this.records.find(
-      (record) =>
-        record.startedAt <= segment.receivedAt &&
-        (record.endedAt === null || segment.receivedAt < record.endedAt),
-    );
+    const active = this.records.find((record) => {
+      // When VAD timestamps are available, evaluate actual speech timing rather
+      // than STT HTTP/WASM delivery latency (`receivedAt`) so a child utterance
+      // spoken BEFORE TTS started (or AFTER TTS ended) is never falsely dropped.
+      if (
+        segment.audioEndedAt != null &&
+        segment.audioEndedAt < record.startedAt
+      ) {
+        return false;
+      }
+      if (
+        record.endedAt !== null &&
+        segment.onsetAt != null &&
+        segment.onsetAt >= record.endedAt + this.onsetGraceMs
+      ) {
+        return false;
+      }
+      const refTime =
+        segment.audioEndedAt != null
+          ? segment.audioEndedAt
+          : segment.onsetAt != null
+            ? segment.onsetAt
+            : segment.receivedAt;
+      return (
+        record.startedAt <= refTime &&
+        (record.endedAt === null || refTime < record.endedAt)
+      );
+    });
     if (active)
       return { accept: false, reason: "playing", playbackId: active.id };
 
     const tokens = tokenizeVietnameseText(segment.text);
     for (let index = this.records.length - 1; index >= 0; index -= 1) {
       const record = this.records[index];
-      if (record.endedAt === null || segment.receivedAt < record.startedAt) {
+      if (record.endedAt === null) {
+        continue;
+      }
+      if (
+        segment.audioEndedAt != null &&
+        segment.audioEndedAt < record.startedAt
+      ) {
+        continue;
+      }
+      if (segment.receivedAt < record.startedAt) {
         continue;
       }
       const sinceEnd = segment.receivedAt - record.endedAt;

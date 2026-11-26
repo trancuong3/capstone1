@@ -14,16 +14,21 @@ Enforces:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import math
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, replace
-from typing import Any, Literal
+from typing import Any, Awaitable, Callable, Literal
 from uuid import UUID
 
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
-from app.providers.google_voice_provider import GoogleCloudVoiceProvider
+from app.providers.google_voice_provider import (
+    GOOGLE_TTS_MODEL_VERSION,
+    GOOGLE_VOICE_BY_ID,
+    GoogleCloudVoiceProvider,
+)
 from app.providers.local_voice_provider import (
     DEFAULT_LOCAL_VOICE_ID,
     LOCAL_TTS_MODEL_VERSION,
@@ -79,12 +84,14 @@ _turn_inflight: dict[tuple[str, str, str, str], asyncio.Future[LocalTranscriptio
 _SESSION_LOCK_MAX = 1024
 _SESSION_LOCK_TTL_SECONDS = 4 * 3600.0
 _session_voice_locks: "OrderedDict[tuple[str, str], tuple[float, str, str]]" = OrderedDict()
+_tts_inflight: dict[tuple[Any, ...], asyncio.Future[Any]] = {}
 
 
 def clear_voice_orchestrator_caches() -> None:
     _turn_results.clear()
     _turn_inflight.clear()
     _session_voice_locks.clear()
+    _tts_inflight.clear()
 
 
 def _prune_session_voice_locks(now: float) -> None:
@@ -169,9 +176,12 @@ class VoiceOrchestrator:
         self.google = google_provider or GoogleCloudVoiceProvider()
 
     async def aclose(self) -> None:
-        aclose = getattr(self.local, "aclose", None)
-        if callable(aclose):
-            await aclose()
+        aclose_local = getattr(self.local, "aclose", None)
+        if callable(aclose_local):
+            await aclose_local()
+        aclose_google = getattr(self.google, "aclose", None)
+        if callable(aclose_google):
+            await aclose_google()
 
     async def get_status(self) -> dict[str, Any]:
         local_health = await self.local.get_health()
@@ -273,7 +283,80 @@ class VoiceOrchestrator:
         for item in STATIC_LOCAL_VOICES:
             if item.get("voice_id") == voice_id:
                 return str(item.get("region") or "north")
+        google_meta = GOOGLE_VOICE_BY_ID.get(voice_id)
+        if google_meta is not None:
+            return str(google_meta.get("region") or "north")
         return "north"
+
+    @staticmethod
+    def _fn_accepts_kwarg(fn: Any, name: str) -> bool:
+        try:
+            params = inspect.signature(fn).parameters
+        except (TypeError, ValueError):
+            return False
+        return name in params or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
+
+    async def _run_tts_single_flight(
+        self,
+        key: tuple[Any, ...],
+        coro_factory: Callable[[], Awaitable[Any]],
+    ) -> Any:
+        existing = _tts_inflight.get(key)
+        if existing is not None:
+            return await asyncio.shield(existing)
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[Any] = loop.create_future()
+        _tts_inflight[key] = fut
+        try:
+            result = await coro_factory()
+            if not fut.done():
+                fut.set_result(result)
+            return result
+        except BaseException as exc:
+            if not fut.done():
+                if isinstance(exc, asyncio.CancelledError):
+                    fut.cancel()
+                else:
+                    fut.set_exception(exc)
+                    _ = fut.exception()
+            raise
+        finally:
+            if _tts_inflight.get(key) is fut:
+                _tts_inflight.pop(key, None)
+
+    def update_session_voice_lock(
+        self,
+        ctx: VoicePolicyContext,
+        voice_id: str,
+    ) -> dict[str, Any]:
+        """Explicitly update a session's locked voice (called when parent changes voice while paused)."""
+        raw_sid = (ctx.session_id or "").strip()[:80]
+        if not raw_sid:
+            raise VoiceProviderError(status_code=422, code="SESSION_ID_REQUIRED")
+        cleaned_voice = (voice_id or "").strip() or DEFAULT_LOCAL_VOICE_ID
+        if cleaned_voice.startswith("google_"):
+            self._validate_google_tts_allowed(ctx)
+            if cleaned_voice not in GOOGLE_VOICE_BY_ID:
+                raise VoiceProviderError(status_code=404, code="VOICE_NOT_FOUND")
+            canonical_voice = cleaned_voice
+            provider = "google"
+        else:
+            canonical_voice, _ = LocalVoiceProvider._resolve_target_voice_id(cleaned_voice)
+            provider = "local"
+
+        now = time.monotonic()
+        _prune_session_voice_locks(now)
+        lock_key = (str(ctx.actor_id or "-"), raw_sid)
+        _session_voice_locks[lock_key] = (now, canonical_voice, provider)
+        _session_voice_locks.move_to_end(lock_key)
+        return {
+            "session_id": raw_sid,
+            "voice_id": canonical_voice,
+            "provider": provider,
+            "locked": True,
+        }
 
     async def _resolve_cache_target(
         self,
@@ -361,124 +444,184 @@ class VoiceOrchestrator:
         word_sample: bool = False,
         policy: VoicePolicyContext | None = None,
         db: Any = None,
+        background_tasks: Any = None,
     ) -> LocalSynthesizedAudio:
         ctx = policy or VoicePolicyContext()
         voice_id = (requested_voice_id or "").strip() or DEFAULT_LOCAL_VOICE_ID
         t0 = time.perf_counter()
 
         self._enforce_session_voice_lock(ctx, voice_id)
-
-        if voice_id.startswith("google_"):
+        is_google_voice = voice_id.startswith("google_")
+        if is_google_voice:
             self._validate_google_tts_allowed(ctx)
-            audio = await self.google.synthesize(
-                text=text, voice_id=voice_id, speed=speed
-            )
-            logger.info(
-                "tts_ok provider=google voice=%s ms=%.1f session=%s request_id=%s",
-                audio.resolved_voice_id,
-                (time.perf_counter() - t0) * 1000,
-                ctx.session_id or "-",
-                get_request_id(),
-            )
-            return audio
 
         normalized_text = canonical_tts_text(text)
         cache_svc, cache_target = await self._resolve_cache_target(
             db, ctx, normalized_text=normalized_text
         )
-        if cache_svc is not None and cache_target is not None and normalized_text:
-            hit = await cache_svc.lookup_cached_audio(
-                target=cache_target,
-                normalized_text=normalized_text,
-                voice_id=voice_id,
-                speed=speed,
-                accept=ctx.accept,
-                audio_format=ctx.audio_format,
-            )
-            if hit is not None:
-                logger.info(
-                    "tts_ok provider=precomputed_cache scope=%s voice=%s ms=%.1f session=%s request_id=%s",
-                    hit.scope,
-                    hit.resolved_voice_id,
-                    (time.perf_counter() - t0) * 1000,
-                    ctx.session_id or "-",
-                    get_request_id(),
-                )
-                return LocalSynthesizedAudio(
-                    content=hit.content,
-                    content_type=hit.content_type,
-                    resolved_voice_id=hit.resolved_voice_id,
-                    region=self._voice_region(hit.resolved_voice_id),
-                    model_version=hit.model_version,
-                    provider="precomputed_cache",
-                    used_fallback_voice=False,
-                    cache_hit=True,
-                    cache_scope=hit.scope,
-                    cached_speed=hit.cached_speed,
-                )
 
-        # Local voice locked: NEVER switch to Google or to another local voice!
-        try:
-            audio = await self.local.synthesize(
-                text=text,
-                voice_id=voice_id,
-                speed=speed,
-                word_sample=word_sample,
-                **self._audio_negotiation_kwargs(ctx),
-            )
-            if (
-                cache_svc is not None
-                and cache_target is not None
-                and cache_target.can_store_on_miss
-                and normalized_text
-            ):
-                await cache_svc.store_cached_audio(
+        scope_key = (
+            (cache_target.scope, str(cache_target.owner_parent_id or "-"), str(cache_target.page_id or "-"))
+            if cache_target is not None
+            else ("none", str(ctx.actor_id or "-"), str(ctx.page_id or "-"))
+        )
+        sf_key = (
+            "tts",
+            id(self.local),
+            id(self.google),
+            voice_id,
+            round(float(speed), 2),
+            bool(word_sample),
+            normalized_text,
+            scope_key,
+            ctx.audio_format or ctx.accept or "",
+            ctx.provider_mode,
+            bool(ctx.allow_google_tts),
+            bool(ctx.session_id),
+        )
+
+        async def _execute() -> LocalSynthesizedAudio:
+            if cache_svc is not None and cache_target is not None and normalized_text:
+                hit = await cache_svc.lookup_cached_audio(
                     target=cache_target,
                     normalized_text=normalized_text,
-                    voice_id=audio.resolved_voice_id,
-                    model_version=audio.model_version or LOCAL_TTS_MODEL_VERSION,
+                    voice_id=voice_id,
+                    model_version=GOOGLE_TTS_MODEL_VERSION if is_google_voice else None,
                     speed=speed,
-                    audio_bytes=audio.content,
-                    source_content_type=audio.content_type,
+                    accept=ctx.accept,
+                    audio_format=ctx.audio_format,
+                    background_tasks=background_tasks,
                 )
-            logger.info(
-                "tts_ok provider=local voice=%s ms=%.1f session=%s request_id=%s",
-                audio.resolved_voice_id,
-                (time.perf_counter() - t0) * 1000,
-                ctx.session_id or "-",
-                get_request_id(),
-            )
-            return audio
-        except LocalVoiceTechnicalError as local_err:
-            if not self._can_fallback_unlocked_tts(ctx):
-                logger.warning(
-                    "tts_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
-                    local_err.code,
-                    voice_id,
+                if hit is not None:
+                    logger.info(
+                        "tts_ok provider=precomputed_cache scope=%s voice=%s ms=%.1f session=%s request_id=%s",
+                        hit.scope,
+                        hit.resolved_voice_id,
+                        (time.perf_counter() - t0) * 1000,
+                        ctx.session_id or "-",
+                        get_request_id(),
+                    )
+                    return LocalSynthesizedAudio(
+                        content=hit.content,
+                        content_type=hit.content_type,
+                        resolved_voice_id=hit.resolved_voice_id,
+                        region=self._voice_region(hit.resolved_voice_id),
+                        model_version=hit.model_version,
+                        provider="precomputed_cache",
+                        used_fallback_voice=False,
+                        cache_hit=True,
+                        cache_scope=hit.scope,
+                        cached_speed=hit.cached_speed,
+                    )
+
+            if is_google_voice:
+                google_kwargs: dict[str, Any] = {
+                    "text": text,
+                    "voice_id": voice_id,
+                    "speed": speed,
+                }
+                if ctx.accept and self._fn_accepts_kwarg(self.google.synthesize, "accept"):
+                    google_kwargs["accept"] = ctx.accept
+                if ctx.audio_format and self._fn_accepts_kwarg(self.google.synthesize, "audio_format"):
+                    google_kwargs["audio_format"] = ctx.audio_format
+                audio = await self.google.synthesize(**google_kwargs)
+                if (
+                    cache_svc is not None
+                    and cache_target is not None
+                    and cache_target.can_store_on_miss
+                    and normalized_text
+                ):
+                    await cache_svc.schedule_store_cached_audio(
+                        background_tasks=background_tasks,
+                        target=cache_target,
+                        normalized_text=normalized_text,
+                        voice_id=audio.resolved_voice_id,
+                        model_version=audio.model_version or GOOGLE_TTS_MODEL_VERSION,
+                        speed=speed,
+                        audio_bytes=audio.content,
+                        source_content_type=audio.content_type,
+                    )
+                logger.info(
+                    "tts_ok provider=google voice=%s ms=%.1f session=%s request_id=%s",
+                    audio.resolved_voice_id,
                     (time.perf_counter() - t0) * 1000,
                     ctx.session_id or "-",
                     get_request_id(),
                 )
-                raise
-            backup_voice_id, backup_reason = _map_local_voice_to_google_backup_with_reason(voice_id)
-            t_google = time.perf_counter()
-            audio = await self.google.synthesize(
-                text=text, voice_id=backup_voice_id, speed=speed
-            )
-            fallback_audio = replace(
-                audio,
-                used_fallback_voice=True,
-                fallback_reason=backup_reason or local_err.code,
-            )
-            logger.info(
-                "tts_ok provider=google fallback=1 reason=%s backup_reason=%s voice=%s ms=%.1f session=- request_id=%s",
-                local_err.code,
-                backup_reason,
-                fallback_audio.resolved_voice_id,
-                (time.perf_counter() - t_google) * 1000,
-                get_request_id(),
-            )
-            return fallback_audio
+                return audio
+
+            # Local voice locked: NEVER switch to Google or to another local voice!
+            try:
+                audio = await self.local.synthesize(
+                    text=text,
+                    voice_id=voice_id,
+                    speed=speed,
+                    word_sample=word_sample,
+                    **self._audio_negotiation_kwargs(ctx),
+                )
+                if (
+                    cache_svc is not None
+                    and cache_target is not None
+                    and cache_target.can_store_on_miss
+                    and normalized_text
+                ):
+                    await cache_svc.schedule_store_cached_audio(
+                        background_tasks=background_tasks,
+                        target=cache_target,
+                        normalized_text=normalized_text,
+                        voice_id=audio.resolved_voice_id,
+                        model_version=audio.model_version or LOCAL_TTS_MODEL_VERSION,
+                        speed=speed,
+                        audio_bytes=audio.content,
+                        source_content_type=audio.content_type,
+                    )
+                logger.info(
+                    "tts_ok provider=local voice=%s ms=%.1f session=%s request_id=%s",
+                    audio.resolved_voice_id,
+                    (time.perf_counter() - t0) * 1000,
+                    ctx.session_id or "-",
+                    get_request_id(),
+                )
+                return audio
+            except LocalVoiceTechnicalError as local_err:
+                if not self._can_fallback_unlocked_tts(ctx):
+                    logger.warning(
+                        "tts_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
+                        local_err.code,
+                        voice_id,
+                        (time.perf_counter() - t0) * 1000,
+                        ctx.session_id or "-",
+                        get_request_id(),
+                    )
+                    raise
+                backup_voice_id, backup_reason = _map_local_voice_to_google_backup_with_reason(voice_id)
+                t_google = time.perf_counter()
+                google_kwargs = {
+                    "text": text,
+                    "voice_id": backup_voice_id,
+                    "speed": speed,
+                }
+                if ctx.accept and self._fn_accepts_kwarg(self.google.synthesize, "accept"):
+                    google_kwargs["accept"] = ctx.accept
+                if ctx.audio_format and self._fn_accepts_kwarg(self.google.synthesize, "audio_format"):
+                    google_kwargs["audio_format"] = ctx.audio_format
+                audio = await self.google.synthesize(**google_kwargs)
+                fallback_audio = replace(
+                    audio,
+                    used_fallback_voice=True,
+                    fallback_reason=backup_reason or local_err.code,
+                )
+                logger.info(
+                    "tts_ok provider=google fallback=1 reason=%s backup_reason=%s voice=%s ms=%.1f session=- request_id=%s",
+                    local_err.code,
+                    backup_reason,
+                    fallback_audio.resolved_voice_id,
+                    (time.perf_counter() - t_google) * 1000,
+                    get_request_id(),
+                )
+                return fallback_audio
+
+        return await self._run_tts_single_flight(sf_key, _execute)
 
     @staticmethod
     def _align_cached_word_timings(
@@ -579,146 +722,196 @@ class VoiceOrchestrator:
         speed: float = 1.0,
         policy: VoicePolicyContext | None = None,
         db: Any = None,
+        background_tasks: Any = None,
     ) -> LocalTimedSpeech:
         ctx = policy or VoicePolicyContext()
         voice_id = (requested_voice_id or "").strip() or DEFAULT_LOCAL_VOICE_ID
         t0 = time.perf_counter()
 
         self._enforce_session_voice_lock(ctx, voice_id)
-
-        if voice_id.startswith("google_"):
+        is_google_voice = voice_id.startswith("google_")
+        if is_google_voice:
             self._validate_google_tts_allowed(ctx)
-            speech = await self.google.synthesize_timed(
-                words=words, voice_id=voice_id, speed=speed
-            )
-            logger.info(
-                "tts_timed_ok provider=google voice=%s words=%d ms=%.1f session=%s request_id=%s",
-                speech.resolved_voice_id,
-                len(words),
-                (time.perf_counter() - t0) * 1000,
-                ctx.session_id or "-",
-                get_request_id(),
-            )
-            return speech
 
         normalized_text = canonical_tts_text(" ".join(words))
         cache_svc, cache_target = await self._resolve_cache_target(
             db, ctx, normalized_text=normalized_text
         )
-        if cache_svc is not None and cache_target is not None and normalized_text:
-            hit = await cache_svc.lookup_cached_audio(
-                target=cache_target,
-                normalized_text=normalized_text,
-                voice_id=voice_id,
-                speed=speed,
-                accept=ctx.accept,
-                audio_format=ctx.audio_format,
-                require_word_timings=True,
-            )
-            if hit is not None and isinstance(hit.word_timings_json, list):
-                timings = self._align_cached_word_timings(
-                    words=words,
-                    raw_timings=hit.word_timings_json,
-                    cached_text=getattr(hit, "normalized_text", None),
-                    duration_seconds=hit.duration_seconds,
+
+        scope_key = (
+            (cache_target.scope, str(cache_target.owner_parent_id or "-"), str(cache_target.page_id or "-"))
+            if cache_target is not None
+            else ("none", str(ctx.actor_id or "-"), str(ctx.page_id or "-"))
+        )
+        sf_key = (
+            "tts_timed",
+            id(self.local),
+            id(self.google),
+            voice_id,
+            round(float(speed), 2),
+            tuple(words),
+            scope_key,
+            ctx.audio_format or ctx.accept or "",
+            ctx.provider_mode,
+            bool(ctx.allow_google_tts),
+            bool(ctx.session_id),
+        )
+
+        async def _execute() -> LocalTimedSpeech:
+            if cache_svc is not None and cache_target is not None and normalized_text:
+                hit = await cache_svc.lookup_cached_audio(
+                    target=cache_target,
+                    normalized_text=normalized_text,
+                    voice_id=voice_id,
+                    model_version=GOOGLE_TTS_MODEL_VERSION if is_google_voice else None,
+                    speed=speed,
+                    accept=ctx.accept,
+                    audio_format=ctx.audio_format,
+                    require_word_timings=True,
+                    background_tasks=background_tasks,
                 )
-            else:
-                timings = None
-            safe_duration = 0.0
-            if hit is not None and timings is not None:
-                raw_dur = hit.duration_seconds
-                if raw_dur is not None and math.isfinite(float(raw_dur)) and float(raw_dur) > 0.0:
-                    safe_duration = round(float(raw_dur), 3)
+                if hit is not None and isinstance(hit.word_timings_json, list):
+                    timings = self._align_cached_word_timings(
+                        words=words,
+                        raw_timings=hit.word_timings_json,
+                        cached_text=getattr(hit, "normalized_text", None),
+                        duration_seconds=hit.duration_seconds,
+                    )
                 else:
-                    safe_duration = round(max((t.end for t in timings), default=0.0), 3)
-            if hit is not None and timings is not None and safe_duration > 0.0:
+                    timings = None
+                safe_duration = 0.0
+                if hit is not None and timings is not None:
+                    raw_dur = hit.duration_seconds
+                    if raw_dur is not None and math.isfinite(float(raw_dur)) and float(raw_dur) > 0.0:
+                        safe_duration = round(float(raw_dur), 3)
+                    else:
+                        safe_duration = round(max((t.end for t in timings), default=0.0), 3)
+                if hit is not None and timings is not None and safe_duration > 0.0:
+                    logger.info(
+                        "tts_timed_ok provider=precomputed_cache scope=%s voice=%s words=%d ms=%.1f session=%s request_id=%s",
+                        hit.scope,
+                        hit.resolved_voice_id,
+                        len(words),
+                        (time.perf_counter() - t0) * 1000,
+                        ctx.session_id or "-",
+                        get_request_id(),
+                    )
+                    return LocalTimedSpeech(
+                        audio=hit.content,
+                        content_type=hit.content_type,
+                        duration_seconds=safe_duration,
+                        words=timings,
+                        resolved_voice_id=hit.resolved_voice_id,
+                        region=self._voice_region(hit.resolved_voice_id),
+                        model_version=hit.model_version,
+                        provider="precomputed_cache",
+                        used_fallback_voice=False,
+                        cache_hit=True,
+                        cache_scope=hit.scope,
+                        cached_speed=hit.cached_speed,
+                    )
+
+            if is_google_voice:
+                speech = await self.google.synthesize_timed(
+                    words=words, voice_id=voice_id, speed=speed
+                )
+                if (
+                    cache_svc is not None
+                    and cache_target is not None
+                    and cache_target.can_store_on_miss
+                    and normalized_text
+                ):
+                    await cache_svc.schedule_store_cached_audio(
+                        background_tasks=background_tasks,
+                        target=cache_target,
+                        normalized_text=normalized_text,
+                        voice_id=speech.resolved_voice_id,
+                        model_version=speech.model_version or GOOGLE_TTS_MODEL_VERSION,
+                        speed=speed,
+                        audio_bytes=speech.audio,
+                        source_content_type=speech.content_type,
+                        duration_seconds=speech.duration_seconds,
+                        word_timings_json=[
+                            {"index": w.index, "start": w.start, "end": w.end}
+                            for w in speech.words
+                        ],
+                    )
                 logger.info(
-                    "tts_timed_ok provider=precomputed_cache scope=%s voice=%s words=%d ms=%.1f session=%s request_id=%s",
-                    hit.scope,
-                    hit.resolved_voice_id,
+                    "tts_timed_ok provider=google voice=%s words=%d ms=%.1f session=%s request_id=%s",
+                    speech.resolved_voice_id,
                     len(words),
                     (time.perf_counter() - t0) * 1000,
                     ctx.session_id or "-",
                     get_request_id(),
                 )
-                return LocalTimedSpeech(
-                    audio=hit.content,
-                    content_type=hit.content_type,
-                    duration_seconds=safe_duration,
-                    words=timings,
-                    resolved_voice_id=hit.resolved_voice_id,
-                    region=self._voice_region(hit.resolved_voice_id),
-                    model_version=hit.model_version,
-                    provider="precomputed_cache",
-                    used_fallback_voice=False,
-                    cache_hit=True,
-                    cache_scope=hit.scope,
-                    cached_speed=hit.cached_speed,
-                )
+                return speech
 
-        try:
-            speech = await self.local.synthesize_timed(
-                words=words,
-                voice_id=voice_id,
-                speed=speed,
-                **self._audio_negotiation_kwargs(ctx),
-            )
-            if (
-                cache_svc is not None
-                and cache_target is not None
-                and cache_target.can_store_on_miss
-                and normalized_text
-            ):
-                await cache_svc.store_cached_audio(
-                    target=cache_target,
-                    normalized_text=normalized_text,
-                    voice_id=speech.resolved_voice_id,
-                    model_version=speech.model_version or LOCAL_TTS_MODEL_VERSION,
+            try:
+                speech = await self.local.synthesize_timed(
+                    words=words,
+                    voice_id=voice_id,
                     speed=speed,
-                    audio_bytes=speech.audio,
-                    source_content_type=speech.content_type,
-                    duration_seconds=speech.duration_seconds,
-                    word_timings_json=[
-                        {"index": w.index, "start": w.start, "end": w.end}
-                        for w in speech.words
-                    ],
+                    **self._audio_negotiation_kwargs(ctx),
                 )
-            logger.info(
-                "tts_timed_ok provider=local voice=%s words=%d ms=%.1f session=%s request_id=%s",
-                speech.resolved_voice_id,
-                len(words),
-                (time.perf_counter() - t0) * 1000,
-                ctx.session_id or "-",
-                get_request_id(),
-            )
-            return speech
-        except LocalVoiceTechnicalError as local_err:
-            if not self._can_fallback_unlocked_tts(ctx):
-                logger.warning(
-                    "tts_timed_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
-                    local_err.code,
-                    voice_id,
+                if (
+                    cache_svc is not None
+                    and cache_target is not None
+                    and cache_target.can_store_on_miss
+                    and normalized_text
+                ):
+                    await cache_svc.schedule_store_cached_audio(
+                        background_tasks=background_tasks,
+                        target=cache_target,
+                        normalized_text=normalized_text,
+                        voice_id=speech.resolved_voice_id,
+                        model_version=speech.model_version or LOCAL_TTS_MODEL_VERSION,
+                        speed=speed,
+                        audio_bytes=speech.audio,
+                        source_content_type=speech.content_type,
+                        duration_seconds=speech.duration_seconds,
+                        word_timings_json=[
+                            {"index": w.index, "start": w.start, "end": w.end}
+                            for w in speech.words
+                        ],
+                    )
+                logger.info(
+                    "tts_timed_ok provider=local voice=%s words=%d ms=%.1f session=%s request_id=%s",
+                    speech.resolved_voice_id,
+                    len(words),
                     (time.perf_counter() - t0) * 1000,
                     ctx.session_id or "-",
                     get_request_id(),
                 )
-                raise
-            backup_voice_id, backup_reason = _map_local_voice_to_google_backup_with_reason(voice_id)
-            timed = await self.google.synthesize_timed(
-                words=words, voice_id=backup_voice_id, speed=speed
-            )
-            logger.info(
-                "tts_timed_ok provider=google fallback=1 reason=%s backup_reason=%s voice=%s session=- request_id=%s",
-                local_err.code,
-                backup_reason,
-                timed.resolved_voice_id,
-                get_request_id(),
-            )
-            return replace(
-                timed,
-                used_fallback_voice=True,
-                fallback_reason=backup_reason or local_err.code,
-            )
+                return speech
+            except LocalVoiceTechnicalError as local_err:
+                if not self._can_fallback_unlocked_tts(ctx):
+                    logger.warning(
+                        "tts_timed_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
+                        local_err.code,
+                        voice_id,
+                        (time.perf_counter() - t0) * 1000,
+                        ctx.session_id or "-",
+                        get_request_id(),
+                    )
+                    raise
+                backup_voice_id, backup_reason = _map_local_voice_to_google_backup_with_reason(voice_id)
+                timed = await self.google.synthesize_timed(
+                    words=words, voice_id=backup_voice_id, speed=speed
+                )
+                logger.info(
+                    "tts_timed_ok provider=google fallback=1 reason=%s backup_reason=%s voice=%s session=- request_id=%s",
+                    local_err.code,
+                    backup_reason,
+                    timed.resolved_voice_id,
+                    get_request_id(),
+                )
+                return replace(
+                    timed,
+                    used_fallback_voice=True,
+                    fallback_reason=backup_reason or local_err.code,
+                )
+
+        return await self._run_tts_single_flight(sf_key, _execute)
 
     async def synthesize_phonics(
         self,
@@ -728,172 +921,226 @@ class VoiceOrchestrator:
         speed: float = 1.0,
         policy: VoicePolicyContext | None = None,
         db: Any = None,
+        background_tasks: Any = None,
     ) -> LocalPhonicsSpeech:
         ctx = policy or VoicePolicyContext()
         voice_id = (requested_voice_id or "").strip() or DEFAULT_LOCAL_VOICE_ID
         t0 = time.perf_counter()
 
         self._enforce_session_voice_lock(ctx, voice_id)
-
-        if voice_id.startswith("google_"):
+        is_google_voice = voice_id.startswith("google_")
+        if is_google_voice:
             self._validate_google_tts_allowed(ctx)
-            speech = await self.google.synthesize_phonics(
-                steps=steps, voice_id=voice_id, speed=speed
-            )
-            logger.info(
-                "tts_phonics_ok provider=google voice=%s steps=%d ms=%.1f session=%s request_id=%s",
-                speech.resolved_voice_id,
-                len(steps),
-                (time.perf_counter() - t0) * 1000,
-                ctx.session_id or "-",
-                get_request_id(),
-            )
-            return speech
 
         phonics_key, _ = canonical_phonics_key(steps)
         cache_svc, cache_target = await self._resolve_cache_target(
             db, ctx, normalized_text=phonics_key
         )
-        if cache_svc is not None and cache_target is not None:
-            hit = await cache_svc.lookup_cached_audio(
-                target=cache_target,
-                normalized_text=phonics_key,
-                voice_id=voice_id,
-                speed=speed,
-                accept=ctx.accept,
-                audio_format=ctx.audio_format,
-                require_word_timings=True,
-            )
-            if (
-                hit is not None
-                and isinstance(hit.word_timings_json, list)
-                and len(hit.word_timings_json) == len(steps)
-            ):
-                raw_dur = hit.duration_seconds
-                max_step_end = max(
-                    (
-                        float(item.get("end", 0.0))
-                        for item in hit.word_timings_json
-                        if isinstance(item, dict)
-                    ),
-                    default=0.0,
-                )
-                safe_dur = (
-                    round(float(raw_dur), 3)
-                    if raw_dur is not None and math.isfinite(float(raw_dur)) and float(raw_dur) > 0.0
-                    else round(max_step_end, 3)
-                )
-                if safe_dur > 0.0:
-                    timings: list[LocalPhonicsStepTiming] = []
-                    prev_end = 0.0
-                    for idx, item in enumerate(hit.word_timings_json):
-                        start = round(
-                            max(prev_end, min(safe_dur, float(item.get("start", 0.0)))),
-                            3,
-                        )
-                        end = round(
-                            max(start, min(safe_dur, float(item.get("end", start)))),
-                            3,
-                        )
-                        timings.append(
-                            LocalPhonicsStepTiming(
-                                id=str(item.get("id") or steps[idx]["id"]),
-                                index=int(item.get("index", idx)),
-                                start=start,
-                                end=end,
-                            )
-                        )
-                        prev_end = end
-                    logger.info(
-                        "tts_phonics_ok provider=precomputed_cache scope=%s voice=%s steps=%d ms=%.1f session=%s request_id=%s",
-                        hit.scope,
-                        hit.resolved_voice_id,
-                        len(steps),
-                        (time.perf_counter() - t0) * 1000,
-                        ctx.session_id or "-",
-                        get_request_id(),
-                    )
-                    return LocalPhonicsSpeech(
-                        audio=hit.content,
-                        content_type=hit.content_type,
-                        duration_seconds=safe_dur,
-                        step_timings=timings,
-                        resolved_voice_id=hit.resolved_voice_id,
-                        region=self._voice_region(hit.resolved_voice_id),
-                        model_version=hit.model_version,
-                        provider="precomputed_cache",
-                        cache_hit=True,
-                        cache_scope=hit.scope,
-                        cached_speed=hit.cached_speed,
-                    )
 
-        try:
-            speech = await self.local.synthesize_phonics(
-                steps=steps,
-                voice_id=voice_id,
-                speed=speed,
-                **self._audio_negotiation_kwargs(ctx),
-            )
-            if (
-                cache_svc is not None
-                and cache_target is not None
-                and cache_target.can_store_on_miss
-            ):
-                await cache_svc.store_cached_audio(
+        scope_key = (
+            (cache_target.scope, str(cache_target.owner_parent_id or "-"), str(cache_target.page_id or "-"))
+            if cache_target is not None
+            else ("none", str(ctx.actor_id or "-"), str(ctx.page_id or "-"))
+        )
+        sf_key = (
+            "tts_phonics",
+            id(self.local),
+            id(self.google),
+            voice_id,
+            round(float(speed), 2),
+            phonics_key,
+            scope_key,
+            ctx.audio_format or ctx.accept or "",
+            ctx.provider_mode,
+            bool(ctx.allow_google_tts),
+            bool(ctx.session_id),
+        )
+
+        async def _execute() -> LocalPhonicsSpeech:
+            if cache_svc is not None and cache_target is not None:
+                hit = await cache_svc.lookup_cached_audio(
                     target=cache_target,
                     normalized_text=phonics_key,
-                    voice_id=speech.resolved_voice_id,
-                    model_version=speech.model_version or LOCAL_TTS_MODEL_VERSION,
+                    voice_id=voice_id,
+                    model_version=GOOGLE_TTS_MODEL_VERSION if is_google_voice else None,
                     speed=speed,
-                    audio_bytes=speech.audio,
-                    source_content_type=speech.content_type,
-                    duration_seconds=speech.duration_seconds,
-                    word_timings_json=[
-                        {
-                            "id": s.id,
-                            "index": s.index,
-                            "start": s.start,
-                            "end": s.end,
-                        }
-                        for s in speech.step_timings
-                    ],
+                    accept=ctx.accept,
+                    audio_format=ctx.audio_format,
+                    require_word_timings=True,
+                    background_tasks=background_tasks,
                 )
-            logger.info(
-                "tts_phonics_ok provider=local voice=%s steps=%d ms=%.1f session=%s request_id=%s",
-                speech.resolved_voice_id,
-                len(steps),
-                (time.perf_counter() - t0) * 1000,
-                ctx.session_id or "-",
-                get_request_id(),
-            )
-            return speech
-        except LocalVoiceTechnicalError as local_err:
-            if not self._can_fallback_unlocked_tts(ctx):
-                logger.warning(
-                    "tts_phonics_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
-                    local_err.code,
-                    voice_id,
+                if (
+                    hit is not None
+                    and isinstance(hit.word_timings_json, list)
+                    and len(hit.word_timings_json) == len(steps)
+                ):
+                    raw_dur = hit.duration_seconds
+                    max_step_end = max(
+                        (
+                            float(item.get("end", 0.0))
+                            for item in hit.word_timings_json
+                            if isinstance(item, dict)
+                        ),
+                        default=0.0,
+                    )
+                    safe_dur = (
+                        round(float(raw_dur), 3)
+                        if raw_dur is not None and math.isfinite(float(raw_dur)) and float(raw_dur) > 0.0
+                        else round(max_step_end, 3)
+                    )
+                    if safe_dur > 0.0:
+                        timings: list[LocalPhonicsStepTiming] = []
+                        prev_end = 0.0
+                        for idx, item in enumerate(hit.word_timings_json):
+                            start = round(
+                                max(prev_end, min(safe_dur, float(item.get("start", 0.0)))),
+                                3,
+                            )
+                            end = round(
+                                max(start, min(safe_dur, float(item.get("end", start)))),
+                                3,
+                            )
+                            timings.append(
+                                LocalPhonicsStepTiming(
+                                    id=str(item.get("id") or steps[idx]["id"]),
+                                    index=int(item.get("index", idx)),
+                                    start=start,
+                                    end=end,
+                                )
+                            )
+                            prev_end = end
+                        logger.info(
+                            "tts_phonics_ok provider=precomputed_cache scope=%s voice=%s steps=%d ms=%.1f session=%s request_id=%s",
+                            hit.scope,
+                            hit.resolved_voice_id,
+                            len(steps),
+                            (time.perf_counter() - t0) * 1000,
+                            ctx.session_id or "-",
+                            get_request_id(),
+                        )
+                        return LocalPhonicsSpeech(
+                            audio=hit.content,
+                            content_type=hit.content_type,
+                            duration_seconds=safe_dur,
+                            step_timings=timings,
+                            resolved_voice_id=hit.resolved_voice_id,
+                            region=self._voice_region(hit.resolved_voice_id),
+                            model_version=hit.model_version,
+                            provider="precomputed_cache",
+                            cache_hit=True,
+                            cache_scope=hit.scope,
+                            cached_speed=hit.cached_speed,
+                        )
+
+            if is_google_voice:
+                speech = await self.google.synthesize_phonics(
+                    steps=steps, voice_id=voice_id, speed=speed
+                )
+                if (
+                    cache_svc is not None
+                    and cache_target is not None
+                    and cache_target.can_store_on_miss
+                ):
+                    await cache_svc.schedule_store_cached_audio(
+                        background_tasks=background_tasks,
+                        target=cache_target,
+                        normalized_text=phonics_key,
+                        voice_id=speech.resolved_voice_id,
+                        model_version=speech.model_version or GOOGLE_TTS_MODEL_VERSION,
+                        speed=speed,
+                        audio_bytes=speech.audio,
+                        source_content_type=speech.content_type,
+                        duration_seconds=speech.duration_seconds,
+                        word_timings_json=[
+                            {
+                                "id": s.id,
+                                "index": s.index,
+                                "start": s.start,
+                                "end": s.end,
+                            }
+                            for s in speech.step_timings
+                        ],
+                    )
+                logger.info(
+                    "tts_phonics_ok provider=google voice=%s steps=%d ms=%.1f session=%s request_id=%s",
+                    speech.resolved_voice_id,
+                    len(steps),
                     (time.perf_counter() - t0) * 1000,
                     ctx.session_id or "-",
                     get_request_id(),
                 )
-                raise
-            backup_voice_id, backup_reason = _map_local_voice_to_google_backup_with_reason(voice_id)
-            phonics = await self.google.synthesize_phonics(
-                steps=steps, voice_id=backup_voice_id, speed=speed
-            )
-            logger.info(
-                "tts_phonics_ok provider=google fallback=1 reason=%s backup_reason=%s voice=%s session=- request_id=%s",
-                local_err.code,
-                backup_reason,
-                phonics.resolved_voice_id,
-                get_request_id(),
-            )
-            return replace(
-                phonics,
-                used_fallback_voice=True,
-                fallback_reason=backup_reason or local_err.code,
-            )
+                return speech
+
+            try:
+                speech = await self.local.synthesize_phonics(
+                    steps=steps,
+                    voice_id=voice_id,
+                    speed=speed,
+                    **self._audio_negotiation_kwargs(ctx),
+                )
+                if (
+                    cache_svc is not None
+                    and cache_target is not None
+                    and cache_target.can_store_on_miss
+                ):
+                    await cache_svc.schedule_store_cached_audio(
+                        background_tasks=background_tasks,
+                        target=cache_target,
+                        normalized_text=phonics_key,
+                        voice_id=speech.resolved_voice_id,
+                        model_version=speech.model_version or LOCAL_TTS_MODEL_VERSION,
+                        speed=speed,
+                        audio_bytes=speech.audio,
+                        source_content_type=speech.content_type,
+                        duration_seconds=speech.duration_seconds,
+                        word_timings_json=[
+                            {
+                                "id": s.id,
+                                "index": s.index,
+                                "start": s.start,
+                                "end": s.end,
+                            }
+                            for s in speech.step_timings
+                        ],
+                    )
+                logger.info(
+                    "tts_phonics_ok provider=local voice=%s steps=%d ms=%.1f session=%s request_id=%s",
+                    speech.resolved_voice_id,
+                    len(steps),
+                    (time.perf_counter() - t0) * 1000,
+                    ctx.session_id or "-",
+                    get_request_id(),
+                )
+                return speech
+            except LocalVoiceTechnicalError as local_err:
+                if not self._can_fallback_unlocked_tts(ctx):
+                    logger.warning(
+                        "tts_phonics_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
+                        local_err.code,
+                        voice_id,
+                        (time.perf_counter() - t0) * 1000,
+                        ctx.session_id or "-",
+                        get_request_id(),
+                    )
+                    raise
+                backup_voice_id, backup_reason = _map_local_voice_to_google_backup_with_reason(voice_id)
+                phonics = await self.google.synthesize_phonics(
+                    steps=steps, voice_id=backup_voice_id, speed=speed
+                )
+                logger.info(
+                    "tts_phonics_ok provider=google fallback=1 reason=%s backup_reason=%s voice=%s session=- request_id=%s",
+                    local_err.code,
+                    backup_reason,
+                    phonics.resolved_voice_id,
+                    get_request_id(),
+                )
+                return replace(
+                    phonics,
+                    used_fallback_voice=True,
+                    fallback_reason=backup_reason or local_err.code,
+                )
+
+        return await self._run_tts_single_flight(sf_key, _execute)
 
     async def transcribe(
         self,

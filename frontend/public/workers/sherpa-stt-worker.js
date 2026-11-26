@@ -94,13 +94,13 @@ function openModelsDb() {
   });
 }
 
-async function readCachedFile(db, key) {
+async function readCachedRecord(db, key) {
   if (!db) return null;
   return new Promise((resolve) => {
     try {
       const tx = db.transaction(IDB_STORE, "readonly");
       const req = tx.objectStore(IDB_STORE).get(key);
-      req.onsuccess = () => resolve(req.result ? req.result.buffer : null);
+      req.onsuccess = () => resolve(req.result || null);
       req.onerror = () => resolve(null);
       tx.onabort = () => resolve(null);
       tx.onerror = () => resolve(null);
@@ -110,7 +110,7 @@ async function readCachedFile(db, key) {
   });
 }
 
-async function writeCachedFile(db, key, buffer) {
+async function writeCachedFile(db, key, buffer, verifiedSha256) {
   if (!db) return;
   return new Promise((resolve) => {
     try {
@@ -119,8 +119,37 @@ async function writeCachedFile(db, key, buffer) {
         key,
         modelVersion: MODEL_VERSION,
         byteLength: buffer.byteLength,
+        verifiedSha256: verifiedSha256 || null,
         updatedAt: Date.now(),
         buffer,
+      });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
+async function writeVerifiedManifest(db) {
+  if (!db) return;
+  const files = {};
+  for (const spec of MODEL_FILES) {
+    files[spec.name] = {
+      byteLength: spec.expectedBytes,
+      sha256: spec.sha256,
+      verified: true,
+    };
+  }
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(IDB_STORE, "readwrite");
+      tx.objectStore(IDB_STORE).put({
+        key: `${MODEL_VERSION}/__manifest__`,
+        modelVersion: MODEL_VERSION,
+        updatedAt: Date.now(),
+        files,
       });
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
@@ -173,13 +202,20 @@ async function fetchAndVerifyModelFile(db, spec, epoch) {
     throw new Error("WASM STT init disposed");
   }
   const cacheKey = `${MODEL_VERSION}/${spec.name}`;
-  const cached = await readCachedFile(db, cacheKey);
+  const cachedRec = await readCachedRecord(db, cacheKey);
   if (epoch !== loadEpoch) {
     throw new Error("WASM STT init disposed");
   }
+  const cached = cachedRec && cachedRec.buffer ? cachedRec.buffer : null;
   if (cached && cached.byteLength === spec.expectedBytes) {
+    // Skip redundant 33.92 MB SHA-256 re-hashing on subsequent startups once
+    // verifiedSha256 was persisted after download verification.
+    if (cachedRec.verifiedSha256 === spec.sha256) {
+      return new Uint8Array(cached);
+    }
     const hash = await sha256Hex(cached);
     if (hash === spec.sha256) {
+      await writeCachedFile(db, cacheKey, cached, spec.sha256);
       return new Uint8Array(cached);
     }
     await deleteCachedFile(db, cacheKey);
@@ -237,7 +273,7 @@ async function fetchAndVerifyModelFile(db, spec, epoch) {
   if (actualSha !== spec.sha256) {
     throw new Error(`Model SHA-256 mismatch for ${spec.name}`);
   }
-  await writeCachedFile(db, cacheKey, buffer);
+  await writeCachedFile(db, cacheKey, buffer, actualSha);
   return new Uint8Array(buffer);
 }
 
@@ -249,19 +285,28 @@ async function ensureRecognizer() {
   const pending = (async () => {
     const [M, db] = await Promise.all([ensureWasmModule(), openModelsDb()]);
     try {
-      for (let i = 0; i < MODEL_FILES.length; i += 1) {
-        if (epoch !== loadEpoch) {
-          throw new Error("WASM STT init disposed");
-        }
-        const spec = MODEL_FILES[i];
-        self.postMessage({
-          type: "progress",
-          stage: "loading-model",
-          file: spec.name,
-          index: i,
-          total: MODEL_FILES.length,
-        });
-        const bytes = await fetchAndVerifyModelFile(db, spec, epoch);
+      // Load/fetch all 4 model files concurrently to cut cold start latency.
+      const loadedFiles = await Promise.all(
+        MODEL_FILES.map(async (spec, i) => {
+          if (epoch !== loadEpoch) {
+            throw new Error("WASM STT init disposed");
+          }
+          self.postMessage({
+            type: "progress",
+            stage: "loading-model",
+            file: spec.name,
+            index: i,
+            total: MODEL_FILES.length,
+          });
+          const bytes = await fetchAndVerifyModelFile(db, spec, epoch);
+          return { spec, bytes };
+        }),
+      );
+      if (epoch !== loadEpoch) {
+        throw new Error("WASM STT init disposed");
+      }
+      await writeVerifiedManifest(db);
+      for (const { spec, bytes } of loadedFiles) {
         try {
           M.FS_unlink(`/${spec.name}`);
         } catch {
@@ -340,6 +385,15 @@ async function ensureRecognizer() {
       );
     }
 
+    // Free ~34 MB from Emscripten MEMFS immediately after ONNX runtime loaded weights.
+    for (const spec of MODEL_FILES) {
+      try {
+        M.FS_unlink(`/${spec.name}`);
+      } catch {
+        // Ignore unlink errors
+      }
+    }
+
     if (epoch !== loadEpoch) {
       try {
         recognizer.free();
@@ -386,8 +440,8 @@ function preprocessChildVoice(input, sampleRate) {
   const dt = 1 / sr;
   const alpha = rc / (rc + dt);
   let prevX = input[0] - mean;
-  let prevY = 0;
-  out[0] = prevX;
+  let prevY = alpha * prevX;
+  out[0] = prevY;
   for (let i = 1; i < n; i += 1) {
     const x = input[i] - mean;
     const y = alpha * (prevY + x - prevX);
@@ -652,7 +706,11 @@ self.onmessage = async (event) => {
       }
       let trailPadSamples = 0;
       if (voicedDurationSeconds >= MIN_PAD_DURATION_SECONDS) {
-        trailPadSamples = Math.round(TRAILING_PAD_SECONDS * sr);
+        const missingTrailSeconds = Math.max(
+          0,
+          TRAILING_PAD_SECONDS - existingTailSeconds,
+        );
+        trailPadSamples = Math.round(missingTrailSeconds * sr);
       } else if (existingTailSeconds > SHORT_TRAIL_CAP_SECONDS) {
         const trimTailSamples = Math.round(
           (existingTailSeconds - SHORT_TRAIL_CAP_SECONDS) * sr,
