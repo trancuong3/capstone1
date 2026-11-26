@@ -2,8 +2,13 @@ from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from app.models import ChildProfile
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import Book, ChildProfile
 from app.models.reading_management import ChildBookCollection, ReadingGoal, ReadingPlan, ReadingReminder
+from app.policies.book_access import is_catalog_book, is_private_book_owned_by
+from app.repositories.book_repository import CatalogRepository
 from app.repositories.reading_management_repository import ReadingManagementRepository
 from app.schemas.reading_management import (
     ReadingGoalCreate,
@@ -127,12 +132,12 @@ class ReadingManagementService:
         self.repository = repository
 
     async def _repo_eligible_book(self, book_id: UUID, actor_id: UUID):
-        if isinstance(self.repository, ReadingManagementRepository):
+        if isinstance(ReadingManagementRepository, type) and isinstance(self.repository, ReadingManagementRepository):
             return await self.repository.eligible_book(book_id, actor_id=actor_id)
         return await self.repository.eligible_book(book_id)
 
     async def _repo_book(self, book_id: UUID, actor_id: UUID | None = None):
-        if isinstance(self.repository, ReadingManagementRepository):
+        if isinstance(ReadingManagementRepository, type) and isinstance(self.repository, ReadingManagementRepository):
             return await self.repository.book(book_id, actor_id=actor_id)
         return await self.repository.book(book_id)
 
@@ -150,9 +155,45 @@ class ReadingManagementService:
         await self.require_parent(actor_id)
         await self.owned_child(actor_id, child_id)
         now = now or datetime.now(timezone.utc)
-        return [await self.goal_dict(goal, now) for goal in await self.repository.goals(child_id)]
+        goals = await self.repository.goals(child_id)
+        if not goals:
+            return []
 
-    async def goal_dict(self, goal: ReadingGoal, now: datetime):
+        preloaded_sessions = None
+        if isinstance(ReadingManagementRepository, type) and isinstance(
+            self.repository, ReadingManagementRepository
+        ):
+            windows: list[tuple[datetime, datetime]] = []
+            for goal in goals:
+                if goal.Status in ("COMPLETED", "ENDED"):
+                    continue
+                cycles = goal_cycles(goal, now)
+                if cycles:
+                    reference = reference_now(goal.EndsOn, goal.Timezone, now)
+                    upper = min(cycles[-1].ends_at, reference + timedelta(microseconds=1))
+                    if upper > cycles[0].starts_at:
+                        windows.append((cycles[0].starts_at, upper))
+            if windows:
+                min_start = min(w[0] for w in windows)
+                max_upper = max(w[1] for w in windows)
+                preloaded_sessions = await self.repository.completed_sessions(
+                    child_id, min_start, max_upper
+                )
+            else:
+                preloaded_sessions = []
+
+        return [
+            await self.goal_dict(goal, now, preloaded_sessions=preloaded_sessions)
+            for goal in goals
+        ]
+
+    async def goal_dict(
+        self,
+        goal: ReadingGoal,
+        now: datetime,
+        *,
+        preloaded_sessions=None,
+    ):
         """Goal plus derived progress.
 
         An expired goal keeps showing its final cycle's result (never a bogus 0%), and
@@ -169,7 +210,20 @@ class ReadingManagementService:
             if cycles:
                 reference = reference_now(goal.EndsOn, goal.Timezone, now)
                 upper = min(cycles[-1].ends_at, reference + timedelta(microseconds=1))
-                sessions = await self.repository.completed_sessions(goal.ChildId, cycles[0].starts_at, upper)
+                if preloaded_sessions is not None:
+                    window_start = cycles[0].starts_at
+                    sessions = [
+                        s
+                        for s in preloaded_sessions
+                        if s.EndedAt is not None
+                        and window_start <= s.EndedAt < upper
+                        and s.StartedAt is not None
+                        and s.StartedAt < upper
+                    ]
+                else:
+                    sessions = await self.repository.completed_sessions(
+                        goal.ChildId, cycles[0].starts_at, upper
+                    )
 
                 def value_of(cycle) -> int:
                     return completed_metric(
@@ -213,6 +267,19 @@ class ReadingManagementService:
         ))
 
     async def find_owned_goal(self, actor_id: UUID, goal_id: UUID):
+        if (
+            isinstance(ReadingManagementRepository, type)
+            and isinstance(self.repository, ReadingManagementRepository)
+            and isinstance(getattr(self.repository, "db", None), AsyncSession)
+        ):
+            goal = await self.repository.db.scalar(
+                select(ReadingGoal)
+                .join(ChildProfile, ChildProfile.Id == ReadingGoal.ChildId)
+                .where(ReadingGoal.Id == goal_id, ChildProfile.ParentId == actor_id)
+            )
+            if goal is None:
+                raise ManagementNotFound()
+            return goal
         for child in await self.repository.children(actor_id):
             goal = await self.repository.goal(goal_id, child.Id)
             if goal is not None:
@@ -255,7 +322,15 @@ class ReadingManagementService:
         goal.Status = payload.status
         return await self.repository.save(goal)
 
-    async def plan_dict(self, plan: ReadingPlan, now: datetime, *, actor_id: UUID | None = None):
+    async def plan_dict(
+        self,
+        plan: ReadingPlan,
+        now: datetime,
+        *,
+        actor_id: UUID | None = None,
+        preloaded_sessions=None,
+        preloaded_books: dict[UUID, Book] | None = None,
+    ):
         zone = ZoneInfo(plan.Timezone)
         phase = item_phase(plan.Status, plan.StartsOn, plan.EndsOn, plan.Timezone, now)
         # Once the plan has ended, keep showing its final week instead of an empty one.
@@ -264,9 +339,20 @@ class ReadingManagementService:
         today = local_date(now, plan.Timezone)
         intervals_by_date: dict[date, list[tuple[datetime, datetime]]] = {}
         if scheduled_dates or phase == "RUNNING":
-            sessions = await self.repository.completed_plan_sessions(
-                plan.ChildId, starts_at, ends_at, now, plan.BookId
-            )
+            if preloaded_sessions is not None:
+                sessions = [
+                    s
+                    for s in preloaded_sessions
+                    if s.StartedAt is not None
+                    and s.EndedAt is not None
+                    and starts_at <= s.StartedAt < ends_at
+                    and s.EndedAt <= now
+                    and (plan.BookId is None or s.BookId == plan.BookId)
+                ]
+            else:
+                sessions = await self.repository.completed_plan_sessions(
+                    plan.ChildId, starts_at, ends_at, now, plan.BookId
+                )
             for session in sessions:
                 if session.StartedAt is not None and session.EndedAt is not None:
                     session_day = session.StartedAt.astimezone(zone).date()
@@ -288,7 +374,12 @@ class ReadingManagementService:
         )
         scheduled_count = len(scheduled_dates)
         completed_count = len(completed_dates)
-        book = await self._repo_book(plan.BookId, actor_id) if plan.BookId else None
+        if plan.BookId is None:
+            book = None
+        elif preloaded_books is not None:
+            book = preloaded_books.get(plan.BookId)
+        else:
+            book = await self._repo_book(plan.BookId, actor_id)
         return {
             "id": plan.Id,
             "child_id": plan.ChildId,
@@ -317,7 +408,59 @@ class ReadingManagementService:
         await self.require_parent(actor_id)
         await self.owned_child(actor_id, child_id)
         now = now or datetime.now(timezone.utc)
-        return [await self.plan_dict(plan, now, actor_id=actor_id) for plan in await self.repository.plans(child_id)]
+        plans = await self.repository.plans(child_id)
+        if not plans:
+            return []
+
+        preloaded_sessions = None
+        preloaded_books: dict[UUID, Book] | None = None
+        if isinstance(ReadingManagementRepository, type) and isinstance(
+            self.repository, ReadingManagementRepository
+        ):
+            windows: list[tuple[datetime, datetime]] = []
+            book_ids: set[UUID] = set()
+            for plan in plans:
+                if plan.BookId is not None:
+                    book_ids.add(plan.BookId)
+                phase = item_phase(plan.Status, plan.StartsOn, plan.EndsOn, plan.Timezone, now)
+                reference = reference_now(plan.EndsOn, plan.Timezone, now)
+                starts_at, ends_at, scheduled_dates = plan_week_window(plan, reference)
+                if (scheduled_dates or phase == "RUNNING") and ends_at > starts_at:
+                    windows.append((starts_at, ends_at))
+            if windows:
+                preloaded_sessions = await self.repository.completed_plan_sessions(
+                    child_id,
+                    min(w[0] for w in windows),
+                    max(w[1] for w in windows),
+                    now,
+                    book_id=None,
+                )
+            else:
+                preloaded_sessions = []
+
+            preloaded_books = {}
+            if book_ids and isinstance(getattr(self.repository, "db", None), AsyncSession):
+                visibility = (
+                    or_(is_catalog_book(), is_private_book_owned_by(actor_id))
+                    if actor_id is not None
+                    else is_catalog_book()
+                )
+                book_rows = await self.repository.db.execute(
+                    select(Book).where(Book.Id.in_(book_ids), visibility)
+                )
+                for b in book_rows.scalars().all():
+                    preloaded_books[b.Id] = b
+
+        return [
+            await self.plan_dict(
+                plan,
+                now,
+                actor_id=actor_id,
+                preloaded_sessions=preloaded_sessions,
+                preloaded_books=preloaded_books,
+            )
+            for plan in plans
+        ]
 
     @staticmethod
     def check_plan_schedule(
@@ -408,17 +551,43 @@ class ReadingManagementService:
 
         await self.require_parent(actor_id)
         await self.owned_child(actor_id, child_id)
+        visible_rows = [
+            (row, book)
+            for row, book in await self.repository.collections(child_id)
+            if not (is_book_private(book) and getattr(book, "OwnerParentId", None) != actor_id)
+        ]
+        if not visible_rows:
+            return []
+
+        eligible_ids: set[UUID] | None = None
+        if (
+            isinstance(ReadingManagementRepository, type)
+            and isinstance(self.repository, ReadingManagementRepository)
+            and isinstance(getattr(self.repository, "db", None), AsyncSession)
+        ):
+            book_ids = {book.Id for _, book in visible_rows}
+            eligible_rows = await self.repository.db.execute(
+                select(Book.Id).where(
+                    Book.Id.in_(book_ids),
+                    CatalogRepository.readable_book(actor_id),
+                )
+            )
+            eligible_ids = set(eligible_rows.scalars().all())
+
         result = []
-        for row, book in await self.repository.collections(child_id):
-            if is_book_private(book) and getattr(book, "OwnerParentId", None) != actor_id:
-                continue
+        for row, book in visible_rows:
+            available = (
+                book.Id in eligible_ids
+                if eligible_ids is not None
+                else await self._repo_eligible_book(book.Id, actor_id) is not None
+            )
             result.append({
                 "id": row.Id, "child_id": row.ChildId, "book_id": row.BookId,
                 "collection_type": row.CollectionType, "created_at": row.CreatedAt,
                 "book": {"id": book.Id, "title": book.Title, "author": book.Author,
                          "min_grade": book.MinGrade, "max_grade": book.MaxGrade,
                          "lifecycle_status": book.LifecycleStatus,
-                         "available_to_read": await self._repo_eligible_book(book.Id, actor_id) is not None},
+                         "available_to_read": available},
             })
         return result
 

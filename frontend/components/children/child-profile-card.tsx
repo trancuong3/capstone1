@@ -1,7 +1,10 @@
+"use client";
+
 import { Check, Pencil } from "lucide-react";
 import Link from "next/link";
 
 import { ProfileAvatar } from "@/components/common/profile-avatar";
+import { useTranslations } from "@/hooks/use-i18n";
 import type { ChildProfileDTO } from "@/types/child";
 
 interface ChildProfileCardProps {
@@ -19,10 +22,16 @@ export function ChildProfileCard({
   onSelect,
   selected = false,
 }: ChildProfileCardProps) {
+  const tParent = useTranslations("parent");
+  const cardAria = tParent("children.cardAria", {
+    alias: child.alias,
+    grade: child.grade,
+  });
+
   const content = (
     <>
       <ProfileAvatar
-        ariaLabel={`Ảnh đại diện của ${child.alias}`}
+        ariaLabel={tParent("children.avatarAria", { alias: child.alias })}
         displayName={child.alias}
         imageUrl={child.avatar_url}
         size="md"
@@ -31,11 +40,14 @@ export function ChildProfileCard({
         <span className="block break-words text-xl font-bold leading-tight text-ink">
           {child.alias}
         </span>
-        <span className="text-sm text-muted">Lớp {child.grade}</span>
+        <span className="text-sm text-muted">
+          {tParent("children.gradeLabel", { grade: child.grade })}
+        </span>
       </span>
       {selected ? (
         <span className="inline-flex items-center gap-1 text-sm font-semibold text-primary">
-          <Check aria-hidden="true" className="size-4" /> Đang chọn
+          <Check aria-hidden="true" className="size-4" />{" "}
+          {tParent("children.selectedBadge")}
         </span>
       ) : showEditAction ? (
         <Pencil aria-hidden="true" className="size-4 shrink-0 text-muted" />
@@ -44,7 +56,7 @@ export function ChildProfileCard({
   );
 
   const className =
-    "group relative flex min-h-20 w-full items-center gap-4 rounded-control border px-4 py-3 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary " +
+    "group relative flex min-h-20 w-full items-center gap-4 rounded-control border px-4 py-3 text-start transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary " +
     (selected
       ? "border-primary bg-sky"
       : "border-border bg-white hover:border-primary/60");
@@ -52,7 +64,7 @@ export function ChildProfileCard({
   if (onSelect) {
     return (
       <button
-        aria-label={`${child.alias}, lớp ${child.grade}`}
+        aria-label={cardAria}
         aria-pressed={selected}
         className={className}
         onClick={onSelect}
@@ -65,11 +77,7 @@ export function ChildProfileCard({
 
   if (href) {
     return (
-      <Link
-        aria-label={`${child.alias}, lớp ${child.grade}`}
-        className={className}
-        href={href}
-      >
+      <Link aria-label={cardAria} className={className} href={href}>
         {content}
       </Link>
     );

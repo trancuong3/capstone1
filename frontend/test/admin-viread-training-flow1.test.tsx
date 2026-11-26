@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -153,11 +159,12 @@ describe("AdminVireadTrainingScreen - Flow 1 Model Replacement & Reliability Pro
     expect(
       screen.getByText("Tập sách giáo khoa thực tế (Real SGK Test Set)"),
     ).toBeInTheDocument();
-    expect(screen.getByText(/CER \(%\)/)).toBeInTheDocument();
-    expect(screen.getByText(/WER \(%\)/)).toBeInTheDocument();
-    expect(screen.getByText("Exact Match (%)")).toBeInTheDocument();
-    expect(screen.getByText("F1-Score (%)")).toBeInTheDocument();
-    expect(screen.getByText("Tốc độ GPU (ms/dòng)")).toBeInTheDocument();
+    const table = within(screen.getByRole("table"));
+    expect(table.getByText(/CER \(%\)/)).toBeInTheDocument();
+    expect(table.getByText(/WER \(%\)/)).toBeInTheDocument();
+    expect(table.getByText("Exact Match (%)")).toBeInTheDocument();
+    expect(table.getByText("F1-Score (%)")).toBeInTheDocument();
+    expect(table.getByText("Tốc độ GPU (ms/dòng)")).toBeInTheDocument();
 
     // Diacritics errors
     expect(screen.getByText(/Lỗi dấu tiếng Việt/i)).toBeInTheDocument();

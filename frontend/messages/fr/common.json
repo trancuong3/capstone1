@@ -1,0 +1,97 @@
+{
+  "brand": {
+    "name": "ViRead",
+    "tagline": "La plateforme qui accompagne les parents et les enfants dans leur parcours de lecture."
+  },
+  "actions": {
+    "save": "Enregistrer",
+    "saving": "Enregistrement en cours…",
+    "cancel": "Annuler",
+    "close": "Fermer",
+    "confirm": "Confirmer",
+    "continue": "Continuer",
+    "back": "Retour",
+    "retry": "Réessayer",
+    "reload": "Recharger",
+    "search": "Rechercher",
+    "clear": "Effacer",
+    "filter": "Filtrer",
+    "edit": "Modifier",
+    "delete": "Effacer",
+    "create": "Créer",
+    "upload": "Téléverser",
+    "download": "Télécharger",
+    "open": "Ouvrir",
+    "viewDetails": "Voir les détails",
+    "select": "Sélectionner",
+    "apply": "Appliquer"
+  },
+  "states": {
+    "loading": "Chargement…",
+    "empty": "Aucune donnée disponible.",
+    "unavailable": "Impossible de charger les informations",
+    "ready": "Prêt",
+    "completed": "Terminé",
+    "inProgress": "En cours",
+    "pending": "En attente",
+    "error": "Une erreur est survenue",
+    "imageLoadFailed": "Échec du chargement de l'image de la page",
+    "retryReload": "Essayer de recharger"
+  },
+  "avatar": {
+    "defaultAlt": "Avatar"
+  },
+  "pagination": {
+    "summary": "Page {page} / {totalPages}",
+    "itemsCount": "{count, plural, =0 {Aucun élément} other {# éléments}}",
+    "previous": "Page précédente",
+    "next": "Page suivante",
+    "previousShort": "Précédent",
+    "nextShort": "Suivant",
+    "navAria": "Pagination",
+    "navAriaWithLabel": "Naviguer dans la liste {itemLabel}",
+    "rangeSummary": "Affichage de {start}–{end} / {total}",
+    "rangeSummaryWithLabel": "Affichage de {start}–{end} / {total} {itemLabel}"
+  },
+  "languageSelector": {
+    "label": "Langue de l'interface",
+    "buttonAriaLabel": "Sélectionnez la langue de l'interface, actuelle : {language}",
+    "dialogTitle": "Choisir la langue",
+    "searchLabel": "Rechercher une langue",
+    "searchPlaceholder": "Rechercher par nom ou code de langue…",
+    "clearSearch": "Effacer le mot-clé de recherche",
+    "popularHeading": "Langues populaires",
+    "allHeading": "Toutes les langues",
+    "searchResultsHeading": "Résultats de recherche",
+    "emptySearch": "Aucune langue trouvée correspondant à \"{query}\".",
+    "currentBadge": "Actuel",
+    "loadingLocale": "Chargement de la langue…",
+    "switchedNotice": "Interface basculée vers {language}.",
+    "closeButton": "Fermer la liste des langues"
+  },
+  "footer": {
+    "copyright": "© {year} ViRead. Tous droits réservés.",
+    "adminCopyright": "© {year} ViRead.",
+    "adminNotice": "Zone d'administration ViRead.",
+    "parentDescription": "Une plateforme accompagnant les parents, aidant les enfants à développer leurs compétences en lecture et à suivre leurs progrès.",
+    "contactHeading": "Informations de contact",
+    "quickLinksHeading": "Liens rapides",
+    "organization": "Université Duy Tan",
+    "contactEmail": "vireadforyou@gmail.com",
+    "contactPhone": "0905373633"
+  },
+  "notFound": {
+    "pageTitle": "Page introuvable",
+    "title": "Page introuvable",
+    "description": "La page que vous recherchez n'existe pas ou a été déplacée.",
+    "backHome": "Retour au tableau de bord",
+    "backLogin": "Retour à la page de connexion"
+  },
+  "errorPage": {
+    "title": "Une erreur s'est produite",
+    "description": "ViRead a rencontré une erreur inattendue lors de l'affichage de cette page. Veuillez réessayer ou retourner au tableau de bord.",
+    "globalTitle": "L'application rencontre temporairement des problèmes",
+    "globalDescription": "Impossible de charger l'interface de l'application pour le moment. Veuillez réessayer de recharger la page.",
+    "backHome": "Retour au tableau de bord"
+  }
+}

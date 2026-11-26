@@ -1113,7 +1113,41 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
                 safe_message: "Worker không được khởi chạy.",
                 detail_status: "disabled",
               },
+              {
+                id: "parent_book_submission",
+                label: "Parent book submission worker",
+                status: "HEALTHY",
+                checked_at: timestamp,
+                safe_message: "Đang xử lý hàng đợi kiểm tra.",
+                detail_status: "healthy",
+                last_success_at: timestamp,
+                oldest_pending_job_age_seconds: 125,
+                queue_depth: 3,
+                last_error: null,
+              },
+              {
+                id: "ocr_worker",
+                label: "Remote OCR worker",
+                status: "DEGRADED",
+                operational_state: "Queued",
+                checked_at: timestamp,
+                safe_message: "Worker gặp lỗi tạm thời.",
+                detail_status: "failed",
+                last_success_at: null,
+                oldest_pending_job_age_seconds: 3720,
+                queue_depth: 7,
+                last_error: "WORKER_TIMEOUT",
+              },
             ],
+            audio_cache: {
+              entry_count: 14,
+              storage_used_bytes: 2 * 1024 * 1024,
+              storage_quota_bytes: 500 * 1024 * 1024,
+              daily_egress_bytes: 512 * 1024,
+              daily_egress_limit_bytes: 300 * 1024 * 1024,
+              cache_hit_ratio: 0.75,
+              quota_exhausted: false,
+            },
           })
         : readyResponse(url),
     );
@@ -1138,6 +1172,22 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     expect(
       screen.getByText("Storage phản hồi kiểm tra bucket (không đọc file)."),
     ).toBeInTheDocument();
+    expect(screen.getByText("3 tác vụ")).toBeInTheDocument();
+    expect(screen.getByText("2 phút 5 giây")).toBeInTheDocument();
+    expect(screen.getByText("7 tác vụ")).toBeInTheDocument();
+    expect(screen.getByText("1 giờ 2 phút")).toBeInTheDocument();
+    expect(screen.getByText("WORKER_TIMEOUT")).toBeInTheDocument();
+    expect(screen.getByText("Chưa ghi nhận")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("operational-state-ocr_worker"),
+    ).toHaveTextContent("Queued");
+    expect(screen.getByTestId("admin-audio-cache-summary")).toBeInTheDocument();
+    expect(screen.getByText("14")).toBeInTheDocument();
+    expect(screen.getByText("75%")).toBeInTheDocument();
+    expect(
+      await screen.findByTestId("admin-client-device-capabilities"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Client Device Capabilities")).toBeInTheDocument();
   });
   it("health error is safe and recheck recovers", async () => {
     const user = userEvent.setup();

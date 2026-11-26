@@ -10,6 +10,7 @@
  *                              (overallScore = null, warm guidance)
  */
 
+import { translateRuntime } from "@/lib/i18n/runtime";
 import type { KaraokeLine, KaraokeLyrics } from "@/types/karaoke";
 import type { LiveSingingScore } from "./live-singing-score";
 import {
@@ -115,16 +116,44 @@ export interface EvaluateMusicalInput {
 }
 
 export const SCORING_MODE_LABELS_VI: Record<MusicalScoringMode, string> = {
-  FULL_MUSICAL: "Chấm đầy đủ nhạc lý (Nhịp · Giai điệu · Lời)",
-  RHYTHM_AND_LYRICS: "Chấm nhịp điệu & lời hát",
-  LYRICS_ONLY: "Chỉ chấm lời hát",
-  INSUFFICIENT_EVIDENCE: "Chưa đủ tín hiệu giọng hát",
+  get FULL_MUSICAL() {
+    return translateRuntime(
+      "entertainment.karaoke.musicalScoring.modes.FULL_MUSICAL",
+    );
+  },
+  get RHYTHM_AND_LYRICS() {
+    return translateRuntime(
+      "entertainment.karaoke.musicalScoring.modes.RHYTHM_AND_LYRICS",
+    );
+  },
+  get LYRICS_ONLY() {
+    return translateRuntime(
+      "entertainment.karaoke.musicalScoring.modes.LYRICS_ONLY",
+    );
+  },
+  get INSUFFICIENT_EVIDENCE() {
+    return translateRuntime(
+      "entertainment.karaoke.musicalScoring.modes.INSUFFICIENT_EVIDENCE",
+    );
+  },
 };
 
 export const PITCH_BASIS_LABELS_VI: Record<PitchScoringBasis, string> = {
-  REFERENCE_MELODY: "Đối chiếu giai điệu chuẩn (không phân biệt quãng 8)",
-  VOCAL_STEADINESS_AND_CONTOUR: "Độ ổn định & đường nét giai điệu giọng hát",
-  UNAVAILABLE: "Chưa đo cao độ",
+  get REFERENCE_MELODY() {
+    return translateRuntime(
+      "entertainment.karaoke.musicalScoring.pitchBasis.REFERENCE_MELODY",
+    );
+  },
+  get VOCAL_STEADINESS_AND_CONTOUR() {
+    return translateRuntime(
+      "entertainment.karaoke.musicalScoring.pitchBasis.VOCAL_STEADINESS_AND_CONTOUR",
+    );
+  },
+  get UNAVAILABLE() {
+    return translateRuntime(
+      "entertainment.karaoke.musicalScoring.pitchBasis.UNAVAILABLE",
+    );
+  },
 };
 
 function roundScore(value: number): number {
@@ -621,21 +650,37 @@ function guidanceForGate(
 ): string {
   switch (reason) {
     case "SILENCE":
-      return "Mình chưa nghe thấy giọng hát của bé. Bé đưa micro lại gần hơn một chút hoặc kiểm tra micro rồi thử lại nhé!";
+      return translateRuntime(
+        "entertainment.karaoke.musicalScoring.gate.silence",
+      );
     case "NOISE_ONLY":
-      return "Xung quanh hơi ồn nên mình chưa nghe rõ tiếng hát của bé. Bé hãy chọn góc yên tĩnh hơn hoặc đeo tai nghe nhé!";
+      return translateRuntime(
+        "entertainment.karaoke.musicalScoring.gate.noiseOnly",
+      );
     case "ELECTRICAL_HUM":
-      return "Micro đang có tiếng ù nền. Ba mẹ giúp bé kiểm tra lại micro hoặc dây cắm rồi thử lại nhé!";
+      return translateRuntime(
+        "entertainment.karaoke.musicalScoring.gate.electricalHum",
+      );
     case "SPEAKER_BLEED":
       return headphoneMode
-        ? "Âm thanh bị lặp lại nên chưa tách rõ giọng bé. Bé giảm nhẹ âm lượng tai nghe và hát rõ hơn nhé!"
-        : "Mình đang nghe tiếng nhạc từ loa nhiều hơn giọng bé. Bé đeo tai nghe hoặc đưa micro gần miệng hơn để mình chấm chính xác nhé!";
+        ? translateRuntime(
+            "entertainment.karaoke.musicalScoring.gate.bleedHeadphones",
+          )
+        : translateRuntime(
+            "entertainment.karaoke.musicalScoring.gate.bleedSpeaker",
+          );
     case "LOW_COVERAGE":
-      return "Bé mới hát được một đoạn ngắn thôi. Hãy hát thêm vài câu nữa để mình chấm điểm đầy đủ cho bé nhé!";
+      return translateRuntime(
+        "entertainment.karaoke.musicalScoring.gate.lowCoverage",
+      );
     case "OK":
       return headphoneMode
-        ? "Chế độ tai nghe giúp micro thu giọng bé rất rõ nét!"
-        : "Mẹo nhỏ: Đeo tai nghe sẽ giúp micro nghe rõ giai điệu và nhịp điệu của bé nhất!";
+        ? translateRuntime(
+            "entertainment.karaoke.musicalScoring.gate.okHeadphones",
+          )
+        : translateRuntime(
+            "entertainment.karaoke.musicalScoring.gate.okSpeaker",
+          );
   }
 }
 
@@ -644,14 +689,25 @@ function encouragementForScore(
   mode: MusicalScoringMode,
 ): string {
   if (mode === "INSUFFICIENT_EVIDENCE" || score === null) {
-    return "Chưa đủ tín hiệu để chấm điểm lần này. Bé thử hát rõ hơn gần micro nhé!";
+    return translateRuntime(
+      "entertainment.karaoke.musicalScoring.encouragement.insufficient",
+    );
   }
   if (score >= 88)
-    return "Tuyệt vời quá! Bé hát đúng nhịp, rõ lời và rất có cảm xúc!";
-  if (score >= 72) return "Giỏi lắm! Bé giữ nhịp và giai điệu khá tốt rồi đó!";
+    return translateRuntime(
+      "entertainment.karaoke.musicalScoring.encouragement.high",
+    );
+  if (score >= 72)
+    return translateRuntime(
+      "entertainment.karaoke.musicalScoring.encouragement.good",
+    );
   if (score >= 52)
-    return "Khá tốt! Bé thử luyện chậm lại đoạn khó ở tốc độ 0.85x nhé!";
-  return "Cố lên nhé! Mình cùng tập chậm từng câu để bé hát ngày càng hay hơn!";
+    return translateRuntime(
+      "entertainment.karaoke.musicalScoring.encouragement.medium",
+    );
+  return translateRuntime(
+    "entertainment.karaoke.musicalScoring.encouragement.low",
+  );
 }
 
 function starsForScore(score: number | null): 0 | 1 | 2 | 3 {
@@ -671,10 +727,14 @@ function buildLineTipVi(params: {
   meanSignedOffsetMs: number | null;
 }): string {
   if (params.vocalCoverage < 0.18 && (params.lyricsScore ?? 0) < 30) {
-    return "Câu này bé chưa hát rõ, bấm luyện lại chậm 0.85x nhé!";
+    return translateRuntime(
+      "entertainment.karaoke.musicalScoring.lineTips.unclear",
+    );
   }
   if (params.status === "GREAT") {
-    return "Tuyệt vời! Bé hát câu này rất tự tin và đúng nhịp!";
+    return translateRuntime(
+      "entertainment.karaoke.musicalScoring.lineTips.great",
+    );
   }
   const scores: { key: "rhythm" | "pitch" | "lyrics"; val: number }[] = [];
   if (params.rhythmScore !== null)
@@ -688,23 +748,35 @@ function buildLineTipVi(params: {
 
   if (weakest === "rhythm") {
     if (params.meanSignedOffsetMs !== null && params.meanSignedOffsetMs > 120) {
-      return "Bé vào câu này hơi chậm nhịp một chút, nghe nhạc và vào sớm hơn nhé!";
+      return translateRuntime(
+        "entertainment.karaoke.musicalScoring.lineTips.rhythmLate",
+      );
     }
     if (
       params.meanSignedOffsetMs !== null &&
       params.meanSignedOffsetMs < -120
     ) {
-      return "Bé hát hơi nhanh hơn nhịp một chút, hãy hát đều theo chữ chạy nhé!";
+      return translateRuntime(
+        "entertainment.karaoke.musicalScoring.lineTips.rhythmFast",
+      );
     }
-    return "Bé thử gõ nhịp hoặc tập câu này ở tốc độ 0.85x cho đều nhịp hơn nhé!";
+    return translateRuntime(
+      "entertainment.karaoke.musicalScoring.lineTips.rhythmSteady",
+    );
   }
   if (weakest === "pitch") {
-    return "Bé nghe kỹ giai điệu câu này, hát ngân tròn chữ để giữ cao độ đều hơn nhé!";
+    return translateRuntime(
+      "entertainment.karaoke.musicalScoring.lineTips.pitch",
+    );
   }
   if (weakest === "lyrics") {
-    return "Bé đọc chậm lại lời câu này một lần rồi hát lại cho rõ từng tiếng nhé!";
+    return translateRuntime(
+      "entertainment.karaoke.musicalScoring.lineTips.lyrics",
+    );
   }
-  return "Khá tốt rồi! Bé luyện thêm một lượt ở tốc độ 0.85x sẽ còn hay hơn nữa!";
+  return translateRuntime(
+    "entertainment.karaoke.musicalScoring.lineTips.practiceMore",
+  );
 }
 
 /**
@@ -764,8 +836,9 @@ export function evaluateMusicalPerformance(
         meanAbsTimingErrorMs: null,
         speakerBleedSuspected: false,
         gateReason: "LOW_COVERAGE",
-        guidanceVi:
-          "Bé hãy nhấn nút Gõ nhịp (hoặc phím Cách) theo từng tiếng chạy trên màn hình nhé!",
+        guidanceVi: translateRuntime(
+          "entertainment.karaoke.musicalScoring.rhythmTap.insufficientGuidance",
+        ),
         encouragementVi: encouragementForScore(null, "INSUFFICIENT_EVIDENCE"),
         segments: linesInScope.map((entry) => ({
           lineIndex: entry.lineIndex,
@@ -779,7 +852,9 @@ export function evaluateMusicalPerformance(
           vocalCoverage: 0,
           lineOverallScore: null,
           status: "PRACTICE",
-          tipVi: "Bé thử gõ nhịp đều theo câu này nhé!",
+          tipVi: translateRuntime(
+            "entertainment.karaoke.musicalScoring.rhythmTap.insufficientTip",
+          ),
         })),
         weakestSegment: null,
       };
@@ -841,7 +916,9 @@ export function evaluateMusicalPerformance(
 
     return {
       scoringMode: "RHYTHM_AND_LYRICS",
-      scoringModeLabelVi: "Chấm gõ nhịp theo bài hát",
+      scoringModeLabelVi: translateRuntime(
+        "entertainment.karaoke.musicalScoring.modes.RHYTHM_TAP",
+      ),
       practiceMode,
       pitchBasis: "UNAVAILABLE",
       pitchBasisLabelVi: PITCH_BASIS_LABELS_VI.UNAVAILABLE,
@@ -863,8 +940,9 @@ export function evaluateMusicalPerformance(
       meanAbsTimingErrorMs: rhythmEval.meanAbsErrorMs,
       speakerBleedSuspected: false,
       gateReason: "OK",
-      guidanceVi:
-        "Chế độ gõ nhịp giúp bé làm quen với tiết tấu bài hát trước khi hát có micro!",
+      guidanceVi: translateRuntime(
+        "entertainment.karaoke.musicalScoring.rhythmTap.okGuidance",
+      ),
       encouragementVi: encouragementForScore(overallScore, "RHYTHM_AND_LYRICS"),
       segments,
       weakestSegment,
@@ -952,8 +1030,9 @@ export function evaluateMusicalPerformance(
       meanAbsTimingErrorMs: null,
       speakerBleedSuspected: false,
       gateReason: "OK",
-      guidanceVi:
-        "Thiết bị chưa kích hoạt bộ phân tích âm thanh Web Audio, nên lần này hệ thống chỉ chấm lời hát.",
+      guidanceVi: translateRuntime(
+        "entertainment.karaoke.musicalScoring.lyricsOnlyFallbackGuidance",
+      ),
       encouragementVi: encouragementForScore(overall, "LYRICS_ONLY"),
       segments,
       weakestSegment: pickWeakestSegment(segments),
@@ -1170,7 +1249,9 @@ export function evaluateMusicalPerformance(
 
   // Mild speaker-bleed flag (still passed gate, but apply honest transparency note).
   const guidanceVi = gate.speakerBleedSuspected
-    ? "Có một ít tiếng nhạc loa lọt vào micro. Bé đeo tai nghe sẽ giúp điểm cao độ và nhịp điệu chính xác hơn nữa!"
+    ? translateRuntime(
+        "entertainment.karaoke.musicalScoring.mildSpeakerBleedGuidance",
+      )
     : guidanceForGate("OK", headphoneMode);
 
   return {
@@ -1275,7 +1356,9 @@ function buildInsufficientResult(params: {
       vocalCoverage: 0,
       lineOverallScore: null,
       status: "PRACTICE",
-      tipVi: "Chưa nghe rõ câu này, bé thử lại gần micro hơn nhé!",
+      tipVi: translateRuntime(
+        "entertainment.karaoke.musicalScoring.lineTips.insufficientLine",
+      ),
     })),
     weakestSegment: null,
   };

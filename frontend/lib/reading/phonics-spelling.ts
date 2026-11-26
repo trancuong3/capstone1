@@ -380,11 +380,17 @@ function applyToneToRhyme(rhyme: string, tone: "sac" | "nang"): string | null {
   return chars.join("");
 }
 
+const phonicsCueCache = new Map<string, ReadonlySet<string>>();
+const MAX_PHONICS_CUE_CACHE = 4096;
+
 /**
  * Build the set of legal single-token phonics cues (including controlled ASR
  * phonetic variants) a child may utter BEFORE blending `word`.
  */
 export function buildPhonicsCueSet(word: string): ReadonlySet<string> {
+  const cached = phonicsCueCache.get(word);
+  if (cached) return cached;
+
   const parts = decomposeVietnameseSyllable(word);
   if (!parts) return new Set();
 
@@ -478,6 +484,10 @@ export function buildPhonicsCueSet(word: string): ReadonlySet<string> {
     add(toneWord);
   }
 
+  if (phonicsCueCache.size >= MAX_PHONICS_CUE_CACHE) {
+    phonicsCueCache.clear();
+  }
+  phonicsCueCache.set(word, cues);
   return cues;
 }
 
@@ -604,12 +614,17 @@ export function isPhonicsInProgress(
       const singleParts = decomposeVietnameseSyllable(single);
       if (
         singleParts &&
-        singleParts.untonedSyllable === parts.untonedSyllable &&
-        parts.rhyme !== "ơ"
+        singleParts.untonedSyllable === parts.untonedSyllable
       ) {
+        // Never swallow a wrong-tone reading of the exact same syllable (including
+        // -ơ words such as "mờ" for "mớ", "cơ" for "cờ", "bơ" for "bờ") as a
+        // standalone phonics cue. Multi-token spelling ("mờ ơ mơ sắc mớ") still passes.
         return false;
       }
-    } else if (parts.rhyme.length === 1 && single !== parts.untonedSyllable) {
+    } else if (parts.rhyme.length === 1) {
+      // Onsetless single-vowel syllables (e.g. "á", "à", "ở", "ô"): any single-token
+      // different-tone variant (including the untoned "a" for "á") is a tone mistake,
+      // not spelling-in-progress.
       return false;
     }
   }

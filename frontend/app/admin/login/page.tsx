@@ -1,18 +1,38 @@
 import type { Metadata } from "next";
 import { AdminLoginScreen } from "@/components/admin/admin-login-screen";
 import { AdminServicesProvider } from "@/components/providers/admin-services-provider";
+import { translateMessage } from "@/lib/i18n/formatter";
+import { getServerI18n } from "@/lib/i18n/server";
 import { resolveAdminAuthRuntime } from "@/lib/utils/admin-scenario";
-export const metadata: Metadata = { title: "Đăng nhập quản trị" };
+import { viMessages } from "@/messages/vi";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const { locale, messages } = await getServerI18n();
+  return {
+    title: translateMessage(
+      messages,
+      viMessages,
+      locale,
+      "admin.routes.loginTitle",
+    ),
+  };
+}
+
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ state?: string | string[] }>;
+  searchParams: Promise<{
+    next?: string | string[];
+    state?: string | string[];
+  }>;
 }) {
   const query = await searchParams;
   const { mode, scenario } = resolveAdminAuthRuntime(query.state);
+  const nextPath = Array.isArray(query.next) ? query.next[0] : query.next;
+
   return (
     <AdminServicesProvider authMode={mode} scenario={scenario}>
-      <AdminLoginScreen scenario={scenario} />
+      <AdminLoginScreen nextPath={nextPath ?? null} scenario={scenario} />
     </AdminServicesProvider>
   );
 }

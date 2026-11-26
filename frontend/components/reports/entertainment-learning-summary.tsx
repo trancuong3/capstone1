@@ -4,6 +4,7 @@ import { HeartHandshake, Info, Music2, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ButtonLink } from "@/components/common/button";
+import { useTranslations } from "@/hooks/use-i18n";
 import { createAdaptiveLearningService } from "@/lib/api/adaptive-learning-service";
 import type {
   ParentEntertainmentAnalyticsDTO,
@@ -16,27 +17,30 @@ interface Props {
   readonly initialData?: ParentEntertainmentAnalyticsDTO | null;
 }
 
-const STATUS_BADGE: Record<SkillStatus, { label: string; className: string }> =
-  {
-    OBSERVED: {
-      label: "Đã quan sát rõ",
-      className: "bg-success-surface text-success-ink",
-    },
-    ESTIMATED: {
-      label: "Ước lượng bước đầu",
-      className: "bg-sky text-primary-hover",
-    },
-    UNKNOWN: {
-      label: "Chưa đủ dữ liệu",
-      className: "bg-slate-100 text-muted",
-    },
-  };
+const STATUS_BADGE: Record<
+  SkillStatus,
+  { readonly key: string; readonly className: string }
+> = {
+  OBSERVED: {
+    key: "entertainmentSummary.statusObserved",
+    className: "bg-success-surface text-success-ink",
+  },
+  ESTIMATED: {
+    key: "entertainmentSummary.statusEstimated",
+    className: "bg-sky text-primary-hover",
+  },
+  UNKNOWN: {
+    key: "entertainmentSummary.statusUnknown",
+    className: "bg-slate-100 text-muted",
+  },
+};
 
 export function EntertainmentLearningSummary({
   childId,
   childName,
   initialData = null,
 }: Props) {
+  const t = useTranslations("reports");
   const [fetchedData, setFetchedData] =
     useState<ParentEntertainmentAnalyticsDTO | null>(null);
   const [fetchStatus, setFetchStatus] = useState<"loading" | "ready" | "empty">(
@@ -81,7 +85,7 @@ export function EntertainmentLearningSummary({
   if (status === "loading") {
     return (
       <div className="rounded-card border border-border bg-white p-5 text-sm text-muted">
-        Đang tổng hợp hoạt động Vui học &amp; Giải trí của {childName}...
+        {t("entertainmentSummary.loading", { childName })}
       </div>
     );
   }
@@ -89,9 +93,7 @@ export function EntertainmentLearningSummary({
   if (!data || status === "empty") {
     return (
       <div className="rounded-card border border-border bg-white p-5 text-sm text-muted">
-        Chưa có dữ liệu tổng hợp từ khu vực Vui học &amp; Giải trí cho{" "}
-        {childName}. Khi bé chơi Kể chuyện tranh, Xạ thủ ghép câu, Karaoke hoặc
-        Bé nhớ được gì?, tiến bộ sẽ tự động hiện tại đây.
+        {t("entertainmentSummary.empty", { childName })}
       </div>
     );
   }
@@ -104,28 +106,34 @@ export function EntertainmentLearningSummary({
           aria-hidden="true"
           className="mt-0.5 size-4 shrink-0 text-primary"
         />
-        <p>{data.disclaimer_vi}</p>
+        <p className="viread-learning-content" dir="ltr" lang="vi">
+          {data.disclaimer_vi}
+        </p>
       </div>
 
       {/* 3 Honest Evidence Counters */}
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-control border border-border bg-white p-4">
           <p className="text-xs font-semibold text-muted">
-            Kỹ năng đã quan sát rõ
+            {t("entertainmentSummary.observedCounterLabel")}
           </p>
-          <p className="mt-1 text-2xl font-extrabold text-success-ink">
+          <p className="mt-1 text-2xl font-extrabold tabular-nums text-success-ink">
             {data.observed_skills_count} / {data.skills.length}
           </p>
         </div>
         <div className="rounded-control border border-border bg-white p-4">
-          <p className="text-xs font-semibold text-muted">Ước lượng bước đầu</p>
-          <p className="mt-1 text-2xl font-extrabold text-primary">
+          <p className="text-xs font-semibold text-muted">
+            {t("entertainmentSummary.estimatedCounterLabel")}
+          </p>
+          <p className="mt-1 text-2xl font-extrabold tabular-nums text-primary">
             {data.estimated_skills_count}
           </p>
         </div>
         <div className="rounded-control border border-border bg-white p-4">
-          <p className="text-xs font-semibold text-muted">Chưa đủ dữ liệu</p>
-          <p className="mt-1 text-2xl font-extrabold text-muted">
+          <p className="text-xs font-semibold text-muted">
+            {t("entertainmentSummary.unknownCounterLabel")}
+          </p>
+          <p className="mt-1 text-2xl font-extrabold tabular-nums text-muted">
             {data.unknown_skills_count}
           </p>
         </div>
@@ -134,7 +142,9 @@ export function EntertainmentLearningSummary({
       {/* Activity per Game Module */}
       <div>
         <h3 className="text-lg font-bold text-ink">
-          Hoạt động theo 4 trò chơi ({data.window_days} ngày gần nhất)
+          {t("entertainmentSummary.activitiesTitle", {
+            days: data.window_days,
+          })}
         </h3>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           {data.module_activities.map((mod) => (
@@ -143,18 +153,32 @@ export function EntertainmentLearningSummary({
               key={mod.game_key}
             >
               <div className="flex items-center justify-between gap-2">
-                <p className="font-bold text-ink">{mod.title_vi}</p>
+                <p
+                  className="viread-learning-content font-bold text-ink"
+                  dir="ltr"
+                  lang="vi"
+                >
+                  {mod.title_vi}
+                </p>
                 {mod.recent_average_pct !== null ? (
-                  <span className="rounded-full bg-sky px-2.5 py-0.5 text-xs font-extrabold text-primary-hover">
-                    TB {mod.recent_average_pct}%
+                  <span className="rounded-full bg-sky px-2.5 py-0.5 text-xs font-extrabold tabular-nums text-primary-hover">
+                    {t("entertainmentSummary.avgScoreBadge", {
+                      pct: mod.recent_average_pct,
+                    })}
                   </span>
                 ) : (
                   <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-muted">
-                    Chưa có điểm
+                    {t("entertainmentSummary.noScoreBadge")}
                   </span>
                 )}
               </div>
-              <p className="mt-1 text-xs text-muted">{mod.highlight_vi}</p>
+              <p
+                className="viread-learning-content mt-1 text-xs text-muted"
+                dir="ltr"
+                lang="vi"
+              >
+                {mod.highlight_vi}
+              </p>
             </div>
           ))}
         </div>
@@ -163,7 +187,7 @@ export function EntertainmentLearningSummary({
       {/* 16-Skill Transparent Map */}
       <div>
         <h3 className="text-lg font-bold text-ink">
-          Bản đồ kỹ năng (Quan sát thực tế vs Chưa đủ dữ liệu)
+          {t("entertainmentSummary.skillsMapTitle")}
         </h3>
         <ul className="mt-3 grid gap-2.5 sm:grid-cols-2">
           {data.skills.map((skill) => {
@@ -174,25 +198,31 @@ export function EntertainmentLearningSummary({
                 key={skill.skill_key}
               >
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-bold text-ink">
+                  <p
+                    className="viread-learning-content truncate text-sm font-bold text-ink"
+                    dir="ltr"
+                    lang="vi"
+                  >
                     {skill.label_vi}
                   </p>
                   <p className="text-xs text-muted">
                     {skill.evidence_count > 0
-                      ? `${skill.evidence_count} lượt ghi nhận`
-                      : "Chưa có lượt luyện tập"}
+                      ? t("entertainmentSummary.evidenceCount", {
+                          count: skill.evidence_count,
+                        })
+                      : t("entertainmentSummary.noPracticeYet")}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {skill.mastery_pct !== null ? (
-                    <span className="text-sm font-extrabold text-ink">
+                    <span className="text-sm font-extrabold tabular-nums text-ink">
                       {skill.mastery_pct}%
                     </span>
                   ) : null}
                   <span
                     className={`rounded-full px-2.5 py-1 text-xs font-bold ${badge.className}`}
                   >
-                    {badge.label}
+                    {t(badge.key)}
                   </span>
                 </div>
               </li>
@@ -205,7 +235,7 @@ export function EntertainmentLearningSummary({
       {data.practiced_difficult_words.length ? (
         <div>
           <h3 className="text-lg font-bold text-ink">
-            Từ khó bé đang ôn lồng ghép qua trò chơi
+            {t("entertainmentSummary.practicedWordsTitle")}
           </h3>
           <ul className="mt-2.5 flex flex-wrap gap-2">
             {data.practiced_difficult_words.map((word) => (
@@ -213,7 +243,13 @@ export function EntertainmentLearningSummary({
                 className="rounded-full border border-amber-200 bg-amber-50 px-3.5 py-1.5 text-xs font-bold text-amber-900"
                 key={word.normalized_word}
               >
-                {word.display_text} · {word.practice_count} lần
+                <span className="viread-learning-content" dir="ltr" lang="vi">
+                  {word.display_text}
+                </span>{" "}
+                ·{" "}
+                {t("entertainmentSummary.practiceTimes", {
+                  count: word.practice_count,
+                })}
               </li>
             ))}
           </ul>
@@ -225,7 +261,7 @@ export function EntertainmentLearningSummary({
         <div className="rounded-control border border-rose-200 bg-rose-50/60 p-4">
           <div className="flex items-center gap-2 font-bold text-rose-950">
             <Music2 aria-hidden="true" className="size-4" />
-            Đoạn hát bé có thể luyện chậm 0.85x
+            {t("entertainmentSummary.karaokeWeakSegmentsTitle")}
           </div>
           <ul className="mt-2.5 space-y-2">
             {data.karaoke_weak_segments.map((seg, idx) => (
@@ -233,16 +269,28 @@ export function EntertainmentLearningSummary({
                 className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-white p-3 text-sm"
                 key={`${seg.song_id}-${seg.start_ms}-${idx}`}
               >
-                <div>
-                  <p className="font-bold text-ink">“{seg.line_text}”</p>
-                  <p className="text-xs text-muted">{seg.tip_vi}</p>
+                <div className="min-w-0">
+                  <p
+                    className="viread-learning-content font-bold text-ink"
+                    dir="ltr"
+                    lang="vi"
+                  >
+                    “{seg.line_text}”
+                  </p>
+                  <p
+                    className="viread-learning-content text-xs text-muted"
+                    dir="ltr"
+                    lang="vi"
+                  >
+                    {seg.tip_vi}
+                  </p>
                 </div>
                 <ButtonLink
                   href={`/karaoke/${encodeURIComponent(seg.song_id)}`}
                   size="compact"
                   variant="secondary"
                 >
-                  Mở bài hát
+                  {t("entertainmentSummary.openSongAction")}
                 </ButtonLink>
               </li>
             ))}
@@ -254,7 +302,7 @@ export function EntertainmentLearningSummary({
       <div className="rounded-control border border-emerald-200 bg-emerald-50/70 p-4">
         <div className="flex items-center gap-2 font-bold text-emerald-950">
           <HeartHandshake aria-hidden="true" className="size-4" />
-          Gợi ý ba mẹ đồng hành tại nhà
+          {t("entertainmentSummary.homeTipsTitle")}
         </div>
         <ul className="mt-2 space-y-1.5 text-sm text-emerald-950">
           {data.home_support_tips_vi.map((tip, idx) => (
@@ -263,7 +311,9 @@ export function EntertainmentLearningSummary({
                 aria-hidden="true"
                 className="mt-1 size-3.5 shrink-0 text-emerald-700"
               />
-              <span>{tip}</span>
+              <span className="viread-learning-content" dir="ltr" lang="vi">
+                {tip}
+              </span>
             </li>
           ))}
         </ul>

@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/common/button";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useTranslations } from "@/hooks/use-i18n";
 import { clearApiReadCache } from "@/lib/api/read-cache";
 import type { AdminPageImageUI } from "@/types/admin";
 
@@ -15,6 +16,7 @@ interface AdminPageImagePreviewProps {
 }
 
 export function AdminPageImagePreview(props: AdminPageImagePreviewProps) {
+  const t = useTranslations("admin");
   const [expanded, setExpanded] = useState(false);
   const panelId = `page-image-panel-${props.pageId}`;
 
@@ -29,8 +31,12 @@ export function AdminPageImagePreview(props: AdminPageImagePreviewProps) {
         variant="secondary"
       >
         {expanded
-          ? `Ẩn ảnh trang ${props.pageNumber}`
-          : `Xem ảnh / thay ảnh trang ${props.pageNumber}`}
+          ? t("books.imagePreview.hideButton", {
+              pageNumber: props.pageNumber,
+            })
+          : t("books.imagePreview.showButton", {
+              pageNumber: props.pageNumber,
+            })}
       </Button>
       {expanded ? (
         <div id={panelId}>
@@ -48,6 +54,7 @@ function AdminPageImagePreviewContent({
   onReplaced,
 }: AdminPageImagePreviewProps) {
   const { pages } = useAdminServices();
+  const t = useTranslations("admin");
   const [requestKey, setRequestKey] = useState(0);
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -85,7 +92,7 @@ function AdminPageImagePreviewContent({
       file.size <= 0 ||
       file.size > 12 * 1024 * 1024
     ) {
-      setNotice("Chọn ảnh JPEG, PNG hoặc WebP, dung lượng không quá 12 MB.");
+      setNotice(t("books.imagePreview.sizeError"));
       return;
     }
     setBusy(true);
@@ -95,16 +102,12 @@ function AdminPageImagePreviewContent({
       if (!mountedRef.current) return;
       if (result.page_id !== pageId)
         throw new Error("Replacement belongs to another page");
-      setNotice(
-        "Ảnh mới đang chờ duyệt. Ảnh và nội dung đã xác minh vẫn được giữ cho lượt đọc.",
-      );
+      setNotice(t("books.imagePreview.uploadedNotice"));
       setFile(null);
       onReplaced?.();
     } catch {
       if (mountedRef.current)
-        setNotice(
-          "Chưa thay được ảnh. Mình vẫn giữ ảnh cũ; hãy thử lại với ảnh đã chọn.",
-        );
+        setNotice(t("books.imagePreview.uploadFailedNotice"));
     } finally {
       if (mountedRef.current) setBusy(false);
     }
@@ -113,7 +116,7 @@ function AdminPageImagePreviewContent({
   const preview =
     state === "error" ? (
       <div className="rounded-control bg-canvas p-3 text-sm text-muted">
-        <p>Chưa tải được ảnh trang {pageNumber}.</p>
+        <p>{t("books.imagePreview.loadError", { pageNumber })}</p>
         <Button
           className="mt-2 sm:w-auto"
           variant="secondary"
@@ -123,19 +126,19 @@ function AdminPageImagePreviewContent({
             setRequestKey((key) => key + 1);
           }}
         >
-          Tải lại ảnh trang {pageNumber}
+          {t("books.imagePreview.retryLoad", { pageNumber })}
         </Button>
       </div>
     ) : state === "loading" ||
       state.pageId !== pageId ||
       state.revisionId !== revisionId ? (
       <p role="status" className="text-sm text-muted">
-        Đang tải ảnh trang {pageNumber}…
+        {t("books.imagePreview.loading", { pageNumber })}
       </p>
     ) : (
       <div className="relative h-48 overflow-hidden rounded-control border border-border bg-canvas">
         <Image
-          alt={`Ảnh trang ${pageNumber}`}
+          alt={t("books.imagePreview.alt", { pageNumber })}
           src={state.image.preview_url}
           fill
           unoptimized
@@ -149,9 +152,9 @@ function AdminPageImagePreviewContent({
     <div className="flex flex-col gap-3">
       {preview}
       <label className="text-sm font-semibold text-ink">
-        Chọn ảnh mới cho trang {pageNumber}
+        {t("books.imagePreview.chooseLabel", { pageNumber })}
         <input
-          aria-label={`Chọn ảnh mới cho trang ${pageNumber}`}
+          aria-label={t("books.imagePreview.chooseAria", { pageNumber })}
           accept="image/jpeg,image/png,image/webp"
           type="file"
           disabled={busy}
@@ -169,7 +172,7 @@ function AdminPageImagePreviewContent({
         isLoading={busy}
         onClick={() => void replaceImage()}
       >
-        Thay ảnh trang {pageNumber}
+        {t("books.imagePreview.submitButton", { pageNumber })}
       </Button>
       {notice ? (
         <p role="status" className="text-sm text-muted">

@@ -118,31 +118,33 @@ describe("AI tutor question service", () => {
     ).rejects.toMatchObject({ code: "RESOURCE_NOT_FOUND" });
   });
 
-  it("posts the chosen answer and returns the server-side grading", async () => {
+  it("posts the chosen answer and returns the server-side grading and optional story_hint", async () => {
     fetchMock.mockResolvedValue(
       json({
         answer_id: "90000000-0000-4000-8000-000000000001",
         question_id: QUESTION_ID,
-        submitted_answer: "mèo",
-        is_correct: true,
-        score: 1,
-        feedback_code: "CORRECT",
+        submitted_answer: "chó",
+        is_correct: false,
+        score: 0,
+        feedback_code: "TRY_AGAIN",
+        story_hint: "Con nhớ lại chi tiết: “Chú … thích nằm bên cửa sổ.” nhé!",
       }),
     );
 
     const result = await createComprehensionService().submitAnswer(
       SESSION_ID,
       QUESTION_ID,
-      "mèo",
+      "chó",
     );
 
-    expect(result.is_correct).toBe(true);
-    expect(result.feedback_code).toBe("CORRECT");
+    expect(result.is_correct).toBe(false);
+    expect(result.feedback_code).toBe("TRY_AGAIN");
+    expect(result.story_hint).toContain("cửa sổ");
     expect(fetchMock).toHaveBeenCalledWith(
       `http://127.0.0.1:8000/tutor/sessions/${SESSION_ID}/questions/${QUESTION_ID}/answer`,
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ answer: "mèo" }),
+        body: JSON.stringify({ answer: "chó" }),
       }),
     );
   });

@@ -1,5 +1,9 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { installApiFixture, setRole } from "./real-data-fixture";
+import {
+  PLAYWRIGHT_ORIGIN,
+  installApiFixture,
+  setRole,
+} from "./real-data-fixture";
 import {
   songDetail,
   previewDetail,
@@ -92,7 +96,7 @@ async function setup(page: Page, resume = false) {
       status,
       contentType: "application/json",
       headers: {
-        "access-control-allow-origin": "http://127.0.0.1:3106",
+        "access-control-allow-origin": PLAYWRIGHT_ORIGIN,
         "access-control-allow-headers": "authorization,content-type,accept",
         "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
       },
@@ -312,6 +316,9 @@ test("repeat proposal requires consent, supports undo, and makes no writes", asy
 }) => {
   const state = await setup(page);
   await page.goto("/admin/karaoke/new");
+  await page
+    .getByRole("button", { name: "Tách giọng nâng cao", exact: true })
+    .click();
   const field = page.getByLabel("Lời bài hát", { exact: true });
   await field.fill("Bé hát, vui! ×2");
   await expect(field).toHaveValue("Bé hát, vui! ×2");
@@ -416,6 +423,9 @@ test("wizard upload → staging → apply → explicit review → publish, with 
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/admin/karaoke/new");
+  await page
+    .getByRole("button", { name: "Tách giọng nâng cao", exact: true })
+    .click();
   await expect(
     page.getByRole("heading", { name: "Tạo karaoke dễ dàng" }),
   ).toBeVisible();
@@ -570,6 +580,9 @@ test("replacement after rejection keeps pasted lyrics and uses the already-creat
   const state = await setup(page);
   state.rejection.remaining = 1;
   await page.goto("/admin/karaoke/new");
+  await page
+    .getByRole("button", { name: "Tách giọng nâng cao", exact: true })
+    .click();
   const input = page.getByLabel("Bài hát có giọng (MP3)", { exact: true });
   await input.setInputFiles({
     name: "fixture-song.mp3",
@@ -578,7 +591,7 @@ test("replacement after rejection keeps pasted lyrics and uses the already-creat
   });
   await page.getByLabel("Lời bài hát", { exact: true }).fill("Bé hát, vui!");
   await page.getByRole("button", { name: "Tạo karaoke", exact: true }).click();
-  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(page.getByRole("main").getByRole("alert")).toBeVisible();
   await expect(page.getByLabel("Lời bài hát", { exact: true })).toHaveValue(
     "Bé hát, vui!",
   );

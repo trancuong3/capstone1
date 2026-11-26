@@ -22,7 +22,14 @@ IDENTITY_FIELDS = (
     "config_sha256", "repository_commit",
     "locked_test_manifest_sha256", "locked_test_version_id",
 )
+LINEAGE_IDENTITY_FIELDS = tuple(f for f in IDENTITY_FIELDS if f != "repository_commit")
 REQUIRED_IDENTITY_FIELDS = IDENTITY_FIELDS[:6]
+
+
+def _lineage_identity(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    return {field: value.get(field) for field in LINEAGE_IDENTITY_FIELDS}
 FIXED_FILES = {
     "latest.pt", "candidate.pth", "candidate.json", "candidate.manifest.json",
     "locked-test-report.json",
@@ -105,7 +112,10 @@ class GCSJobStateStore:
             manifest = json.loads(manifest_blob.download_as_bytes())
         except Exception as exc:
             raise ValueError("GCS resume manifest cannot be read") from exc
-        if manifest.get("schema") != SCHEMA or manifest.get("identity") != self.identity:
+        if (
+            manifest.get("schema") != SCHEMA
+            or _lineage_identity(manifest.get("identity")) != _lineage_identity(self.identity)
+        ):
             raise ValueError("GCS resume manifest identity mismatch; refusing to mix training lineage")
         files = manifest.get("files")
         if not isinstance(files, dict):
@@ -277,7 +287,10 @@ class LocalDriveJobStateStore:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except Exception as exc:
             raise ValueError("Drive resume manifest cannot be read") from exc
-        if manifest.get("schema") != SCHEMA or manifest.get("identity") != self.identity:
+        if (
+            manifest.get("schema") != SCHEMA
+            or _lineage_identity(manifest.get("identity")) != _lineage_identity(self.identity)
+        ):
             raise ValueError(
                 "Drive resume manifest identity mismatch; refusing to mix training lineage"
             )
@@ -523,7 +536,10 @@ class RemoteBackendJobStateStore:
             manifest = json.loads(self._download_bytes(MANIFEST_NAME).decode("utf-8"))
         except Exception as exc:
             raise ValueError("Remote Drive resume manifest cannot be read") from exc
-        if manifest.get("schema") != SCHEMA or manifest.get("identity") != self.identity:
+        if (
+            manifest.get("schema") != SCHEMA
+            or _lineage_identity(manifest.get("identity")) != _lineage_identity(self.identity)
+        ):
             raise ValueError(
                 "Remote Drive resume manifest identity mismatch; refusing to mix training lineage"
             )

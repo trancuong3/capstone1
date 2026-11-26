@@ -349,9 +349,9 @@ class ProviderHttpErrorClassificationTests(unittest.TestCase):
             401: ("PROVIDER_AUTHENTICATION", True),
             403: ("PROVIDER_AUTHENTICATION", True),
             404: ("MODEL_UNAVAILABLE", False),
-            429: ("PROVIDER_QUOTA", False),
-            500: ("PROVIDER_UNAVAILABLE", False),
-            503: ("PROVIDER_UNAVAILABLE", False),
+            429: ("PROVIDER_QUOTA", True),
+            500: ("PROVIDER_UNAVAILABLE", True),
+            503: ("PROVIDER_UNAVAILABLE", True),
         }
         for status_code, (code, disables_family) in cases.items():
             with self.subTest(status_code=status_code):

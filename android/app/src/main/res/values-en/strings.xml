@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ViRead</string>
+    <string name="loading_title">Opening ViRead</string>
+    <string name="loading_subtitle">Loading ViRead…</string>
+    <string name="loading_hint_stage2">Connecting to server…</string>
+    <string name="loading_hint_stage3">Server is starting up, please wait…</string>
+    <string name="loading_cold_start_hint">Server is warming up (cold-start), please wait a moment…</string>
+    <string name="error_title_network">Unable to reach ViRead server</string>
+    <string name="error_title_server">ViRead server is starting or busy</string>
+    <string name="error_title_timeout">Cannot connect to ViRead</string>
+    <string name="error_title_tls">Invalid security certificate</string>
+    <string name="offline_message">Cannot connect to the ViRead server. Please check your Wi-Fi / mobile data or server address and tap Retry.</string>
+    <string name="timeout_message">The ViRead server is responding slowly. Please check your network connection and tap Retry. On first launch, the server may take 30–60 seconds to start.</string>
+    <string name="server_5xx_message">The ViRead server is busy or restarting (%1$d). Please wait a few seconds and tap Retry.</string>
+    <string name="tls_error_message">The server HTTPS security certificate is invalid, so ViRead blocked the connection to protect your family account.</string>
+    <string name="no_network_toast">This device currently has no Internet or Wi-Fi connection.</string>
+    <string name="network_ready_toast">Network connection detected. Retrying ViRead…</string>
+    <string name="retry_button">Retry</string>
+    <string name="open_home_button">Go to Sign In</string>
+    <string name="check_connection_button">Check Connection Again</string>
+    <string name="configure_lan_server_button">Change LAN HTTPS Server (Debug)</string>
+    <string name="lan_dialog_title">Configure LAN HTTPS Server (Debug)</string>
+    <string name="lan_dialog_hint">Enter the HTTPS URL of the Next.js server on the same Wi-Fi (e.g. https://192.168.1.10:8443). HTTP and localhost are not accepted.</string>
+    <string name="lan_dialog_save">Save &amp; Connect</string>
+    <string name="lan_dialog_reset">Restore Default</string>
+    <string name="lan_dialog_cancel">Close</string>
+    <string name="lan_invalid_url_toast">Invalid address. Only a valid LAN HTTPS origin is accepted (no subpaths or HTTP).</string>
+    <string name="file_chooser_title">Select book page image, take a photo, or choose PDF/DOCX</string>
+    <string name="permission_denied_title">Permission required for this feature</string>
+    <string name="permission_denied_message">Camera or Microphone permission is currently disabled for ViRead. You can open App Settings to enable it anytime.</string>
+    <string name="open_app_settings_button">Open App Settings</string>
+    <string name="back_exit_confirm_toast">Press back again to exit ViRead</string>
+</resources>

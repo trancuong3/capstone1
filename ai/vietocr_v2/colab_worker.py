@@ -6,6 +6,7 @@ Use ``run_next_job_once`` from an interactive Colab Free session. The persistent
 polling entrypoint is retained for explicitly managed runtimes only.
 """
 
+import concurrent.futures
 import hashlib
 import json
 import logging
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import requests
+from requests.adapters import HTTPAdapter
 
 from .artifact_store import assemble_shards, shard_file
 from .colab_state_store import LocalDriveJobStateStore, RemoteBackendJobStateStore
@@ -114,6 +116,13 @@ def build_remote_backend_state_store_factory(
 
 
 class ColabWorker:
+    ARTIFACT_FETCH_MAX_ATTEMPTS = 5
+    ARTIFACT_FETCH_RETRY_BASE_SECONDS = 1.0
+    ARTIFACT_DOWNLOAD_WORKERS = 4
+    API_CALL_MAX_ATTEMPTS = 6
+    API_CALL_RETRY_BASE_SECONDS = 2.0
+    RETRYABLE_HTTP_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
+
     def __init__(
         self,
         api_base: str,
@@ -136,6 +145,11 @@ class ColabWorker:
         self.work_root.mkdir(parents=True, exist_ok=True)
         self.drive_root = Path(drive_root) if (drive_root is not None and str(drive_root).strip()) else None
         self.poll_seconds = max(5, poll_seconds)
+        self.artifact_fetch_max_attempts = self.ARTIFACT_FETCH_MAX_ATTEMPTS
+        self.artifact_fetch_retry_base_seconds = self.ARTIFACT_FETCH_RETRY_BASE_SECONDS
+        self.artifact_download_workers = self.ARTIFACT_DOWNLOAD_WORKERS
+        self.api_call_max_attempts = self.API_CALL_MAX_ATTEMPTS
+        self.api_call_retry_base_seconds = self.API_CALL_RETRY_BASE_SECONDS
         has_resume_root = resume_root is not None and str(resume_root).strip() != ""
         if state_store_factory is None:
             if has_resume_root or self.drive_root is not None:
@@ -147,12 +161,60 @@ class ColabWorker:
         self.worker_id = f"colab-{uuid.uuid4()}"
         self.runtime_data: dict[str, Any] = {}
         self.session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=8, pool_maxsize=8)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
         self.session.headers.update({"X-ViRead-Training-Worker": token})
 
+    @staticmethod
+    def _rewind_request_files(files_arg: Any) -> None:
+        items = files_arg.values() if isinstance(files_arg, dict) else (item[1] for item in files_arg)
+        for entry in items:
+            handle = entry[1] if isinstance(entry, tuple) and len(entry) >= 2 else entry
+            if handle is not None and hasattr(handle, "seek"):
+                try:
+                    if not hasattr(handle, "seekable") or handle.seekable():
+                        handle.seek(0)
+                except (OSError, ValueError):
+                    pass
+
     def call(self, method: str, path: str, **kwargs):
-        response = self.session.request(method, self.api_base + path, timeout=300, **kwargs)
-        response.raise_for_status()
-        return response.json() if response.content else {}
+        attempts = max(1, int(getattr(self, "api_call_max_attempts", self.API_CALL_MAX_ATTEMPTS)))
+        base_delay = max(
+            0.0,
+            float(getattr(self, "api_call_retry_base_seconds", self.API_CALL_RETRY_BASE_SECONDS)),
+        )
+        timeout = kwargs.pop("timeout", 300)
+        last_error: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            if "files" in kwargs and kwargs["files"] is not None:
+                self._rewind_request_files(kwargs["files"])
+            try:
+                response = self.session.request(method, self.api_base + path, timeout=timeout, **kwargs)
+                response.raise_for_status()
+                return response.json() if response.content else {}
+            except requests.HTTPError as exc:
+                status_code = getattr(getattr(exc, "response", None), "status_code", None)
+                if status_code is not None and status_code not in self.RETRYABLE_HTTP_STATUSES:
+                    raise
+                last_error = exc
+                reason = f"http_{status_code or 'unknown'}"
+            except requests.RequestException as exc:
+                last_error = exc
+                reason = type(exc).__name__
+            assert last_error is not None
+            if attempt >= attempts:
+                raise last_error
+            delay = base_delay * (2 ** (attempt - 1))
+            logger.warning(
+                "API %s attempt %d/%d failed (%s); retrying in %.1fs",
+                method,
+                attempt,
+                attempts,
+                reason,
+                delay,
+            )
+            time.sleep(delay)
 
     def claim(self, training_job_id: str | None = None) -> dict[str, Any] | None:
         payload = {"worker_id": self.worker_id, "runtime": self.runtime_data}
@@ -223,10 +285,7 @@ class ColabWorker:
         minimum_ram_gb = int(os.getenv("VIETOCR_TRAINING_MIN_RAM_GB", "4"))
         minimum_ram = minimum_ram_gb * 1024**3
         if available_ram < minimum_ram:
-            available_ram_gb = available_ram / 1024**3
-            raise RuntimeError(
-                f"COLAB_INSUFFICIENT_RAM:{available_ram_gb:.1f}GB_AVAILABLE_REQUIRED_{minimum_ram_gb}GB"
-            )
+            raise RuntimeError("COLAB_INSUFFICIENT_RAM")
         work_dir.mkdir(parents=True, exist_ok=True)
         free_disk = shutil.disk_usage(work_dir).free
         minimum_disk = int(os.getenv("VIETOCR_TRAINING_MIN_DISK_GB", "8")) * 1024**3
@@ -270,29 +329,105 @@ class ColabWorker:
         return dataset, items
 
     @staticmethod
-    def download(url: str, destination: Path, expected_sha256: str | None = None) -> None:
+    def _parse_content_length(header_value: Any) -> int | None:
+        raw = str(header_value or "").strip()
+        if raw.isdigit():
+            return int(raw)
+        return None
+
+    @classmethod
+    def _stream_http_download(
+        cls,
+        getter: Callable[[], Any],
+        destination: Path,
+        expected_sha256: str | None = None,
+        *,
+        max_attempts: int | None = None,
+        retry_base_seconds: float | None = None,
+    ) -> None:
         expected = expected_sha256.lower() if expected_sha256 else None
         if destination.exists():
             if expected is None or sha256_file(destination) == expected:
                 return
             raise ValueError("CACHED_OBJECT_HASH_MISMATCH")
+        attempts = max(1, int(max_attempts if max_attempts is not None else cls.ARTIFACT_FETCH_MAX_ATTEMPTS))
+        base_delay = max(
+            0.0,
+            float(
+                retry_base_seconds
+                if retry_base_seconds is not None
+                else cls.ARTIFACT_FETCH_RETRY_BASE_SECONDS
+            ),
+        )
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_suffix(destination.suffix + ".download")
-        temporary.unlink(missing_ok=True)
-        digest = hashlib.sha256()
-        try:
-            with requests.get(url, stream=True, timeout=300) as response:
-                response.raise_for_status()
-                with temporary.open("xb") as output:
-                    for block in response.iter_content(1024 * 1024):
-                        if block:
-                            output.write(block)
-                            digest.update(block)
-            if expected and digest.hexdigest() != expected:
-                raise ValueError("DOWNLOADED_OBJECT_HASH_MISMATCH")
-            temporary.replace(destination)
-        finally:
+        for attempt in range(1, attempts + 1):
             temporary.unlink(missing_ok=True)
+            digest = hashlib.sha256()
+            bytes_received = 0
+            retry_reason: str | None = None
+            last_error: Exception | None = None
+            try:
+                with getter() as response:
+                    response.raise_for_status()
+                    headers = getattr(response, "headers", None)
+                    expected_length = (
+                        cls._parse_content_length(headers.get("Content-Length"))
+                        if headers is not None and hasattr(headers, "get")
+                        else None
+                    )
+                    with temporary.open("xb") as output:
+                        for block in response.iter_content(1024 * 1024):
+                            if block:
+                                output.write(block)
+                                digest.update(block)
+                                bytes_received += len(block)
+                actual_sha = digest.hexdigest()
+                if expected_length is not None and bytes_received != expected_length:
+                    last_error = requests.exceptions.ChunkedEncodingError(
+                        f"Incomplete artifact response ({bytes_received}/{expected_length} bytes)"
+                    )
+                    retry_reason = f"truncated_content_length({bytes_received}/{expected_length})"
+                elif expected and actual_sha != expected:
+                    last_error = ValueError("DOWNLOADED_OBJECT_HASH_MISMATCH")
+                    retry_reason = (
+                        f"hash_mismatch(bytes={bytes_received},expected={expected[:12]},actual={actual_sha[:12]})"
+                    )
+                else:
+                    temporary.replace(destination)
+                    return
+            except requests.HTTPError as exc:
+                status_code = getattr(getattr(exc, "response", None), "status_code", None)
+                if status_code is not None and status_code not in cls.RETRYABLE_HTTP_STATUSES:
+                    raise
+                last_error = exc
+                retry_reason = f"http_{status_code or 'unknown'}"
+            except requests.RequestException as exc:
+                last_error = exc
+                retry_reason = type(exc).__name__
+            finally:
+                temporary.unlink(missing_ok=True)
+
+            assert last_error is not None
+            if attempt >= attempts:
+                raise last_error
+            delay = base_delay * (2 ** (attempt - 1))
+            logger.warning(
+                "Artifact download attempt %d/%d failed (%s); retrying in %.1fs",
+                attempt,
+                attempts,
+                retry_reason or type(last_error).__name__,
+                delay,
+            )
+            time.sleep(delay)
+
+    @staticmethod
+    def download(url: str, destination: Path, expected_sha256: str | None = None) -> None:
+        ColabWorker._stream_http_download(
+            lambda: requests.get(url, stream=True, timeout=300),
+            destination,
+            expected_sha256,
+        )
 
     def _fetch_artifact(
         self,
@@ -335,23 +470,13 @@ class ColabWorker:
             return
 
         resolved_url = self.api_base + url if url.startswith("/") else url
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        temporary = destination.with_suffix(destination.suffix + ".download")
-        temporary.unlink(missing_ok=True)
-        digest = hashlib.sha256()
-        try:
-            with self.session.get(resolved_url, stream=True, timeout=300) as response:
-                response.raise_for_status()
-                with temporary.open("xb") as output:
-                    for block in response.iter_content(1024 * 1024):
-                        if block:
-                            output.write(block)
-                            digest.update(block)
-            if expected and digest.hexdigest() != expected:
-                raise ValueError("DOWNLOADED_OBJECT_HASH_MISMATCH")
-            temporary.replace(destination)
-        finally:
-            temporary.unlink(missing_ok=True)
+        self._stream_http_download(
+            lambda: self.session.get(resolved_url, stream=True, timeout=300),
+            destination,
+            expected,
+            max_attempts=self.artifact_fetch_max_attempts,
+            retry_base_seconds=self.artifact_fetch_retry_base_seconds,
+        )
 
     def materialize_dataset(self, job_id: str, dataset: dict[str, Any], items: list[dict[str, Any]],
                             run_dir: Path, *, locked_test: bool = False) -> tuple[Path, Path, Path]:
@@ -372,24 +497,84 @@ class ColabWorker:
             local_drive_candidates=manifest_candidates,
         )
         image_root = run_dir / f"{prefix}-images"
+        total_items = len(items)
+        workers = max(1, int(self.artifact_download_workers))
+        progress_lock = threading.Lock()
+        completed_count = [0]
+        refresh_lock = threading.Lock()
+        refreshed_urls: dict[tuple[str, str], str] = {}
+        refresh_generation = [0]
+
+        def _refresh_image_urls(observed_gen: int, item_sample_id: str, item_sha: str) -> str | None:
+            with refresh_lock:
+                if refresh_generation[0] == observed_gen:
+                    _, fresh_items = self.dataset(job_id, locked_test=locked_test)
+                    for fresh in fresh_items:
+                        fresh_url = fresh.get("image_url")
+                        if not fresh_url:
+                            continue
+                        f_sha = str(fresh.get("image_sha256") or "")
+                        f_sid = str(fresh.get("sample_id") or "")
+                        refreshed_urls[(f_sid, f_sha)] = str(fresh_url)
+                        refreshed_urls.setdefault(("", f_sha), str(fresh_url))
+                    refresh_generation[0] += 1
+                return refreshed_urls.get((item_sample_id, item_sha)) or refreshed_urls.get(("", item_sha))
+
+        def _download_item(item: dict[str, Any]) -> None:
+            image_path = image_root / item["image_sha256"]
+            img_candidates: list[Path] = []
+            img_sha_lower = str(item["image_sha256"]).lower()
+            if self.drive_root and locked_test:
+                for cohort_sub in ("production", "pilot"):
+                    for ext in ("png", "jpg", "webp"):
+                        img_candidates.append(
+                            self.drive_root / "locked-tests" / cohort_sub / img_sha_lower[:2] / f"{img_sha_lower}.{ext}"
+                        )
+            item_sample_id = str(item.get("sample_id") or "")
+            item_sha = str(item.get("image_sha256") or "")
+            current_url = item.get("image_url")
+            with refresh_lock:
+                observed_gen = refresh_generation[0]
+                cached_fresh = refreshed_urls.get((item_sample_id, item_sha)) or refreshed_urls.get(("", item_sha))
+                if cached_fresh:
+                    current_url = cached_fresh
+            for refresh_cycle in range(3):
+                try:
+                    self._fetch_artifact(
+                        current_url,
+                        image_path,
+                        item["image_sha256"],
+                        local_drive_candidates=img_candidates,
+                    )
+                    break
+                except requests.HTTPError as exc:
+                    status_code = getattr(getattr(exc, "response", None), "status_code", None)
+                    if status_code != 403 or refresh_cycle >= 2:
+                        raise
+                    fresh_url = _refresh_image_urls(observed_gen, item_sample_id, item_sha)
+                    with refresh_lock:
+                        observed_gen = refresh_generation[0]
+                    if not fresh_url or fresh_url == current_url:
+                        raise
+                    current_url = fresh_url
+            with progress_lock:
+                completed_count[0] += 1
+                completed = completed_count[0]
+                if completed % 25 == 0 or completed == total_items:
+                    print(f"Downloaded {prefix} images: {completed}/{total_items}", flush=True)
+
+        if workers > 1 and total_items > 1:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = [executor.submit(_download_item, item) for item in items]
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+        else:
+            for item in items:
+                _download_item(item)
+
         rows = []
         for item in items:
             image_path = image_root / item["image_sha256"]
-            img_candidates: list[Path] = []
-            if self.drive_root:
-                img_sha = str(item["image_sha256"]).lower()
-                if locked_test:
-                    for cohort_sub in ("production", "pilot"):
-                        for ext in ("png", "jpg", "webp"):
-                            img_candidates.append(
-                                self.drive_root / "locked-tests" / cohort_sub / img_sha[:2] / f"{img_sha}.{ext}"
-                            )
-            self._fetch_artifact(
-                item.get("image_url"),
-                image_path,
-                item["image_sha256"],
-                local_drive_candidates=img_candidates,
-            )
             if locked_test:
                 rows.append({"sample_id": item.get("source_annotation_id") or item["sample_id"],
                              "group_id": item["group_id"], "reference": item["label"],
@@ -465,6 +650,7 @@ class ColabWorker:
         run = self.call("POST", f"{API_PREFIX}/jobs/{job_id}/runs", params={"worker_id": self.worker_id},
                         json=run_payload)
         run_id = str(run["run_id"])
+        job["run_id"] = run_id
         if run["status"] in {"CANDIDATE", "BENCHMARKED"}:
             if run.get("checkpoint_sha256") != candidate["checkpoint_sha256"]:
                 raise ValueError("REGISTERED_CANDIDATE_HASH_MISMATCH")
@@ -480,11 +666,13 @@ class ColabWorker:
                 raise ValueError("CACHED_CANDIDATE_SHARDS_MISMATCH")
         else:
             shard_manifest = shard_file(stable_candidate, chunks_root, chunk_bytes=8 * 1024 * 1024)
+        total_shards = len(shard_manifest["chunks"])
         for chunk in shard_manifest["chunks"]:
             with (chunks_root / chunk["name"]).open("rb") as stream:
                 self.call("POST", f"{API_PREFIX}/jobs/{job_id}/runs/{run_id}/chunks",
                           data={"worker_id": self.worker_id, "chunk_index": str(chunk["index"])},
                           files={"file": (chunk["name"], stream, "application/octet-stream")})
+            print(f"Uploaded candidate shard {int(chunk['index']) + 1}/{total_shards}", flush=True)
         self.call("POST", f"{API_PREFIX}/jobs/{job_id}/runs/{run_id}/complete",
                   params={"worker_id": self.worker_id}, json={
                       "profile": candidate["profile"],
@@ -666,8 +854,8 @@ class ColabWorker:
             dataset, items = self.dataset(job_id)
             if not dataset or dataset["version_sha256"] != job["manifest_sha256"]:
                 raise ValueError("JOB_DATASET_MANIFEST_MISMATCH")
-            manifest, receipt, _ = self.materialize_dataset(job_id, dataset, items, run_dir)
             parent = self.materialize_parent(job, run_dir)
+            manifest, receipt, _ = self.materialize_dataset(job_id, dataset, items, run_dir)
             progress.update(stage="training", completed_steps=0,
                             total_steps=int(config["steps"]))
             self.assert_runtime_capacity(run_dir)
@@ -682,10 +870,33 @@ class ColabWorker:
             else:
                 from .train import run_training
 
+                is_remote_store = isinstance(state_store, RemoteBackendJobStateStore)
+                sync_interval = (
+                    max(500, int(os.getenv("VIREAD_REMOTE_RESUME_SYNC_INTERVAL_STEPS", "2500")))
+                    if is_remote_store
+                    else 500
+                )
+                last_synced_step = [0]
+
                 def persist_training_progress(completed: int, total: int) -> None:
                     progress.update({"stage": "training", "completed_steps": completed, "total_steps": total})
-                    if state_store is not None:
+                    if completed > 0 and (completed % 100 == 0 or completed >= total):
+                        print(f"Training progress: {completed}/{total} steps", flush=True)
+                    if state_store is None:
+                        return
+                    if completed <= 0 or completed >= total:
+                        return
+                    if completed - last_synced_step[0] < sync_interval:
+                        return
+                    try:
                         state_store.sync()
+                        last_synced_step[0] = completed
+                    except Exception as sync_exc:
+                        logger.warning(
+                            "Mid-training resume sync at step %d failed (%s); continuing training on local disk checkpoint",
+                            completed,
+                            type(sync_exc).__name__,
+                        )
 
                 candidate = run_training(
                     profile=job["profile"], manifest_path=str(manifest), output_dir=str(run_dir),
@@ -714,7 +925,16 @@ class ColabWorker:
                 raise ValueError("CANDIDATE_CONFIG_FINGERPRINT_MISMATCH")
             if state_store is not None:
                 # Commit the finished candidate before registering its run in the database.
-                state_store.sync()
+                if isinstance(state_store, RemoteBackendJobStateStore):
+                    try:
+                        state_store.sync()
+                    except Exception as sync_exc:
+                        logger.warning(
+                            "Post-training remote resume sync skipped (%s); proceeding directly to candidate upload",
+                            type(sync_exc).__name__,
+                        )
+                else:
+                    state_store.sync()
             progress["stage"] = "uploading_candidate"
             run_id, run_status, stable_candidate = self.upload_candidate(job, candidate, run_dir)
             if run_status == "BENCHMARKED":

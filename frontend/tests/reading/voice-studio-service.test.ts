@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createVoiceStudioService } from "@/lib/api/voice-studio-service";
+import {
+  resetVoiceLockAndPolicyForTests,
+  setVoicePolicyPreferences,
+} from "@/lib/reading/session-voice-lock";
 
 const { getSession, initialize, fetchMock } = vi.hoisted(() => ({
   getSession: vi.fn(),
@@ -16,6 +20,8 @@ vi.mock("@/lib/supabase/config", () => ({
 }));
 
 beforeEach(() => {
+  localStorage.clear();
+  resetVoiceLockAndPolicyForTests();
   initialize.mockReset().mockResolvedValue({ error: null });
   getSession.mockReset().mockResolvedValue({
     data: { session: { access_token: "isolated-test-token" } },
@@ -78,7 +84,7 @@ describe("voice studio service", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(fetchMock).not.toHaveBeenCalled();
   });
-  it("lists the voices with the user's token", async () => {
+  it("lists the voices with the user's token in privacy-first local_only default and supports Google opt-in", async () => {
     fetchMock.mockResolvedValue(
       json({
         voices: [{ voice_id: "v1", name: "Sarah", gender: "female" }],
@@ -91,7 +97,7 @@ describe("voice studio service", () => {
     expect(list.default_voice_id).toBe("v1");
     expect(list.voices[0]?.name).toBe("Sarah");
     expect(fetchMock).toHaveBeenCalledWith(
-      "http://127.0.0.1:8000/voice/voices?provider_mode=local_with_google_fallback&allow_google_tts=true",
+      "http://127.0.0.1:8000/voice/voices",
       expect.objectContaining({ method: "GET", credentials: "omit" }),
     );
     const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<
@@ -99,6 +105,23 @@ describe("voice studio service", () => {
       string
     >;
     expect(headers.Authorization).toBe("Bearer isolated-test-token");
+
+    setVoicePolicyPreferences({
+      providerMode: "local_with_google_fallback",
+      allowGoogleTtsFallback: true,
+    });
+    fetchMock.mockResolvedValueOnce(
+      json({
+        voices: [{ voice_id: "v1", name: "Sarah", gender: "female" }],
+        default_voice_id: "v1",
+      }),
+    );
+    await createVoiceStudioService().listVoices();
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:8000/voice/voices?provider_mode=local_with_google_fallback&allow_google_tts=true",
+      expect.objectContaining({ method: "GET", credentials: "omit" }),
+    );
   });
 
   it("requests timed speech and decodes the audio and timings", async () => {
@@ -117,8 +140,29 @@ describe("voice studio service", () => {
       words: ["Bé", "Na"],
       voice_id: "v1",
       speed: 0.85,
+    });
+
+    setVoicePolicyPreferences({
+      providerMode: "local_with_google_fallback",
+      allowGoogleTtsFallback: true,
+    });
+    fetchMock.mockResolvedValueOnce(json(timedBody));
+    await createVoiceStudioService().synthesizeTimed(["Bé", "Na"], {
+      voiceId: "v1",
+      speed: 0.85,
+      bookId: "book-1",
+      pageId: "page-1",
+      cacheScope: "CATALOG",
+    });
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1]?.body as string)).toEqual({
+      words: ["Bé", "Na"],
+      voice_id: "v1",
+      speed: 0.85,
       provider_mode: "local_with_google_fallback",
       allow_google_tts: true,
+      book_id: "book-1",
+      page_id: "page-1",
+      cache_scope: "CATALOG",
     });
   });
 
@@ -129,8 +173,6 @@ describe("voice studio service", () => {
     });
     expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
       words: ["Bé", "Na"],
-      provider_mode: "local_with_google_fallback",
-      allow_google_tts: true,
     });
   });
 
@@ -209,5 +251,39 @@ describe("voice studio service", () => {
     await expect(createVoiceStudioService().listVoices()).rejects.toMatchObject(
       { code: "AUTH_REQUIRED" },
     );
+  });
+
+  it("preserves cachedSpeed from JSON body or X-TTS-Cached-Speed header on timed speech", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ...timedBody, cached_speed: 1.0 }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-tts-cache": "HIT",
+          "x-tts-scope": "CATALOG",
+          "x-tts-cached-speed": "1.00",
+        },
+      }),
+    );
+    const fromJson = await createVoiceStudioService().synthesizeTimed(
+      ["Bé", "Na"],
+      { speed: 0.9 },
+    );
+    expect(fromJson.cachedSpeed).toBe(1.0);
+
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(timedBody), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-tts-cached-speed": "1.00",
+        },
+      }),
+    );
+    const fromHeader = await createVoiceStudioService().synthesizeTimed(
+      ["Bé", "Na"],
+      { speed: 0.85 },
+    );
+    expect(fromHeader.cachedSpeed).toBe(1.0);
   });
 });

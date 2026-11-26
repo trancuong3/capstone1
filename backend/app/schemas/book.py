@@ -124,6 +124,8 @@ class CatalogBookResponse(BaseModel):
         default="CATALOG",
         validation_alias=AliasChoices("visibility_scope", "VisibilityScope"),
     )
+    cover_url: str | None = None
+    cover_source_type: str | None = None
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -143,6 +145,8 @@ class AdminBookMetadataResponse(BaseModel):
         default="CATALOG",
         validation_alias=AliasChoices("visibility_scope", "VisibilityScope"),
     )
+    cover_url: str | None = None
+    cover_source_type: str | None = None
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -158,6 +162,7 @@ class CatalogPagePreviewResponse(BaseModel):
     lifecycle_status: Literal["ACTIVE"]
     current_verified_revision_id: UUID
     preview_url: str
+    tts_audio_url: str | None = None
 
 
 class AdminCatalogBookResponse(BaseModel):

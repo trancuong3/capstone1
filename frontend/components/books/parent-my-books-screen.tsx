@@ -28,6 +28,7 @@ import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
+import { useTranslations } from "@/hooks/use-i18n";
 import { useParentPrivateBookService } from "@/hooks/use-parent-private-book-service";
 import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
 import { isServiceError } from "@/lib/api/service-error";
@@ -95,6 +96,7 @@ function ParentMyBooksContent({
   currentUserId: string;
   initialPage: number;
 }) {
+  const t = useTranslations("books");
   const service = useParentPrivateBookService();
   const router = useRouter();
   const requestIdRef = useRef(0);
@@ -207,12 +209,7 @@ function ParentMyBooksContent({
         }
         setBooks([]);
         setTotal(0);
-        setLoadError(
-          getErrorText(
-            error,
-            "Không thể tải danh sách Sách của tôi. Vui lòng thử lại.",
-          ),
-        );
+        setLoadError(getErrorText(error, t("myBooks.loadErrorFallback")));
       })
       .finally(() => {
         if (requestId === requestIdRef.current) {
@@ -224,7 +221,7 @@ function ParentMyBooksContent({
       requestIdRef.current += 1;
       controller.abort();
     };
-  }, [currentUserId, page, reloadKey, service, syncPageUrl]);
+  }, [currentUserId, page, reloadKey, service, syncPageUrl, t]);
 
   async function handleCreateBook(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -232,11 +229,11 @@ function ParentMyBooksContent({
     setActionNotice(null);
     const trimmedTitle = title.trim();
     if (!trimmedTitle) {
-      setActionError("Vui lòng nhập tên sách riêng.");
+      setActionError(t("myBooks.validationTitleRequired"));
       return;
     }
     if (minGrade > maxGrade) {
-      setActionError("Lớp tối thiểu không được lớn hơn lớp tối đa.");
+      setActionError(t("myBooks.validationGradeOrder"));
       return;
     }
 
@@ -254,7 +251,7 @@ function ParentMyBooksContent({
       setAuthor("");
       setSourceNote("");
       setShowCreateForm(false);
-      setActionNotice(`Đã tạo sách riêng "${created.title}".`);
+      setActionNotice(t("myBooks.createdNotice", { title: created.title }));
       setTotal((prev) => prev + 1);
       if (page !== 1) {
         setPage(1);
@@ -264,9 +261,7 @@ function ParentMyBooksContent({
       }
       router.push(`/my-books/${encodeURIComponent(created.id)}`);
     } catch (error) {
-      setActionError(
-        getErrorText(error, "Không thể tạo sách riêng. Vui lòng thử lại."),
-      );
+      setActionError(getErrorText(error, t("myBooks.createErrorFallback")));
     } finally {
       setCreating(false);
     }
@@ -295,11 +290,11 @@ function ParentMyBooksContent({
     setActionNotice(null);
     const trimmedTitle = editTitle.trim();
     if (!trimmedTitle) {
-      setActionError("Tên sách riêng không được để trống.");
+      setActionError(t("myBooks.validationTitleEmpty"));
       return;
     }
     if (editMinGrade > editMaxGrade) {
-      setActionError("Lớp tối thiểu không được lớn hơn lớp tối đa.");
+      setActionError(t("myBooks.validationGradeOrder"));
       return;
     }
 
@@ -320,14 +315,15 @@ function ParentMyBooksContent({
       const totalRecheck = updated.pending_submission_count;
       setActionNotice(
         totalRecheck > 0
-          ? `Đã sửa sách "${updated.title}". Toàn bộ ${totalRecheck} trang đã được đưa về kiểm tra lại từ đầu (OCR → Rà chính tả → Tool Check an toàn).`
-          : `Đã cập nhật thông tin sách "${updated.title}".`,
+          ? t("myBooks.updatedRecheckNotice", {
+              title: updated.title,
+              count: totalRecheck,
+            })
+          : t("myBooks.updatedNotice", { title: updated.title }),
       );
       setReloadKey((prev) => prev + 1);
     } catch (error) {
-      setActionError(
-        getErrorText(error, "Không thể sửa sách riêng. Vui lòng thử lại."),
-      );
+      setActionError(getErrorText(error, t("myBooks.updateErrorFallback")));
     } finally {
       setSavingBookId(null);
     }
@@ -343,7 +339,7 @@ function ParentMyBooksContent({
       if (editingBookId === book.id) {
         setEditingBookId(null);
       }
-      setActionNotice(`Đã xóa sách riêng "${book.title}".`);
+      setActionNotice(t("myBooks.deletedNotice", { title: book.title }));
       if (books.length <= 1 && page > 1) {
         const prevPage = page - 1;
         setPage(prevPage);
@@ -354,9 +350,7 @@ function ParentMyBooksContent({
         setReloadKey((prev) => prev + 1);
       }
     } catch (error) {
-      setActionError(
-        getErrorText(error, "Không thể xóa sách riêng. Vui lòng thử lại."),
-      );
+      setActionError(getErrorText(error, t("myBooks.deleteErrorFallback")));
     } finally {
       setDeletingBookId(null);
     }
@@ -367,15 +361,13 @@ function ParentMyBooksContent({
       <header className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
           <p className="text-xs font-bold uppercase tracking-wider text-primary">
-            Không gian riêng của gia đình
+            {t("myBooks.eyebrow")}
           </p>
           <h1 className="book-title mt-1 text-3xl text-ink sm:text-4xl">
-            Sách của tôi
+            {t("myBooks.title")}
           </h1>
           <p className="mt-2 max-w-2xl text-body text-muted">
-            Tạo sách riêng và tải ảnh trang hoặc tài liệu (JPEG, PNG, WebP, BMP,
-            TIFF, PDF, DOCX — tối đa 30 trang/tệp). Mỗi trang đều chạy OCR, rà
-            chính tả và kiểm tra an toàn trước khi thêm vào sách đọc.
+            {t("myBooks.headingSubtitle")}
           </p>
         </div>
 
@@ -388,7 +380,7 @@ function ParentMyBooksContent({
             disabled={loading || fetching}
           >
             <RefreshCw aria-hidden="true" className="size-4" />
-            Tải lại
+            {t("myBooks.reload")}
           </Button>
           <Button
             className="w-auto"
@@ -396,7 +388,9 @@ function ParentMyBooksContent({
             onClick={() => setShowCreateForm((open) => !open)}
           >
             <Plus aria-hidden="true" className="size-4" />
-            {showCreateForm ? "Đóng biểu mẫu" : "Tạo sách riêng"}
+            {showCreateForm
+              ? t("myBooks.closeCreateForm")
+              : t("myBooks.createPrivateBook")}
           </Button>
         </div>
       </header>
@@ -410,82 +404,78 @@ function ParentMyBooksContent({
           className="mt-0.5 size-5 shrink-0 text-emerald-700"
         />
         <div>
-          <p className="font-bold">Riêng tư tuyệt đối cho gia đình bạn</p>
+          <p className="font-bold">{t("myBooks.privacyBannerTitle")}</p>
           <p className="mt-0.5 text-emerald-900">
-            Chỉ bạn và các hồ sơ trẻ thuộc tài khoản này có thể đọc sách riêng
-            sau khi trang hoàn tất kiểm tra. Sách riêng không bao giờ xuất hiện
-            trong thư viện chung và mặc định không được dùng để huấn luyện OCR.
-            Bạn có thể chủ động bật hoặc ngừng đóng góp mẫu OCR cho từng cuốn
-            sách bên trong trang quản lý sách.
+            {t("myBooks.privacyBannerBody")}
           </p>
         </div>
       </div>
 
       {actionError ? (
-        <StatusMessage title="Thao tác chưa hoàn tất" tone="error">
+        <StatusMessage title={t("myBooks.actionErrorTitle")} tone="error">
           {actionError}
         </StatusMessage>
       ) : null}
 
       {actionNotice ? (
-        <StatusMessage title="Đã cập nhật" tone="success">
+        <StatusMessage title={t("myBooks.actionSuccessTitle")} tone="success">
           {actionNotice}
         </StatusMessage>
       ) : null}
 
       {showCreateForm ? (
         <form
-          aria-label="Tạo sách riêng mới"
+          aria-label={t("myBooks.createFormAria")}
           className="flex flex-col gap-4 rounded-card border border-border bg-white p-5 shadow-sm"
           onSubmit={(event) => void handleCreateBook(event)}
         >
           <h2 className="text-xl font-extrabold text-ink">
-            Thông tin sách riêng mới
+            {t("myBooks.createFormTitle")}
           </h2>
           <div className="grid gap-4 sm:grid-cols-2">
             <TextField
-              label="Tên sách *"
+              label={t("myBooks.titleLabel")}
               onChange={(event) => setTitle(event.target.value)}
-              placeholder="Ví dụ: Truyện cổ tích bé An thích"
+              placeholder={t("myBooks.titlePlaceholder")}
               required
               value={title}
             />
             <TextField
-              label="Tác giả (không bắt buộc)"
+              label={t("myBooks.authorLabel")}
               onChange={(event) => setAuthor(event.target.value)}
-              placeholder="Ví dụ: Gia đình bé An"
+              placeholder={t("myBooks.authorPlaceholder")}
               value={author}
             />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
-              Phù hợp từ lớp
+              {t("myBooks.minGradeLabel")}
               <select
-                aria-label="Phù hợp từ lớp"
+                aria-label={t("myBooks.minGradeLabel")}
                 className="min-h-12 rounded-control border border-border bg-white px-3 text-body text-ink focus-visible:outline-3 focus-visible:outline-primary"
                 onChange={(event) => setMinGrade(Number(event.target.value))}
                 value={minGrade}
               >
                 {CHILD_GRADES.map((grade) => (
                   <option key={grade} value={grade}>
-                    Lớp {grade}
+                    {t("card.gradeSingle", { grade })}
                   </option>
                 ))}
               </select>
             </label>
 
             <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
-              Đến lớp
+              {t("myBooks.maxGradeLabel")}
               <select
-                aria-label="Đến lớp"
+                aria-label={t("myBooks.maxGradeLabel")}
                 className="min-h-12 rounded-control border border-border bg-white px-3 text-body text-ink focus-visible:outline-3 focus-visible:outline-primary"
                 onChange={(event) => setMaxGrade(Number(event.target.value))}
                 value={maxGrade}
               >
                 {CHILD_GRADES.map((grade) => (
                   <option key={grade} value={grade}>
-                    Lớp {grade}
+                    {t("card.gradeSingle", { grade })}
                   </option>
                 ))}
               </select>
@@ -494,9 +484,9 @@ function ParentMyBooksContent({
 
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
-              Nguồn nội dung sách
+              {t("myBooks.sourceUsageLabel")}
               <select
-                aria-label="Nguồn nội dung sách"
+                aria-label={t("myBooks.sourceUsageLabel")}
                 className="min-h-12 rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
                 onChange={(event) =>
                   setSourceType(event.target.value as SourceUsageType)
@@ -505,23 +495,23 @@ function ParentMyBooksContent({
               >
                 {SOURCE_USAGE_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
-                    {opt.label}
+                    {t(`sourceUsage.${opt.value}`, undefined, opt.label)}
                   </option>
                 ))}
               </select>
             </label>
 
             <TextField
-              label="Ghi chú nguồn sách (không bắt buộc)"
+              label={t("myBooks.sourceNoteLabel")}
               onChange={(event) => setSourceNote(event.target.value)}
-              placeholder="Ví dụ: Sách giấy gia đình mua cho bé luyện đọc tại nhà"
+              placeholder={t("myBooks.sourceNotePlaceholder")}
               value={sourceNote}
             />
           </div>
 
           <div className="flex flex-wrap gap-3 pt-2">
             <Button className="sm:w-auto" isLoading={creating} type="submit">
-              {creating ? "Đang tạo sách…" : "Lưu và thêm trang"}
+              {creating ? t("myBooks.creating") : t("myBooks.saveAndAddPages")}
             </Button>
             <Button
               className="sm:w-auto"
@@ -529,7 +519,7 @@ function ParentMyBooksContent({
               type="button"
               variant="secondary"
             >
-              Hủy
+              {t("reportDialog.cancel")}
             </Button>
           </div>
         </form>
@@ -538,7 +528,7 @@ function ParentMyBooksContent({
       {loading ? (
         <div
           aria-busy="true"
-          aria-label="Đang tải danh sách Sách của tôi"
+          aria-label={t("myBooks.loadingListAria")}
           className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
         >
           {[0, 1, 2].map((index) => (
@@ -547,7 +537,7 @@ function ParentMyBooksContent({
         </div>
       ) : loadError ? (
         <div className="flex flex-col gap-4">
-          <StatusMessage title="Chưa tải được Sách của tôi" tone="error">
+          <StatusMessage title={t("myBooks.loadErrorTitle")} tone="error">
             {loadError}
           </StatusMessage>
           <Button
@@ -556,7 +546,7 @@ function ParentMyBooksContent({
             variant="secondary"
           >
             <RefreshCw aria-hidden="true" className="size-4" />
-            Thử lại
+            {t("catalog.retry")}
           </Button>
         </div>
       ) : books.length === 0 && total === 0 ? (
@@ -567,23 +557,23 @@ function ParentMyBooksContent({
               onClick={() => setShowCreateForm(true)}
             >
               <Plus aria-hidden="true" className="size-4" />
-              Tạo sách riêng đầu tiên
+              {t("myBooks.createFirstAction")}
             </Button>
           }
-          description="Tạo sách riêng để chụp trang sách giấy hoặc tải PDF/DOCX cho bé luyện đọc tại nhà."
+          description={t("myBooks.emptyDescription")}
           icon={
             <BookMarked aria-hidden="true" className="size-10 text-primary" />
           }
-          title="Bạn chưa có sách riêng nào"
+          title={t("myBooks.emptyTitle")}
         />
       ) : (
         <div className="flex flex-col gap-5">
           {total > PAGE_SIZE ? (
             <PaginationBar
-              ariaLabel="Phân trang Sách của tôi (trên)"
+              ariaLabel={t("myBooks.paginationTopAria")}
               compact
               disabled={fetching}
-              itemLabel="cuốn sách"
+              itemLabel={t("catalog.paginationItemLabel")}
               onPageChange={handlePageChange}
               page={page}
               pageSize={PAGE_SIZE}
@@ -598,8 +588,11 @@ function ParentMyBooksContent({
               const isSuspended = book.moderation_status === "SUSPENDED";
               const gradeLabel =
                 book.min_grade === book.max_grade
-                  ? `Lớp ${book.min_grade}`
-                  : `Lớp ${book.min_grade}–${book.max_grade}`;
+                  ? t("card.gradeSingle", { grade: book.min_grade })
+                  : t("card.gradeRange", {
+                      min: book.min_grade,
+                      max: book.max_grade,
+                    });
               const detailHref =
                 page > 1
                   ? `/my-books/${encodeURIComponent(book.id)}?fromPage=${page}`
@@ -613,7 +606,7 @@ function ParentMyBooksContent({
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
                       <Lock aria-hidden="true" className="size-3 shrink-0" />
-                      Sách riêng
+                      {t("myBooks.privateBadge")}
                     </span>
                     {isSuspended ? (
                       <span className="inline-flex items-center gap-1 rounded-full border border-rose-300 bg-rose-100 px-2.5 py-0.5 text-xs font-bold text-rose-900">
@@ -621,7 +614,7 @@ function ParentMyBooksContent({
                           aria-hidden="true"
                           className="size-3 shrink-0"
                         />
-                        Đang bị đình chỉ
+                        {t("myBooks.suspendedBadge")}
                       </span>
                     ) : book.readable_for_children ? (
                       <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-900">
@@ -629,61 +622,78 @@ function ParentMyBooksContent({
                           aria-hidden="true"
                           className="size-3 shrink-0"
                         />
-                        Bé có thể đọc
+                        {t("myBooks.readableBadge")}
                       </span>
                     ) : (
                       <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-bold text-amber-950">
-                        Chưa sẵn sàng đọc
+                        {t("myBooks.notReadyBadge")}
                       </span>
                     )}
                   </div>
 
                   <div className="min-w-0">
                     <h2
-                      className="book-title line-clamp-2 break-words text-xl text-ink"
+                      className="book-title viread-learning-content line-clamp-2 break-words text-xl text-ink"
+                      dir="ltr"
+                      lang="vi"
                       title={book.title}
                     >
                       {book.title}
                     </h2>
                     <p className="mt-1 line-clamp-1 break-words text-sm text-muted">
-                      {book.author ?? "Gia đình tự tải lên"} · {gradeLabel}
+                      {book.author ? (
+                        <span
+                          className="viread-learning-content"
+                          dir="ltr"
+                          lang="vi"
+                        >
+                          {book.author}
+                        </span>
+                      ) : (
+                        t("myBooks.defaultAuthor")
+                      )}{" "}
+                      · {gradeLabel}
                     </p>
                   </div>
 
                   {isSuspended && book.suspended_reason ? (
                     <p className="break-words rounded-control border border-rose-200 bg-rose-50 p-2.5 text-xs text-rose-900">
-                      <strong>Lý do đình chỉ:</strong> {book.suspended_reason}
+                      <strong>{t("myBooks.suspendedReasonLabel")}</strong>{" "}
+                      {book.suspended_reason}
                     </p>
                   ) : null}
 
                   {book.has_held_multipage_batch ? (
                     <p className="rounded-control border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-950">
-                      Tài liệu nhiều trang đang có trang bị giữ lại chờ xử lý
-                      hoặc Admin duyệt nên sách chưa mở đọc trọn bộ.
+                      {t("myBooks.multiPageHoldingNotice")}
                     </p>
                   ) : null}
 
                   <dl className="grid grid-cols-2 gap-2 rounded-control bg-canvas p-3 text-xs">
                     <div>
-                      <dt className="text-muted">Đã thêm vào sách</dt>
+                      <dt className="text-muted">
+                        {t("myBooks.statCommitted")}
+                      </dt>
                       <dd className="text-base font-extrabold text-ink">
-                        {book.committed_page_count} trang
+                        {t("catalog.pagesCount", {
+                          count: book.committed_page_count,
+                        })}
                       </dd>
                     </div>
                     <div>
-                      <dt className="text-muted">Đang kiểm tra / chờ</dt>
+                      <dt className="text-muted">{t("myBooks.statPending")}</dt>
                       <dd className="text-base font-extrabold text-ink">
                         {book.pending_submission_count}
                       </dd>
                     </div>
                     <div>
-                      <dt className="text-muted">Cần Admin duyệt</dt>
+                      <dt className="text-muted">{t("myBooks.statAdmin")}</dt>
                       <dd className="text-base font-extrabold text-amber-800">
                         {book.flagged_submission_count}
                       </dd>
                     </div>
                     <div>
-                      <dt className="text-muted">Kiểm tra lỗi</dt>
+                      <dt className="text-muted">{t("myBooks.statFailed")}</dt>
                       <dd className="text-base font-extrabold text-rose-800">
                         {book.failed_submission_count}
                       </dd>
@@ -692,7 +702,7 @@ function ParentMyBooksContent({
 
                   <div className="mt-auto flex flex-col gap-2 pt-2">
                     <ButtonLink href={detailHref} className="min-h-11">
-                      Quản lý & thêm trang
+                      {t("myBooks.manageAndAddPages")}
                     </ButtonLink>
 
                     {book.readable_for_children && !isSuspended ? (
@@ -701,20 +711,22 @@ function ParentMyBooksContent({
                         className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control border border-primary bg-sky px-3 text-sm font-bold text-primary-hover hover:bg-primary/10"
                       >
                         <BookOpen aria-hidden="true" className="size-4" />
-                        Mở đọc cùng bé
+                        {t("myBooks.openReadWithChild")}
                       </Link>
                     ) : (
                       <span
                         aria-disabled="true"
                         className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control border border-border bg-canvas px-3 text-xs font-semibold text-muted"
                       >
-                        Chưa mở đọc cùng bé
+                        {t("myBooks.notOpenReadYet")}
                       </span>
                     )}
 
                     <div className="grid grid-cols-2 gap-2 pt-1">
                       <button
-                        aria-label={`Sửa sách ${book.title}`}
+                        aria-label={t("myBooks.editBookAria", {
+                          title: book.title,
+                        })}
                         className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control border border-border bg-white px-3 text-xs font-bold text-ink transition hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-50"
                         disabled={
                           isSuspended ||
@@ -729,10 +741,12 @@ function ParentMyBooksContent({
                         type="button"
                       >
                         <Pencil aria-hidden="true" className="size-3.5" />
-                        Sửa sách
+                        {t("myBooks.editBook")}
                       </button>
                       <button
-                        aria-label={`Xóa sách ${book.title}`}
+                        aria-label={t("myBooks.deleteBookAria", {
+                          title: book.title,
+                        })}
                         className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
                         disabled={
                           savingBookId === book.id || deletingBookId === book.id
@@ -746,26 +760,26 @@ function ParentMyBooksContent({
                         type="button"
                       >
                         <Trash2 aria-hidden="true" className="size-3.5" />
-                        Xóa sách
+                        {t("myBooks.deleteBook")}
                       </button>
                     </div>
                   </div>
 
                   {editingBookId === book.id ? (
                     <form
-                      aria-label={`Chỉnh sửa sách ${book.title}`}
+                      aria-label={t("myBooks.editFormAria", {
+                        title: book.title,
+                      })}
                       className="flex flex-col gap-3 rounded-control border border-amber-300 bg-amber-50/60 p-3.5 text-xs"
                       onSubmit={(event) => void handleSaveBookEdit(event, book)}
                     >
                       <p className="font-bold text-amber-950">
-                        Lưu ý: Khi sửa sách, toàn bộ các trang của sách sẽ phải
-                        kiểm tra lại từ đầu (OCR → Rà chính tả → Tool Check an
-                        toàn) và tạm khóa đọc cùng bé cho đến khi hoàn tất.
+                        {t("myBooks.editRecheckNotice")}
                       </p>
                       <label className="flex flex-col gap-1 font-semibold text-ink">
-                        Tên sách *
+                        {t("myBooks.titleLabel")}
                         <input
-                          aria-label="Tên sách chỉnh sửa"
+                          aria-label={t("myBooks.editTitleAria")}
                           className="min-h-10 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
                           onChange={(event) => setEditTitle(event.target.value)}
                           required
@@ -774,9 +788,9 @@ function ParentMyBooksContent({
                         />
                       </label>
                       <label className="flex flex-col gap-1 font-semibold text-ink">
-                        Tác giả
+                        {t("myBooks.editAuthorLabel")}
                         <input
-                          aria-label="Tác giả chỉnh sửa"
+                          aria-label={t("myBooks.editAuthorAria")}
                           className="min-h-10 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
                           onChange={(event) =>
                             setEditAuthor(event.target.value)
@@ -787,9 +801,9 @@ function ParentMyBooksContent({
                       </label>
                       <div className="grid grid-cols-2 gap-2">
                         <label className="flex flex-col gap-1 font-semibold text-ink">
-                          Từ lớp
+                          {t("myBooks.editMinGradeLabel")}
                           <select
-                            aria-label="Từ lớp chỉnh sửa"
+                            aria-label={t("myBooks.editMinGradeAria")}
                             className="min-h-10 rounded-control border border-border bg-white px-2 text-xs text-ink"
                             onChange={(event) =>
                               setEditMinGrade(Number(event.target.value))
@@ -798,15 +812,15 @@ function ParentMyBooksContent({
                           >
                             {CHILD_GRADES.map((grade) => (
                               <option key={grade} value={grade}>
-                                Lớp {grade}
+                                {t("card.gradeSingle", { grade })}
                               </option>
                             ))}
                           </select>
                         </label>
                         <label className="flex flex-col gap-1 font-semibold text-ink">
-                          Đến lớp
+                          {t("myBooks.editMaxGradeLabel")}
                           <select
-                            aria-label="Đến lớp chỉnh sửa"
+                            aria-label={t("myBooks.editMaxGradeAria")}
                             className="min-h-10 rounded-control border border-border bg-white px-2 text-xs text-ink"
                             onChange={(event) =>
                               setEditMaxGrade(Number(event.target.value))
@@ -815,16 +829,16 @@ function ParentMyBooksContent({
                           >
                             {CHILD_GRADES.map((grade) => (
                               <option key={grade} value={grade}>
-                                Lớp {grade}
+                                {t("card.gradeSingle", { grade })}
                               </option>
                             ))}
                           </select>
                         </label>
                       </div>
                       <label className="flex flex-col gap-1 font-semibold text-ink">
-                        Nguồn nội dung
+                        {t("myBooks.editSourceLabel")}
                         <select
-                          aria-label="Nguồn nội dung chỉnh sửa"
+                          aria-label={t("myBooks.editSourceAria")}
                           className="min-h-10 rounded-control border border-border bg-white px-2 text-xs text-ink"
                           onChange={(event) =>
                             setEditSourceType(
@@ -835,15 +849,19 @@ function ParentMyBooksContent({
                         >
                           {SOURCE_USAGE_OPTIONS.map((opt) => (
                             <option key={opt.value} value={opt.value}>
-                              {opt.label}
+                              {t(
+                                `sourceUsage.${opt.value}`,
+                                undefined,
+                                opt.label,
+                              )}
                             </option>
                           ))}
                         </select>
                       </label>
                       <label className="flex flex-col gap-1 font-semibold text-ink">
-                        Ghi chú nguồn
+                        {t("myBooks.editSourceNoteLabel")}
                         <input
-                          aria-label="Ghi chú nguồn chỉnh sửa"
+                          aria-label={t("myBooks.editSourceNoteAria")}
                           className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
                           onChange={(event) =>
                             setEditSourceNote(event.target.value)
@@ -859,7 +877,7 @@ function ParentMyBooksContent({
                           isLoading={savingBookId === book.id}
                           type="submit"
                         >
-                          Lưu & kiểm tra lại toàn bộ
+                          {t("myBooks.saveAndRecheckAll")}
                         </Button>
                         <Button
                           className="min-h-10 w-auto px-3 text-xs"
@@ -868,7 +886,7 @@ function ParentMyBooksContent({
                           type="button"
                           variant="secondary"
                         >
-                          Hủy
+                          {t("reportDialog.cancel")}
                         </Button>
                       </div>
                     </form>
@@ -877,16 +895,15 @@ function ParentMyBooksContent({
                   {confirmDeleteBookId === book.id ? (
                     <div
                       role="alertdialog"
-                      aria-label={`Xác nhận xóa sách ${book.title}`}
+                      aria-label={t("myBooks.deleteDialogAria", {
+                        title: book.title,
+                      })}
                       className="flex flex-col gap-2.5 rounded-control border border-rose-300 bg-rose-50 p-3.5 text-xs text-rose-950"
                     >
                       <p className="break-words font-bold">
-                        Xóa sách &ldquo;{book.title}&rdquo;?
+                        {t("myBooks.deleteDialogTitle", { title: book.title })}
                       </p>
-                      <p>
-                        Sách sẽ bị xóa ngay khỏi Sách của tôi (không cần kiểm
-                        tra lại).
-                      </p>
+                      <p>{t("myBooks.deleteDialogBody")}</p>
                       <div className="flex flex-wrap gap-2">
                         <Button
                           className="min-h-10 w-auto bg-rose-700 px-3 text-xs text-white hover:bg-rose-800"
@@ -895,7 +912,7 @@ function ParentMyBooksContent({
                           onClick={() => void handleDeleteBook(book)}
                           type="button"
                         >
-                          Xác nhận xóa
+                          {t("myBooks.confirmDelete")}
                         </Button>
                         <Button
                           className="min-h-10 w-auto px-3 text-xs"
@@ -904,7 +921,7 @@ function ParentMyBooksContent({
                           type="button"
                           variant="secondary"
                         >
-                          Hủy
+                          {t("reportDialog.cancel")}
                         </Button>
                       </div>
                     </div>
@@ -914,9 +931,9 @@ function ParentMyBooksContent({
             })}
           </div>
           <PaginationBar
-            ariaLabel="Phân trang Sách của tôi"
+            ariaLabel={t("myBooks.paginationBottomAria")}
             disabled={fetching}
-            itemLabel="cuốn sách"
+            itemLabel={t("catalog.paginationItemLabel")}
             onPageChange={handlePageChange}
             page={page}
             pageSize={PAGE_SIZE}

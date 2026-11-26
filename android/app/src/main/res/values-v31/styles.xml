@@ -2,7 +2,7 @@
 <resources>
     <style name="Theme.ViRead.Splash" parent="Theme.ViRead">
         <item name="android:windowBackground">@drawable/splash_window_background</item>
-        <item name="android:windowSplashScreenBackground">@color/viread_surface</item>
+        <item name="android:windowSplashScreenBackground">@color/viread_canvas</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/viread_splash_logo</item>
         <item name="android:windowSplashScreenIconBackgroundColor">@color/viread_sky</item>
     </style>

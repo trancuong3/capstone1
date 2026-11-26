@@ -1,0 +1,77 @@
+{
+  "parent": {
+    "navLabel": "Navegación para padres",
+    "skipToContent": "Saltar navegación, ir al contenido",
+    "dashboard": "Resumen",
+    "myBooks": "Mis libros",
+    "reports": "Progreso",
+    "readingManagement": "Gestión de lectura",
+    "sessions": "Historial",
+    "sessionsLong": "Historial de lectura",
+    "entertainment": "Entretenimiento",
+    "difficultWords": "Palabras difíciles",
+    "children": "Perfiles de los niños",
+    "parentProfile": "Perfil del padre/madre",
+    "parentProfileLong": "Perfil del padre/madre",
+    "settings": "Ajustes",
+    "helpSupport": "Ayuda y soporte",
+    "moreTitle": "Más funciones",
+    "booksShort": "Libros",
+    "scannerShort": "Escanear",
+    "moreButton": "Más",
+    "mobileAriaLabel": "Navegación móvil rápida",
+    "moreDescriptions": {
+      "myBooks": "Suba y gestione los libros de su familia",
+      "readingManagement": "Objetivos, calendario de lectura y libros guardados para su hijo",
+      "sessions": "Revisar las sesiones de lectura completadas",
+      "entertainment": "Juegos de lenguaje, cuentos y karaoke",
+      "difficultWords": "Practicar las palabras que su hijo suele leer mal"
+    }
+  },
+  "admin": {
+    "navLabel": "Navegación de administración",
+    "skipToContent": "Saltar navegación, ir al contenido de administración",
+    "badge": "Administración",
+    "karaoke": "Canciones",
+    "parents": "Padres",
+    "books": "Biblioteca de libros",
+    "metadataQuality": "Calidad del libro",
+    "auditLogs": "Registros de auditoría",
+    "training": "Entrenamiento OCR",
+    "health": "Operaciones",
+    "moreTitle": "Más administración",
+    "mobileQualityShort": "Calidad",
+    "mobileOcrShort": "OCR",
+    "mobileMoreDescriptions": {
+      "auditLogs": "Seguimiento de registros de auditoría de administración",
+      "training": "Entrenar y operar el modelo VietOCR V2",
+      "health": "Estado del sistema, trabajador OCR y voz"
+    }
+  },
+  "accountMenu": {
+    "openAria": "Abrir menú de cuenta",
+    "closeAria": "Cerrar menú de cuenta",
+    "menuAria": "Menú de cuenta de ViRead",
+    "shortMenuAria": "Menú de cuenta",
+    "accountNavAria": "Cuenta de ViRead",
+    "profileSection": "Perfil",
+    "accountSection": "Cuenta",
+    "helpSection": "Ayuda",
+    "sessionSection": "Sesión",
+    "defaultAccountLabel": "Cuenta de ViRead"
+  },
+  "childSwitcher": {
+    "selectedAria": "Niño seleccionado: {alias}, toque para cambiar",
+    "openAria": "Cambio rápido de niño",
+    "compactLabel": "{alias} · Gr {grade}",
+    "selectChild": "Seleccionar niño",
+    "listAria": "Cambio rápido de perfil de niño",
+    "gradeLabel": " · Grado {grade}",
+    "manageChildren": "Gestionar perfiles de niño"
+  },
+  "footer": {
+    "ariaLabel": "Información de ViRead",
+    "logoDashboardAria": "ViRead - Ir al panel",
+    "logoHomeAria": "ViRead - Ir al inicio"
+  }
+}

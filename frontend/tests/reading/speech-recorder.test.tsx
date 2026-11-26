@@ -166,6 +166,21 @@ describe("useSpeechRecorder", () => {
     expect(stopTrack).toHaveBeenCalledOnce();
   });
 
+  it("stops microphone stream tracks on pagehide (page unload)", async () => {
+    const { result } = renderHook(() => useSpeechRecorder());
+    await act(async () => {
+      await result.current.start({ retainStream: true });
+    });
+    expect(FakeMediaRecorder.instances[0].state).toBe("recording");
+
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    expect(stopTrack).toHaveBeenCalledOnce();
+    expect(result.current.getStream()).toBeNull();
+    expect(result.current.isRecording).toBe(false);
+  });
+
   it("cannot start capture after stop while microphone permission is pending", async () => {
     let grantPermission: (stream: MediaStream) => void = () => undefined;
     getUserMedia.mockReturnValueOnce(

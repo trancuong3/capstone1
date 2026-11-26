@@ -18,6 +18,7 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminKaraoke } from "@/components/karaoke/karaoke-services-provider";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { KaraokeWizardController } from "@/lib/karaoke/wizard-controller";
 import { suggestRepeatedLyrics } from "@/lib/karaoke/wizard-lyrics";
 import { karaokeErrorMessage } from "@/lib/api/admin-karaoke-service";
@@ -32,6 +33,8 @@ export function KaraokeWizardScreen({
   capabilities: ProcessingCapabilities | null;
 }) {
   const service = useAdminKaraoke();
+  const t = useTranslations("admin");
+  const { formatNumber } = useI18n();
   const router = useRouter();
   const [controller] = useState(
     () => new KaraokeWizardController(service, capabilities, initial),
@@ -87,11 +90,7 @@ export function KaraokeWizardScreen({
         anchor.hasAttribute("download")
       )
         return;
-      if (
-        !window.confirm(
-          "Có file hoặc nội dung chưa được xác nhận lưu. Rời trang có thể mất phần đang nhập; job đã gửi vẫn tiếp tục. Bạn muốn rời trang?",
-        )
-      ) {
+      if (!window.confirm(t("karaoke.wizard.leaveConfirm"))) {
         event.preventDefault();
         event.stopPropagation();
       }
@@ -102,7 +101,7 @@ export function KaraokeWizardScreen({
       window.removeEventListener("beforeunload", unload);
       document.removeEventListener("click", navigate, true);
     };
-  }, [controller]);
+  }, [controller, t]);
   const detail = view.detail;
   const draft = detail?.draft;
   const locked = controller.isLocked();
@@ -110,11 +109,11 @@ export function KaraokeWizardScreen({
   const metaErrors = Object.fromEntries(
     (view.validation?.issues ?? []).flatMap((issue) =>
       issue.code === "SOURCE_REQUIRED"
-        ? [["source_note", "Hãy ghi nguồn nhạc và lời trước khi xuất bản."]]
+        ? [["source_note", t("karaoke.wizard.sourceRequired")]]
         : issue.code === "USAGE_REQUIRED"
-          ? [["usage_note", "Hãy xác nhận quyền sử dụng nội dung."]]
+          ? [["usage_note", t("karaoke.wizard.usageRequired")]]
           : issue.code === "TITLE_REQUIRED"
-            ? [["title", "Hãy đặt tên bài hát."]]
+            ? [["title", t("karaoke.wizard.titleRequired")]]
             : [],
     ),
   );
@@ -131,7 +130,7 @@ export function KaraokeWizardScreen({
       setSwitchError(
         error instanceof Error
           ? error.message
-          : "Cần lưu bản nháp trước khi chuyển chế độ.",
+          : t("karaoke.wizard.saveDraftBeforeSwitch"),
       );
     }
   }
@@ -140,9 +139,7 @@ export function KaraokeWizardScreen({
     if (
       kind === "audio" &&
       draft?.has_audio &&
-      !window.confirm(
-        "Thay nhạc sẽ xóa mốc lời trong bản nháp sau khi tải thành công. Bạn muốn tiếp tục?",
-      )
+      !window.confirm(t("karaoke.wizard.replaceAudioConfirm"))
     )
       return;
     controller.chooseFile(kind, file);
@@ -165,51 +162,52 @@ export function KaraokeWizardScreen({
   return (
     <div className="grid min-w-0 gap-6">
       <AdminPageHeader
-        eyebrow="KARAOKE CHO BÉ"
-        title="Tạo karaoke dễ dàng"
-        description="Tải bài hát có giọng, dán lời đúng bản thu; sau đó nghe kiểm tra và xuất bản."
+        eyebrow={t("karaoke.wizard.eyebrow")}
+        title={t("karaoke.wizard.title")}
+        description={t("karaoke.wizard.description")}
         actions={
           <ButtonLink variant="quiet" href="/admin/karaoke">
-            Danh sách bài hát
+            {t("karaoke.wizard.listLink")}
           </ButtonLink>
         }
       />
       <ol
-        aria-label="Các bước tạo karaoke"
+        aria-label={t("karaoke.wizard.stepsAria")}
         className="grid gap-2 sm:grid-cols-3"
       >
-        {["1. Thêm nhạc và lời", "2. Xử lý", "3. Nghe và xuất bản"].map(
-          (label, index) => (
-            <li
-              key={label}
-              aria-current={currentStep === index + 1 ? "step" : undefined}
-              className={
-                currentStep === index + 1
-                  ? "rounded-control bg-primary p-3 font-bold text-white"
-                  : "rounded-control border border-border p-3 font-bold text-muted"
-              }
-            >
-              {label}
-            </li>
-          ),
-        )}
+        {[
+          t("karaoke.wizard.step1"),
+          t("karaoke.wizard.step2"),
+          t("karaoke.wizard.step3"),
+        ].map((label, index) => (
+          <li
+            key={label}
+            aria-current={currentStep === index + 1 ? "step" : undefined}
+            className={
+              currentStep === index + 1
+                ? "rounded-control bg-primary p-3 font-bold text-white"
+                : "rounded-control border border-border p-3 font-bold text-muted"
+            }
+          >
+            {label}
+          </li>
+        ))}
       </ol>
       {detail && (
         <StatusMessage tone="info">
-          Bản nháp đã có trên máy chủ.{" "}
+          {t("karaoke.wizard.draftOnServerNotice")}{" "}
           <a
             className="break-all underline"
             href={`/admin/karaoke/${detail.song_id}/edit`}
           >
-            Mở lại bài hát đã lưu
+            {t("karaoke.wizard.reopenSavedSong")}
           </a>
-          . File chưa tải xong vẫn chỉ nằm ở trình duyệt.
+          {t("karaoke.wizard.browserFilesSuffix")}
         </StatusMessage>
       )}
       {!controller.canProcess() && (
         <StatusMessage tone="info">
-          Tự động tạo karaoke hiện chưa được bật hoặc cấu hình đầy đủ. Bạn vẫn
-          có thể chỉnh sửa và duyệt bản nháp đã có, hoặc dùng chế độ nâng cao.
+          {t("karaoke.wizard.autoNotEnabledNote")}
         </StatusMessage>
       )}
       {(view.error || saveError || switchError) && (
@@ -222,15 +220,11 @@ export function KaraokeWizardScreen({
               className="mt-3 sm:w-auto"
               disabled={!!view.busy || !!view.save?.busy}
               onClick={() => {
-                if (
-                  window.confirm(
-                    "Nạp bản trên máy chủ sẽ bỏ phần đang nhập và lựa chọn file chưa tải. Hãy sao chép nội dung cần giữ trước. Tiếp tục?",
-                  )
-                )
+                if (window.confirm(t("karaoke.wizard.reloadServerConfirm")))
                   void controller.reloadSaved();
               }}
             >
-              Đối chiếu / nạp bản đã lưu
+              {t("karaoke.wizard.loadSavedBtn")}
             </Button>
           )}
         </StatusMessage>
@@ -240,13 +234,12 @@ export function KaraokeWizardScreen({
       )}
       {detail && !draft ? (
         <Card>
-          <h2 className="text-xl font-extrabold">Bài hát đã xuất bản</h2>
-          <p>
-            Muốn thay đổi nội dung, hãy tạo một bản nháp mới từ danh sách bài
-            hát.
-          </p>
+          <h2 className="text-xl font-extrabold">
+            {t("karaoke.wizard.publishedTitle")}
+          </h2>
+          <p>{t("karaoke.wizard.publishedDesc")}</p>
           <ButtonLink href="/admin/karaoke" variant="secondary">
-            Về danh sách
+            {t("karaoke.wizard.backToList")}
           </ButtonLink>
         </Card>
       ) : (
@@ -267,8 +260,8 @@ export function KaraokeWizardScreen({
                 }}
               >
                 {job && !inputOpen
-                  ? "1. Nhạc và lời đã lưu — xem / chỉnh sửa"
-                  : "1. Thêm nhạc và lời"}
+                  ? t("karaoke.wizard.step1SavedHeading")
+                  : t("karaoke.wizard.step1NewHeading")}
               </summary>
               <div className="grid min-w-0 gap-5 pt-3">
                 <fieldset className="grid min-w-0 gap-5" disabled={locked}>
@@ -280,13 +273,13 @@ export function KaraokeWizardScreen({
                   />
                   <label className="grid gap-2 font-bold">
                     {view.mode === "VOCAL_TRACK"
-                      ? "Bài hát có giọng (MP3)"
-                      : "Nhạc nền (MP3)"}
+                      ? t("karaoke.wizard.vocalSongMp3")
+                      : t("karaoke.wizard.instrumentalMp3")}
                     <input
                       aria-label={
                         view.mode === "VOCAL_TRACK"
-                          ? "Bài hát có giọng (MP3)"
-                          : "Nhạc nền (MP3)"
+                          ? t("karaoke.wizard.vocalSongMp3")
+                          : t("karaoke.wizard.instrumentalMp3")
                       }
                       className={karaokeInputClass}
                       type="file"
@@ -299,23 +292,24 @@ export function KaraokeWizardScreen({
                     <span className="break-words text-sm font-normal text-muted">
                       {view.file?.name ??
                         (draft?.has_audio
-                          ? "Đã có nhạc trên máy chủ"
-                          : "Chưa chọn nhạc")}{" "}
-                      · MP3 tối đa 20 MiB, 5 phút.
+                          ? t("karaoke.wizard.audioOnServer")
+                          : t("karaoke.wizard.audioNotSelected"))}
+                      {t("karaoke.wizard.audioLimitSuffix")}
                     </span>
                   </label>
                   <p className="text-muted">
-                    Dùng bản có giọng hát để hệ thống tự căn lời. Nhạc không lời
-                    thuần cần bản hát đối chiếu cùng bản phối hoặc căn thủ công.
+                    {t("karaoke.wizard.vocalRecommendation")}
                   </p>
                   <label className="grid gap-2 font-bold">
-                    Lời bài hát
+                    {t("karaoke.wizard.lyricsLabel")}
                     <textarea
-                      aria-label="Lời bài hát"
-                      className={`${karaokeInputClass} min-h-52`}
+                      aria-label={t("karaoke.wizard.lyricsLabel")}
+                      className={`${karaokeInputClass} viread-learning-content min-h-52`}
+                      dir="ltr"
+                      lang="vi"
                       value={view.rawLyrics}
                       maxLength={50000}
-                      placeholder="Dán lời đúng bản thu, mỗi câu một dòng. Viết đầy đủ các câu lặp."
+                      placeholder={t("karaoke.wizard.lyricsPlaceholder")}
                       aria-invalid={!!view.lyricsError}
                       aria-describedby="karaoke-lyrics-help"
                       onBlur={() => {
@@ -332,7 +326,7 @@ export function KaraokeWizardScreen({
                         ) {
                           if (
                             !window.confirm(
-                              "Đổi lời có thể làm các tiếng bị sửa mất mốc thời gian và cần duyệt lại. Tiếp tục?",
+                              t("karaoke.wizard.lyricsEditConfirm"),
                             )
                           )
                             return;
@@ -345,10 +339,7 @@ export function KaraokeWizardScreen({
                       id="karaoke-lyrics-help"
                       className="text-sm font-normal text-muted"
                     >
-                      Không cần nhập mili giây, JSON hay LRC. Hệ thống không tự
-                      thêm lời còn thiếu. Ký hiệu ×2 ở cuối câu chỉ được mở rộng
-                      khi bạn xác nhận; ký hiệu trên dòng riêng cần sửa thủ
-                      công.
+                      {t("karaoke.wizard.lyricsInputNote")}
                     </span>
                   </label>
                   {view.lyricsError && (
@@ -359,7 +350,9 @@ export function KaraokeWizardScreen({
                   {repeatProposal && (
                     <StatusMessage tone="info">
                       {repeatProposal.error ??
-                        `Có ${repeatProposal.markedLines} câu có ký hiệu lặp. Mỗi ký hiệu chỉ lặp lại chính câu đó, không phải cả đoạn.`}
+                        t("karaoke.wizard.repeatDetected", {
+                          count: formatNumber(repeatProposal.markedLines),
+                        })}
                       {!repeatProposal.error && (
                         <Button
                           type="button"
@@ -368,7 +361,7 @@ export function KaraokeWizardScreen({
                           onClick={() => {
                             if (
                               window.confirm(
-                                "Mở rộng ký hiệu thành các câu lặp đầy đủ theo đúng số lần đã ghi? Lời bị thay đổi sẽ mất mốc cũ và cần duyệt lại. Hãy kiểm tra thứ tự với bản thu.",
+                                t("karaoke.wizard.repeatExpandConfirm"),
                               )
                             ) {
                               setRepeatUndo({
@@ -379,7 +372,7 @@ export function KaraokeWizardScreen({
                             }
                           }}
                         >
-                          Mở rộng câu lặp
+                          {t("karaoke.wizard.expandRepeatsBtn")}
                         </Button>
                       )}
                     </StatusMessage>
@@ -394,16 +387,16 @@ export function KaraokeWizardScreen({
                         setRepeatUndo(undefined);
                       }}
                     >
-                      Hoàn tác mở rộng lời
+                      {t("karaoke.wizard.undoExpandBtn")}
                     </Button>
                   )}
                   <details>
                     <summary className="min-h-12 cursor-pointer py-3 font-bold">
-                      Tôi đã có nhạc nền / Thêm ảnh bìa
+                      {t("karaoke.wizard.moreOptionsSummary")}
                     </summary>
                     <div className="grid gap-4 pt-3">
                       <label className="grid gap-2">
-                        Loại nhạc
+                        {t("karaoke.wizard.audioModeHeading")}
                         <select
                           className={karaokeInputClass}
                           value={view.mode}
@@ -414,16 +407,16 @@ export function KaraokeWizardScreen({
                           }
                         >
                           <option value="VOCAL_TRACK">
-                            Bản có giọng hát — tự chuẩn bị nhạc nền
+                            {t("karaoke.wizard.vocalExtractOption")}
                           </option>
                           <option value="INSTRUMENTAL_WITH_REFERENCE">
-                            Nhạc nền và bản hát đối chiếu
+                            {t("karaoke.wizard.instrumentalWithRefOption")}
                           </option>
                         </select>
                       </label>
                       {view.mode === "INSTRUMENTAL_WITH_REFERENCE" && (
                         <label className="grid gap-2">
-                          Bản hát đối chiếu (MP3)
+                          {t("karaoke.wizard.referenceAudioLabel")}
                           <input
                             className={karaokeInputClass}
                             type="file"
@@ -436,14 +429,14 @@ export function KaraokeWizardScreen({
                           <span className="break-words text-sm text-muted">
                             {view.reference?.name ??
                               (draft?.has_reference_audio
-                                ? "Đã có bản hát đối chiếu"
-                                : "Chưa chọn bản hát đối chiếu")}
-                            . Hai bản cần cùng phần nhạc dạo, nhịp và bản phối.
+                                ? t("karaoke.wizard.refOnServer")
+                                : t("karaoke.wizard.refNotSelected"))}
+                            {t("karaoke.wizard.refMatchNote")}
                           </span>
                         </label>
                       )}
                       <label className="grid gap-2">
-                        Ảnh bìa (tùy chọn)
+                        {t("karaoke.wizard.coverOptionalLabel")}
                         <input
                           className={karaokeInputClass}
                           type="file"
@@ -455,7 +448,7 @@ export function KaraokeWizardScreen({
                         />
                         <span className="text-sm text-muted">
                           {view.cover?.name ??
-                            "JPEG/PNG/WebP tối đa 2 MiB; có thể để trống."}
+                            t("karaoke.wizard.coverLimitNote")}
                         </span>
                       </label>
                     </div>
@@ -470,7 +463,9 @@ export function KaraokeWizardScreen({
                     onClick={() => void controller.createAndProcess()}
                   >
                     {view.busy ||
-                      (detail ? "Tạo / căn lại karaoke" : "Tạo karaoke")}
+                      (detail
+                        ? t("karaoke.wizard.submitRecreate")
+                        : t("karaoke.wizard.submitCreate"))}
                   </Button>
                   <Button
                     variant="quiet"
@@ -481,7 +476,7 @@ export function KaraokeWizardScreen({
                     }
                     onClick={() => void advanced()}
                   >
-                    Chỉnh sửa nâng cao
+                    {t("karaoke.wizard.advancedEditLink")}
                   </Button>
                 </div>
                 <p
@@ -491,12 +486,12 @@ export function KaraokeWizardScreen({
                 >
                   {view.busy ||
                     (view.save?.state === "saving"
-                      ? "Đang tự lưu…"
+                      ? t("karaoke.wizard.statusAutosaving")
                       : view.save?.state === "saved"
-                        ? "Đã lưu bản nháp"
+                        ? t("karaoke.wizard.statusDraftSaved")
                         : view.save?.dirty
-                          ? "Có thay đổi chưa lưu"
-                          : "Chỉ tạo bản nháp khi bạn bấm Tạo karaoke.")}
+                          ? t("karaoke.wizard.statusDirty")
+                          : t("karaoke.wizard.statusDraftOnCreate"))}
                 </p>
               </div>
             </details>
@@ -530,7 +525,7 @@ export function KaraokeWizardScreen({
               }
               onClick={() => void controller.loadDraftPreview()}
             >
-              Nghe và kiểm tra bản nháp đã lưu
+              {t("karaoke.wizard.reviewSavedHeading")}
             </Button>
           )}
           {view.preview && detail && (
@@ -557,11 +552,7 @@ export function KaraokeWizardScreen({
                 onChangeLyrics={controller.setTimedLyrics}
                 onSave={() => void controller.loadDraftPreview()}
                 onPublish={() => {
-                  if (
-                    window.confirm(
-                      "Xuất bản đúng bản đã nghe và duyệt này cho trẻ?",
-                    )
-                  )
+                  if (window.confirm(t("karaoke.wizard.publishConfirm")))
                     void controller.publish();
                 }}
                 canPublish={!!controller.canPublish()}

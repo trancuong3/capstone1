@@ -18,6 +18,7 @@ import { Modal } from "@/components/common/modal";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useChildService } from "@/hooks/use-child-service";
+import { useI18n } from "@/hooks/use-i18n";
 import { ServiceError } from "@/lib/api/service-error";
 import type { ChildProfileCreateDTO, ChildProfileDTO } from "@/types/child";
 
@@ -54,6 +55,7 @@ export function ChildProfileScreen({
   hasAvatarError = false,
   mode,
 }: ChildProfileScreenProps) {
+  const { t } = useI18n();
   const childService = useChildService();
   const router = useRouter();
 
@@ -257,9 +259,9 @@ export function ChildProfileScreen({
   if (loadState.status === "loading") {
     return (
       <section className="mx-auto w-full max-w-[744px]">
-        <Card aria-busy="true" aria-label="Đang tải hồ sơ bé">
+        <Card aria-busy="true" aria-label={t("parent.children.loadingAria")}>
           <span className="sr-only" role="status">
-            Đang tải…
+            {t("common.states.loading")}
           </span>
 
           <Skeleton className="h-11 w-3/5" />
@@ -283,15 +285,18 @@ export function ChildProfileScreen({
               href="/children"
               variant="secondary"
             >
-              <ArrowLeft aria-hidden="true" className="size-5" />
-              Về danh sách hồ sơ
+              <ArrowLeft
+                aria-hidden="true"
+                className="size-5 viread-rtl-flip"
+              />
+              {t("parent.children.backToList")}
             </ButtonLink>
           }
-          description="Hồ sơ này không tồn tại hoặc không thuộc tài khoản hiện tại."
+          description={t("parent.children.notFoundDescription")}
           icon={
             <UserRoundX aria-hidden="true" className="size-10 text-primary" />
           }
-          title="Không tìm thấy hồ sơ bé"
+          title={t("parent.children.notFoundTitle")}
         />
       </section>
     );
@@ -300,8 +305,8 @@ export function ChildProfileScreen({
   if (loadState.status === "error") {
     return (
       <section className="mx-auto flex w-full max-w-[744px] flex-col gap-4">
-        <StatusMessage title="Chưa tải được hồ sơ bé" tone="error">
-          Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
+        <StatusMessage title={t("parent.children.loadErrorTitle")} tone="error">
+          {t("auth.errors.generic")}
         </StatusMessage>
 
         <Button
@@ -310,7 +315,7 @@ export function ChildProfileScreen({
           variant="secondary"
         >
           <RefreshCw aria-hidden="true" className="size-5" />
-          Thử lại
+          {t("common.actions.retry")}
         </Button>
       </section>
     );
@@ -319,16 +324,18 @@ export function ChildProfileScreen({
   const child = loadState.status === "ready" ? loadState.child : null;
 
   const title = fromRegistration
-    ? "Tài khoản đã sẵn sàng"
+    ? t("parent.children.onboardingTitle")
     : mode === "create"
-      ? "Tạo hồ sơ bé"
-      : `Hồ sơ của ${child?.alias ?? "bé"}`;
+      ? t("parent.children.createTitle")
+      : t("parent.children.editTitle", {
+          alias: child?.alias ?? t("parent.children.childFallback"),
+        });
 
   const description = fromRegistration
-    ? "Ba mẹ tạo hồ sơ đầu tiên để bé bắt đầu đọc nhé."
+    ? t("parent.children.onboardingDescription")
     : mode === "create"
-      ? "Tạo hồ sơ để bắt đầu hành trình đọc cùng ViRead."
-      : "Xem và chỉnh sửa hồ sơ của bé.";
+      ? t("parent.children.createDescription")
+      : t("parent.children.editDescription");
 
   return (
     <>
@@ -339,33 +346,36 @@ export function ChildProfileScreen({
           <p className="mt-2 text-body text-muted">{description}</p>
         </div>
         <Card className="gap-4 sm:px-8 sm:py-8">
-          <h2 className="text-2xl font-extrabold text-ink">Thông tin của bé</h2>
+          <h2 className="text-2xl font-extrabold text-ink">
+            {t("parent.children.cardHeading")}
+          </h2>
           {saveNotice === "created" ? (
-            <StatusMessage tone="success">Hồ sơ bé đã được tạo.</StatusMessage>
+            <StatusMessage tone="success">
+              {t("parent.children.createdSuccess")}
+            </StatusMessage>
           ) : null}
 
           {saveNotice === "updated" ? (
             <StatusMessage tone="success">
-              Thay đổi của hồ sơ bé đã được lưu.
+              {t("parent.children.updatedSuccess")}
             </StatusMessage>
           ) : null}
 
           {saveNotice === "error" ? (
             <StatusMessage tone="error">
-              Chưa thể lưu hồ sơ. Ba mẹ vui lòng thử lại sau.
+              {t("parent.children.saveError")}
             </StatusMessage>
           ) : null}
 
           {saveNotice === "avatar-error" ? (
             <StatusMessage tone="error">
-              Thông tin hồ sơ đã lưu, nhưng ảnh đại diện chưa được cập nhật. Ba
-              mẹ có thể thử tải ảnh lại.
+              {t("parent.children.avatarSaveError")}
             </StatusMessage>
           ) : null}
 
           {deleteError ? (
             <StatusMessage tone="error">
-              Chưa thể xóa hồ sơ. Ba mẹ vui lòng thử lại sau.
+              {t("parent.children.deleteError")}
             </StatusMessage>
           ) : null}
 
@@ -399,7 +409,11 @@ export function ChildProfileScreen({
               );
             }}
             selectedAvatarFile={selectedAvatarFile}
-            submitLabel={fromRegistration ? "Lưu và chọn sách" : undefined}
+            submitLabel={
+              fromRegistration
+                ? t("parent.children.saveAndChooseBook")
+                : undefined
+            }
           />
 
           {mode === "edit" && child ? (
@@ -409,7 +423,7 @@ export function ChildProfileScreen({
                 variant="secondary"
               >
                 <BookOpenText aria-hidden="true" className="size-5" />
-                Chọn sách cho {child.alias}
+                {t("parent.children.chooseBooksFor", { alias: child.alias })}
               </ButtonLink>
 
               <Button
@@ -420,14 +434,14 @@ export function ChildProfileScreen({
                 variant="quiet"
               >
                 <Trash2 aria-hidden="true" className="size-5" />
-                Xóa hồ sơ bé
+                {t("parent.children.deleteAction")}
               </Button>
             </>
           ) : null}
         </Card>
         {!fromRegistration ? (
           <ButtonLink className="min-h-16" href="/children" variant="quiet">
-            Quay lại
+            {t("common.actions.back")}
           </ButtonLink>
         ) : null}
       </section>
@@ -440,18 +454,20 @@ export function ChildProfileScreen({
               setIsDeleteModalOpen(false);
             }
           }}
-          title="Xóa hồ sơ bé?"
+          title={t("parent.children.deleteModalTitle")}
         >
           <div className="flex flex-col gap-6">
             <p className="text-body text-ink">
-              Bạn có chắc muốn xóa hồ sơ của <strong>{child.alias}</strong>?
+              {t("parent.children.deleteConfirmPrefix")}
+              <strong>{child.alias}</strong>
+              {t("parent.children.deleteConfirmQuestion")}
               <br />
-              Thao tác này không thể hoàn tác.
+              {t("parent.children.deleteIrreversible")}
             </p>
 
             {deleteError ? (
               <StatusMessage tone="error">
-                Chưa thể xóa hồ sơ. Ba mẹ vui lòng thử lại sau.
+                {t("parent.children.deleteError")}
               </StatusMessage>
             ) : null}
 
@@ -461,7 +477,7 @@ export function ChildProfileScreen({
                 onClick={() => setIsDeleteModalOpen(false)}
                 variant="secondary"
               >
-                Hủy
+                {t("common.actions.cancel")}
               </Button>
 
               <Button
@@ -469,7 +485,7 @@ export function ChildProfileScreen({
                 onClick={() => void handleDelete()}
                 variant="primary"
               >
-                Xóa hồ sơ
+                {t("parent.children.deleteConfirmAction")}
               </Button>
             </div>
           </div>

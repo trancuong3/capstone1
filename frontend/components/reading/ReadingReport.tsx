@@ -2,13 +2,18 @@
 
 import { useEffect, useState } from "react";
 
+import { BookPageContent } from "@/components/reading/book-page-content";
+import { Skeleton } from "@/components/common/skeleton";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import {
   getReadingPage,
-  type ReadingPage,
   type ComparisonResult,
+  type ReadingPage,
 } from "@/lib/api/comparison-service";
-
-import { BookPageContent } from "@/components/reading/book-page-content";
+import {
+  buildReportWordMetrics,
+  REPORT_WORD_LEGEND,
+} from "@/lib/utils/session-report-grouping";
 
 type Props = {
   result: Pick<
@@ -16,6 +21,7 @@ type Props = {
     "alignment" | "summary" | "page_id" | "page_revision_id"
   > & {
     self_corrected_word_ids?: readonly string[];
+    transcript?: string;
   };
   sessionId: string;
 };
@@ -24,14 +30,6 @@ type Hesitation = {
   after_word: string;
   before_word: string;
   pause: number;
-};
-
-const COLORS = {
-  correct: "border-green-500 bg-green-100",
-  missing: "border-red-500 bg-red-100",
-  wrong: "border-red-500 bg-red-100",
-  hesitation: "border-purple-500 bg-purple-100",
-  repeated: "border-purple-500 bg-purple-100",
 };
 
 function isHesitation(value: unknown): value is Hesitation {
@@ -47,6 +45,9 @@ function isHesitation(value: unknown): value is Hesitation {
 }
 
 export function ReadingReport({ result, sessionId }: Props) {
+  const { formatNumber } = useI18n();
+  const t = useTranslations("reading");
+  const tp = useTranslations("reports");
   const [page, setPage] = useState<ReadingPage | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
 
@@ -56,47 +57,44 @@ export function ReadingReport({ result, sessionId }: Props) {
     async function loadPage() {
       try {
         setPageError(null);
-
         const data = await getReadingPage(
           result.page_id,
           sessionId,
           result.page_revision_id,
         );
-
         if (!cancelled) {
+          if (
+            data.page_id !== result.page_id ||
+            data.page_revision_id !== result.page_revision_id
+          ) {
+            setPageError(t("report.versionLoadError"));
+            setPage(null);
+            return;
+          }
           setPage(data);
         }
       } catch (error) {
         if (!cancelled) {
           setPageError(
-            error instanceof Error
-              ? error.message
-              : "Không thể tải nội dung trang sách.",
+            error instanceof Error ? error.message : t("report.pageLoadError"),
           );
         }
       }
     }
 
-    loadPage();
+    void loadPage();
 
     return () => {
       cancelled = true;
     };
-  }, [result.page_id, result.page_revision_id, sessionId]);
+  }, [result.page_id, result.page_revision_id, sessionId, t]);
 
-  // Thống kê kết quả đọc
+  const metrics = buildReportWordMetrics(result);
   const snapshot = result.summary.initial_assessment;
-  const correctCount = snapshot
-    ? snapshot.filter((word) => word.status === "CORRECT").length
-    : result.alignment.filter((item) => item.status === "MATCH").length;
-
-  const missingCount = snapshot
-    ? snapshot.filter((word) => word.status === "OMISSION").length
-    : result.summary.missing_words.length;
-  const extraCount = result.summary.extra_words.length;
-  const wrongCount = snapshot
-    ? snapshot.filter((word) => word.status === "MISPRONUNCIATION").length
-    : result.summary.substitutions.length;
+  const missingCount =
+    metrics.find((metric) => metric.key === "missing")?.count ?? 0;
+  const wrongCount =
+    metrics.find((metric) => metric.key === "substitution")?.count ?? 0;
   const uncertainCount =
     snapshot?.filter((word) => word.status === "UNCERTAIN").length ?? 0;
 
@@ -106,7 +104,6 @@ export function ReadingReport({ result, sessionId }: Props) {
     counts[word] = (counts[word] ?? 0) + 1;
     return counts;
   }, {});
-
   const repeatedWords = Object.entries(repeatedWordCounts);
   const repeatedCount = result.summary.repeated_words.length;
 
@@ -115,161 +112,187 @@ export function ReadingReport({ result, sessionId }: Props) {
 
   return (
     <div className="space-y-5 rounded-card border border-border bg-white p-4 sm:p-6">
-      <h2 className="text-xl font-semibold">Báo cáo đọc</h2>
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,1fr)]">
+        <div className="space-y-3">
+          <div className="rounded-card border border-border bg-cream p-3 sm:p-5">
+            {pageError ? (
+              <p className="rounded-control bg-white/80 p-4 text-sm text-danger">
+                {pageError}
+              </p>
+            ) : !page ? (
+              <div
+                aria-busy="true"
+                aria-label={t("report.loadingAria")}
+                className="space-y-3 p-2"
+              >
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-32 rounded-control" />
+              </div>
+            ) : (
+              <article
+                className="relative flex min-h-[200px] w-full flex-col rounded-control bg-[#fffdfa] p-3.5 sm:min-h-[260px] sm:p-5"
+                data-page-id={page.page_id}
+                data-page-revision-id={page.page_revision_id}
+              >
+                <header className="mb-2 flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1.5 rounded-control bg-success-surface px-2.5 py-1 text-xs font-bold text-success-ink">
+                    <span className="size-1.5 rounded-full bg-success-ink" />
+                    {t("report.verifiedContentTitle")}
+                  </span>
+                  <span className="text-xs font-bold tabular-nums text-muted">
+                    {t("progress.pageLabel", {
+                      page: formatNumber(page.page_number),
+                    })}
+                  </span>
+                </header>
 
-      {/* Nội dung bài đọc */}
-      <div className="space-y-3 border-t border-border pt-3">
-        <h3 className="font-semibold">Nội dung bài đọc</h3>
+                <BookPageContent
+                  comparisonResult={result}
+                  page={page}
+                  readOnly
+                  selfCorrectedWordIds={
+                    new Set(result.self_corrected_word_ids ?? [])
+                  }
+                />
+              </article>
+            )}
+          </div>
 
-        {pageError ? (
-          <p className="text-label text-danger">{pageError}</p>
-        ) : !page ? (
-          <p className="text-label text-muted">Đang tải nội dung bài đọc...</p>
-        ) : (
-          <article
-            className="relative min-h-[360px] w-full overflow-hidden rounded-card border border-border bg-cream p-4 sm:aspect-[3/2] sm:min-h-0 sm:max-w-[1008px] sm:p-6"
-            data-page-id={page.page_id}
-            data-page-revision-id={page.page_revision_id}
+          <ul
+            aria-label={t("report.legendAria")}
+            className="flex flex-wrap gap-1.5 text-xs font-semibold"
           >
-            <div className="relative z-10 flex h-full flex-col">
-              <header className="mb-2 flex items-center justify-between">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-success-surface px-3 py-1 text-xs font-semibold text-success-ink">
-                  <span className="size-2 rounded-full bg-success-ink" />
-                  Nội dung OCR đã xác minh
-                </span>
+            {REPORT_WORD_LEGEND.map((legend) => (
+              <li
+                className={`rounded-control border px-2.5 py-1 ${legend.swatchClassName}`}
+                key={legend.key}
+              >
+                {tp(`sessions.readingReports.legend.${legend.key}`)}
+              </li>
+            ))}
+          </ul>
+        </div>
 
-                <span className="text-label text-muted">
-                  Trang {page.page_number}
-                </span>
-              </header>
+        <div className="space-y-4">
+          <dl className="grid grid-cols-2 gap-2.5">
+            {metrics.map((metric) => (
+              <div
+                className="rounded-control border border-border bg-canvas/50 p-3"
+                key={metric.key}
+              >
+                <dt className={`text-xs font-bold ${metric.accentClassName}`}>
+                  {metric.key === "correct"
+                    ? t("report.correctLabel")
+                    : metric.key === "substitution"
+                      ? t("report.substitutionLabel")
+                      : tp(`sessions.readingReports.wordMetrics.${metric.key}`)}
+                </dt>
+                <dd className="mt-1 text-2xl font-extrabold tabular-nums text-ink">
+                  {formatNumber(metric.count)}
+                </dd>
+              </div>
+            ))}
+          </dl>
 
-              <BookPageContent
-                page={page}
-                comparisonResult={result}
-                selfCorrectedWordIds={
-                  new Set(result.self_corrected_word_ids ?? [])
-                }
-                readOnly
-              />
-
-              <p className="mt-2 text-right text-label text-muted">
-                {page.page_number}
+          {typeof result.transcript === "string" ? (
+            <div className="rounded-control border border-border bg-canvas/70 p-3.5">
+              <p className="text-xs font-bold text-muted">
+                {t("report.recordedTranscriptLabel")}
+              </p>
+              <p className="mt-1 text-sm leading-relaxed text-ink">
+                {result.transcript.trim() ? (
+                  <span className="viread-learning-content" dir="ltr" lang="vi">
+                    {result.transcript.trim()}
+                  </span>
+                ) : (
+                  t("report.notRecorded")
+                )}
               </p>
             </div>
-          </article>
-        )}
-      </div>
-
-      {/* Thống kê */}
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <p className="text-green-700">Từ đọc đúng</p>
-          <p className="text-2xl font-semibold">{correctCount}</p>
-        </div>
-
-        <div>
-          <p className="text-red-600">Từ bỏ</p>
-          <p className="text-2xl font-semibold">{missingCount}</p>
-        </div>
-
-        <div>
-          <p className="text-red-600">Từ đọc nhầm</p>
-          <p className="text-2xl font-semibold">{wrongCount}</p>
-        </div>
-
-        <div>
-          <p className="text-purple-700">Từ đọc thêm</p>
-          <p className="text-2xl font-semibold">{extraCount}</p>
-        </div>
-
-        <div>
-          <p className="text-purple-700">Lặp từ</p>
-          <p className="text-2xl font-semibold">{repeatedCount}</p>
-        </div>
-
-        <div>
-          <p className="text-purple-700">Khoảng ngập ngừng</p>
-          <p className="text-2xl font-semibold">{hesitations.length}</p>
+          ) : null}
         </div>
       </div>
 
-      {/* Chú giải màu */}
-      <div className="flex flex-wrap gap-2 border-t border-border pt-3 text-sm">
-        {[
-          ["Đọc đúng", COLORS.correct],
-          ["Đã đọc lại đúng", "border-green-600 bg-green-200"],
-          ["Bỏ từ", COLORS.missing],
-          ["Đọc nhầm", COLORS.wrong],
-          ["Ngập ngừng", COLORS.hesitation],
-          ["Lặp từ", COLORS.repeated],
-        ].map(([label, color]) => (
-          <span key={label} className={`rounded border px-2 py-1 ${color}`}>
-            {label}
-          </span>
-        ))}
-      </div>
+      {repeatedWords.length > 0 || hesitations.length > 0 ? (
+        <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
+          <div className="space-y-1.5 text-sm">
+            <h3 className="font-extrabold text-ink">
+              {t("report.repetitionsTitle", {
+                count: formatNumber(repeatedCount),
+              })}
+            </h3>
+            {repeatedWords.length > 0 ? (
+              <ul className="list-disc space-y-1 ps-5 text-muted">
+                {repeatedWords.map(([word, count]) => (
+                  <li key={word}>
+                    <span
+                      className="viread-learning-content font-bold text-ink"
+                      dir="ltr"
+                      lang="vi"
+                    >
+                      {word}
+                    </span>{" "}
+                    — {formatNumber(count)} {t("report.timesUnit")}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-muted">{t("report.noRepetitions")}</p>
+            )}
+          </div>
 
-      {/* Chi tiết lặp từ */}
-      <div className="space-y-2 border-t border-border pt-3">
-        <h3 className="font-semibold">Tình trạng lặp từ</h3>
+          <div className="space-y-1.5 text-sm">
+            <h3 className="font-extrabold text-ink">
+              {t("report.hesitationsTitle", {
+                count: formatNumber(hesitations.length),
+              })}
+            </h3>
+            {hesitationSeconds != null ? (
+              <p className="text-xs font-semibold text-muted tabular-nums">
+                {t("report.totalPauseSummary", {
+                  seconds: hesitationSeconds.toFixed(1),
+                })}
+              </p>
+            ) : null}
+            {hesitations.length > 0 ? (
+              <ul className="list-disc space-y-1 ps-5 text-muted">
+                {hesitations.map((item, index) => (
+                  <li key={`${item.after_word}-${item.before_word}-${index}`}>
+                    <span
+                      className="viread-learning-content"
+                      dir="ltr"
+                      lang="vi"
+                    >
+                      {item.after_word}
+                    </span>{" "}
+                    →{" "}
+                    <span
+                      className="viread-learning-content font-bold text-ink"
+                      dir="ltr"
+                      lang="vi"
+                    >
+                      {item.before_word}
+                    </span>
+                    :{" "}
+                    {t("report.pauseDetail", {
+                      seconds: item.pause.toFixed(1),
+                    })}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-muted">{t("report.noHesitations")}</p>
+            )}
+          </div>
+        </div>
+      ) : null}
 
-        <p>
-          Tổng số lần lặp từ: <strong>{repeatedCount}</strong>
-        </p>
-
-        {repeatedWords.length > 0 ? (
-          <ul className="list-disc pl-5">
-            {repeatedWords.map(([word, count]) => (
-              <li key={word}>
-                <span className="rounded border border-purple-500 bg-purple-100 px-1">
-                  {word}
-                </span>{" "}
-                được ghi nhận {count} lần trong danh sách lặp.
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p>Không phát hiện từ bị lặp.</p>
-        )}
-      </div>
-
-      {/* Chi tiết ngập ngừng */}
-      <div className="space-y-2 border-t border-border pt-3">
-        <h3 className="font-semibold">Tình trạng ngập ngừng</h3>
-
-        <p>
-          Tổng thời gian ngập ngừng:{" "}
-          <strong>
-            {hesitationSeconds == null
-              ? "Chưa có dữ liệu"
-              : `${hesitationSeconds.toFixed(2)} giây`}
-          </strong>
-        </p>
-
-        {hesitations.length > 0 ? (
-          <ul className="list-disc space-y-1 pl-5">
-            {hesitations.map((item, index) => (
-              <li key={`${item.after_word}-${item.before_word}-${index}`}>
-                {item.after_word}
-                {" → "}
-                <span className="rounded border border-purple-500 bg-purple-100 px-1">
-                  {item.before_word}
-                </span>
-                : dừng {item.pause.toFixed(2)} giây
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p>Chưa phát hiện khoảng ngập ngừng.</p>
-        )}
-      </div>
-
-      <p>
+      <p className="border-t border-border pt-3 text-sm font-semibold text-muted">
         {uncertainCount > 0
-          ? "Có phần chưa nghe rõ nên chưa thể đánh giá toàn bộ trang."
+          ? t("report.uncertainSummary")
           : missingCount === 0 && wrongCount === 0
-            ? "Bé đã đọc đúng nội dung bài."
-            : "Bé đã đọc một phần bài. Hãy tiếp tục luyện đọc những từ còn thiếu nhé."}
+            ? t("report.allCorrectSummary")
+            : t("report.partialSummary")}
       </p>
     </div>
   );

@@ -1,5 +1,6 @@
 import { apiQuery, requestApi } from "@/lib/api/api-client";
 import { isServiceError } from "@/lib/api/service-error";
+import { translateRuntime } from "@/lib/i18n/runtime";
 import {
   adminKaraokeDetailSchema,
   adminKaraokeListSchema,
@@ -351,24 +352,24 @@ export function karaokeErrorMessage(error: unknown) {
   if (isServiceError(error)) {
     switch (error.status) {
       case 401:
-        return "Phiên đăng nhập đã hết hạn. Hãy đăng nhập lại.";
+        return translateRuntime("admin.karaoke.errors.status401");
       case 403:
-        return "Tài khoản không có quyền quản lý bài hát.";
+        return translateRuntime("admin.karaoke.errors.status403");
       case 404:
-        return "Không tìm thấy bài hát hoặc bản nháp.";
+        return translateRuntime("admin.karaoke.errors.status404");
       case 409:
-        return "Bài hát vừa thay đổi. Bản đang nhập được giữ lại; hãy tải lại để đối chiếu trước khi sửa tiếp.";
+        return translateRuntime("admin.karaoke.errors.status409");
       case 413:
-        return "File vượt quá giới hạn cho phép.";
+        return translateRuntime("admin.karaoke.errors.status413");
       case 415:
-        return "Định dạng file không được hỗ trợ hoặc file bị hỏng.";
+        return translateRuntime("admin.karaoke.errors.status415");
       case 422:
-        return "Nội dung chưa hợp lệ. Hãy kiểm tra thông tin, lời và thời gian từng dòng.";
+        return translateRuntime("admin.karaoke.errors.status422");
       case 429:
-        return "Đã đạt giới hạn xử lý karaoke. Hãy đợi trước khi gửi lại.";
+        return translateRuntime("admin.karaoke.errors.status429");
       case 503:
-        return "Dịch vụ karaoke chưa sẵn sàng. Kiểm tra migration và Storage ở backend.";
+        return translateRuntime("admin.karaoke.errors.status503");
     }
   }
-  return "Chưa hoàn tất yêu cầu. Nội dung đang nhập được giữ lại; vui lòng thử lại.";
+  return translateRuntime("admin.karaoke.errors.fallback");
 }

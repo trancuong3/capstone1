@@ -1,12 +1,27 @@
 import type { Metadata } from "next";
 
 import { ParentPrivateBookManager } from "@/components/books/parent-private-book-manager";
+import { translateMessage } from "@/lib/i18n/formatter";
+import { getServerI18n } from "@/lib/i18n/server";
+import { viMessages } from "@/messages/vi";
 
-export const metadata: Metadata = {
-  title: "Quản lý sách riêng | ViRead",
-  description:
-    "Tải trang sách, theo dõi OCR, rà chính tả, kiểm tra an toàn và gửi Admin xem xét.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const { locale, messages } = await getServerI18n();
+  return {
+    title: translateMessage(
+      messages,
+      viMessages,
+      locale,
+      "books.myBooks.detailPageTitle",
+    ),
+    description: translateMessage(
+      messages,
+      viMessages,
+      locale,
+      "books.myBooks.detailPageDescription",
+    ),
+  };
+}
 
 function parsePositivePage(raw: string | string[] | undefined): number {
   const value = Array.isArray(raw) ? raw[0] : raw;

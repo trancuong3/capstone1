@@ -9,10 +9,13 @@ import { EmptyState } from "@/components/common/empty-state";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import type { AuditLogDTO } from "@/types/admin";
 
 export function AdminAuditScreen() {
   const { audit } = useAdminServices();
+  const t = useTranslations("admin");
+  const { formatDateTime, formatNumber } = useI18n();
   const [items, setItems] = useState<readonly AuditLogDTO[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [action, setAction] = useState("");
@@ -84,19 +87,19 @@ export function AdminAuditScreen() {
   return (
     <>
       <AdminPageHeader
-        eyebrow="Vận hành ViRead"
-        title="Nhật ký kiểm toán"
-        description="Xem các sự kiện quản trị và metadata an toàn."
+        eyebrow={t("auditLogs.eyebrow")}
+        title={t("auditLogs.title")}
+        description={t("auditLogs.description")}
       />
       <div className="mb-4">
         <div className="grid gap-4 md:grid-cols-2">
           <TextField
-            label="Lọc theo action chính xác"
+            label={t("auditLogs.filterActionLabel")}
             onChange={(event) => setAction(event.target.value)}
             value={action}
           />
           <TextField
-            label="Lọc theo resource_type"
+            label={t("auditLogs.filterResourceLabel")}
             onChange={(event) => setResource(event.target.value)}
             value={resource}
           />
@@ -106,7 +109,7 @@ export function AdminAuditScreen() {
         <AdminLoading />
       ) : error ? (
         <StatusMessage tone="error">
-          Không thể tải nhật ký.{" "}
+          {t("auditLogs.loadError")}{" "}
           <Button
             className="sm:w-auto"
             onClick={() =>
@@ -118,13 +121,13 @@ export function AdminAuditScreen() {
             type="button"
             variant="secondary"
           >
-            Thử lại
+            {t("common.retry")}
           </Button>
         </StatusMessage>
       ) : items.length === 0 ? (
         <EmptyState
-          title="Chưa có sự kiện phù hợp"
-          description="Thử bỏ bộ lọc để xem nhật ký đã lưu trong database."
+          title={t("auditLogs.emptyFilteredTitle")}
+          description={t("auditLogs.emptyFilteredDescription")}
         />
       ) : (
         <>
@@ -136,22 +139,22 @@ export function AdminAuditScreen() {
                 </h2>
                 <p className="break-words text-body text-muted">
                   <time dateTime={item.created_at}>
-                    {new Date(item.created_at).toLocaleString("vi-VN")}
+                    {formatDateTime(item.created_at)}
                   </time>{" "}
                   · {item.resource_type} ·{" "}
-                  {item.resource_id ?? "Không có mã dữ liệu"}
+                  {item.resource_id ?? t("auditLogs.noResourceId")}
                 </p>
                 <dl className="grid gap-4 sm:grid-cols-2">
-                  <InformationField label="Người thực hiện">
-                    {item.actor_id ?? "Hệ thống"}
+                  <InformationField label={t("auditLogs.actorLabel")}>
+                    {item.actor_id ?? t("auditLogs.systemActor")}
                   </InformationField>
-                  <InformationField label="Mã yêu cầu">
-                    {item.request_id ?? "—"}
+                  <InformationField label={t("auditLogs.requestIdLabel")}>
+                    {item.request_id ?? t("common.emptyDash")}
                   </InformationField>
                 </dl>
                 <section className="rounded-card bg-sky p-4">
                   <h3 className="text-xl font-extrabold text-ink">
-                    Metadata an toàn
+                    {t("auditLogs.safeMetadataLabel")}
                   </h3>
                   {(() => {
                     const serialized = JSON.stringify(item.metadata);
@@ -165,7 +168,9 @@ export function AdminAuditScreen() {
                     return (
                       <details className="mt-2">
                         <summary className="cursor-pointer text-sm font-bold text-primary hover:underline">
-                          Xem chi tiết metadata ({serialized.length} ký tự)
+                          {t("auditLogs.viewMetadataDetails", {
+                            count: formatNumber(serialized.length),
+                          })}
                         </summary>
                         <pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap break-all rounded-control bg-white p-3 text-xs text-muted">
                           {JSON.stringify(item.metadata, null, 2)}
@@ -180,8 +185,7 @@ export function AdminAuditScreen() {
           {loadMoreError ? (
             <div className="mt-4">
               <StatusMessage tone="error">
-                Không thể tải thêm nhật ký. Các bản ghi trước đó vẫn được giữ
-                nguyên.{" "}
+                {t("auditLogs.loadMoreError")}{" "}
                 <Button
                   className="sm:w-auto"
                   disabled={loadingMore}
@@ -189,7 +193,7 @@ export function AdminAuditScreen() {
                   type="button"
                   variant="secondary"
                 >
-                  Thử tải thêm lại
+                  {t("auditLogs.retryLoadMore")}
                 </Button>
               </StatusMessage>
             </div>
@@ -203,7 +207,7 @@ export function AdminAuditScreen() {
               onClick={() => void load(cursor, true)}
               variant="secondary"
             >
-              Tải thêm
+              {t("auditLogs.loadMore")}
             </Button>
           ) : null}
         </>

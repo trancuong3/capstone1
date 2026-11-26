@@ -1,0 +1,117 @@
+{
+  "recorder": {
+    "permissionRequired": "Microphone permission required to record the child's voice.",
+    "recording": "Listening…",
+    "processing": "Analyzing pronunciation…",
+    "playback": "Listen to recording"
+  },
+  "preferences": {
+    "title": "Voice options",
+    "voiceSpeed": "Playback speed",
+    "autoRead": "Auto-play sample on page open",
+    "slow": "Slow",
+    "normal": "Normal",
+    "fast": "Fast"
+  },
+  "status": {
+    "micReady": "Microphone ready",
+    "micMuted": "Microphone off",
+    "ttsReady": "Sample voice ready"
+  },
+  "settings": {
+    "buttonLabel": "Voice",
+    "modalTitle": "Sample voice",
+    "savedVoice": "Saved voice",
+    "defaultVoice": "Default voice",
+    "localOnlyMode": "This device only",
+    "localWithGoogleMode": "Device + Google fallback",
+    "speedLabel": "Reading speed",
+    "regionAndVoiceTitle": "Select Region & Voice",
+    "regionAria": "Select region",
+    "filterAria": "Filter voices",
+    "allVoices": "All voices",
+    "maleVoice": "Male voice",
+    "femaleVoice": "Female voice",
+    "youngVoice": "Young voice",
+    "childVoice": "Child voice",
+    "loadingVoices": "Loading voices…",
+    "loadErrorFallback": "Could not load voice list. Default voice remains available.",
+    "retry": "Retry",
+    "emptyVoices": "No voices available. Your child can use the default system voice.",
+    "emptyFiltered": "No voices match your filters.",
+    "parentModeTitle": "Voice Settings (Parent Mode)",
+    "localAvailable": "Ready",
+    "localUnavailable": "Disabled",
+    "googleConfigured": "Configured",
+    "googleUnconfigured": "API key not configured",
+    "localOnlyTitle": "This device only",
+    "localOnlyDesc": "Runs 100% locally (server + browser), no Google calls",
+    "localWithGoogleTitle": "Device + Google fallback",
+    "localWithGoogleDesc": "Prioritizes local, auto-falls back to Online",
+    "googleSttFallback": "Google fallback for Voice recognition (STT)",
+    "googleTtsFallback": "Google fallback for Pronunciation (TTS)",
+    "missingGoogleKeyHint": "If the Google Cloud API key is not configured in backend/.env, ViRead will automatically use Google/Browser Online as a fallback.",
+    "useDefaultVoice": "Use default voice",
+    "preview": "Preview",
+    "stopPreview": "Stop preview",
+    "previewFailed": "Could not play the voice. Please try again or select a different voice.",
+    "savedVoiceResetNotice": "The previously saved voice is no longer available. ViRead has reverted to the default voice for parent review.",
+    "regions": {
+      "all": "All regions",
+      "north": "North",
+      "central": "Central",
+      "south": "South"
+    },
+    "genders": {
+      "female": "Female",
+      "male": "Male"
+    },
+    "ageGroups": {
+      "young": "Young",
+      "child": "Child voice",
+      "middle_aged": "Middle-aged",
+      "old": "Senior"
+    },
+    "accents": {
+      "northern": "Northern accent",
+      "southern": "Southern accent",
+      "central": "Central accent",
+      "american": "American accent",
+      "british": "British accent"
+    },
+    "googleProviderLabel": "Google fallback"
+  },
+  "engineBadge": {
+    "ariaLabel": "Speech source: STT {stt}, TTS {tts}",
+    "fallbackDetail": "{base} (Fallback: {reason})",
+    "androidDetail": "{base} (Device · Android vi-VN voice)",
+    "catalogCacheDetail": "{base} (Standard cache · Zero-latency TTS)",
+    "googleCloudDetail": "{base} (Online · Using Google Cloud API fallback)",
+    "browserDefaultDetail": "{base} (Online · Google/Browser fallback)",
+    "wasmDetail": "{base} (Offline · On-device recognition via WASM)",
+    "localDetail": "{base} (Offline · Running directly on this device)",
+    "shortLabels": {
+      "local_offline": "Offline",
+      "browser_wasm": "Offline (WASM)",
+      "catalog_cache": "Standard cache",
+      "android_native": "Android (vi-VN)",
+      "google_cloud": "Online (Google API)",
+      "browser_default": "Online (Google/Browser)"
+    }
+  },
+  "playback": {
+    "unavailable": "On-device voice not ready. Please follow the text on screen and tap Retry.",
+    "lockedVoiceUnavailableNotice": "The selected voice is busy. ViRead will keep the text instructions to avoid switching voices — please tap Retry.",
+    "serverFallbackNotice": "Selected voice unavailable; using fallback voice.",
+    "androidNativeFallbackNotice": "Server voice disabled — using Android device voice.",
+    "browserFallbackNotice": "On-device voice disabled — using browser online voice.",
+    "autoplayBlocked": "Browser waiting for interaction to enable audio. Tap Listen again.",
+    "partialPlayback": "Audio interrupted. You can listen from the beginning."
+  },
+  "wasm": {
+    "workerUnavailable": "Web Worker unavailable",
+    "wasmUnavailable": "WebAssembly unavailable",
+    "cryptoUnavailable": "Web Crypto API unavailable",
+    "deviceUnsupported": "WASM STT unavailable on this device."
+  }
+}

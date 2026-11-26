@@ -140,6 +140,7 @@ test("Parent empty catalog and detail route require a selected child", async ({
   await expect(
     page.getByRole("heading", { name: "Thư viện đang được cập nhật" }),
   ).toBeVisible();
+  await page.evaluate(() => window.sessionStorage.clear());
   await page.goto(`/books/${ids.page}`);
   await expect(page).toHaveURL(
     /\/dashboard\?focus=child-selection&reason=missing$/,
@@ -474,8 +475,19 @@ test("Visual QA: book, scanner and reading preparation at requested widths", asy
             .__deviceProbe.cameraRequests,
       ),
     ).toBe(1);
+    if (width < 1280) {
+      await page.addStyleTag({
+        content:
+          "nextjs-portal { display: none !important; pointer-events: none !important; }",
+      });
+    }
     await page
-      .getByRole("navigation", { name: "Điều hướng dành cho ba mẹ" })
+      .getByRole("navigation", {
+        name:
+          width < 1280
+            ? "Điều hướng nhanh trên di động"
+            : "Điều hướng dành cho ba mẹ",
+      })
       .getByRole("link", { name: "Tổng quan", exact: true })
       .click();
     await expect(

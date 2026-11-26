@@ -2,18 +2,20 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AuthRuntimeContext } from "@/components/auth/auth-service-provider";
 import { DashboardScreen } from "@/components/dashboard/dashboard-screen";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
 import {
   AppStoreProvider,
   useAppStore,
 } from "@/components/providers/app-store-provider";
+import { clearUserCache, writeUserCache } from "@/lib/cache/user-query-cache";
 import {
   apiFetchFixture,
   installApiFetchFixture,
 } from "@/test/fixtures/api-test-fixture";
 import { childFixture } from "@/test/fixtures/report-data-fixture";
-import type { ParentProfileDTO } from "@/types/profile";
+import type { DashboardSummaryDTO, ParentProfileDTO } from "@/types/profile";
 
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserSupabaseClient: () => ({
@@ -44,6 +46,8 @@ vi.mock("@/lib/supabase/config", () => ({
   getApiBaseUrl: () => "http://127.0.0.1:8000",
 }));
 beforeEach(() => {
+  clearUserCache();
+  window.sessionStorage.clear();
   installApiFetchFixture();
   routerPushMock.mockReset();
   routerReplaceMock.mockReset();
@@ -58,7 +62,11 @@ beforeEach(() => {
     nextSearchParams.forEach((value, key) => searchParamsMock.set(key, value));
   });
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  clearUserCache();
+  window.sessionStorage.clear();
+  vi.unstubAllGlobals();
+});
 
 const secondChild = {
   ...childFixture,
@@ -80,20 +88,50 @@ const profile: ParentProfileDTO = {
 };
 function readyResponse(input: RequestInfo | URL, empty = false) {
   const path = new URL(String(input)).pathname;
+  if (path === "/profiles/dashboard-summary") {
+    return Response.json({
+      profile,
+      children: empty ? [] : [childFixture, secondChild],
+      latest_sessions_by_child: {},
+    });
+  }
   if (path === "/profiles/me") return Response.json(profile);
   if (path === "/profiles/children")
     return Response.json(empty ? [] : [childFixture, secondChild]);
-  throw new Error("Unexpected isolated dashboard route");
+  throw new Error(`Unexpected isolated dashboard route: ${path}`);
 }
-function renderDashboard() {
-  return render(
+function renderDashboard(userId?: string) {
+  const tree = (
     <AppStoreProvider>
       <AppServicesProvider>
         <DashboardScreen />
       </AppServicesProvider>
-    </AppStoreProvider>,
+    </AppStoreProvider>
+  );
+  if (!userId) return render(tree);
+  return render(
+    <AuthRuntimeContext.Provider
+      value={{
+        initializationFailure: null,
+        isPasswordRecovery: false,
+        lastEvent: "SIGNED_IN",
+        mode: "supabase",
+        status: "ready",
+        session: {
+          expires_at: null,
+          user: {
+            id: userId,
+            email: "parent@example.com",
+            display_name: "Ba mẹ kiểm thử",
+          },
+        },
+      }}
+    >
+      {tree}
+    </AuthRuntimeContext.Provider>,
   );
 }
+
 describe("DashboardScreen with real API adapters", () => {
   it("selects exactly one child without navigating and exposes separate reading actions", async () => {
     apiFetchFixture.mockImplementation(async (input) => readyResponse(input));
@@ -105,7 +143,7 @@ describe("DashboardScreen with real API adapters", () => {
       }),
     ).toBeInTheDocument();
 
-    const firstProfile = screen.getByRole("button", {
+    const firstProfile = await screen.findByRole("button", {
       name: `${childFixture.alias}, lớp ${childFixture.grade}`,
     });
     const secondProfile = screen.getByRole("button", {
@@ -150,8 +188,8 @@ describe("DashboardScreen with real API adapters", () => {
     apiFetchFixture.mockImplementation(async (input) => readyResponse(input));
     const user = userEvent.setup();
     renderDashboard();
-    await screen.findByRole("heading", {
-      name: "Góc đọc gia đình",
+    await screen.findByRole("button", {
+      name: `${childFixture.alias}, lớp ${childFixture.grade}`,
     });
 
     await user.click(screen.getByRole("button", { name: "Quét sách" }));
@@ -232,7 +270,7 @@ describe("DashboardScreen with real API adapters", () => {
     expect(alert).not.toHaveTextContent("Private database details");
   });
 
-  it("exposes an accessible loading state until the child response arrives", async () => {
+  it("renders dashboard chrome immediately with an accessible inline loading status until summary arrives", async () => {
     let release: () => void = () => undefined;
     const pending = new Promise<void>((resolve) => {
       release = resolve;
@@ -242,12 +280,98 @@ describe("DashboardScreen with real API adapters", () => {
       return readyResponse(input);
     });
     renderDashboard();
+    expect(
+      screen.getByRole("heading", { name: "Góc đọc gia đình" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent("Đang tải");
     await waitFor(() => expect(apiFetchFixture).toHaveBeenCalledTimes(1));
     await act(async () => release());
     expect(
-      await screen.findByRole("heading", {
-        name: "Góc đọc gia đình",
+      await screen.findByRole("button", {
+        name: `${childFixture.alias}, lớp ${childFixture.grade}`,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders SWR-cached summary immediately and refreshes with 1 dashboard-summary call", async () => {
+    const cachedSummary: DashboardSummaryDTO = {
+      profile,
+      children: [childFixture],
+      latest_sessions_by_child: {
+        [childFixture.id]: {
+          id: "session-resume-1",
+          child_id: childFixture.id,
+          book_id: "book-1",
+          book_title: "Chú Mèo Đi Hia",
+          state: "IN_PROGRESS",
+          started_at: "2026-11-25T09:00:00Z",
+          ended_at: null,
+          resumable: true,
+        },
+      },
+      source: "dashboard-summary",
+    };
+    writeUserCache(profile.id, "dashboard-summary", cachedSummary);
+
+    let releaseRefresh: () => void = () => undefined;
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    apiFetchFixture.mockImplementation(async (input) => {
+      await refreshGate;
+      return readyResponse(input);
+    });
+
+    const user = userEvent.setup();
+    renderDashboard(profile.id);
+
+    // Cached child profile is visible immediately without waiting for network.
+    const cachedChildButton = screen.getByRole("button", {
+      name: `${childFixture.alias}, lớp ${childFixture.grade}`,
+    });
+    expect(cachedChildButton).toBeInTheDocument();
+
+    await user.click(cachedChildButton);
+    expect(
+      screen.getByRole("heading", { name: "Chú Mèo Đi Hia" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Đọc tiếp/ })).toHaveAttribute(
+      "href",
+      "/reading/session-resume-1",
+    );
+
+    await act(async () => releaseRefresh());
+    await screen.findByRole("button", {
+      name: `${secondChild.alias}, lớp ${secondChild.grade}`,
+    });
+    expect(apiFetchFixture).toHaveBeenCalledTimes(1);
+    expect(new URL(String(apiFetchFixture.mock.calls[0]?.[0])).pathname).toBe(
+      "/profiles/dashboard-summary",
+    );
+  });
+
+  it("falls back cleanly to /profiles/me and /profiles/children when /profiles/dashboard-summary returns 404", async () => {
+    apiFetchFixture.mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/profiles/dashboard-summary") {
+        return Response.json({ detail: "Not Found" }, { status: 404 });
+      }
+      if (path === "/profiles/me") return Response.json(profile);
+      if (path === "/profiles/children") {
+        return Response.json([childFixture, secondChild]);
+      }
+      throw new Error(`Unexpected route: ${path}`);
+    });
+
+    renderDashboard();
+    expect(
+      await screen.findByRole("button", {
+        name: `${childFixture.alias}, lớp ${childFixture.grade}`,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: `${secondChild.alias}, lớp ${secondChild.grade}`,
       }),
     ).toBeInTheDocument();
   });

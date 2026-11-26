@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ViRead</string>
+    <string name="loading_title">Otwieranie ViRead</string>
+    <string name="loading_subtitle">Ładowanie ViRead…</string>
+    <string name="loading_hint_stage2">Łączenie z serwerem…</string>
+    <string name="loading_hint_stage3">Serwer uruchamia się, proszę czekać…</string>
+    <string name="loading_cold_start_hint">Trwa uruchamianie serwera (cold-start), proszę chwilę poczekać…</string>
+    <string name="error_title_network">Nie można połączyć z serwerem ViRead</string>
+    <string name="error_title_server">Serwer ViRead uruchamia się lub jest zajęty</string>
+    <string name="error_title_timeout">Nie można połączyć z ViRead</string>
+    <string name="error_title_tls">Nieprawidłowy certyfikat bezpieczeństwa</string>
+    <string name="offline_message">Nie można połączyć z serwerem ViRead. Sprawdź sieć Wi-Fi / dane komórkowe lub adres serwera i naciśnij Spróbuj ponownie.</string>
+    <string name="timeout_message">Serwer ViRead odpowiada wolno. Sprawdź połączenie sieciowe i naciśnij Spróbuj ponownie. Przy pierwszym uruchomieniu serwer może potrzebować 30–60 sekund.</string>
+    <string name="server_5xx_message">Serwer ViRead jest zajęty lub uruchamia się ponownie (%1$d). Poczekaj kilka sekund i naciśnij Spróbuj ponownie.</string>
+    <string name="tls_error_message">Certyfikat bezpieczeństwa HTTPS serwera jest nieprawidłowy, więc ViRead zablokował połączenie, aby chronić konto rodzinne.</string>
+    <string name="no_network_toast">Urządzenie nie ma obecnie połączenia z Internetem ani Wi-Fi.</string>
+    <string name="network_ready_toast">Wykryto połączenie sieciowe. Ponowne ładowanie ViRead…</string>
+    <string name="retry_button">Spróbuj ponownie</string>
+    <string name="open_home_button">Przejdź do logowania</string>
+    <string name="check_connection_button">Sprawdź połączenie ponownie</string>
+    <string name="configure_lan_server_button">Zmień serwer LAN HTTPS (Debug)</string>
+    <string name="lan_dialog_title">Konfiguracja serwera LAN HTTPS (Debug)</string>
+    <string name="lan_dialog_hint">Wpisz adres HTTPS serwera Next.js w tej samej sieci Wi-Fi (np. https://192.168.1.10:8443). Adresy HTTP i localhost nie są akceptowane.</string>
+    <string name="lan_dialog_save">Zapisz i połącz</string>
+    <string name="lan_dialog_reset">Przywróć domyślny</string>
+    <string name="lan_dialog_cancel">Zamknij</string>
+    <string name="lan_invalid_url_toast">Nieprawidłowy adres. Akceptowane jest tylko poprawne źródło LAN HTTPS (bez podścieżek i HTTP).</string>
+    <string name="file_chooser_title">Wybierz zdjęcie strony książki, zrób zdjęcie lub wybierz PDF/DOCX</string>
+    <string name="permission_denied_title">Wymagane uprawnienie do tej funkcji</string>
+    <string name="permission_denied_message">Uprawnienie do aparatu lub mikrofonu dla ViRead jest wyłączone. Możesz je włączyć w dowolnym momencie w ustawieniach aplikacji.</string>
+    <string name="open_app_settings_button">Otwórz ustawienia aplikacji</string>
+    <string name="back_exit_confirm_toast">Naciśnij jeszcze raz, aby wyjść z ViRead</string>
+</resources>

@@ -22,10 +22,10 @@ Implemented in `backend/app/services/picture_description_ai.py`:
 Tier 0 (Samples): Curated static guide (`curated-sample-v4`, 0 outbound cloud calls)
         │ (only on CUSTOM_UPLOAD, BOOK_PAGE, explicit refresh_ai_guide=True, or attempt evaluation)
         ▼
-Tier 1 (Cloud 1): Gemini Primary (`GEMINI_PRIMARY`, default `gemini-3.1-flash-lite`, `thinkingLevel: MINIMAL`)
+Tier 1 (Cloud 1): Gemini Primary (`GEMINI_PRIMARY`, default `gemini-3.5-flash-lite`, `thinkingLevel: MINIMAL`)
         │ (on timeout / 429 / 503 / invalid JSON; NEVER on PictureSafetyError or 401/403)
         ▼
-Tier 2 (Cloud 2): Gemini Fallback (`GEMINI_FALLBACK`, default `gemini-3.5-flash-lite` + optional extras)
+Tier 2 (Cloud 2): Gemini Fallback (`GEMINI_FALLBACK`, default `gemini-3.1-flash-lite` + optional extras)
         │
         ▼
 Tier 3 (Cloud 3): Groq Free (`GROQ_FREE`, `GROQ_API_KEY`, default `qwen/qwen3.8-27b`)

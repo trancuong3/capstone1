@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ViRead</string>
+    <string name="loading_title">Membuka ViRead</string>
+    <string name="loading_subtitle">Memuat ViRead…</string>
+    <string name="loading_hint_stage2">Menghubungkan ke server…</string>
+    <string name="loading_hint_stage3">Server sedang dimulai, harap tunggu…</string>
+    <string name="loading_cold_start_hint">Server sedang memulai (cold-start), harap tunggu sebentar…</string>
+    <string name="error_title_network">Belum dapat terhubung ke server ViRead</string>
+    <string name="error_title_server">Server ViRead sedang dimulai atau sibuk</string>
+    <string name="error_title_timeout">Tidak dapat terhubung ke ViRead</string>
+    <string name="error_title_tls">Sertifikat keamanan tidak valid</string>
+    <string name="offline_message">Tidak dapat terhubung ke server ViRead. Periksa jaringan Wi-Fi / data seluler atau alamat server lalu ketuk Coba lagi.</string>
+    <string name="timeout_message">Server ViRead merespons lambat. Periksa koneksi jaringan Anda lalu ketuk Coba lagi. Jika baru pertama kali dibuka, server mungkin memerlukan 30–60 detik untuk mulai.</string>
+    <string name="server_5xx_message">Server ViRead sedang sibuk atau memulai ulang (%1$d). Tunggu beberapa detik lalu ketuk Coba lagi.</string>
+    <string name="tls_error_message">Sertifikat keamanan HTTPS server tidak valid sehingga ViRead memblokir koneksi untuk melindungi akun keluarga Anda.</string>
+    <string name="no_network_toast">Perangkat saat ini belum terhubung ke Internet atau Wi-Fi.</string>
+    <string name="network_ready_toast">Koneksi jaringan terdeteksi. Mencoba memuat ulang ViRead…</string>
+    <string name="retry_button">Coba lagi</string>
+    <string name="open_home_button">Ke halaman masuk</string>
+    <string name="check_connection_button">Periksa koneksi lagi</string>
+    <string name="configure_lan_server_button">Ubah server LAN HTTPS (Debug)</string>
+    <string name="lan_dialog_title">Konfigurasi server LAN HTTPS (Debug)</string>
+    <string name="lan_dialog_hint">Masukkan alamat HTTPS server Next.js di Wi-Fi yang sama (contoh: https://192.168.1.10:8443). Tidak menerima HTTP atau localhost.</string>
+    <string name="lan_dialog_save">Simpan &amp; Hubungkan</string>
+    <string name="lan_dialog_reset">Pulihkan bawaan</string>
+    <string name="lan_dialog_cancel">Tutup</string>
+    <string name="lan_invalid_url_toast">Alamat tidak valid. Hanya menerima origin HTTPS LAN yang sah (tanpa sub-jalur atau HTTP).</string>
+    <string name="file_chooser_title">Pilih gambar halaman buku, ambil foto, atau pilih PDF/DOCX</string>
+    <string name="permission_denied_title">Izin diperlukan untuk fitur ini</string>
+    <string name="permission_denied_message">Izin Kamera atau Mikrofon sedang dinonaktifkan untuk ViRead. Anda dapat membuka Pengaturan aplikasi untuk mengaktifkannya kapan saja.</string>
+    <string name="open_app_settings_button">Buka Pengaturan aplikasi</string>
+    <string name="back_exit_confirm_toast">Tekan lagi untuk keluar dari ViRead</string>
+</resources>

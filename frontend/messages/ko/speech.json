@@ -1,0 +1,117 @@
+{
+  "recorder": {
+    "permissionRequired": "아이의 목소리를 녹음하려면 마이크 권한이 필요합니다.",
+    "recording": "아이의 읽기를 듣는 중…",
+    "processing": "발음 분석 중…",
+    "playback": "녹음 듣기"
+  },
+  "preferences": {
+    "title": "음성 옵션",
+    "voiceSpeed": "읽기 속도",
+    "autoRead": "페이지를 열 때 시범 음성 자동 재생",
+    "slow": "느리게",
+    "normal": "보통",
+    "fast": "빠르게"
+  },
+  "status": {
+    "micReady": "마이크 준비 완료",
+    "micMuted": "마이크 꺼짐",
+    "ttsReady": "시범 음성 준비 완료"
+  },
+  "settings": {
+    "buttonLabel": "음성",
+    "modalTitle": "시범 음성",
+    "savedVoice": "저장된 음성",
+    "defaultVoice": "기본 음성",
+    "localOnlyMode": "이 기기만",
+    "localWithGoogleMode": "기기 + Google 대체 음성",
+    "speedLabel": "읽기 속도",
+    "regionAndVoiceTitle": "지역 및 음성 선택",
+    "regionAria": "지역 선택",
+    "filterAria": "음성 필터",
+    "allVoices": "모든 음성",
+    "maleVoice": "남성 음성",
+    "femaleVoice": "여성 음성",
+    "youngVoice": "청년 음성",
+    "childVoice": "어린이 음성",
+    "loadingVoices": "음성 목록 불러오는 중…",
+    "loadErrorFallback": "음성 목록을 불러올 수 없습니다. 기본 음성을 계속 사용할 수 있습니다.",
+    "retry": "재시도",
+    "emptyVoices": "사용 가능한 음성이 없습니다. 기기의 기본 음성을 사용하세요.",
+    "emptyFiltered": "필터에 맞는 음성이 없습니다.",
+    "parentModeTitle": "음성 설정 (학부모 모드)",
+    "localAvailable": "준비 완료",
+    "localUnavailable": "비활성화됨",
+    "googleConfigured": "설정 완료",
+    "googleUnconfigured": "API 키 미설정",
+    "localOnlyTitle": "이 기기만",
+    "localOnlyDesc": "100% 로컬 실행 (서버+브라우저), Google 호출 없음",
+    "localWithGoogleTitle": "기기 + Google 대체 음성",
+    "localWithGoogleDesc": "로컬 우선, 온라인 자동 전환 활성화",
+    "googleSttFallback": "음성 인식(STT)을 위한 Google 대체 사용",
+    "googleTtsFallback": "발음(TTS)을 위한 Google 대체 사용",
+    "missingGoogleKeyHint": "backend/.env에 Google Cloud API 키가 설정되지 않은 경우, ViRead는 자동으로 Google/브라우저 온라인을 대체 수단으로 사용합니다.",
+    "useDefaultVoice": "기본 음성 사용",
+    "preview": "미리듣기",
+    "stopPreview": "미리듣기 중지",
+    "previewFailed": "음성을 재생할 수 없습니다. 다시 시도하거나 다른 음성을 선택하세요.",
+    "savedVoiceResetNotice": "이전에 저장된 음성을 사용할 수 없습니다. 학부모님 확인을 위해 기본 음성으로 전환되었습니다.",
+    "regions": {
+      "all": "모든 지역",
+      "north": "북부",
+      "central": "중부",
+      "south": "남부"
+    },
+    "genders": {
+      "female": "여성",
+      "male": "남성"
+    },
+    "ageGroups": {
+      "young": "청년",
+      "child": "어린이 음성",
+      "middle_aged": "중년",
+      "old": "고령"
+    },
+    "accents": {
+      "northern": "북부 억양",
+      "southern": "남부 억양",
+      "central": "중부 억양",
+      "american": "미국 억양",
+      "british": "영국 억양"
+    },
+    "googleProviderLabel": "Google 대체"
+  },
+  "engineBadge": {
+    "ariaLabel": "음성 소스: STT {stt}, TTS {tts}",
+    "fallbackDetail": "{base} (대체: {reason})",
+    "androidDetail": "{base} (기기 · Android vi-VN 음성)",
+    "catalogCacheDetail": "{base} (표준 캐시 · 지연 시간 없는 TTS)",
+    "googleCloudDetail": "{base} (온라인 · Google Cloud API 대체 사용 중)",
+    "browserDefaultDetail": "{base} (온라인 · Google/브라우저 대체)",
+    "wasmDetail": "{base} (오프라인 · WASM을 통한 기기 내 인식)",
+    "localDetail": "{base} (오프라인 · 이 기기에서 직접 실행)",
+    "shortLabels": {
+      "local_offline": "오프라인",
+      "browser_wasm": "오프라인 (WASM)",
+      "catalog_cache": "표준 캐시",
+      "android_native": "Android (vi-VN)",
+      "google_cloud": "온라인 (Google API)",
+      "browser_default": "온라인 (Google/브라우저)"
+    }
+  },
+  "playback": {
+    "unavailable": "기기 내 음성을 사용할 수 없습니다. 화면의 텍스트를 확인하고 다시 시도하세요.",
+    "lockedVoiceUnavailableNotice": "선택한 음성이 현재 사용 중입니다. 음성 변경을 방지하기 위해 텍스트 안내를 유지합니다. 다시 시도하세요.",
+    "serverFallbackNotice": "선택한 음성을 사용할 수 없어 대체 음성으로 읽고 있습니다.",
+    "androidNativeFallbackNotice": "서버 음성이 비활성화되어 Android 기기 음성을 사용 중입니다.",
+    "browserFallbackNotice": "기기 내 음성이 비활성화되어 브라우저 온라인 음성을 사용 중입니다.",
+    "autoplayBlocked": "브라우저가 오디오 활성화를 위해 다시 듣기 버튼을 기다리고 있습니다.",
+    "partialPlayback": "오디오가 중단되었습니다. 처음부터 다시 들을 수 있습니다."
+  },
+  "wasm": {
+    "workerUnavailable": "Web Worker를 사용할 수 없습니다",
+    "wasmUnavailable": "WebAssembly를 사용할 수 없습니다",
+    "cryptoUnavailable": "Web Crypto API를 사용할 수 없습니다",
+    "deviceUnsupported": "이 기기에서 WASM STT를 사용할 수 없습니다."
+  }
+}

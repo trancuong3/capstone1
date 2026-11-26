@@ -12,6 +12,8 @@ from app.database.config import (
     SMTP_SEND_TIMEOUT_SECONDS,
     SMTP_USERNAME,
 )
+from app.services.i18n.email_templates import render_reading_reminder_email
+from app.services.i18n.locales import DEFAULT_LOCALE
 
 
 class EmailDeliveryNotConfigured(RuntimeError):
@@ -30,22 +32,26 @@ def build_reading_reminder_message(
     local_time: str,
     timezone_name: str,
     occurrence_id: UUID,
+    locale: str = DEFAULT_LOCALE,
 ) -> EmailMessage:
     if not SMTP_FROM_EMAIL:
         raise EmailDeliveryNotConfigured()
+    rendered = render_reading_reminder_email(
+        locale=locale,
+        child_alias=child_alias,
+        local_date=local_date,
+        local_time=local_time,
+        timezone_name=timezone_name,
+        app_url=READING_REMINDER_APP_URL,
+    )
     domain = SMTP_FROM_EMAIL.rpartition("@")[2] or "viread.local"
     message = EmailMessage()
     message["From"] = SMTP_FROM_EMAIL
     message["To"] = recipient
-    message["Subject"] = "\u0110\u1ebfn gi\u1edd \u0111\u1ecdc s\u00e1ch c\u00f9ng b\u00e9"
+    message["Subject"] = rendered.subject
     message["Message-ID"] = f"<reading-reminder-{occurrence_id}@{domain}>"
-    message.set_content(
-        "Ch\u00e0o ba m\u1eb9,\n\n"
-        f"\u0110\u00e3 \u0111\u1ebfn gi\u1edd \u0111\u1ecdc s\u00e1ch c\u00f9ng {child_alias}.\n"
-        f"L\u1ecbch \u0111\u1ecdc: {local_date} l\u00fac {local_time} ({timezone_name}).\n\n"
-        f"Mở ViRead: {READING_REMINDER_APP_URL}\n\n"
-        "Ch\u00fac gia \u0111\u00ecnh c\u00f3 m\u1ed9t bu\u1ed5i \u0111\u1ecdc s\u00e1ch vui v\u1ebb!"
-    )
+    message.set_content(rendered.body)
+    message["Content-Language"] = rendered.locale
     return message
 
 
@@ -57,6 +63,7 @@ def send_reading_reminder_email(
     local_time: str,
     timezone_name: str,
     occurrence_id: UUID,
+    locale: str = DEFAULT_LOCALE,
 ) -> None:
     if not email_delivery_is_configured():
         raise EmailDeliveryNotConfigured()
@@ -67,6 +74,7 @@ def send_reading_reminder_email(
         local_time=local_time,
         timezone_name=timezone_name,
         occurrence_id=occurrence_id,
+        locale=locale,
     )
     context = ssl.create_default_context()
     if SMTP_PORT == 465:

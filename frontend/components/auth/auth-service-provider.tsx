@@ -4,6 +4,7 @@ import {
   createContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -13,12 +14,17 @@ import {
   type AuthFailureReason,
   type AuthService,
 } from "@/lib/api/auth-service";
+import { dispatchI18nAuthSync } from "@/components/i18n/i18n-provider";
+import { clearPersistedSelectedChild } from "@/lib/cache/selected-child-storage";
+import { clearUserCache } from "@/lib/cache/user-query-cache";
 import { createSupabaseAuthService } from "@/lib/supabase/auth-service";
 import type { AuthSessionSnapshot, AuthStateEvent } from "@/types/auth";
 
 export const AuthServiceContext = createContext<AuthService | null>(null);
 
 export interface AuthRuntimeState {
+  hasProvider?: boolean;
+  initialUserId?: string | null;
   initializationFailure: AuthFailureReason | null;
   isPasswordRecovery: boolean;
   lastEvent: AuthStateEvent | null;
@@ -28,6 +34,8 @@ export interface AuthRuntimeState {
 }
 
 const defaultAuthRuntimeState: AuthRuntimeState = {
+  hasProvider: false,
+  initialUserId: null,
   initializationFailure: null,
   isPasswordRecovery: false,
   lastEvent: null,
@@ -42,6 +50,7 @@ export const AuthRuntimeContext = createContext<AuthRuntimeState>(
 
 interface AuthServiceProviderProps {
   children: ReactNode;
+  initialUserId?: string | null;
 
   /*
    * Giữ lại các props này để tương thích
@@ -54,11 +63,17 @@ interface AuthServiceProviderProps {
   scenario: string;
 }
 
-export function AuthServiceProvider({ children }: AuthServiceProviderProps) {
+export function AuthServiceProvider({
+  children,
+  initialUserId = null,
+}: AuthServiceProviderProps) {
   const service = useMemo<AuthService>(() => createSupabaseAuthService(), []);
+  const lastUserIdRef = useRef<string | null>(initialUserId);
 
   const [runtime, setRuntime] = useState<AuthRuntimeState>(() => ({
     ...defaultAuthRuntimeState,
+    hasProvider: true,
+    initialUserId,
     mode: "supabase",
     status: "initializing",
   }));
@@ -69,8 +84,28 @@ export function AuthServiceProvider({ children }: AuthServiceProviderProps) {
     const unsubscribe = service.onAuthStateChange((event, session) => {
       if (!isActive) return;
 
+      const nextUserId = session?.user?.id ?? null;
+      if (event === "SIGNED_OUT" || !nextUserId) {
+        clearUserCache();
+        clearPersistedSelectedChild();
+        lastUserIdRef.current = null;
+        if (event === "SIGNED_OUT") {
+          dispatchI18nAuthSync({ userId: null, preferredLocale: null });
+        }
+      } else if (
+        lastUserIdRef.current &&
+        lastUserIdRef.current !== nextUserId
+      ) {
+        clearUserCache(lastUserIdRef.current);
+        clearPersistedSelectedChild(nextUserId);
+        lastUserIdRef.current = nextUserId;
+      } else {
+        lastUserIdRef.current = nextUserId;
+      }
+
       setRuntime((current) => ({
         ...current,
+        initialUserId: nextUserId,
 
         isPasswordRecovery:
           event === "PASSWORD_RECOVERY"

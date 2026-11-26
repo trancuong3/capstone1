@@ -112,6 +112,7 @@ function respond(url: string, init?: RequestInit): Response {
 }
 
 beforeEach(() => {
+  window.localStorage.clear();
   navigation.replace.mockReset();
   navigation.push.mockReset();
   fetchMock.mockReset();

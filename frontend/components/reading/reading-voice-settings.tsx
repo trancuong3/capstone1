@@ -14,6 +14,7 @@ import { Button } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
 import { ReadingAutomationSettings } from "@/components/reading/reading-automation-settings";
 import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useSpeechPreferences } from "@/hooks/use-speech-preferences";
 import {
   createVoiceStudioService,
@@ -27,7 +28,6 @@ import {
   lockSessionVoice,
   setVoicePolicyPreferences,
   subscribeVoicePolicy,
-  VOICE_REGION_LABELS,
   type VoiceProviderMode,
   type VoiceRegion,
 } from "@/lib/reading/session-voice-lock";
@@ -42,25 +42,30 @@ import {
   fetchVoiceEngineHealth,
   type VoiceEngineHealthSnapshot,
 } from "@/lib/reading/voice-engine-status";
+import {
+  adaptTextToTeacherPersona,
+  resolveVoiceGender,
+} from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 
 const PREVIEW_TEXT =
   "Chào con, hôm nay cô trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.";
 const SPEED_PRESETS = [
-  { label: "Chậm", value: 0.85 },
-  { label: "Vừa", value: 1.0 },
-  { label: "Nhanh", value: 1.15 },
+  { labelKey: "preferences.slow", value: 0.85 },
+  { labelKey: "preferences.normal", value: 1.0 },
+  { labelKey: "preferences.fast", value: 1.15 },
 ] as const;
 const REGION_TABS: readonly {
   readonly id: "all" | VoiceRegion;
-  readonly label: string;
+  readonly labelKey: string;
 }[] = [
-  { id: "all", label: "Tất cả vùng" },
-  { id: "north", label: "Miền Bắc" },
-  { id: "central", label: "Miền Trung" },
-  { id: "south", label: "Miền Nam" },
+  { id: "all", labelKey: "settings.regions.all" },
+  { id: "north", labelKey: "settings.regions.north" },
+  { id: "central", labelKey: "settings.regions.central" },
+  { id: "south", labelKey: "settings.regions.south" },
 ];
-const GENDER_LABELS: Record<string, string> = { female: "Nữ", male: "Nam" };
+
+type SpeechTranslateFn = ReturnType<typeof useTranslations>;
 
 type LoadState =
   | { status: "idle" }
@@ -96,40 +101,46 @@ function resolveVoiceRegion(voice: VoiceOption): VoiceRegion | null {
   return null;
 }
 
-function voiceDetails(voice: VoiceOption): string {
-  const ages: Record<string, string> = {
-    young: "Trẻ trung",
-    young_adult: "Trẻ trung",
-    youthful: "Trẻ trung",
-    child: "Giọng trẻ em",
-    middle_aged: "Trung niên",
-    old: "Lớn tuổi",
+function voiceDetails(voice: VoiceOption, t: SpeechTranslateFn): string {
+  const ageKeys: Record<string, string> = {
+    young: "settings.ageGroups.young",
+    young_adult: "settings.ageGroups.young",
+    youthful: "settings.ageGroups.young",
+    child: "settings.ageGroups.child",
+    middle_aged: "settings.ageGroups.middle_aged",
+    old: "settings.ageGroups.old",
   };
+  const accentKeys: Record<string, string> = {
+    northern: "settings.accents.northern",
+    southern: "settings.accents.southern",
+    central: "settings.accents.central",
+    american: "settings.accents.american",
+    british: "settings.accents.british",
+  };
+  const genderKey = voice.gender?.toLowerCase();
+  const genderLabel =
+    genderKey === "female" || genderKey === "male"
+      ? t(`settings.genders.${genderKey}`)
+      : voice.gender;
+  const accentKey = voice.accent?.toLowerCase();
+  const ageKey = voice.age?.toLowerCase();
   return [
-    voice.gender ? (GENDER_LABELS[voice.gender] ?? voice.gender) : null,
+    voice.gender ? genderLabel : null,
     voice.region_label ??
       (voice.accent
-        ? ((
-            {
-              northern: "Giọng Bắc",
-              southern: "Giọng Nam",
-              central: "Giọng Trung",
-              american: "Giọng Mỹ",
-              british: "Giọng Anh",
-            } as Record<string, string>
-          )[voice.accent.toLowerCase()] ?? voice.accent)
+        ? accentKey && accentKeys[accentKey]
+          ? t(accentKeys[accentKey])
+          : voice.accent
         : null),
     voice.age
-      ? (ages[voice.age.toLowerCase()] ?? voice.age.replaceAll("_", " "))
+      ? ageKey && ageKeys[ageKey]
+        ? t(ageKeys[ageKey])
+        : voice.age.replaceAll("_", " ")
       : null,
-    voice.provider === "google" ? "Google dự phòng" : null,
+    voice.provider === "google" ? t("settings.googleProviderLabel") : null,
   ]
     .filter(Boolean)
     .join(" · ");
-}
-
-function formatSpeed(speed: number): string {
-  return `${speed.toFixed(2).replace(".", ",")}×`;
 }
 
 export function ReadingVoiceSettings({
@@ -139,6 +150,10 @@ export function ReadingVoiceSettings({
   onPreview,
   onStopPreview,
 }: ReadingVoiceSettingsProps) {
+  const { formatNumber } = useI18n();
+  const t = useTranslations("speech");
+  const formatSpeed = (speed: number): string =>
+    `${formatNumber(speed, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}×`;
   const voiceStudio = useMemo(() => createVoiceStudioService(), []);
   const { preferences, update } = useSpeechPreferences();
   const policy = useSyncExternalStore(
@@ -214,9 +229,7 @@ export function ReadingVoiceSettings({
           storedVoice &&
           !data.voices.some((voice) => voice.voice_id === storedVoice)
         ) {
-          setRemovedVoiceNotice(
-            "Giọng đã lưu trước đây không còn khả dụng, ViRead đã chuyển về giọng mặc định để phụ huynh kiểm tra lại.",
-          );
+          setRemovedVoiceNotice(t("settings.savedVoiceResetNotice"));
           update({ voiceId: null });
           syncPausedSessionLock(null);
         }
@@ -226,7 +239,7 @@ export function ReadingVoiceSettings({
         if (mountedRef.current && !controller.signal.aborted)
           setLoadState({ status: "error" });
       });
-  }, [voiceStudio, update, syncPausedSessionLock]);
+  }, [voiceStudio, update, syncPausedSessionLock, t]);
 
   function change(
     value: Parameters<typeof update>[0],
@@ -363,29 +376,94 @@ export function ReadingVoiceSettings({
       ? loadState.data.voices.filter(matchesFilter)
       : [];
 
-  const activeRegionLabel = selectedVoice
-    ? (VOICE_REGION_LABELS[
-        resolveVoiceRegion(selectedVoice) ??
-          inferRegionFromVoiceId(selectedVoice.voice_id, policy.region)
-      ] ?? "Miền Bắc")
-    : VOICE_REGION_LABELS[policy.region];
+  const activeRegionKey = selectedVoice
+    ? (resolveVoiceRegion(selectedVoice) ??
+      inferRegionFromVoiceId(selectedVoice.voice_id, policy.region))
+    : policy.region;
+  const activeRegionLabel = t(`settings.regions.${activeRegionKey}`);
 
   return (
     <>
       <Button
         aria-haspopup="dialog"
-        className="min-h-14 min-w-0 gap-2 px-3 text-base"
+        className="min-w-0 flex-col gap-0.5 px-1.5 py-1.5 text-xs leading-snug lg:min-h-14 lg:flex-row lg:gap-2 lg:px-3 lg:py-2 lg:text-button"
         disabled={disabled}
         onClick={open}
+        size="compact"
         variant="quiet"
       >
-        <SlidersHorizontal aria-hidden="true" className="size-6 shrink-0" />
+        <SlidersHorizontal
+          aria-hidden="true"
+          className="size-5 shrink-0 lg:size-6"
+        />
         <span className="max-w-full text-center whitespace-normal break-words">
-          Giọng đọc
+          {t("settings.buttonLabel")}
         </span>
       </Button>
 
-      <Modal isOpen={isOpen} onClose={close} title="Giọng đọc mẫu">
+      <Modal
+        footer={
+          <div className="space-y-2">
+            <footer className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                className="w-auto!"
+                size="compact"
+                onClick={() => change({ voiceId: null })}
+                variant="quiet"
+              >
+                {t("settings.useDefaultVoice")}
+              </Button>
+              <Button
+                className="w-auto!"
+                size="compact"
+                onClick={() => {
+                  const generation = ++previewGenerationRef.current;
+                  if (isPreviewing) {
+                    onStopPreview();
+                    return;
+                  }
+                  setPreviewError(false);
+                  const previewText = adaptTextToTeacherPersona(
+                    PREVIEW_TEXT,
+                    resolveVoiceGender(selectedVoiceId, selectedVoice?.gender),
+                  );
+                  void Promise.resolve()
+                    .then(() => onPreview(previewText))
+                    .catch((error: unknown) => {
+                      if (
+                        mountedRef.current &&
+                        generation === previewGenerationRef.current &&
+                        !(error instanceof Error && error.name === "AbortError")
+                      )
+                        setPreviewError(true);
+                    });
+                }}
+                variant="primary"
+              >
+                <Volume2 aria-hidden="true" className="size-5" />
+                {isPreviewing
+                  ? t("settings.stopPreview")
+                  : t("settings.preview")}
+              </Button>
+            </footer>
+            {previewError ? (
+              <p role="alert" className="text-body text-muted">
+                {t("settings.previewFailed")}
+              </p>
+            ) : fallbackNotice ? (
+              <p
+                role="status"
+                className="rounded-control bg-warning-surface px-3 py-2 text-sm font-medium text-ink"
+              >
+                {fallbackNotice}
+              </p>
+            ) : null}
+          </div>
+        }
+        isOpen={isOpen}
+        onClose={close}
+        title={t("settings.modalTitle")}
+      >
         <div className="space-y-4">
           <div
             className="rounded-control bg-sky px-3 py-2 text-sm font-semibold text-primary"
@@ -394,12 +472,12 @@ export function ReadingVoiceSettings({
             {selectedVoice
               ? voiceTitle(selectedVoice)
               : preferences.voiceId
-                ? "Giọng đã lưu"
-                : "Giọng mặc định"}{" "}
+                ? t("settings.savedVoice")
+                : t("settings.defaultVoice")}{" "}
             · {activeRegionLabel} · {formatSpeed(preferences.speed)} ·{" "}
             {policy.providerMode === "local_only"
-              ? "Chỉ máy này"
-              : "Máy này + Google dự phòng"}
+              ? t("settings.localOnlyMode")
+              : t("settings.localWithGoogleMode")}
           </div>
 
           {removedVoiceNotice ? (
@@ -417,7 +495,7 @@ export function ReadingVoiceSettings({
                 className="text-label font-semibold text-ink"
                 id="voice-speed-heading"
               >
-                Tốc độ đọc
+                {t("settings.speedLabel")}
               </h3>
               <output
                 aria-live="polite"
@@ -452,11 +530,11 @@ export function ReadingVoiceSettings({
                         ? "border-primary bg-primary text-white"
                         : "border-border bg-white text-ink hover:border-primary hover:bg-cream",
                     )}
-                    key={preset.label}
+                    key={preset.value}
                     onClick={() => change({ speed: preset.value })}
                     type="button"
                   >
-                    {preset.label}
+                    {t(preset.labelKey)}
                   </button>
                 );
               })}
@@ -468,12 +546,12 @@ export function ReadingVoiceSettings({
               className="text-label font-semibold text-ink"
               id="voice-choice-heading"
             >
-              Chọn vùng miền & giọng đọc
+              {t("settings.regionAndVoiceTitle")}
             </h3>
 
             {hasRegionalMetadata ? (
               <div
-                aria-label="Chọn vùng miền"
+                aria-label={t("settings.regionAria")}
                 className="grid grid-cols-2 gap-1.5 sm:grid-cols-4"
                 role="group"
               >
@@ -492,7 +570,7 @@ export function ReadingVoiceSettings({
                       onClick={() => selectRegionTab(tab.id)}
                       type="button"
                     >
-                      {tab.label}
+                      {t(tab.labelKey)}
                     </button>
                   );
                 })}
@@ -502,47 +580,48 @@ export function ReadingVoiceSettings({
             {loadState.status === "ready" &&
             loadState.data.voices.length > 0 ? (
               <select
-                aria-label="Lọc giọng đọc"
+                aria-label={t("settings.filterAria")}
                 className="min-h-11 w-full rounded-control border border-border bg-white px-3 text-body"
                 value={filter}
                 onChange={(event) => setFilter(event.target.value)}
               >
-                <option value="all">Tất cả giọng đọc</option>
+                <option value="all">{t("settings.allVoices")}</option>
                 {loadState.data.voices.some(
                   (voice) => voice.gender?.toLowerCase() === "male",
                 ) ? (
-                  <option value="male">Giọng nam</option>
+                  <option value="male">{t("settings.maleVoice")}</option>
                 ) : null}
                 {loadState.data.voices.some(
                   (voice) => voice.gender?.toLowerCase() === "female",
                 ) ? (
-                  <option value="female">Giọng nữ</option>
+                  <option value="female">{t("settings.femaleVoice")}</option>
                 ) : null}
                 {loadState.data.voices.some(isYouthful) ? (
-                  <option value="young">Giọng trẻ trung</option>
+                  <option value="young">{t("settings.youngVoice")}</option>
                 ) : null}
                 {loadState.data.voices.some(isChildVoice) ? (
-                  <option value="child">Giọng trẻ em</option>
+                  <option value="child">{t("settings.childVoice")}</option>
                 ) : null}
               </select>
             ) : null}
 
             {loadState.status === "loading" || loadState.status === "idle" ? (
-              <p className="text-body text-muted">Đang tải danh sách giọng…</p>
+              <p className="text-body text-muted">
+                {t("settings.loadingVoices")}
+              </p>
             ) : loadState.status === "error" ? (
               <div className="space-y-2">
                 <p className="text-body text-muted">
-                  Chưa tải được danh sách giọng. Giọng mặc định vẫn dùng được.
+                  {t("settings.loadErrorFallback")}
                 </p>
                 <Button onClick={loadVoices} variant="secondary">
                   <RefreshCw aria-hidden="true" className="size-4" />
-                  Thử lại
+                  {t("settings.retry")}
                 </Button>
               </div>
             ) : loadState.data.voices.length === 0 ? (
               <p className="text-body text-muted">
-                Chưa có giọng đọc trong danh sách. Bé có thể dùng giọng mặc định
-                trên máy này.
+                {t("settings.emptyVoices")}
               </p>
             ) : (
               <div
@@ -552,11 +631,21 @@ export function ReadingVoiceSettings({
               >
                 {filteredVoices.length === 0 ? (
                   <p className="px-3 py-2 text-sm text-muted">
-                    Không có giọng phù hợp với bộ lọc.
+                    {t("settings.emptyFiltered")}
                   </p>
                 ) : null}
                 {filteredVoices.map((voice) => {
                   const selected = voice.voice_id === selectedVoiceId;
+                  const cachedVoiceIds =
+                    loadState.status === "ready" &&
+                    loadState.data.cached_voice_ids &&
+                    loadState.data.cached_voice_ids.length > 0
+                      ? loadState.data.cached_voice_ids
+                      : [defaultVoiceId];
+                  const isCachedOffline =
+                    loadState.status === "ready" &&
+                    loadState.data.local_worker_ready === false &&
+                    cachedVoiceIds.includes(voice.voice_id);
                   return (
                     <label
                       key={voice.voice_id}
@@ -566,12 +655,20 @@ export function ReadingVoiceSettings({
                       )}
                     >
                       <span className="min-w-0 flex-1">
-                        <span className="block break-words text-sm font-bold text-ink">
-                          {voiceTitle(voice)}
+                        <span className="flex flex-wrap items-center gap-1.5 break-words text-sm font-bold text-ink">
+                          <span>{voiceTitle(voice)}</span>
+                          {isCachedOffline ? (
+                            <span
+                              className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800"
+                              data-testid={`voice-wifi-ready-badge-${voice.voice_id}`}
+                            >
+                              Sẵn Wi-Fi
+                            </span>
+                          ) : null}
                         </span>
-                        {voiceDetails(voice) ? (
+                        {voiceDetails(voice, t) ? (
                           <span className="block break-words text-sm text-muted">
-                            {voiceDetails(voice)}
+                            {voiceDetails(voice, t)}
                           </span>
                         ) : null}
                       </span>
@@ -597,6 +694,29 @@ export function ReadingVoiceSettings({
                 })}
               </div>
             )}
+            {loadState.status === "ready" &&
+            loadState.data.local_worker_ready === false
+              ? (() => {
+                  const cachedIds =
+                    loadState.data.cached_voice_ids &&
+                    loadState.data.cached_voice_ids.length > 0
+                      ? loadState.data.cached_voice_ids
+                      : [];
+                  const cachedNames = loadState.data.voices
+                    .filter((v) => cachedIds.includes(v.voice_id))
+                    .map((v) => voiceTitle(v));
+                  return (
+                    <p
+                      className="rounded-control border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs leading-relaxed text-amber-950"
+                      data-testid="voice-offline-cache-notice"
+                    >
+                      {cachedNames.length > 1
+                        ? `Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có sẵn âm thanh dựng trước cho: ${cachedNames.join(", ")}; các giọng khác cần bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới.`
+                        : "Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có sẵn âm thanh dựng trước cho giọng mặc định; để nghe trực tiếp các giọng vùng miền khác hãy bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới."}
+                    </p>
+                  );
+                })()
+              : null}
           </section>
 
           <section
@@ -607,7 +727,7 @@ export function ReadingVoiceSettings({
               className="text-label font-semibold text-ink"
               id="voice-provider-policy-heading"
             >
-              Chế độ xử lý giọng nói (Dành cho phụ huynh)
+              {t("settings.parentModeTitle")}
             </h3>
             <VoiceEngineBadge />
             {voiceHealth ? (
@@ -633,7 +753,9 @@ export function ReadingVoiceSettings({
                     aria-hidden="true"
                   />
                   Local Worker:{" "}
-                  {voiceHealth.local.available ? "Sẵn sàng" : "Chưa bật"}
+                  {voiceHealth.local.available
+                    ? t("settings.localAvailable")
+                    : t("settings.localUnavailable")}
                 </span>
                 <span
                   className={cn(
@@ -657,8 +779,8 @@ export function ReadingVoiceSettings({
                   Google Cloud API:{" "}
                   {voiceHealth.google.stt_configured ||
                   voiceHealth.google.tts_configured
-                    ? "Đã cấu hình"
-                    : "Chưa cấu hình key"}
+                    ? t("settings.googleConfigured")
+                    : t("settings.googleUnconfigured")}
                 </span>
               </div>
             ) : null}
@@ -666,7 +788,7 @@ export function ReadingVoiceSettings({
               <button
                 aria-pressed={policy.providerMode === "local_only"}
                 className={cn(
-                  "rounded-control border-2 px-3 py-2 text-left text-xs font-bold transition",
+                  "rounded-control border-2 px-3 py-2 text-start text-xs font-bold transition",
                   policy.providerMode === "local_only"
                     ? "border-primary bg-primary text-white"
                     : "border-border bg-cream/60 text-ink hover:border-primary",
@@ -680,7 +802,7 @@ export function ReadingVoiceSettings({
                 }
                 type="button"
               >
-                Chỉ máy này
+                {t("settings.localOnlyTitle")}
                 <span
                   className={cn(
                     "mt-0.5 block font-normal",
@@ -689,7 +811,7 @@ export function ReadingVoiceSettings({
                       : "text-muted",
                   )}
                 >
-                  Chạy 100% local, không gọi Google
+                  {t("settings.localOnlyDesc")}
                 </span>
               </button>
               <button
@@ -697,7 +819,7 @@ export function ReadingVoiceSettings({
                   policy.providerMode === "local_with_google_fallback"
                 }
                 className={cn(
-                  "rounded-control border-2 px-3 py-2 text-left text-xs font-bold transition",
+                  "rounded-control border-2 px-3 py-2 text-start text-xs font-bold transition",
                   policy.providerMode === "local_with_google_fallback"
                     ? "border-primary bg-primary text-white"
                     : "border-border bg-cream/60 text-ink hover:border-primary",
@@ -715,7 +837,7 @@ export function ReadingVoiceSettings({
                 }
                 type="button"
               >
-                Máy này + Google dự phòng
+                {t("settings.localWithGoogleTitle")}
                 <span
                   className={cn(
                     "mt-0.5 block font-normal",
@@ -724,7 +846,7 @@ export function ReadingVoiceSettings({
                       : "text-muted",
                   )}
                 >
-                  Ưu tiên local, bật tự động chuyển Online dự phòng
+                  {t("settings.localWithGoogleDesc")}
                 </span>
               </button>
             </div>
@@ -732,7 +854,7 @@ export function ReadingVoiceSettings({
             {policy.providerMode === "local_with_google_fallback" ? (
               <div className="space-y-2 rounded-lg bg-cream/70 p-2.5 text-xs">
                 <label className="flex cursor-pointer items-center justify-between gap-2 font-medium text-ink">
-                  <span>Dự phòng Google cho Nhận diện giọng nói (STT)</span>
+                  <span>{t("settings.googleSttFallback")}</span>
                   <input
                     checked={policy.allowGoogleSttFallback}
                     className="size-4 accent-primary"
@@ -745,7 +867,7 @@ export function ReadingVoiceSettings({
                   />
                 </label>
                 <label className="flex cursor-pointer items-center justify-between gap-2 font-medium text-ink">
-                  <span>Dự phòng Google cho Đọc mẫu (TTS)</span>
+                  <span>{t("settings.googleTtsFallback")}</span>
                   <input
                     checked={policy.allowGoogleTtsFallback}
                     className="size-4 accent-primary"
@@ -761,9 +883,7 @@ export function ReadingVoiceSettings({
                 (!voiceHealth.google.stt_configured &&
                   !voiceHealth.google.tts_configured) ? (
                   <p className="text-[11px] leading-relaxed text-muted">
-                    Khi máy chưa cấu hình khóa Google Cloud API trong{" "}
-                    <code className="font-mono">backend/.env</code>, ViRead sẽ
-                    tự động dùng Google/Trình duyệt Online làm dự phòng.
+                    {t("settings.missingGoogleKeyHint")}
                   </p>
                 ) : null}
               </div>
@@ -771,55 +891,6 @@ export function ReadingVoiceSettings({
           </section>
 
           <ReadingAutomationSettings />
-
-          <footer className="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 border-t border-border bg-cream pt-3">
-            <Button
-              className="w-auto!"
-              size="compact"
-              onClick={() => change({ voiceId: null })}
-              variant="quiet"
-            >
-              Dùng giọng mặc định
-            </Button>
-            <Button
-              className="w-auto!"
-              size="compact"
-              onClick={() => {
-                const generation = ++previewGenerationRef.current;
-                if (isPreviewing) {
-                  onStopPreview();
-                  return;
-                }
-                setPreviewError(false);
-                void Promise.resolve()
-                  .then(() => onPreview(PREVIEW_TEXT))
-                  .catch((error: unknown) => {
-                    if (
-                      mountedRef.current &&
-                      generation === previewGenerationRef.current &&
-                      !(error instanceof Error && error.name === "AbortError")
-                    )
-                      setPreviewError(true);
-                  });
-              }}
-              variant="primary"
-            >
-              <Volume2 aria-hidden="true" className="size-5" />
-              {isPreviewing ? "Dừng nghe thử" : "Nghe thử"}
-            </Button>
-          </footer>
-          {previewError ? (
-            <p role="alert" className="text-body text-muted">
-              Chưa phát được giọng đọc. Bé thử lại hoặc chọn giọng khác nhé.
-            </p>
-          ) : fallbackNotice ? (
-            <p
-              role="status"
-              className="rounded-control bg-warning-surface px-3 py-2 text-sm font-medium text-ink"
-            >
-              {fallbackNotice}
-            </p>
-          ) : null}
         </div>
       </Modal>
     </>

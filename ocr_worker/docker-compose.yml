@@ -15,8 +15,17 @@ services:
       OMP_NUM_THREADS: "2"
       OPENBLAS_NUM_THREADS: "2"
       MKL_NUM_THREADS: "2"
+      HOME: /var/cache/viread
+      PADDLEOCR_HOME: /var/cache/viread/.paddleocr
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=512m
     volumes:
-      - ocr-model-cache:/tmp
+      - ocr-model-cache:/var/cache/viread
     mem_limit: 4g
     cpus: "2.0"
 

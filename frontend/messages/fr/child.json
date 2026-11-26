@@ -1,0 +1,36 @@
+{
+  "list": {
+    "title": "Profils des enfants",
+    "subtitle": "Gérer les informations et les niveaux de lecture de chaque enfant.",
+    "addChild": "Ajouter un profil d'enfant",
+    "empty": "Aucun profil d'enfant pour le moment. Créez votre premier profil."
+  },
+  "switcher": {
+    "selectChild": "Sélectionner un enfant",
+    "quickSwitchAria": "Changement rapide d'enfant",
+    "selectedAria": "Enfant sélectionné : {alias}, appuyez pour changer",
+    "gradeLabel": "Classe {grade}",
+    "gradeShort": "C{grade}",
+    "manageChildren": "Gérer les profils enfants"
+  },
+  "form": {
+    "createTitle": "Créer le profil de l'enfant",
+    "editTitle": "Mettre à jour le profil de l'enfant",
+    "aliasLabel": "Surnom",
+    "gradeLabel": "Niveau scolaire",
+    "ageLabel": "Âge",
+    "saveSuccess": "Informations du profil de l'enfant enregistrées."
+  },
+  "count": "{count, plural, =0 {Aucun profil d'enfant} one {# profil d'enfant} other {# profils d'enfant}}",
+  "selector": {
+    "label": "Profil de l'enfant",
+    "selectAria": "Sélectionner un profil d'enfant pour afficher les données",
+    "optionLabel": "{alias} · Niveau {grade}"
+  },
+  "verification": {
+    "loading": "Vérification du profil enfant…",
+    "errorTitle": "Impossible de vérifier le profil enfant",
+    "errorBody": "Impossible de confirmer que le profil appartient à ce compte. Veuillez réessayer.",
+    "retry": "Réessayer"
+  }
+}

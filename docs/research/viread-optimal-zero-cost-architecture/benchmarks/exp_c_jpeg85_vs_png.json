@@ -1,0 +1,329 @@
+{
+  "experiment": "C_JPEG_Q85_VS_PNG_AB",
+  "size_reduction_10case_pct": 90.42,
+  "size_reduction_24page_pct": 62.01,
+  "summary_10case": {
+    "png": {
+      "total_bytes_10case": 28673377,
+      "micro_cer": 0.020644,
+      "micro_wer": 0.082418,
+      "exact_word": "348/364 (95.6%)",
+      "diacritic_word": "295/311 (94.86%)",
+      "diacritic_errors": 15,
+      "p50_ms": 34467.87,
+      "p95_ms": 59258.76
+    },
+    "jpeg_q85": {
+      "total_bytes_10case": 2746362,
+      "micro_cer": 0.017001,
+      "micro_wer": 0.074176,
+      "exact_word": "349/364 (95.88%)",
+      "diacritic_word": "296/311 (95.18%)",
+      "diacritic_errors": 14,
+      "p50_ms": 21316.83,
+      "p95_ms": 46221.75
+    }
+  },
+  "iou_24page": {
+    "png": {
+      "total_bytes": 1540411,
+      "summary": {
+        "0.50": {
+          "predicted_words": 489,
+          "reference_words": 489,
+          "geometry": {
+            "tp": 478,
+            "fp": 11,
+            "fn": 11,
+            "precision": 0.977505,
+            "recall": 0.977505,
+            "f1": 0.977505
+          },
+          "strict_word_and_geometry": {
+            "tp": 438,
+            "fp": 51,
+            "fn": 51,
+            "precision": 0.895706,
+            "recall": 0.895706,
+            "f1": 0.895706
+          }
+        },
+        "0.75": {
+          "predicted_words": 489,
+          "reference_words": 489,
+          "geometry": {
+            "tp": 440,
+            "fp": 49,
+            "fn": 49,
+            "precision": 0.899796,
+            "recall": 0.899796,
+            "f1": 0.899796
+          },
+          "strict_word_and_geometry": {
+            "tp": 419,
+            "fp": 70,
+            "fn": 70,
+            "precision": 0.856851,
+            "recall": 0.856851,
+            "f1": 0.856851
+          }
+        }
+      }
+    },
+    "jpeg_q85": {
+      "total_bytes": 585126,
+      "summary": {
+        "0.50": {
+          "predicted_words": 488,
+          "reference_words": 489,
+          "geometry": {
+            "tp": 483,
+            "fp": 5,
+            "fn": 6,
+            "precision": 0.989754,
+            "recall": 0.98773,
+            "f1": 0.988741
+          },
+          "strict_word_and_geometry": {
+            "tp": 446,
+            "fp": 42,
+            "fn": 43,
+            "precision": 0.913934,
+            "recall": 0.912065,
+            "f1": 0.912999
+          }
+        },
+        "0.75": {
+          "predicted_words": 488,
+          "reference_words": 489,
+          "geometry": {
+            "tp": 454,
+            "fp": 34,
+            "fn": 35,
+            "precision": 0.930328,
+            "recall": 0.928425,
+            "f1": 0.929376
+          },
+          "strict_word_and_geometry": {
+            "tp": 433,
+            "fp": 55,
+            "fn": 56,
+            "precision": 0.887295,
+            "recall": 0.885481,
+            "f1": 0.886387
+          }
+        }
+      }
+    }
+  },
+  "arms": {
+    "png": {
+      "cases": [
+        {
+          "sample_id": "case_01",
+          "condition": "clean",
+          "bytes": 2501128,
+          "latency_ms": 59258.76,
+          "text_sha256": "bd48524d3dbf7a354884114912d5ff4cfd7f02a87bab9e447e70302f64918ed5",
+          "cer": 0.006536,
+          "wer": 0.027778,
+          "diacritic_errors": 1
+        },
+        {
+          "sample_id": "case_02",
+          "condition": "childrens_font",
+          "bytes": 2582214,
+          "latency_ms": 35465.51,
+          "text_sha256": "702fc07229c3395d90436dccfe8c5c842010b6d89469ff46b4a8a22341ab9f65",
+          "cer": 0.02963,
+          "wer": 0.121212,
+          "diacritic_errors": 4
+        },
+        {
+          "sample_id": "case_03",
+          "condition": "small_text",
+          "bytes": 2574960,
+          "latency_ms": 37156.2,
+          "text_sha256": "a236b59e9c981a7168452003dfd91c96291b10321dc1d0379bec5ef56fc5c69c",
+          "cer": 0.010753,
+          "wer": 0.05,
+          "diacritic_errors": 1
+        },
+        {
+          "sample_id": "case_04",
+          "condition": "rotated",
+          "bytes": 2619600,
+          "latency_ms": 35255.43,
+          "text_sha256": "1e4164b96dfae1369d95a1c9685dd434db65447d5b2fe512cde14bf03aaab3c8",
+          "cer": 0.007042,
+          "wer": 0.029412,
+          "diacritic_errors": 1
+        },
+        {
+          "sample_id": "case_05",
+          "condition": "low_light",
+          "bytes": 1723546,
+          "latency_ms": 34467.87,
+          "text_sha256": "ecb403a71f13c93de07c8a36528542702a2bfed71915a442936f3eb4ba5bfb1a",
+          "cer": 0.04142,
+          "wer": 0.097561,
+          "diacritic_errors": 1
+        },
+        {
+          "sample_id": "case_06",
+          "condition": "perspective",
+          "bytes": 2754297,
+          "latency_ms": 34669.2,
+          "text_sha256": "b58de96da78a0af4efe8485bd5de2d7ba9f0f33d6b7b15376148a4fd96fd71fd",
+          "cer": 0.013072,
+          "wer": 0.055556,
+          "diacritic_errors": 2
+        },
+        {
+          "sample_id": "case_07",
+          "condition": "shadow",
+          "bytes": 2528065,
+          "latency_ms": 32453.92,
+          "text_sha256": "9373d42e4ef97fe75a977bab08d88e553d6d597442cf93995eb313072c5f3845",
+          "cer": 0.007353,
+          "wer": 0.029412,
+          "diacritic_errors": 1
+        },
+        {
+          "sample_id": "case_08",
+          "condition": "noise",
+          "bytes": 8167474,
+          "latency_ms": 17547.31,
+          "text_sha256": "bcd3264ef4310941f4c293a7e08c0cff7ff6f7c4f8f5bc58f2f6995e1c1e692e",
+          "cer": 0.013699,
+          "wer": 0.060606,
+          "diacritic_errors": 2
+        },
+        {
+          "sample_id": "case_09",
+          "condition": "compressed",
+          "bytes": 678501,
+          "latency_ms": 18286.74,
+          "text_sha256": "4ccbd1b225f997689d4e8910b3b8c13d39313c1f58c4ccd1762f74a6cb44e00e",
+          "cer": 0.010695,
+          "wer": 0.04878,
+          "diacritic_errors": 2
+        },
+        {
+          "sample_id": "case_10",
+          "condition": "mixed_background",
+          "bytes": 2543592,
+          "latency_ms": 15312.93,
+          "text_sha256": "16e7da9b2802c6c3b07f70065e5ec73f78a2ea2877b1089a268f38679e4977cf",
+          "cer": 0.0,
+          "wer": 0.0,
+          "diacritic_errors": 0
+        }
+      ]
+    },
+    "jpeg_q85": {
+      "cases": [
+        {
+          "sample_id": "case_01",
+          "condition": "clean",
+          "bytes": 221457,
+          "latency_ms": 37642.79,
+          "text_sha256": "78307e882e4748209471e4c49d5703b47d1e5a5017e9fb216ac604b8f73becbb",
+          "cer": 0.0,
+          "wer": 0.0,
+          "diacritic_errors": 0
+        },
+        {
+          "sample_id": "case_02",
+          "condition": "childrens_font",
+          "bytes": 210888,
+          "latency_ms": 46221.75,
+          "text_sha256": "702fc07229c3395d90436dccfe8c5c842010b6d89469ff46b4a8a22341ab9f65",
+          "cer": 0.02963,
+          "wer": 0.121212,
+          "diacritic_errors": 4
+        },
+        {
+          "sample_id": "case_03",
+          "condition": "small_text",
+          "bytes": 214837,
+          "latency_ms": 28176.76,
+          "text_sha256": "a236b59e9c981a7168452003dfd91c96291b10321dc1d0379bec5ef56fc5c69c",
+          "cer": 0.010753,
+          "wer": 0.05,
+          "diacritic_errors": 1
+        },
+        {
+          "sample_id": "case_04",
+          "condition": "rotated",
+          "bytes": 232553,
+          "latency_ms": 28336.94,
+          "text_sha256": "ed147722ed982abfa3670d8d0400ecaa27022900fc71cef079d230b51cc939a8",
+          "cer": 0.007042,
+          "wer": 0.029412,
+          "diacritic_errors": 1
+        },
+        {
+          "sample_id": "case_05",
+          "condition": "low_light",
+          "bytes": 229786,
+          "latency_ms": 20943.13,
+          "text_sha256": "15080c9fd84b3bdf82b77403fed64b6df968c7123312c44184f96b9bf3b6bc99",
+          "cer": 0.005917,
+          "wer": 0.02439,
+          "diacritic_errors": 1
+        },
+        {
+          "sample_id": "case_06",
+          "condition": "perspective",
+          "bytes": 237474,
+          "latency_ms": 36394.65,
+          "text_sha256": "b58de96da78a0af4efe8485bd5de2d7ba9f0f33d6b7b15376148a4fd96fd71fd",
+          "cer": 0.013072,
+          "wer": 0.055556,
+          "diacritic_errors": 2
+        },
+        {
+          "sample_id": "case_07",
+          "condition": "shadow",
+          "bytes": 215016,
+          "latency_ms": 21316.83,
+          "text_sha256": "9373d42e4ef97fe75a977bab08d88e553d6d597442cf93995eb313072c5f3845",
+          "cer": 0.007353,
+          "wer": 0.029412,
+          "diacritic_errors": 1
+        },
+        {
+          "sample_id": "case_08",
+          "condition": "noise",
+          "bytes": 819762,
+          "latency_ms": 14839.27,
+          "text_sha256": "bcd3264ef4310941f4c293a7e08c0cff7ff6f7c4f8f5bc58f2f6995e1c1e692e",
+          "cer": 0.013699,
+          "wer": 0.060606,
+          "diacritic_errors": 2
+        },
+        {
+          "sample_id": "case_09",
+          "condition": "compressed",
+          "bytes": 139051,
+          "latency_ms": 14689.85,
+          "text_sha256": "4ccbd1b225f997689d4e8910b3b8c13d39313c1f58c4ccd1762f74a6cb44e00e",
+          "cer": 0.010695,
+          "wer": 0.04878,
+          "diacritic_errors": 2
+        },
+        {
+          "sample_id": "case_10",
+          "condition": "mixed_background",
+          "bytes": 225538,
+          "latency_ms": 16264.95,
+          "text_sha256": "16e7da9b2802c6c3b07f70065e5ec73f78a2ea2877b1089a268f38679e4977cf",
+          "cer": 0.0,
+          "wer": 0.0,
+          "diacritic_errors": 0
+        }
+      ]
+    }
+  }
+}

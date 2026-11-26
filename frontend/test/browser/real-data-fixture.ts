@@ -3,6 +3,8 @@ import { createPlaywrightAuthFixtureHeaders } from "../../lib/auth/playwright-au
 import type { VoiceEngineHealthSnapshot } from "../../lib/reading/voice-engine-status";
 import type { ProcessingCapabilities } from "../../types/karaoke-processing";
 
+export const PLAYWRIGHT_ORIGIN = `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? "3106"}`;
+
 export function readyVoiceStatus(
   defaultVoiceId: string,
 ): VoiceEngineHealthSnapshot {
@@ -186,7 +188,7 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
   };
   await seedBrowserSession(page);
   const headers = {
-    "access-control-allow-origin": "http://127.0.0.1:3106",
+    "access-control-allow-origin": PLAYWRIGHT_ORIGIN,
     "access-control-allow-headers": "authorization,content-type,accept",
     "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
   };
@@ -282,7 +284,7 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
   await page.context().route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.origin === "http://127.0.0.1:3106") return route.continue();
+    if (url.origin === PLAYWRIGHT_ORIGIN) return route.continue();
     if (
       url.hostname === "example.supabase.co" &&
       url.pathname === "/auth/v1/user"
@@ -554,6 +556,12 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         contentType: "image/svg+xml",
         body: '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000"><rect width="800" height="1000" fill="#fff9e8"/><text x="100" y="220" font-size="38">Stored page - test fixture</text></svg>',
       });
+    if (path === "/health")
+      return respond(route, {
+        status: "ok",
+        ocr_mode: "remote_worker",
+        ocr: { mode: "remote_worker", ready: true, workers: [], queue: {} },
+      });
     expect(request.headers().authorization).toMatch(/^Bearer /);
     if (
       path === "/reading-management/collections" ||
@@ -567,6 +575,23 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       return respond(route, { email_enabled: false, updated_at: timestamp });
     if (path.startsWith("/reading-presence/"))
       return respond(route, { ok: true, cancelled: 0 });
+    if (path === "/profiles/dashboard-summary")
+      return respond(route, {
+        profile: {
+          id: ids.parent,
+          role: "parent",
+          display_name: "Ba mẹ API",
+          created_at: timestamp,
+          email: "parent@example.test",
+          contact_phone: "+84900000000",
+          email_verified: true,
+          contact_info_status: "available",
+          avatar_url: null,
+          children: state.emptyChildren ? [] : [child],
+        },
+        children: state.emptyChildren ? [] : [child],
+        latest_sessions_by_child: {},
+      });
     if (path === "/profiles/me")
       return respond(route, {
         id: ids.parent,
@@ -1033,6 +1058,120 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
           },
         ],
       });
+    if (request.method() === "GET" && path === "/voice/status")
+      return respond(route, readyVoiceStatus("Binh"));
+    if (request.method() === "GET" && path === "/studio/tasks")
+      return respond(route, {
+        actor_id: ids.parent,
+        actor_role: "parent",
+        active_count: 0,
+        waiting_review_count: 0,
+        failed_count: 0,
+        completed_count: 0,
+        worker_online: true,
+        recommended_poll_ms: null,
+        tasks: [],
+      });
+    if (
+      request.method() === "GET" &&
+      /^\/studio\/books\/[^/]+\/assets$/.test(path)
+    )
+      return respond(route, {
+        book_id: ids.book,
+        title: book.title,
+        author: book.author,
+        min_grade: book.min_grade,
+        max_grade: book.max_grade,
+        visibility_scope: "CATALOG",
+        active_cover: null,
+        effective_cover_source: "METADATA_RENDER",
+        metadata_fallback: {
+          palette_id: "sky-blue",
+          primary_color: "#1D4ED8",
+          secondary_color: "#DBEAFE",
+          accent_color: "#F59E0B",
+          motif: "storybook",
+          title: book.title,
+          author: book.author,
+          grade_label: `Lớp ${book.min_grade}–${book.max_grade}`,
+          source_type: "METADATA_RENDER",
+        },
+        style_bible: null,
+        page_illustrations: [],
+        ai_image_provider_available: false,
+        ai_image_provider_name: null,
+        ai_image_provider_message_vi:
+          "Chưa cấu hình nhà cung cấp tạo ảnh AI miễn phí.",
+        v2_storage_degraded: false,
+      });
+    const recMatch =
+      request.method() === "GET"
+        ? /^\/learning\/children\/([^/]+)\/recommendations$/.exec(path)
+        : null;
+    if (recMatch) {
+      const targetChildId = decodeURIComponent(recMatch[1]);
+      return respond(route, {
+        child_id: targetChildId,
+        child_alias: child.alias,
+        child_grade: child.grade,
+        mascot_greeting_vi: `Chào ${child.alias}! Hôm nay cùng vui học nhé!`,
+        natural_break_reminder_vi:
+          "Mỗi phiên chơi khoảng 10–15 phút là vừa đẹp để mắt bé luôn khỏe mạnh.",
+        today_activities_count: 1,
+        focus_difficult_words: [word.display_text],
+        primary_recommendation: {
+          game_key: "KARAOKE",
+          zone_title_vi: "Sân khấu âm nhạc",
+          game_title_vi: "Hát vui cùng bé",
+          reason_vi: "Cùng bé luyện nhịp điệu và câu hát rõ lời.",
+          suggested_mode: "FULL_SONG",
+          suggested_difficulty: 1,
+          target_words: [word.display_text],
+          href: "/karaoke",
+          priority: 1,
+        },
+        recommendations: [
+          {
+            game_key: "KARAOKE",
+            zone_title_vi: "Sân khấu âm nhạc",
+            game_title_vi: "Hát vui cùng bé",
+            reason_vi: "Cùng bé luyện nhịp điệu và câu hát rõ lời.",
+            suggested_mode: "FULL_SONG",
+            suggested_difficulty: 1,
+            target_words: [word.display_text],
+            href: "/karaoke",
+            priority: 1,
+          },
+        ],
+      });
+    }
+    const analyticsMatch =
+      request.method() === "GET"
+        ? /^\/learning\/children\/([^/]+)\/parent-analytics$/.exec(path)
+        : null;
+    if (analyticsMatch) {
+      const targetChildId = decodeURIComponent(analyticsMatch[1]);
+      const windowDays =
+        Number(url.searchParams.get("window_days") ?? "30") || 30;
+      return respond(route, {
+        child_id: targetChildId,
+        child_alias: child.alias,
+        child_grade: child.grade,
+        window_days: windowDays,
+        is_diagnostic: false,
+        disclaimer_vi:
+          "Báo cáo này tổng hợp hoạt động Học mà Chơi để hỗ trợ luyện đọc tại nhà, không phải đánh giá hay chẩn đoán y khoa.",
+        observed_skills_count: 0,
+        estimated_skills_count: 0,
+        unknown_skills_count: 0,
+        skills: [],
+        practiced_difficult_words: [],
+        module_activities: [],
+        karaoke_weak_segments: [],
+        home_support_tips_vi: [],
+        generated_at: timestamp,
+      });
+    }
     state.unexpected.push(`unknown:${path}`);
     return respond(route, {}, 404);
   });

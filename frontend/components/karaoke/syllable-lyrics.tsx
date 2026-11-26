@@ -1,3 +1,5 @@
+"use client";
+
 import {
   Fragment,
   memo,
@@ -6,6 +8,7 @@ import {
   useRef,
   type CSSProperties,
 } from "react";
+import { useTranslations } from "@/hooks/use-i18n";
 import type { KaraokeLine, KaraokeSyllable } from "@/types/karaoke";
 import type {
   LiveLineScore,
@@ -16,12 +19,20 @@ import { splitSingingText } from "@/lib/karaoke/singing-text";
 import type { ClockListener } from "@/hooks/use-karaoke-player";
 import styles from "./syllable-lyrics.module.css";
 
+interface LiveWordSrLabels {
+  matched: string;
+  different: string;
+  omitted: string;
+  processing: string;
+}
+
 function renderMarkedTokens(
   text: string,
   unitId: string,
   hasAnyEvidence: boolean,
   stateById: ReadonlyMap<string, LiveWordState>,
   phaseById: ReadonlyMap<string, string | undefined>,
+  srLabels: LiveWordSrLabels,
   previewWords?: ReadonlyMap<string, LiveWordState>,
 ) {
   if (!hasAnyEvidence) return text;
@@ -39,7 +50,7 @@ function renderMarkedTokens(
           data-word-state="matched"
         >
           {part}
-          <span className="sr-only"> (đã nghe khớp)</span>
+          <span className="sr-only">{srLabels.matched}</span>
         </span>
       );
     }
@@ -47,7 +58,7 @@ function renderMarkedTokens(
       return (
         <span key={index} className={styles.wrong} data-word-state="different">
           {part}
-          <span className="sr-only"> (chưa đúng lời)</span>
+          <span className="sr-only">{srLabels.different}</span>
         </span>
       );
     }
@@ -55,7 +66,7 @@ function renderMarkedTokens(
       return (
         <span key={index} className={styles.omitted} data-word-state="omitted">
           {part}
-          <span className="sr-only"> (bỏ qua)</span>
+          <span className="sr-only">{srLabels.omitted}</span>
         </span>
       );
     }
@@ -67,7 +78,7 @@ function renderMarkedTokens(
           data-word-state="processing"
         >
           {part}
-          <span className="sr-only"> (đang xử lý)</span>
+          <span className="sr-only">{srLabels.processing}</span>
         </span>
       );
     }
@@ -104,6 +115,8 @@ const SyllableUnit = memo(function SyllableUnit({
   hasAnyEvidence,
   stateById,
   phaseById,
+  srLabels,
+  reducedMotion,
   previewWords,
   registerRef,
 }: {
@@ -113,6 +126,8 @@ const SyllableUnit = memo(function SyllableUnit({
   hasAnyEvidence: boolean;
   stateById: ReadonlyMap<string, LiveWordState>;
   phaseById: ReadonlyMap<string, string | undefined>;
+  srLabels: LiveWordSrLabels;
+  reducedMotion?: boolean;
   previewWords?: ReadonlyMap<string, LiveWordState>;
   registerRef?: (id: string, node: HTMLSpanElement | null) => void;
 }) {
@@ -138,9 +153,18 @@ const SyllableUnit = memo(function SyllableUnit({
         hasAnyEvidence,
         stateById,
         phaseById,
+        srLabels,
         previewWords,
       ),
-    [unit.text, unit.id, hasAnyEvidence, stateById, phaseById, previewWords],
+    [
+      unit.text,
+      unit.id,
+      hasAnyEvidence,
+      stateById,
+      phaseById,
+      srLabels,
+      previewWords,
+    ],
   );
   return (
     <span
@@ -149,6 +173,7 @@ const SyllableUnit = memo(function SyllableUnit({
       data-syllable-id={unit.id}
       data-state={active ? "active" : progress >= 1 ? "past" : "upcoming"}
       data-recognition={recognition}
+      data-reduced-motion={reducedMotion ? "true" : undefined}
       style={{ "--karaoke-fill": `${progress * 100}%` } as CSSProperties}
     >
       <span>{marked}</span>
@@ -166,6 +191,7 @@ export const SyllableLyrics = memo(function SyllableLyrics({
   evidence,
   previewWords,
   subscribeClock,
+  reducedMotion = false,
 }: {
   line: KaraokeLine;
   currentMs: number;
@@ -173,7 +199,9 @@ export const SyllableLyrics = memo(function SyllableLyrics({
   evidence?: LiveLineScore;
   previewWords?: ReadonlyMap<string, LiveWordState>;
   subscribeClock?: (listener: ClockListener) => () => void;
+  reducedMotion?: boolean;
 }) {
+  const t = useTranslations("entertainment");
   const unitNodes = useRef(new Map<string, HTMLSpanElement>());
   const registerRef = useMemo(
     () => (id: string, node: HTMLSpanElement | null) => {
@@ -208,6 +236,16 @@ export const SyllableLyrics = memo(function SyllableLyrics({
     });
   }, [subscribeClock, line]);
 
+  const srLabels = useMemo<LiveWordSrLabels>(
+    () => ({
+      matched: t("karaoke.lyrics.wordMatchedSr"),
+      different: t("karaoke.lyrics.wordDifferentSr"),
+      omitted: t("karaoke.lyrics.wordOmittedSr"),
+      processing: t("karaoke.lyrics.wordProcessingSr"),
+    }),
+    [t],
+  );
+
   // Keep original punctuation and capitalization while marking each occurrence.
   const { stateById, phaseById, hasAnyEvidence } = useMemo(() => {
     const stateMap = new Map<string, LiveWordState>();
@@ -230,18 +268,33 @@ export const SyllableLyrics = memo(function SyllableLyrics({
       hasAnyEvidence,
       stateById,
       phaseById,
+      srLabels,
       previewWords,
     );
-    return highlightActive ? (
-      <span className={styles.activeLine} data-state="active">
-        {text}
+    return (
+      <span
+        className="viread-learning-content"
+        dir="ltr"
+        lang="vi"
+        data-reduced-motion={reducedMotion ? "true" : undefined}
+      >
+        {highlightActive ? (
+          <span className={styles.activeLine} data-state="active">
+            {text}
+          </span>
+        ) : (
+          text
+        )}
       </span>
-    ) : (
-      <>{text}</>
     );
   }
   return (
-    <>
+    <span
+      className="viread-learning-content"
+      dir="ltr"
+      lang="vi"
+      data-reduced-motion={reducedMotion ? "true" : undefined}
+    >
       {line.syllables.map((unit, i) => (
         <Fragment key={unit.id}>
           {i > 0 ? " " : null}
@@ -252,11 +305,13 @@ export const SyllableLyrics = memo(function SyllableLyrics({
             hasAnyEvidence={hasAnyEvidence}
             stateById={stateById}
             phaseById={phaseById}
+            srLabels={srLabels}
+            reducedMotion={reducedMotion}
             previewWords={previewWords}
             registerRef={subscribeClock ? registerRef : undefined}
           />
         </Fragment>
       ))}
-    </>
+    </span>
   );
 });

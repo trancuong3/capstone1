@@ -19,7 +19,7 @@ os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_current_parent_id
+from app.api.deps import require_active_profile_id
 from app.api.routes import voice as voice_routes
 from app.api.routes import voice_studio as studio_routes
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
@@ -61,7 +61,7 @@ def _make_app(orchestrator: VoiceOrchestrator) -> TestClient:
     app = FastAPI()
     app.include_router(voice_routes.router, prefix="/voice")
     app.include_router(studio_routes.router, prefix="/voice")
-    app.dependency_overrides[get_current_parent_id] = lambda: ACTOR_ID
+    app.dependency_overrides[require_active_profile_id] = lambda: ACTOR_ID
     voice_routes.get_voice_orchestrator = lambda: orchestrator  # type: ignore[assignment]
     studio_routes.get_voice_orchestrator = lambda: orchestrator  # type: ignore[assignment]
     return TestClient(app)
@@ -627,7 +627,7 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
                 )
 
         self.assertEqual(
-            health_no_token,
+            {key: health_no_token[key] for key in ("available", "stt_ready", "tts_ready", "stt_model_version", "tts_model_version")},
             {
                 "available": False,
                 "stt_ready": False,
@@ -642,11 +642,14 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
         self.assertTrue(health_with_token["available"])
         self.assertTrue(health_with_token["stt_ready"])
         self.assertTrue(health_with_token["tts_ready"])
+        self.assertIn("stt_mode", health_with_token)
+        self.assertIn("tts_precision", health_with_token)
         self.assertTrue(live_with_token)
         self.assertEqual(voices_with_token[0]["voice_id"], "local_north_truc_ly")
         self.assertEqual(
             recorded_headers[-1],
             {
+                "Authorization": "Bearer secret-worker-tok",
                 "X-ViRead-Voice-Token": "secret-worker-tok",
             },
         )

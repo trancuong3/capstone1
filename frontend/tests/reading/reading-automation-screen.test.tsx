@@ -425,7 +425,7 @@ describe("automatic reading flow on the reading screen", () => {
     expect(word("đang")).toHaveClass(SUCCESS);
   });
 
-  it("walks the help ladder: model, slower model, phrase, then encourages and moves on without a green word (G9)", async () => {
+  it("walks the help ladder during quiet windows without counting silence as a reading mistake (G9)", async () => {
     await startWithFakeClock();
     act(() => lastRecognition().say("Bé mèo"));
     await act(async () => vi.advanceTimersByTimeAsync(10_000));
@@ -435,16 +435,18 @@ describe("automatic reading flow on the reading screen", () => {
     const calls = speechPlayerMock.play.mock.calls;
     expect(calls).toEqual(
       expect.arrayContaining([
-        ["Cô đọc mẫu cho con nhé."],
+        ["Cô đọc mẫu cho con nhé.", { coaching: true }],
         ["nhỏ", { wordSample: true }],
         ["nhỏ", { wordSample: true, speedScale: 0.8 }],
         ["nhỏ đang"],
-        ["Con đã cố gắng rất tốt rồi. Mình đọc tiếp nhé!"],
       ]),
     );
     const order = calls.map(([text]) => text);
     expect(order.indexOf("Cô đọc mẫu cho con nhé.")).toBeLessThan(
-      order.indexOf("Con đã cố gắng rất tốt rồi. Mình đọc tiếp nhé!"),
+      order.indexOf("nhỏ đang"),
+    );
+    expect(order).not.toContain(
+      "Con đã cố gắng rất tốt rồi. Mình đọc tiếp nhé!",
     );
     expect(word("nhỏ")).not.toHaveClass(SUCCESS);
     expect(compareTranscriptMock).not.toHaveBeenCalled();

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -14,6 +15,7 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminKaraoke } from "@/components/karaoke/karaoke-services-provider";
+import { useTranslations } from "@/hooks/use-i18n";
 import { karaokeErrorMessage } from "@/lib/api/admin-karaoke-service";
 import {
   createKaraokeSimpleImportService,
@@ -21,8 +23,11 @@ import {
   type KaraokeSimpleImportService,
   type SimpleAudioType,
   type SimpleImportResult,
-  type SimpleLyricsSource,
+  type SimplePipelineLifecycleState,
+  type SimpleProcessingStatus,
 } from "@/lib/api/karaoke-simple-import-service";
+import { isServiceError } from "@/lib/api/service-error";
+import { translateRuntime } from "@/lib/i18n/runtime";
 import {
   classifyAudioFile,
   cleanFilenameToTitle,
@@ -47,25 +52,16 @@ import type {
 } from "@/types/karaoke";
 
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
-const DEFAULT_SOURCE_NOTE =
-  "Tài liệu nhạc thiếu nhi do Quản trị viên tải lên và kiểm duyệt";
-const DEFAULT_USAGE_NOTE =
-  "Sử dụng cho luyện đọc và hát karaoke giáo dục lớp 1–5 trên ViRead";
+const PIPELINE_POLL_INTERVAL_MS = 3000;
 
-const AUDIO_TYPE_LABELS: Record<SimpleAudioType, string> = {
-  VOCAL_FULL: "Có giọng hát (Vocal)",
-  INSTRUMENTAL_ONLY: "Nhạc nền không lời (Instrumental)",
-  DUAL_TRACK: "Song song giọng & nhạc nền",
-  UNKNOWN: "Chưa xác định loại nhạc",
-};
-
-const LYRICS_SOURCE_LABELS: Record<SimpleLyricsSource, string> = {
-  EMBEDDED_SYNCED: "Lời đồng bộ nhúng sẵn (ID3/LRC)",
-  EMBEDDED_UNSYNCED: "Lời nhúng sẵn (USLT)",
-  ADMIN_TEXT: "Lời Quản trị viên cung cấp",
-  GROQ_WHISPER: "Nhận diện tự động (Groq Whisper)",
-  NONE: "Chưa có lời bài hát",
-};
+const ACTIVE_PIPELINE_STATES = new Set<SimplePipelineLifecycleState>([
+  "QUEUED",
+  "SEPARATING_AUDIO",
+  "TRANSCRIBING_LYRICS",
+  "ALIGNING_LYRICS",
+  "ANALYZING_RHYTHM",
+  "ANALYZING_MELODY",
+]);
 
 function buildProportionalSyllables(
   text: string,
@@ -154,6 +150,9 @@ function distributePlainTextToLyrics(
   let cursor = 0;
   const lines: KaraokeLine[] = [];
   const flagged: FlaggedLyricLine[] = [];
+  const estimatedReason = translateRuntime(
+    "admin.karaoke.simpleUpload.estimatedTimingReason",
+  );
   for (let idx = 0; idx < cleanedLines.length; idx++) {
     const text = cleanedLines[idx];
     const startMs = cursor;
@@ -178,8 +177,7 @@ function distributePlainTextToLyrics(
       line_index: idx,
       text,
       flag: "NEEDS_TIMING_CHECK",
-      reason:
-        "Mốc thời gian được ước lượng đều — bạn có thể nghe thử hoặc gõ phím Space 1 lượt.",
+      reason: estimatedReason,
     });
   }
 
@@ -263,6 +261,33 @@ function applyTapStartsToLyrics(
   return { format_version: 2, lines: nextLines };
 }
 
+function mapQualityFlagsToFlaggedLines(
+  status: SimpleProcessingStatus,
+  lines: KaraokeLine[],
+  reasonFallback: (messageKey: string) => string,
+): FlaggedLyricLine[] {
+  const seen = new Set<string>();
+  const mapped: FlaggedLyricLine[] = [];
+  for (const qFlag of status.quality_flags) {
+    if (!qFlag.line_id || seen.has(qFlag.line_id)) continue;
+    const idx = lines.findIndex((line) => line.id === qFlag.line_id);
+    if (idx < 0) continue;
+    seen.add(qFlag.line_id);
+    const flagType =
+      qFlag.message_key === "LYRIC_MISMATCH"
+        ? "NEEDS_REVIEW"
+        : "NEEDS_TIMING_CHECK";
+    mapped.push({
+      line_id: qFlag.line_id,
+      line_index: idx,
+      text: lines[idx].text,
+      flag: flagType,
+      reason: reasonFallback(qFlag.message_key),
+    });
+  }
+  return mapped;
+}
+
 export function KaraokeSimpleUploadScreen({
   simpleService,
   classifier = classifyAudioFile,
@@ -274,11 +299,15 @@ export function KaraokeSimpleUploadScreen({
   onSwitchAdvanced?: (songId?: string) => void;
   onSwitchWizard?: () => void;
 }) {
+  const t = useTranslations("admin");
   const adminService = useAdminKaraoke();
   const importService = useMemo(
     () => simpleService ?? createKaraokeSimpleImportService(),
     [simpleService],
   );
+
+  const defaultSourceNote = t("karaoke.simpleUpload.defaultSourceNote");
+  const defaultUsageNote = t("karaoke.simpleUpload.defaultUsageNote");
 
   // Step 1 state (MP3 selection + instant client classification)
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -306,6 +335,8 @@ export function KaraokeSimpleUploadScreen({
   const [step1MaxGrade, setStep1MaxGrade] = useState(5);
   const [step1LyricsText, setStep1LyricsText] = useState("");
   const [autoTranscribe, setAutoTranscribe] = useState(true);
+  const [enableBackgroundProcessing, setEnableBackgroundProcessing] =
+    useState(true);
 
   // Import & Review (Steps 2–3) state
   const [importing, setImporting] = useState(false);
@@ -318,6 +349,13 @@ export function KaraokeSimpleUploadScreen({
   const [flaggedLines, setFlaggedLines] = useState<FlaggedLyricLine[]>([]);
   const [inlineLyricsInput, setInlineLyricsInput] = useState("");
 
+  // Optional background pipeline state
+  const [processingStatus, setProcessingStatus] =
+    useState<SimpleProcessingStatus | null>(null);
+  const [processingBusy, setProcessingBusy] = useState(false);
+  const [processingReviewConfirmed, setProcessingReviewConfirmed] =
+    useState(false);
+
   // Tap-to-sync mini-mode
   const [tapSyncActive, setTapSyncActive] = useState(false);
   const [tapIndex, setTapIndex] = useState(0);
@@ -328,8 +366,8 @@ export function KaraokeSimpleUploadScreen({
   const [author, setAuthor] = useState("");
   const [minGrade, setMinGrade] = useState(1);
   const [maxGrade, setMaxGrade] = useState(5);
-  const [sourceNote, setSourceNote] = useState(DEFAULT_SOURCE_NOTE);
-  const [usageNote, setUsageNote] = useState(DEFAULT_USAGE_NOTE);
+  const [sourceNote, setSourceNote] = useState(defaultSourceNote);
+  const [usageNote, setUsageNote] = useState(defaultUsageNote);
   const [rightsConfirmed, setRightsConfirmed] = useState(false);
   const [childSafeConfirmed, setChildSafeConfirmed] = useState(false);
 
@@ -343,11 +381,29 @@ export function KaraokeSimpleUploadScreen({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const tapRegionRef = useRef<HTMLDivElement | null>(null);
   const requestRef = useRef<AbortController | null>(null);
+  const pipelineRequestRef = useRef<AbortController | null>(null);
   const classifyRunId = useRef(0);
 
   useEffect(() => {
     return () => {
       requestRef.current?.abort();
+      pipelineRequestRef.current?.abort();
+    };
+  }, []);
+
+  // Pause preview / tap-sync audio when Android app or browser tab goes to background.
+  useEffect(() => {
+    function pauseAudioOnHide() {
+      audioRef.current?.pause?.();
+    }
+    function onVisibilityChange() {
+      if (document.hidden) pauseAudioOnHide();
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("viread:android-background", pauseAudioOnHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("viread:android-background", pauseAudioOnHide);
     };
   }, []);
 
@@ -367,20 +423,123 @@ export function KaraokeSimpleUploadScreen({
       ? (classification?.audioType ?? "UNKNOWN")
       : audioTypeOverride;
 
+  const effectiveLifecycle: SimplePipelineLifecycleState =
+    processingStatus?.lifecycle_state ??
+    imported?.lifecycle_state ??
+    "UPLOADED";
+  const effectiveWorkerOnline =
+    processingStatus?.worker_online ?? imported?.worker_online ?? false;
+  const effectiveBpm = processingStatus?.bpm ?? imported?.bpm ?? null;
+  const isPipelineRunning = ACTIVE_PIPELINE_STATES.has(effectiveLifecycle);
+
+  const loadDraftPreview = useCallback(
+    (
+      songId: string,
+      revision: number,
+      versionId: string,
+      signal?: AbortSignal,
+    ) => {
+      adminService
+        .preview(songId, revision, versionId, signal)
+        .then((loadedPreview) => {
+          if (!signal?.aborted) setPreview(loadedPreview);
+        })
+        .catch(() => {
+          // Local blob preview remains usable if preview fetch is unavailable.
+        });
+    },
+    [adminService],
+  );
+
+  // Poll background processing cleanly only while an asynchronous job is active.
+  useEffect(() => {
+    const songId = imported?.song_id;
+    const getStatus = importService.getSimpleProcessingStatus;
+    if (!songId || publishedDetail || typeof getStatus !== "function") return;
+    const shouldPoll =
+      processingStatus !== null
+        ? ACTIVE_PIPELINE_STATES.has(processingStatus.lifecycle_state)
+        : Boolean(imported.processing_queued);
+    if (!shouldPoll) return;
+
+    let stopped = false;
+    let activeController: AbortController | null = null;
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+
+    async function pollOnce() {
+      if (stopped || !songId || typeof getStatus !== "function") return;
+      if (typeof document !== "undefined" && document.hidden) {
+        scheduleNext();
+        return;
+      }
+      activeController?.abort();
+      const controller = new AbortController();
+      activeController = controller;
+      try {
+        const nextStatus = await getStatus(songId, controller.signal);
+        if (stopped || controller.signal.aborted) return;
+        setProcessingStatus(nextStatus);
+        if (ACTIVE_PIPELINE_STATES.has(nextStatus.lifecycle_state)) {
+          scheduleNext();
+        }
+      } catch (err) {
+        if (stopped || controller.signal.aborted) return;
+        if (
+          isServiceError(err) &&
+          (err.status === 401 || err.status === 403 || err.status === 404)
+        ) {
+          stopped = true;
+          return;
+        }
+        scheduleNext();
+      }
+    }
+
+    function scheduleNext() {
+      if (stopped) return;
+      if (timerId !== null) clearTimeout(timerId);
+      timerId = setTimeout(() => {
+        void pollOnce();
+      }, PIPELINE_POLL_INTERVAL_MS);
+    }
+
+    function handleVisible() {
+      if (typeof document !== "undefined" && !document.hidden && !stopped) {
+        if (timerId !== null) clearTimeout(timerId);
+        void pollOnce();
+      }
+    }
+
+    scheduleNext();
+    document.addEventListener("visibilitychange", handleVisible);
+    return () => {
+      stopped = true;
+      if (timerId !== null) clearTimeout(timerId);
+      activeController?.abort();
+      document.removeEventListener("visibilitychange", handleVisible);
+    };
+  }, [
+    importService,
+    imported?.song_id,
+    imported?.processing_queued,
+    processingStatus,
+    publishedDetail,
+  ]);
+
   async function handleFileSelection(file: File | null) {
     setError("");
     setNotice("");
     if (!file) return;
     if (!/\.mp3$/i.test(file.name)) {
-      setError("Chỉ hỗ trợ file nhạc định dạng MP3 (.mp3).");
+      setError(t("karaoke.simpleUpload.errors.mp3Only"));
       return;
     }
     if (file.size <= 0) {
-      setError("File MP3 đang rỗng. Hãy chọn file hợp lệ.");
+      setError(t("karaoke.simpleUpload.errors.emptyFile"));
       return;
     }
     if (file.size > MAX_AUDIO_BYTES) {
-      setError("File MP3 vượt quá giới hạn tối đa 20 MiB.");
+      setError(t("karaoke.simpleUpload.errors.maxAudioSize"));
       return;
     }
 
@@ -423,7 +582,7 @@ export function KaraokeSimpleUploadScreen({
     if (!file) return;
     setError("");
     if (file.size > 256 * 1024) {
-      setError("File lời (.lrc / .txt) vượt quá 256 KiB.");
+      setError(t("karaoke.simpleUpload.errors.lyricsFileTooLarge"));
       return;
     }
     try {
@@ -434,17 +593,18 @@ export function KaraokeSimpleUploadScreen({
         setInlineLyricsInput(text);
       }
     } catch {
-      setError("Không đọc được file lời đã chọn.");
+      setError(t("karaoke.simpleUpload.errors.lyricsFileUnreadable"));
     }
   }
 
   async function handleAutoCreate() {
     if (!selectedFile || importing) return;
     if (step1MinGrade > step1MaxGrade) {
-      setError("Lớp bắt đầu không được lớn hơn lớp kết thúc.");
+      setError(t("karaoke.simpleUpload.errors.invalidGradeRange"));
       return;
     }
     requestRef.current?.abort();
+    pipelineRequestRef.current?.abort();
     const controller = new AbortController();
     requestRef.current = controller;
     setImporting(true);
@@ -464,6 +624,7 @@ export function KaraokeSimpleUploadScreen({
           bpm: classification?.estimatedBpm ?? null,
           auto_transcribe:
             effectiveAudioType === "INSTRUMENTAL_ONLY" ? false : autoTranscribe,
+          enable_background_processing: enableBackgroundProcessing,
           rights_confirmed: false,
           child_safe_confirmed: false,
         },
@@ -472,6 +633,8 @@ export function KaraokeSimpleUploadScreen({
       if (controller.signal.aborted) return;
 
       setImported(result);
+      setProcessingStatus(null);
+      setProcessingReviewConfirmed(false);
       const draft = result.song.draft;
       setLyrics(draft?.lyrics ?? { format_version: 1, lines: [] });
       setFlaggedLines(result.flagged_lines);
@@ -479,8 +642,8 @@ export function KaraokeSimpleUploadScreen({
       setAuthor(result.author);
       setMinGrade(draft?.min_grade ?? step1MinGrade);
       setMaxGrade(draft?.max_grade ?? step1MaxGrade);
-      setSourceNote(draft?.source_note?.trim() || DEFAULT_SOURCE_NOTE);
-      setUsageNote(draft?.usage_note?.trim() || DEFAULT_USAGE_NOTE);
+      setSourceNote(draft?.source_note?.trim() || defaultSourceNote);
+      setUsageNote(draft?.usage_note?.trim() || defaultUsageNote);
       // Always start UNCHECKED so admin makes an explicit safety & rights confirmation.
       setRightsConfirmed(false);
       setChildSafeConfirmed(false);
@@ -490,20 +653,12 @@ export function KaraokeSimpleUploadScreen({
       setTapStarts([]);
       setNotice(result.guidance_vi);
 
-      // Load signed server preview in the background (cover art + signed playback URL).
-      adminService
-        .preview(
-          result.song_id,
-          result.revision,
-          result.version_id,
-          controller.signal,
-        )
-        .then((loadedPreview) => {
-          if (!controller.signal.aborted) setPreview(loadedPreview);
-        })
-        .catch(() => {
-          // Local blob preview remains usable if preview fetch is unavailable.
-        });
+      loadDraftPreview(
+        result.song_id,
+        result.revision,
+        result.version_id,
+        controller.signal,
+      );
     } catch (err) {
       if (!controller.signal.aborted) {
         setError(karaokeErrorMessage(err));
@@ -511,6 +666,135 @@ export function KaraokeSimpleUploadScreen({
     } finally {
       if (requestRef.current === controller) requestRef.current = null;
       if (!controller.signal.aborted) setImporting(false);
+    }
+  }
+
+  async function handleStartBackgroundProcessing() {
+    if (
+      !imported ||
+      processingBusy ||
+      typeof importService.startSimpleProcessing !== "function"
+    ) {
+      return;
+    }
+    pipelineRequestRef.current?.abort();
+    const controller = new AbortController();
+    pipelineRequestRef.current = controller;
+    setProcessingBusy(true);
+    setError("");
+
+    try {
+      const draftId = imported.song.draft?.id ?? imported.version_id;
+      const status = await importService.startSimpleProcessing(
+        imported.song_id,
+        {
+          expected_revision: imported.revision,
+          draft_version_id: draftId,
+          idempotency_key: crypto.randomUUID(),
+          audio_type: imported.audio_type,
+          bpm: effectiveBpm,
+          lyrics: lyrics.lines.length > 0 ? lyrics : undefined,
+        },
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      setProcessingStatus(status);
+      setNotice(status.guidance_vi);
+    } catch (err) {
+      if (!controller.signal.aborted) {
+        if (isServiceError(err) && err.status === 503) {
+          setNotice(t("karaoke.simpleUpload.workerOfflineFallbackNotice"));
+        } else {
+          setError(karaokeErrorMessage(err));
+        }
+      }
+    } finally {
+      if (pipelineRequestRef.current === controller) {
+        pipelineRequestRef.current = null;
+      }
+      if (!controller.signal.aborted) setProcessingBusy(false);
+    }
+  }
+
+  async function handleApplyProcessingResult() {
+    if (
+      !imported ||
+      !processingStatus?.can_apply ||
+      !processingStatus.job_id ||
+      processingBusy ||
+      typeof importService.applySimpleProcessing !== "function"
+    ) {
+      return;
+    }
+    pipelineRequestRef.current?.abort();
+    const controller = new AbortController();
+    pipelineRequestRef.current = controller;
+    setProcessingBusy(true);
+    setError("");
+
+    try {
+      const draftId =
+        processingStatus.draft_version_id ??
+        imported.song.draft?.id ??
+        imported.version_id;
+      const applied = await importService.applySimpleProcessing(
+        imported.song_id,
+        {
+          expected_revision: processingStatus.revision,
+          draft_version_id: draftId,
+          job_id: processingStatus.job_id,
+          audio_type: imported.audio_type,
+          bpm: effectiveBpm,
+        },
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+
+      const updatedDraft = applied.song.draft;
+      const updatedLyrics = updatedDraft?.lyrics ?? lyrics;
+      const nextVersionId = updatedDraft?.id ?? draftId;
+      setProcessingStatus(applied);
+      setProcessingReviewConfirmed(Boolean(applied.reviewed));
+      setImported((prev) =>
+        prev
+          ? {
+              ...prev,
+              revision: applied.revision,
+              version_id: nextVersionId,
+              bpm: applied.bpm ?? prev.bpm,
+              lifecycle_state: applied.lifecycle_state,
+              worker_online: applied.worker_online,
+              processing_queued: false,
+              processing_job_id: applied.job_id ?? prev.processing_job_id,
+              lyrics_line_count: updatedLyrics.lines.length,
+              song: applied.song,
+            }
+          : prev,
+      );
+      if (updatedLyrics.lines.length > 0) {
+        setLyrics(updatedLyrics);
+        setFlaggedLines(
+          mapQualityFlagsToFlaggedLines(applied, updatedLyrics.lines, (key) =>
+            t(`karaoke.review.flags.${key}`),
+          ),
+        );
+      }
+      setNotice(t("karaoke.simpleUpload.pipelineAppliedNotice"));
+      loadDraftPreview(
+        applied.song_id,
+        applied.revision,
+        nextVersionId,
+        controller.signal,
+      );
+    } catch (err) {
+      if (!controller.signal.aborted) {
+        setError(karaokeErrorMessage(err));
+      }
+    } finally {
+      if (pipelineRequestRef.current === controller) {
+        pipelineRequestRef.current = null;
+      }
+      if (!controller.signal.aborted) setProcessingBusy(false);
     }
   }
 
@@ -545,15 +829,18 @@ export function KaraokeSimpleUploadScreen({
           : parsed.lyrics;
         setLyrics(nextLyrics);
         setFlaggedLines([]);
+        setProcessingReviewConfirmed(false);
         setNotice(
-          `Đã áp dụng ${nextLyrics.lines.length} dòng từ file .lrc thành công.`,
+          t("karaoke.simpleUpload.lrcAppliedNotice", {
+            count: nextLyrics.lines.length,
+          }),
         );
         return;
       } catch (err) {
         setError(
           err instanceof Error
             ? err.message
-            : "Nội dung .lrc chưa đúng định dạng [mm:ss.xx].",
+            : t("karaoke.simpleUpload.errors.lrcFormat"),
         );
         return;
       }
@@ -561,18 +848,22 @@ export function KaraokeSimpleUploadScreen({
 
     const distributed = distributePlainTextToLyrics(raw, imported.duration_ms);
     if (!distributed.lyrics.lines.length) {
-      setError("Hãy nhập ít nhất 1 dòng lời hợp lệ.");
+      setError(t("karaoke.simpleUpload.errors.minOneLyricLine"));
       return;
     }
     setLyrics(distributed.lyrics);
     setFlaggedLines(distributed.flagged);
+    setProcessingReviewConfirmed(false);
     setNotice(
-      `Đã tạo ${distributed.lyrics.lines.length} dòng lời và chia mốc tạm thời. Bạn có thể gõ phím Space 1 lượt để khớp nhịp chuẩn.`,
+      t("karaoke.simpleUpload.plainLyricsAppliedNotice", {
+        count: distributed.lyrics.lines.length,
+      }),
     );
   }
 
   function updateLineText(lineId: string, nextTextRaw: string) {
     const cleaned = nextTextRaw.normalize("NFC").replace(/\p{Cc}/gu, "");
+    setProcessingReviewConfirmed(false);
     setLyrics((current) => {
       let downgradeToV1 = current.format_version === 1;
       const updatedLines = current.lines.map((line) => {
@@ -622,9 +913,7 @@ export function KaraokeSimpleUploadScreen({
     setTapSyncActive(true);
     setTapIndex(0);
     setTapStarts([]);
-    setNotice(
-      "Chế độ gõ nhịp 1 lượt đang bật: bấm phím Space (hoặc nút Gõ nhịp) mỗi khi bắt đầu hát câu mới.",
-    );
+    setNotice(t("karaoke.simpleUpload.tapSyncStartedNotice"));
     const audio = audioRef.current;
     if (audio) {
       audio.currentTime = 0;
@@ -651,6 +940,7 @@ export function KaraokeSimpleUploadScreen({
         imported.duration_ms,
       );
       setLyrics(updated);
+      setProcessingReviewConfirmed(false);
       setFlaggedLines((items) =>
         items.filter((item) => item.flag !== "NEEDS_TIMING_CHECK"),
       );
@@ -658,7 +948,7 @@ export function KaraokeSimpleUploadScreen({
       setTapStarts([]);
       setTapIndex(0);
       audioRef.current?.pause?.();
-      setNotice("Đã hoàn tất căn nhịp 1 lượt bằng phím Space cho toàn bộ bài!");
+      setNotice(t("karaoke.simpleUpload.tapSyncCompletedNotice"));
     } else {
       setTapStarts(nextStarts);
       setTapIndex(nextIdx);
@@ -702,12 +992,24 @@ export function KaraokeSimpleUploadScreen({
 
   const hasEmptyLineText = lyrics.lines.some((line) => !line.text.trim());
 
+  const activeReviewMeta =
+    processingStatus?.song.processing_review ??
+    imported?.song.processing_review ??
+    null;
+  const requiresProcessingReview = Boolean(
+    (processingStatus?.review_required ?? activeReviewMeta?.required) &&
+    !(processingStatus?.reviewed ?? activeReviewMeta?.reviewed),
+  );
+
   const canPublish = Boolean(
     imported &&
     !publishedDetail &&
     !publishing &&
+    !processingBusy &&
+    !isPipelineRunning &&
     rightsConfirmed &&
     childSafeConfirmed &&
+    (!requiresProcessingReview || processingReviewConfirmed) &&
     title.trim() &&
     sourceNote.trim() &&
     usageNote.trim() &&
@@ -727,26 +1029,105 @@ export function KaraokeSimpleUploadScreen({
     setNotice("");
 
     try {
+      const draft = imported.song.draft;
+      let publishRevision = imported.revision;
+      const draftVersionId = draft?.id ?? imported.version_id;
+      const trimmedTitle = title.trim();
+      const trimmedAuthor = author.trim();
+      const trimmedSourceNote = sourceNote.trim();
+      const trimmedUsageNote = usageNote.trim();
+
+      if (requiresProcessingReview && draft) {
+        const draftChanged =
+          draft.title !== trimmedTitle ||
+          draft.author !== trimmedAuthor ||
+          draft.min_grade !== minGrade ||
+          draft.max_grade !== maxGrade ||
+          draft.source_note !== trimmedSourceNote ||
+          draft.usage_note !== trimmedUsageNote ||
+          JSON.stringify(draft.lyrics) !== JSON.stringify(lyrics);
+
+        let reviewedSource = imported.song;
+        if (draftChanged) {
+          reviewedSource = await adminService.save(
+            imported.song_id,
+            {
+              expected_revision: publishRevision,
+              draft_version_id: draftVersionId,
+              title: trimmedTitle,
+              author: trimmedAuthor,
+              min_grade: minGrade,
+              max_grade: maxGrade,
+              source_note: trimmedSourceNote,
+              usage_note: trimmedUsageNote,
+              lyrics,
+            },
+            controller.signal,
+          );
+          if (controller.signal.aborted) return;
+          publishRevision = reviewedSource.revision;
+        }
+
+        const reviewInfo = reviewedSource.processing_review;
+        if (reviewInfo?.required && !reviewInfo.reviewed) {
+          const fingerprint = reviewInfo.current_content_fingerprint;
+          if (!fingerprint) {
+            throw new Error(
+              t("karaoke.simpleUpload.errors.reviewFingerprintMissing"),
+            );
+          }
+          const confirmed = await adminService.confirmReview(
+            imported.song_id,
+            {
+              expected_revision: publishRevision,
+              draft_version_id: draftVersionId,
+              content_fingerprint: fingerprint,
+              confirmed_listened: true,
+              acknowledged_flag_ids: reviewInfo.quality_flags.map((f) => f.id),
+            },
+            controller.signal,
+          );
+          if (controller.signal.aborted) return;
+          publishRevision = confirmed.revision;
+        }
+
+        // Draft changes & review confirmation already committed cleanly above; publish directly.
+        const published = await importService.simplePublish(
+          imported.song_id,
+          {
+            expected_revision: publishRevision,
+            draft_version_id: draftVersionId,
+            rights_confirmed: rightsConfirmed,
+            child_safe_confirmed: childSafeConfirmed,
+          },
+          controller.signal,
+        );
+        if (controller.signal.aborted) return;
+        setPublishedDetail(published);
+        setNotice(t("karaoke.simpleUpload.publishedNotice"));
+        return;
+      }
+
       const published = await importService.simplePublish(
         imported.song_id,
         {
-          expected_revision: imported.revision,
-          draft_version_id: imported.version_id,
+          expected_revision: publishRevision,
+          draft_version_id: draftVersionId,
           rights_confirmed: rightsConfirmed,
           child_safe_confirmed: childSafeConfirmed,
-          title: title.trim(),
-          author: author.trim(),
+          title: trimmedTitle,
+          author: trimmedAuthor,
           min_grade: minGrade,
           max_grade: maxGrade,
-          source_note: sourceNote.trim(),
-          usage_note: usageNote.trim(),
+          source_note: trimmedSourceNote,
+          usage_note: trimmedUsageNote,
           lyrics,
         },
         controller.signal,
       );
       if (controller.signal.aborted) return;
       setPublishedDetail(published);
-      setNotice("Đã xuất bản bài hát thành công! Trẻ đã có thể hát bài này.");
+      setNotice(t("karaoke.simpleUpload.publishedNotice"));
     } catch (err) {
       if (!controller.signal.aborted) {
         setError(karaokeErrorMessage(err));
@@ -758,6 +1139,7 @@ export function KaraokeSimpleUploadScreen({
   }
 
   function resetForAnotherSong() {
+    pipelineRequestRef.current?.abort();
     setSelectedFile(null);
     setClassification(null);
     setAudioTypeOverride("AUTO");
@@ -768,7 +1150,11 @@ export function KaraokeSimpleUploadScreen({
     setStep1MaxGrade(5);
     setStep1LyricsText("");
     setAutoTranscribe(true);
+    setEnableBackgroundProcessing(true);
     setImported(null);
+    setProcessingStatus(null);
+    setProcessingBusy(false);
+    setProcessingReviewConfirmed(false);
     setPreview(null);
     setLyrics({ format_version: 1, lines: [] });
     setFlaggedLines([]);
@@ -776,6 +1162,8 @@ export function KaraokeSimpleUploadScreen({
     setTapSyncActive(false);
     setTapIndex(0);
     setTapStarts([]);
+    setSourceNote(defaultSourceNote);
+    setUsageNote(defaultUsageNote);
     setRightsConfirmed(false);
     setChildSafeConfirmed(false);
     setPublishedDetail(null);
@@ -788,9 +1176,9 @@ export function KaraokeSimpleUploadScreen({
   return (
     <div className="grid gap-6">
       <AdminPageHeader
-        eyebrow="Quản trị Karaoke · Chế độ đơn giản"
-        title="Thêm nhanh 1 file MP3"
-        description="Thả 1 file MP3 để tự động tách tên bài, tác giả, ảnh bìa, phân loại giọng hát/nhạc nền và tạo bản nháp karaoke trong vài giây."
+        eyebrow={t("karaoke.simpleUpload.eyebrow")}
+        title={t("karaoke.simpleUpload.title")}
+        description={t("karaoke.simpleUpload.description")}
         actions={
           <div className="flex flex-wrap gap-2">
             {onSwitchAdvanced ? (
@@ -800,7 +1188,7 @@ export function KaraokeSimpleUploadScreen({
                 className="sm:w-auto"
                 onClick={() => onSwitchAdvanced(imported?.song_id)}
               >
-                Chỉnh sửa nâng cao
+                {t("karaoke.simpleUpload.advancedEditBtn")}
               </Button>
             ) : (
               <ButtonLink
@@ -813,7 +1201,7 @@ export function KaraokeSimpleUploadScreen({
                 size="compact"
                 className="sm:w-auto"
               >
-                Chỉnh sửa nâng cao
+                {t("karaoke.simpleUpload.advancedEditBtn")}
               </ButtonLink>
             )}
             {onSwitchWizard ? (
@@ -823,7 +1211,7 @@ export function KaraokeSimpleUploadScreen({
                 className="sm:w-auto"
                 onClick={onSwitchWizard}
               >
-                Tách giọng nâng cao
+                {t("karaoke.simpleUpload.wizardSwitchBtn")}
               </Button>
             ) : null}
             <ButtonLink
@@ -832,20 +1220,20 @@ export function KaraokeSimpleUploadScreen({
               size="compact"
               className="sm:w-auto"
             >
-              Về danh sách
+              {t("karaoke.simpleUpload.backToListBtn")}
             </ButtonLink>
           </div>
         }
       />
 
       <ol
-        aria-label="Các bước thêm karaoke nhanh"
+        aria-label={t("karaoke.simpleUpload.stepsAria")}
         className="grid gap-2 sm:grid-cols-3"
       >
         {[
-          { step: 1, label: "1. Chọn 1 file MP3" },
-          { step: 2, label: "2. Kiểm tra nhanh" },
-          { step: 3, label: "3. Xác nhận & Xuất bản" },
+          { step: 1, label: t("karaoke.simpleUpload.steps.step1") },
+          { step: 2, label: t("karaoke.simpleUpload.steps.step2") },
+          { step: 3, label: t("karaoke.simpleUpload.steps.step3") },
         ].map(({ step, label }) => {
           const active = currentStep === step;
           const completed = currentStep > step || Boolean(publishedDetail);
@@ -872,21 +1260,29 @@ export function KaraokeSimpleUploadScreen({
 
       {publishedDetail ? (
         <Card className="grid gap-4">
-          <StatusMessage tone="success" title="Đã xuất bản bài hát">
-            Bài hát <strong>{publishedDetail.published?.title ?? title}</strong>{" "}
-            đã sẵn sàng trong thư viện Karaoke cho học sinh lớp {minGrade}–
-            {maxGrade}.
+          <StatusMessage
+            tone="success"
+            title={t("karaoke.simpleUpload.publishedTitle")}
+          >
+            {t("karaoke.simpleUpload.publishedDescPrefix")}{" "}
+            <strong className="viread-learning-content" dir="ltr" lang="vi">
+              {publishedDetail.published?.title ?? title}
+            </strong>{" "}
+            {t("karaoke.simpleUpload.publishedDescSuffix", {
+              min: minGrade,
+              max: maxGrade,
+            })}
           </StatusMessage>
           <div className="flex flex-wrap gap-3">
             <Button className="sm:w-auto" onClick={resetForAnotherSong}>
-              Thêm bài hát khác
+              {t("karaoke.simpleUpload.addAnotherBtn")}
             </Button>
             <ButtonLink
               href="/admin/karaoke"
               variant="secondary"
               className="sm:w-auto"
             >
-              Về danh sách bài hát
+              {t("karaoke.simpleUpload.goToListBtn")}
             </ButtonLink>
           </div>
         </Card>
@@ -894,7 +1290,9 @@ export function KaraokeSimpleUploadScreen({
 
       {!imported && !publishedDetail ? (
         <Card className="grid gap-5">
-          <h2 className="text-xl font-extrabold">Bước 1 — Chọn 1 file MP3</h2>
+          <h2 className="text-xl font-extrabold">
+            {t("karaoke.simpleUpload.step1Heading")}
+          </h2>
 
           <div
             onDragOver={(e) => {
@@ -911,21 +1309,23 @@ export function KaraokeSimpleUploadScreen({
           >
             <p className="text-lg font-bold">
               {selectedFile
-                ? `Đã chọn: ${selectedFile.name}`
-                : "Kéo thả 1 file MP3 vào đây hoặc bấm để chọn"}
+                ? t("karaoke.simpleUpload.selectedFile", {
+                    name: selectedFile.name,
+                  })
+                : t("karaoke.simpleUpload.dropzonePrompt")}
             </p>
             <p className="text-sm text-muted">
-              Hỗ trợ MP3 tối đa 20 MiB (≤ 5 phút). Tự động đọc thẻ ID3 (tên, tác
-              giả, ảnh bìa, lời nhúng) và phân loại giọng hát ngay trên trình
-              duyệt.
+              {t("karaoke.simpleUpload.dropzoneHint")}
             </p>
             <div className="mx-auto">
               <label className="inline-flex min-h-12 cursor-pointer items-center justify-center rounded-control bg-white px-5 py-2.5 font-bold text-primary-hover shadow-sm ring-1 ring-border hover:bg-sky">
                 <span>
-                  {selectedFile ? "Chọn file MP3 khác" : "Chọn file nhạc MP3"}
+                  {selectedFile
+                    ? t("karaoke.simpleUpload.chooseOtherMp3Btn")
+                    : t("karaoke.simpleUpload.chooseMp3Btn")}
                 </span>
                 <input
-                  aria-label="Chọn file nhạc MP3"
+                  aria-label={t("karaoke.simpleUpload.chooseMp3Aria")}
                   type="file"
                   accept=".mp3,audio/mpeg"
                   className="sr-only"
@@ -946,8 +1346,10 @@ export function KaraokeSimpleUploadScreen({
                     className="inline-flex items-center rounded-md bg-sky px-3 py-1 text-sm font-bold text-primary-hover"
                   >
                     {classifying
-                      ? "Đang phân tích loại nhạc…"
-                      : AUDIO_TYPE_LABELS[effectiveAudioType]}
+                      ? t("karaoke.simpleUpload.analyzingAudio")
+                      : t(
+                          `karaoke.simpleUpload.audioTypes.${effectiveAudioType}`,
+                        )}
                   </span>
                   {classification?.estimatedBpm ? (
                     <span className="inline-flex items-center rounded-md bg-success-surface px-2.5 py-1 text-sm font-semibold text-success-ink">
@@ -956,9 +1358,9 @@ export function KaraokeSimpleUploadScreen({
                   ) : null}
                 </div>
                 <label className="flex items-center gap-2 text-sm font-semibold">
-                  Loại nhạc:
+                  {t("karaoke.simpleUpload.audioTypeLabel")}
                   <select
-                    aria-label="Chọn loại nhạc"
+                    aria-label={t("karaoke.simpleUpload.audioTypeAria")}
                     className="min-h-10 rounded-control border border-border bg-white px-2.5 py-1 text-sm"
                     value={audioTypeOverride}
                     onChange={(e) => {
@@ -969,10 +1371,14 @@ export function KaraokeSimpleUploadScreen({
                       }
                     }}
                   >
-                    <option value="AUTO">Tự động nhận diện</option>
-                    <option value="VOCAL_FULL">Có giọng hát (Vocal)</option>
+                    <option value="AUTO">
+                      {t("karaoke.simpleUpload.audioTypes.AUTO")}
+                    </option>
+                    <option value="VOCAL_FULL">
+                      {t("karaoke.simpleUpload.audioTypes.VOCAL_FULL")}
+                    </option>
                     <option value="INSTRUMENTAL_ONLY">
-                      Nhạc nền không lời (Instrumental)
+                      {t("karaoke.simpleUpload.audioTypes.INSTRUMENTAL_ONLY")}
                     </option>
                   </select>
                 </label>
@@ -983,13 +1389,17 @@ export function KaraokeSimpleUploadScreen({
                 </p>
               ) : null}
               <label className="grid gap-1.5 text-sm font-bold">
-                Tên bài hát gợi ý (tự đọc từ file / thẻ ID3)
+                {t("karaoke.simpleUpload.suggestedTitleLabel")}
                 <input
-                  aria-label="Tên bài hát gợi ý"
-                  className={karaokeInputClass}
+                  aria-label={t("karaoke.simpleUpload.suggestedTitleAria")}
+                  className={`${karaokeInputClass} viread-learning-content`}
+                  dir="ltr"
+                  lang="vi"
                   maxLength={200}
                   value={step1Title}
-                  placeholder="Để trống để máy chủ tự đọc từ thẻ ID3"
+                  placeholder={t(
+                    "karaoke.simpleUpload.suggestedTitlePlaceholder",
+                  )}
                   onChange={(e) => {
                     setStep1TitleDirty(true);
                     setStep1Title(e.target.value.normalize("NFC"));
@@ -1001,17 +1411,19 @@ export function KaraokeSimpleUploadScreen({
 
           <details className="rounded-control border border-border bg-white p-4">
             <summary className="cursor-pointer font-bold text-primary-hover">
-              Tùy chọn nhanh: dán sẵn lời / tải file .lrc / chọn lớp & tác giả
+              {t("karaoke.simpleUpload.step1OptionsSummary")}
             </summary>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <label className="grid gap-1.5 font-bold">
-                Tác giả / ca sĩ (tùy chọn)
+                {t("karaoke.simpleUpload.step1AuthorLabel")}
                 <input
-                  aria-label="Tác giả (tùy chọn)"
-                  className={karaokeInputClass}
+                  aria-label={t("karaoke.simpleUpload.step1AuthorAria")}
+                  className={`${karaokeInputClass} viread-learning-content`}
+                  dir="ltr"
+                  lang="vi"
                   maxLength={200}
                   value={step1Author}
-                  placeholder="Tự đọc từ thẻ ID3 nếu có"
+                  placeholder={t("karaoke.simpleUpload.step1AuthorPlaceholder")}
                   onChange={(e) =>
                     setStep1Author(e.target.value.normalize("NFC"))
                   }
@@ -1019,31 +1431,31 @@ export function KaraokeSimpleUploadScreen({
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <label className="grid gap-1.5 font-bold">
-                  Từ lớp
+                  {t("karaoke.simpleUpload.minGradeLabel")}
                   <select
-                    aria-label="Từ lớp bước 1"
+                    aria-label={t("karaoke.simpleUpload.step1MinGradeAria")}
                     className={karaokeInputClass}
                     value={step1MinGrade}
                     onChange={(e) => setStep1MinGrade(Number(e.target.value))}
                   >
                     {[1, 2, 3, 4, 5].map((grade) => (
                       <option key={grade} value={grade}>
-                        Lớp {grade}
+                        {t("karaoke.simpleUpload.gradeOption", { grade })}
                       </option>
                     ))}
                   </select>
                 </label>
                 <label className="grid gap-1.5 font-bold">
-                  Đến lớp
+                  {t("karaoke.simpleUpload.maxGradeLabel")}
                   <select
-                    aria-label="Đến lớp bước 1"
+                    aria-label={t("karaoke.simpleUpload.step1MaxGradeAria")}
                     className={karaokeInputClass}
                     value={step1MaxGrade}
                     onChange={(e) => setStep1MaxGrade(Number(e.target.value))}
                   >
                     {[1, 2, 3, 4, 5].map((grade) => (
                       <option key={grade} value={grade}>
-                        Lớp {grade}
+                        {t("karaoke.simpleUpload.gradeOption", { grade })}
                       </option>
                     ))}
                   </select>
@@ -1052,12 +1464,12 @@ export function KaraokeSimpleUploadScreen({
               <div className="grid gap-2 md:col-span-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <label htmlFor="simple-step1-lyrics" className="font-bold">
-                    Lời bài hát hoặc nội dung .lrc (tùy chọn)
+                    {t("karaoke.simpleUpload.step1LyricsLabel")}
                   </label>
                   <label className="cursor-pointer text-sm font-semibold text-primary-hover underline">
-                    Tải nhanh file .lrc / .txt
+                    {t("karaoke.simpleUpload.uploadLyricsQuickBtn")}
                     <input
-                      aria-label="Tải nhanh file lời bước 1"
+                      aria-label={t("karaoke.simpleUpload.step1LyricsFileAria")}
                       type="file"
                       accept=".lrc,.txt,text/plain"
                       className="sr-only"
@@ -1072,10 +1484,12 @@ export function KaraokeSimpleUploadScreen({
                 </div>
                 <textarea
                   id="simple-step1-lyrics"
-                  aria-label="Lời bài hát hoặc nội dung .lrc (tùy chọn)"
+                  aria-label={t("karaoke.simpleUpload.step1LyricsLabel")}
                   rows={4}
-                  className={karaokeInputClass}
-                  placeholder="[00:01.00] Cháu lên ba cháu đi mẫu giáo..."
+                  className={`${karaokeInputClass} viread-learning-content`}
+                  dir="ltr"
+                  lang="vi"
+                  placeholder={t("karaoke.simpleUpload.step1LyricsPlaceholder")}
                   value={step1LyricsText}
                   onChange={(e) => setStep1LyricsText(e.target.value)}
                 />
@@ -1087,8 +1501,17 @@ export function KaraokeSimpleUploadScreen({
                   disabled={effectiveAudioType === "INSTRUMENTAL_ONLY"}
                   onChange={(e) => setAutoTranscribe(e.target.checked)}
                 />
-                Tự nhận diện lời miễn phí (Groq Whisper) nếu MP3 có giọng hát
-                nhưng không có lời nhúng
+                {t("karaoke.simpleUpload.autoTranscribeLabel")}
+              </label>
+              <label className="flex items-center gap-2 text-sm font-semibold md:col-span-2">
+                <input
+                  type="checkbox"
+                  checked={enableBackgroundProcessing}
+                  onChange={(e) =>
+                    setEnableBackgroundProcessing(e.target.checked)
+                  }
+                />
+                {t("karaoke.simpleUpload.enableBackgroundProcessingLabel")}
               </label>
             </div>
           </details>
@@ -1100,7 +1523,7 @@ export function KaraokeSimpleUploadScreen({
               className="sm:w-auto"
               onClick={() => void handleAutoCreate()}
             >
-              Tự động tạo karaoke
+              {t("karaoke.simpleUpload.autoCreateBtn")}
             </Button>
           </div>
         </Card>
@@ -1108,25 +1531,34 @@ export function KaraokeSimpleUploadScreen({
 
       {imported && !publishedDetail ? (
         <>
-          <Card aria-label="Bước 2: Kiểm tra nhanh" className="grid gap-5">
+          <Card
+            aria-label={t("karaoke.simpleUpload.step2Aria")}
+            className="grid gap-5"
+          >
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="grid gap-1">
                 <h2 className="text-xl font-extrabold">
-                  Bước 2 — Kiểm tra nhanh (Review by Exception)
+                  {t("karaoke.simpleUpload.step2Heading")}
                 </h2>
                 <div className="flex flex-wrap items-center gap-2 pt-1">
                   <span className="rounded-md bg-sky px-2.5 py-1 text-sm font-bold text-primary-hover">
-                    {AUDIO_TYPE_LABELS[imported.audio_type]}
+                    {t(
+                      `karaoke.simpleUpload.audioTypes.${imported.audio_type}`,
+                    )}
                   </span>
                   <span className="rounded-md bg-sky px-2.5 py-1 text-sm font-semibold">
-                    {LYRICS_SOURCE_LABELS[imported.lyrics_source]}
+                    {t(
+                      `karaoke.simpleUpload.lyricsSources.${imported.lyrics_source}`,
+                    )}
                   </span>
                   <span className="rounded-md border border-border px-2.5 py-1 text-sm font-semibold tabular-nums">
-                    Thời lượng: {formatKaraokeTime(imported.duration_ms)}
+                    {t("karaoke.simpleUpload.durationBadge", {
+                      duration: formatKaraokeTime(imported.duration_ms),
+                    })}
                   </span>
                   {imported.has_cover ? (
                     <span className="rounded-md bg-success-surface px-2.5 py-1 text-sm font-semibold text-success-ink">
-                      Đã tự tách ảnh bìa MP3
+                      {t("karaoke.simpleUpload.extractedCoverBadge")}
                     </span>
                   ) : null}
                 </div>
@@ -1134,15 +1566,93 @@ export function KaraokeSimpleUploadScreen({
               {preview?.cover_url ? (
                 <img
                   src={preview.cover_url}
-                  alt={`Ảnh bìa ${title}`}
+                  alt={t("karaoke.simpleUpload.coverAlt", { title })}
                   className="size-20 rounded-control border border-border object-cover"
                 />
               ) : null}
             </div>
 
+            <div
+              data-testid="simple-pipeline-card"
+              className="grid gap-3 rounded-control border border-border bg-white p-4"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    data-testid="simple-pipeline-lifecycle"
+                    className="rounded-md bg-sky px-2.5 py-1 text-xs font-extrabold text-primary-hover"
+                  >
+                    {t(`karaoke.simpleUpload.lifecycle.${effectiveLifecycle}`)}
+                  </span>
+                  <span className="rounded-md border border-border px-2.5 py-1 text-xs font-semibold text-muted">
+                    {effectiveWorkerOnline
+                      ? t("karaoke.simpleUpload.workerOnlineBadge")
+                      : t("karaoke.simpleUpload.workerOfflineBadge")}
+                  </span>
+                  {processingStatus?.has_beat_grid ? (
+                    <span className="rounded-md bg-success-surface px-2.5 py-1 text-xs font-bold text-success-ink">
+                      {t("karaoke.simpleUpload.beatGridReady")}
+                      {effectiveBpm ? ` · ${effectiveBpm} BPM` : ""}
+                    </span>
+                  ) : null}
+                  {processingStatus?.has_pitch_contour ? (
+                    <span className="rounded-md bg-success-surface px-2.5 py-1 text-xs font-bold text-success-ink">
+                      {t("karaoke.simpleUpload.pitchContourReady")}
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {processingStatus?.can_apply && processingStatus.job_id ? (
+                    <Button
+                      size="compact"
+                      className="sm:w-auto"
+                      disabled={processingBusy}
+                      isLoading={processingBusy}
+                      onClick={() => void handleApplyProcessingResult()}
+                    >
+                      {t("karaoke.simpleUpload.applyPipelineBtn")}
+                    </Button>
+                  ) : typeof importService.startSimpleProcessing ===
+                      "function" &&
+                    !isPipelineRunning &&
+                    (effectiveWorkerOnline ||
+                      effectiveLifecycle === "FAILED") ? (
+                    <Button
+                      variant="secondary"
+                      size="compact"
+                      className="sm:w-auto"
+                      disabled={processingBusy}
+                      isLoading={processingBusy}
+                      onClick={() => void handleStartBackgroundProcessing()}
+                    >
+                      {effectiveLifecycle === "FAILED"
+                        ? t("karaoke.simpleUpload.retryPipelineBtn")
+                        : t("karaoke.simpleUpload.startPipelineBtn")}
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+
+              {processingStatus?.safe_error_code ? (
+                <p className="text-sm font-semibold text-warning">
+                  {t(
+                    `karaoke.processing.errorHints.${processingStatus.safe_error_code}`,
+                  )}
+                </p>
+              ) : processingStatus?.guidance_vi ||
+                imported.processing_notice ? (
+                <p className="text-sm text-muted">
+                  {processingStatus?.guidance_vi ?? imported.processing_notice}
+                </p>
+              ) : null}
+            </div>
+
             {playbackUrl ? (
               <div className="grid gap-2 rounded-control border border-border bg-sky/40 p-3">
-                <p className="text-sm font-bold">Nghe thử bài hát</p>
+                <p className="text-sm font-bold">
+                  {t("karaoke.simpleUpload.audioPreviewTitle")}
+                </p>
                 <audio
                   ref={audioRef}
                   controls
@@ -1155,18 +1665,18 @@ export function KaraokeSimpleUploadScreen({
             {lyrics.lines.length === 0 ? (
               <div className="grid gap-3 rounded-control border-2 border-warning bg-warning-surface/40 p-4">
                 <p className="font-bold">
-                  Chưa có lời bài hát — dán lời hoặc chọn file .lrc ngay trong 1
-                  bước:
+                  {t("karaoke.simpleUpload.missingLyricsPrompt")}
                 </p>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-sm text-muted">
-                    Hỗ trợ lời thường (mỗi câu 1 dòng) hoặc định dạng .lrc
-                    [mm:ss.xx].
+                    {t("karaoke.simpleUpload.missingLyricsHint")}
                   </span>
                   <label className="cursor-pointer text-sm font-bold text-primary-hover underline">
-                    Chọn file .lrc / .txt
+                    {t("karaoke.simpleUpload.chooseLyricsFileBtn")}
                     <input
-                      aria-label="Chọn file lời bổ sung"
+                      aria-label={t(
+                        "karaoke.simpleUpload.chooseLyricsFileAria",
+                      )}
                       type="file"
                       accept=".lrc,.txt,text/plain"
                       className="sr-only"
@@ -1180,10 +1690,12 @@ export function KaraokeSimpleUploadScreen({
                   </label>
                 </div>
                 <textarea
-                  aria-label="Dán lời bài hát hoặc .lrc"
+                  aria-label={t("karaoke.simpleUpload.pasteLyricsAria")}
                   rows={5}
-                  className={karaokeInputClass}
-                  placeholder="Cháu lên ba cháu đi mẫu giáo&#10;Cô thương cháu vì cháu không khóc nhè"
+                  className={`${karaokeInputClass} viread-learning-content`}
+                  dir="ltr"
+                  lang="vi"
+                  placeholder={t("karaoke.simpleUpload.pasteLyricsPlaceholder")}
                   value={inlineLyricsInput}
                   onChange={(e) => setInlineLyricsInput(e.target.value)}
                 />
@@ -1192,19 +1704,20 @@ export function KaraokeSimpleUploadScreen({
                   disabled={!inlineLyricsInput.trim()}
                   onClick={handleApplyInlineLyrics}
                 >
-                  Áp dụng lời & chia mốc nhanh
+                  {t("karaoke.simpleUpload.applyInlineLyricsBtn")}
                 </Button>
               </div>
             ) : (
               <div className="grid gap-4">
                 {flaggedLines.length > 0 ? (
                   <div
-                    aria-label="Các dòng cần kiểm tra nhanh"
+                    aria-label={t("karaoke.simpleUpload.flaggedLinesAria")}
                     className="grid gap-3 rounded-control border border-warning bg-warning-surface/40 p-4"
                   >
                     <p className="font-bold">
-                      Có {flaggedLines.length} dòng cần kiểm tra nhanh (Review
-                      by Exception):
+                      {t("karaoke.simpleUpload.flaggedLinesTitle", {
+                        count: flaggedLines.length,
+                      })}
                     </p>
                     <ul className="grid gap-3">
                       {flaggedLines.map((flag) => {
@@ -1218,11 +1731,16 @@ export function KaraokeSimpleUploadScreen({
                           >
                             <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
                               <span className="font-bold">
-                                Dòng {flag.line_index + 1} ·{" "}
+                                {t("karaoke.simpleUpload.flaggedLinePrefix", {
+                                  number: flag.line_index + 1,
+                                })}{" "}
+                                ·{" "}
                                 <span className="text-warning">
                                   {flag.flag === "NEEDS_REVIEW"
-                                    ? "Cần rà lại chính tả"
-                                    : "Cần kiểm tra nhịp"}
+                                    ? t("karaoke.simpleUpload.flagNeedsReview")
+                                    : t(
+                                        "karaoke.simpleUpload.flagNeedsTimingCheck",
+                                      )}
                                 </span>
                               </span>
                               <div className="flex items-center gap-2">
@@ -1238,14 +1756,19 @@ export function KaraokeSimpleUploadScreen({
                                     className="sm:w-auto"
                                     onClick={() => seekAndPlay(line.start_ms)}
                                   >
-                                    Nghe đoạn này
+                                    {t("karaoke.simpleUpload.playSegmentBtn")}
                                   </Button>
                                 ) : null}
                               </div>
                             </div>
                             <input
-                              aria-label={`Sửa nhanh dòng ${flag.line_index + 1}`}
-                              className={karaokeInputClass}
+                              aria-label={t(
+                                "karaoke.simpleUpload.quickEditLineAria",
+                                { number: flag.line_index + 1 },
+                              )}
+                              className={`${karaokeInputClass} viread-learning-content`}
+                              dir="ltr"
+                              lang="vi"
                               maxLength={300}
                               value={line?.text ?? flag.text}
                               onChange={(e) =>
@@ -1260,8 +1783,9 @@ export function KaraokeSimpleUploadScreen({
                   </div>
                 ) : (
                   <StatusMessage tone="success">
-                    Tất cả {lyrics.lines.length} dòng lời đã có mốc thời gian
-                    hợp lệ và không có dòng nào bị đánh dấu bất thường.
+                    {t("karaoke.simpleUpload.allLinesCleanStatus", {
+                      count: lyrics.lines.length,
+                    })}
                   </StatusMessage>
                 )}
 
@@ -1269,12 +1793,10 @@ export function KaraokeSimpleUploadScreen({
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <p className="font-bold">
-                        Căn nhịp 1 lượt bằng phím Space (không cần chỉnh từng
-                        mili-giây)
+                        {t("karaoke.simpleUpload.tapSyncTitle")}
                       </p>
                       <p className="text-sm text-muted">
-                        Tùy chọn: nghe bài hát 1 lượt và nhấn Space ở đầu mỗi
-                        câu để cập nhật mốc chuẩn tức thì.
+                        {t("karaoke.simpleUpload.tapSyncHint")}
                       </p>
                     </div>
                     {!tapSyncActive ? (
@@ -1284,7 +1806,7 @@ export function KaraokeSimpleUploadScreen({
                         className="sm:w-auto"
                         onClick={startTapSync}
                       >
-                        Căn nhịp nhanh bằng phím Space
+                        {t("karaoke.simpleUpload.startTapSyncBtn")}
                       </Button>
                     ) : (
                       <Button
@@ -1293,7 +1815,7 @@ export function KaraokeSimpleUploadScreen({
                         className="sm:w-auto"
                         onClick={() => setTapSyncActive(false)}
                       >
-                        Đóng chế độ gõ nhịp
+                        {t("karaoke.simpleUpload.closeTapSyncBtn")}
                       </Button>
                     )}
                   </div>
@@ -1303,20 +1825,26 @@ export function KaraokeSimpleUploadScreen({
                       ref={tapRegionRef}
                       tabIndex={0}
                       role="region"
-                      aria-label="Vùng gõ nhịp Space 1 lượt"
+                      aria-label={t("karaoke.simpleUpload.tapSyncRegionAria")}
                       onKeyDown={handleTapRegionKeyDown}
                       className="grid gap-3 rounded-control border-2 border-primary bg-sky p-4 focus-visible:outline-3 focus-visible:outline-primary"
                     >
                       <p className="text-sm font-bold text-primary-hover">
-                        Câu {tapIndex + 1} / {lyrics.lines.length} — Nhấn phím
-                        Space khi bắt đầu hát câu này:
+                        {t("karaoke.simpleUpload.tapSyncProgress", {
+                          current: tapIndex + 1,
+                          total: lyrics.lines.length,
+                        })}
                       </p>
-                      <p className="text-xl font-extrabold">
+                      <p
+                        className="viread-learning-content text-xl font-extrabold"
+                        dir="ltr"
+                        lang="vi"
+                      >
                         “{lyrics.lines[tapIndex].text}”
                       </p>
                       <div className="flex flex-wrap gap-2">
                         <Button className="sm:w-auto" onClick={recordTap}>
-                          Gõ nhịp (Space) — Dòng tiếp theo
+                          {t("karaoke.simpleUpload.tapNextLineBtn")}
                         </Button>
                         <Button
                           variant="secondary"
@@ -1324,7 +1852,7 @@ export function KaraokeSimpleUploadScreen({
                           disabled={tapIndex === 0}
                           onClick={undoTap}
                         >
-                          Hoàn tác 1 dòng
+                          {t("karaoke.simpleUpload.undoTapBtn")}
                         </Button>
                       </div>
                     </div>
@@ -1333,7 +1861,9 @@ export function KaraokeSimpleUploadScreen({
 
                 <details className="rounded-control border border-border bg-white p-3">
                   <summary className="cursor-pointer text-sm font-bold text-primary-hover">
-                    Xem / sửa toàn bộ lời ({lyrics.lines.length} dòng)
+                    {t("karaoke.simpleUpload.editAllLyricsSummary", {
+                      count: lyrics.lines.length,
+                    })}
                   </summary>
                   <ul className="mt-3 grid gap-2">
                     {lyrics.lines.map((line, idx) => (
@@ -1345,8 +1875,12 @@ export function KaraokeSimpleUploadScreen({
                           #{idx + 1} · {formatLyricTimestamp(line.start_ms)}
                         </span>
                         <input
-                          aria-label={`Lời dòng ${idx + 1}`}
-                          className={karaokeInputClass}
+                          aria-label={t("karaoke.simpleUpload.lineTextAria", {
+                            number: idx + 1,
+                          })}
+                          className={`${karaokeInputClass} viread-learning-content`}
+                          dir="ltr"
+                          lang="vi"
                           maxLength={300}
                           value={line.text}
                           onChange={(e) =>
@@ -1362,68 +1896,72 @@ export function KaraokeSimpleUploadScreen({
           </Card>
 
           <Card
-            aria-label="Bước 3: Xác nhận an toàn và xuất bản"
+            aria-label={t("karaoke.simpleUpload.step3Aria")}
             className="grid gap-5"
           >
             <h2 className="text-xl font-extrabold">
-              Bước 3 — Xác nhận an toàn & Xuất bản
+              {t("karaoke.simpleUpload.step3Heading")}
             </h2>
 
             <div className="grid gap-4 md:grid-cols-2">
               <label className="grid gap-1.5 font-bold">
-                Tên bài hát
+                {t("karaoke.simpleUpload.songTitleLabel")}
                 <input
-                  aria-label="Tên bài hát"
-                  className={karaokeInputClass}
+                  aria-label={t("karaoke.simpleUpload.songTitleLabel")}
+                  className={`${karaokeInputClass} viread-learning-content`}
+                  dir="ltr"
+                  lang="vi"
                   maxLength={200}
                   value={title}
                   onChange={(e) => setTitle(e.target.value.normalize("NFC"))}
                 />
               </label>
               <label className="grid gap-1.5 font-bold">
-                Tác giả / người thể hiện
+                {t("karaoke.simpleUpload.songAuthorLabel")}
                 <input
-                  aria-label="Tác giả / người thể hiện"
-                  className={karaokeInputClass}
+                  aria-label={t("karaoke.simpleUpload.songAuthorLabel")}
+                  className={`${karaokeInputClass} viread-learning-content`}
+                  dir="ltr"
+                  lang="vi"
                   maxLength={200}
                   value={author}
                   onChange={(e) => setAuthor(e.target.value.normalize("NFC"))}
                 />
               </label>
               <label className="grid gap-1.5 font-bold">
-                Từ lớp
+                {t("karaoke.simpleUpload.minGradeLabel")}
                 <select
-                  aria-label="Từ lớp"
+                  aria-label={t("karaoke.simpleUpload.minGradeLabel")}
                   className={karaokeInputClass}
                   value={minGrade}
                   onChange={(e) => setMinGrade(Number(e.target.value))}
                 >
                   {[1, 2, 3, 4, 5].map((grade) => (
                     <option key={grade} value={grade}>
-                      Lớp {grade}
+                      {t("karaoke.simpleUpload.gradeOption", { grade })}
                     </option>
                   ))}
                 </select>
               </label>
               <label className="grid gap-1.5 font-bold">
-                Đến lớp
+                {t("karaoke.simpleUpload.maxGradeLabel")}
                 <select
-                  aria-label="Đến lớp"
+                  aria-label={t("karaoke.simpleUpload.maxGradeLabel")}
                   className={karaokeInputClass}
                   value={maxGrade}
                   onChange={(e) => setMaxGrade(Number(e.target.value))}
                 >
                   {[1, 2, 3, 4, 5].map((grade) => (
                     <option key={grade} value={grade}>
-                      Lớp {grade}
+                      {t("karaoke.simpleUpload.gradeOption", { grade })}
                     </option>
                   ))}
                 </select>
               </label>
               <label className="grid gap-1.5 font-bold">
-                Nguồn nhạc và lời
+                {t("karaoke.simpleUpload.sourceNoteLabel")}
                 <input
-                  aria-label="Nguồn nhạc và lời"
+                  aria-label={t("karaoke.simpleUpload.sourceNoteLabel")}
                   className={karaokeInputClass}
                   maxLength={1000}
                   value={sourceNote}
@@ -1433,9 +1971,9 @@ export function KaraokeSimpleUploadScreen({
                 />
               </label>
               <label className="grid gap-1.5 font-bold">
-                Quyền sử dụng nội dung
+                {t("karaoke.simpleUpload.usageNoteLabel")}
                 <input
-                  aria-label="Quyền sử dụng nội dung"
+                  aria-label={t("karaoke.simpleUpload.usageNoteLabel")}
                   className={karaokeInputClass}
                   maxLength={1000}
                   value={usageNote}
@@ -1448,14 +1986,14 @@ export function KaraokeSimpleUploadScreen({
 
             {localTimingProblems.length > 0 ? (
               <StatusMessage tone="warning">
-                Cần hoàn thiện mốc thời gian trước khi xuất bản:{" "}
+                {t("karaoke.simpleUpload.timingProblemsPrefix")}{" "}
                 {localTimingProblems[0]}
               </StatusMessage>
             ) : null}
 
             <div className="grid gap-3 rounded-control border border-border bg-sky/40 p-4">
               <p className="text-sm font-extrabold">
-                Xác nhận bắt buộc trước khi xuất bản cho học sinh:
+                {t("karaoke.simpleUpload.complianceHeading")}
               </p>
               <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold">
                 <input
@@ -1463,7 +2001,7 @@ export function KaraokeSimpleUploadScreen({
                   checked={rightsConfirmed}
                   onChange={(e) => setRightsConfirmed(e.target.checked)}
                 />
-                Tôi xác nhận quyền sử dụng bài hát phù hợp
+                {t("karaoke.simpleUpload.rightsConfirmLabel")}
               </label>
               <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold">
                 <input
@@ -1471,8 +2009,20 @@ export function KaraokeSimpleUploadScreen({
                   checked={childSafeConfirmed}
                   onChange={(e) => setChildSafeConfirmed(e.target.checked)}
                 />
-                Tôi xác nhận nội dung phù hợp trẻ em lớp 1–5
+                {t("karaoke.simpleUpload.childSafeConfirmLabel")}
               </label>
+              {requiresProcessingReview ? (
+                <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={processingReviewConfirmed}
+                    onChange={(e) =>
+                      setProcessingReviewConfirmed(e.target.checked)
+                    }
+                  />
+                  {t("karaoke.simpleUpload.processingReviewConfirmLabel")}
+                </label>
+              ) : null}
             </div>
 
             <div className="flex flex-wrap gap-3">
@@ -1482,7 +2032,7 @@ export function KaraokeSimpleUploadScreen({
                 className="sm:w-auto"
                 onClick={() => void handleSimplePublish()}
               >
-                Xuất bản ngay
+                {t("karaoke.simpleUpload.publishBtn")}
               </Button>
               {onSwitchAdvanced ? (
                 <Button
@@ -1490,7 +2040,7 @@ export function KaraokeSimpleUploadScreen({
                   className="sm:w-auto"
                   onClick={() => onSwitchAdvanced(imported.song_id)}
                 >
-                  Mở trình chỉnh sửa nâng cao
+                  {t("karaoke.simpleUpload.openAdvancedEditorBtn")}
                 </Button>
               ) : (
                 <ButtonLink
@@ -1498,7 +2048,7 @@ export function KaraokeSimpleUploadScreen({
                   variant="secondary"
                   className="sm:w-auto"
                 >
-                  Mở trình chỉnh sửa nâng cao
+                  {t("karaoke.simpleUpload.openAdvancedEditorBtn")}
                 </ButtonLink>
               )}
             </div>

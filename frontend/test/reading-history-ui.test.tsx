@@ -216,6 +216,62 @@ describe("Reading history list", () => {
       await screen.findByRole("heading", { name: bookFixture.title });
     },
   );
+  it("deduplicates /book requests by book_id across multiple sessions on the same page", async () => {
+    const secondBookId = "33000000-0000-4000-8000-000000000099";
+    const secondBook = {
+      ...bookFixture,
+      id: secondBookId,
+      title: "Cuốn sách thứ hai",
+    };
+    const sessions = [
+      {
+        ...sessionSummaryFixture,
+        id: "12000000-0000-4000-8000-000000000101",
+        started_at: "2026-10-02T03:00:00Z",
+      },
+      {
+        ...sessionSummaryFixture,
+        id: "12000000-0000-4000-8000-000000000102",
+        started_at: "2026-10-02T01:00:00Z",
+      },
+      {
+        ...sessionSummaryFixture,
+        id: "12000000-0000-4000-8000-000000000103",
+        book_id: secondBookId,
+        started_at: "2026-10-01T01:00:00Z",
+      },
+    ];
+    fetchMock.mockImplementation(async (url: string) => {
+      const path = new URL(url).pathname;
+      if (path === "/reading/history") {
+        return Response.json({ sessions, next_cursor: null });
+      }
+      if (
+        path === "/reading/history/12000000-0000-4000-8000-000000000103/book"
+      ) {
+        return Response.json(secondBook);
+      }
+      return respond(url);
+    });
+
+    render(
+      <AppServicesProvider>
+        <SessionHistoryScreen page={1} requestedChildId={TEST_CHILD_ID} />
+      </AppServicesProvider>,
+    );
+
+    expect(
+      await screen.findAllByRole("heading", { name: bookFixture.title }),
+    ).toHaveLength(2);
+    expect(
+      screen.getByRole("heading", { name: secondBook.title }),
+    ).toBeInTheDocument();
+    const bookRequests = fetchMock.mock.calls.filter(([url]) =>
+      new URL(String(url)).pathname.endsWith("/book"),
+    );
+    // 3 sessions sharing 2 unique books -> only 2 /book requests!
+    expect(bookRequests).toHaveLength(2);
+  });
 });
 
 describe("Reading history detail", () => {

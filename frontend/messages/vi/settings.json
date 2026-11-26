@@ -1,0 +1,47 @@
+{
+  "account": {
+    "eyebrow": "Tài khoản ViRead",
+    "title": "Cài đặt tài khoản",
+    "description": "Quản lý thông tin tài khoản, bảo mật và các tùy chọn sử dụng ViRead.",
+    "infoHeading": "Thông tin tài khoản",
+    "displayName": "Tên hiển thị",
+    "email": "Email tài khoản",
+    "role": "Vai trò tài khoản",
+    "emailStatus": "Trạng thái email",
+    "manageProfile": "Quản lý hồ sơ",
+    "changePassword": "Đổi mật khẩu",
+    "emailVerificationHeading": "Email và xác minh",
+    "readingRemindersHeading": "Quản lý lịch nhắc đọc sách",
+    "readingRemindersDescription": "Điều chỉnh lịch đọc và các thông báo nhắc nhở cho bé.",
+    "loadingAria": "Đang tải cài đặt tài khoản",
+    "loadErrorBody": "ViRead chưa thể tải dữ liệu tài khoản. Ba mẹ vui lòng thử tải lại trang hoặc đăng nhập lại.",
+    "notUpdated": "Chưa cập nhật",
+    "pendingEmailNotice": "Email mới đang chờ xác nhận:",
+    "emailStatusPending": "Đang chờ xác nhận email mới",
+    "emailVerified": "Đã xác minh",
+    "emailUnverified": "Chưa xác minh",
+    "emailPendingBody": "Yêu cầu đổi email đang chờ xác minh. Email hiện tại vẫn là địa chỉ đã được xác nhận trước đó.",
+    "emailDefaultBody": "Để đổi email hoặc gửi lại email xác minh, hãy sử dụng chức năng hiện có trong hồ sơ phụ huynh.",
+    "openParentProfile": "Mở hồ sơ phụ huynh"
+  },
+  "password": {
+    "title": "Đổi mật khẩu",
+    "description": "Dùng mật khẩu riêng biệt để bảo vệ tài khoản của bạn.",
+    "minLengthHint": "Mật khẩu mới cần có ít nhất {min} ký tự.",
+    "noPasswordDescription": "Tài khoản này chưa có phương thức đăng nhập bằng mật khẩu. Ba mẹ có thể yêu cầu liên kết đặt mật khẩu qua email.",
+    "requestRecoveryButton": "Chưa có mật khẩu? Gửi liên kết đặt mật khẩu qua email",
+    "changedSuccess": "Mật khẩu đã được cập nhật. Phiên đăng nhập hiện tại vẫn được giữ nguyên.",
+    "currentInvalid": "Mật khẩu hiện tại chưa chính xác.",
+    "changeError": "Chưa thể đổi mật khẩu. Ba mẹ vui lòng kiểm tra kết nối và thử lại.",
+    "noEmailForRecovery": "Tài khoản chưa có email để gửi liên kết đặt mật khẩu.",
+    "recoverySent": "Supabase Auth đã tiếp nhận yêu cầu gửi liên kết đặt mật khẩu. Ba mẹ hãy kiểm tra hộp thư và thư rác.",
+    "recoveryError": "Chưa gửi được liên kết đặt mật khẩu. Ba mẹ vui lòng thử lại sau.",
+    "showFieldAria": "Hiện {label}",
+    "hideFieldAria": "Ẩn {label}"
+  },
+  "language": {
+    "heading": "Ngôn ngữ hiển thị",
+    "description": "Chọn ngôn ngữ cho giao diện điều hướng và cài đặt. Nội dung sách tiếng Việt vẫn được giữ nguyên.",
+    "learningContentNote": "Đổi ngôn ngữ chỉ thay đổi thanh điều hướng, nút bấm và cài đặt. Sách tiếng Việt, OCR, nhận diện giọng nói (STT) và giọng đọc mẫu (TTS) vẫn giữ nguyên tiếng Việt."
+  }
+}

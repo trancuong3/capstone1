@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import re
@@ -36,6 +37,7 @@ from app.database.config import (
 )
 from app.database.integrity import postgres_integrity_error_metadata
 from app.database.session import (
+    AsyncSessionLocal,
     DatabaseConcurrencyLimitExceeded,
     engine,
     probe_database_connection,
@@ -51,6 +53,7 @@ from app.services.ocr_inference_job_service import (
     is_heavy_workers_disabled,
     is_remote_ocr_mode,
     shutdown_post_ocr_tasks,
+    worker_heartbeat_ttl_seconds,
 )
 from app.services.runtime_diagnostics import (
     collect_ocr_health,
@@ -84,7 +87,11 @@ def run_active_viread_model_worker(stop_event: threading.Event):
     return _run_worker(stop_event)
 from app.services.admin_ocr_jobs import admin_ocr_correction_jobs
 from app.jobs.book_quality_worker import run_worker as run_book_quality_worker
-from app.jobs.admin_ai_workflow_worker import run_worker as run_admin_ai_workflow_worker
+from app.jobs.admin_ai_workflow_worker import (
+    run_worker as run_admin_ai_workflow_worker,
+    shutdown_scheduled_admin_ai_workflows,
+)
+from app.services.remote_ocr_wakeup import shutdown_remote_ocr_wakeup_tasks
 from app.jobs.parent_book_submission_worker import run_worker as run_parent_book_submission_worker
 from app.jobs.viread_ocr_outbox_worker import run_worker as run_viread_ocr_outbox_worker
 from app.jobs.viread_ocr_training_auto_worker import run_worker as run_viread_ocr_training_auto_worker
@@ -93,6 +100,82 @@ logger = logging.getLogger(__name__)
 
 
 _WORKER_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+
+
+def _optional_bool_env(name: str) -> bool | None:
+    """Parse an optional boolean environment override (None when unset/blank)."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+async def _prewarm_tts_public_voice_ids_nonfatal(*, timeout: float = 6.0) -> None:
+    """Best-effort startup prewarm of cached public TTS voice IDs without failing boot."""
+    prewarmed = False
+    try:
+        from app.services.tts_audio_cache_service import TtsAudioCacheService
+
+        raw_attr = inspect.getattr_static(
+            TtsAudioCacheService, "prewarm_cached_public_voice_ids", None
+        )
+        if raw_attr is not None:
+            is_instance_method = (
+                inspect.isfunction(raw_attr)
+                and next(iter(inspect.signature(raw_attr).parameters), None) == "self"
+            )
+            if is_instance_method:
+                async with AsyncSessionLocal() as prewarm_db:
+                    service = TtsAudioCacheService(prewarm_db)
+                    prewarm_fn = getattr(service, "prewarm_cached_public_voice_ids")
+                    sig = inspect.signature(prewarm_fn)
+                    accepts_timeout = "timeout" in sig.parameters or any(
+                        p.kind == inspect.Parameter.VAR_KEYWORD
+                        for p in sig.parameters.values()
+                    )
+                    if accepts_timeout:
+                        await prewarm_fn(timeout=timeout)
+                    else:
+                        await prewarm_fn()
+            else:
+                prewarm_fn = getattr(TtsAudioCacheService, "prewarm_cached_public_voice_ids")
+                sig = inspect.signature(prewarm_fn)
+                accepts_timeout = "timeout" in sig.parameters or any(
+                    p.kind == inspect.Parameter.VAR_KEYWORD
+                    for p in sig.parameters.values()
+                )
+                if accepts_timeout:
+                    await prewarm_fn(timeout=timeout)
+                else:
+                    await prewarm_fn()
+            prewarmed = True
+    except Exception as exc:
+        log_diagnostic(
+            logger,
+            logging.WARNING,
+            event="tts_cache_voice_ids_prewarm_failed",
+            stage="lifespan_startup",
+            database_error_type=type(exc).__name__,
+        )
+
+    if not prewarmed:
+        try:
+            from app.api.routes.voice_studio import refresh_cached_public_voice_ids
+
+            await refresh_cached_public_voice_ids(timeout=timeout)
+        except Exception as exc:
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="tts_cache_voice_ids_prewarm_failed",
+                stage="lifespan_startup",
+                database_error_type=type(exc).__name__,
+            )
 
 
 def _background_worker_startup_delay_seconds() -> float:
@@ -195,6 +278,7 @@ async def _shutdown_subprocess(
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Start lightweight durable workers; OCR models load only on OCR requests."""
+    startup_db_probe_task: asyncio.Task[object] | None = None
     if APP_ENVIRONMENT != "test":
         app_diag_logger = logging.getLogger("app")
         if app_diag_logger.level == logging.NOTSET:
@@ -206,29 +290,64 @@ async def lifespan(_app: FastAPI):
             )
             app_diag_logger.addHandler(diag_handler)
 
-        db_probe = await probe_database_connection(
-            timeout=min(5.0, DATABASE_CONNECT_TIMEOUT)
-        )
-        log_diagnostic(
-            logger,
-            logging.INFO if db_probe["ok"] else logging.WARNING,
-            event=(
-                "database_startup_probe_succeeded"
-                if db_probe["ok"]
-                else "database_startup_probe_failed"
-            ),
-            stage="lifespan_startup",
-            dns_resolved=db_probe["dns_resolved"],
-            ssl_enabled=db_probe["ssl_enabled"],
-            pool_class=db_probe["pool_class"],
-            pooler_mode=db_probe["pooler_mode"],
-            latency_ms=db_probe["latency_ms"],
-            database_error_type=db_probe["error_type"],
+        async def _run_startup_db_probe() -> None:
+            try:
+                db_probe = await probe_database_connection(
+                    timeout=min(5.0, DATABASE_CONNECT_TIMEOUT)
+                )
+                log_diagnostic(
+                    logger,
+                    logging.INFO if db_probe["ok"] else logging.WARNING,
+                    event=(
+                        "database_startup_probe_succeeded"
+                        if db_probe["ok"]
+                        else "database_startup_probe_failed"
+                    ),
+                    stage="lifespan_startup",
+                    dns_resolved=db_probe["dns_resolved"],
+                    ssl_enabled=db_probe["ssl_enabled"],
+                    pool_class=db_probe["pool_class"],
+                    pooler_mode=db_probe["pooler_mode"],
+                    latency_ms=db_probe["latency_ms"],
+                    database_error_type=db_probe["error_type"],
+                )
+                if db_probe["ok"]:
+                    await _prewarm_tts_public_voice_ids_nonfatal(timeout=6.0)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="database_startup_probe_failed",
+                    stage="lifespan_startup",
+                    database_error_type=type(exc).__name__,
+                )
+
+        # Non-blocking startup probe so Uvicorn binds its HTTP port immediately on cold boot.
+        startup_db_probe_task = asyncio.create_task(
+            _run_startup_db_probe(), name="startup_db_probe"
         )
 
+    heavy_workers_disabled = is_heavy_workers_disabled()
+    remote_ocr_mode = is_remote_ocr_mode()
+
+    lightweight_workers_override = _optional_bool_env("VIREAD_ENABLE_LIGHTWEIGHT_WORKERS")
+    lightweight_workers_enabled = (
+        lightweight_workers_override
+        if lightweight_workers_override is not None
+        else (not heavy_workers_disabled)
+    )
+    smart_studio_override = _optional_bool_env("VIREAD_ENABLE_SMART_STUDIO_WORKER")
+    smart_studio_worker_enabled = (
+        smart_studio_override
+        if smart_studio_override is not None
+        else (not heavy_workers_disabled)
+    )
+
     warmup_enabled = (
-        not is_remote_ocr_mode()
-        and not is_heavy_workers_disabled()
+        not remote_ocr_mode
+        and not heavy_workers_disabled
         and os.getenv("VIREAD_OCR_WARMUP_ENABLED", "false").strip().lower()
         in {"1", "true", "yes", "on"}
     )
@@ -243,8 +362,8 @@ async def lifespan(_app: FastAPI):
     active_model_worker = None
     if (
         APP_ENVIRONMENT != "test"
-        and not is_remote_ocr_mode()
-        and not is_heavy_workers_disabled()
+        and not remote_ocr_mode
+        and not heavy_workers_disabled
     ):
         active_model_worker = threading.Thread(
             target=run_active_viread_model_worker,
@@ -266,7 +385,7 @@ async def lifespan(_app: FastAPI):
     stop_parent_book_worker = asyncio.Event()
     parent_book_task = None
     worker_startup_delay = _background_worker_startup_delay_seconds()
-    if APP_ENVIRONMENT != "test" and not worker_disabled:
+    if APP_ENVIRONMENT != "test" and lightweight_workers_enabled and not worker_disabled:
         book_quality_task = asyncio.create_task(
             _run_worker_with_startup_delay(
                 run_book_quality_worker, stop_book_quality_worker, worker_startup_delay
@@ -276,7 +395,7 @@ async def lifespan(_app: FastAPI):
     workflow_worker_enabled = os.getenv(
         "ADMIN_AI_WORKFLOW_WORKER_ENABLED", "true"
     ).strip().lower() not in {"0", "false", "no", "off"}
-    if APP_ENVIRONMENT != "test" and workflow_worker_enabled:
+    if APP_ENVIRONMENT != "test" and lightweight_workers_enabled and workflow_worker_enabled:
         admin_ai_workflow_task = asyncio.create_task(
             _run_worker_with_startup_delay(
                 run_admin_ai_workflow_worker,
@@ -285,12 +404,10 @@ async def lifespan(_app: FastAPI):
             ),
             name="admin_ai_workflow_worker",
         )
-    parent_book_worker_enabled = (
-        not is_heavy_workers_disabled()
-        and os.getenv("PARENT_BOOK_WORKER_ENABLED", "true").strip().lower()
-        not in {"0", "false", "no", "off"}
-    )
-    if APP_ENVIRONMENT != "test" and parent_book_worker_enabled:
+    parent_book_worker_enabled = os.getenv(
+        "PARENT_BOOK_WORKER_ENABLED", "true"
+    ).strip().lower() not in {"0", "false", "no", "off"}
+    if APP_ENVIRONMENT != "test" and lightweight_workers_enabled and parent_book_worker_enabled:
         parent_book_task = asyncio.create_task(
             _run_worker_with_startup_delay(
                 run_parent_book_submission_worker,
@@ -299,14 +416,11 @@ async def lifespan(_app: FastAPI):
             ),
             name="parent_book_submission_worker",
         )
-    ocr_outbox_enabled = (
-        not is_remote_ocr_mode()
-        and not is_heavy_workers_disabled()
-        and os.getenv("VIREAD_OCR_OUTBOX_WORKER_ENABLED", "true").strip().lower()
-        not in {"0", "false", "no", "off"}
-    )
+    ocr_outbox_enabled = os.getenv(
+        "VIREAD_OCR_OUTBOX_WORKER_ENABLED", "true"
+    ).strip().lower() not in {"0", "false", "no", "off"}
     stop_viread_ocr_outbox = asyncio.Event()
-    if APP_ENVIRONMENT != "test" and ocr_outbox_enabled:
+    if APP_ENVIRONMENT != "test" and lightweight_workers_enabled and ocr_outbox_enabled:
         viread_outbox_task = asyncio.create_task(
             _run_worker_with_startup_delay(
                 run_viread_ocr_outbox_worker,
@@ -315,14 +429,11 @@ async def lifespan(_app: FastAPI):
             ),
             name="viread_ocr_verified_outbox_worker",
         )
-    training_worker_enabled = (
-        not is_remote_ocr_mode()
-        and not is_heavy_workers_disabled()
-        and os.getenv("VIREAD_OCR_AUTO_TRAINING_WORKER_ENABLED", "true").strip().lower()
-        not in {"0", "false", "no", "off"}
-    )
+    training_worker_enabled = os.getenv(
+        "VIREAD_OCR_AUTO_TRAINING_WORKER_ENABLED", "true"
+    ).strip().lower() not in {"0", "false", "no", "off"}
     stop_viread_training = asyncio.Event()
-    if APP_ENVIRONMENT != "test" and training_worker_enabled:
+    if APP_ENVIRONMENT != "test" and not heavy_workers_disabled and training_worker_enabled:
         viread_training_task = asyncio.create_task(
             _run_worker_with_startup_delay(
                 run_viread_ocr_training_auto_worker,
@@ -335,8 +446,8 @@ async def lifespan(_app: FastAPI):
     # Dedicated training is opt-in. The subprocess itself defaults to disabled;
     # starting it without an explicit opt-in wastes memory and fails on Render.
     local_training_enabled = (
-        not is_remote_ocr_mode()
-        and not is_heavy_workers_disabled()
+        not remote_ocr_mode
+        and not heavy_workers_disabled
         and os.getenv("VIREAD_LOCAL_TRAINING_ENABLED", "false").strip().lower()
         in {"1", "true", "yes", "on"}
     )
@@ -355,11 +466,33 @@ async def lifespan(_app: FastAPI):
 
     stop_local_voice_bootstrap = asyncio.Event()
     local_voice_bootstrap_task = None
-    if APP_ENVIRONMENT != "test":
+    if APP_ENVIRONMENT != "test" and not heavy_workers_disabled:
         arm_local_voice_worker_autostart(True)
         local_voice_bootstrap_task = asyncio.create_task(
             ensure_local_voice_worker_running(stop_event=stop_local_voice_bootstrap),
             name="local_voice_worker_bootstrap",
+        )
+
+    stop_smart_studio_worker = asyncio.Event()
+    smart_studio_worker_task = None
+    if APP_ENVIRONMENT != "test" and smart_studio_worker_enabled:
+        async def _run_smart_studio_worker() -> None:
+            if worker_startup_delay > 0:
+                try:
+                    await asyncio.wait_for(
+                        stop_smart_studio_worker.wait(),
+                        timeout=worker_startup_delay,
+                    )
+                    return
+                except asyncio.TimeoutError:
+                    pass
+            from app.services.global_tasks_service import run_smart_studio_worker_loop
+
+            await run_smart_studio_worker_loop(stop_smart_studio_worker)
+
+        smart_studio_worker_task = asyncio.create_task(
+            _run_smart_studio_worker(),
+            name="smart_studio_worker",
         )
 
     if _app is not None:
@@ -369,6 +502,7 @@ async def lifespan(_app: FastAPI):
             "book_quality": book_quality_task,
             "admin_ai_workflow": admin_ai_workflow_task,
             "parent_book_submission": parent_book_task,
+            "smart_studio": smart_studio_worker_task,
             "local_voice_bootstrap": local_voice_bootstrap_task,
             "active_model_registry": active_model_worker,
             "local_trainer_process": local_trainer_process,
@@ -389,9 +523,14 @@ async def lifespan(_app: FastAPI):
         stop_book_quality_worker.set()
         stop_admin_ai_workflow.set()
         stop_parent_book_worker.set()
+        stop_smart_studio_worker.set()
+        if startup_db_probe_task is not None and not startup_db_probe_task.done():
+            startup_db_probe_task.cancel()
 
         worker_tasks = (
+            startup_db_probe_task,
             local_voice_bootstrap_task,
+            smart_studio_worker_task,
             viread_outbox_task,
             viread_training_task,
             book_quality_task,
@@ -403,12 +542,24 @@ async def lifespan(_app: FastAPI):
             # page is resumed from its durable per-page state on the next poll.
             await asyncio.gather(
                 _shutdown_subprocess(local_trainer_process),
+                shutdown_post_ocr_tasks(),
+                shutdown_remote_ocr_wakeup_tasks(),
+                shutdown_scheduled_admin_ai_workflows(),
+                _shutdown_worker_task(
+                    startup_db_probe_task,
+                    asyncio.Event(),
+                    timeout=1.0,
+                ),
                 _shutdown_worker_task(
                     local_voice_bootstrap_task,
                     stop_local_voice_bootstrap,
                     timeout=2.0,
                 ),
-                shutdown_post_ocr_tasks(),
+                _shutdown_worker_task(
+                    smart_studio_worker_task,
+                    stop_smart_studio_worker,
+                    timeout=2.0,
+                ),
                 _shutdown_worker_task(viread_outbox_task, stop_viread_ocr_outbox),
                 _shutdown_worker_task(viread_training_task, stop_viread_training),
                 _shutdown_worker_task(book_quality_task, stop_book_quality_worker),
@@ -617,9 +768,26 @@ async def database_connection_exception_handler(
     )
 
 
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """Return a generic error while retaining a private traceback and request ID."""
+def _cors_error_headers(request: Request) -> dict[str, str]:
+    """Attach explicit CORS headers on unhandled 500s that bypass CORSMiddleware."""
+    origin = (request.headers.get("origin") or "").strip()
+    if origin and origin in CORS_ALLOWED_ORIGINS:
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Expose-Headers": "X-Request-ID, X-ViRead-Version",
+            "Vary": "Origin",
+        }
+    return {}
+
+
+async def _build_unhandled_500_response(
+    request: Request,
+    exc: Exception,
+    *,
+    include_cors_headers: bool,
+) -> JSONResponse:
+    """Return a generic 500 error while retaining a private traceback and request ID."""
     request_id = getattr(request.state, "request_id", uuid4().hex)
     log_diagnostic(
         logger,
@@ -632,14 +800,23 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
         method=request.method,
         route=_route_template(request),
     )
+    headers = {
+        "X-Request-ID": request_id,
+        "X-ViRead-Version": get_viread_app_version(),
+    }
+    if include_cors_headers:
+        headers.update(_cors_error_headers(request))
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error", "request_id": request_id},
-        headers={
-            "X-Request-ID": request_id,
-            "X-ViRead-Version": get_viread_app_version(),
-        },
+        headers=headers,
     )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Unhandled exceptions escape CORSMiddleware via ServerErrorMiddleware; attach CORS headers."""
+    return await _build_unhandled_500_response(request, exc, include_cors_headers=True)
 
 
 @app.exception_handler(DBAPIError)
@@ -662,7 +839,9 @@ async def database_api_exception_handler(
             route=_route_template(request),
             **metadata,
         )
-        return await unhandled_exception_handler(request, exc)
+        return await _build_unhandled_500_response(
+            request, exc, include_cors_headers=False
+        )
 
     original = exc.orig
     sqlstate = getattr(original, "sqlstate", None)
@@ -677,7 +856,9 @@ async def database_api_exception_handler(
     )
     if transient:
         return await database_connection_exception_handler(request, exc)
-    return await unhandled_exception_handler(request, exc)
+    return await _build_unhandled_500_response(
+        request, exc, include_cors_headers=False
+    )
 
 
 app.add_middleware(
@@ -696,13 +877,26 @@ app.add_middleware(
         "X-Voice-Model-Version",
         "X-Voice-Fallback",
         "X-Voice-Fallback-Reason",
+        "X-TTS-Cache",
+        "X-TTS-Provider",
+        "X-TTS-Scope",
+        "X-TTS-Cached-Speed",
     ],
 )
+
+def _remote_ocr_health_timeout_seconds() -> float:
+    raw = (os.getenv("VIREAD_HEALTH_OCR_TIMEOUT_SECONDS") or "").strip()
+    if raw:
+        try:
+            return max(2.5, min(15.0, float(raw)))
+        except ValueError:
+            pass
+    return 8.0
+
 
 @app.get("/health", tags=["System"])
 async def get_health(request: Request) -> dict[str, object]:
     """Read-only liveness/readiness check (SELECT 1 + worker states, zero secrets)."""
-    db_probe = await probe_database_connection(timeout=4.0)
     workers = getattr(request.app.state, "background_workers", None) or {}
     active_model_thread = workers.get("active_model_registry")
     local_trainer = workers.get("local_trainer_process")
@@ -712,6 +906,7 @@ async def get_health(request: Request) -> dict[str, object]:
         "book_quality": _task_runtime_state(workers.get("book_quality")),
         "admin_ai_workflow": _task_runtime_state(workers.get("admin_ai_workflow")),
         "parent_book_submission": _task_runtime_state(workers.get("parent_book_submission")),
+        "smart_studio": _task_runtime_state(workers.get("smart_studio")),
         "active_model_registry": (
             "disabled"
             if active_model_thread is None
@@ -723,27 +918,39 @@ async def get_health(request: Request) -> dict[str, object]:
             else ("running" if local_trainer.returncode is None else "stopped")
         ),
     }
-    ocr_payload: dict[str, object]
-    if is_remote_ocr_mode():
+
+    ocr_timeout = _remote_ocr_health_timeout_seconds()
+
+    async def _probe_remote_ocr() -> dict[str, object]:
         try:
-            remote_info = await asyncio.wait_for(collect_remote_ocr_health(), timeout=2.5)
-            ocr_payload = {
+            remote_info = await asyncio.wait_for(
+                collect_remote_ocr_health(), timeout=ocr_timeout
+            )
+            payload: dict[str, object] = {
                 "mode": "remote_worker",
                 "ready": bool(remote_info.get("ready", False)),
                 "engines": remote_info.get("engines", {}),
                 "workers": remote_info.get("workers", []),
                 "queue": remote_info.get("queue", {}),
-                "heartbeat_ttl_seconds": remote_info.get("heartbeat_ttl_seconds", 45),
+                "heartbeat_ttl_seconds": remote_info.get(
+                    "heartbeat_ttl_seconds", worker_heartbeat_ttl_seconds()
+                ),
             }
+            if remote_info.get("probe_degraded"):
+                payload["probe_degraded"] = True
+            return payload
         except Exception:
-            ocr_payload = {
+            return {
                 "mode": "remote_worker",
                 "ready": False,
                 "engines": {},
                 "workers": [],
                 "queue": {},
+                "heartbeat_ttl_seconds": worker_heartbeat_ttl_seconds(),
+                "probe_degraded": True,
             }
-    else:
+
+    async def _probe_local_ocr() -> dict[str, object]:
         try:
             ocr_items = await asyncio.wait_for(asyncio.to_thread(collect_ocr_health), timeout=2.5)
             ocr_engines = {
@@ -770,10 +977,38 @@ async def get_health(request: Request) -> dict[str, object]:
         except Exception:
             ocr_engines = {}
             ocr_ready = False
-        ocr_payload = {
+        return {
             "mode": "local_inprocess",
             "ready": ocr_ready,
             "engines": ocr_engines,
+        }
+
+    # Run DB probe and OCR readiness probe concurrently so NullPool handshakes don't stack.
+    db_probe_res, ocr_payload = await asyncio.gather(
+        probe_database_connection(timeout=max(6.0, ocr_timeout)),
+        _probe_remote_ocr() if is_remote_ocr_mode() else _probe_local_ocr(),
+        return_exceptions=True,
+    )
+    if isinstance(db_probe_res, BaseException):
+        db_probe: dict[str, object] = {
+            "ok": False,
+            "dns_resolved": False,
+            "ssl_enabled": False,
+            "pool_class": type(engine.pool).__name__,
+            "pooler_mode": "unknown",
+            "latency_ms": 0,
+        }
+    else:
+        db_probe = db_probe_res
+    if isinstance(ocr_payload, BaseException):
+        ocr_payload = {
+            "mode": "remote_worker" if is_remote_ocr_mode() else "local_inprocess",
+            "ready": False,
+            "engines": {},
+            "workers": [],
+            "queue": {},
+            "heartbeat_ttl_seconds": worker_heartbeat_ttl_seconds(),
+            "probe_degraded": True,
         }
 
     return {

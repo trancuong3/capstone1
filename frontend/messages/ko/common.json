@@ -1,0 +1,97 @@
+{
+  "brand": {
+    "name": "ViRead",
+    "tagline": "부모님과 아이의 독서 여정을 함께하는 플랫폼입니다."
+  },
+  "actions": {
+    "save": "저장",
+    "saving": "저장 중…",
+    "cancel": "취소",
+    "close": "닫기",
+    "confirm": "확인",
+    "continue": "계속",
+    "back": "뒤로",
+    "retry": "재시도",
+    "reload": "새로고침",
+    "search": "검색",
+    "clear": "지우기",
+    "filter": "필터",
+    "edit": "편집",
+    "delete": "지우기",
+    "create": "새로 만들기",
+    "upload": "업로드",
+    "download": "다운로드",
+    "open": "열기",
+    "viewDetails": "상세 보기",
+    "select": "선택",
+    "apply": "적용"
+  },
+  "states": {
+    "loading": "불러오는 중…",
+    "empty": "데이터가 없습니다.",
+    "unavailable": "정보를 불러올 수 없습니다",
+    "ready": "준비 완료",
+    "completed": "완료",
+    "inProgress": "진행 중",
+    "pending": "대기 중",
+    "error": "오류가 발생했습니다",
+    "imageLoadFailed": "페이지 이미지를 불러올 수 없습니다",
+    "retryReload": "다시 시도"
+  },
+  "avatar": {
+    "defaultAlt": "프로필 사진"
+  },
+  "pagination": {
+    "summary": "{page} / {totalPages} 페이지",
+    "itemsCount": "{count, plural, =0 {항목 없음} other {#개 항목}}",
+    "previous": "이전 페이지",
+    "next": "다음 페이지",
+    "previousShort": "이전",
+    "nextShort": "다음",
+    "navAria": "페이지 번호",
+    "navAriaWithLabel": "{itemLabel} 목록 탐색",
+    "rangeSummary": "{start}–{end} / {total} 표시 중",
+    "rangeSummaryWithLabel": "{start}–{end} / {total} {itemLabel} 표시 중"
+  },
+  "languageSelector": {
+    "label": "인터페이스 언어",
+    "buttonAriaLabel": "인터페이스 언어 선택, 현재: {language}",
+    "dialogTitle": "언어 선택",
+    "searchLabel": "언어 검색",
+    "searchPlaceholder": "언어 이름이나 코드로 검색…",
+    "clearSearch": "검색어 지우기",
+    "popularHeading": "인기 언어",
+    "allHeading": "모든 언어",
+    "searchResultsHeading": "검색 결과",
+    "emptySearch": "\"{query}\"와 일치하는 언어를 찾을 수 없습니다.",
+    "currentBadge": "사용 중",
+    "loadingLocale": "언어 불러오는 중…",
+    "switchedNotice": "인터페이스가 {language}로 변경되었습니다.",
+    "closeButton": "언어 목록 닫기"
+  },
+  "footer": {
+    "copyright": "© {year} ViRead. 모든 권리 보유.",
+    "adminCopyright": "© {year} ViRead.",
+    "adminNotice": "ViRead 관리자 영역.",
+    "parentDescription": "부모님을 지원하여 아이의 독서 능력 향상과 학습 과정을 추적하는 플랫폼입니다.",
+    "contactHeading": "연락처 정보",
+    "quickLinksHeading": "빠른 링크",
+    "organization": "두이탄 대학교",
+    "contactEmail": "vireadforyou@gmail.com",
+    "contactPhone": "0905373633"
+  },
+  "notFound": {
+    "pageTitle": "페이지를 찾을 수 없습니다",
+    "title": "페이지를 찾을 수 없습니다",
+    "description": "찾으시는 페이지가 존재하지 않거나 주소가 변경되었습니다.",
+    "backHome": "대시보드로 돌아가기",
+    "backLogin": "로그인 페이지로 돌아가기"
+  },
+  "errorPage": {
+    "title": "문제가 발생했습니다",
+    "description": "이 페이지를 표시하는 동안 ViRead에서 예기치 않은 오류가 발생했습니다. 다시 시도하거나 대시보드로 돌아가 주세요.",
+    "globalTitle": "일시적인 앱 오류",
+    "globalDescription": "현재 앱 인터페이스를 불러올 수 없습니다. 페이지를 새로고침해 주세요.",
+    "backHome": "대시보드로 돌아가기"
+  }
+}

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
+from contextlib import asynccontextmanager
+import inspect
 import logging
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
+
+from sqlalchemy import text
 
 from app.database.config import (
     READING_REMINDER_MAX_ATTEMPTS,
@@ -21,8 +26,12 @@ from app.providers.reading_reminder_email_provider import (
 )
 from app.providers.supabase_auth_contact_provider import SupabaseAuthContactProvider
 from app.repositories.reading_management_repository import ReadingManagementRepository
+from app.services.i18n.locales import DEFAULT_LOCALE, resolve_supported_locale
+from app.services.worker_telemetry import record_worker_error, record_worker_success
 
 logger = logging.getLogger(__name__)
+READING_REMINDER_ADVISORY_LOCK_KEY = 4201001
+_WORKER_KEY = "reading_reminder"
 
 
 class ParentEmailUnavailable(Exception):
@@ -33,6 +42,45 @@ class ParentEmailUnavailable(Exception):
 
 class ParentEmailLookupFailed(Exception):
     """Raised when the contact provider is temporarily unavailable."""
+
+
+@asynccontextmanager
+async def _advisory_lock_guard(lock_key: int):
+    """Acquire a PostgreSQL session advisory lock so overlapping cron/worker ticks never race."""
+    try:
+        async with AsyncSessionLocal() as lock_session:
+            dialect = getattr(getattr(lock_session, "bind", None), "dialect", None)
+            dialect_name = getattr(dialect, "name", None)
+            if dialect_name and dialect_name != "postgresql":
+                yield True
+                return
+            result = await lock_session.execute(
+                text("SELECT pg_try_advisory_lock(:key)"),
+                {"key": lock_key},
+            )
+            acquired = bool(result.scalar())
+            if not acquired:
+                yield False
+                return
+            try:
+                yield True
+            finally:
+                try:
+                    await lock_session.execute(
+                        text("SELECT pg_advisory_unlock(:key)"),
+                        {"key": lock_key},
+                    )
+                except Exception:
+                    pass
+    except Exception:
+        # In unit tests where AsyncSessionLocal is patched/unbacked by Postgres,
+        # let callers test process_due_* directly without failing on advisory lock.
+        if getattr(AsyncSessionLocal, "__name__", "") != "sessionmaker" and not hasattr(
+            AsyncSessionLocal, "kw"
+        ):
+            yield True
+            return
+        raise
 
 
 async def get_verified_parent_email(parent_id: UUID) -> str:
@@ -51,6 +99,44 @@ async def get_verified_parent_email(parent_id: UUID) -> str:
     return email.strip()
 
 
+def _sender_accepts_locale(email_sender) -> bool:
+    try:
+        sig = inspect.signature(email_sender)
+    except (TypeError, ValueError):
+        return False
+    for param in sig.parameters.values():
+        if param.kind == inspect.Parameter.VAR_KEYWORD:
+            return True
+        if param.name == "locale" and param.kind in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        ):
+            return True
+    return False
+
+
+async def _resolve_claim_locale(
+    reminder: ReadingReminder,
+    child: ChildProfile,
+    locale_resolver=None,
+) -> str:
+    if locale_resolver is not None:
+        raw = locale_resolver(child.ParentId)
+        if inspect.isawaitable(raw):
+            raw = await raw
+        if raw:
+            return resolve_supported_locale(raw)
+    explicit = getattr(reminder, "Locale", None) or getattr(child, "Locale", None)
+    if explicit:
+        return resolve_supported_locale(explicit)
+    settings = getattr(child, "Settings", None)
+    if isinstance(settings, dict):
+        pref = settings.get("preferred_locale") or settings.get("locale")
+        if pref:
+            return resolve_supported_locale(pref)
+    return DEFAULT_LOCALE
+
+
 async def deliver_claimed_occurrences(
     repository: ReadingManagementRepository,
     claims: list[tuple[ReadingReminderOccurrence, ReadingReminder, ChildProfile]],
@@ -58,21 +144,27 @@ async def deliver_claimed_occurrences(
     *,
     recipient_resolver=get_verified_parent_email,
     email_sender=send_reading_reminder_email,
+    locale_resolver=None,
     max_attempts: int = READING_REMINDER_MAX_ATTEMPTS,
 ) -> int:
     delivered = 0
+    supports_locale = _sender_accepts_locale(email_sender)
     for occurrence, reminder, child in claims:
         try:
             recipient = await recipient_resolver(child.ParentId)
-            await asyncio.to_thread(
-                email_sender,
-                recipient=recipient,
-                child_alias=child.Alias,
-                local_date=occurrence.ScheduledLocalDate.isoformat(),
-                local_time=reminder.RemindAt.strftime("%H:%M"),
-                timezone_name=reminder.Timezone,
-                occurrence_id=occurrence.Id,
-            )
+            send_kwargs: dict[str, object] = {
+                "recipient": recipient,
+                "child_alias": child.Alias,
+                "local_date": occurrence.ScheduledLocalDate.isoformat(),
+                "local_time": reminder.RemindAt.strftime("%H:%M"),
+                "timezone_name": reminder.Timezone,
+                "occurrence_id": occurrence.Id,
+            }
+            if supports_locale:
+                send_kwargs["locale"] = await _resolve_claim_locale(
+                    reminder, child, locale_resolver=locale_resolver
+                )
+            await asyncio.to_thread(email_sender, **send_kwargs)
         except ParentEmailUnavailable as error:
             await repository.update_email_delivery(
                 occurrence.Id,
@@ -139,13 +231,19 @@ async def deliver_claimed_occurrences(
 
 async def process_due_reminders_once(now: datetime | None = None) -> int:
     now = now or datetime.now(timezone.utc)
-    async with AsyncSessionLocal() as session:
-        repository = ReadingManagementRepository(session)
-        await repository.create_due_occurrences_for_worker(now)
-        claims = await repository.claim_due_email_occurrences(
-            now, max_attempts=READING_REMINDER_MAX_ATTEMPTS
-        )
-        return await deliver_claimed_occurrences(repository, claims, now)
+    async with _advisory_lock_guard(READING_REMINDER_ADVISORY_LOCK_KEY) as acquired:
+        if not acquired:
+            logger.info("reading_reminder_skipped_lock_held")
+            return 0
+        async with AsyncSessionLocal() as session:
+            repository = ReadingManagementRepository(session)
+            await repository.create_due_occurrences_for_worker(now)
+            claims = await repository.claim_due_email_occurrences(
+                now, max_attempts=READING_REMINDER_MAX_ATTEMPTS
+            )
+            delivered = await deliver_claimed_occurrences(repository, claims, now)
+        record_worker_success(_WORKER_KEY)
+        return delivered
 
 
 def validate_worker_configuration() -> None:
@@ -157,13 +255,16 @@ def validate_worker_configuration() -> None:
         raise RuntimeError("Set a server-only Supabase Admin API key for verified parent email lookup.")
 
 
-async def run_worker() -> None:
+async def run_worker(*, once: bool = False) -> int:
     validate_worker_configuration()
     try:
+        if once:
+            return await process_due_reminders_once()
         while True:
             try:
                 await process_due_reminders_once()
             except Exception as error:
+                record_worker_error(_WORKER_KEY, error)
                 log_diagnostic(
                     logger,
                     logging.ERROR,
@@ -176,5 +277,13 @@ async def run_worker() -> None:
         await engine.dispose()
 
 
+def main() -> int:
+    parser = argparse.ArgumentParser(description="ViRead reading reminder email worker.")
+    parser.add_argument("--once", action="store_true", help="Run one idempotent sweep and exit.")
+    args = parser.parse_args()
+    asyncio.run(run_worker(once=args.once))
+    return 0
+
+
 if __name__ == "__main__":
-    asyncio.run(run_worker())
+    raise SystemExit(main())

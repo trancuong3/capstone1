@@ -1,14 +1,20 @@
 import { Suspense } from "react";
 
-import { AdminOcrReviewScreen } from "@/components/admin/admin-ocr-review-screen";
+import { DynamicAdminOcrReviewScreen } from "@/components/admin/admin-dynamic-screens";
 import { AdminServicesProvider } from "@/components/providers/admin-services-provider";
+import { translateMessage } from "@/lib/i18n/formatter";
+import { getServerI18n } from "@/lib/i18n/server";
+import { viMessages } from "@/messages/vi";
 
 export default async function Page({
   params,
 }: {
   params: Promise<{ bookId: string; pageId: string }>;
 }) {
-  const { bookId, pageId } = await params;
+  const [{ bookId, pageId }, { locale, messages }] = await Promise.all([
+    params,
+    getServerI18n(),
+  ]);
   return (
     <AdminServicesProvider>
       <Suspense
@@ -17,11 +23,16 @@ export default async function Page({
             aria-live="polite"
             className="mx-auto max-w-5xl px-4 py-12 text-sm text-muted"
           >
-            Đang mở trang OCR Review…
+            {translateMessage(
+              messages,
+              viMessages,
+              locale,
+              "admin.routes.ocrReviewLoading",
+            )}
           </div>
         }
       >
-        <AdminOcrReviewScreen bookId={bookId} pageId={pageId} />
+        <DynamicAdminOcrReviewScreen bookId={bookId} pageId={pageId} />
       </Suspense>
     </AdminServicesProvider>
   );

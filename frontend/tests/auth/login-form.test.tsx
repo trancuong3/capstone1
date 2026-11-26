@@ -176,4 +176,96 @@ describe("LoginForm", () => {
       "/register",
     );
   });
+
+  it("returns to a safe parent deep link after email/password login and signup callback", async () => {
+    const user = userEvent.setup();
+    const service = createAuthServiceFixture();
+    render(
+      withAuthFixture(
+        <LoginForm nextPath="/books/book-1?tab=preview" scenario="default" />,
+        service,
+      ),
+    );
+    await fillValidLogin(user);
+    await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
+    await waitFor(() =>
+      expect(replaceMock).toHaveBeenCalledWith("/books/book-1?tab=preview"),
+    );
+
+    replaceMock.mockClear();
+    render(
+      withAuthFixture(
+        <LoginForm
+          isAuthCallback
+          nextPath="/reading/session-9?childId=c1"
+          scenario="default"
+        />,
+        service,
+        { lastEvent: "SIGNED_IN", session: authSessionFixture },
+      ),
+    );
+    await waitFor(() =>
+      expect(replaceMock).toHaveBeenCalledWith("/reading/session-9?childId=c1"),
+    );
+  });
+
+  it("blocks open redirects and cross-role next targets after login", async () => {
+    const user = userEvent.setup();
+    const service = createAuthServiceFixture();
+    render(
+      withAuthFixture(
+        <LoginForm nextPath="//evil.example/steal" scenario="default" />,
+        service,
+      ),
+    );
+    await fillValidLogin(user);
+    await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/dashboard"));
+
+    replaceMock.mockClear();
+    const { unmount } = render(
+      withAuthFixture(
+        <LoginForm nextPath="/admin/parents" scenario="default" />,
+        service,
+      ),
+    );
+    const emailInputs = screen.getAllByLabelText("Email của ba mẹ");
+    const passwordInputs = screen.getAllByLabelText("Mật khẩu");
+    const submitButtons = screen.getAllByRole("button", { name: "Đăng nhập" });
+    await user.type(emailInputs[1]!, "minhanh@example.com");
+    await user.type(passwordInputs[1]!, "matkhau123");
+    await user.click(submitButtons[1]!);
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/dashboard"));
+    unmount();
+  });
+
+  it("persists safe next path in cookie before OAuth and clears it on OAuth failure", async () => {
+    const user = userEvent.setup();
+    const service = createAuthServiceFixture();
+    render(
+      withAuthFixture(
+        <LoginForm nextPath="/books/book-2?page=3" scenario="default" />,
+        service,
+      ),
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Tiếp tục với Google" }),
+    );
+    await waitFor(() =>
+      expect(service.signInWithOAuth).toHaveBeenCalledWith("google"),
+    );
+    expect(document.cookie).toContain(
+      "viread_auth_next=%2Fbooks%2Fbook-2%3Fpage%3D3",
+    );
+
+    service.signInWithOAuth.mockRejectedValueOnce(new Error("oauth error"));
+    await user.click(
+      screen.getByRole("button", { name: "Tiếp tục với Facebook" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Không thể bắt đầu đăng nhập xã hội",
+    );
+    expect(document.cookie).not.toContain("viread_auth_next=");
+  });
 });

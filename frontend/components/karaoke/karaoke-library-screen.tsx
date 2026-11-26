@@ -10,6 +10,7 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
+import { useTranslations } from "@/hooks/use-i18n";
 import {
   karaokeParentErrorMessage,
   type KaraokeCatalog,
@@ -24,6 +25,7 @@ export function KaraokeLibraryScreen() {
   );
 }
 function Library({ child }: { child: ChildProfileDTO }) {
+  const t = useTranslations("entertainment");
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState({ search: "", offset: 0, refresh: 0 });
   return (
@@ -31,14 +33,14 @@ function Library({ child }: { child: ChildProfileDTO }) {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="mt-2 text-heading font-extrabold">
-            Hát vui cùng {child.alias}
+            {t("karaoke.library.heading", { alias: child.alias })}
           </h1>
           <p className="mt-3 text-body text-muted">
-            Chọn một bài bé thích, nghe nhạc và cùng hát theo chữ nhé!
+            {t("karaoke.library.subtitle")}
           </p>
         </div>
         <ButtonLink href="/dashboard" variant="secondary" className="sm:w-auto">
-          Về Tổng quan
+          {t("karaoke.library.backToDashboard")}
         </ButtonLink>
       </div>
       <SelectedChildIdentity child={child} />
@@ -54,7 +56,7 @@ function Library({ child }: { child: ChildProfileDTO }) {
         }}
       >
         <label className="grid min-w-0 flex-1 gap-2 font-bold">
-          Tìm bài hát hoặc tác giả
+          {t("karaoke.library.searchLabel")}
           <input
             className="min-h-12 w-full rounded-control border border-border bg-white px-4 focus-visible:outline-3 focus-visible:outline-primary"
             maxLength={120}
@@ -63,7 +65,7 @@ function Library({ child }: { child: ChildProfileDTO }) {
           />
         </label>
         <Button className="sm:w-auto" type="submit" variant="secondary">
-          Tìm bài hát
+          {t("karaoke.library.searchAction")}
         </Button>
       </form>
       <Catalog
@@ -87,6 +89,7 @@ function Catalog({
   onRetry: () => void;
   onPage: (offset: number) => void;
 }) {
+  const t = useTranslations("entertainment");
   const service = useKaraokeService();
   const [state, setState] = useState<
     | { status: "loading" }
@@ -116,19 +119,19 @@ function Catalog({
   if (state.status === "loading")
     return (
       <p className="rounded-card bg-sky p-6" role="status">
-        Đang tìm những bài hát cho bé…
+        {t("karaoke.library.loading")}
       </p>
     );
   if (state.status === "error")
     return (
-      <StatusMessage tone="error" title="Chưa tải được thư viện">
+      <StatusMessage tone="error" title={t("karaoke.library.loadErrorTitle")}>
         {state.message}
         <Button
           className="mt-3 sm:w-auto"
           variant="secondary"
           onClick={onRetry}
         >
-          Thử lại thư viện
+          {t("karaoke.library.retry")}
         </Button>
       </StatusMessage>
     );
@@ -144,24 +147,24 @@ function Catalog({
       ) : (
         <EmptyState
           icon={<Music2 aria-hidden className="size-10 text-primary" />}
-          title="Chưa có bài hát phù hợp"
+          title={t("karaoke.library.emptyTitle")}
           description={
             query.search
-              ? "Thử tìm bằng tên khác hoặc xóa từ khóa nhé."
-              : "Những bài hát mới đang được chuẩn bị. Bé quay lại sau nhé!"
+              ? t("karaoke.library.emptySearchDesc")
+              : t("karaoke.library.emptyCatalogDesc")
           }
         />
       )}
       <PaginationBar
-        ariaLabel="Phân trang Hát vui"
-        itemLabel="bài"
-        nextLabel="Trang sau"
+        ariaLabel={t("karaoke.library.paginationAria")}
+        itemLabel={t("karaoke.library.paginationItem")}
+        nextLabel={t("karaoke.library.nextPage")}
         onPageChange={(nextPage) =>
           onPage((nextPage - 1) * Math.max(1, data.limit))
         }
         page={Math.floor(query.offset / Math.max(1, data.limit)) + 1}
         pageSize={Math.max(1, data.limit)}
-        prevLabel="Trang trước"
+        prevLabel={t("karaoke.library.prevPage")}
         total={data.total}
       />
     </>

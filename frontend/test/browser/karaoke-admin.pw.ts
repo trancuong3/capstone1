@@ -1,5 +1,9 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { installApiFixture, setRole } from "./real-data-fixture";
+import {
+  PLAYWRIGHT_ORIGIN,
+  installApiFixture,
+  setRole,
+} from "./real-data-fixture";
 import {
   previewDetail,
   songDetail,
@@ -37,7 +41,7 @@ async function fixture(page: Page) {
         await route.fulfill({
           status: route.request().method() === "OPTIONS" ? 204 : 404,
           headers: {
-            "access-control-allow-origin": "http://127.0.0.1:3106",
+            "access-control-allow-origin": PLAYWRIGHT_ORIGIN,
             "access-control-allow-headers": "authorization,content-type,accept",
           },
           contentType: "application/json",
@@ -54,7 +58,7 @@ async function fixture(page: Page) {
     await route.fulfill({
       status,
       headers: {
-        "access-control-allow-origin": "http://127.0.0.1:3106",
+        "access-control-allow-origin": PLAYWRIGHT_ORIGIN,
         "access-control-allow-headers": "authorization,content-type,accept",
         "access-control-allow-methods": "GET,POST,PUT,PATCH,OPTIONS",
       },

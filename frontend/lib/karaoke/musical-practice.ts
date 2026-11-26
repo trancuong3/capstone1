@@ -8,6 +8,7 @@
  *   - RHYTHM_TAP    (Gõ nhịp theo bài hát — tap button/Spacebar on beats even without mic)
  */
 
+import { translateRuntime } from "@/lib/i18n/runtime";
 import type { KaraokeLine, KaraokeLyrics } from "@/types/karaoke";
 import type { LyricTimeSpan } from "./musical-dsp";
 import {
@@ -30,35 +31,81 @@ export interface PracticeModeMeta {
 export const PRACTICE_MODES: readonly PracticeModeMeta[] = [
   {
     mode: "FULL_SONG",
-    labelVi: "Hát cả bài",
-    shortLabelVi: "Cả bài",
-    descriptionVi: "Hát trọn bài và lưu kỷ lục điểm cao nhất của bé.",
+    get labelVi() {
+      return translateRuntime(
+        "entertainment.karaoke.stage.practiceModes.FULL_SONG.label",
+      );
+    },
+    get shortLabelVi() {
+      return translateRuntime(
+        "entertainment.karaoke.stage.practiceModes.FULL_SONG.shortLabel",
+      );
+    },
+    get descriptionVi() {
+      return translateRuntime(
+        "entertainment.karaoke.stage.practiceModes.FULL_SONG.description",
+      );
+    },
     requiresMic: true,
     updatesBestFullSong: true,
   },
   {
     mode: "SEGMENT",
-    labelVi: "Luyện đoạn khó",
-    shortLabelVi: "Đoạn khó",
-    descriptionVi:
-      "Lặp lại đoạn nhạc khó ở tốc độ 0.85x — không làm mất điểm cao nhất cả bài.",
+    get labelVi() {
+      return translateRuntime(
+        "entertainment.karaoke.stage.practiceModes.SEGMENT.label",
+      );
+    },
+    get shortLabelVi() {
+      return translateRuntime(
+        "entertainment.karaoke.stage.practiceModes.SEGMENT.shortLabel",
+      );
+    },
+    get descriptionVi() {
+      return translateRuntime(
+        "entertainment.karaoke.stage.practiceModes.SEGMENT.description",
+      );
+    },
     requiresMic: true,
     updatesBestFullSong: false,
   },
   {
     mode: "LINE_PRACTICE",
-    labelVi: "Tập từng câu",
-    shortLabelVi: "Từng câu",
-    descriptionVi: "Chọn từng câu hát để luyện rõ lời và giữ nhịp thật vững.",
+    get labelVi() {
+      return translateRuntime(
+        "entertainment.karaoke.stage.practiceModes.LINE_PRACTICE.label",
+      );
+    },
+    get shortLabelVi() {
+      return translateRuntime(
+        "entertainment.karaoke.stage.practiceModes.LINE_PRACTICE.shortLabel",
+      );
+    },
+    get descriptionVi() {
+      return translateRuntime(
+        "entertainment.karaoke.stage.practiceModes.LINE_PRACTICE.description",
+      );
+    },
     requiresMic: true,
     updatesBestFullSong: false,
   },
   {
     mode: "RHYTHM_TAP",
-    labelVi: "Gõ nhịp theo bài hát",
-    shortLabelVi: "Gõ nhịp",
-    descriptionVi:
-      "Nhấn nút Gõ nhịp hoặc phím Cách theo từng phách — tập nhịp vui ngay cả khi không bật micro!",
+    get labelVi() {
+      return translateRuntime(
+        "entertainment.karaoke.stage.practiceModes.RHYTHM_TAP.label",
+      );
+    },
+    get shortLabelVi() {
+      return translateRuntime(
+        "entertainment.karaoke.stage.practiceModes.RHYTHM_TAP.shortLabel",
+      );
+    },
+    get descriptionVi() {
+      return translateRuntime(
+        "entertainment.karaoke.stage.practiceModes.RHYTHM_TAP.description",
+      );
+    },
     requiresMic: false,
     updatesBestFullSong: false,
   },
@@ -264,26 +311,33 @@ export class RhythmTapTracker {
     }
 
     let quality: TapFeedbackQuality = "GOOD";
-    let labelVi = "Khá đều nhịp!";
+    let labelVi = translateRuntime("entertainment.karaoke.rhythmTap.steady");
     if (nearest === null || Math.abs(bestSigned) > 360) {
       quality = bestSigned < 0 ? "EARLY" : "LATE";
-      labelVi = bestSigned < 0 ? "Hơi sớm nhịp!" : "Hơi trễ nhịp!";
+      labelVi =
+        bestSigned < 0
+          ? translateRuntime("entertainment.karaoke.rhythmTap.early")
+          : translateRuntime("entertainment.karaoke.rhythmTap.late");
       this.streak = 0;
     } else if (Math.abs(bestSigned) <= 95) {
       quality = "PERFECT";
-      labelVi = "Đúng phách tuyệt vời!";
+      labelVi = translateRuntime("entertainment.karaoke.rhythmTap.perfect");
       this.streak += 1;
     } else if (Math.abs(bestSigned) <= 190) {
       quality = "GOOD";
-      labelVi = "Rất gần nhịp!";
+      labelVi = translateRuntime("entertainment.karaoke.rhythmTap.good");
       this.streak += 1;
     } else if (bestSigned < 0) {
       quality = "EARLY";
-      labelVi = "Hơi nhanh một chút!";
+      labelVi = translateRuntime(
+        "entertainment.karaoke.rhythmTap.slightlyFast",
+      );
       this.streak = 0;
     } else {
       quality = "LATE";
-      labelVi = "Hơi chậm một chút!";
+      labelVi = translateRuntime(
+        "entertainment.karaoke.rhythmTap.slightlySlow",
+      );
       this.streak = 0;
     }
 

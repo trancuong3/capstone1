@@ -5,6 +5,7 @@ import { useCallback, useState } from "react";
 
 import { BookCover } from "@/components/books/book-cover";
 import { Button } from "@/components/common/button";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import type {
   DifficultWordBookGroup,
   DifficultWordDTO,
@@ -22,32 +23,32 @@ const CHIP_STYLES: Record<
   {
     readonly className: string;
     readonly dotClass: string;
-    readonly label: string;
+    readonly labelKey: string;
   }
 > = {
   NOT_PRACTICED: {
     className:
       "border-red-300 bg-red-50 text-red-900 hover:bg-red-100 focus-visible:outline-red-600",
     dotClass: "bg-red-500",
-    label: "Chưa đọc lại",
+    labelKey: "bookCard.badgeNotPracticed",
   },
   NEEDS_MORE_PRACTICE: {
     className:
       "border-red-300 bg-red-50 text-red-900 hover:bg-red-100 focus-visible:outline-red-600",
     dotClass: "bg-red-500",
-    label: "Cần luyện thêm",
+    labelKey: "bookCard.badgeNeedsMore",
   },
   IN_PROGRESS: {
     className:
       "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 focus-visible:outline-amber-600",
     dotClass: "bg-amber-500",
-    label: "Đang luyện",
+    labelKey: "bookCard.badgeInProgress",
   },
   COMPLETED: {
     className:
       "border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100 focus-visible:outline-emerald-600",
     dotClass: "bg-emerald-500",
-    label: "Đã đọc đúng",
+    labelKey: "bookCard.badgeCompleted",
   },
 };
 
@@ -56,6 +57,9 @@ export function DifficultWordBookCard({
   onStartBookPractice,
   onSelectWord,
 }: DifficultWordBookCardProps) {
+  const { formatNumber } = useI18n();
+  const t = useTranslations("difficultWords");
+  const tr = useTranslations("reading");
   const [coverError, setCoverError] = useState(false);
   const handleCoverError = useCallback(() => setCoverError(true), []);
 
@@ -67,8 +71,11 @@ export function DifficultWordBookCard({
   const gradeLabel =
     group.minGrade != null
       ? group.maxGrade != null && group.maxGrade !== group.minGrade
-        ? `Lớp ${group.minGrade}–${group.maxGrade}`
-        : `Lớp ${group.minGrade}`
+        ? t("bookCard.gradeRange", {
+            min: group.minGrade,
+            max: group.maxGrade,
+          })
+        : t("bookCard.gradeSingle", { grade: group.minGrade })
       : null;
 
   return (
@@ -86,7 +93,7 @@ export function DifficultWordBookCard({
                  ahead of time.  A plain <img> with onError fallback is the
                  safest option until cover URLs are served from a known CDN. */
               <img
-                alt={`Bìa sách ${group.bookTitle}`}
+                alt={t("bookCard.coverAlt", { title: group.bookTitle })}
                 className="h-24 w-20 shrink-0 rounded-2xl border border-[#DCE8E4] object-cover sm:h-28 sm:w-24"
                 loading="lazy"
                 onError={handleCoverError}
@@ -122,17 +129,25 @@ export function DifficultWordBookCard({
               {allCompleted ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-900">
                   <Sparkles aria-hidden="true" className="size-3.5" />
-                  Đã hoàn thành
+                  {t("bookCard.completedBadge")}
                 </span>
               ) : null}
             </div>
 
-            <h2 className="mt-1.5 text-xl font-extrabold leading-snug text-[#213C42]">
+            <h2
+              className="viread-learning-content mt-1.5 text-xl font-extrabold leading-snug text-[#213C42]"
+              dir="ltr"
+              lang="vi"
+            >
               {group.bookTitle}
             </h2>
 
             {group.bookAuthor ? (
-              <p className="mt-0.5 truncate text-sm text-[#526970]">
+              <p
+                className="viread-learning-content mt-0.5 truncate text-sm text-[#526970]"
+                dir="ltr"
+                lang="vi"
+              >
                 {group.bookAuthor}
               </p>
             ) : null}
@@ -140,7 +155,10 @@ export function DifficultWordBookCard({
             <div className="mt-3">
               <div className="mb-1.5 flex items-center justify-between gap-2 text-xs font-bold text-[#526970]">
                 <span>
-                  Đã luyện đúng {group.completedWords}/{group.totalWords} từ
+                  {t("bookCard.progressSummary", {
+                    completed: formatNumber(group.completedWords),
+                    total: formatNumber(group.totalWords),
+                  })}
                 </span>
                 <span className="tabular-nums text-[#0E6D76]">
                   {group.progressPercent}%
@@ -162,16 +180,20 @@ export function DifficultWordBookCard({
         <div
           className="flex flex-wrap gap-2"
           role="list"
-          aria-label={`Danh sách từ khó sách ${group.bookTitle}`}
+          aria-label={t("bookCard.wordsAria", { title: group.bookTitle })}
         >
           {group.words.map((word) => {
             const status: DifficultWordPracticeStatus =
               word.practice_status ?? "NOT_PRACTICED";
             const style = CHIP_STYLES[status];
+            const statusLabel = t(style.labelKey);
             return (
               <button
-                aria-label={`Luyện từ ${word.display_text} (${style.label})`}
-                className={`inline-flex min-h-11 items-center gap-2 rounded-full border px-4 py-1.5 text-base font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 ${style.className}`}
+                aria-label={t("bookCard.wordButtonAria", {
+                  word: word.display_text,
+                  status: statusLabel,
+                })}
+                className={`inline-flex min-h-12 items-center gap-2 rounded-full border px-4 py-2 text-base font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 ${style.className}`}
                 key={word.normalized_word}
                 onClick={() => onSelectWord(word)}
                 type="button"
@@ -187,7 +209,9 @@ export function DifficultWordBookCard({
                     className={`size-2 rounded-full ${style.dotClass}`}
                   />
                 )}
-                <span>{word.display_text}</span>
+                <span className="viread-learning-content" dir="ltr" lang="vi">
+                  {word.display_text}
+                </span>
               </button>
             );
           })}
@@ -195,7 +219,7 @@ export function DifficultWordBookCard({
 
         <details className="group rounded-2xl border border-[#DCE8E4] bg-[#F6FAF8] px-4 py-2.5 text-sm">
           <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between font-bold text-[#213C42]">
-            <span>Chi tiết cho phụ huynh</span>
+            <span>{t("bookCard.parentDetails")}</span>
             <ChevronDown
               aria-hidden="true"
               className="size-4 text-[#526970] transition-transform group-open:rotate-180"
@@ -210,23 +234,42 @@ export function DifficultWordBookCard({
                   key={`detail-${word.normalized_word}`}
                 >
                   <div>
-                    <span className="font-bold text-[#213C42]">
+                    <span
+                      className="viread-learning-content font-bold text-[#213C42]"
+                      dir="ltr"
+                      lang="vi"
+                    >
                       {word.display_text}
                     </span>
                     {source?.page_number ? (
-                      <span> · Trang {source.page_number}</span>
+                      <span>
+                        {" "}
+                        ·{" "}
+                        {tr("progress.pageLabel", {
+                          page: formatNumber(source.page_number),
+                        })}
+                      </span>
                     ) : null}
                     {source?.context_phrase ? (
-                      <span className="italic">
+                      <span
+                        className="viread-learning-content italic"
+                        dir="ltr"
+                        lang="vi"
+                      >
                         {" "}
                         · “{source.context_phrase}”
                       </span>
                     ) : null}
                   </div>
                   <span className="tabular-nums">
-                    Điểm {word.difficulty_score} · nhầm{" "}
-                    {word.mispronunciation_count ?? 0} · bỏ{" "}
-                    {word.omission_count} · lặp {word.repetition_count}
+                    {t("bookCard.wordStats", {
+                      score: formatNumber(word.difficulty_score),
+                      mispronounced: formatNumber(
+                        word.mispronunciation_count ?? 0,
+                      ),
+                      omitted: formatNumber(word.omission_count),
+                      repeated: formatNumber(word.repetition_count),
+                    })}
                   </span>
                 </li>
               );
@@ -242,7 +285,9 @@ export function DifficultWordBookCard({
           variant={allCompleted ? "secondary" : "primary"}
         >
           <Mic aria-hidden="true" className="size-5" />
-          {allCompleted ? "Luyện lại sách này" : "Luyện cùng bé"}
+          {allCompleted
+            ? t("bookCard.reviewBookAction")
+            : t("bookCard.practiceBookAction")}
         </Button>
       ) : null}
     </article>

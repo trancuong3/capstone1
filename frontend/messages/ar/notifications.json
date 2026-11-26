@@ -1,0 +1,15 @@
+{
+  "reminders": {
+    "saved": "تم حفظ تذكير القراءة.",
+    "deleted": "تم حذف تذكير القراءة.",
+    "emailSent": "تم إرسال بريد إلكتروني لتذكير القراءة."
+  },
+  "presence": {
+    "childStarted": "بدأ {alias} جلسة قراءة جديدة.",
+    "childCompleted": "أكمل {alias} جلسة القراءة."
+  },
+  "updates": {
+    "saved": "تم حفظ التغييرات.",
+    "localeChanged": "تم تحديث لغة العرض إلى {language}."
+  }
+}

@@ -46,6 +46,11 @@ export function prefersReducedMotion(): boolean {
   }
 }
 
+export interface ShooterSoundOptions {
+  readonly reducedMotion?: boolean;
+  readonly calmSound?: boolean;
+}
+
 /**
  * Plays a lightweight Web Audio SFX using a single lazily initialized singleton
  * AudioContext reused across all shots (zero per-shot AudioContext allocations).
@@ -53,8 +58,9 @@ export function prefersReducedMotion(): boolean {
 export function playShooterSound(
   kind: ShooterSoundKind,
   enabled: boolean,
+  options?: ShooterSoundOptions,
 ): void {
-  if (!enabled) return;
+  if (!enabled || options?.calmSound === false) return;
   const context = getOrCreateAudioContext();
   if (!context) return;
 
@@ -73,7 +79,11 @@ export function playShooterSound(
       oscillator.frequency.setValueAtTime(freq, now + idx * 0.09);
     });
 
-    const peakGain = prefersReducedMotion() ? 0.035 : 0.055;
+    const calmOrReduced =
+      options?.reducedMotion === true ||
+      options?.calmSound === true ||
+      prefersReducedMotion();
+    const peakGain = calmOrReduced ? 0.035 : 0.055;
     const duration = notes.length > 1 ? 0.34 : 0.16;
     gain.gain.setValueAtTime(0.0001, now);
     gain.gain.exponentialRampToValueAtTime(peakGain, now + 0.02);

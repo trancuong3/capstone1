@@ -86,7 +86,8 @@ actual_commit = subprocess.run(["git", "-C", str(REPO), "rev-parse", "HEAD"], ch
 if actual_commit != REPOSITORY_COMMIT:
     raise RuntimeError("WORKER_REPOSITORY_COMMIT_MISMATCH")
 
-subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "-r", str(REPO / "ai/vietocr_v2/requirements.txt")], check=True)
+subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "-r", str(REPO / "ai/vietocr_v2/requirements-colab.txt")], check=True)
+subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--no-deps", "vietocr==0.3.12"], check=True)
 subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "google-cloud-secret-manager==2.24.0", "google-cloud-storage==3.17.1"], check=True)
 sys.path.insert(0, str(REPO))
 os.chdir(REPO)

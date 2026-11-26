@@ -303,7 +303,8 @@ test("ReadingScreen: Bắc · Trung · Nam selector, local-first Google fallback
   const onlineBackupBtn = dialog.getByRole("button", {
     name: /Máy này \+ Google dự phòng/,
   });
-  await expect(onlineBackupBtn).toHaveAttribute("aria-pressed", "true");
+  await expect(localOnlyBtn).toHaveAttribute("aria-pressed", "true");
+  await expect(onlineBackupBtn).toHaveAttribute("aria-pressed", "false");
   await localOnlyBtn.click();
   await expect(localOnlyBtn).toHaveAttribute("aria-pressed", "true");
 

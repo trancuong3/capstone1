@@ -162,6 +162,16 @@ class RequestScopedSessionDependencyTests(unittest.IsolatedAsyncioTestCase):
 
 
 class DatabaseConnectionProbeTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        from app.database.session import clear_database_dns_cache
+
+        clear_database_dns_cache()
+
+    def tearDown(self) -> None:
+        from app.database.session import clear_database_dns_cache
+
+        clear_database_dns_cache()
+
     async def test_probe_database_connection_runs_select_1_without_exposing_secrets(self):
         class FakeProbeSession:
             async def __aenter__(self):
@@ -202,6 +212,74 @@ class DatabaseConnectionProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["ok"])
         self.assertFalse(result["dns_resolved"])
         self.assertEqual(result["error_type"], "gaierror")
+
+    async def test_probe_database_connection_uses_autocommit_for_real_async_session(self):
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        captured_options: list[dict[str, object]] = []
+
+        class FakeRealAsyncSession(AsyncSession):
+            def __init__(self) -> None:
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            async def connection(self, *, execution_options=None, **_kwargs):
+                captured_options.append(dict(execution_options or {}))
+                return object()
+
+            async def scalar(self, statement, *_args, **_kwargs):
+                assert str(statement) == "SELECT 1"
+                return 1
+
+        with patch(
+            "app.database.session.AsyncSessionLocal",
+            return_value=FakeRealAsyncSession(),
+        ):
+            result = await probe_database_connection(timeout=1.0)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(captured_options, [{"isolation_level": "AUTOCOMMIT"}])
+
+    async def test_evict_closed_asyncpg_connection_and_probe_stale_retry(self):
+        from types import SimpleNamespace
+        from sqlalchemy.exc import DisconnectionError, InterfaceError
+        from app.database.session import _evict_closed_asyncpg_connection
+
+        open_conn = SimpleNamespace(_connection=SimpleNamespace(is_closed=lambda: False))
+        closed_conn = SimpleNamespace(_connection=SimpleNamespace(is_closed=lambda: True))
+        # Healthy connection passes with 0 RTT
+        _evict_closed_asyncpg_connection(open_conn, None, None)
+        # Closed idle socket triggers DisconnectionError so SQLAlchemy transparently reconnects
+        with self.assertRaises(DisconnectionError):
+            _evict_closed_asyncpg_connection(closed_conn, None, None)
+
+        # probe_database_connection retries once if a pooled socket disconnected mid-flight
+        attempts = {"count": 0}
+
+        class FlakySession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            async def scalar(self, statement, *_args, **_kwargs):
+                assert str(statement) == "SELECT 1"
+                attempts["count"] += 1
+                if attempts["count"] == 1:
+                    raise InterfaceError("SELECT 1", {}, RuntimeError("connection is closed"))
+                return 1
+
+        with patch("app.database.session.AsyncSessionLocal", side_effect=lambda: FlakySession()):
+            result = await probe_database_connection(timeout=1.0)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(attempts["count"], 2)
 
 
 if __name__ == "__main__":

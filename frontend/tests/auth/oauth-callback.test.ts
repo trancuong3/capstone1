@@ -195,5 +195,113 @@ describe("OAuth callback", () => {
     const spoofedLoc = spoofedResp.headers.get("location") ?? "";
     expect(spoofedLoc).not.toContain("evil.example");
     expect(new URL(spoofedLoc).pathname).toBe("/dashboard");
+
+    // Valid-syntax untrusted domain in X-Forwarded-Host must also be rejected.
+    const validSyntaxSpoofReq = new NextRequest(
+      new URL("/auth/callback?code=lan-oauth-code", "http://127.0.0.1:3001"),
+      {
+        headers: {
+          host: "attacker.example",
+          "x-forwarded-host": "attacker.example",
+          "x-forwarded-proto": "https",
+        },
+      },
+    );
+    const validSyntaxSpoofResp = await GET(validSyntaxSpoofReq);
+    const validSyntaxSpoofLoc =
+      validSyntaxSpoofResp.headers.get("location") ?? "";
+    expect(validSyntaxSpoofLoc).not.toContain("attacker.example");
+    expect(new URL(validSyntaxSpoofLoc).pathname).toBe("/dashboard");
+  });
+
+  it("enforces NEXT_PUBLIC_SITE_URL and VIREAD_ALLOWED_CALLBACK_ORIGINS allowlist against host header spoofing", async () => {
+    const harness = makeSupabase();
+    createServerSupabaseClientMock.mockResolvedValue(harness.client);
+    const prevSiteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+    const prevAllowed = process.env.VIREAD_ALLOWED_CALLBACK_ORIGINS;
+    process.env.NEXT_PUBLIC_SITE_URL = "https://viread.example.org";
+    process.env.VIREAD_ALLOWED_CALLBACK_ORIGINS =
+      "https://staging.viread.example.org";
+
+    try {
+      const spoofedReq = new NextRequest(
+        new URL("/auth/callback?code=oauth-code", "http://0.0.0.0:3000"),
+        {
+          headers: {
+            host: "evil.example.org",
+            "x-forwarded-host": "evil.example.org",
+            "x-forwarded-proto": "https",
+          },
+        },
+      );
+      const spoofedResp = await GET(spoofedReq);
+      expect(spoofedResp.headers.get("location")).toBe(
+        "https://viread.example.org/dashboard",
+      );
+
+      const allowlistedReq = new NextRequest(
+        new URL("/auth/callback?code=oauth-code", "http://0.0.0.0:3000"),
+        {
+          headers: {
+            "x-forwarded-host": "staging.viread.example.org",
+            "x-forwarded-proto": "https",
+          },
+        },
+      );
+      const allowlistedResp = await GET(allowlistedReq);
+      expect(allowlistedResp.headers.get("location")).toBe(
+        "https://staging.viread.example.org/dashboard",
+      );
+    } finally {
+      if (prevSiteUrl === undefined) {
+        delete process.env.NEXT_PUBLIC_SITE_URL;
+      } else {
+        process.env.NEXT_PUBLIC_SITE_URL = prevSiteUrl;
+      }
+      if (prevAllowed === undefined) {
+        delete process.env.VIREAD_ALLOWED_CALLBACK_ORIGINS;
+      } else {
+        process.env.VIREAD_ALLOWED_CALLBACK_ORIGINS = prevAllowed;
+      }
+    }
+  });
+
+  it("restores safe deep link from OAuth next cookie, clears the cookie, and enforces role", async () => {
+    const parentHarness = makeSupabase({ role: "parent" });
+    createServerSupabaseClientMock.mockResolvedValue(parentHarness.client);
+
+    const parentReq = new NextRequest(new URL(CALLBACK_PATH, APP_ORIGIN), {
+      headers: {
+        cookie: "viread_auth_next=%2Fbooks%2Fb1%3Fpage%3D2",
+      },
+    });
+    const parentResp = await GET(parentReq);
+    expect(parentResp.headers.get("location")).toBe(
+      `${APP_ORIGIN}/books/b1?page=2`,
+    );
+    expect(parentResp.cookies.get("viread_auth_next")?.value).toBe("");
+
+    const crossRoleReq = new NextRequest(new URL(CALLBACK_PATH, APP_ORIGIN), {
+      headers: {
+        cookie: "viread_auth_next=%2Fadmin%2Fparents",
+      },
+    });
+    const crossRoleResp = await GET(crossRoleReq);
+    expect(crossRoleResp.headers.get("location")).toBe(
+      `${APP_ORIGIN}/dashboard`,
+    );
+
+    const adminHarness = makeSupabase({ role: "admin" });
+    createServerSupabaseClientMock.mockResolvedValue(adminHarness.client);
+    const adminReq = new NextRequest(new URL(CALLBACK_PATH, APP_ORIGIN), {
+      headers: {
+        cookie: "viread_auth_next=%2Fadmin%2Fparents%3Fpage%3D3",
+      },
+    });
+    const adminResp = await GET(adminReq);
+    expect(adminResp.headers.get("location")).toBe(
+      `${APP_ORIGIN}/admin/parents?page=3`,
+    );
+    expect(adminResp.cookies.get("viread_auth_next")?.value).toBe("");
   });
 });

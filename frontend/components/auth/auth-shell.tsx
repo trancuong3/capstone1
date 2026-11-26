@@ -1,11 +1,14 @@
+"use client";
+
 import Image from "next/image";
 import type { ReactNode } from "react";
 
+import { ButtonSizeProvider } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { Skeleton } from "@/components/common/skeleton";
-import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
-import { ButtonSizeProvider } from "@/components/common/button";
+import { SiteHeader } from "@/components/layout/site-header";
+import { useTranslations } from "@/hooks/use-i18n";
 
 interface AuthShellProps {
   children: ReactNode;
@@ -15,7 +18,7 @@ export function AuthShell({ children }: AuthShellProps) {
   return (
     <div className="account-spread flex min-h-dvh w-full flex-col overflow-x-hidden bg-canvas">
       <SiteHeader />
-      <main className="flex w-full min-w-0 flex-1 items-center justify-center px-4 py-8 sm:min-h-[640px] sm:px-12 sm:py-12">
+      <main className="flex w-full min-w-0 flex-1 items-center justify-center px-3 py-4 sm:min-h-[640px] sm:px-12 sm:py-12">
         <ButtonSizeProvider size="compact">
           <div className="account-spread-inner grid w-full max-w-[560px] lg:max-w-[1088px] items-stretch overflow-hidden rounded-card border border-border bg-white lg:grid-cols-[1.1fr_1fr]">
             <div
@@ -26,9 +29,7 @@ export function AuthShell({ children }: AuthShellProps) {
                 alt=""
                 src="/images/reading-studio.webp"
                 fill
-                unoptimized
-                sizes="560px"
-                loading="eager"
+                sizes="(min-width: 1024px) 560px, 1px"
                 className="object-cover object-[41%_center]"
               />
             </div>
@@ -44,15 +45,18 @@ export function AuthShell({ children }: AuthShellProps) {
 }
 
 export function AuthLoadingState() {
+  const tA11y = useTranslations("accessibility");
+  const tCommon = useTranslations("common");
+
   return (
     <AuthShell>
       <Card
         aria-busy="true"
-        aria-label="Đang tải nội dung"
+        aria-label={tA11y("loadingContent")}
         className="border border-border bg-white"
       >
         <span className="sr-only" role="status">
-          Đang tải…
+          {tCommon("states.loading")}
         </span>
         <Skeleton className="h-11 w-3/5" />
         <Skeleton className="h-7 w-4/5" />

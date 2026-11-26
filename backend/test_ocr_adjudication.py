@@ -137,7 +137,7 @@ class VietnameseTokenRules(unittest.TestCase):
         self.assertEqual([step["operation"] for step in steps], ["substitute", "substitute"])
 
     def test_a08_adjudication_token_rejects_non_tokens(self):
-        for value in (None, 5, "", "   ", "...", "hai từ", "vào li vào li"):
+        for value in (None, 5, "", "   ", "...", "hai từ", "vào li vào li", "ti<pad>f", "<sos>một", "hai<eos>", "<unk>"):
             with self.subTest(value=value):
                 self.assertIsNone(adjudication_token(value))
         self.assertEqual(adjudication_token(' "Sáng," '), "sáng")

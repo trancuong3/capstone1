@@ -20,6 +20,8 @@ export default async function warmRoutes(): Promise<void> {
       "/forgot-password",
       "/reset-password",
       "/dashboard",
+      "/my-books",
+      `/my-books/${book}`,
       "/profile",
       "/settings",
       "/help-support",
@@ -27,6 +29,7 @@ export default async function warmRoutes(): Promise<void> {
       "/entertainment",
       "/entertainment/picture-description",
       "/entertainment/sentence-shooter",
+      "/entertainment/memory-game",
       "/karaoke",
       "/karaoke/11111111-1111-4111-8111-111111111111",
       "/children",
@@ -73,7 +76,7 @@ export default async function warmRoutes(): Promise<void> {
       : paths[role];
     if (targetPaths.length === 0) continue;
     const context = await request.newContext({
-      baseURL: "http://127.0.0.1:3106",
+      baseURL: `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? "3106"}`,
       extraHTTPHeaders: createPlaywrightAuthFixtureHeaders(role, token),
     });
     try {

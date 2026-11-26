@@ -47,17 +47,21 @@ describe("AppShell service provider boundary", () => {
   it("loads the persisted account menu inside AppServicesProvider", async () => {
     apiFetchFixture.mockResolvedValueOnce(
       Response.json({
-        id: "10000000-0000-4000-8000-000000000001",
-        display_name: "Ba mẹ đã lưu",
-        role: "parent",
-        created_at: "2026-10-01T00:00:00Z",
-        email: "parent@example.com",
-        contact_phone: null,
-        pending_email: null,
-        email_verified: true,
-        contact_info_status: "available",
-        avatar_url: "https://storage.example/avatar.webp",
+        profile: {
+          id: "10000000-0000-4000-8000-000000000001",
+          display_name: "Ba mẹ đã lưu",
+          role: "parent",
+          created_at: "2026-10-01T00:00:00Z",
+          email: "parent@example.com",
+          contact_phone: null,
+          pending_email: null,
+          email_verified: true,
+          contact_info_status: "available",
+          avatar_url: "https://storage.example/avatar.webp",
+          children: [],
+        },
         children: [],
+        latest_sessions_by_child: {},
       }),
     );
 

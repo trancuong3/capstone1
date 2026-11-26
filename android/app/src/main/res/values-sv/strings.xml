@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ViRead</string>
+    <string name="loading_title">Öppnar ViRead</string>
+    <string name="loading_subtitle">Läser in ViRead…</string>
+    <string name="loading_hint_stage2">Ansluter till servern…</string>
+    <string name="loading_hint_stage3">Servern startar, vänta lite…</string>
+    <string name="loading_cold_start_hint">Servern startar upp (cold-start), vänligen vänta ett ögonblick…</string>
+    <string name="error_title_network">Kan inte nå ViRead-servern</string>
+    <string name="error_title_server">ViRead-servern startar eller är upptagen</string>
+    <string name="error_title_timeout">Kunde inte ansluta till ViRead</string>
+    <string name="error_title_tls">Ogiltigt säkerhetscertifikat</string>
+    <string name="offline_message">Kan inte ansluta till ViRead-servern. Kontrollera Wi-Fi / mobildata eller serveradressen och tryck på Försök igen.</string>
+    <string name="timeout_message">ViRead-servern svarar långsamt. Kontrollera nätverksanslutningen och tryck på Försök igen. Vid första starten kan servern ta 30–60 sekunder att starta.</string>
+    <string name="server_5xx_message">ViRead-servern är upptagen eller startar om (%1$d). Vänta några sekunder och tryck på Försök igen.</string>
+    <string name="tls_error_message">Serverns HTTPS-säkerhetscertifikat är ogiltigt, så ViRead blockerade anslutningen för att skydda familjens konto.</string>
+    <string name="no_network_toast">Enheten har för närvarande ingen internet- eller Wi-Fi-anslutning.</string>
+    <string name="network_ready_toast">Nätverksanslutning upptäckt. Laddar om ViRead…</string>
+    <string name="retry_button">Försök igen</string>
+    <string name="open_home_button">Gå till inloggning</string>
+    <string name="check_connection_button">Kontrollera anslutningen igen</string>
+    <string name="configure_lan_server_button">Byt LAN HTTPS-server (Debug)</string>
+    <string name="lan_dialog_title">Konfigurera LAN HTTPS-server (Debug)</string>
+    <string name="lan_dialog_hint">Ange HTTPS-adressen till Next.js-servern på samma Wi-Fi (t.ex. https://192.168.1.10:8443). HTTP och localhost accepteras inte.</string>
+    <string name="lan_dialog_save">Spara &amp; Anslut</string>
+    <string name="lan_dialog_reset">Återställ standard</string>
+    <string name="lan_dialog_cancel">Stäng</string>
+    <string name="lan_invalid_url_toast">Ogiltig adress. Endast ett giltigt LAN HTTPS-ursprung accepteras (inga undersökvägar eller HTTP).</string>
+    <string name="file_chooser_title">Välj boksidebild, ta ett foto eller välj PDF/DOCX</string>
+    <string name="permission_denied_title">Behörighet krävs för den här funktionen</string>
+    <string name="permission_denied_message">Kamera- eller mikrofonbehörigheten är avstängd för ViRead. Du kan när som helst slå på den igen i appinställningarna.</string>
+    <string name="open_app_settings_button">Öppna appinställningar</string>
+    <string name="back_exit_confirm_toast">Tryck igen för att avsluta ViRead</string>
+</resources>

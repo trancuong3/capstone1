@@ -13,6 +13,8 @@ export interface BookListItemDTO {
   readonly max_grade: number;
   readonly lifecycle_status: BookLifecycleStatus;
   readonly visibility_scope?: BookVisibilityScope;
+  readonly cover_url?: string | null;
+  readonly cover_source_type?: string | null;
 }
 
 // Parent-facing preview metadata is delivered through BookPagePreviewDTO.

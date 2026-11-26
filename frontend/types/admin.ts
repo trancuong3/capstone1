@@ -307,6 +307,15 @@ export interface AuditLogPageDTO {
 
 export type OperationalHealthStatusUI = "HEALTHY" | "DEGRADED" | "UNAVAILABLE";
 
+export type HealthOperationalStateUI =
+  | "Healthy"
+  | "Degraded"
+  | "Offline"
+  | "Queued"
+  | "Quota exhausted"
+  | "Unsupported"
+  | "Unknown";
+
 export type RuntimeHealthDetailUI =
   | "installed"
   | "initialized"
@@ -320,15 +329,31 @@ export interface HealthServiceItemUI {
   readonly id: string;
   readonly label: string;
   readonly status: OperationalHealthStatusUI;
+  readonly operational_state?: HealthOperationalStateUI | null;
   readonly checked_at: ISODateTime;
   readonly safe_message: string;
   readonly detail_status?: RuntimeHealthDetailUI | null;
+  readonly last_success_at?: ISODateTime | null;
+  readonly oldest_pending_job_age_seconds?: number | null;
+  readonly queue_depth?: number | null;
+  readonly last_error?: string | null;
+}
+
+export interface AudioCacheHealthSummaryUI {
+  readonly entry_count: number;
+  readonly storage_used_bytes: number;
+  readonly storage_quota_bytes: number;
+  readonly daily_egress_bytes: number;
+  readonly daily_egress_limit_bytes?: number | null;
+  readonly cache_hit_ratio: number | null;
+  readonly quota_exhausted?: boolean;
 }
 
 export interface HealthSnapshotUI {
   readonly overall_status: OperationalHealthStatusUI;
   readonly checked_at: ISODateTime;
   readonly services: readonly HealthServiceItemUI[];
+  readonly audio_cache?: AudioCacheHealthSummaryUI | null;
 }
 
 export type AdminMockScenario =

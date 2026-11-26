@@ -1,6 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { useTranslations } from "@/hooks/use-i18n";
 import {
   getVoiceEngineStatus,
   subscribeVoiceEngineStatus,
@@ -23,6 +24,13 @@ function getTierStyles(tier: VoiceEngineTier): {
         dot: "bg-orange-500",
         chip: "border-orange-200 bg-orange-50/90 text-orange-900",
       };
+    case "android_native":
+      return {
+        dot: "bg-sky-500",
+        chip: "border-sky-200 bg-sky-50/90 text-sky-900",
+      };
+    case "catalog_cache":
+    case "browser_wasm":
     case "local_offline":
     case "idle":
     default:
@@ -33,18 +41,53 @@ function getTierStyles(tier: VoiceEngineTier): {
   }
 }
 
-function buildTooltip(kind: "STT" | "TTS", snap: EngineSourceSnapshot): string {
+type SpeechTranslateFn = ReturnType<typeof useTranslations>;
+
+function buildTooltip(
+  kind: "STT" | "TTS",
+  snap: EngineSourceSnapshot,
+  t: SpeechTranslateFn,
+): string {
   const base = `${kind}: ${snap.engineLabel}`;
   if (snap.fallbackReason) {
-    return `${base} (Dự phòng: ${snap.fallbackReason})`;
+    return t("engineBadge.fallbackDetail", {
+      base,
+      reason: snap.fallbackReason,
+    });
+  }
+  if (snap.tier === "android_native") {
+    return t("engineBadge.androidDetail", { base });
+  }
+  if (snap.tier === "catalog_cache") {
+    return t("engineBadge.catalogCacheDetail", { base });
   }
   if (snap.tier === "google_cloud") {
-    return `${base} (Online · Đang dùng dự phòng Google Cloud API)`;
+    return t("engineBadge.googleCloudDetail", { base });
   }
   if (snap.tier === "browser_default") {
-    return `${base} (Online · Dự phòng Google/Trình duyệt)`;
+    return t("engineBadge.browserDefaultDetail", { base });
   }
-  return `${base} (Offline · Chạy trực tiếp trên máy này)`;
+  if (snap.tier === "browser_wasm") {
+    return t("engineBadge.wasmDetail", { base });
+  }
+  return t("engineBadge.localDetail", { base });
+}
+
+function resolveShortLabel(
+  snap: EngineSourceSnapshot,
+  t: SpeechTranslateFn,
+): string {
+  switch (snap.tier) {
+    case "local_offline":
+    case "browser_wasm":
+    case "catalog_cache":
+    case "android_native":
+    case "google_cloud":
+    case "browser_default":
+      return t(`engineBadge.shortLabels.${snap.tier}`);
+    default:
+      return snap.shortLabel;
+  }
 }
 
 export interface VoiceEngineBadgeProps {
@@ -56,6 +99,7 @@ export function VoiceEngineBadge({
   compact = false,
   className = "",
 }: VoiceEngineBadgeProps) {
+  const t = useTranslations("speech");
   const status = useSyncExternalStore(
     subscribeVoiceEngineStatus,
     getVoiceEngineStatus,
@@ -71,11 +115,14 @@ export function VoiceEngineBadge({
       data-stt-tier={status.stt.tier}
       data-tts-tier={status.tts.tier}
       className={`inline-flex flex-wrap items-center gap-1.5 ${className}`}
-      aria-label={`Nguồn giọng nói: STT ${status.stt.engineLabel}, TTS ${status.tts.engineLabel}`}
+      aria-label={t("engineBadge.ariaLabel", {
+        stt: status.stt.engineLabel,
+        tts: status.tts.engineLabel,
+      })}
     >
       <span
         data-testid="voice-engine-stt-chip"
-        title={buildTooltip("STT", status.stt)}
+        title={buildTooltip("STT", status.stt, t)}
         className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium leading-tight ${sttStyles.chip}`}
       >
         <span
@@ -83,13 +130,14 @@ export function VoiceEngineBadge({
           aria-hidden="true"
         />
         <span>
-          STT: {compact ? status.stt.shortLabel : status.stt.engineLabel}
+          STT:{" "}
+          {compact ? resolveShortLabel(status.stt, t) : status.stt.engineLabel}
         </span>
       </span>
 
       <span
         data-testid="voice-engine-tts-chip"
-        title={buildTooltip("TTS", status.tts)}
+        title={buildTooltip("TTS", status.tts, t)}
         className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium leading-tight ${ttsStyles.chip}`}
       >
         <span
@@ -97,7 +145,8 @@ export function VoiceEngineBadge({
           aria-hidden="true"
         />
         <span>
-          TTS: {compact ? status.tts.shortLabel : status.tts.engineLabel}
+          TTS:{" "}
+          {compact ? resolveShortLabel(status.tts, t) : status.tts.engineLabel}
         </span>
       </span>
     </div>

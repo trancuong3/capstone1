@@ -342,7 +342,7 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
       </AppServicesProvider>,
     );
     await screen.findByRole("heading", {
-      name: `Cùng nhìn lại hành trình của ${child.alias}`,
+      name: `Tiến bộ của ${child.alias}`,
     });
     expect(screen.getByText("2 buổi")).toBeInTheDocument();
     expect(screen.getByText("Chưa đủ kỳ so sánh")).toBeInTheDocument();
@@ -650,9 +650,13 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
     // Sample TTS success
     mockSpeechPlayer.play.mockResolvedValueOnce(undefined);
     await user.click(screen.getByRole("button", { name: "Nghe phát âm mẫu" }));
-    expect(mockSpeechPlayer.play).toHaveBeenCalledWith("có", {
-      wordSample: true,
-    });
+    expect(mockSpeechPlayer.play).toHaveBeenCalledWith(
+      "có",
+      expect.objectContaining({
+        wordSample: true,
+        cacheScope: expect.stringMatching(/^(CATALOG|PRIVATE)$/),
+      }),
+    );
 
     // The retry action reopens the microphone. Saving reuses the same recording.
     await user.click(screen.getByRole("button", { name: /Tiếp tục luyện/ }));

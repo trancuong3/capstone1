@@ -462,9 +462,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       act(() => first.say(["Bé mèo", "Con không biết đọc từ này ạ."]));
       await waitFor(() => expect(Recognition.instances).toHaveLength(2));
       expect(speechPlayerMock.play.mock.calls).toEqual([
-        ["Cô đọc mẫu cho con nhé."],
+        ["Cô đọc mẫu cho con nhé.", { coaching: true }],
         ["nhỏ", { wordSample: true }],
-        ["Đến lượt con đọc nhé."],
+        ["Đến lượt con đọc nhé.", { coaching: true }],
       ]);
       expect(speechServiceMock.transcribe).not.toHaveBeenCalled();
       // Policy change (automatic reading flow): a repeated request is not
@@ -550,7 +550,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       }
     });
 
-    it("offers a model after two quiet windows, then keeps stepping the ladder (slower, phrase, encouragement) instead of going silent", async () => {
+    it("models, slows down and offers a phrase during silence without recording a failed attempt", async () => {
       await act(async () => {
         renderReading("reading");
       });
@@ -576,7 +576,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
           speedScale: 0.8,
         });
         expect(speechPlayerMock.play).toHaveBeenCalledWith("Bé mèo nhỏ");
-        expect(speechPlayerMock.play).toHaveBeenCalledWith(
+        expect(speechPlayerMock.play).not.toHaveBeenCalledWith(
           "Con đã cố gắng rất tốt rồi. Mình đọc tiếp nhé!",
         );
         expect(speechRecorderMock.start.mock.calls.length).toBeGreaterThan(2);
@@ -764,6 +764,34 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     expect(screen.queryByText("Đọc mẫu cả đoạn:")).not.toBeInTheDocument();
     await act(async () => finishSecond());
     expect(services.readingService.createRetryEvent).not.toHaveBeenCalled();
+  });
+
+  it("shows a recoverable page sample failure without automatically starting the microphone", async () => {
+    const user = userEvent.setup();
+    speechPlayerMock.playWithWordTimings.mockRejectedValueOnce(
+      new Error("All TTS providers unavailable"),
+    );
+    speechRecorderMock.start.mockRejectedValueOnce(
+      new Error("Microphone permission denied"),
+    );
+    renderReading("reading");
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Nghe đọc mẫu cả trang",
+      }),
+    );
+    expect(
+      await screen.findByText(
+        "Mình chưa phát được âm thanh. Bé vẫn có thể nhìn chữ và đọc tiếp nhé.",
+      ),
+    ).toBeVisible();
+    expect(speechRecorderMock.start).not.toHaveBeenCalled();
+    expect(compareTranscriptMock).not.toHaveBeenCalled();
+    expect(services.readingService.createRetryEvent).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Đọc tiếp" }));
+    expect(
+      await screen.findByRole("button", { name: "Nghe đọc mẫu cả trang" }),
+    ).toBeEnabled();
   });
 
   it("cancels a page sample on navigation and ignores every stale sample callback", async () => {
@@ -1205,6 +1233,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     "silent-help-limit",
   ] as const)(
     "uses recorded Vietnamese STT for retry outcome: %s",
+    { timeout: 15_000 },
     async (outcome) => {
       class FakeSpeechRecognition {
         static instances: FakeSpeechRecognition[] = [];

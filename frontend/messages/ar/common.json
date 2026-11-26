@@ -1,0 +1,97 @@
+{
+  "brand": {
+    "name": "ViRead",
+    "tagline": "المنصة التي ترافق الآباء والأطفال في رحلة القراءة."
+  },
+  "actions": {
+    "save": "حفظ",
+    "saving": "جاري الحفظ...",
+    "cancel": "إلغاء",
+    "close": "إغلاق",
+    "confirm": "تأكيد",
+    "continue": "متابعة",
+    "back": "رجوع",
+    "retry": "إعادة المحاولة",
+    "reload": "إعادة تحميل",
+    "search": "بحث",
+    "clear": "مسح",
+    "filter": "تصفية",
+    "edit": "تعديل",
+    "delete": "مسح",
+    "create": "إنشاء جديد",
+    "upload": "رفع",
+    "download": "تنزيل",
+    "open": "فتح",
+    "viewDetails": "عرض التفاصيل",
+    "select": "تحديد",
+    "apply": "تطبيق"
+  },
+  "states": {
+    "loading": "جاري التحميل...",
+    "empty": "لا توجد بيانات متاحة.",
+    "unavailable": "تعذر تحميل المعلومات",
+    "ready": "جاهز",
+    "completed": "مكتمل",
+    "inProgress": "قيد التنفيذ",
+    "pending": "معلق",
+    "error": "حدث خطأ ما",
+    "imageLoadFailed": "فشل تحميل صورة الصفحة",
+    "retryReload": "حاول إعادة التحميل"
+  },
+  "avatar": {
+    "defaultAlt": "الصورة الرمزية"
+  },
+  "pagination": {
+    "summary": "صفحة {page} من {totalPages}",
+    "itemsCount": "{count, plural, =0 {لا توجد عناصر} other {# عناصر}}",
+    "previous": "الصفحة السابقة",
+    "next": "الصفحة التالية",
+    "previousShort": "السابق",
+    "nextShort": "التالي",
+    "navAria": "الترقيم",
+    "navAriaWithLabel": "تصفح قائمة {itemLabel}",
+    "rangeSummary": "عرض {start}–{end} من {total}",
+    "rangeSummaryWithLabel": "عرض {start}–{end} من {total} {itemLabel}"
+  },
+  "languageSelector": {
+    "label": "لغة الواجهة",
+    "buttonAriaLabel": "اختر لغة الواجهة، الحالية: {language}",
+    "dialogTitle": "اختر اللغة",
+    "searchLabel": "البحث عن لغة",
+    "searchPlaceholder": "البحث باسم اللغة أو الرمز...",
+    "clearSearch": "مسح كلمة البحث",
+    "popularHeading": "اللغات الشائعة",
+    "allHeading": "جميع اللغات",
+    "searchResultsHeading": "نتائج البحث",
+    "emptySearch": "لم يتم العثور على لغات تطابق \"{query}\".",
+    "currentBadge": "قيد الاستخدام",
+    "loadingLocale": "جاري تحميل اللغة...",
+    "switchedNotice": "تم تغيير الواجهة إلى {language}.",
+    "closeButton": "إغلاق قائمة اللغات"
+  },
+  "footer": {
+    "copyright": "© {year} ViRead. جميع الحقوق محفوظة.",
+    "adminCopyright": "© {year} ViRead.",
+    "adminNotice": "منطقة إدارة ViRead.",
+    "parentDescription": "منصة تدعم الآباء في مساعدة الأطفال على تطوير مهارات القراءة وتتبع تقدم التعلم.",
+    "contactHeading": "معلومات الاتصال",
+    "quickLinksHeading": "روابط سريعة",
+    "organization": "جامعة دوي تان",
+    "contactEmail": "vireadforyou@gmail.com",
+    "contactPhone": "0905373633"
+  },
+  "notFound": {
+    "pageTitle": "الصفحة غير موجودة",
+    "title": "الصفحة غير موجودة",
+    "description": "الصفحة التي تبحث عنها غير موجودة أو تم نقلها إلى عنوان آخر.",
+    "backHome": "العودة إلى لوحة التحكم",
+    "backLogin": "العودة إلى تسجيل الدخول"
+  },
+  "errorPage": {
+    "title": "حدث خطأ ما",
+    "description": "واجهت ViRead خطأ غير متوقع أثناء عرض هذه الصفحة. يرجى المحاولة مرة أخرى أو الرجوع إلى لوحة التحكم.",
+    "globalTitle": "تواجه التطبيق بعض المشاكل المؤقتة",
+    "globalDescription": "تعذر تحميل واجهة التطبيق في الوقت الحالي. يرجى المحاولة مرة أخرى بعد قليل.",
+    "backHome": "العودة إلى لوحة التحكم"
+  }
+}

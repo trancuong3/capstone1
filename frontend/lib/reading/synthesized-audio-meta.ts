@@ -4,6 +4,7 @@ export interface SynthesizedAudioMeta {
   readonly provider?: string | null;
   readonly region?: string | null;
   readonly modelVersion?: string | null;
+  readonly cachedSpeed?: number | null;
 }
 
 const synthesizedAudioMeta = new WeakMap<Blob, SynthesizedAudioMeta>();
