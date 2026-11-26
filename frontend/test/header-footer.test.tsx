@@ -63,7 +63,7 @@ describe("shared header and footer", () => {
       screen.queryByRole("navigation", { name: "Điều hướng tài khoản" }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "ViRead - đăng nhập" }),
+      screen.getByRole("link", { name: "ViRead - Đăng nhập" }),
     ).toHaveAttribute("href", "/login");
   });
 
@@ -224,7 +224,7 @@ describe("shared header and footer", () => {
     expect(screen.getByRole("main")).toHaveTextContent("Đăng nhập quản trị");
     expect(
       screen.getByRole("link", {
-        name: "ViRead - đăng nhập quản trị",
+        name: "ViRead - Đăng nhập quản trị",
       }),
     ).toHaveAttribute("href", "/admin/login");
     expect(

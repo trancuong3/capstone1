@@ -1,0 +1,118 @@
+{
+  "verifiedAt": "2026-11-25T21:29:05.276Z",
+  "sessionUrl": "https://192.168.1.2:8443/reading/fa31e466-aab5-483d-8b01-a72b535ac0ad?state=ready&pageId=aaaaaaaa-2026-4112-8001-000000000101",
+  "live_comprehension_quiz": {
+    "choices": [
+      "Tạm dừng nghe",
+      "A Cái cặp",
+      "B Cái ô",
+      "C Quyển vở"
+    ],
+    "questionDispatchedBeforePrefetch": true,
+    "fullNarrationListeningReached": true,
+    "requestCountsDuringFullNarration": {
+      "Bạn Mi đã mang đồ vật gì đến lớp vào sáng nay thế bé?": 1,
+      "Đáp án B: Cái ô": 1,
+      "Đáp án C: Quyển vở": 1,
+      "Đáp án A: Cái cặp": 1,
+      "Bé chọn đáp án nào?": 1
+    },
+    "prefetchCacheHitVerifiedLive": true,
+    "prefetchedChoiceTts": [
+      {
+        "text": "Đáp án B: Cái ô",
+        "voice_id": "local_north_truc_ly",
+        "speed": 0.9,
+        "provider_mode": "local_with_google_fallback",
+        "allow_google_tts": true,
+        "session_id": "fa31e466-aab5-483d-8b01-a72b535ac0ad"
+      },
+      {
+        "text": "Đáp án C: Quyển vở",
+        "voice_id": "local_north_truc_ly",
+        "speed": 0.9,
+        "provider_mode": "local_with_google_fallback",
+        "allow_google_tts": true,
+        "session_id": "fa31e466-aab5-483d-8b01-a72b535ac0ad"
+      }
+    ],
+    "prefetchAllHaveLockedVoiceAndSpeed": true,
+    "lockedVoiceId": "local_north_truc_ly",
+    "lockedSpeed": 0.9,
+    "wrongChoiceClicked": "C Quyển vở",
+    "storyHintReturned": "Con nhớ lại chi tiết trong bài đọc: “Sáng nay, Mi mang … đến lớp. Tan học, trời đổ mưa.” rồi chọn lại nhé!",
+    "hintTtsRequested": true,
+    "hintTtsPayload": {
+      "text": "Con nhớ lại chi tiết trong bài đọc: “Sáng nay, Mi mang … đến lớp. Tan học, trời đổ mưa.”",
+      "voice_id": "local_north_truc_ly",
+      "speed": 0.9,
+      "provider_mode": "local_with_google_fallback",
+      "allow_google_tts": true,
+      "session_id": "fa31e466-aab5-483d-8b01-a72b535ac0ad"
+    },
+    "bargeInSucceeded": true,
+    "correctChoiceClicked": "B Cái ô",
+    "ttsPayloadsCount": 7,
+    "ttsSamplePayloads": [
+      {
+        "text": "Bạn Mi đã mang đồ vật gì đến lớp vào sáng nay thế bé?",
+        "voice_id": "local_north_truc_ly",
+        "speed": 0.9,
+        "provider_mode": "local_with_google_fallback",
+        "allow_google_tts": true,
+        "session_id": "fa31e466-aab5-483d-8b01-a72b535ac0ad"
+      },
+      {
+        "text": "Đáp án B: Cái ô",
+        "voice_id": "local_north_truc_ly",
+        "speed": 0.9,
+        "provider_mode": "local_with_google_fallback",
+        "allow_google_tts": true,
+        "session_id": "fa31e466-aab5-483d-8b01-a72b535ac0ad"
+      },
+      {
+        "text": "Đáp án C: Quyển vở",
+        "voice_id": "local_north_truc_ly",
+        "speed": 0.9,
+        "provider_mode": "local_with_google_fallback",
+        "allow_google_tts": true,
+        "session_id": "fa31e466-aab5-483d-8b01-a72b535ac0ad"
+      },
+      {
+        "text": "Đáp án A: Cái cặp",
+        "voice_id": "local_north_truc_ly",
+        "speed": 0.9,
+        "provider_mode": "local_with_google_fallback",
+        "allow_google_tts": true,
+        "session_id": "fa31e466-aab5-483d-8b01-a72b535ac0ad"
+      },
+      {
+        "text": "Bé chọn đáp án nào?",
+        "voice_id": "local_north_truc_ly",
+        "speed": 0.9,
+        "provider_mode": "local_with_google_fallback",
+        "allow_google_tts": true,
+        "session_id": "fa31e466-aab5-483d-8b01-a72b535ac0ad"
+      },
+      {
+        "text": "Con nhớ lại chi tiết trong bài đọc: “Sáng nay, Mi mang … đến lớp. Tan học, trời đổ mưa.”",
+        "voice_id": "local_north_truc_ly",
+        "speed": 0.9,
+        "provider_mode": "local_with_google_fallback",
+        "allow_google_tts": true,
+        "session_id": "fa31e466-aab5-483d-8b01-a72b535ac0ad"
+      },
+      {
+        "text": "rồi chọn lại nhé!",
+        "voice_id": "local_north_truc_ly",
+        "speed": 0.9,
+        "provider_mode": "local_with_google_fallback",
+        "allow_google_tts": true,
+        "session_id": "fa31e466-aab5-483d-8b01-a72b535ac0ad"
+      }
+    ]
+  },
+  "consoleErrors": [],
+  "pageErrors": [],
+  "apiErrors": []
+}

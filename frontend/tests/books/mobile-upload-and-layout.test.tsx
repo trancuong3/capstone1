@@ -200,9 +200,17 @@ describe("Mobile My Books Multi-Format Upload (Image/PDF/DOCX) & Responsive Cont
     apiFetchFixture.mockImplementation(async (input, init) => {
       const path = new URL(String(input)).pathname;
       if (
-        path === "/books/my-books" &&
+        (path === "/books/my-books" || path === "/books/my-books/paged") &&
         (!init?.method || init.method === "GET")
       ) {
+        if (path === "/books/my-books/paged") {
+          return Response.json({
+            items: [summary],
+            total: 1,
+            limit: 9,
+            offset: 0,
+          });
+        }
         return Response.json([summary]);
       }
       if (path === "/books/my-books" && init?.method === "POST") {

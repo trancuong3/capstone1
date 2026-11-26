@@ -1075,6 +1075,165 @@ class ReadingComparisonSelfCorrectedTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mot_entry.consecutive_correct_count, 1)
         self.assertEqual(mot_entry.sources[0].context_phrase, "Bé có một bông hoa.")
 
+    def test_display_text_strips_edge_punctuation_preserving_vietnamese_tones_and_d(self):
+        from app.services.difficult_words_service import (
+            _WordAccumulator,
+            clean_difficult_word_display_text,
+        )
+
+        self.assertEqual(clean_difficult_word_display_text('“mưa.”'), "mưa")
+        self.assertEqual(clean_difficult_word_display_text("Đường!"), "Đường")
+        self.assertEqual(clean_difficult_word_display_text("?đồng,"), "đồng")
+        self.assertEqual(clean_difficult_word_display_text("  'trời;'  "), "trời")
+
+        acc = _WordAccumulator(normalized_word="đường")
+        acc.observe(display_text="“Đường!”", seen_at=NOW)
+        self.assertEqual(acc.display_counter.most_common(1)[0][0], "Đường")
+
+    async def test_start_practice_attempt_and_history_sanitize_display_text(self):
+        repo = InMemoryPracticeRepo()
+        service = DifficultWordsService(repo, make_access())
+        attempt = await service.start_attempt(
+            CHILD_A,
+            ACTOR,
+            DifficultWordPracticeStartRequest(
+                normalized_word="đường",
+                display_text="“Đường,”",
+                request_id=uuid4(),
+            ),
+        )
+        self.assertEqual(attempt.display_text, "Đường")
+
+        # Legacy DB row with edge punctuation must also return clean display_text in history.
+        repo.attempts.append(
+            DifficultWordPracticeAttempt(
+                Id=uuid4(),
+                ChildId=CHILD_A,
+                ParentId=ACTOR,
+                NormalizedWord="mèo",
+                DisplayText="“Mèo.”",
+                AttemptNumber=1,
+                State="COMPLETED",
+                AssessmentStatus="CORRECT",
+                RecognitionSource="BROWSER_SPEECH",
+                AssessmentVersion=1,
+                StartedAt=NOW,
+                CompletedAt=NOW,
+            )
+        )
+        history = await service.practice_history(CHILD_A, ACTOR)
+        display_by_norm = {item.normalized_word: item.display_text for item in history.items}
+        self.assertEqual(display_by_norm["đường"], "Đường")
+        self.assertEqual(display_by_norm["mèo"], "Mèo")
+
+    def test_difficult_words_service_reuses_shared_voice_orchestrator_singleton(self):
+        from app.api.routes.system import _difficult_words_service
+        from app.api.routes.voice import get_voice_orchestrator as route_get_orchestrator
+        from app.services.voice_orchestrator import (
+            clear_default_voice_orchestrators,
+            get_voice_orchestrator,
+        )
+
+        clear_default_voice_orchestrators()
+        try:
+            shared = get_voice_orchestrator()
+            self.assertIs(route_get_orchestrator(), shared)
+
+            # Route helper reuses the shared pooled orchestrator across requests.
+            svc_route_1 = _difficult_words_service(MagicMock())
+            svc_route_2 = _difficult_words_service(MagicMock())
+            self.assertIs(svc_route_1.voice_provider, shared)
+            self.assertIs(svc_route_2.voice_provider, shared)
+            self.assertIs(svc_route_1.voice_provider.local, svc_route_2.voice_provider.local)
+
+            # Direct construction without voice_provider also reuses the shared singleton.
+            svc_direct_1 = DifficultWordsService(InMemoryPracticeRepo(), make_access())
+            svc_direct_2 = DifficultWordsService(InMemoryPracticeRepo(), make_access())
+            self.assertIs(svc_direct_1.voice_provider, shared)
+            self.assertIs(svc_direct_2.voice_provider, shared)
+
+            # Explicit voice_provider injection for unit tests remains supported.
+            custom_provider = MagicMock()
+            svc_custom = DifficultWordsService(
+                InMemoryPracticeRepo(), make_access(), voice_provider=custom_provider
+            )
+            self.assertIs(svc_custom.voice_provider, custom_provider)
+        finally:
+            clear_default_voice_orchestrators()
+
+    def test_pooled_voice_orchestrator_survives_cross_event_loop_reuse_and_closes_cleanly(self):
+        import asyncio
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        from app.services.voice_orchestrator import (
+            _DEFAULT_ORCHESTRATORS,
+            clear_default_voice_orchestrators,
+            close_default_voice_orchestrators,
+            get_voice_orchestrator,
+        )
+
+        class _OkHandler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+            timeout = 1.0
+
+            def do_GET(self):
+                body = b"ok"
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_args):
+                return None
+
+        class _DaemonThreadingServer(ThreadingHTTPServer):
+            daemon_threads = True
+
+        server = _DaemonThreadingServer(("127.0.0.1", 0), _OkHandler)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        clear_default_voice_orchestrators()
+        try:
+            shared = get_voice_orchestrator()
+
+            async def _ping() -> int:
+                client = shared.local._get_client()
+                resp = await client.get(f"http://127.0.0.1:{port}/", timeout=2.0)
+                return resp.status_code
+
+            # First event loop opens a keep-alive connection on the pooled AsyncClient.
+            self.assertEqual(asyncio.run(_ping()), 200)
+            first_client = shared.local._client
+            self.assertIsNotNone(first_client)
+
+            # Second separate event loop must transparently refresh the loop-bound client
+            # instead of crashing with RuntimeError: Event loop is closed.
+            self.assertEqual(asyncio.run(_ping()), 200)
+            self.assertIsNot(shared.local._client, first_client)
+
+            # Shutdown hook closes pooled AsyncClient, cancels pending recovery task, and empties pool.
+            async def _close_check() -> None:
+                client = shared.local._get_client()
+                self.assertFalse(client.is_closed)
+                pending_recovery: asyncio.Task[bool] = asyncio.create_task(
+                    asyncio.sleep(60, result=True)
+                )
+                shared.local._recovery_task = pending_recovery
+                await close_default_voice_orchestrators()
+                self.assertTrue(client.is_closed)
+                self.assertIsNone(shared.local._client)
+                self.assertTrue(pending_recovery.cancelled())
+                self.assertEqual(len(_DEFAULT_ORCHESTRATORS), 0)
+
+            asyncio.run(_close_check())
+        finally:
+            server.shutdown()
+            server.server_close()
+            clear_default_voice_orchestrators()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -361,7 +361,10 @@ export function HelpSupportScreen() {
         ))}
       </section>
 
-      <section aria-labelledby="support-contact-heading">
+      <section
+        aria-labelledby="support-contact-heading"
+        className="flex flex-col gap-4"
+      >
         <Card>
           <div className="flex items-center gap-3">
             <div>
@@ -379,16 +382,15 @@ export function HelpSupportScreen() {
           >
             <span className="break-all">{VIREAD_SUPPORT_EMAIL}</span>
           </a>
+          <Button
+            className="mt-2 sm:max-w-72"
+            variant="secondary"
+            onClick={() => setShowFeedbackEditor(true)}
+          >
+            Gửi phản hồi
+          </Button>
         </Card>
       </section>
-
-      <Button
-        className="sm:max-w-72"
-        variant="secondary"
-        onClick={() => setShowFeedbackEditor(true)}
-      >
-        Gửi phản hồi
-      </Button>
     </section>
   );
 }

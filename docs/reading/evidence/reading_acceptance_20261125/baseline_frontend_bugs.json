@@ -1,0 +1,188 @@
+{
+  "recordedAt": "2026-11-24T20:12:30.976Z",
+  "quizResults": [
+    {
+      "utterance": "ạ",
+      "expectedBehavior": "Keep open (NONE/filler)",
+      "actual": {
+        "type": "CHOICE",
+        "choice": {
+          "id": "A",
+          "label": "Bạn Lan",
+          "value": "Bạn Lan"
+        },
+        "matchedBy": "letter"
+      }
+    },
+    {
+      "utterance": "à...",
+      "expectedBehavior": "Keep open (NONE/filler)",
+      "actual": {
+        "type": "CHOICE",
+        "choice": {
+          "id": "A",
+          "label": "Bạn Lan",
+          "value": "Bạn Lan"
+        },
+        "matchedBy": "letter"
+      }
+    },
+    {
+      "utterance": "con chọn B ạ",
+      "expectedBehavior": "Select B (Bạn An)",
+      "actual": {
+        "type": "NONE"
+      }
+    },
+    {
+      "utterance": "B, bạn An ạ",
+      "expectedBehavior": "Select B (Bạn An)",
+      "actual": {
+        "type": "CHOICE",
+        "choice": {
+          "id": "B",
+          "label": "Bạn An",
+          "value": "Bạn An"
+        },
+        "matchedBy": "content"
+      }
+    },
+    {
+      "utterance": "bạn An",
+      "expectedBehavior": "Select B (Bạn An)",
+      "actual": {
+        "type": "CHOICE",
+        "choice": {
+          "id": "B",
+          "label": "Bạn An",
+          "value": "Bạn An"
+        },
+        "matchedBy": "content"
+      }
+    },
+    {
+      "utterance": "cho bạn An",
+      "expectedBehavior": "Select B (Bạn An)",
+      "actual": {
+        "type": "CHOICE",
+        "choice": {
+          "id": "B",
+          "label": "Bạn An",
+          "value": "Bạn An"
+        },
+        "matchedBy": "content"
+      }
+    },
+    {
+      "utterance": "con không chọn bạn An",
+      "expectedBehavior": "Keep open / NOT B",
+      "actual": {
+        "type": "CHOICE",
+        "choice": {
+          "id": "B",
+          "label": "Bạn An",
+          "value": "Bạn An"
+        },
+        "matchedBy": "content"
+      }
+    },
+    {
+      "utterance": "A… à không, con chọn B",
+      "expectedBehavior": "Select B (Bạn An)",
+      "actual": {
+        "type": "NONE"
+      }
+    },
+    {
+      "utterance": "A, bạn An",
+      "expectedBehavior": "Conflict prompt (Lan vs An)",
+      "actual": {
+        "type": "CHOICE",
+        "choice": {
+          "id": "B",
+          "label": "Bạn An",
+          "value": "Bạn An"
+        },
+        "matchedBy": "content"
+      }
+    },
+    {
+      "utterance": "A hay B nhỉ?",
+      "expectedBehavior": "Keep open (ambiguous)",
+      "actual": {
+        "type": "NONE"
+      }
+    },
+    {
+      "utterance": "Bạn",
+      "expectedBehavior": "Ask clarify Lan vs An",
+      "actual": {
+        "type": "NONE"
+      }
+    },
+    {
+      "utterance": "Cô đọc lại giúp con",
+      "expectedBehavior": "REPLAY",
+      "actual": {
+        "type": "REPLAY"
+      }
+    },
+    {
+      "utterance": "Bạn Lan",
+      "expectedBehavior": "Select A (Bạn Lan)",
+      "actual": {
+        "type": "CHOICE",
+        "choice": {
+          "id": "A",
+          "label": "Bạn Lan",
+          "value": "Bạn Lan"
+        },
+        "matchedBy": "content"
+      }
+    }
+  ],
+  "echoReproduction": {
+    "teacherModelsSingleWordThenChildRepeatsWithinTail_noOnsetAt": {
+      "accept": false,
+      "reason": "tail-overlap",
+      "playbackId": "tts-1"
+    },
+    "sameWithRealOnsetAtAfterGrace": {
+      "accept": true,
+      "reason": "ok"
+    }
+  },
+  "voiceIntentBaseline": {
+    "de_con_tu_doc": {
+      "type": "NONE",
+      "reason": "not-a-command"
+    },
+    "chu_nay_con_chua_biet": {
+      "type": "NONE",
+      "reason": "not-a-command"
+    },
+    "nghi_mot_chut": {
+      "type": "NONE",
+      "reason": "not-a-command"
+    },
+    "dialogue_dung_lai_in_book": {
+      "type": "NONE",
+      "reason": "in-book"
+    },
+    "cho_con_thu_them": {
+      "type": "NONE",
+      "reason": "not-a-command"
+    }
+  },
+  "alignmentBaseline": {
+    "repeatedPassageCursorAfterFirst": 3,
+    "repeatedPassageEndIndex": -1,
+    "repeatedPassageMismatches": [],
+    "selfCorrectPreviewSlipStatusOnBan": "SUBSTITUTE",
+    "selfCorrectPreviewAfterFix": "MATCH",
+    "selfCorrectFinalStatusOnBan": "MATCH",
+    "selfCorrectedSlipIds": [
+      "b-4"
+    ]
+  }
+}

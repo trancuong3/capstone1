@@ -13,7 +13,19 @@ import { parseVoiceIntent, type VoiceIntent } from "@/lib/reading/voice-intent";
 import type { ReadingPageWordDTO } from "@/types/reading";
 
 /** Words per millisecond of detected speech beyond which text is implausible. */
-const MIN_SPEECH_MS_PER_WORD = 150;
+export const MIN_SPEECH_MS_PER_WORD = 150;
+
+export function isImplausibleSpeechSpeed(
+  tokenCount: number,
+  speechDurationMs?: number | null,
+): boolean {
+  return (
+    tokenCount >= 3 &&
+    speechDurationMs != null &&
+    Number.isFinite(speechDurationMs) &&
+    speechDurationMs < tokenCount * MIN_SPEECH_MS_PER_WORD
+  );
+}
 
 export type EvidenceRejectReason =
   | EchoVerdictReason
@@ -175,11 +187,7 @@ export class ReadingEvidencePipeline {
     const verdict = this.echo.evaluate(segment);
     if (!verdict.accept) return reject(verdict.reason);
 
-    if (
-      tokens.length >= 3 &&
-      segment.speechDurationMs != null &&
-      segment.speechDurationMs < tokens.length * MIN_SPEECH_MS_PER_WORD
-    ) {
+    if (isImplausibleSpeechSpeed(tokens.length, segment.speechDurationMs)) {
       return reject("implausible-speed");
     }
 
@@ -199,6 +207,34 @@ export class ReadingEvidencePipeline {
       return { kind: "off-topic", snapshot };
     }
     return { kind: "scored", snapshot };
+  }
+
+  previewInterim(
+    text: string,
+    options?: {
+      readonly receivedAt?: number;
+      readonly onsetAt?: number | null;
+      readonly scope?: CaptureScope;
+    },
+  ): RealtimeAlignmentSnapshot {
+    if (
+      this.scope &&
+      options?.scope &&
+      !sameCaptureScope(this.scope, options.scope)
+    ) {
+      return this.engine.getSnapshot();
+    }
+    if (
+      options?.receivedAt !== undefined &&
+      !this.echo.evaluate({
+        text,
+        receivedAt: options.receivedAt,
+        onsetAt: options.onsetAt ?? null,
+      }).accept
+    ) {
+      return this.engine.getSnapshot();
+    }
+    return this.engine.previewAlignment(text);
   }
 
   finish(): RealtimeAlignmentSnapshot {

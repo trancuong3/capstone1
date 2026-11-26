@@ -18,6 +18,7 @@ import { AdminFlow2CandidatesPanel } from "@/components/admin/admin-flow2-candid
 import { AuthenticatedImage } from "@/components/common/authenticated-image";
 import { Button } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
@@ -114,6 +115,8 @@ export function AdminUserBooksQualitySection({
   const [actionError, setActionError] = useState<string | null>(null);
   const [conflictError, setConflictError] = useState<string | null>(null);
 
+  const USER_BOOKS_PAGE_SIZE = 30;
+  const [queueOffset, setQueueOffset] = useState(0);
   const [queueReloadKey, setQueueReloadKey] = useState(0);
 
   const loadQueue = useCallback(async () => {
@@ -133,12 +136,20 @@ export function AdminUserBooksQualitySection({
         return bookContentQuality.listUserBooks!({
           status: statusFilter || undefined,
           search: searchText.trim() || undefined,
-          limit: 30,
-          offset: 0,
+          limit: USER_BOOKS_PAGE_SIZE,
+          offset: queueOffset,
         });
       })
       .then((response) => {
         if (!active || !response) return;
+        if (
+          response.items.length === 0 &&
+          queueOffset > 0 &&
+          response.total > 0
+        ) {
+          setQueueOffset(Math.max(0, queueOffset - USER_BOOKS_PAGE_SIZE));
+          return;
+        }
         setQueue(response);
         onPendingCountChange?.(response.summary?.PENDING_ADMIN ?? 0);
       })
@@ -160,6 +171,7 @@ export function AdminUserBooksQualitySection({
   }, [
     bookContentQuality,
     onPendingCountChange,
+    queueOffset,
     queueReloadKey,
     searchText,
     statusFilter,
@@ -408,7 +420,10 @@ export function AdminUserBooksQualitySection({
                     ? "border-primary bg-primary text-white"
                     : "border-border bg-white text-ink hover:bg-canvas")
                 }
-                onClick={() => setStatusFilter("")}
+                onClick={() => {
+                  setQueueOffset(0);
+                  setStatusFilter("");
+                }}
                 type="button"
               >
                 Tất cả
@@ -426,7 +441,10 @@ export function AdminUserBooksQualitySection({
                         ? "border-primary bg-primary text-white"
                         : "border-border bg-white text-ink hover:bg-canvas")
                     }
-                    onClick={() => setStatusFilter(filterKey)}
+                    onClick={() => {
+                      setQueueOffset(0);
+                      setStatusFilter(filterKey);
+                    }}
                     type="button"
                   >
                     {ADMIN_USER_BOOK_FILTER_LABELS[filterKey]}
@@ -457,7 +475,10 @@ export function AdminUserBooksQualitySection({
                 <input
                   aria-label="Tìm sách người dùng theo tên sách"
                   className="min-h-11 w-full rounded-control border border-border bg-white pl-9 pr-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
-                  onChange={(event) => setSearchText(event.target.value)}
+                  onChange={(event) => {
+                    setQueueOffset(0);
+                    setSearchText(event.target.value);
+                  }}
                   placeholder="Tìm theo tên sách riêng…"
                   type="search"
                   value={searchText}
@@ -568,6 +589,21 @@ export function AdminUserBooksQualitySection({
                 })}
               </ul>
             )}
+            {queue ? (
+              <PaginationBar
+                ariaLabel="Phân trang hàng đợi sách người dùng"
+                className="mt-4"
+                compact
+                disabled={loadingQueue}
+                itemLabel="sách"
+                onPageChange={(nextPage) =>
+                  setQueueOffset((nextPage - 1) * USER_BOOKS_PAGE_SIZE)
+                }
+                page={Math.floor(queueOffset / USER_BOOKS_PAGE_SIZE) + 1}
+                pageSize={USER_BOOKS_PAGE_SIZE}
+                total={queue.total}
+              />
+            ) : null}
           </section>
 
           {/* Detail Review Panel */}

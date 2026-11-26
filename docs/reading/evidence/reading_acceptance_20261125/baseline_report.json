@@ -1,0 +1,121 @@
+{
+  "recorded_at": "2026-11-25T03:15:08+07:00",
+  "worker_health": {
+    "status": "ok",
+    "provider": "local",
+    "stt": {
+      "ready": true,
+      "model_version": "sherpa-onnx-zipformer-vi-30m-int8-2026-02-09",
+      "active_jobs": 0
+    },
+    "tts": {
+      "ready": true,
+      "model_version": "vieneu-v3-turbo-onnx-int8-3.8.5",
+      "precision": "int8",
+      "voices_count": 8,
+      "regions": [
+        "north",
+        "central",
+        "south"
+      ],
+      "active_jobs": 0
+    }
+  },
+  "worker_voices_count": 8,
+  "total_timestamped_words_in_corpus": 187,
+  "latency_eval": {
+    "words_evaluated": 183,
+    "words_matched": 162,
+    "match_rate": 0.8852,
+    "words_missed_or_unhighlighted": 21,
+    "early_highlight_count": 0,
+    "end_of_word_to_paint_backend_p50_ms": 839.57,
+    "end_of_word_to_paint_backend_p95_ms": 2902.75,
+    "end_of_word_to_paint_worker_p50_ms": 455.21,
+    "end_of_word_to_paint_worker_p95_ms": 2519.79,
+    "avg_backend_overhead_ms": 384.33,
+    "avg_worker_rtt_ms": 143.78
+  },
+  "tail_decode_growth": [
+    {
+      "segment_s": 0.5,
+      "wav_kb": 15.7,
+      "worker_ms": 71.83,
+      "backend_ms": 457.17
+    },
+    {
+      "segment_s": 1.5,
+      "wav_kb": 46.9,
+      "worker_ms": 112.81,
+      "backend_ms": 490.59
+    },
+    {
+      "segment_s": 3.0,
+      "wav_kb": 93.8,
+      "worker_ms": 172.78,
+      "backend_ms": 561.72
+    },
+    {
+      "segment_s": 4.2,
+      "wav_kb": 131.3,
+      "worker_ms": 223.29,
+      "backend_ms": 592.3
+    }
+  ],
+  "tts_baseline": {
+    "precision": "int8",
+    "uncached_short_prompts_ms": [
+      1595.25,
+      1749.26,
+      1261.31,
+      1249.49,
+      1760.23
+    ],
+    "uncached_p50_ms": 1595.25,
+    "uncached_p95_ms": 1760.23,
+    "minimal_pairs": [
+      {
+        "word": "mốt",
+        "precision": "int8",
+        "tts_ms": 2.6,
+        "tts_stt_loopback_text": "một",
+        "exact_loopback_match": false
+      },
+      {
+        "word": "một",
+        "precision": "int8",
+        "tts_ms": 2.83,
+        "tts_stt_loopback_text": "một",
+        "exact_loopback_match": true
+      },
+      {
+        "word": "bàn",
+        "precision": "int8",
+        "tts_ms": 350.03,
+        "tts_stt_loopback_text": "ban công",
+        "exact_loopback_match": false
+      },
+      {
+        "word": "bạn",
+        "precision": "int8",
+        "tts_ms": 380.7,
+        "tts_stt_loopback_text": "bạn",
+        "exact_loopback_match": true
+      },
+      {
+        "word": "nghỉ",
+        "precision": "int8",
+        "tts_ms": 341.43,
+        "tts_stt_loopback_text": "nghỉ",
+        "exact_loopback_match": true
+      },
+      {
+        "word": "nghĩ",
+        "precision": "int8",
+        "tts_ms": 337.91,
+        "tts_stt_loopback_text": "nghĩ là",
+        "exact_loopback_match": false
+      }
+    ]
+  }
+}

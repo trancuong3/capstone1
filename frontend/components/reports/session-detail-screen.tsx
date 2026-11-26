@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 
 import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ReportPageHeader } from "@/components/reports/report-page-header";
@@ -46,6 +47,10 @@ export function SessionDetailScreen({
   const { childService, sessionService } = useReportServices();
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<DetailState>({ status: "loading" });
+  const [eventsPage, setEventsPage] = useState(1);
+  const [comprehensionPage, setComprehensionPage] = useState(1);
+  const EVENTS_PAGE_SIZE = 10;
+  const COMPREHENSION_PAGE_SIZE = 10;
 
   useEffect(() => {
     let active = true;
@@ -316,7 +321,23 @@ export function SessionDetailScreen({
               </StatusMessage>
             ) : null}
             {detail.events.length > 0 || availability.events === "absent" ? (
-              <SessionEventList events={detail.events} />
+              <>
+                <SessionEventList
+                  events={detail.events.slice(
+                    (eventsPage - 1) * EVENTS_PAGE_SIZE,
+                    eventsPage * EVENTS_PAGE_SIZE,
+                  )}
+                />
+                <PaginationBar
+                  ariaLabel="Phân trang sự kiện trong buổi đọc"
+                  compact
+                  itemLabel="sự kiện"
+                  onPageChange={setEventsPage}
+                  page={eventsPage}
+                  pageSize={EVENTS_PAGE_SIZE}
+                  total={detail.events.length}
+                />
+              </>
             ) : null}
           </Card>
           <Card className="bg-white">
@@ -339,26 +360,45 @@ export function SessionDetailScreen({
                 Buổi đọc này không có câu hỏi đọc hiểu.
               </p>
             ) : (
-              <ul className="flex flex-col gap-3">
-                {detail.comprehension.map(({ answer, question }) => (
-                  <li
-                    className="rounded-control border border-border p-4"
-                    key={question.id}
-                  >
-                    <p className="font-semibold text-ink">{question.prompt}</p>
-                    <p className="mt-2 text-label text-muted">
-                      Độ khó đã lưu: {question.difficulty ?? "Chưa ghi nhận"}
-                    </p>
-                    <p className="mt-2 text-label text-muted">
-                      {answer
-                        ? `Trả lời: ${answer.submitted_answer} · ${answer.is_correct === true ? "Đúng" : answer.is_correct === false ? "Chưa đúng" : "Chưa chấm"}`
-                        : question.answered
-                          ? "Đã lưu câu trả lời nhưng định dạng chưa được hỗ trợ."
-                          : "Chưa có câu trả lời"}
-                    </p>
-                  </li>
-                ))}
-              </ul>
+              <>
+                <ul className="flex flex-col gap-3">
+                  {detail.comprehension
+                    .slice(
+                      (comprehensionPage - 1) * COMPREHENSION_PAGE_SIZE,
+                      comprehensionPage * COMPREHENSION_PAGE_SIZE,
+                    )
+                    .map(({ answer, question }) => (
+                      <li
+                        className="rounded-control border border-border p-4"
+                        key={question.id}
+                      >
+                        <p className="break-words font-semibold text-ink">
+                          {question.prompt}
+                        </p>
+                        <p className="mt-2 text-label text-muted">
+                          Độ khó đã lưu:{" "}
+                          {question.difficulty ?? "Chưa ghi nhận"}
+                        </p>
+                        <p className="mt-2 break-words text-label text-muted">
+                          {answer
+                            ? `Trả lời: ${answer.submitted_answer} · ${answer.is_correct === true ? "Đúng" : answer.is_correct === false ? "Chưa đúng" : "Chưa chấm"}`
+                            : question.answered
+                              ? "Đã lưu câu trả lời nhưng định dạng chưa được hỗ trợ."
+                              : "Chưa có câu trả lời"}
+                        </p>
+                      </li>
+                    ))}
+                </ul>
+                <PaginationBar
+                  ariaLabel="Phân trang câu hỏi đọc hiểu"
+                  compact
+                  itemLabel="câu hỏi"
+                  onPageChange={setComprehensionPage}
+                  page={comprehensionPage}
+                  pageSize={COMPREHENSION_PAGE_SIZE}
+                  total={detail.comprehension.length}
+                />
+              </>
             )}
           </Card>
         </div>

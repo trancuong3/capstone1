@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 from uuid import UUID
 
@@ -25,12 +26,15 @@ from app.providers.elevenlabs_voice_provider import VoiceProviderError
 from app.providers.google_voice_provider import GoogleCloudVoiceProvider
 from app.providers.local_voice_provider import (
     DEFAULT_LOCAL_VOICE_ID,
+    STATIC_LOCAL_VOICES,
     LocalPhonicsSpeech,
     LocalSynthesizedAudio,
     LocalTimedSpeech,
     LocalTranscription,
     LocalVoiceProvider,
     LocalVoiceTechnicalError,
+    resolve_local_stt_mode,
+    resolve_local_tts_precision,
 )
 
 logger = logging.getLogger("viread.voice_orchestrator")
@@ -74,6 +78,39 @@ def _prune_turn_cache(now: float) -> None:
         _turn_results.popitem(last=False)
 
 
+def _map_local_voice_to_google_backup(voice_id: str) -> str:
+    region = "north"
+    gender = "female"
+    for item in STATIC_LOCAL_VOICES:
+        if item.get("voice_id") == voice_id:
+            region = str(item.get("region") or "north")
+            gender = str(item.get("gender") or "female")
+            break
+    else:
+        lower = voice_id.lower()
+        if "south" in lower or "nam" in lower:
+            region = "south"
+        elif "central" in lower or "trung" in lower:
+            region = "central"
+        if any(
+            marker in lower
+            for marker in ("thien_minh", "quang_son", "thai_son", "_male")
+        ):
+            gender = "male"
+
+    if region == "south":
+        return (
+            "google_vi_vn_wavenet_b"
+            if gender == "male"
+            else "google_vi_vn_wavenet_c"
+        )
+    return (
+        "google_vi_vn_neural2_d"
+        if gender == "male"
+        else "google_vi_vn_neural2_a"
+    )
+
+
 class VoiceOrchestrator:
     def __init__(
         self,
@@ -94,7 +131,12 @@ class VoiceOrchestrator:
                 "stt_ready": bool(local_health.get("stt_ready")),
                 "tts_ready": bool(local_health.get("tts_ready")),
                 "stt_model_version": local_health.get("stt_model_version"),
+                "stt_mode": local_health.get("stt_mode") or resolve_local_stt_mode(),
                 "tts_model_version": local_health.get("tts_model_version"),
+                "tts_precision": local_health.get("tts_precision")
+                or resolve_local_tts_precision(),
+                "active_voices": local_health.get("active_voices")
+                or [v["voice_id"] for v in STATIC_LOCAL_VOICES],
             },
             "google": {
                 "stt_configured": self.google.is_stt_configured(),
@@ -103,6 +145,45 @@ class VoiceOrchestrator:
                 "tts_cooldown": self.google.is_tts_in_cooldown(),
             },
         }
+
+    async def probe_tts(self) -> tuple[str, str]:
+        """Probe Local-First TTS readiness (with Google backup awareness) without spending quota."""
+        local_health = await self.local.get_health()
+        if bool(local_health.get("available")) and bool(local_health.get("tts_ready")):
+            voices = local_health.get("active_voices") or STATIC_LOCAL_VOICES
+            precision = local_health.get("tts_precision") or resolve_local_tts_precision()
+            return (
+                "HEALTHY",
+                f"Local TTS cục bộ sẵn sàng ({len(voices)} giọng, {precision}).",
+            )
+        if self.google.is_tts_configured() and not self.google.is_tts_in_cooldown():
+            return (
+                "DEGRADED",
+                "Local TTS cục bộ chưa sẵn sàng; Google Cloud TTS dự phòng khả dụng.",
+            )
+        return (
+            "UNAVAILABLE",
+            "Local TTS cục bộ chưa sẵn sàng và không có dự phòng Google TTS.",
+        )
+
+    async def probe_stt(self) -> tuple[str, str]:
+        """Probe Local-First STT readiness (with Google backup awareness) without spending quota."""
+        local_health = await self.local.get_health()
+        if bool(local_health.get("available")) and bool(local_health.get("stt_ready")):
+            stt_mode = local_health.get("stt_mode") or resolve_local_stt_mode()
+            return (
+                "HEALTHY",
+                f"Local STT cục bộ sẵn sàng (chế độ {stt_mode}).",
+            )
+        if self.google.is_stt_configured() and not self.google.is_stt_in_cooldown():
+            return (
+                "DEGRADED",
+                "Local STT cục bộ chưa sẵn sàng; Google Cloud STT dự phòng khả dụng.",
+            )
+        return (
+            "UNAVAILABLE",
+            "Local STT cục bộ chưa sẵn sàng và không có dự phòng Google STT.",
+        )
 
     async def list_voices(
         self,
@@ -136,6 +217,15 @@ class VoiceOrchestrator:
                 status_code=503, code="GOOGLE_TTS_UNCONFIGURED"
             )
 
+    def _can_fallback_unlocked_tts(self, policy: VoicePolicyContext) -> bool:
+        return (
+            not policy.session_id
+            and policy.provider_mode == "local_with_google_fallback"
+            and policy.allow_google_tts
+            and self.google.is_tts_configured()
+            and not self.google.is_tts_in_cooldown()
+        )
+
     async def synthesize(
         self,
         *,
@@ -162,20 +252,36 @@ class VoiceOrchestrator:
             )
             return audio
 
-        # Local voice locked: NEVER switch to Google or to another local voice!
-        audio = await self.local.synthesize(
-            text=text,
-            voice_id=voice_id,
-            speed=speed,
-            word_sample=word_sample,
-        )
-        logger.info(
-            "tts_ok provider=local voice=%s ms=%.1f session=%s",
-            audio.resolved_voice_id,
-            (time.perf_counter() - t0) * 1000,
-            ctx.session_id or "-",
-        )
-        return audio
+        try:
+            audio = await self.local.synthesize(
+                text=text,
+                voice_id=voice_id,
+                speed=speed,
+                word_sample=word_sample,
+            )
+            logger.info(
+                "tts_ok provider=local voice=%s ms=%.1f session=%s",
+                audio.resolved_voice_id,
+                (time.perf_counter() - t0) * 1000,
+                ctx.session_id or "-",
+            )
+            return audio
+        except LocalVoiceTechnicalError as local_err:
+            if not self._can_fallback_unlocked_tts(ctx):
+                raise
+            backup_voice_id = _map_local_voice_to_google_backup(voice_id)
+            t_google = time.perf_counter()
+            audio = await self.google.synthesize(
+                text=text, voice_id=backup_voice_id, speed=speed
+            )
+            fallback_audio = replace(audio, used_fallback_voice=True)
+            logger.info(
+                "tts_ok provider=google fallback=1 reason=%s voice=%s ms=%.1f session=-",
+                local_err.code,
+                fallback_audio.resolved_voice_id,
+                (time.perf_counter() - t_google) * 1000,
+            )
+            return fallback_audio
 
     async def synthesize_timed(
         self,
@@ -194,9 +300,23 @@ class VoiceOrchestrator:
                 words=words, voice_id=voice_id, speed=speed
             )
 
-        return await self.local.synthesize_timed(
-            words=words, voice_id=voice_id, speed=speed
-        )
+        try:
+            return await self.local.synthesize_timed(
+                words=words, voice_id=voice_id, speed=speed
+            )
+        except LocalVoiceTechnicalError as local_err:
+            if not self._can_fallback_unlocked_tts(ctx):
+                raise
+            backup_voice_id = _map_local_voice_to_google_backup(voice_id)
+            timed = await self.google.synthesize_timed(
+                words=words, voice_id=backup_voice_id, speed=speed
+            )
+            logger.info(
+                "tts_timed_ok provider=google fallback=1 reason=%s voice=%s session=-",
+                local_err.code,
+                timed.resolved_voice_id,
+            )
+            return replace(timed, used_fallback_voice=True)
 
     async def synthesize_phonics(
         self,
@@ -215,9 +335,23 @@ class VoiceOrchestrator:
                 steps=steps, voice_id=voice_id, speed=speed
             )
 
-        return await self.local.synthesize_phonics(
-            steps=steps, voice_id=voice_id, speed=speed
-        )
+        try:
+            return await self.local.synthesize_phonics(
+                steps=steps, voice_id=voice_id, speed=speed
+            )
+        except LocalVoiceTechnicalError as local_err:
+            if not self._can_fallback_unlocked_tts(ctx):
+                raise
+            backup_voice_id = _map_local_voice_to_google_backup(voice_id)
+            phonics = await self.google.synthesize_phonics(
+                steps=steps, voice_id=backup_voice_id, speed=speed
+            )
+            logger.info(
+                "tts_phonics_ok provider=google fallback=1 reason=%s voice=%s session=-",
+                local_err.code,
+                phonics.resolved_voice_id,
+            )
+            return replace(phonics, used_fallback_voice=True)
 
     async def transcribe(
         self,
@@ -296,6 +430,10 @@ class VoiceOrchestrator:
                 filename=filename,
                 content_type=content_type,
                 language_code=language_code,
+                keyterms=keyterms,
+                source=ctx.source,
+                session_id=ctx.session_id,
+                turn_id=ctx.turn_id,
             )
             logger.info(
                 "stt_ok provider=local fallback=0 ms=%.1f session=%s page=%s turn=%s",
@@ -306,8 +444,10 @@ class VoiceOrchestrator:
             )
             return res
         except LocalVoiceTechnicalError as local_err:
+            is_rolling_interim = (ctx.source or "").strip() == "local_live_interim"
             can_fallback = (
-                ctx.provider_mode == "local_with_google_fallback"
+                not is_rolling_interim
+                and ctx.provider_mode == "local_with_google_fallback"
                 and ctx.allow_google_stt
                 and self.google.is_stt_configured()
                 and not self.google.is_stt_in_cooldown()
@@ -341,3 +481,40 @@ class VoiceOrchestrator:
                 ctx.turn_id or "-",
             )
             return google_res
+
+
+    async def aclose(self) -> None:
+        """Release underlying HTTP pools and background recovery tasks."""
+        await self.local.aclose()
+
+
+_DEFAULT_ORCHESTRATORS: dict[tuple[str, str], VoiceOrchestrator] = {}
+
+
+def clear_default_voice_orchestrators() -> None:
+    """Reset pooled VoiceOrchestrator instances (used by tests)."""
+    _DEFAULT_ORCHESTRATORS.clear()
+
+
+async def close_default_voice_orchestrators() -> None:
+    """Close and clear all pooled VoiceOrchestrator instances cleanly on shutdown."""
+    orchestrators = list(_DEFAULT_ORCHESTRATORS.values())
+    _DEFAULT_ORCHESTRATORS.clear()
+    for orchestrator in orchestrators:
+        try:
+            await orchestrator.aclose()
+        except Exception:
+            pass
+
+
+def get_voice_orchestrator() -> VoiceOrchestrator:
+    worker_url = (
+        os.getenv("VIREAD_LOCAL_VOICE_WORKER_URL") or "http://127.0.0.1:8010"
+    ).strip().rstrip("/") or "http://127.0.0.1:8010"
+    worker_token = (os.getenv("VIREAD_LOCAL_VOICE_WORKER_TOKEN") or "").strip()
+    key = (worker_url, worker_token)
+    cached = _DEFAULT_ORCHESTRATORS.get(key)
+    if cached is None:
+        cached = VoiceOrchestrator()
+        _DEFAULT_ORCHESTRATORS[key] = cached
+    return cached

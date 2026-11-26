@@ -1,0 +1,513 @@
+{
+  "schema_version": "viread-cad23ac-baseline-repro-v1",
+  "captured_at": "2026-11-25T05:04:23.468665+00:00",
+  "baseline_commit": "cad23ac79f7a94fb1224f23e730b5e990043af65",
+  "worktree_path_used": "F:\\c1\\tools\\baseline-cad23ac",
+  "worker_health": {
+    "status": "ok",
+    "provider": "local",
+    "stt": {
+      "ready": true,
+      "model_version": "sherpa-onnx-zipformer-vi-30m-int8-2026-02-09",
+      "active_jobs": 0
+    },
+    "tts": {
+      "ready": true,
+      "model_version": "vieneu-v3-turbo-onnx-int8-3.8.5",
+      "precision": "int8",
+      "voices_count": 8,
+      "regions": [
+        "north",
+        "central",
+        "south"
+      ],
+      "active_jobs": 0
+    }
+  },
+  "worker_has_ws_stt_stream": false,
+  "passages_summary": {
+    "short_word_count": 18,
+    "long_word_count": 401
+  },
+  "short_passage_stt_trace": [
+    {
+      "id": "short_1",
+      "expected": "Sáng nay, Mi mang ô đến lớp.",
+      "stt_text": "sáng nay my mang ô đến lớp",
+      "duration_s": 2.07,
+      "worker_http_ms": 1215.88,
+      "words": [
+        {
+          "text": "sáng",
+          "start": 0,
+          "end": 0.23,
+          "gap_to_next": 0
+        },
+        {
+          "text": "nay",
+          "start": 0.23,
+          "end": 0.75,
+          "gap_to_next": 0
+        },
+        {
+          "text": "my",
+          "start": 0.75,
+          "end": 0.99,
+          "gap_to_next": 0
+        },
+        {
+          "text": "mang",
+          "start": 0.99,
+          "end": 1.19,
+          "gap_to_next": 0
+        },
+        {
+          "text": "ô",
+          "start": 1.19,
+          "end": 1.43,
+          "gap_to_next": 0
+        },
+        {
+          "text": "đến",
+          "start": 1.43,
+          "end": 1.71,
+          "gap_to_next": 0
+        },
+        {
+          "text": "lớp",
+          "start": 1.71,
+          "end": 1.79,
+          "gap_to_next": null
+        }
+      ]
+    },
+    {
+      "id": "short_2",
+      "expected": "Tan học, trời đổ mưa.",
+      "stt_text": "tan học trời đổ mưa",
+      "duration_s": 2.31,
+      "worker_http_ms": 438.78,
+      "words": [
+        {
+          "text": "tan",
+          "start": 0,
+          "end": 0.31,
+          "gap_to_next": 0
+        },
+        {
+          "text": "học",
+          "start": 0.31,
+          "end": 0.99,
+          "gap_to_next": 0
+        },
+        {
+          "text": "trời",
+          "start": 0.99,
+          "end": 1.35,
+          "gap_to_next": 0
+        },
+        {
+          "text": "đổ",
+          "start": 1.35,
+          "end": 1.67,
+          "gap_to_next": 0
+        },
+        {
+          "text": "mưa",
+          "start": 1.67,
+          "end": 1.75,
+          "gap_to_next": null
+        }
+      ]
+    },
+    {
+      "id": "short_3",
+      "expected": "Mi che ô cho bạn An.",
+      "stt_text": "mì che ô cho bạn an",
+      "duration_s": 1.75,
+      "worker_http_ms": 307.31,
+      "words": [
+        {
+          "text": "mì",
+          "start": 0,
+          "end": 0.31,
+          "gap_to_next": 0
+        },
+        {
+          "text": "che",
+          "start": 0.31,
+          "end": 0.51,
+          "gap_to_next": 0
+        },
+        {
+          "text": "ô",
+          "start": 0.51,
+          "end": 0.75,
+          "gap_to_next": 0
+        },
+        {
+          "text": "cho",
+          "start": 0.75,
+          "end": 0.95,
+          "gap_to_next": 0
+        },
+        {
+          "text": "bạn",
+          "start": 0.95,
+          "end": 1.19,
+          "gap_to_next": 0
+        },
+        {
+          "text": "an",
+          "start": 1.19,
+          "end": 1.27,
+          "gap_to_next": null
+        }
+      ]
+    }
+  ],
+  "long_passage_stt_trace": [
+    {
+      "id": "long_repeat",
+      "expected": "Mi gọi An. An quay lại gọi Mi cùng xuống sân trường.",
+      "stt_text": "mi gọi an an quay lại gọi my cùng xuống sân trường",
+      "duration_s": 3.59,
+      "worker_http_ms": 545.82,
+      "word_count": 12
+    },
+    {
+      "id": "long_dialogue",
+      "expected": "Dừng lại! Đừng chạy nhanh quá!",
+      "stt_text": "dừng lại đừng chạy nhanh quá",
+      "duration_s": 2.39,
+      "worker_http_ms": 318.24,
+      "word_count": 6
+    },
+    {
+      "id": "long_diff_1",
+      "expected": "Mi đọc chậm từng chữ: mốt, một, nghiêng đầu, khúc khích rồi cười tươi.",
+      "stt_text": "mi đọc chậm từng chữ một nghiêng đầu khúc khích rồi cười tươi",
+      "duration_s": 4.79,
+      "worker_http_ms": 513.08,
+      "word_count": 13
+    },
+    {
+      "id": "long_diff_2",
+      "expected": "Khi về nhà, bé tự lấy vở tập viết từng chữ bàn, bạn, nghỉ, nghĩ rất cẩn thận.",
+      "stt_text": "khi về nhà bé tư lấy vợ tập việc tương trừ bang ba nghỉ nghỉ rất cẩn thận",
+      "duration_s": 5.03,
+      "worker_http_ms": 783.62,
+      "word_count": 18
+    },
+    {
+      "id": "long_longsent",
+      "expected": "Mùa thu đi qua thật êm đềm trong tiếng đọc bài rộn ràng của lớp nhỏ.",
+      "stt_text": "mùa thu đi qua thật êm đềm trong tiếng đọc bài rộn ràng của lớp nhỏ",
+      "duration_s": 4.07,
+      "worker_http_ms": 419.91,
+      "word_count": 15
+    },
+    {
+      "id": "long_rain",
+      "expected": "Bỗng nhiên mây xám kéo đến, gió thổi làm tán cây nghiêng ngả bên hiên.",
+      "stt_text": "bỗng nhiên mây sám kéo đến gió thổi làm tán cây nghiêng ngả bên hiên",
+      "duration_s": 4.47,
+      "worker_http_ms": 586.43,
+      "word_count": 15
+    },
+    {
+      "id": "long_home",
+      "expected": "Tối đến, cả nhà quây quần bên mâm cơm ấm áp nghe Mi kể chuyện ở lớp.",
+      "stt_text": "tối đến cả nhà quây quần bên mâm cơm ấm áp nghe my kể chuyện ở lớp",
+      "duration_s": 4.47,
+      "worker_http_ms": 652.18,
+      "word_count": 16
+    },
+    {
+      "id": "long_morning",
+      "expected": "Buổi sáng mùa thu, nắng vàng dịu nhẹ chiếu qua khung cửa sổ lớp Một.",
+      "stt_text": "buổi sáng mùa thu nắng vàng dịu nhẹ chiếu qua khung cửa số lớp một",
+      "duration_s": 3.99,
+      "worker_http_ms": 647.41,
+      "word_count": 15
+    },
+    {
+      "id": "long_desk",
+      "expected": "Trên bàn gỗ sạch sẽ, bé Mi mở quyển sách Tiếng Việt mới tinh.",
+      "stt_text": "trên bàn gỗ sạch sẽ bé my mở quyển sách tiếng việt mới tinh",
+      "duration_s": 4.63,
+      "worker_http_ms": 508.04,
+      "word_count": 14
+    },
+    {
+      "id": "long_story",
+      "expected": "Giọng đọc trong trẻo của bé khiến ông bà gật gù khen ngợi suốt buổi tối.",
+      "stt_text": "giọng đọc trong trẻo của bé khiến ông bà gật gù khen ngợi suốt buổi tối",
+      "duration_s": 4.55,
+      "worker_http_ms": 1183.94,
+      "word_count": 16
+    }
+  ],
+  "cumulative_growing_wav_decode_latencies": [
+    {
+      "segment_s": 0.5,
+      "wav_kb": 15.7,
+      "worker_http_ms": 208.85,
+      "stt_text": "động độc trong nước"
+    },
+    {
+      "segment_s": 1.5,
+      "wav_kb": 46.9,
+      "worker_http_ms": 234.89,
+      "stt_text": "động độc trong trẻo của bé"
+    },
+    {
+      "segment_s": 3,
+      "wav_kb": 93.8,
+      "worker_http_ms": 622.04,
+      "stt_text": "động độc trong trẻo của bé khiến ông bà gật gù khen ngợi"
+    },
+    {
+      "segment_s": 4.2,
+      "wav_kb": 131.3,
+      "worker_http_ms": 770.75,
+      "stt_text": "giọng đọc trong trẻo của bé khiến ông bà gật gù khen ngợi suốt buổi tối"
+    }
+  ],
+  "stt_word_end_pause_stretch_bug": {
+    "word": {
+      "text": "học",
+      "start": 0.31,
+      "end": 0.99,
+      "gap_to_next": 0
+    },
+    "next_word": {
+      "text": "trời",
+      "start": 0.99,
+      "end": 1.35,
+      "gap_to_next": 0
+    },
+    "bug": "build_stt_words_from_sherpa sets word.end = next_word.start across comma pause (gap_to_next == 0.0 despite ~400ms silence)"
+  },
+  "stop_reading_bugs": {
+    "echo_guard_rejects_child_repeat_without_onset_at": {
+      "accept": false,
+      "reason": "tail-overlap",
+      "playbackId": "tts-1"
+    },
+    "echo_guard_accepts_with_onset_at": {
+      "accept": true,
+      "reason": "ok"
+    },
+    "missing_voice_intents": [
+      {
+        "text": "để con tự đọc",
+        "upcoming": "Sáng nay Mi mang ô",
+        "actual": {
+          "type": "NONE",
+          "reason": "not-a-command"
+        }
+      },
+      {
+        "text": "chờ con một chút",
+        "upcoming": "Sáng nay Mi mang ô",
+        "actual": {
+          "type": "WAIT"
+        }
+      },
+      {
+        "text": "chữ này con chưa biết",
+        "upcoming": "Sáng nay Mi mang ô",
+        "actual": {
+          "type": "NONE",
+          "reason": "not-a-command"
+        }
+      },
+      {
+        "text": "nghỉ một chút",
+        "upcoming": "Sáng nay Mi mang ô",
+        "actual": {
+          "type": "NONE",
+          "reason": "not-a-command"
+        }
+      },
+      {
+        "text": "cho con thử thêm",
+        "upcoming": "Sáng nay Mi mang ô",
+        "actual": {
+          "type": "NONE",
+          "reason": "not-a-command"
+        }
+      },
+      {
+        "text": "Dừng lại!",
+        "upcoming": "Dừng lại! Đừng chạy nhanh quá!",
+        "actual": {
+          "type": "NONE",
+          "reason": "in-book"
+        }
+      }
+    ],
+    "has_transcription_abort_ref_in_reading_screen": true,
+    "local_segment_interim_step_ms": 320,
+    "local_segment_max_segment_ms": 4500,
+    "local_segment_uses_growing_cumulative_wav": true
+  },
+  "false_error_bugs": {
+    "low_volume_quality_snapshot": {
+      "status": "LOW_VOLUME",
+      "durationMs": 300,
+      "speechDurationMs": 0,
+      "silenceDurationMs": 300,
+      "rms": 0.002199999988079071,
+      "peak": 0.002199999988079071,
+      "noiseFloor": 0.002199999988079071,
+      "clipped": false,
+      "isSpeaking": false
+    },
+    "has_unusable_audio_on_low_volume": true,
+    "has_usable_transcript_on_low_volume": false,
+    "int8_tts_minimal_pairs": [
+      {
+        "word": "mốt",
+        "precision": "int8",
+        "tts_ms": 706.69,
+        "loopback_stt": "mốt",
+        "exact_match": true
+      },
+      {
+        "word": "một",
+        "precision": "int8",
+        "tts_ms": 609.89,
+        "loopback_stt": "một",
+        "exact_match": true
+      },
+      {
+        "word": "bàn",
+        "precision": "int8",
+        "tts_ms": 34.78,
+        "loopback_stt": "ban công",
+        "exact_match": false
+      },
+      {
+        "word": "bạn",
+        "precision": "int8",
+        "tts_ms": 16.32,
+        "loopback_stt": "bạn",
+        "exact_match": true
+      },
+      {
+        "word": "nghỉ",
+        "precision": "int8",
+        "tts_ms": 67.43,
+        "loopback_stt": "nghỉ",
+        "exact_match": true
+      },
+      {
+        "word": "nghĩ",
+        "precision": "int8",
+        "tts_ms": 57.19,
+        "loopback_stt": "nghĩ",
+        "exact_match": true
+      }
+    ]
+  },
+  "quiz_bugs": [
+    {
+      "utterance": "ạ",
+      "expected": "NONE",
+      "actual": {
+        "type": "CHOICE",
+        "choice": {
+          "id": "A",
+          "label": "Bạn Lan",
+          "value": "Bạn Lan"
+        },
+        "matchedBy": "letter"
+      }
+    },
+    {
+      "utterance": "à...",
+      "expected": "NONE",
+      "actual": {
+        "type": "CHOICE",
+        "choice": {
+          "id": "A",
+          "label": "Bạn Lan",
+          "value": "Bạn Lan"
+        },
+        "matchedBy": "letter"
+      }
+    },
+    {
+      "utterance": "con chọn B ạ",
+      "expected": "CHOICE:B",
+      "actual": {
+        "type": "NONE"
+      }
+    },
+    {
+      "utterance": "con không chọn bạn An",
+      "expected": "NONE/NEGATED",
+      "actual": {
+        "type": "CHOICE",
+        "choice": {
+          "id": "B",
+          "label": "Bạn An",
+          "value": "Bạn An"
+        },
+        "matchedBy": "content"
+      }
+    },
+    {
+      "utterance": "A… à không, con chọn B",
+      "expected": "CHOICE:B",
+      "actual": {
+        "type": "NONE"
+      }
+    },
+    {
+      "utterance": "A, bạn An",
+      "expected": "CONFLICT",
+      "actual": {
+        "type": "CHOICE",
+        "choice": {
+          "id": "B",
+          "label": "Bạn An",
+          "value": "Bạn An"
+        },
+        "matchedBy": "content"
+      }
+    },
+    {
+      "utterance": "Bạn Lan",
+      "expected": "CHOICE:A",
+      "actual": {
+        "type": "CHOICE",
+        "choice": {
+          "id": "A",
+          "label": "Bạn Lan",
+          "value": "Bạn Lan"
+        },
+        "matchedBy": "content"
+      }
+    }
+  ],
+  "alignment_traces": {
+    "short_passage_word_count": 18,
+    "short_preview_early_highlights_count": 0,
+    "short_final_cursor": -1,
+    "short_final_matched_words": 18,
+    "short_align_ms": 20.028,
+    "long_passage_word_count": 401,
+    "long_final_cursor": -1,
+    "long_final_matched_words": 393,
+    "long_align_ms": 593.777
+  },
+  "replay_commands": {
+    "create_worktree": "git worktree add --detach F:\\c1\\tools\\baseline-cad23ac cad23ac",
+    "frontend_repro": "node <scratch>/capture_cad23ac_fe.mjs",
+    "backend_worker_repro": "F:\\c1\\tools\\voice-runtime\\.venv\\Scripts\\python.exe <scratch>/capture_cad23ac_be.py <fe_json>",
+    "cleanup_worktree": "git worktree remove F:\\c1\\tools\\baseline-cad23ac"
+  }
+}

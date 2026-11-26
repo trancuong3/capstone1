@@ -1,0 +1,103 @@
+{
+  "started_at": "2026-11-25T20:06:26.278Z",
+  "base_url": "https://192.168.1.2:8443",
+  "console_errors": [],
+  "page_errors": [],
+  "api_errors": [],
+  "checks": {
+    "login": {
+      "pass": true,
+      "url": "https://192.168.1.2:8443/dashboard"
+    },
+    "tts_wav_header_and_browser_duration": {
+      "pass": true,
+      "byteLength": 356038,
+      "riffSize": 356030,
+      "expectedRiff": 356030,
+      "dataSize": 355994,
+      "expectedData": 355994,
+      "browserAudioDurationSec": 3.708
+    },
+    "session_created": {
+      "childId": "5bc8d249-3a37-4e08-950e-cc2dd2fcee98",
+      "childName": "Bé Minh Nghiệm Thu",
+      "sessionId": "cf536682-931f-4d35-8482-4235c49dd56a"
+    },
+    "url_page_id_sync_on_page_turn": {
+      "pass": true,
+      "url": "https://192.168.1.2:8443/reading/cf536682-931f-4d35-8482-4235c49dd56a?state=ready&pageId=aaaaaaaa-2026-4112-8001-000000000102"
+    },
+    "scroll_desktop": {
+      "label": "desktop",
+      "viewport": "1280x800",
+      "found": true,
+      "scrollHeight": 3611,
+      "clientHeight": 509,
+      "overflowY": "auto",
+      "isScrollable": true,
+      "wordCount": 0,
+      "detachedVisible": true,
+      "reattachedHidden": true
+    },
+    "scroll_mobile_portrait": {
+      "label": "mobile_portrait",
+      "viewport": "390x844",
+      "found": true,
+      "scrollHeight": 5842,
+      "clientHeight": 418,
+      "overflowY": "auto",
+      "isScrollable": true,
+      "wordCount": 0,
+      "detachedVisible": true,
+      "reattachedHidden": true
+    },
+    "scroll_mobile_landscape": {
+      "label": "mobile_landscape",
+      "viewport": "844x390",
+      "found": true,
+      "scrollHeight": 3955,
+      "clientHeight": 78,
+      "overflowY": "auto",
+      "isScrollable": true,
+      "wordCount": 0,
+      "detachedVisible": true,
+      "reattachedHidden": true
+    },
+    "android_background_event": {
+      "dispatched": true
+    },
+    "male_persona_ui": {
+      "pass": true,
+      "co_leak_count": 0
+    },
+    "difficult_words_report": {
+      "pass": true,
+      "status": 200,
+      "count": 0,
+      "dirty": []
+    },
+    "quiz_live": {
+      "pass": false,
+      "url": "https://192.168.1.2:8443/reading/aaaaaaaa-2026-4112-8001-000000000901?state=question&pageId=aaaaaaaa-2026-4112-8001-000000000103",
+      "choiceCount": 1,
+      "hintTextObserved": null,
+      "ttsRequestsBeforeTap": 1,
+      "ttsRequestsAfterTap": 1
+    }
+  },
+  "screenshots": [
+    "F:\\c1\\capstone1\\docs\\reading\\evidence\\reading_deep_audit_20261126\\browser_desktop_detached.png",
+    "F:\\c1\\capstone1\\docs\\reading\\evidence\\reading_deep_audit_20261126\\browser_portrait_detached.png",
+    "F:\\c1\\capstone1\\docs\\reading\\evidence\\reading_deep_audit_20261126\\browser_landscape_detached.png",
+    "F:\\c1\\capstone1\\docs\\reading\\evidence\\reading_deep_audit_20261126\\browser_male_persona.png",
+    "F:\\c1\\capstone1\\docs\\reading\\evidence\\reading_deep_audit_20261126\\browser_difficult_words.png",
+    "F:\\c1\\capstone1\\docs\\reading\\evidence\\reading_deep_audit_20261126\\browser_quiz_loaded.png"
+  ],
+  "finished_at": "2026-11-25T20:07:12.944Z",
+  "summary": {
+    "console_error_count": 0,
+    "page_error_count": 0,
+    "api_error_count": 0,
+    "all_zero_errors": true
+  }
+}

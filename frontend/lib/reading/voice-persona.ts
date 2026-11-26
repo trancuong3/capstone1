@@ -104,16 +104,32 @@ export function getTeacherPersonaForVoice(
 /**
  * Safely converts Vietnamese teacher self-reference ("cô" / "Cô" / "Cô giáo")
  * to ("thầy" / "Thầy" / "Thầy giáo") when a male voice is active, without
- * altering unrelated words like "con", "công", "cố", "cổ", "cơ".
+ * altering unrelated words ("con", "công", "cố", "cổ", "cơ") or quoted book
+ * text inside “...” / "...".
  */
 export function adaptTextToTeacherPersona(
   text: string,
   gender: VoiceGender,
 ): string {
   if (gender !== "male" || !text) return text;
+  const replaceOutsideQuotes = (segment: string): string =>
+    segment
+      .replace(/(^|[^\p{L}])Cô giáo(?=$|[^\p{L}])/gu, "$1Thầy giáo")
+      .replace(/(^|[^\p{L}])cô giáo(?=$|[^\p{L}])/gu, "$1thầy giáo")
+      .replace(/(^|[^\p{L}])Cô(?=$|[^\p{L}])/gu, "$1Thầy")
+      .replace(/(^|[^\p{L}])cô(?=$|[^\p{L}])/gu, "$1thầy");
+
+  // Preserve quoted story/book excerpts verbatim (“Cô Tấm gặp cô tiên” / "Cô tiên")
   return text
-    .replace(/(^|[^\p{L}])Cô giáo(?=$|[^\p{L}])/gu, "$1Thầy giáo")
-    .replace(/(^|[^\p{L}])cô giáo(?=$|[^\p{L}])/gu, "$1thầy giáo")
-    .replace(/(^|[^\p{L}])Cô(?=$|[^\p{L}])/gu, "$1Thầy")
-    .replace(/(^|[^\p{L}])cô(?=$|[^\p{L}])/gu, "$1thầy");
+    .split(/(“[^”]*”|"[^"]*")/gu)
+    .map((part) => {
+      if (
+        (part.startsWith("“") && part.endsWith("”")) ||
+        (part.startsWith('"') && part.endsWith('"'))
+      ) {
+        return part;
+      }
+      return replaceOutsideQuotes(part);
+    })
+    .join("");
 }

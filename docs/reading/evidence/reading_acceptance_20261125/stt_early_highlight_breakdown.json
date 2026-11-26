@@ -1,0 +1,230 @@
+{
+  "vivos_human_holdout": {
+    "label": "vivos_holdout",
+    "clips": 80,
+    "total_words": 745,
+    "matched_words": 738,
+    "match_rate": 0.9906,
+    "pre_onset_count": 13,
+    "pre_onset_samples": [
+      {
+        "clip": "vivos_holdout_VIVOSDEV01_R003",
+        "idx": 8,
+        "word": "này",
+        "recv_ms": 2998.0,
+        "start_ms": 3000.0,
+        "end_ms": 3145.0,
+        "pre_ms": 2.0
+      },
+      {
+        "clip": "vivos_holdout_VIVOSDEV02_R067",
+        "idx": 7,
+        "word": "nào",
+        "recv_ms": 2960.5,
+        "start_ms": 3080.0,
+        "end_ms": 3165.0,
+        "pre_ms": 119.5
+      },
+      {
+        "clip": "vivos_holdout_VIVOSDEV03_R046",
+        "idx": 9,
+        "word": "trường",
+        "recv_ms": 2262.5,
+        "start_ms": 2400.0,
+        "end_ms": 2465.0,
+        "pre_ms": 137.5
+      },
+      {
+        "clip": "vivos_holdout_VIVOSDEV04_R002",
+        "idx": 0,
+        "word": "đó",
+        "recv_ms": 684.8,
+        "start_ms": 710.0,
+        "end_ms": 800.0,
+        "pre_ms": 25.2
+      },
+      {
+        "clip": "vivos_holdout_VIVOSDEV05_043",
+        "idx": 8,
+        "word": "bắt",
+        "recv_ms": 2429.7,
+        "start_ms": 2480.0,
+        "end_ms": 2545.0,
+        "pre_ms": 50.3
+      },
+      {
+        "clip": "vivos_holdout_VIVOSDEV05_115",
+        "idx": 7,
+        "word": "phẩm",
+        "recv_ms": 2544.6,
+        "start_ms": 2560.0,
+        "end_ms": 2750.0,
+        "pre_ms": 15.4
+      },
+      {
+        "clip": "vivos_holdout_VIVOSDEV06_040",
+        "idx": 8,
+        "word": "ra",
+        "recv_ms": 2725.9,
+        "start_ms": 2760.0,
+        "end_ms": 2895.0,
+        "pre_ms": 34.1
+      },
+      {
+        "clip": "vivos_holdout_VIVOSDEV06_042",
+        "idx": 9,
+        "word": "quốc",
+        "recv_ms": 2867.8,
+        "start_ms": 2900.0,
+        "end_ms": 3120.0,
+        "pre_ms": 32.2
+      },
+      {
+        "clip": "vivos_holdout_VIVOSDEV06_042",
+        "idx": 10,
+        "word": "gia",
+        "recv_ms": 3114.2,
+        "start_ms": 3120.0,
+        "end_ms": 3245.0,
+        "pre_ms": 5.8
+      },
+      {
+        "clip": "vivos_holdout_VIVOSDEV07_030",
+        "idx": 4,
+        "word": "mình",
+        "recv_ms": 1712.3,
+        "start_ms": 1720.0,
+        "end_ms": 1805.0,
+        "pre_ms": 7.7
+      }
+    ],
+    "intra_word_streaming_count": 110,
+    "post_end_count": 615,
+    "mismatch_clips": []
+  },
+  "technical_regression_3_plus_17": {
+    "label": "reg_3_17",
+    "clips": 16,
+    "total_words": 183,
+    "matched_words": 167,
+    "match_rate": 0.9126,
+    "pre_onset_count": 4,
+    "pre_onset_samples": [
+      {
+        "clip": "long_diff_2",
+        "idx": 12,
+        "word": "ba",
+        "recv_ms": 2805.3,
+        "start_ms": 3110.0,
+        "end_ms": 3390.0,
+        "pre_ms": 304.7
+      },
+      {
+        "clip": "long_morning",
+        "idx": 14,
+        "word": "một",
+        "recv_ms": 3538.9,
+        "start_ms": 3550.0,
+        "end_ms": 3630.0,
+        "pre_ms": 11.1
+      },
+      {
+        "clip": "long_story",
+        "idx": 2,
+        "word": "trong",
+        "recv_ms": 174.7,
+        "start_ms": 390.0,
+        "end_ms": 630.0,
+        "pre_ms": 215.3
+      },
+      {
+        "clip": "human_1",
+        "idx": 7,
+        "word": "bệnh",
+        "recv_ms": 2080.7,
+        "start_ms": 2110.0,
+        "end_ms": 2190.0,
+        "pre_ms": 29.3
+      }
+    ],
+    "intra_word_streaming_count": 72,
+    "post_end_count": 91,
+    "mismatch_clips": []
+  },
+  "synthetic_multi_region": {
+    "label": "synth_multiregion",
+    "clips": 12,
+    "total_words": 186,
+    "matched_words": 146,
+    "match_rate": 0.7849,
+    "pre_onset_count": 3,
+    "pre_onset_samples": [
+      {
+        "clip": "synth_mr_00",
+        "idx": 2,
+        "word": "mùa",
+        "recv_ms": 362.4,
+        "start_ms": 470.0,
+        "end_ms": 670.0,
+        "pre_ms": 107.6
+      },
+      {
+        "clip": "synth_mr_03",
+        "idx": 14,
+        "word": "tươi",
+        "recv_ms": 3617.6,
+        "start_ms": 3630.0,
+        "end_ms": 3780.0,
+        "pre_ms": 12.4
+      },
+      {
+        "clip": "synth_mr_06",
+        "idx": 12,
+        "word": "phòng",
+        "recv_ms": 2407.6,
+        "start_ms": 2430.0,
+        "end_ms": 2630.0,
+        "pre_ms": 22.4
+      }
+    ],
+    "intra_word_streaming_count": 79,
+    "post_end_count": 64,
+    "mismatch_clips": [
+      {
+        "id": "synth_mr_01",
+        "matched": 13,
+        "total": 14,
+        "ts": "trên bàn gỗ sạch sẽ bé my mở quyển sách tiếng việt mới tin",
+        "ws_hyp": "trên bang gỗ sạch sẽ bé my mở quyển sách tiếng việt mới tinh"
+      },
+      {
+        "id": "synth_mr_04",
+        "matched": 6,
+        "total": 15,
+        "ts": "giờ ra chơi my gọi an an quay lại gọi my cùng xuống sân trường",
+        "ws_hyp": "giờ ra chơi my gọi an"
+      },
+      {
+        "id": "synth_mr_07",
+        "matched": 0,
+        "total": 16,
+        "ts": "my nhớ mẹ rằng nên mở chiếc ô nhỏ màu xanh che chung cho bạn an",
+        "ws_hyp": "mí nhử mè dặn nên mở chiếc ô nhỏ màu xanh che chung cho bạn an"
+      },
+      {
+        "id": "synth_mr_10",
+        "matched": 5,
+        "total": 18,
+        "ts": "khi về nhà bẻ tự lấy vợ tập việc từng chữ bang bạn nghĩ nghĩ rất cẩn thận",
+        "ws_hyp": "khi về nha bè tư lấy vợ tập việc từng chữ bang bạn nhỉ bàng nghĩ nghĩ rất cẩn thận"
+      },
+      {
+        "id": "synth_mr_11",
+        "matched": 16,
+        "total": 17,
+        "ts": "tè khen mì biếc giữ gìn sách vở chịu khó ghép vần từng tiếng khó mỗi tối",
+        "ws_hyp": "tè khen mi biết giữ gìn sách vở chịu khó ghép vần từng tiếng khó mỗi tối"
+      }
+    ]
+  }
+}

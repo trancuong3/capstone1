@@ -369,6 +369,8 @@ class FakeRepository:
     async def question(self, session_id, question_id):
         return next((q for q in self.question_rows if q.Id == question_id), None)
 
+    question_for_update = question
+
     async def answers(self, question_ids):
         return [a for a in self.answer_rows if a.QuestionId in question_ids]
 
@@ -454,17 +456,67 @@ class ServiceTests(unittest.TestCase):
             miss = run(service.submit_answer(repo.session.Id, nxt.question.id, PARENT_ID, wrong))
             self.assertFalse(miss.is_correct)
             self.assertEqual(miss.feedback_code, "TRY_AGAIN")
+            self.assertNotIn(normalize_text(question.ExpectedAnswer), normalize_text(miss.story_hint or ""))
             # A wrong answer keeps the same question as the next one.
             self.assertEqual(run(service.next_question(repo.session.Id, PARENT_ID)).question.id, nxt.question.id)
             hit = run(service.submit_answer(repo.session.Id, nxt.question.id, PARENT_ID, question.ExpectedAnswer.upper()))
             self.assertTrue(hit.is_correct)
             self.assertEqual(hit.score, 1.0)
+            self.assertIsNone(hit.story_hint)
 
         self.assertEqual(seen, total)
         again = run(service.submit_answer(repo.session.Id, repo.question_rows[0].Id, PARENT_ID, "anything"))
         self.assertTrue(again.is_correct)  # idempotent after success
         correct_rows = [a for a in repo.answer_rows if a.IsCorrect]
         self.assertEqual(len(correct_rows), total)
+
+    def test_submit_answer_uses_row_lock_deduplicates_retries_and_returns_safe_story_hint(self):
+        repo = FakeRepository()
+        lock_calls = []
+
+        async def tracked_question_for_update(session_id, question_id):
+            lock_calls.append((session_id, question_id))
+            return await repo.question(session_id, question_id)
+
+        repo.question_for_update = tracked_question_for_update
+        service = make_service(repo)
+        # Seed a FACTUAL question whose SourceSpan contains ExpectedAnswer ("Bên cửa sổ").
+        q_id = uuid4()
+        repo.question_rows.append(
+            ComprehensionQuestion(
+                Id=q_id,
+                SessionId=repo.session.Id,
+                PageId=repo.page.page_id,
+                PageRevisionId=repo.page.revision_id,
+                Type="FACTUAL",
+                Prompt="Chú mèo thích nằm ở đâu?",
+                ExpectedAnswer="Bên cửa sổ",
+                AcceptedAnswers=["bên cửa sổ"],
+                SourceSpan={
+                    "start_word_index": 7,
+                    "end_word_index_exclusive": 14,
+                    "sentence_index": None,
+                    "choices": ["Bên cửa sổ", "Trên mái nhà", "Dưới gầm bàn"],
+                },
+                Difficulty="EASY",
+            )
+        )
+
+        # Duplicate wrong retries / concurrent tap+STT submit only 1 row and never leak ExpectedAnswer
+        first_wrong = run(service.submit_answer(repo.session.Id, q_id, PARENT_ID, "Trên mái nhà"))
+        second_wrong = run(service.submit_answer(repo.session.Id, q_id, PARENT_ID, "trên mái nhà"))
+        self.assertEqual(first_wrong.answer_id, second_wrong.answer_id)
+        self.assertEqual(len(repo.answer_rows), 1)
+        self.assertEqual(len(lock_calls), 2)
+        self.assertIsNotNone(first_wrong.story_hint)
+        self.assertIn("Chú mèo thích nằm", first_wrong.story_hint)
+        self.assertNotIn("cửa sổ", normalize_text(first_wrong.story_hint))
+
+        # Correct answer clears story_hint and locks subsequent retries
+        right = run(service.submit_answer(repo.session.Id, q_id, PARENT_ID, "Bên cửa sổ"))
+        self.assertTrue(right.is_correct)
+        self.assertIsNone(right.story_hint)
+        self.assertEqual(len(repo.answer_rows), 2)
 
     def test_legacy_questions_without_choices_are_ignored(self):
         repo = FakeRepository()
@@ -475,6 +527,119 @@ class ServiceTests(unittest.TestCase):
         nxt = run(make_service(repo).next_question(repo.session.Id, PARENT_ID))
         self.assertTrue(nxt.completed)
         self.assertEqual(nxt.total, 0)
+
+    def test_release_and_commit_never_read_expired_orm_attributes(self):
+        """Regression for real AsyncSession MissingGreenlet after release()/commit()."""
+
+        class _ExpiringProxy:
+            def __init__(self, target):
+                object.__setattr__(self, "_target", target)
+                object.__setattr__(self, "_expired", False)
+
+            def __getattr__(self, name):
+                if object.__getattribute__(self, "_expired"):
+                    raise RuntimeError(
+                        f"MissingGreenlet simulated: accessed expired attribute {name!r}"
+                    )
+                return getattr(object.__getattribute__(self, "_target"), name)
+
+            def __setattr__(self, name, value):
+                setattr(object.__getattribute__(self, "_target"), name, value)
+
+        class ExpiringRepository(FakeRepository):
+            def __init__(self):
+                super().__init__()
+                self._proxies = []
+
+            def _wrap(self, obj):
+                if obj is None:
+                    return None
+                proxy = _ExpiringProxy(obj)
+                self._proxies.append(proxy)
+                return proxy
+
+            def _expire_all(self):
+                for proxy in self._proxies:
+                    object.__setattr__(proxy, "_expired", True)
+
+            async def owned_session(self, session_id, parent_id):
+                return self._wrap(await super().owned_session(session_id, parent_id))
+
+            async def owned_session_for_update(self, session_id, parent_id):
+                return self._wrap(await super().owned_session_for_update(session_id, parent_id))
+
+            async def questions(self, session_id):
+                return [self._wrap(q) for q in await super().questions(session_id)]
+
+            async def question(self, session_id, question_id):
+                return self._wrap(await super().question(session_id, question_id))
+
+            question_for_update = question
+
+            async def answers(self, question_ids):
+                return [self._wrap(a) for a in await super().answers(question_ids)]
+
+            def add_answer(self, answer):
+                super().add_answer(answer)
+
+            async def commit(self):
+                await super().commit()
+                self._expire_all()
+
+            async def release(self):
+                await super().release()
+                self._expire_all()
+
+            async def refresh(self, instance):
+                # Only the explicitly refreshed record becomes readable after commit;
+                # previously loaded Question / Answer instances stay expired.
+                self._expire_all()
+                return None
+
+        repo = ExpiringRepository()
+        service = make_service(repo)
+        q_id = uuid4()
+        repo.question_rows.append(
+            ComprehensionQuestion(
+                Id=q_id,
+                SessionId=repo.session.Id,
+                PageId=repo.page.page_id,
+                PageRevisionId=repo.page.revision_id,
+                Type="FACTUAL",
+                Prompt="Chú mèo thích nằm ở đâu?",
+                ExpectedAnswer="Bên cửa sổ",
+                AcceptedAnswers=["bên cửa sổ"],
+                SourceSpan={
+                    "start_word_index": 7,
+                    "end_word_index_exclusive": 14,
+                    "sentence_index": None,
+                    "choices": ["Bên cửa sổ", "Trên mái nhà", "Dưới gầm bàn"],
+                    "generation": {"source": "RULE_BASED"},
+                },
+                Difficulty="EASY",
+            )
+        )
+
+        # Existing questions path (generate_for_session calls release())
+        generated = run(service.generate_for_session(repo.session.Id, PARENT_ID))
+        self.assertFalse(generated.created)
+        self.assertEqual(generated.total, 1)
+
+        # Wrong attempt (commit path must not access expired `question` after commit)
+        wrong_first = run(service.submit_answer(repo.session.Id, q_id, PARENT_ID, "Trên mái nhà"))
+        self.assertFalse(wrong_first.is_correct)
+        self.assertEqual(wrong_first.question_id, q_id)
+
+        # Duplicate wrong retry (release() path must not access expired `latest` or `question`)
+        wrong_dup = run(service.submit_answer(repo.session.Id, q_id, PARENT_ID, "trên mái nhà"))
+        self.assertEqual(wrong_dup.answer_id, wrong_first.answer_id)
+
+        # Correct attempt then duplicate post-correct retry (already_correct release() path)
+        right = run(service.submit_answer(repo.session.Id, q_id, PARENT_ID, "Bên cửa sổ"))
+        self.assertTrue(right.is_correct)
+        right_dup = run(service.submit_answer(repo.session.Id, q_id, PARENT_ID, "Trên mái nhà"))
+        self.assertTrue(right_dup.is_correct)
+        self.assertEqual(right_dup.answer_id, right.answer_id)
 
 
 class RouteTests(unittest.TestCase):
@@ -518,6 +683,76 @@ class RouteTests(unittest.TestCase):
             self.assertEqual(client.get(f"/tutor/sessions/{uuid4()}/questions/next").status_code, 404)
         finally:
             tutor_routes._service = original
+
+    def test_story_hint_masks_single_char_kinship_accepted_answers_and_uses_token_anti_leak(self):
+        class TokenRepo(FakeRepository):
+            def __init__(self, tokens):
+                super().__init__()
+                self._tokens = tokens
+
+            async def revision_word_texts(self, revision_id):
+                return list(self._tokens)
+
+        cases = [
+            # 1. Single-char answer with classifier ("Chiếc ô") must mask "ô" even when story uses "cái ô".
+            (
+                ["Bé", "cầm", "cái", "ô", "màu", "đỏ", "đi", "học."],
+                "Chiếc ô",
+                ["chiếc ô"],
+                {"start_word_index": 2, "end_word_index_exclusive": 4},
+                lambda h: h is not None and "…" in h and " ô " not in f" {normalize_text(h)} ",
+            ),
+            # 2. Kinship noun ("Bà") must not be ignored as a function word.
+            (
+                ["Hôm", "nay", "bà", "kể", "chuyện", "cho", "bé", "nghe."],
+                "Bà",
+                ["bà"],
+                {"start_word_index": 2, "end_word_index_exclusive": 3},
+                lambda h: h is not None and "…" in h and " bà " not in f" {normalize_text(h)} ",
+            ),
+            # 3. AcceptedAnswers tokens must also be masked.
+            (
+                ["Mèo", "mướp", "trèo", "lên", "cây", "cau", "cao."],
+                "Mèo mướp",
+                ["mèo mướp", "cây cau"],
+                {"start_word_index": 0, "end_word_index_exclusive": 2},
+                lambda h: h is not None and "cây" not in normalize_text(h) and "cau" not in normalize_text(h),
+            ),
+            # 4. Static clue frame ("Con nhớ lại chi tiết trong bài đọc...") must NOT falsely kill hint
+            #    when answer contains "Con" or "Bài đọc".
+            (
+                ["Bé", "nhìn", "thấy", "con", "cò", "trắng", "bay", "qua."],
+                "Con cò",
+                ["con cò", "con"],
+                {"start_word_index": 3, "end_word_index_exclusive": 5},
+                lambda h: h is not None and "trắng bay qua" in h,
+            ),
+            # 5. Token matching (not substring) so answer "ô" does NOT collide with "Cô".
+            (
+                ["Cô", "giáo", "tặng", "bé", "cái", "ô", "xanh."],
+                "ô",
+                ["ô"],
+                {"start_word_index": 5, "end_word_index_exclusive": 6},
+                lambda h: h is not None and "Cô giáo" in h and "…" in h,
+            ),
+        ]
+        for tokens, exp, acc, span, check in cases:
+            repo = TokenRepo(tokens)
+            service = make_service(repo)
+            q = ComprehensionQuestion(
+                Id=uuid4(),
+                SessionId=repo.session.Id,
+                PageId=repo.page.page_id,
+                PageRevisionId=repo.page.revision_id,
+                Type="FACTUAL",
+                Prompt="p",
+                ExpectedAnswer=exp,
+                AcceptedAnswers=acc,
+                SourceSpan=span,
+                Difficulty="EASY",
+            )
+            hint = run(service._build_story_hint(q))
+            self.assertTrue(check(hint), f"Failed for {exp!r}: got {hint!r}")
 
 
 if __name__ == "__main__":

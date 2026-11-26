@@ -15,8 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_parent_id, get_db, require_admin_id, require_parent_id
 from app.api.routes.reading import HistoryRepository, HistoryService
+from app.api.routes.voice import get_voice_orchestrator
 from app.models import AuditLog, ChildProfile, ConsentRecord, Profile, ProgressReport, ReadingSession
-from app.providers.elevenlabs_voice_provider import ElevenLabsVoiceProvider
+from app.services.voice_orchestrator import VoiceOrchestrator
 from app.repositories.difficult_words_repository import DifficultWordsRepository
 from app.services.admin_ocr_local import LocalCorrectionError, LocalOcrConfig, LocalOcrCorrector
 from app.services.runtime_diagnostics import (
@@ -572,6 +573,7 @@ def _difficult_words_service(db: AsyncSession) -> DifficultWordsService:
     return DifficultWordsService(
         DifficultWordsRepository(db),
         HistoryService(HistoryRepository(db)),
+        voice_provider=get_voice_orchestrator(),
     )
 
 
@@ -779,10 +781,12 @@ class AdminSystemService:
     def __init__(
         self,
         repository: AdminSystemRepository,
-        voice_provider: ElevenLabsVoiceProvider | None = None,
+        voice_provider: VoiceOrchestrator | object | None = None,
     ):
         self.repository = repository
-        self.voice_provider = voice_provider or ElevenLabsVoiceProvider()
+        self.voice_provider = (
+            voice_provider if voice_provider is not None else get_voice_orchestrator()
+        )
 
     async def require_admin(self, actor_id: UUID):
         if await self.repository.role(actor_id) != "admin":

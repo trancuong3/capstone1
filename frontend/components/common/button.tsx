@@ -32,7 +32,22 @@ export function ButtonSizeProvider({
 }
 
 const baseClassName =
-  "inline-flex w-full items-center justify-center gap-2 rounded-control px-4 py-2 text-center text-button font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-55";
+  "inline-flex items-center justify-center gap-2 rounded-control px-4 py-2 text-center text-button font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-55";
+
+const explicitWidthClassPattern =
+  /(?:^|\s)(?:w-(?:auto|fit|min|max|\d+|\[.+?\])|(?:sm|md|lg|xl):w-auto|size-\S+)/;
+
+function resolveWidthClassName(
+  fullWidth: boolean | undefined,
+  className: string | undefined,
+): string | undefined {
+  if (fullWidth === false) return "w-auto";
+  if (fullWidth === true) return "w-full";
+  if (className && explicitWidthClassPattern.test(className)) {
+    return undefined;
+  }
+  return "w-full";
+}
 
 const variantClassNames: Record<ButtonVariant, string> = {
   primary: "bg-primary text-white hover:bg-primary-hover",
@@ -46,8 +61,9 @@ const sizeClassNames: Record<ButtonSize, string> = {
   compact: "min-h-12 px-4 py-2.5 text-label leading-5",
 };
 
-interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode;
+  fullWidth?: boolean;
   isLoading?: boolean;
   size?: ButtonSize;
   variant?: ButtonVariant;
@@ -57,6 +73,7 @@ export function Button({
   children,
   className,
   disabled,
+  fullWidth,
   isLoading = false,
   size,
   type = "button",
@@ -70,6 +87,7 @@ export function Button({
       aria-busy={isLoading || undefined}
       className={cn(
         baseClassName,
+        resolveWidthClassName(fullWidth, className),
         variantClassNames[variant],
         sizeClassNames[size ?? inheritedSize],
         className,
@@ -86,8 +104,9 @@ export function Button({
   );
 }
 
-interface ButtonLinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
+export interface ButtonLinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
   children: ReactNode;
+  fullWidth?: boolean;
   href: string;
   size?: ButtonSize;
   variant?: ButtonVariant;
@@ -96,6 +115,7 @@ interface ButtonLinkProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
 export function ButtonLink({
   children,
   className,
+  fullWidth,
   href,
   size,
   variant = "primary",
@@ -107,6 +127,7 @@ export function ButtonLink({
     <Link
       className={cn(
         baseClassName,
+        resolveWidthClassName(fullWidth, className),
         variantClassNames[variant],
         sizeClassNames[size ?? inheritedSize],
         className,

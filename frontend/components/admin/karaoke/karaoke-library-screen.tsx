@@ -5,6 +5,8 @@ import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
 import { karaokeInputClass } from "@/components/admin/karaoke/song-metadata-form";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
+import { Modal } from "@/components/common/modal";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminKaraoke } from "@/components/karaoke/karaoke-services-provider";
 import { karaokeErrorMessage } from "@/lib/api/admin-karaoke-service";
@@ -29,6 +31,9 @@ export function KaraokeLibraryScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pendingVisibilityItem, setPendingVisibilityItem] = useState<
+    AdminKaraokeList["items"][number] | null
+  >(null);
   const [reload, setReload] = useState(0);
   const mutation = useRef<AbortController | null>(null);
   useEffect(() => () => mutation.current?.abort(), []);
@@ -100,15 +105,10 @@ export function KaraokeLibraryScreen() {
     setError("");
     setQuery({ search: search.trim(), status, offset: 0 });
   }
-  async function visibility(item: AdminKaraokeList["items"][number]) {
-    if (mutation.current) return;
+  async function confirmVisibility() {
+    const item = pendingVisibilityItem;
+    if (!item || mutation.current) return;
     const visible = item.status === "HIDDEN";
-    if (
-      !window.confirm(
-        `${visible ? "Hiện lại" : "Ẩn"} bài hát “${item.title}” cho trẻ?`,
-      )
-    )
-      return;
     const controller = new AbortController();
     mutation.current = controller;
     setBusy(true);
@@ -120,9 +120,15 @@ export function KaraokeLibraryScreen() {
         visible,
         controller.signal,
       );
-      if (!controller.signal.aborted) refresh();
+      if (!controller.signal.aborted) {
+        setPendingVisibilityItem(null);
+        refresh();
+      }
     } catch (e) {
-      if (!controller.signal.aborted) setError(karaokeErrorMessage(e));
+      if (!controller.signal.aborted) {
+        setPendingVisibilityItem(null);
+        setError(karaokeErrorMessage(e));
+      }
     } finally {
       mutation.current = null;
       if (!controller.signal.aborted) setBusy(false);
@@ -249,7 +255,7 @@ export function KaraokeLibraryScreen() {
                           variant="quiet"
                           className="sm:w-auto"
                           disabled={busy}
-                          onClick={() => void visibility(item)}
+                          onClick={() => setPendingVisibilityItem(item)}
                         >
                           {item.status === "HIDDEN" ? "Hiện lại" : "Ẩn bài hát"}
                         </Button>
@@ -259,44 +265,80 @@ export function KaraokeLibraryScreen() {
                 ))}
               </div>
             )}
-            <nav
-              aria-label="Phân trang bài hát"
-              className="flex flex-wrap items-center justify-between gap-3"
-            >
-              <Button
-                className="sm:w-auto"
-                variant="secondary"
-                disabled={query.offset === 0 || busy}
-                onClick={() => {
-                  setLoading(true);
-                  setQuery({
-                    ...query,
-                    offset: Math.max(0, query.offset - 12),
-                  });
-                }}
-              >
-                Trang trước
-              </Button>
-              <p>
-                {data.items.length
-                  ? `${data.offset + 1}–${Math.min(data.offset + data.items.length, data.total)} / ${data.total} bài`
-                  : `0 / ${data.total} bài`}
-              </p>
-              <Button
-                className="sm:w-auto"
-                variant="secondary"
-                disabled={query.offset + 12 >= data.total || busy}
-                onClick={() => {
-                  setLoading(true);
-                  setQuery({ ...query, offset: query.offset + 12 });
-                }}
-              >
-                Trang sau
-              </Button>
-            </nav>
+            <PaginationBar
+              ariaLabel="Phân trang bài hát"
+              disabled={busy}
+              itemLabel="bài"
+              nextLabel="Trang sau"
+              onPageChange={(nextPage) => {
+                const limit = Math.max(1, data.limit || 12);
+                setLoading(true);
+                setQuery({
+                  ...query,
+                  offset: (nextPage - 1) * limit,
+                });
+              }}
+              page={
+                Math.floor(query.offset / Math.max(1, data.limit || 12)) + 1
+              }
+              pageSize={Math.max(1, data.limit || 12)}
+              prevLabel="Trang trước"
+              total={data.total}
+            />
           </>
         )
       )}
+      <Modal
+        closeOnBackdropClick={!busy}
+        closeOnEscape={!busy}
+        footer={
+          <div className="flex flex-wrap justify-end gap-3">
+            <Button
+              disabled={busy}
+              fullWidth={false}
+              onClick={() => setPendingVisibilityItem(null)}
+              type="button"
+              variant="secondary"
+            >
+              Hủy
+            </Button>
+            <Button
+              disabled={busy}
+              fullWidth={false}
+              isLoading={busy}
+              onClick={() => void confirmVisibility()}
+              type="button"
+              variant={
+                pendingVisibilityItem?.status === "HIDDEN"
+                  ? "primary"
+                  : "destructive"
+              }
+            >
+              {pendingVisibilityItem?.status === "HIDDEN"
+                ? "Xác nhận hiện lại"
+                : "Xác nhận ẩn bài hát"}
+            </Button>
+          </div>
+        }
+        isOpen={pendingVisibilityItem !== null}
+        onClose={() => {
+          if (!busy) setPendingVisibilityItem(null);
+        }}
+        role="alertdialog"
+        showCloseButton={!busy}
+        title={
+          pendingVisibilityItem?.status === "HIDDEN"
+            ? "Hiện lại bài hát?"
+            : "Ẩn bài hát?"
+        }
+        tone="paper"
+      >
+        <p className="text-body text-ink">
+          {pendingVisibilityItem
+            ? `${pendingVisibilityItem.status === "HIDDEN" ? "Hiện lại" : "Ẩn"} bài hát “${pendingVisibilityItem.title}” cho trẻ?`
+            : ""}
+        </p>
+      </Modal>
     </div>
   );
 }

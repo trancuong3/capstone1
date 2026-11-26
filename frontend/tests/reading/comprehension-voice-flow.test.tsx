@@ -10,6 +10,10 @@ import { ComprehensionQuestion } from "@/components/reading/comprehension-questi
 import type { ReadingServices } from "@/hooks/use-reading-services";
 import { matchComprehensionVoiceInput } from "@/lib/reading/comprehension-voice-matcher";
 import {
+  lockSessionVoice,
+  resetVoiceLockAndPolicyForTests,
+} from "@/lib/reading/session-voice-lock";
+import {
   childFixture,
   TEST_SESSION_ID,
 } from "@/test/fixtures/report-data-fixture";
@@ -22,6 +26,7 @@ const { servicesHook, speechPlayerMock } = vi.hoisted(() => ({
     isPaused: false,
     fallbackNotice: null,
     play: vi.fn(),
+    prefetch: vi.fn(),
     playWithWordTimings: vi.fn(),
     pause: vi.fn(),
     resume: vi.fn(),
@@ -45,6 +50,9 @@ class QuizRecognition {
   private results: Array<{
     isFinal: boolean;
     length: number;
+    epoch?: number;
+    sessionId?: string | null;
+    pageId?: string | null;
     0: { transcript: string; confidence: number };
   }> = [];
 
@@ -58,15 +66,49 @@ class QuizRecognition {
     this.stopped = true;
     this.onend?.();
   }
-  say(transcript: string, confidence = 0.95) {
+  say(
+    transcript: string,
+    confidence = 0.95,
+    meta?: {
+      epoch?: number;
+      sessionId?: string | null;
+      pageId?: string | null;
+    },
+  ) {
     this.results.push({
       isFinal: true,
       length: 1,
+      epoch: meta?.epoch,
+      sessionId: meta?.sessionId,
+      pageId: meta?.pageId,
       0: { transcript, confidence },
     });
     this.onresult?.({
       resultIndex: this.results.length - 1,
       results: [...this.results],
+    });
+  }
+  sayInterim(
+    transcript: string,
+    meta?: {
+      epoch?: number;
+      sessionId?: string | null;
+      pageId?: string | null;
+    },
+  ) {
+    this.onresult?.({
+      resultIndex: this.results.length,
+      results: [
+        ...this.results,
+        {
+          isFinal: false,
+          length: 1,
+          epoch: meta?.epoch,
+          sessionId: meta?.sessionId,
+          pageId: meta?.pageId,
+          0: { transcript, confidence: 0 },
+        },
+      ],
     });
   }
 }
@@ -87,12 +129,14 @@ beforeEach(() => {
     value: QuizRecognition,
   });
   speechPlayerMock.play.mockReset().mockResolvedValue(undefined);
+  speechPlayerMock.prefetch.mockReset().mockResolvedValue(undefined);
   speechPlayerMock.stop.mockReset();
 });
 
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  resetVoiceLockAndPolicyForTests();
   if (previousRecognition) {
     Object.defineProperty(window, "SpeechRecognition", previousRecognition);
   } else {
@@ -325,5 +369,396 @@ describe("hands-free voice comprehension quiz flow (G24)", () => {
     // Settling the aborted old TTS promise must NOT open recognition or advance
     act(() => resolvePendingPlay());
     expect(QuizRecognition.instances).toHaveLength(0);
+  });
+
+  it("waits 850ms for bare single-letter 'A', cancels on interim speech, and commits cross-segment self-correction 'B'", async () => {
+    vi.useFakeTimers();
+    let now = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+
+    const q1 = makeQuizQuestion(1, 1, "Mi che ô cho ai?", [
+      "Bạn Lan",
+      "Bạn An",
+      "Cô giáo",
+    ]);
+    const submitAnswer = vi.fn().mockResolvedValue({
+      answer_id: "ans-1",
+      question_id: q1.question.id,
+      submitted_answer: "Bạn An",
+      is_correct: true,
+      score: 1,
+      feedback_code: "CORRECT",
+    });
+    servicesHook.mockReturnValue({
+      comprehensionService: {
+        getQuestion: vi.fn().mockResolvedValueOnce(q1),
+        submitAnswer,
+      },
+    } as unknown as ReadingServices);
+
+    render(
+      <ComprehensionQuestion
+        child={childFixture}
+        onComplete={vi.fn()}
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(QuizRecognition.instances).toHaveLength(1);
+    now += 2_000;
+
+    // Interim highlight only previews and NEVER submits
+    act(() => lastRec().sayInterim("Bạn Lan"));
+    expect(screen.getByRole("button", { name: /Bạn Lan/ })).toHaveAttribute(
+      "data-preview-choice",
+      "true",
+    );
+    expect(submitAnswer).not.toHaveBeenCalled();
+
+    // Bare single-letter "A" previews A and does NOT submit at 500ms (< 850ms)
+    act(() => lastRec().say("A"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expect(submitAnswer).not.toHaveBeenCalled();
+
+    // New interim speech cancels the 850ms settle timer cleanly
+    act(() => lastRec().sayInterim("à không"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expect(submitAnswer).not.toHaveBeenCalled();
+
+    // Child completes self-correction "à không, con chọn B" -> submits Bạn An
+    act(() => lastRec().say("à không, con chọn B"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(submitAnswer).toHaveBeenCalledTimes(1);
+    expect(submitAnswer).toHaveBeenCalledWith(
+      TEST_SESSION_ID,
+      q1.question.id,
+      "Bạn An",
+    );
+  });
+
+  it("fences late Q1 STT results out of Q2, adapts Thầy persona, speaks story_hint on wrong choice, and prevents double-submit", async () => {
+    let now = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    lockSessionVoice(TEST_SESSION_ID, {
+      voiceId: "local_north_thien_minh",
+      forceUpdate: true,
+    });
+
+    const q1 = makeQuizQuestion(1, 2, "Mi che ô cho ai?", [
+      "Bạn Lan",
+      "Bạn An",
+      "Cô giáo",
+    ]);
+    const q2 = makeQuizQuestion(2, 2, "Trời hôm đó thế nào?", [
+      "Trời nắng",
+      "Trời đổ mưa",
+      "Có tuyết",
+    ]);
+    const getQuestion = vi
+      .fn()
+      .mockResolvedValueOnce(q1)
+      .mockResolvedValueOnce(q2);
+
+    let resolveManual!: (val: unknown) => void;
+    const submitAnswer = vi
+      .fn()
+      .mockResolvedValueOnce({
+        answer_id: "ans-wrong",
+        question_id: q1.question.id,
+        submitted_answer: "Bạn Lan",
+        is_correct: false,
+        score: 0,
+        feedback_code: "TRY_AGAIN",
+        story_hint:
+          "Con nhớ lại chi tiết: “Tan học, trời đổ mưa. Mi che ô cho…” nhé!",
+      })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveManual = resolve;
+          }),
+      );
+    servicesHook.mockReturnValue({
+      comprehensionService: { getQuestion, submitAnswer },
+    } as unknown as ReadingServices);
+
+    render(
+      <ComprehensionQuestion
+        child={childFixture}
+        onComplete={vi.fn()}
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    await waitFor(() => expect(QuizRecognition.instances).toHaveLength(1));
+    const q1Rec = lastRec();
+    // Male voice selected: story choices ("Đáp án C: Cô giáo") MUST stay verbatim
+    // (P1-10: never rewrite story characters into "Thầy"), while teacher prompts have zero "Cô".
+    const playedUtterances = speechPlayerMock.play.mock.calls.map(([t]) =>
+      String(t),
+    );
+    expect(playedUtterances).toContain("Đáp án C: Cô giáo");
+    const teacherPrompts = playedUtterances.filter(
+      (t) => t !== q1.question.prompt && !t.startsWith("Đáp án "),
+    );
+    expect(teacherPrompts.join(" ")).not.toMatch(
+      /(^|[^\p{L}])Cô(?=$|[^\p{L}])/u,
+    );
+
+    // Wrong voice choice records exact choice first, speaks story_hint, and re-opens mic
+    now += 2_000;
+    act(() => q1Rec.say("Bạn Lan"));
+    await waitFor(() => expect(QuizRecognition.instances).toHaveLength(2));
+    expect(submitAnswer).toHaveBeenCalledWith(
+      TEST_SESSION_ID,
+      q1.question.id,
+      "Bạn Lan",
+    );
+    expect(
+      screen.getByText(/Tan học, trời đổ mưa\. Mi che ô cho/),
+    ).toBeInTheDocument();
+
+    // Simultaneous click + STT does not double-submit
+    const btnB = screen.getByRole("button", { name: /Bạn An/ });
+    fireEvent.click(btnB);
+    act(() => lastRec().say("con chọn B"));
+    expect(submitAnswer).toHaveBeenCalledTimes(2);
+
+    act(() =>
+      resolveManual({
+        answer_id: "ans-right",
+        question_id: q1.question.id,
+        submitted_answer: "Bạn An",
+        is_correct: true,
+        score: 1,
+        feedback_code: "CORRECT",
+      }),
+    );
+
+    // Advance to Q2 via click on "Câu tiếp theo"
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Câu tiếp theo/ }),
+    );
+    await screen.findByText("Trời hôm đó thế nào?");
+    await waitFor(() => expect(QuizRecognition.instances).toHaveLength(3));
+
+    // Late result carrying Q1's pageId or stale epoch must NOT affect Q2
+    now += 2_000;
+    act(() =>
+      lastRec().say("con chọn A", 0.95, {
+        pageId: `quiz:${q1.question.id}`,
+        sessionId: TEST_SESSION_ID,
+      }),
+    );
+    expect(submitAnswer).toHaveBeenCalledTimes(2);
+  });
+
+  it("speaks story_hint aloud on manual wrong tap and supports barge-in when tapping another choice (Mũi D P1)", async () => {
+    const q1 = makeQuizQuestion(1, 1, "Mi cầm gì che mưa?", [
+      "Chiếc ô",
+      "Quả táo",
+      "Quyển sách",
+    ]);
+    let resolveHintPlay: () => void = () => undefined;
+    const submitAnswer = vi
+      .fn()
+      .mockResolvedValueOnce({
+        answer_id: "ans-wrong-tap",
+        question_id: q1.question.id,
+        submitted_answer: "Quả táo",
+        is_correct: false,
+        score: 0,
+        feedback_code: "TRY_AGAIN",
+        story_hint: "Trong bài có câu: Mi cầm … che mưa cho bạn.",
+      })
+      .mockResolvedValueOnce({
+        answer_id: "ans-right-tap",
+        question_id: q1.question.id,
+        submitted_answer: "Chiếc ô",
+        is_correct: true,
+        score: 1,
+        feedback_code: "CORRECT",
+      });
+
+    servicesHook.mockReturnValue({
+      comprehensionService: {
+        getQuestion: vi.fn().mockResolvedValueOnce(q1),
+        submitAnswer,
+      },
+    } as unknown as ReadingServices);
+
+    render(
+      <ComprehensionQuestion
+        child={childFixture}
+        onComplete={vi.fn()}
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    await waitFor(() => expect(QuizRecognition.instances).toHaveLength(1));
+    speechPlayerMock.play.mockClear();
+    speechPlayerMock.stop.mockClear();
+    speechPlayerMock.play.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveHintPlay = resolve;
+        }),
+    );
+
+    // Manual tap on wrong choice "Quả táo" -> must read story_hint aloud
+    fireEvent.click(screen.getByRole("button", { name: /Quả táo/ }));
+    await waitFor(() =>
+      expect(speechPlayerMock.play).toHaveBeenCalledWith(
+        expect.stringContaining("Mi cầm … che mưa cho bạn"),
+        { coaching: true },
+      ),
+    );
+
+    // Barge-in: child taps correct choice "Chiếc ô" while hint audio is still playing
+    fireEvent.click(screen.getByRole("button", { name: /Chiếc ô/ }));
+    expect(speechPlayerMock.stop).toHaveBeenCalled();
+    act(() => resolveHintPlay());
+
+    await waitFor(() =>
+      expect(submitAnswer).toHaveBeenCalledWith(
+        TEST_SESSION_ID,
+        q1.question.id,
+        "Chiếc ô",
+      ),
+    );
+  });
+
+  it("dispatches question prompt before prefetching choices B/C and aborts in-flight prefetch on barge-in", async () => {
+    const callOrder: string[] = [];
+    let capturedSignal: AbortSignal | undefined;
+    let resolveQuestionPlay: () => void = () => undefined;
+
+    speechPlayerMock.play.mockImplementationOnce(
+      (text: string) =>
+        new Promise<void>((resolve) => {
+          callOrder.push(`play:${text}`);
+          resolveQuestionPlay = resolve;
+        }),
+    );
+    speechPlayerMock.prefetch.mockImplementation(
+      (text: string, options?: { signal?: AbortSignal }) => {
+        callOrder.push(`prefetch:${text}`);
+        capturedSignal = options?.signal;
+        return new Promise<void>(() => {
+          // keep pending until aborted
+        });
+      },
+    );
+
+    const q1 = makeQuizQuestion(1, 1, "Mi cầm gì che mưa?", [
+      "Chiếc ô",
+      "Quả táo",
+      "Quyển sách",
+    ]);
+    const submitAnswer = vi.fn().mockResolvedValue({
+      answer_id: "ans-barge",
+      question_id: q1.question.id,
+      submitted_answer: "Chiếc ô",
+      is_correct: true,
+      score: 1,
+      feedback_code: "CORRECT",
+    });
+
+    servicesHook.mockReturnValue({
+      comprehensionService: {
+        getQuestion: vi.fn().mockResolvedValueOnce(q1),
+        submitAnswer,
+      },
+    } as unknown as ReadingServices);
+
+    render(
+      <ComprehensionQuestion
+        child={childFixture}
+        onComplete={vi.fn()}
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    await waitFor(() => expect(callOrder.length).toBeGreaterThanOrEqual(2));
+    // Question prompt MUST be dispatched before Choice B prefetch
+    expect(callOrder[0]).toBe("play:Mi cầm gì che mưa?");
+    expect(callOrder[1]).toBe("prefetch:Đáp án B: Quả táo");
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal?.aborted).toBe(false);
+
+    // Barge-in tap aborts the in-flight prefetch signal immediately
+    fireEvent.click(screen.getByRole("button", { name: /Chiếc ô/ }));
+    expect(capturedSignal?.aborted).toBe(true);
+    act(() => resolveQuestionPlay());
+    await waitFor(() => expect(submitAnswer).toHaveBeenCalledTimes(1));
+  });
+
+  it("preserves choice labels ('Cô Tấm', 'Cô tiên') verbatim in CONFLICT clarification under male Thầy voice (P1-10) and handles local-stt-unavailable (P1-3)", async () => {
+    let now = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    lockSessionVoice(TEST_SESSION_ID, {
+      voiceId: "local_north_thien_minh",
+      forceUpdate: true,
+    });
+    const q1 = makeQuizQuestion(1, 1, "Ai đã giúp nhân vật chính?", [
+      "Cô Tấm",
+      "Quả táo",
+      "Cô tiên",
+    ]);
+    servicesHook.mockReturnValue({
+      comprehensionService: {
+        getQuestion: vi.fn().mockResolvedValueOnce(q1),
+        submitAnswer: vi.fn(),
+      },
+    } as unknown as ReadingServices);
+
+    render(
+      <ComprehensionQuestion
+        child={childFixture}
+        onComplete={vi.fn()}
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    await waitFor(() => expect(QuizRecognition.instances).toHaveLength(1));
+    speechPlayerMock.play.mockClear();
+
+    // Child speaks conflicting letter A ("Cô Tấm") + content "Cô tiên" -> CONFLICT clarification
+    now += 2_000;
+    act(() => lastRec().say("A Cô tiên", 0.95));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Con chọn Cô Tấm hay Cô tiên?"),
+      ).toBeInTheDocument(),
+    );
+    expect(speechPlayerMock.play).toHaveBeenCalledWith(
+      "Con chọn Cô Tấm hay Cô tiên?",
+      { coaching: true },
+    );
+
+    // P1-3: local-stt-unavailable displays explicit local worker banner and stops listening
+    await waitFor(() =>
+      expect(QuizRecognition.instances.length).toBeGreaterThanOrEqual(2),
+    );
+    act(() => lastRec().onerror?.({ error: "local-stt-unavailable" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Bộ nhận diện giọng nói trên máy chưa bật/),
+      ).toBeInTheDocument(),
+    );
   });
 });

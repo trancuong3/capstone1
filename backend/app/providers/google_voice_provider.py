@@ -7,10 +7,14 @@ Never logs audio bytes, child transcripts, or secret values.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
+import math
 import os
+import shutil
 import struct
+import subprocess
 import time
 import unicodedata
 import wave
@@ -133,6 +137,81 @@ def _parse_google_duration_seconds(value: Any) -> float:
     return 0.0
 
 
+def _is_mp4_m4a_aac(filename: str, content_type: str, raw: bytes) -> bool:
+    lower_name = filename.lower()
+    lower_ct = content_type.lower()
+    if len(raw) >= 8 and raw[4:8] == b"ftyp":
+        return True
+    if any(ext in lower_name for ext in (".mp4", ".m4a", ".aac")) and (
+        lower_name.endswith(".mp4")
+        or lower_name.endswith(".m4a")
+        or lower_name.endswith(".aac")
+    ):
+        return True
+    if any(tok in lower_ct for tok in ("audio/mp4", "video/mp4", "m4a", "aac")):
+        return True
+    return False
+
+
+def _transcode_container_to_wav_16k_sync(raw: bytes) -> bytes | None:
+    """Best-effort transcode of MP4/M4A/AAC to 16kHz mono PCM16 WAV for Google STT v1."""
+    try:
+        import av  # type: ignore[import-not-found]
+        import numpy as np
+
+        container = av.open(io.BytesIO(raw), mode="r")
+        try:
+            audio_streams = [s for s in container.streams if s.type == "audio"]
+            if not audio_streams:
+                return None
+            resampler = av.AudioResampler(format="s16", layout="mono", rate=16000)
+            pcm_parts: list[bytes] = []
+            for frame in container.decode(audio_streams[0]):
+                for out_frame in resampler.resample(frame):
+                    arr = out_frame.to_ndarray()
+                    pcm_parts.append(np.asarray(arr, dtype="<i2").tobytes())
+            for out_frame in resampler.resample(None):
+                arr = out_frame.to_ndarray()
+                pcm_parts.append(np.asarray(arr, dtype="<i2").tobytes())
+            if not pcm_parts:
+                return None
+            return _wrap_pcm16_mono_wav(b"".join(pcm_parts), 16000)
+        finally:
+            container.close()
+    except Exception:
+        pass
+
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if ffmpeg_bin:
+        try:
+            proc = subprocess.run(
+                [
+                    ffmpeg_bin,
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-i",
+                    "pipe:0",
+                    "-ac",
+                    "1",
+                    "-ar",
+                    "16000",
+                    "-f",
+                    "wav",
+                    "pipe:1",
+                ],
+                input=raw,
+                capture_output=True,
+                timeout=6.0,
+                check=False,
+            )
+            if proc.returncode == 0 and proc.stdout[:4] == b"RIFF":
+                return proc.stdout
+        except Exception:
+            pass
+    return None
+
+
 def _detect_google_encoding(filename: str, content_type: str, raw: bytes) -> dict[str, Any]:
     lower_name = filename.lower()
     lower_ct = content_type.lower()
@@ -142,13 +221,18 @@ def _detect_google_encoding(filename: str, content_type: str, raw: bytes) -> dic
         if len(raw) >= 28:
             sr = int(struct.unpack("<I", raw[24:28])[0]) or 16000
         return {"encoding": "LINEAR16", "sampleRateHertz": sr}
-    if "webm" in lower_ct or lower_name.endswith(".webm"):
+    if _is_mp4_m4a_aac(filename, content_type, raw):
+        raise VoiceProviderError(
+            status_code=415,
+            code="GOOGLE_STT_UNSUPPORTED_AUDIO_FORMAT",
+        )
+    if "webm" in lower_ct or lower_name.endswith(".webm") or raw[:4] == b"\x1a\x45\xdf\xa3":
         return {"encoding": "WEBM_OPUS", "sampleRateHertz": 48000}
-    if "ogg" in lower_ct or lower_name.endswith(".ogg"):
+    if "ogg" in lower_ct or lower_name.endswith(".ogg") or raw[:4] == b"OggS":
         return {"encoding": "OGG_OPUS", "sampleRateHertz": 48000}
-    if "flac" in lower_ct or lower_name.endswith(".flac"):
+    if "flac" in lower_ct or lower_name.endswith(".flac") or raw[:4] == b"fLaC":
         return {"encoding": "FLAC"}
-    if "mp3" in lower_ct or "mpeg" in lower_ct or lower_name.endswith(".mp3"):
+    if "mp3" in lower_ct or "mpeg" in lower_ct or lower_name.endswith(".mp3") or raw[:3] == b"ID3":
         return {"encoding": "MP3", "sampleRateHertz": 16000}
     return {"encoding": "WEBM_OPUS", "sampleRateHertz": 48000}
 
@@ -250,22 +334,33 @@ class GoogleCloudVoiceProvider:
                 status_code=413, code="GOOGLE_STT_AUDIO_TOO_LONG"
             )
 
+        effective_audio = audio
+        effective_filename = filename
+        effective_ct = content_type
+        if _is_mp4_m4a_aac(filename, content_type, audio):
+            transcoded = await asyncio.to_thread(_transcode_container_to_wav_16k_sync, audio)
+            if transcoded is not None:
+                effective_audio = transcoded
+                effective_filename = "recording.wav"
+                effective_ct = "audio/wav"
+
         lang = "vi-VN" if not language_code or language_code.startswith("vi") else language_code
         config: dict[str, Any] = {
-            **_detect_google_encoding(filename, content_type, audio),
+            **_detect_google_encoding(effective_filename, effective_ct, effective_audio),
             "languageCode": lang,
             "enableWordTimeOffsets": True,
+            "enableWordConfidence": True,
             "enableAutomaticPunctuation": False,
             "maxAlternatives": 1,
         }
         if keyterms:
             clean_phrases = [k.strip()[:64] for k in keyterms[:30] if k and k.strip()]
             if clean_phrases:
-                config["speechContexts"] = [{"phrases": clean_phrases}]
+                config["speechContexts"] = [{"phrases": clean_phrases, "boost": 12.0}]
 
         body = {
             "config": config,
-            "audio": {"content": base64.b64encode(audio).decode("ascii")},
+            "audio": {"content": base64.b64encode(effective_audio).decode("ascii")},
         }
 
         try:
@@ -321,14 +416,35 @@ class GoogleCloudVoiceProvider:
             conf = top.get("confidence")
             if isinstance(conf, (int, float)) and 0.0 <= conf <= 1.0:
                 confidences.append(float(conf))
+            alt_conf = (
+                float(conf)
+                if isinstance(conf, (int, float)) and 0.0 < float(conf) <= 1.0
+                else None
+            )
             for w in top.get("words") or []:
                 wtxt = unicodedata.normalize("NFC", str(w.get("word") or "").strip().lower())
                 if not wtxt:
                     continue
                 start = _parse_google_duration_seconds(w.get("startTime"))
                 end = max(start, _parse_google_duration_seconds(w.get("endTime")))
+                raw_wconf = w.get("confidence")
+                wconf = (
+                    float(raw_wconf)
+                    if isinstance(raw_wconf, (int, float)) and 0.0 < float(raw_wconf) <= 1.0
+                    else alt_conf
+                )
+                word_logprob = (
+                    round(math.log(max(1e-6, min(1.0, wconf))), 4)
+                    if wconf is not None
+                    else None
+                )
                 words_out.append(
-                    {"text": wtxt, "start": round(start, 3), "end": round(end, 3), "logprob": None}
+                    {
+                        "text": wtxt,
+                        "start": round(start, 3),
+                        "end": round(end, 3),
+                        "logprob": word_logprob,
+                    }
                 )
 
         avg_conf = (
@@ -351,6 +467,7 @@ class GoogleCloudVoiceProvider:
         text: str,
         voice_id: str,
         speed: float,
+        for_phonics_step: bool = False,
     ) -> tuple[bytes, dict[str, Any]]:
         global _tts_cooldown_until
 
@@ -365,9 +482,9 @@ class GoogleCloudVoiceProvider:
         if meta is None:
             raise VoiceProviderError(status_code=404, code="VOICE_NOT_FOUND")
 
-        normalized_text = normalize_vietnamese_tts_text(text) or unicodedata.normalize(
-            "NFC", text.strip()
-        )
+        normalized_text = normalize_vietnamese_tts_text(
+            text, for_phonics_step=for_phonics_step
+        ) or unicodedata.normalize("NFC", text.strip())
         body = {
             "input": {"text": normalized_text},
             "voice": {
@@ -498,7 +615,10 @@ class GoogleCloudVoiceProvider:
 
         for idx, step in enumerate(steps):
             wav_bytes, _ = await self._synthesize_wav_raw(
-                text=str(step["spoken_text"]), voice_id=voice_id, speed=speed
+                text=str(step["spoken_text"]),
+                voice_id=voice_id,
+                speed=speed,
+                for_phonics_step=True,
             )
             _, step_sr, pcm = _wav_duration_and_pcm(wav_bytes)
             sr = step_sr

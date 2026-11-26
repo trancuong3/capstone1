@@ -95,6 +95,12 @@ export class AudioQualityMonitor {
   private frames = 0;
   private invalid = false;
   private maxRms = 0;
+  private minRms = Number.POSITIVE_INFINITY;
+  private stationaryLoudMs = 0;
+  private lastRms = 0;
+  private totalCheckedSamples = 0;
+  private totalClippedSamples = 0;
+  private recentClipRatios: number[] = [];
   private snapshot: AudioQualitySnapshot = {
     status: "UNKNOWN",
     durationMs: 0,
@@ -110,6 +116,17 @@ export class AudioQualityMonitor {
   constructor(options?: AudioQualityMonitorOptions) {
     this.mode = options?.mode ?? "passage";
     this.profile = AUDIO_QUALITY_PROFILES[this.mode];
+  }
+
+  private isSustainedClipping(): boolean {
+    const recentWindow = this.recentClipRatios.slice(-8);
+    const highRecentFrames = recentWindow.filter((r) => r > 0.1).length;
+    if (highRecentFrames >= 3 && this.totalClippedSamples >= 480) {
+      return true;
+    }
+    const overallRatio =
+      this.totalClippedSamples / Math.max(1, this.totalCheckedSamples);
+    return overallRatio > 0.05 && this.totalClippedSamples >= 480;
   }
 
   addFrame(samples: Float32Array, nowMs: number): AudioQualitySnapshot {
@@ -135,18 +152,50 @@ export class AudioQualityMonitor {
     const rms = Math.sqrt(sum / samples.length);
     this.frames++;
     this.maxRms = Math.max(this.maxRms, rms);
+    this.minRms = Math.min(this.minRms, rms);
+    if (
+      this.mode === "child-passage" &&
+      rms >= 0.02 &&
+      this.frames > 1 &&
+      this.lastRms > 0 &&
+      Math.abs(rms - this.lastRms) / Math.max(rms, this.lastRms) < 0.15
+    ) {
+      this.stationaryLoudMs += elapsed;
+    } else if (
+      rms < 0.02 ||
+      this.maxRms / Math.max(this.minRms, 1e-6) >= 1.35
+    ) {
+      this.stationaryLoudMs = 0;
+    }
+    this.lastRms = rms;
+    this.totalCheckedSamples += samples.length;
+    this.totalClippedSamples += clippedSamples;
+    this.recentClipRatios.push(clippedSamples / samples.length);
+    if (this.recentClipRatios.length > 16) {
+      this.recentClipRatios.shift();
+    }
+
     const durationMs = Math.max(0, nowMs - this.startedAt);
+    const protectEarlySpeech =
+      this.mode === "short-word" || this.mode === "child-passage";
     // Calibrate on the opening room sound, then follow quiet frames slowly.
-    // Continuous fan noise is not automatically treated as speech.
+    // Continuous fan noise is not automatically treated as speech, while early child
+    // speech on frame 1 in short-word / child-passage must not poison noiseFloor.
     let noise = this.snapshot.noiseFloor;
-    if (this.frames === 1) {
-      noise = this.mode === "short-word" ? Math.min(rms, 0.008) : rms;
+    const isStationaryFanNoise =
+      this.mode === "child-passage" &&
+      this.stationaryLoudMs >= 1000 &&
+      this.maxRms / Math.max(this.minRms, 1e-6) < 1.35;
+    if (isStationaryFanNoise) {
+      noise = rms;
+    } else if (this.frames === 1) {
+      noise = protectEarlySpeech ? Math.min(rms, 0.008) : rms;
     } else if (
       durationMs < this.profile.calibrationWindowMs ||
       !this.snapshot.isSpeaking
     ) {
       const sampleRms =
-        this.mode === "short-word" &&
+        protectEarlySpeech &&
         durationMs < this.profile.calibrationWindowMs &&
         rms >= 0.015
           ? Math.min(rms, 0.008)
@@ -163,16 +212,24 @@ export class AudioQualityMonitor {
     );
     const calibrated =
       durationMs >= this.profile.calibrationWindowMs ||
-      (this.mode === "short-word" && rms > Math.max(onset, 0.0055));
+      (protectEarlySpeech && rms > Math.max(onset, 0.0055));
     const active =
-      calibrated && rms > (this.snapshot.isSpeaking ? offset : onset);
+      !isStationaryFanNoise &&
+      calibrated &&
+      rms > (this.snapshot.isSpeaking ? offset : onset);
     this.candidateMs = active ? this.candidateMs + elapsed : 0;
     this.quietMs = active ? 0 : this.quietMs + elapsed;
-    let speaking = this.snapshot.isSpeaking;
+    let speaking = isStationaryFanNoise ? false : this.snapshot.isSpeaking;
     if (this.candidateMs >= this.profile.candidateOnsetMs) speaking = true;
     if (this.quietMs >= this.profile.hangoverMs) speaking = false;
-    const speechDurationMs =
-      this.snapshot.speechDurationMs + (speaking && active ? elapsed : 0);
+    const speechDurationMs = isStationaryFanNoise
+      ? 0
+      : this.snapshot.speechDurationMs + (speaking && active ? elapsed : 0);
+    // Evaluate clipping over the segment/sliding window rather than latching forever on a transient spike.
+    const clipped =
+      this.mode === "passage"
+        ? this.isSustainedClipping() || clippedSamples / samples.length > 0.05
+        : this.isSustainedClipping();
     this.snapshot = {
       status: "UNKNOWN",
       durationMs,
@@ -181,7 +238,7 @@ export class AudioQualityMonitor {
       rms,
       peak,
       noiseFloor: noise,
-      clipped: this.snapshot.clipped || clippedSamples / samples.length > 0.05,
+      clipped,
       isSpeaking: speaking,
     };
     return this.getSnapshot();

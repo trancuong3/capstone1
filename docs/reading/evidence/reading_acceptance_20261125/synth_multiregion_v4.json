@@ -1,0 +1,96 @@
+{
+  "label": "synth_multiregion_v4",
+  "clips_evaluated": 12,
+  "total_words": 186,
+  "matched_words": 146,
+  "match_rate": 0.7849,
+  "unhighlighted_count": 40,
+  "wrong_position_count": 39,
+  "early_highlight_count": 73,
+  "early_samples": [
+    {
+      "clip": "synth_mr_00",
+      "idx": 2,
+      "word": "mùa",
+      "recv_ms": 346.6,
+      "end_ms": 670.0,
+      "diff_ms": -323.4
+    },
+    {
+      "clip": "synth_mr_00",
+      "idx": 3,
+      "word": "thu",
+      "recv_ms": 785.0,
+      "end_ms": 940.0,
+      "diff_ms": -155.0
+    },
+    {
+      "clip": "synth_mr_00",
+      "idx": 6,
+      "word": "dịu",
+      "recv_ms": 1688.5,
+      "end_ms": 1710.0,
+      "diff_ms": -21.5
+    },
+    {
+      "clip": "synth_mr_00",
+      "idx": 7,
+      "word": "nhẹ",
+      "recv_ms": 1836.2,
+      "end_ms": 1910.0,
+      "diff_ms": -73.8
+    },
+    {
+      "clip": "synth_mr_00",
+      "idx": 9,
+      "word": "qua",
+      "recv_ms": 2279.0,
+      "end_ms": 2310.0,
+      "diff_ms": -31.0
+    },
+    {
+      "clip": "synth_mr_01",
+      "idx": 0,
+      "word": "trên",
+      "recv_ms": 225.2,
+      "end_ms": 230.0,
+      "diff_ms": -4.8
+    },
+    {
+      "clip": "synth_mr_01",
+      "idx": 2,
+      "word": "gỗ",
+      "recv_ms": 716.8,
+      "end_ms": 830.0,
+      "diff_ms": -113.2
+    },
+    {
+      "clip": "synth_mr_01",
+      "idx": 3,
+      "word": "sạch",
+      "recv_ms": 963.1,
+      "end_ms": 1150.0,
+      "diff_ms": -186.9
+    },
+    {
+      "clip": "synth_mr_01",
+      "idx": 4,
+      "word": "sẽ",
+      "recv_ms": 1214.4,
+      "end_ms": 1340.0,
+      "diff_ms": -125.6
+    },
+    {
+      "clip": "synth_mr_01",
+      "idx": 5,
+      "word": "bé",
+      "recv_ms": 1817.1,
+      "end_ms": 1870.0,
+      "diff_ms": -52.9
+    }
+  ],
+  "end_of_word_to_highlight_p50_ms": 0.45,
+  "end_of_word_to_highlight_p95_ms": 325.22,
+  "worker_decode_p50_ms": 83.47,
+  "worker_decode_p95_ms": 184.5
+}

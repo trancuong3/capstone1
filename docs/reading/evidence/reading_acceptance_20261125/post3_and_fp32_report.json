@@ -1,0 +1,124 @@
+{
+  "recorded_at": "2026-11-25T03:26:51+07:00",
+  "worker_health": {
+    "status": "ok",
+    "provider": "local",
+    "stt": {
+      "ready": true,
+      "model_version": "sherpa-onnx-zipformer-vi-30m-int8-2026-02-09",
+      "active_jobs": 0
+    },
+    "tts": {
+      "ready": true,
+      "model_version": "vieneu-v3-turbo-onnx-fp32-3.8.5",
+      "precision": "fp32",
+      "voices_count": 8,
+      "regions": [
+        "north",
+        "central",
+        "south"
+      ],
+      "active_jobs": 0
+    }
+  },
+  "post3_latency_eval": {
+    "words_evaluated": 183,
+    "words_matched": 164,
+    "match_rate": 0.8962,
+    "words_missed_or_unhighlighted": 19,
+    "early_highlight_count": 27,
+    "end_of_word_to_paint_backend_p50_ms": 247.64,
+    "end_of_word_to_paint_backend_p95_ms": 2362.07,
+    "end_of_word_to_paint_worker_p50_ms": 238.81,
+    "end_of_word_to_paint_worker_p95_ms": 2375.47,
+    "human_clips_p50_ms": 97.19,
+    "human_clips_p95_ms": 414.34,
+    "avg_backend_overhead_ms": 13.36,
+    "avg_worker_rtt_ms": 130.4
+  },
+  "offbook_preservation": [
+    {
+      "id": "offbook_1",
+      "spoken_ref": "con mèo đen",
+      "book_expected": "chú mèo trắng",
+      "worker_stt_text": "con mèo đen",
+      "deviation_preserved": true
+    },
+    {
+      "id": "offbook_tone",
+      "spoken_ref": "một",
+      "book_expected": "mốt",
+      "worker_stt_text": "một",
+      "deviation_preserved": true
+    }
+  ],
+  "tts_fp32_eval": {
+    "precision": "fp32",
+    "uncached_short_prompts_ms": [
+      2417.39,
+      2216.58,
+      2019.28,
+      1674.65,
+      1966.77,
+      1971.28
+    ],
+    "uncached_p50_ms": 1971.28,
+    "uncached_p95_ms": 2417.39,
+    "minimal_pairs_1x": [
+      {
+        "word": "mốt",
+        "precision": "fp32",
+        "tts_ms": 435.44,
+        "duration_s": 0.71,
+        "f0_median_hz": 314.5,
+        "f0_p75_hz": 329.4,
+        "loopback_stt": "một"
+      },
+      {
+        "word": "một",
+        "precision": "fp32",
+        "tts_ms": 430.92,
+        "duration_s": 0.79,
+        "f0_median_hz": 265.2,
+        "f0_p75_hz": 279.0,
+        "loopback_stt": "một"
+      },
+      {
+        "word": "bàn",
+        "precision": "fp32",
+        "tts_ms": 482.28,
+        "duration_s": 0.79,
+        "f0_median_hz": 282.6,
+        "f0_p75_hz": 285.1,
+        "loopback_stt": "ban"
+      },
+      {
+        "word": "bạn",
+        "precision": "fp32",
+        "tts_ms": 437.11,
+        "duration_s": 0.79,
+        "f0_median_hz": 314.5,
+        "f0_p75_hz": 325.6,
+        "loopback_stt": "bạn"
+      },
+      {
+        "word": "nghỉ",
+        "precision": "fp32",
+        "tts_ms": 436.77,
+        "duration_s": 0.79,
+        "f0_median_hz": 268.3,
+        "f0_p75_hz": 293.9,
+        "loopback_stt": "nghỉ ăn"
+      },
+      {
+        "word": "nghĩ",
+        "precision": "fp32",
+        "tts_ms": 419.53,
+        "duration_s": 0.79,
+        "f0_median_hz": 284.3,
+        "f0_p75_hz": 360.7,
+        "loopback_stt": "nghĩ"
+      }
+    ]
+  }
+}

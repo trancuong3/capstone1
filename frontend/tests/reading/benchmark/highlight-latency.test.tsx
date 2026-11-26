@@ -105,8 +105,8 @@ describe("highlight latency benchmark (120-word page, 30 streaming interim updat
           />,
         );
       });
-      const active = container.querySelector('[aria-current="true"]');
       const elapsed = performance.now() - t0;
+      const active = container.querySelector('[aria-current="true"]');
       expect(active?.getAttribute("data-word-id")).toBe(`w-${step}`);
       const prev = container.querySelector(`[data-word-id="w-${step - 1}"]`);
       expect(prev?.getAttribute("data-reading-state")).toBe("preview-correct");

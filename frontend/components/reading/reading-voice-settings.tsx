@@ -38,6 +38,14 @@ import {
   SPEED_STEP,
   getSpeechPreferences,
 } from "@/lib/reading/speech-preferences";
+import {
+  fetchVoiceEngineHealth,
+  type VoiceEngineHealthSnapshot,
+} from "@/lib/reading/voice-engine-status";
+import {
+  adaptTextToTeacherPersona,
+  resolveVoiceGender,
+} from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 
 const PREVIEW_TEXT =
@@ -149,17 +157,33 @@ export function ReadingVoiceSettings({
   const [removedVoiceNotice, setRemovedVoiceNotice] = useState<string | null>(
     null,
   );
+  const [voiceHealth, setVoiceHealth] =
+    useState<VoiceEngineHealthSnapshot | null>(null);
   const [previewError, setPreviewError] = useState(false);
   const mountedRef = useRef(true);
   const previewGenerationRef = useRef(0);
   const loadControllerRef = useRef<AbortController | null>(null);
+  const healthControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       loadControllerRef.current?.abort();
+      healthControllerRef.current?.abort();
     };
+  }, []);
+
+  const loadVoiceHealth = useCallback(() => {
+    healthControllerRef.current?.abort();
+    const controller = new AbortController();
+    healthControllerRef.current = controller;
+    void fetchVoiceEngineHealth(controller.signal).then((snapshot) => {
+      if (!mountedRef.current || controller.signal.aborted) return;
+      if (snapshot) {
+        setVoiceHealth(snapshot);
+      }
+    });
   }, []);
 
   const syncPausedSessionLock = useCallback(
@@ -288,6 +312,7 @@ export function ReadingVoiceSettings({
 
   function open() {
     setIsOpen(true);
+    loadVoiceHealth();
     if (loadState.status === "idle" || loadState.status === "error") {
       loadVoices();
     }
@@ -298,6 +323,7 @@ export function ReadingVoiceSettings({
     setPreviewError(false);
     onStopPreview();
     loadControllerRef.current?.abort();
+    healthControllerRef.current?.abort();
     if (loadState.status === "loading") setLoadState({ status: "idle" });
     setIsOpen(false);
   }
@@ -588,6 +614,58 @@ export function ReadingVoiceSettings({
               Chế độ xử lý giọng nói (Dành cho phụ huynh)
             </h3>
             <VoiceEngineBadge />
+            {voiceHealth ? (
+              <div
+                data-testid="voice-health-status-pills"
+                className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold"
+              >
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5",
+                    voiceHealth.local.available
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                      : "border-rose-200 bg-rose-50 text-rose-900",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 rounded-full",
+                      voiceHealth.local.available
+                        ? "bg-emerald-500"
+                        : "bg-rose-500",
+                    )}
+                    aria-hidden="true"
+                  />
+                  Local Worker:{" "}
+                  {voiceHealth.local.available ? "Sẵn sàng" : "Chưa bật"}
+                </span>
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5",
+                    voiceHealth.google.stt_configured ||
+                      voiceHealth.google.tts_configured
+                      ? "border-sky-200 bg-sky-50 text-sky-900"
+                      : "border-amber-200 bg-amber-50 text-amber-900",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 rounded-full",
+                      voiceHealth.google.stt_configured ||
+                        voiceHealth.google.tts_configured
+                        ? "bg-sky-500"
+                        : "bg-amber-500",
+                    )}
+                    aria-hidden="true"
+                  />
+                  Google Cloud API:{" "}
+                  {voiceHealth.google.stt_configured ||
+                  voiceHealth.google.tts_configured
+                    ? "Đã cấu hình"
+                    : "Chưa cấu hình key"}
+                </span>
+              </div>
+            ) : null}
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <button
                 aria-pressed={policy.providerMode === "local_only"}
@@ -629,9 +707,15 @@ export function ReadingVoiceSettings({
                     : "border-border bg-cream/60 text-ink hover:border-primary",
                 )}
                 onClick={() =>
-                  changeProviderPolicy({
-                    providerMode: "local_with_google_fallback",
-                  })
+                  changeProviderPolicy(
+                    policy.providerMode === "local_with_google_fallback"
+                      ? { providerMode: "local_with_google_fallback" }
+                      : {
+                          providerMode: "local_with_google_fallback",
+                          allowGoogleSttFallback: true,
+                          allowGoogleTtsFallback: true,
+                        },
+                  )
                 }
                 type="button"
               >
@@ -644,7 +728,7 @@ export function ReadingVoiceSettings({
                       : "text-muted",
                   )}
                 >
-                  Ưu tiên local, bật riêng từng dự phòng
+                  Ưu tiên local, bật tự động chuyển Online dự phòng
                 </span>
               </button>
             </div>
@@ -677,6 +761,15 @@ export function ReadingVoiceSettings({
                     type="checkbox"
                   />
                 </label>
+                {!voiceHealth ||
+                (!voiceHealth.google.stt_configured &&
+                  !voiceHealth.google.tts_configured) ? (
+                  <p className="text-[11px] leading-relaxed text-muted">
+                    Khi máy chưa cấu hình khóa Google Cloud API trong{" "}
+                    <code className="font-mono">backend/.env</code>, ViRead sẽ
+                    tự động dùng Google/Trình duyệt Online làm dự phòng.
+                  </p>
+                ) : null}
               </div>
             ) : null}
           </section>
@@ -702,8 +795,12 @@ export function ReadingVoiceSettings({
                   return;
                 }
                 setPreviewError(false);
+                const previewText = adaptTextToTeacherPersona(
+                  PREVIEW_TEXT,
+                  resolveVoiceGender(selectedVoiceId, selectedVoice?.gender),
+                );
                 void Promise.resolve()
-                  .then(() => onPreview(PREVIEW_TEXT))
+                  .then(() => onPreview(previewText))
                   .catch((error: unknown) => {
                     if (
                       mountedRef.current &&

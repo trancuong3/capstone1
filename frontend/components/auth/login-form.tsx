@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Eye, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -23,7 +23,10 @@ const loginSchema = z.object({
     .trim()
     .min(1, "Ba mẹ vui lòng nhập email.")
     .email("Email chưa đúng định dạng."),
-  password: z.string().min(8, "Mật khẩu cần có ít nhất 8 ký tự."),
+  password: z
+    .string()
+    .refine((value) => value.trim().length > 0, "Ba mẹ vui lòng nhập mật khẩu.")
+    .refine((value) => value.length >= 8, "Mật khẩu cần có ít nhất 8 ký tự."),
 });
 
 interface LoginFormProps {
@@ -80,6 +83,7 @@ export function LoginForm({
   const [socialLoading, setSocialLoading] = useState<OAuthProvider | null>(
     null,
   );
+  const [showPassword, setShowPassword] = useState(false);
   const [notice, setNotice] = useState<Notice>(() => {
     if (oauthError === "email_required") {
       return {
@@ -243,15 +247,31 @@ export function LoginForm({
         autoComplete="email"
         error={errors.email?.message}
         label="Email của ba mẹ"
+        placeholder="vidu@email.com"
         type="email"
         {...register("email")}
       />
       <TextField
         autoComplete="current-password"
+        endAdornment={
+          <button
+            aria-label={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
+            aria-pressed={showPassword}
+            className="inline-flex size-11 items-center justify-center rounded-control text-muted transition-colors hover:bg-sky hover:text-ink focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            onClick={() => setShowPassword((prev) => !prev)}
+            type="button"
+          >
+            {showPassword ? (
+              <EyeOff aria-hidden="true" className="size-5" />
+            ) : (
+              <Eye aria-hidden="true" className="size-5" />
+            )}
+          </button>
+        }
         error={errors.password?.message}
         label="Mật khẩu"
-        placeholder="••••••••••••"
-        type="password"
+        placeholder="Nhập mật khẩu"
+        type={showPassword ? "text" : "password"}
         {...register("password")}
       />
       <Link href="/forgot-password" className="account-forgot">
@@ -321,7 +341,12 @@ export function LoginForm({
           Tiếp tục với Facebook
         </Button>
       </div>
-      <ButtonLink href="/register" variant="quiet" className="account-signup">
+      <ButtonLink
+        href="/register"
+        variant="quiet"
+        fullWidth={false}
+        className="account-signup mx-auto w-fit"
+      >
         <span className="sm:hidden">Đăng ký tài khoản</span>
         <span className="hidden sm:inline">Chưa có tài khoản? Đăng ký</span>
       </ButtonLink>

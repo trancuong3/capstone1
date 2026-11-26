@@ -32,14 +32,20 @@ export function ProgressChart({ report }: ProgressChartProps) {
       </p>
       <div
         aria-hidden="true"
-        className="mt-8 flex h-52 items-end gap-5 sm:gap-8"
+        className="mt-8 flex min-h-52 items-end gap-3 sm:gap-8"
       >
         {rows.map((row) => (
           <div
             className="flex h-full min-w-0 flex-1 flex-col justify-end"
             key={row.label}
           >
-            <span className="mb-2 text-center text-lg font-semibold text-ink">
+            <span
+              className={
+                row.value === null
+                  ? "mb-2 break-words text-center text-xs font-semibold leading-tight text-muted sm:text-sm"
+                  : "mb-2 text-center text-lg font-semibold tabular-nums text-ink"
+              }
+            >
               {row.value ?? "Chưa có dữ liệu"}
             </span>
             <div
@@ -48,7 +54,7 @@ export function ProgressChart({ report }: ProgressChartProps) {
                 height: `${((row.value ?? 0) / maxValue) * 132}px`,
               }}
             />
-            <span className="mt-3 text-center text-label font-semibold text-muted">
+            <span className="mt-3 text-center text-xs font-semibold text-muted sm:text-label">
               {row.label}
             </span>
           </div>

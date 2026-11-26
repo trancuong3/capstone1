@@ -7,6 +7,7 @@ import { RefreshCw } from "lucide-react";
 import { AdminLoading } from "@/components/admin/admin-ui";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { useBookContentReportService } from "@/hooks/use-book-content-report-service";
 import { isServiceError } from "@/lib/api/service-error";
@@ -48,7 +49,10 @@ export function ParentBookReportsScreen() {
   );
   const [selectedDetail, setSelectedDetail] =
     useState<BookContentReportDetailDTO | null>(null);
-  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<{
+    reportId: string;
+    message: string;
+  } | null>(null);
   const [loadingDetailId, setLoadingDetailId] = useState<string | null>(null);
   const limit = 20;
 
@@ -63,7 +67,10 @@ export function ParentBookReportsScreen() {
     try {
       setSelectedDetail(await reportService.getMine(reportId));
     } catch {
-      setDetailError("Không thể tải chi tiết phản hồi của báo cáo này.");
+      setDetailError({
+        reportId,
+        message: "Không thể tải chi tiết phản hồi của báo cáo này.",
+      });
     } finally {
       setLoadingDetailId(null);
     }
@@ -100,8 +107,7 @@ export function ParentBookReportsScreen() {
     return () => globalThis.clearTimeout(timer);
   }, [load]);
 
-  const first = total > 0 ? offset + 1 : 0;
-  const last = Math.min(offset + limit, total);
+  const currentPage = Math.floor(offset / limit) + 1;
 
   return (
     <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6">
@@ -162,7 +168,9 @@ export function ParentBookReportsScreen() {
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 className="font-semibold text-ink">{item.book_title}</h2>
+                  <h2 className="break-words font-semibold text-ink">
+                    {item.book_title}
+                  </h2>
                   <p className="mt-1 text-sm text-muted">
                     {issueLabels[item.issue_type]}
                     {item.page_number !== null
@@ -174,11 +182,11 @@ export function ParentBookReportsScreen() {
                   {statusLabels[item.status]}
                 </span>
               </div>
-              <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-ink">
+              <p className="mt-3 break-words whitespace-pre-wrap text-sm leading-6 text-ink">
                 {item.description}
               </p>
               {item.reported_text ? (
-                <p className="mt-2 text-sm text-muted">
+                <p className="mt-2 break-words text-sm text-muted">
                   Nội dung nghi ngờ:{" "}
                   <span className="font-semibold text-ink">
                     {item.reported_text}
@@ -186,7 +194,7 @@ export function ParentBookReportsScreen() {
                 </p>
               ) : null}
               <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3 text-xs text-muted">
-                <span>
+                <span className="break-all">
                   Mã báo cáo: <span className="font-mono">{item.id}</span>
                 </span>
                 <time dateTime={item.created_at}>
@@ -204,8 +212,9 @@ export function ParentBookReportsScreen() {
               ) : null}
               <div className="mt-3">
                 <Button
-                  className="h-9 w-auto px-3 text-xs"
+                  className="h-9 px-3 text-xs"
                   disabled={loadingDetailId === item.id}
+                  fullWidth={false}
                   onClick={() => void toggleDetail(item.id)}
                   type="button"
                   variant="secondary"
@@ -215,9 +224,9 @@ export function ParentBookReportsScreen() {
                     : "Xem chi tiết & phản hồi Admin"}
                 </Button>
               </div>
-              {detailError && loadingDetailId === null ? (
+              {detailError?.reportId === item.id && loadingDetailId === null ? (
                 <p className="mt-2 text-xs text-danger" role="alert">
-                  {detailError}
+                  {detailError.message}
                 </p>
               ) : null}
               {selectedDetail?.id === item.id ? (
@@ -249,29 +258,15 @@ export function ParentBookReportsScreen() {
         </div>
       )}
 
-      {total > limit ? (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted">
-            Đang hiển thị {first}–{last} / {total} báo cáo
-          </p>
-          <div className="flex gap-2">
-            <Button
-              disabled={offset === 0 || loading}
-              onClick={() => setOffset((value) => Math.max(0, value - limit))}
-              variant="secondary"
-            >
-              Trước
-            </Button>
-            <Button
-              disabled={offset + limit >= total || loading}
-              onClick={() => setOffset((value) => value + limit)}
-              variant="secondary"
-            >
-              Tiếp
-            </Button>
-          </div>
-        </div>
-      ) : null}
+      <PaginationBar
+        ariaLabel="Phân trang báo cáo chất lượng sách"
+        disabled={loading}
+        itemLabel="báo cáo"
+        onPageChange={(nextPage) => setOffset((nextPage - 1) * limit)}
+        page={currentPage}
+        pageSize={limit}
+        total={total}
+      />
     </section>
   );
 }

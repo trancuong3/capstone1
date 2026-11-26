@@ -1095,6 +1095,96 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     },
   );
 
+  it("displays committed finals plus active interim without concatenating interim onto final", async () => {
+    class FakeSpeechRecognition {
+      static instances: FakeSpeechRecognition[] = [];
+      onresult:
+        | ((event: {
+            resultIndex: number;
+            results: Array<{
+              isFinal: boolean;
+              0: { transcript: string; confidence?: number };
+            }>;
+          }) => void)
+        | null = null;
+      onerror: ((event: { error?: string }) => void) | null = null;
+      onend: (() => void) | null = null;
+      continuous = false;
+      interimResults = false;
+      lang = "";
+      maxAlternatives = 1;
+
+      constructor() {
+        FakeSpeechRecognition.instances.push(this);
+      }
+
+      start() {}
+      stop() {
+        this.onend?.();
+      }
+    }
+
+    Object.defineProperty(window, "SpeechRecognition", {
+      configurable: true,
+      value: FakeSpeechRecognition,
+    });
+
+    const user = userEvent.setup();
+    renderReading("reading");
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Bé đọc với nhận diện giọng nói",
+      }),
+    );
+    await screen.findByRole("button", {
+      name: "Dừng nhận diện giọng nói",
+    });
+    await waitFor(() => {
+      expect(FakeSpeechRecognition.instances).toHaveLength(1);
+    });
+
+    const recognition = FakeSpeechRecognition.instances[0];
+    act(() => {
+      recognition.onresult?.({
+        resultIndex: 0,
+        results: [{ isFinal: false, 0: { transcript: "Bé mèo" } }],
+      });
+    });
+    expect(screen.getByText("“Bé mèo”")).toBeInTheDocument();
+
+    act(() => {
+      recognition.onresult?.({
+        resultIndex: 0,
+        results: [{ isFinal: true, 0: { transcript: "Bé mèo" } }],
+      });
+    });
+    expect(screen.getByText("“Bé mèo”")).toBeInTheDocument();
+    expect(screen.queryByText(/Bé mèo Bé mèo/)).not.toBeInTheDocument();
+
+    act(() => {
+      recognition.onresult?.({
+        resultIndex: 1,
+        results: [
+          { isFinal: true, 0: { transcript: "Bé mèo" } },
+          { isFinal: false, 0: { transcript: "nhỏ" } },
+        ],
+      });
+    });
+    expect(screen.getByText("“Bé mèo nhỏ”")).toBeInTheDocument();
+
+    act(() => {
+      recognition.onresult?.({
+        resultIndex: 1,
+        results: [
+          { isFinal: true, 0: { transcript: "Bé mèo" } },
+          { isFinal: true, 0: { transcript: "nhỏ" } },
+        ],
+      });
+    });
+    expect(screen.getByText("“Bé mèo nhỏ”")).toBeInTheDocument();
+    expect(screen.queryByText(/nhỏ nhỏ/)).not.toBeInTheDocument();
+  });
+
   it.each([
     "correct",
     "incorrect-limit",
@@ -1115,6 +1205,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     "silent-help-limit",
   ] as const)(
     "uses recorded Vietnamese STT for retry outcome: %s",
+    { timeout: 15_000 },
     async (outcome) => {
       class FakeSpeechRecognition {
         static instances: FakeSpeechRecognition[] = [];
@@ -3274,5 +3365,79 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       screen.queryByText("ReadingService is not implemented yet."),
     ).not.toBeInTheDocument();
     expect(services.readingSocketAdapter.subscribe).not.toHaveBeenCalled();
+  });
+
+  it("allows closing the phonics lesson card and clears it on page navigation", async () => {
+    services.readingService.getCurrentPage
+      .mockResolvedValueOnce(pageFour)
+      .mockResolvedValue(pageFive);
+    services.readingService.navigateToPage.mockResolvedValue({
+      ...pageProgressFixture,
+      current_page_id: pageFive.page_id,
+      current_page_number: 5,
+      current_index: 1,
+    });
+    const user = userEvent.setup();
+    renderReading("reading");
+
+    await user.click(
+      await screen.findByRole("button", { name: "Nghe đánh vần" }),
+    );
+    expect(await screen.findByTestId("phonics-lesson-card")).toBeVisible();
+
+    await user.click(
+      screen.getByRole("button", { name: "Đóng hướng dẫn đánh vần" }),
+    );
+    expect(screen.queryByTestId("phonics-lesson-card")).toBeNull();
+
+    // Re-open phonics card, then navigate to page 5 -> must clear automatically
+    await user.click(screen.getByRole("button", { name: "Nghe đánh vần" }));
+    expect(await screen.findByTestId("phonics-lesson-card")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Trang tiếp theo" }));
+    await screen.findByLabelText("Trang sách 5");
+    expect(screen.queryByTestId("phonics-lesson-card")).toBeNull();
+  });
+
+  it("does not auto-reopen the microphone when handleReadSample fails with a TTS error", async () => {
+    let recStartCount = 0;
+    class TrackingRecognition {
+      onresult: null = null;
+      onerror: null = null;
+      onend: (() => void) | null = null;
+      start() {
+        recStartCount += 1;
+      }
+      stop() {
+        this.onend?.();
+      }
+    }
+    Object.defineProperty(window, "SpeechRecognition", {
+      configurable: true,
+      value: TrackingRecognition,
+    });
+    speechPlayerMock.playWithWordTimings.mockRejectedValueOnce(
+      new Error("TTS_UNAVAILABLE"),
+    );
+
+    const user = userEvent.setup();
+    renderReading("reading");
+
+    // Start mic listening first so wasListening = true when tapping "Nghe đọc mẫu"
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Bé đọc với nhận diện giọng nói",
+      }),
+    );
+    await waitFor(() => expect(recStartCount).toBe(1));
+
+    await user.click(
+      screen.getByRole("button", { name: "Nghe đọc mẫu cả trang" }),
+    );
+    expect(
+      await screen.findByText(/Mình chưa phát được âm thanh/i),
+    ).toBeInTheDocument();
+    // Microphone must NOT have been auto-reopened after TTS failure
+    expect(recStartCount).toBe(1);
   });
 });

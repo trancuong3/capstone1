@@ -15,11 +15,11 @@ export function LoginScreen({
   scenario,
 }: LoginScreenProps) {
   if (scenario === "loading") {
-    return <AuthLoadingState />;
+    return <AuthLoadingState activeRoute="login" />;
   }
 
   return (
-    <AuthShell>
+    <AuthShell activeRoute="login">
       <Card className="border border-border bg-white">
         <div>
           <p className="text-sm font-semibold text-primary">

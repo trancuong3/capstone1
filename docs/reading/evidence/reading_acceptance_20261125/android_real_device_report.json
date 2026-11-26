@@ -1,0 +1,57 @@
+{
+  "schema_version": "viread-android-real-device-v1",
+  "verified_at": "2026-11-25T14:00:00+07:00",
+  "device": {
+    "adb_serial": "ATSYVB6205006984",
+    "model": "MTN_NX1",
+    "os": "Android 16",
+    "display": "1200x2640 520dpi"
+  },
+  "apk_build": {
+    "command": "gradle :app:assembleDebug --no-daemon -PvireadUrl=https://192.168.1.2:8443 -PvireadLanMode=1 -PvireadLanCaCert=F:\\c1\\viread-host-runtime\\certs\\viread-lan-ca.pem",
+    "status": "BUILD SUCCESSFUL in 29s",
+    "apk_path": "android/app/build/outputs/apk/debug/app-debug.apk",
+    "build_script_bug_reported": "build-android.ps1 sets VIREAD_FRONTEND_URL env var which is overridden by vireadUrl in android/gradle.properties unless -PvireadUrl=... is passed",
+    "unit_test_status": "32/33 passed, 1 failed (ErrorAndOfflineRecoveryTest.java:134 expects 'chậm' in strings.xml:21 timeout_message)"
+  },
+  "install": {
+    "command": "adb -s ATSYVB6205006984 install -r F:\\c1\\capstone1\\android\\app\\build\\outputs\\apk\\debug\\app-debug.apk",
+    "status": "Success",
+    "package": "vn.viread.android"
+  },
+  "checks": {
+    "cold_launch_latency_ms": {
+      "launch_state": "COLD",
+      "total_time_ms": 739,
+      "wait_time_ms": 742
+    },
+    "webview_lan_tls_load": {
+      "url": "https://192.168.1.2:8443/login",
+      "ui_dump_observed": [
+        "ViRead",
+        "Đăng nhập ViRead",
+        "Email của ba mẹ",
+        "Mật khẩu"
+      ],
+      "ssl_or_cert_errors": 0
+    },
+    "mic_permission": {
+      "permission": "android.permission.RECORD_AUDIO",
+      "granted": true
+    },
+    "rotation": {
+      "portrait": "1200x2640 (ROTATION_0)",
+      "landscape": "2640x1200 (ROTATION_90)",
+      "activity_retained": true,
+      "crashes": 0
+    },
+    "lock_unlock": {
+      "power_cycle_tested": true,
+      "resumed_without_crash": true
+    },
+    "audio_routing": {
+      "speaker": "verified (Devices: speaker(2) in dumpsys audio)",
+      "headset": "not_attached_on_test_bench (chưa kiểm chứng tai nghe vật lý)"
+    }
+  }
+}

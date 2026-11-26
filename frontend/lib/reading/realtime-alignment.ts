@@ -79,7 +79,7 @@ interface IndexedBookWord {
 }
 
 /** How far behind the cursor a re-read may start (restart / self-correction). */
-const REWIND_WINDOW = 8;
+const REWIND_WINDOW = 16;
 /** How far ahead two consecutive spoken words may re-anchor (line jump). */
 const REANCHOR_WINDOW = 30;
 
@@ -788,12 +788,11 @@ export class RealtimeAlignmentEngine {
       const matchedIndex = this.findAheadFrom(cursor, token);
 
       if (matchedIndex !== -1) {
-        // Kiểm tra từ hiện tại đã được nhận diện là đọc sai trước đó chưa.
-        const previousStatus = statusByWordId.get(currentWord.wordId);
-
-        if (previousStatus?.status !== "SUBSTITUTE") {
-          // Chưa có bằng chứng đọc sai: đánh dấu từ bị bỏ qua.
-          for (let index = cursor; index < matchedIndex; index += 1) {
+        // Điền trạng thái nhất quán cho mọi từ bị bỏ qua trong [cursor .. matchedIndex - 1],
+        // giữ nguyên các từ đã có bằng chứng đọc sai (SUBSTITUTE) trước đó.
+        for (let index = cursor; index < matchedIndex; index += 1) {
+          const existing = statusByWordId.get(this.bookWords[index].wordId);
+          if (existing?.status !== "SUBSTITUTE") {
             setPreviewStatus(index, "DELETE");
           }
         }
@@ -806,8 +805,33 @@ export class RealtimeAlignmentEngine {
         continue;
       }
 
-      // 4. Từ không khớp: đánh dấu SUBSTITUTE tạm thời.
-      setPreviewStatus(cursor, "SUBSTITUTE");
+      // 3b. Khôi phục con trỏ khi bé nhảy dòng / lệch >= 4 từ (đồng bộ với addFinalTranscript -> findReanchor).
+      if (tokenIndex + 1 < tokens.length) {
+        const anchor = this.findReanchor(cursor, token, tokens[tokenIndex + 1]);
+        if (anchor !== -1) {
+          for (let index = cursor; index < anchor; index += 1) {
+            const existing = statusByWordId.get(this.bookWords[index].wordId);
+            if (existing?.status !== "SUBSTITUTE") {
+              setPreviewStatus(index, "DELETE");
+            }
+          }
+          setPreviewStatus(anchor, "MATCH");
+          setPreviewStatus(anchor + 1, "MATCH");
+          previewSpelling = false;
+
+          cursor = anchor + 2;
+          targetIndex = cursor < this.bookWords.length ? cursor : anchor + 1;
+          tokenIndex += 1;
+          continue;
+        }
+      }
+
+      // 4. Từ không khớp ở cuối interim: có thể bé đang ghép vần hoặc sắp tự sửa
+      // ("bàn... bạn") → chỉ đánh dấu SUBSTITUTE tạm khi còn từ kế tiếp xác nhận,
+      // không vội nháy đỏ ở âm tiết cuối cùng của interim.
+      if (tokenIndex < tokens.length - 1) {
+        setPreviewStatus(cursor, "SUBSTITUTE");
+      }
       previewSpelling = false;
 
       targetIndex = cursor;

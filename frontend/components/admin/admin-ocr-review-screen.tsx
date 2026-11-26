@@ -26,6 +26,8 @@ import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
+import { Modal } from "@/components/common/modal";
+import { ResponsiveTable } from "@/components/common/responsive-table";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { isServiceError } from "@/lib/api/service-error";
@@ -652,23 +654,13 @@ function OcrImageViewer({
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const expandButtonRef = useRef<HTMLButtonElement>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const restoreExpandFocusRef = useRef(true);
 
   useEffect(() => {
     if (!isExpanded) return;
 
     const expandButton = expandButtonRef.current;
-    closeButtonRef.current?.focus();
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setIsExpanded(false);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
       if (restoreExpandFocusRef.current) expandButton?.focus();
       restoreExpandFocusRef.current = true;
     };
@@ -778,34 +770,29 @@ function OcrImageViewer({
         </div>
       </div>
       {renderImageFrame()}
-      {isExpanded ? (
-        <div
-          aria-labelledby="ocr-expanded-image-title"
-          aria-modal="true"
-          className="fixed inset-0 z-[100] grid place-items-center bg-black/85 p-4"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) setIsExpanded(false);
-          }}
-          role="dialog"
-        >
-          <div className="grid max-h-full w-full justify-items-center gap-3">
-            <div className="flex w-full max-w-[92vw] items-center justify-between gap-3 text-white">
-              <h2 className="font-semibold" id="ocr-expanded-image-title">
-                Trang {image.page_number} · {book.title}
-              </h2>
-              <button
-                className="min-h-11 rounded-control bg-white px-4 font-semibold text-ink hover:bg-canvas"
-                onClick={() => setIsExpanded(false)}
-                ref={closeButtonRef}
-                type="button"
-              >
-                Đóng ảnh
-              </button>
-            </div>
-            {renderImageFrame(true)}
+      <Modal
+        closeOnBackdropClick
+        footer={
+          <div className="flex justify-end">
+            <Button
+              fullWidth={false}
+              onClick={() => setIsExpanded(false)}
+              type="button"
+              variant="secondary"
+            >
+              Đóng ảnh
+            </Button>
           </div>
+        }
+        isOpen={isExpanded}
+        onClose={() => setIsExpanded(false)}
+        title={`Trang ${image.page_number} · ${book.title}`}
+        tone="paper"
+      >
+        <div className="grid justify-items-center gap-3">
+          {renderImageFrame(true)}
         </div>
-      ) : null}
+      </Modal>
     </>
   );
 }
@@ -4212,9 +4199,12 @@ function AdminOcrWordReviewPanel({
 
       <Card className="gap-4 bg-white sm:p-8">
         <h2 className="text-2xl font-extrabold text-ink">Từ và bounding box</h2>
-        <div className="max-h-[360px] overflow-auto">
+        <ResponsiveTable
+          ariaLabel="Bảng từ và bounding box"
+          className="max-h-[360px] overflow-y-auto"
+        >
           <table className="w-full border-collapse text-left text-sm">
-            <thead className="sticky top-0 bg-sky text-primary-hover">
+            <thead className="sticky top-0 z-10 bg-sky text-primary-hover">
               <tr>
                 <th className="px-3 py-3 font-bold">#</th>
                 <th className="px-3 py-3 font-bold">Từ</th>
@@ -4235,7 +4225,7 @@ function AdminOcrWordReviewPanel({
                     <td className="px-3 py-2">
                       <input
                         aria-label={`Từ ${word.word_index + 1}`}
-                        className="min-h-9 w-full min-w-20 bg-transparent text-ink outline-offset-2 focus-visible:outline-2 focus-visible:outline-primary"
+                        className="min-h-9 w-full min-w-20 scroll-mt-12 bg-transparent text-ink outline-offset-2 focus-visible:outline-2 focus-visible:outline-primary"
                         disabled={readOnly}
                         onChange={(event) =>
                           onUpdateWord(word.word_index, {
@@ -4256,7 +4246,7 @@ function AdminOcrWordReviewPanel({
               })}
             </tbody>
           </table>
-        </div>
+        </ResponsiveTable>
 
         {selected ? (
           <div className="grid gap-3 sm:grid-cols-2">

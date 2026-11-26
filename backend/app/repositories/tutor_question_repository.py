@@ -99,6 +99,18 @@ class TutorQuestionRepository:
             )
         )
 
+    async def question_for_update(
+        self, session_id: UUID, question_id: UUID
+    ) -> ComprehensionQuestion | None:
+        return await self.db.scalar(
+            select(ComprehensionQuestion)
+            .where(
+                ComprehensionQuestion.Id == question_id,
+                ComprehensionQuestion.SessionId == session_id,
+            )
+            .with_for_update(of=ComprehensionQuestion)
+        )
+
     async def answers(self, question_ids: list[UUID]) -> list[ComprehensionAnswer]:
         if not question_ids:
             return []

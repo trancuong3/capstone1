@@ -1,0 +1,81 @@
+{
+  "duration_s": 1204.79,
+  "turns_completed": 322,
+  "errors_count": 0,
+  "errors": [],
+  "start_window_p50_ms": 676.46,
+  "start_window_p95_ms": 932.67,
+  "end_window_p50_ms": 744.84,
+  "end_window_p95_ms": 1052.83,
+  "overall_p50_ms": 674.63,
+  "overall_p95_ms": 1042.96,
+  "worker_rss_mb_start": null,
+  "worker_rss_mb_end": null,
+  "worker_rss_delta_mb": null,
+  "health_at_start": {
+    "status": "ok",
+    "provider": "local",
+    "stt": {
+      "ready": true,
+      "model_version": "sherpa-onnx-zipformer-vi-30m-int8-2026-02-09",
+      "mode": "ws",
+      "ws_stream_supported": true,
+      "active_jobs": 0
+    },
+    "tts": {
+      "ready": true,
+      "model_version": "vieneu-v3-turbo-onnx-hybrid-3.8.5",
+      "precision": "hybrid",
+      "voices_count": 8,
+      "active_voices": [
+        "local_north_truc_ly",
+        "local_north_ngoc_linh",
+        "local_north_thien_minh",
+        "local_central_ngoc_tran",
+        "local_central_quang_son",
+        "local_south_thuc_doan",
+        "local_south_my_duyen",
+        "local_south_thai_son"
+      ],
+      "regions": [
+        "north",
+        "central",
+        "south"
+      ],
+      "active_jobs": 0
+    }
+  },
+  "health_at_end": {
+    "status": "ok",
+    "provider": "local",
+    "stt": {
+      "ready": true,
+      "model_version": "sherpa-onnx-zipformer-vi-30m-int8-2026-02-09",
+      "mode": "ws",
+      "ws_stream_supported": true,
+      "active_jobs": 0
+    },
+    "tts": {
+      "ready": true,
+      "model_version": "vieneu-v3-turbo-onnx-hybrid-3.8.5",
+      "precision": "hybrid",
+      "voices_count": 8,
+      "active_voices": [
+        "local_north_truc_ly",
+        "local_north_ngoc_linh",
+        "local_north_thien_minh",
+        "local_central_ngoc_tran",
+        "local_central_quang_son",
+        "local_south_thuc_doan",
+        "local_south_my_duyen",
+        "local_south_thai_son"
+      ],
+      "regions": [
+        "north",
+        "central",
+        "south"
+      ],
+      "active_jobs": 0
+    }
+  }
+}

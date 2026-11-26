@@ -4,13 +4,18 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
+import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.media.AudioAttributes;
+import android.media.AudioFocusRequest;
+import android.media.AudioManager;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
@@ -113,6 +118,29 @@ public final class MainActivity extends Activity {
     private String lastFailedUrl;
     private long lastBackPressMs;
     private OnBackInvokedCallback backInvokedCallback;
+    private boolean activityStopped;
+    private boolean webViewPausedForStop;
+    private AudioManager audioManager;
+    private AudioFocusRequest audioFocusRequest;
+    private boolean noisyReceiverRegistered;
+
+    private final Runnable deferredWebViewPauseRunnable = this::pauseWebViewAfterBackgroundEvent;
+
+    private final AudioManager.OnAudioFocusChangeListener audioFocusChangeListener = focusChange -> {
+        if (focusChange == AudioManager.AUDIOFOCUS_LOSS
+                || focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+            dispatchAndroidBackgroundEvent(false);
+        }
+    };
+
+    private final BroadcastReceiver becomingNoisyReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (AudioManager.ACTION_AUDIO_BECOMING_NOISY.equals(intent != null ? intent.getAction() : null)) {
+                dispatchAndroidBackgroundEvent(false);
+            }
+        }
+    };
 
     // Multi-stage loading hints matched to Render.com cold-start timeline:
     // Stage 1 (0-8s): "Đang tải ViRead..."  — shown immediately via loading_subtitle
@@ -1188,12 +1216,97 @@ public final class MainActivity extends Activity {
         super.onPause();
     }
 
+    private void dispatchAndroidBackgroundEvent(boolean pauseAfterDispatch) {
+        if (webView == null) return;
+        if (pauseAfterDispatch) {
+            mainHandler.removeCallbacks(deferredWebViewPauseRunnable);
+            mainHandler.postDelayed(deferredWebViewPauseRunnable, 250L);
+        }
+        webView.evaluateJavascript(
+                "document.dispatchEvent(new Event('viread:android-background'));'ok'",
+                value -> {
+                    if (pauseAfterDispatch) {
+                        pauseWebViewAfterBackgroundEvent();
+                    }
+                });
+    }
+
+    private void pauseWebViewAfterBackgroundEvent() {
+        mainHandler.removeCallbacks(deferredWebViewPauseRunnable);
+        if (activityStopped && !webViewPausedForStop && webView != null) {
+            webViewPausedForStop = true;
+            webView.onPause();
+        }
+    }
+
+    private void requestAppAudioFocus() {
+        if (audioManager == null) {
+            audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        }
+        if (audioManager == null) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (audioFocusRequest == null) {
+                AudioAttributes attrs = new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build();
+                audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                        .setAudioAttributes(attrs)
+                        .setOnAudioFocusChangeListener(audioFocusChangeListener, mainHandler)
+                        .build();
+            }
+            audioManager.requestAudioFocus(audioFocusRequest);
+        } else {
+            @SuppressWarnings("deprecation")
+            int ignored = audioManager.requestAudioFocus(
+                    audioFocusChangeListener,
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN);
+        }
+    }
+
+    private void abandonAppAudioFocus() {
+        if (audioManager == null) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (audioFocusRequest != null) {
+                audioManager.abandonAudioFocusRequest(audioFocusRequest);
+            }
+        } else {
+            @SuppressWarnings("deprecation")
+            int ignored = audioManager.abandonAudioFocus(audioFocusChangeListener);
+        }
+    }
+
+    private void registerBecomingNoisyReceiver() {
+        if (noisyReceiverRegistered) return;
+        IntentFilter filter = new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(becomingNoisyReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(becomingNoisyReceiver, filter);
+        }
+        noisyReceiverRegistered = true;
+    }
+
+    private void unregisterBecomingNoisyReceiver() {
+        if (!noisyReceiverRegistered) return;
+        noisyReceiverRegistered = false;
+        try {
+            unregisterReceiver(becomingNoisyReceiver);
+        } catch (IllegalArgumentException ignored) {
+            // Receiver was already unregistered.
+        }
+    }
+
     @Override
     protected void onStop() {
+        activityStopped = true;
+        webViewPausedForStop = false;
+        unregisterBecomingNoisyReceiver();
+        abandonAppAudioFocus();
         if (webView != null && !awaitingSystemPermission && pendingFiles == null) {
-            webView.evaluateJavascript(
-                    "document.dispatchEvent(new Event('viread:android-background'))", null);
-            webView.onPause();
+            // Let WebView JS process viread:android-background BEFORE webView.onPause() suspends JS timers/WS!
+            dispatchAndroidBackgroundEvent(true);
         }
         if (!awaitingSystemPermission) {
             denyPending();
@@ -1204,6 +1317,11 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        activityStopped = false;
+        webViewPausedForStop = false;
+        mainHandler.removeCallbacks(deferredWebViewPauseRunnable);
+        registerBecomingNoisyReceiver();
+        requestAppAudioFocus();
         if (webView != null) webView.onResume();
     }
 
@@ -1252,6 +1370,9 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        mainHandler.removeCallbacks(deferredWebViewPauseRunnable);
+        unregisterBecomingNoisyReceiver();
+        abandonAppAudioFocus();
         cancelLoadWatchdog();
         oauthLoopbackServer.stop();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && backInvokedCallback != null) {

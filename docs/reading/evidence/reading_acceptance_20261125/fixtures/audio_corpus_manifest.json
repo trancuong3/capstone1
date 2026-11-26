@@ -1,0 +1,1345 @@
+{
+  "total_timestamped_words": 187,
+  "items": [
+    {
+      "id": "short_1",
+      "split": "tuning",
+      "voice": "local_north_ngoc_linh",
+      "expected": "Sáng nay, Mi mang ô đến lớp.",
+      "source_kind": "synthetic_tts",
+      "audio_file": "docs\\reading\\evidence\\reading_acceptance_20261125\\fixtures\\audio\\short_1.wav",
+      "duration_s": 2.07,
+      "worker_stt_text": "sáng nay my mang ô đến lớp",
+      "word_timestamps": [
+        {
+          "text": "sáng",
+          "start": 0.0,
+          "end": 0.23,
+          "type": "word"
+        },
+        {
+          "text": "nay",
+          "start": 0.23,
+          "end": 0.75,
+          "type": "word"
+        },
+        {
+          "text": "my",
+          "start": 0.75,
+          "end": 0.99,
+          "type": "word"
+        },
+        {
+          "text": "mang",
+          "start": 0.99,
+          "end": 1.19,
+          "type": "word"
+        },
+        {
+          "text": "ô",
+          "start": 1.19,
+          "end": 1.43,
+          "type": "word"
+        },
+        {
+          "text": "đến",
+          "start": 1.43,
+          "end": 1.71,
+          "type": "word"
+        },
+        {
+          "text": "lớp",
+          "start": 1.71,
+          "end": 1.79,
+          "type": "word"
+        }
+      ]
+    },
+    {
+      "id": "short_2",
+      "split": "tuning",
+      "voice": "local_south_my_duyen",
+      "expected": "Tan học, trời đổ mưa.",
+      "source_kind": "synthetic_tts",
+      "audio_file": "docs\\reading\\evidence\\reading_acceptance_20261125\\fixtures\\audio\\short_2.wav",
+      "duration_s": 2.31,
+      "worker_stt_text": "tan học trời đổ mưa",
+      "word_timestamps": [
+        {
+          "text": "tan",
+          "start": 0.0,
+          "end": 0.31,
+          "type": "word"
+        },
+        {
+          "text": "học",
+          "start": 0.31,
+          "end": 0.99,
+          "type": "word"
+        },
+        {
+          "text": "trời",
+          "start": 0.99,
+          "end": 1.35,
+          "type": "word"
+        },
+        {
+          "text": "đổ",
+          "start": 1.35,
+          "end": 1.67,
+          "type": "word"
+        },
+        {
+          "text": "mưa",
+          "start": 1.67,
+          "end": 1.75,
+          "type": "word"
+        }
+      ]
+    },
+    {
+      "id": "short_3",
+      "split": "tuning",
+      "voice": "local_north_ngoc_linh",
+      "expected": "Mi che ô cho bạn An.",
+      "source_kind": "synthetic_tts",
+      "audio_file": "docs\\reading\\evidence\\reading_acceptance_20261125\\fixtures\\audio\\short_3.wav",
+      "duration_s": 1.75,
+      "worker_stt_text": "mì che ô cho bạn an",
+      "word_timestamps": [
+        {
+          "text": "mì",
+          "start": 0.0,
+          "end": 0.31,
+          "type": "word"
+        },
+        {
+          "text": "che",
+          "start": 0.31,
+          "end": 0.51,
+          "type": "word"
+        },
+        {
+          "text": "ô",
+          "start": 0.51,
+          "end": 0.75,
+          "type": "word"
+        },
+        {
+          "text": "cho",
+          "start": 0.75,
+          "end": 0.95,
+          "type": "word"
+        },
+        {
+          "text": "bạn",
+          "start": 0.95,
+          "end": 1.19,
+          "type": "word"
+        },
+        {
+          "text": "an",
+          "start": 1.19,
+          "end": 1.27,
+          "type": "word"
+        }
+      ]
+    },
+    {
+      "id": "long_repeat",
+      "split": "holdout",
+      "voice": "local_south_thuc_doan",
+      "expected": "Mi gọi An. An quay lại gọi Mi cùng xuống sân trường.",
+      "source_kind": "synthetic_tts",
+      "audio_file": "docs\\reading\\evidence\\reading_acceptance_20261125\\fixtures\\audio\\long_repeat.wav",
+      "duration_s": 3.59,
+      "worker_stt_text": "mi gọi an an quay lại gọi my cùng xuống sân trường",
+      "word_timestamps": [
+        {
+          "text": "mi",
+          "start": 0.0,
+          "end": 0.31,
+          "type": "word"
+        },
+        {
+          "text": "gọi",
+          "start": 0.31,
+          "end": 0.63,
+          "type": "word"
+        },
+        {
+          "text": "an",
+          "start": 0.63,
+          "end": 1.15,
+          "type": "word"
+        },
+        {
+          "text": "an",
+          "start": 1.15,
+          "end": 1.51,
+          "type": "word"
+        },
+        {
+          "text": "quay",
+          "start": 1.51,
+          "end": 1.67,
+          "type": "word"
+        },
+        {
+          "text": "lại",
+          "start": 1.67,
+          "end": 1.91,
+          "type": "word"
+        },
+        {
+          "text": "gọi",
+          "start": 1.91,
+          "end": 2.15,
+          "type": "word"
+        },
+        {
+          "text": "my",
+          "start": 2.15,
+          "end": 2.39,
+          "type": "word"
+        },
+        {
+          "text": "cùng",
+          "start": 2.39,
+          "end": 2.63,
+          "type": "word"
+        },
+        {
+          "text": "xuống",
+          "start": 2.63,
+          "end": 2.83,
+          "type": "word"
+        },
+        {
+          "text": "sân",
+          "start": 2.83,
+          "end": 3.15,
+          "type": "word"
+        },
+        {
+          "text": "trường",
+          "start": 3.15,
+          "end": 3.23,
+          "type": "word"
+        }
+      ]
+    },
+    {
+      "id": "long_dialogue",
+      "split": "holdout",
+      "voice": "local_central_ngoc_tran",
+      "expected": "Dừng lại! Đừng chạy nhanh quá!",
+      "source_kind": "synthetic_tts",
+      "audio_file": "docs\\reading\\evidence\\reading_acceptance_20261125\\fixtures\\audio\\long_dialogue.wav",
+      "duration_s": 2.39,
+      "worker_stt_text": "dừng lại đừng chạy nhanh quá",
+      "word_timestamps": [
+        {
+          "text": "dừng",
+          "start": 0.0,
+          "end": 0.35,
+          "type": "word"
+        },
+        {
+          "text": "lại",
+          "start": 0.35,
+          "end": 1.07,
+          "type": "word"
+        },
+        {
+          "text": "đừng",
+          "start": 1.07,
+          "end": 1.35,
+          "type": "word"
+        },
+        {
+          "text": "chạy",
+          "start": 1.35,
+          "end": 1.63,
+          "type": "word"
+        },
+        {
+          "text": "nhanh",
+          "start": 1.63,
+          "end": 1.95,
+          "type": "word"
+        },
+        {
+          "text": "quá",
+          "start": 1.95,
+          "end": 2.03,
+          "type": "word"
+        }
+      ]
+    },
+    {
+      "id": "long_diff_1",
+      "split": "holdout",
+      "voice": "local_south_thuc_doan",
+      "expected": "Mi đọc chậm từng chữ: mốt, một, nghiêng đầu, khúc khích rồi cười tươi.",
+      "source_kind": "synthetic_tts",
+      "audio_file": "docs\\reading\\evidence\\reading_acceptance_20261125\\fixtures\\audio\\long_diff_1.wav",
+      "duration_s": 4.79,
+      "worker_stt_text": "mi đọc chậm từng chữ một nghiêng đầu khúc khích rồi cười tươi",
+      "word_timestamps": [
+        {
+          "text": "mi",
+          "start": 0.0,
+          "end": 0.19,
+          "type": "word"
+        },
+        {
+          "text": "đọc",
+          "start": 0.19,
+          "end": 0.47,
+          "type": "word"
+        },
+        {
+          "text": "chậm",
+          "start": 0.47,
+          "end": 0.75,
+          "type": "word"
+        },
+        {
+          "text": "từng",
+          "start": 0.75,
+          "end": 1.07,
+          "type": "word"
+        },
+        {
+          "text": "chữ",
+          "start": 1.07,
+          "end": 1.59,
+          "type": "word"
+        },
+        {
+          "text": "một",
+          "start": 1.59,
+          "end": 2.79,
+          "type": "word"
+        },
+        {
+          "text": "nghiêng",
+          "start": 2.79,
+          "end": 3.07,
+          "type": "word"
+        },
+        {
+          "text": "đầu",
+          "start": 3.07,
+          "end": 3.35,
+          "type": "word"
+        },
+        {
+          "text": "khúc",
+          "start": 3.35,
+          "end": 3.59,
+          "type": "word"
+        },
+        {
+          "text": "khích",
+          "start": 3.59,
+          "end": 3.87,
+          "type": "word"
+        },
+        {
+          "text": "rồi",
+          "start": 3.87,
+          "end": 4.11,
+          "type": "word"
+        },
+        {
+          "text": "cười",
+          "start": 4.11,
+          "end": 4.35,
+          "type": "word"
+        },
+        {
+          "text": "tươi",
+          "start": 4.35,
+          "end": 4.43,
+          "type": "word"
+        }
+      ]
+    },
+    {
+      "id": "long_diff_2",
+      "split": "holdout",
+      "voice": "local_central_ngoc_tran",
+      "expected": "Khi về nhà, bé tự lấy vở tập viết từng chữ bàn, bạn, nghỉ, nghĩ rất cẩn thận.",
+      "source_kind": "synthetic_tts",
+      "audio_file": "docs\\reading\\evidence\\reading_acceptance_20261125\\fixtures\\audio\\long_diff_2.wav",
+      "duration_s": 5.03,
+      "worker_stt_text": "khi về nhà bé tư lấy vợ tập việc tương trừ bang ba nghỉ nghỉ rất cẩn thận",
+      "word_timestamps": [
+        {
+          "text": "khi",
+          "start": 0.0,
+          "end": 0.23,
+          "type": "word"
+        },
+        {
+          "text": "về",
+          "start": 0.23,
+          "end": 0.51,
+          "type": "word"
+        },
+        {
+          "text": "nhà",
+          "start": 0.51,
+          "end": 0.99,
+          "type": "word"
+        },
+        {
+          "text": "bé",
+          "start": 0.99,
+          "end": 1.27,
+          "type": "word"
+        },
+        {
+          "text": "tư",
+          "start": 1.27,
+          "end": 1.47,
+          "type": "word"
+        },
+        {
+          "text": "lấy",
+          "start": 1.47,
+          "end": 1.71,
+          "type": "word"
+        },
+        {
+          "text": "vợ",
+          "start": 1.71,
+          "end": 1.91,
+          "type": "word"
+        },
+        {
+          "text": "tập",
+          "start": 1.91,
+          "end": 2.07,
+          "type": "word"
+        },
+        {
+          "text": "việc",
+          "start": 2.07,
+          "end": 2.27,
+          "type": "word"
+        },
+        {
+          "text": "tương",
+          "start": 2.27,
+          "end": 2.47,
+          "type": "word"
+        },
+        {
+          "text": "trừ",
+          "start": 2.47,
+          "end": 2.71,
+          "type": "word"
+        },
+        {
+          "text": "bang",
+          "start": 2.71,
+          "end": 3.11,
+          "type": "word"
+        },
+        {
+          "text": "ba",
+          "start": 3.11,
+          "end": 3.39,
+          "type": "word"
+        },
+        {
+          "text": "nghỉ",
+          "start": 3.39,
+          "end": 3.79,
+          "type": "word"
+        },
+        {
+          "text": "nghỉ",
+          "start": 3.79,
+          "end": 4.07,
+          "type": "word"
+        },
+        {
+          "text": "rất",
+          "start": 4.07,
+          "end": 4.31,
+          "type": "word"
+        },
+        {
+          "text": "cẩn",
+          "start": 4.31,
+          "end": 4.59,
+          "type": "word"
+        },
+        {
+          "text": "thận",
+          "start": 4.59,
+          "end": 4.83,
+          "type": "word"
+        }
+      ]
+    },
+    {
+      "id": "long_longsent",
+      "split": "holdout",
+      "voice": "local_south_thuc_doan",
+      "expected": "Mùa thu đi qua thật êm đềm trong tiếng đọc bài rộn ràng của lớp nhỏ.",
+      "source_kind": "synthetic_tts",
+      "audio_file": "docs\\reading\\evidence\\reading_acceptance_20261125\\fixtures\\audio\\long_longsent.wav",
+      "duration_s": 4.07,
+      "worker_stt_text": "mùa thu đi qua thật êm đềm trong tiếng đọc bài rộn ràng của lớp nhỏ",
+      "word_timestamps": [
+        {
+          "text": "mùa",
+          "start": 0.0,
+          "end": 0.15,
+          "type": "word"
+        },
+        {
+          "text": "thu",
+          "start": 0.15,
+          "end": 0.51,
+          "type": "word"
+        },
+        {
+          "text": "đi",
+          "start": 0.51,
+          "end": 0.75,
+          "type": "word"
+        },
+        {
+          "text": "qua",
+          "start": 0.75,
+          "end": 0.95,
+          "type": "word"
+        },
+        {
+          "text": "thậtêm",
+          "start": 0.95,
+          "end": 1.39,
+          "type": "word"
+        },
+        {
+          "text": "đềm",
+          "start": 1.39,
+          "end": 1.67,
+          "type": "word"
+        },
+        {
+          "text": "trong",
+          "start": 1.67,
+          "end": 1.87,
+          "type": "word"
+        },
+        {
+          "text": "tiếng",
+          "start": 1.87,
+          "end": 2.11,
+          "type": "word"
+        },
+        {
+          "text": "đọc",
+          "start": 2.11,
+          "end": 2.31,
+          "type": "word"
+        },
+        {
+          "text": "bài",
+          "start": 2.31,
+          "end": 2.51,
+          "type": "word"
+        },
+        {
+          "text": "rộn",
+          "start": 2.51,
+          "end": 2.79,
+          "type": "word"
+        },
+        {
+          "text": "ràng",
+          "start": 2.79,
+          "end": 3.07,
+          "type": "word"
+        },
+        {
+          "text": "của",
+          "start": 3.07,
+          "end": 3.27,
+          "type": "word"
+        },
+        {
+          "text": "lớp",
+          "start": 3.27,
+          "end": 3.59,
+          "type": "word"
+        },
+        {
+          "text": "nhỏ",
+          "start": 3.59,
+          "end": 3.67,
+          "type": "word"
+        }
+      ]
+    },
+    {
+      "id": "long_rain",
+      "split": "holdout",
+      "voice": "local_central_ngoc_tran",
+      "expected": "Bỗng nhiên mây xám kéo đến, gió thổi làm tán cây nghiêng ngả bên hiên.",
+      "source_kind": "synthetic_tts",
+      "audio_file": "docs\\reading\\evidence\\reading_acceptance_20261125\\fixtures\\audio\\long_rain.wav",
+      "duration_s": 4.47,
+      "worker_stt_text": "bỗng nhiên mây sám kéo đến gió thổi làm tán cây nghiêng ngả bên hiên",
+      "word_timestamps": [
+        {
+          "text": "bỗng",
+          "start": 0.0,
+          "end": 0.04,
+          "type": "word"
+        },
+        {
+          "text": "nhiên",
+          "start": 0.0,
+          "end": 0.59,
+          "type": "word"
+        },
+        {
+          "text": "mây",
+          "start": 0.59,
+          "end": 0.83,
+          "type": "word"
+        },
+        {
+          "text": "sám",
+          "start": 0.83,
+          "end": 1.07,
+          "type": "word"
+        },
+        {
+          "text": "kéo",
+          "start": 1.07,
+          "end": 1.39,
+          "type": "word"
+        },
+        {
+          "text": "đến",
+          "start": 1.39,
+          "end": 1.79,
+          "type": "word"
+        },
+        {
+          "text": "gió",
+          "start": 1.79,
+          "end": 2.15,
+          "type": "word"
+        },
+        {
+          "text": "thổi",
+          "start": 2.15,
+          "end": 2.47,
+          "type": "word"
+        },
+        {
+          "text": "làm",
+          "start": 2.47,
+          "end": 2.71,
+          "type": "word"
+        },
+        {
+          "text": "tán",
+          "start": 2.71,
+          "end": 2.95,
+          "type": "word"
+        },
+        {
+          "text": "cây",
+          "start": 2.95,
+          "end": 3.15,
+          "type": "word"
+        },
+        {
+          "text": "nghiêng",
+          "start": 3.15,
+          "end": 3.43,
+          "type": "word"
+        },
+        {
+          "text": "ngả",
+          "start": 3.43,
+          "end": 3.71,
+          "type": "word"
+        },
+        {
+          "text": "bên",
+          "start": 3.71,
+          "end": 3.99,
+          "type": "word"
+        },
+        {
+          "text": "hiên",
+          "start": 3.99,
+          "end": 4.11,
+          "type": "word"
+        }
+      ]
+    },
+    {
+      "id": "long_home",
+      "split": "holdout",
+      "voice": "local_south_thuc_doan",
+      "expected": "Tối đến, cả nhà quây quần bên mâm cơm ấm áp nghe Mi kể chuyện ở lớp.",
+      "source_kind": "synthetic_tts",
+      "audio_file": "docs\\reading\\evidence\\reading_acceptance_20261125\\fixtures\\audio\\long_home.wav",
+      "duration_s": 4.47,
+      "worker_stt_text": "tối đến cả nhà quây quần bên mâm cơm ấm áp nghe my kể chuyện ở lớp",
+      "word_timestamps": [
+        {
+          "text": "tối",
+          "start": 0.0,
+          "end": 0.19,
+          "type": "word"
+        },
+        {
+          "text": "đến",
+          "start": 0.19,
+          "end": 0.75,
+          "type": "word"
+        },
+        {
+          "text": "cả",
+          "start": 0.75,
+          "end": 0.95,
+          "type": "word"
+        },
+        {
+          "text": "nhà",
+          "start": 0.95,
+          "end": 1.23,
+          "type": "word"
+        },
+        {
+          "text": "quây",
+          "start": 1.23,
+          "end": 1.43,
+          "type": "word"
+        },
+        {
+          "text": "quần",
+          "start": 1.43,
+          "end": 1.67,
+          "type": "word"
+        },
+        {
+          "text": "bên",
+          "start": 1.67,
+          "end": 1.91,
+          "type": "word"
+        },
+        {
+          "text": "mâm",
+          "start": 1.91,
+          "end": 2.15,
+          "type": "word"
+        },
+        {
+          "text": "cơmấm",
+          "start": 2.15,
+          "end": 2.63,
+          "type": "word"
+        },
+        {
+          "text": "áp",
+          "start": 2.63,
+          "end": 2.87,
+          "type": "word"
+        },
+        {
+          "text": "nghe",
+          "start": 2.87,
+          "end": 3.07,
+          "type": "word"
+        },
+        {
+          "text": "my",
+          "start": 3.07,
+          "end": 3.39,
+          "type": "word"
+        },
+        {
+          "text": "kể",
+          "start": 3.39,
+          "end": 3.63,
+          "type": "word"
+        },
+        {
+          "text": "chuyện",
+          "start": 3.63,
+          "end": 3.87,
+          "type": "word"
+        },
+        {
+          "text": "ở",
+          "start": 3.87,
+          "end": 4.11,
+          "type": "word"
+        },
+        {
+          "text": "lớp",
+          "start": 4.11,
+          "end": 4.19,
+          "type": "word"
+        }
+      ]
+    },
+    {
+      "id": "long_morning",
+      "split": "tuning",
+      "voice": "local_north_ngoc_linh",
+      "expected": "Buổi sáng mùa thu, nắng vàng dịu nhẹ chiếu qua khung cửa sổ lớp Một.",
+      "source_kind": "synthetic_tts",
+      "audio_file": "docs\\reading\\evidence\\reading_acceptance_20261125\\fixtures\\audio\\long_morning.wav",
+      "duration_s": 3.99,
+      "worker_stt_text": "buổi sáng mùa thu nắng vàng dịu nhẹ chiếu qua khung cửa số lớp một",
+      "word_timestamps": [
+        {
+          "text": "buổi",
+          "start": 0.0,
+          "end": 0.15,
+          "type": "word"
+        },
+        {
+          "text": "sáng",
+          "start": 0.15,
+          "end": 0.55,
+          "type": "word"
+        },
+        {
+          "text": "mùa",
+          "start": 0.55,
+          "end": 0.79,
+          "type": "word"
+        },
+        {
+          "text": "thu",
+          "start": 0.79,
+          "end": 1.23,
+          "type": "word"
+        },
+        {
+          "text": "nắng",
+          "start": 1.23,
+          "end": 1.55,
+          "type": "word"
+        },
+        {
+          "text": "vàng",
+          "start": 1.55,
+          "end": 1.83,
+          "type": "word"
+        },
+        {
+          "text": "dịu",
+          "start": 1.83,
+          "end": 2.03,
+          "type": "word"
+        },
+        {
+          "text": "nhẹ",
+          "start": 2.03,
+          "end": 2.27,
+          "type": "word"
+        },
+        {
+          "text": "chiếu",
+          "start": 2.27,
+          "end": 2.47,
+          "type": "word"
+        },
+        {
+          "text": "qua",
+          "start": 2.47,
+          "end": 2.67,
+          "type": "word"
+        },
+        {
+          "text": "khung",
+          "start": 2.67,
+          "end": 2.87,
+          "type": "word"
+        },
+        {
+          "text": "cửa",
+          "start": 2.87,
+          "end": 3.11,
+          "type": "word"
+        },
+        {
+          "text": "số",
+          "start": 3.11,
+          "end": 3.31,
+          "type": "word"
+        },
+        {
+          "text": "lớp",
+          "start": 3.31,
+          "end": 3.55,
+          "type": "word"
+        },
+        {
+          "text": "một",
+          "start": 3.55,
+          "end": 3.63,
+          "type": "word"
+        }
+      ]
+    },
+    {
+      "id": "long_desk",
+      "split": "tuning",
+      "voice": "local_south_my_duyen",
+      "expected": "Trên bàn gỗ sạch sẽ, bé Mi mở quyển sách Tiếng Việt mới tinh.",
+      "source_kind": "synthetic_tts",
+      "audio_file": "docs\\reading\\evidence\\reading_acceptance_20261125\\fixtures\\audio\\long_desk.wav",
+      "duration_s": 4.63,
+      "worker_stt_text": "trên bàn gỗ sạch sẽ bé my mở quyển sách tiếng việt mới tinh",
+      "word_timestamps": [
+        {
+          "text": "trên",
+          "start": 0.0,
+          "end": 0.15,
+          "type": "word"
+        },
+        {
+          "text": "bàn",
+          "start": 0.15,
+          "end": 0.55,
+          "type": "word"
+        },
+        {
+          "text": "gỗ",
+          "start": 0.55,
+          "end": 0.91,
+          "type": "word"
+        },
+        {
+          "text": "sạch",
+          "start": 0.91,
+          "end": 1.23,
+          "type": "word"
+        },
+        {
+          "text": "sẽ",
+          "start": 1.23,
+          "end": 1.75,
+          "type": "word"
+        },
+        {
+          "text": "bé",
+          "start": 1.75,
+          "end": 2.07,
+          "type": "word"
+        },
+        {
+          "text": "my",
+          "start": 2.07,
+          "end": 2.39,
+          "type": "word"
+        },
+        {
+          "text": "mở",
+          "start": 2.39,
+          "end": 2.67,
+          "type": "word"
+        },
+        {
+          "text": "quyển",
+          "start": 2.67,
+          "end": 2.91,
+          "type": "word"
+        },
+        {
+          "text": "sách",
+          "start": 2.91,
+          "end": 3.19,
+          "type": "word"
+        },
+        {
+          "text": "tiếng",
+          "start": 3.19,
+          "end": 3.43,
+          "type": "word"
+        },
+        {
+          "text": "việt",
+          "start": 3.43,
+          "end": 3.75,
+          "type": "word"
+        },
+        {
+          "text": "mới",
+          "start": 3.75,
+          "end": 4.07,
+          "type": "word"
+        },
+        {
+          "text": "tinh",
+          "start": 4.07,
+          "end": 4.15,
+          "type": "word"
+        }
+      ]
+    },
+    {
+      "id": "long_story",
+      "split": "holdout",
+      "voice": "local_south_thuc_doan",
+      "expected": "Giọng đọc trong trẻo của bé khiến ông bà gật gù khen ngợi suốt buổi tối.",
+      "source_kind": "synthetic_tts",
+      "audio_file": "docs\\reading\\evidence\\reading_acceptance_20261125\\fixtures\\audio\\long_story.wav",
+      "duration_s": 4.55,
+      "worker_stt_text": "giọng đọc trong trẻo của bé khiến ông bà gật gù khen ngợi suốt buổi tối",
+      "word_timestamps": [
+        {
+          "text": "giọng",
+          "start": 0.0,
+          "end": 0.15,
+          "type": "word"
+        },
+        {
+          "text": "đọc",
+          "start": 0.15,
+          "end": 0.39,
+          "type": "word"
+        },
+        {
+          "text": "trong",
+          "start": 0.39,
+          "end": 0.63,
+          "type": "word"
+        },
+        {
+          "text": "trẻo",
+          "start": 0.63,
+          "end": 0.91,
+          "type": "word"
+        },
+        {
+          "text": "của",
+          "start": 0.91,
+          "end": 1.11,
+          "type": "word"
+        },
+        {
+          "text": "bé",
+          "start": 1.11,
+          "end": 1.47,
+          "type": "word"
+        },
+        {
+          "text": "khiến",
+          "start": 1.47,
+          "end": 1.71,
+          "type": "word"
+        },
+        {
+          "text": "ông",
+          "start": 1.71,
+          "end": 1.95,
+          "type": "word"
+        },
+        {
+          "text": "bà",
+          "start": 1.95,
+          "end": 2.23,
+          "type": "word"
+        },
+        {
+          "text": "gật",
+          "start": 2.23,
+          "end": 2.51,
+          "type": "word"
+        },
+        {
+          "text": "gù",
+          "start": 2.51,
+          "end": 2.75,
+          "type": "word"
+        },
+        {
+          "text": "khen",
+          "start": 2.75,
+          "end": 3.07,
+          "type": "word"
+        },
+        {
+          "text": "ngợi",
+          "start": 3.07,
+          "end": 3.51,
+          "type": "word"
+        },
+        {
+          "text": "suốt",
+          "start": 3.51,
+          "end": 3.79,
+          "type": "word"
+        },
+        {
+          "text": "buổi",
+          "start": 3.79,
+          "end": 4.11,
+          "type": "word"
+        },
+        {
+          "text": "tối",
+          "start": 4.11,
+          "end": 4.19,
+          "type": "word"
+        }
+      ]
+    },
+    {
+      "id": "offbook_1",
+      "split": "holdout",
+      "voice": "local_south_thuc_doan",
+      "expected": "con mèo đen",
+      "book_expected": "chú mèo trắng",
+      "source_kind": "synthetic_tts",
+      "audio_file": "docs\\reading\\evidence\\reading_acceptance_20261125\\fixtures\\audio\\offbook_1.wav",
+      "duration_s": 1.27,
+      "worker_stt_text": "con mèo đen",
+      "word_timestamps": [
+        {
+          "text": "con",
+          "start": 0.0,
+          "end": 0.31,
+          "type": "word"
+        },
+        {
+          "text": "mèo",
+          "start": 0.31,
+          "end": 0.67,
+          "type": "word"
+        },
+        {
+          "text": "đen",
+          "start": 0.67,
+          "end": 0.75,
+          "type": "word"
+        }
+      ]
+    },
+    {
+      "id": "offbook_tone",
+      "split": "holdout",
+      "voice": "local_central_ngoc_tran",
+      "expected": "một",
+      "book_expected": "mốt",
+      "source_kind": "synthetic_tts",
+      "audio_file": "docs\\reading\\evidence\\reading_acceptance_20261125\\fixtures\\audio\\offbook_tone.wav",
+      "duration_s": 0.79,
+      "worker_stt_text": "một",
+      "word_timestamps": [
+        {
+          "text": "một",
+          "start": 0.0,
+          "end": 0.08,
+          "type": "word"
+        }
+      ]
+    },
+    {
+      "id": "human_0",
+      "split": "human_eval",
+      "voice": "human_speaker",
+      "expected": "nếu mà không có những chế độ khống chế thì",
+      "source_kind": "human_recording",
+      "audio_file": "F:\\c1\\tools\\voice-runtime\\models\\sherpa-onnx-zipformer-vi-30M-int8-2026-02-09\\test_wavs\\0.wav",
+      "duration_s": 3.74,
+      "worker_stt_text": "rồi cũng hỗ trợ cho lâu lâu cũng cho gạo cho này kia",
+      "word_timestamps": [
+        {
+          "text": "rồi",
+          "start": 0.0,
+          "end": 0.11,
+          "type": "word"
+        },
+        {
+          "text": "cũng",
+          "start": 0.11,
+          "end": 0.47,
+          "type": "word"
+        },
+        {
+          "text": "hỗ",
+          "start": 0.47,
+          "end": 0.67,
+          "type": "word"
+        },
+        {
+          "text": "trợ",
+          "start": 0.67,
+          "end": 1.03,
+          "type": "word"
+        },
+        {
+          "text": "cho",
+          "start": 1.03,
+          "end": 1.31,
+          "type": "word"
+        },
+        {
+          "text": "lâu",
+          "start": 1.31,
+          "end": 1.47,
+          "type": "word"
+        },
+        {
+          "text": "lâu",
+          "start": 1.47,
+          "end": 1.75,
+          "type": "word"
+        },
+        {
+          "text": "cũng",
+          "start": 1.75,
+          "end": 1.95,
+          "type": "word"
+        },
+        {
+          "text": "cho",
+          "start": 1.95,
+          "end": 2.23,
+          "type": "word"
+        },
+        {
+          "text": "gạo",
+          "start": 2.23,
+          "end": 2.63,
+          "type": "word"
+        },
+        {
+          "text": "cho",
+          "start": 2.63,
+          "end": 2.91,
+          "type": "word"
+        },
+        {
+          "text": "này",
+          "start": 2.91,
+          "end": 3.31,
+          "type": "word"
+        },
+        {
+          "text": "kia",
+          "start": 3.31,
+          "end": 3.39,
+          "type": "word"
+        }
+      ]
+    },
+    {
+      "id": "human_1",
+      "split": "human_eval",
+      "voice": "human_speaker",
+      "expected": "cho này kia thôi",
+      "source_kind": "human_recording",
+      "audio_file": "F:\\c1\\tools\\voice-runtime\\models\\sherpa-onnx-zipformer-vi-30M-int8-2026-02-09\\test_wavs\\1.wav",
+      "duration_s": 2.4,
+      "worker_stt_text": "những nơi đã khống chế được căn bệnh",
+      "word_timestamps": [
+        {
+          "text": "những",
+          "start": 0.0,
+          "end": 0.31,
+          "type": "word"
+        },
+        {
+          "text": "nơi",
+          "start": 0.31,
+          "end": 0.95,
+          "type": "word"
+        },
+        {
+          "text": "đã",
+          "start": 0.95,
+          "end": 1.27,
+          "type": "word"
+        },
+        {
+          "text": "khống",
+          "start": 1.27,
+          "end": 1.47,
+          "type": "word"
+        },
+        {
+          "text": "chế",
+          "start": 1.47,
+          "end": 1.67,
+          "type": "word"
+        },
+        {
+          "text": "được",
+          "start": 1.67,
+          "end": 1.87,
+          "type": "word"
+        },
+        {
+          "text": "căn",
+          "start": 1.87,
+          "end": 2.11,
+          "type": "word"
+        },
+        {
+          "text": "bệnh",
+          "start": 2.11,
+          "end": 2.19,
+          "type": "word"
+        }
+      ]
+    },
+    {
+      "id": "human_2",
+      "split": "human_eval",
+      "voice": "human_speaker",
+      "expected": "âm lượng tivi giảm",
+      "source_kind": "human_recording",
+      "audio_file": "F:\\c1\\tools\\voice-runtime\\models\\sherpa-onnx-zipformer-vi-30M-int8-2026-02-09\\test_wavs\\2.wav",
+      "duration_s": 1.55,
+      "worker_stt_text": "âm lượng tv giảm",
+      "word_timestamps": [
+        {
+          "text": "âm",
+          "start": 0.0,
+          "end": 0.23,
+          "type": "word"
+        },
+        {
+          "text": "lượng",
+          "start": 0.23,
+          "end": 0.63,
+          "type": "word"
+        },
+        {
+          "text": "tv",
+          "start": 0.63,
+          "end": 1.19,
+          "type": "word"
+        },
+        {
+          "text": "giảm",
+          "start": 1.19,
+          "end": 1.27,
+          "type": "word"
+        }
+      ]
+    }
+  ]
+}

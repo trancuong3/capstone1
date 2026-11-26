@@ -1,0 +1,24 @@
+{
+  "landscape_844x390_v2": {
+    "clientHeight": 156,
+    "scrollHeight": 3949,
+    "isScrollable": true,
+    "detachedVisible": true,
+    "reattachedHidden": true
+  },
+  "live_comprehension_quiz": {
+    "url": "https://192.168.1.2:8443/reading/aaaaaaaa-2026-4112-8001-000000000901?state=question&pageId=aaaaaaaa-2026-4112-8001-000000000103",
+    "h1": "Buổi đọc đã hoàn thành",
+    "choiceTexts": [
+      "Chưa ghi nhậntrong lượt đọcXem từ bé đọc"
+    ],
+    "wrongChoiceClicked": null,
+    "storyHintText": null,
+    "ttsTriggeredOnWrongTap": false,
+    "bargeInSucceeded": false,
+    "totalTtsRequests": 0
+  },
+  "consoleErrors": [],
+  "pageErrors": [],
+  "apiErrors": []
+}

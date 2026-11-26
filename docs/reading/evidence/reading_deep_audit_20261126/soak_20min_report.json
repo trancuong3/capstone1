@@ -1,0 +1,178 @@
+{
+  "started_at": "2026-11-25T19:26:08.927314+00:00",
+  "finished_at": "2026-11-25T19:46:40.850455+00:00",
+  "duration_seconds": 1231.4,
+  "worker_pid": 23920,
+  "worker_rss_mb_start": 2027.46,
+  "worker_rss_mb_end": 2659.71,
+  "worker_rss_delta_mb": 632.25,
+  "rss_timeline": [
+    {
+      "elapsed_s": 0,
+      "rss_mb": 2027.46
+    },
+    {
+      "elapsed_s": 66.1,
+      "rss_mb": 2527.45
+    },
+    {
+      "elapsed_s": 127.8,
+      "rss_mb": 2828.55
+    },
+    {
+      "elapsed_s": 189.3,
+      "rss_mb": 2830.44
+    },
+    {
+      "elapsed_s": 253.3,
+      "rss_mb": 2832.6
+    },
+    {
+      "elapsed_s": 315.1,
+      "rss_mb": 2835.71
+    },
+    {
+      "elapsed_s": 376.5,
+      "rss_mb": 2835.82
+    },
+    {
+      "elapsed_s": 437.0,
+      "rss_mb": 2836.01
+    },
+    {
+      "elapsed_s": 498.5,
+      "rss_mb": 2838.52
+    },
+    {
+      "elapsed_s": 560.2,
+      "rss_mb": 2658.04
+    },
+    {
+      "elapsed_s": 620.7,
+      "rss_mb": 2659.05
+    },
+    {
+      "elapsed_s": 681.6,
+      "rss_mb": 2659.43
+    },
+    {
+      "elapsed_s": 741.9,
+      "rss_mb": 2659.64
+    },
+    {
+      "elapsed_s": 803.3,
+      "rss_mb": 2659.65
+    },
+    {
+      "elapsed_s": 863.8,
+      "rss_mb": 2659.68
+    },
+    {
+      "elapsed_s": 924.8,
+      "rss_mb": 2659.7
+    },
+    {
+      "elapsed_s": 986.2,
+      "rss_mb": 2659.7
+    },
+    {
+      "elapsed_s": 1046.9,
+      "rss_mb": 2659.72
+    },
+    {
+      "elapsed_s": 1107.2,
+      "rss_mb": 2659.68
+    },
+    {
+      "elapsed_s": 1168.0,
+      "rss_mb": 2659.7
+    },
+    {
+      "elapsed_s": 1229.3,
+      "rss_mb": 2659.71
+    },
+    {
+      "elapsed_s": 1231.4,
+      "rss_mb": 2659.71
+    }
+  ],
+  "cycles_completed": 610,
+  "tts_requests": 610,
+  "ws_stt_turns": 610,
+  "errors": 0,
+  "invalid_wav_headers": 0,
+  "latency_drift": {
+    "tts_first_5m": {
+      "count": 110,
+      "p50_ms": 14.4,
+      "p95_ms": 5190.2
+    },
+    "tts_last_5m": {
+      "count": 161,
+      "p50_ms": 3.8,
+      "p95_ms": 20.8
+    },
+    "tts_p50_drift_ms": -10.6,
+    "ws_first_5m": {
+      "count": 110,
+      "p50_ms": 268.6,
+      "p95_ms": 530.2
+    },
+    "ws_last_5m": {
+      "count": 161,
+      "p50_ms": 303.5,
+      "p95_ms": 449.4
+    },
+    "ws_p50_drift_ms": 34.9
+  },
+  "choice_c_v7": {
+    "local_north_truc_ly": {
+      "stt_text": "đáp án cỏ táo",
+      "header_valid": true,
+      "quality_cached": "0",
+      "total_ms": 4591.7
+    },
+    "local_north_ngoc_linh": {
+      "stt_text": "đáp án c quả táo",
+      "header_valid": true,
+      "quality_cached": "1",
+      "total_ms": 1561.0
+    },
+    "local_north_thien_minh": {
+      "stt_text": "đáp án cỏ táo",
+      "header_valid": true,
+      "quality_cached": "0",
+      "total_ms": 4599.2
+    },
+    "local_central_ngoc_tran": {
+      "stt_text": "đạp án c qua tạo",
+      "header_valid": true,
+      "quality_cached": "1",
+      "total_ms": 3621.0
+    },
+    "local_central_quang_son": {
+      "stt_text": "đáp án cước quả táo",
+      "header_valid": true,
+      "quality_cached": "0",
+      "total_ms": 7277.6
+    },
+    "local_south_thuc_doan": {
+      "stt_text": "đáp án c quả táo",
+      "header_valid": true,
+      "quality_cached": "1",
+      "total_ms": 5321.2
+    },
+    "local_south_my_duyen": {
+      "stt_text": "đáp án cỏ táo",
+      "header_valid": true,
+      "quality_cached": "0",
+      "total_ms": 6686.4
+    },
+    "local_south_thai_son": {
+      "stt_text": "áp án cỏ táo",
+      "header_valid": true,
+      "quality_cached": "0",
+      "total_ms": 5385.9
+    }
+  }
+}

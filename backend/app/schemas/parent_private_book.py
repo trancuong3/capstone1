@@ -342,6 +342,13 @@ class ParentPrivateBookSummaryRead(BaseModel):
     created_at: datetime
 
 
+class ParentPrivateBookPageRead(BaseModel):
+    items: list[ParentPrivateBookSummaryRead] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 9
+    offset: int = 0
+
+
 class ParentPrivateBookDetailRead(BaseModel):
     book: ParentPrivateBookSummaryRead
     pages: list[ParentPrivatePageRead] = Field(default_factory=list)
