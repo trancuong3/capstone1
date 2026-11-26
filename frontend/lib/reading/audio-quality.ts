@@ -139,9 +139,16 @@ export class AudioQualityMonitor {
       if (Math.abs(sample) >= 0.99) clippedSamples++;
     }
     const frameClipped = clippedSamples / samples.length > 0.05;
-    this.clipWindow.push({ atMs: nowMs, elapsedMs: elapsed, clipped: frameClipped });
+    this.clipWindow.push({
+      atMs: nowMs,
+      elapsedMs: elapsed,
+      clipped: frameClipped,
+    });
     const windowStartMs = nowMs - 300;
-    while (this.clipWindow.length > 0 && this.clipWindow[0].atMs < windowStartMs) {
+    while (
+      this.clipWindow.length > 0 &&
+      this.clipWindow[0].atMs < windowStartMs
+    ) {
       this.clipWindow.shift();
     }
     let clippedFramesInWindow = 0;

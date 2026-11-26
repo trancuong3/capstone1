@@ -13,10 +13,7 @@
 
 import { invalidateBrowserTokenCache } from "@/lib/api/browser-auth";
 import { ServiceError } from "@/lib/api/service-error";
-import type {
-  SpeechService,
-  WordTimestamp,
-} from "@/lib/api/speech-service";
+import type { SpeechService, WordTimestamp } from "@/lib/api/speech-service";
 import {
   AndroidNativeSpeechRecognition,
   getCachedAndroidSpeechCapabilities,
@@ -1943,7 +1940,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private computeAudioQuality(speechDurationMs: number): SegmentAudioQuality {
     // Compute RMS over voiced frames only (never diluted by 0.45s pre-roll / 0.52s tail silence).
     const rmsDenominator =
-      this.voicedSamples > 0 ? this.voicedSamples : Math.max(1, this.speechSamples);
+      this.voicedSamples > 0
+        ? this.voicedSamples
+        : Math.max(1, this.speechSamples);
     const rms = Math.sqrt(this.segmentSumSq / rmsDenominator);
     const peak = this.segmentPeak;
     const sustainedClipping =
@@ -2194,7 +2193,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.wsCurrentTurnId = null;
     const signal = this.abortController?.signal;
 
-    const deliverFinalPayload = (payload: SegmentTranscriptionPayload | null) => {
+    const deliverFinalPayload = (
+      payload: SegmentTranscriptionPayload | null,
+    ) => {
       if (
         !payload?.text ||
         this.usingBrowserFallback ||
@@ -2296,15 +2297,14 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         : (() => {
             const transcribeWithWasm = async () => {
               attemptedWasm = true;
-              const wasmRes =
-                await getBrowserWasmSttClient().transcribeSamples(
-                  audioToEncode,
-                  {
-                    signal,
-                    timeoutMs: 20_000,
-                    voicedDurationMs,
-                  },
-                );
+              const wasmRes = await getBrowserWasmSttClient().transcribeSamples(
+                audioToEncode,
+                {
+                  signal,
+                  timeoutMs: 20_000,
+                  voicedDurationMs,
+                },
+              );
               recordSttEngineUsage({
                 provider: "wasm",
                 fallbackUsed: true,

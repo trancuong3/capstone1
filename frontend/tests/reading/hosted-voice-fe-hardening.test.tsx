@@ -42,7 +42,10 @@ import {
   setCachedVoiceEngineHealth,
 } from "@/lib/reading/voice-engine-status";
 import { evaluateRecordedShortWord } from "@/lib/reading/word-practice-engine";
-import type { ComprehensionChoiceUI, ReadingPageWordDTO } from "@/types/reading";
+import type {
+  ComprehensionChoiceUI,
+  ReadingPageWordDTO,
+} from "@/types/reading";
 
 function pageWords(sentence: string): ReadingPageWordDTO[] {
   return sentence.split(/\s+/u).map((text, index) => ({
@@ -373,7 +376,9 @@ describe("Hosted Voice FE Hardening (STT-01..STT-10 & TTS-03..TTS-09)", () => {
       sockets[0].onclose?.({ code: 4401 } as CloseEvent);
       await new Promise((r) => setTimeout(r, 20));
       expect(sockets).toHaveLength(2);
-      expect(sentFrames.some((f) => f.type === "auth" && f.token === "jwt-2")).toBe(true);
+      expect(
+        sentFrames.some((f) => f.type === "auth" && f.token === "jwt-2"),
+      ).toBe(true);
 
       // Mark WS ready, speak a single-sample plosive pop + quiet voiced speech -> verify OK quality & words passthrough
       sockets[1].onmessage?.({
@@ -440,7 +445,8 @@ describe("Hosted Voice FE Hardening (STT-01..STT-10 & TTS-03..TTS-09)", () => {
     it("never submits negated options and resolves unanchored self-corrections, symmetric fillers, explicit letters, and 'ba' ambiguity", () => {
       // Inverted negation P0 must stay NEGATED (NEVER submit A!)
       expect(
-        analyzeComprehensionVoiceInput("không phải con chọn A", ANIMAL_OPT).type,
+        analyzeComprehensionVoiceInput("không phải con chọn A", ANIMAL_OPT)
+          .type,
       ).toBe("NEGATED");
       expect(
         analyzeComprehensionVoiceInput("không con chọn A", ANIMAL_OPT).type,
@@ -515,7 +521,9 @@ describe("Hosted Voice FE Hardening (STT-01..STT-10 & TTS-03..TTS-09)", () => {
         pageWords("Mèo nhỏ và chó con"),
       );
       driftEngine.addFinalTranscript("và");
-      expect(driftEngine.getSnapshot().statusByWordId.get("w-0")).toBeUndefined();
+      expect(
+        driftEngine.getSnapshot().statusByWordId.get("w-0"),
+      ).toBeUndefined();
       const recovered = driftEngine.addFinalTranscript("Mèo nhỏ và chó con");
       expect(recovered.statusByWordId.get("w-0")?.status).toBe("MATCH");
       expect(recovered.statusByWordId.get("w-1")?.status).toBe("MATCH");
@@ -718,7 +726,8 @@ describe("Hosted Voice FE Hardening (STT-01..STT-10 & TTS-03..TTS-09)", () => {
       );
       await player.playWithWordTimings(["Mèo"], {
         text: "Mèo",
-        precomputedAudioUrl: "https://cdn.example.test/local_north_truc_ly/1.0/a.mp3",
+        precomputedAudioUrl:
+          "https://cdn.example.test/local_north_truc_ly/1.0/a.mp3",
         onWordChange: vi.fn(),
       });
       expect(fetchMock).not.toHaveBeenCalled();
@@ -748,7 +757,9 @@ describe("Hosted Voice FE Hardening (STT-01..STT-10 & TTS-03..TTS-09)", () => {
         .spyOn(HTMLMediaElement.prototype, "play")
         .mockRejectedValueOnce(notAllowed)
         .mockResolvedValueOnce(undefined);
-      vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+      vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(
+        () => {},
+      );
 
       installAndroidAudioUnlock();
       document.dispatchEvent(new Event("touchstart"));

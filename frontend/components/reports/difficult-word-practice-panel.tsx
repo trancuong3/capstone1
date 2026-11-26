@@ -329,7 +329,7 @@ export function DifficultWordPracticePanel({
     Boolean(primarySource?.is_private_book) ||
     Boolean(
       primarySource?.book_id &&
-        primarySource?.visibility_scope !== "PUBLIC_CATALOG",
+      primarySource?.visibility_scope !== "PUBLIC_CATALOG",
     );
   const rawContextPhrase =
     explicitContextPhrase ?? primarySource?.context_phrase ?? null;
@@ -1163,7 +1163,9 @@ export function DifficultWordPracticePanel({
       stopSelfPlayback();
       setRecordedBlob(recording);
 
-      let effectiveTranscript = transcript ? transcript.normalize("NFC").trim() : null;
+      let effectiveTranscript = transcript
+        ? transcript.normalize("NFC").trim()
+        : null;
       let effectiveConfidence = browserBestConfRef.current;
       const freshHealth = getFreshVoiceEngineHealth();
       const localSttDown =

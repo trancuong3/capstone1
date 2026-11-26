@@ -148,11 +148,15 @@ describe("Hosted Audit Regressions (DEF-H01..DEF-H10)", () => {
       true,
     );
 
+    const voicedSamples = new Float32Array(8000);
+    for (let i = 0; i < voicedSamples.length; i += 1) {
+      voicedSamples[i] = 0.08 * Math.sin((2 * Math.PI * 320 * i) / 16000);
+    }
     await onmessage({
       data: {
         type: "transcribe",
         id: "t_1",
-        samples: new Float32Array(8000),
+        samples: voicedSamples,
         sampleRate: 16000,
       },
     });

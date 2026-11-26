@@ -208,9 +208,21 @@ describe("hands-free word coaching", () => {
     await start();
     await say("Con không biết đọc.");
     expect(play.mock.calls.slice(-3)).toEqual([
-      ["Không sao đâu. Con nghe cô đọc nhé.", { coaching: true }],
-      ["một", { wordSample: true }],
-      ["Đến lượt con. Con đọc lại nhé.", { coaching: true }],
+      [
+        "Không sao đâu. Con nghe cô đọc nhé.",
+        { coaching: true, isPrivateBook: false, cacheScope: "COACHING" },
+      ],
+      [
+        "một",
+        expect.objectContaining({
+          wordSample: true,
+          cacheScope: expect.stringMatching(/^(CATALOG|PRIVATE)$/),
+        }),
+      ],
+      [
+        "Đến lượt con. Con đọc lại nhé.",
+        { coaching: true, isPrivateBook: false, cacheScope: "COACHING" },
+      ],
     ]);
     expect(recorder.start).toHaveBeenCalledTimes(2);
     await say("Con không biết.");
