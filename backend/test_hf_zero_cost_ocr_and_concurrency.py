@@ -1469,6 +1469,139 @@ class TestHfZeroCostOcrAndConcurrency(unittest.TestCase):
 
         asyncio.run(_scenario())
 
+    def test_sync_local_ocr_scan_honors_scale_to_zero_90s_timeout_without_premature_45s_cancel(
+        self,
+    ) -> None:
+        from io import BytesIO
+        from PIL import Image
+        from app.repositories.local_ocr_scan_repository import LocalOcrScanRepository
+        from app.services.local_ocr_scan_service import LocalOcrScanService
+
+        buf = BytesIO()
+        Image.new("RGB", (120, 60), color=(255, 255, 255)).save(buf, format="JPEG")
+        jpeg_bytes = buf.getvalue()
+        img_sha = hashlib.sha256(jpeg_bytes).hexdigest()
+
+        async def _scenario() -> None:
+            state = InMemoryDbState()
+            observed_timeouts: list[float | None] = []
+            cancelled_reasons: list[str] = []
+
+            async def fake_wait_for_job_completion(
+                _self_svc: OcrInferenceJobService,
+                job_id,
+                *,
+                timeout_seconds: float | None = None,
+                poll_interval_seconds: float | None = None,
+            ) -> OcrInferenceJob:
+                del poll_interval_seconds
+                observed_timeouts.append(timeout_seconds)
+                completed_job = OcrInferenceJob(
+                    Id=job_id,
+                    JobKind=JOB_KIND_LOCAL_SCAN,
+                    Status="SUCCEEDED",
+                    ImageSha256=img_sha,
+                    ResultPayload={
+                        "full_text": "Xin chào thế giới",
+                        "words": [{"text": "Xin", "bbox": [0.1, 0.1, 0.1, 0.05]}],
+                        "ocr_meta": {"runtime_device": "cpu"},
+                        "no_text_detected": False,
+                    },
+                )
+                return completed_job
+
+            async def fake_cancel_job(_self_svc: OcrInferenceJobService, _job_id, *, reason: str):
+                cancelled_reasons.append(reason)
+
+            aca_url = "https://viread-ocr-worker.eastasia.azurecontainerapps.io"
+            with (
+                tempfile.TemporaryDirectory(prefix="viread-sync-scan-cap-") as tmp_storage,
+                patch.object(
+                    OcrInferenceJobService,
+                    "wait_for_job_completion",
+                    new=fake_wait_for_job_completion,
+                ),
+                patch.object(
+                    OcrInferenceJobService,
+                    "cancel_job",
+                    new=fake_cancel_job,
+                ),
+                patch(
+                    "app.services.remote_ocr_wakeup.send_remote_ocr_wakeup",
+                    return_value=True,
+                ),
+            ):
+                # 1. Scale-to-zero enabled -> sync scan waits up to 90.0s (not 45.0s!)
+                with patch.dict(
+                    os.environ,
+                    {
+                        "VIREAD_LOCAL_STORAGE_DIR": tmp_storage,
+                        "VIREAD_OCR_MODE": "remote_worker",
+                        "VIREAD_OCR_REMOTE_WORKER_URL": aca_url,
+                        "VIREAD_OCR_REMOTE_SCALE_TO_ZERO": "true",
+                        "VIREAD_OCR_WORKER_TOKEN": WORKER_TOKEN,
+                        "VIREAD_REMOTE_OCR_SYNC_TIMEOUT_SECONDS": "",
+                    },
+                    clear=False,
+                ):
+                    sess = FakeAsyncSession(state)
+                    svc = LocalOcrScanService(LocalOcrScanRepository(sess))  # type: ignore[arg-type]
+                    out = await svc._run_remote_ocr_scan(
+                        actor_id=uuid4(),
+                        scan_job_id=uuid4(),
+                        clean_bytes=jpeg_bytes,
+                        image_sha256=img_sha,
+                        book_id=None,
+                        idempotency_key=None,
+                        timeout_seconds=120.0,
+                    )
+                    await shutdown_remote_ocr_wakeup_tasks()
+                    self.assertEqual(out["text"], "Xin chào thế giới")
+
+                # 2. Scale-to-zero disabled -> preserves 45.0s cap
+                with patch.dict(
+                    os.environ,
+                    {
+                        "VIREAD_LOCAL_STORAGE_DIR": tmp_storage,
+                        "VIREAD_OCR_MODE": "remote_worker",
+                        "VIREAD_OCR_REMOTE_WORKER_URL": aca_url,
+                        "VIREAD_OCR_REMOTE_SCALE_TO_ZERO": "false",
+                        "VIREAD_OCR_WORKER_TOKEN": WORKER_TOKEN,
+                        "VIREAD_REMOTE_OCR_SYNC_TIMEOUT_SECONDS": "",
+                    },
+                    clear=False,
+                ):
+                    clear_remote_ocr_wakeup_cache_for_tests()
+                    set_remote_ocr_wakeup_transport_for_tests(
+                        httpx.MockTransport(
+                            lambda _req: httpx.Response(
+                                200,
+                                json={
+                                    "status": "ok",
+                                    "worker_status": "IDLE",
+                                    "ready": True,
+                                },
+                            )
+                        )
+                    )
+                    sess2 = FakeAsyncSession(state)
+                    svc2 = LocalOcrScanService(LocalOcrScanRepository(sess2))  # type: ignore[arg-type]
+                    await svc2._run_remote_ocr_scan(
+                        actor_id=uuid4(),
+                        scan_job_id=uuid4(),
+                        clean_bytes=jpeg_bytes,
+                        image_sha256=img_sha,
+                        book_id=None,
+                        idempotency_key=None,
+                        timeout_seconds=120.0,
+                    )
+                    await shutdown_remote_ocr_wakeup_tasks()
+
+                self.assertEqual(observed_timeouts, [90.0, 45.0])
+                self.assertEqual(cancelled_reasons, [])
+
+        asyncio.run(_scenario())
+
 
 if __name__ == "__main__":
     unittest.main()

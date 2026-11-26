@@ -48,6 +48,7 @@ from app.services.ocr_inference_job_service import (
     is_remote_ocr_mode,
     normalize_text_tokens,
     normalize_word,
+    remote_sync_wait_timeout_seconds,
 )
 
 
@@ -391,7 +392,9 @@ class LocalOcrScanService:
             try:
                 completed = await job_service.wait_for_job_completion(
                     job.Id,
-                    timeout_seconds=min(float(timeout_seconds), 45.0),
+                    timeout_seconds=min(
+                        float(timeout_seconds), remote_sync_wait_timeout_seconds()
+                    ),
                 )
             except HTTPException:
                 await OcrInferenceJobService(self.repository.db).cancel_job(
