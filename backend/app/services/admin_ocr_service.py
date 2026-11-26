@@ -3013,6 +3013,9 @@ class AdminOcrService:
                 },
             )
             await self.db.commit()
+            from app.jobs.viread_ocr_outbox_worker import schedule_viread_ocr_outbox
+
+            schedule_viread_ocr_outbox()
         except Exception:
             await self.db.rollback()
             raise

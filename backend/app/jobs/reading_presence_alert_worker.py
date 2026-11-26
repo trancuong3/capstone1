@@ -5,8 +5,10 @@ import asyncio
 import functools
 import inspect
 import logging
+import os
 import signal
 from datetime import datetime, timezone
+from typing import Any
 
 from app.database.config import READING_PRESENCE_POLL_SECONDS, SUPABASE_ADMIN_KEY
 from app.database.session import AsyncSessionLocal, engine
@@ -21,7 +23,11 @@ from app.providers.reading_presence_email_provider import send_presence_email
 from app.repositories.reading_presence_repository import ReadingPresenceRepository
 from app.services.i18n.locales import DEFAULT_LOCALE, resolve_supported_locale
 from app.services.reading_presence_service import ReadingPresenceService
-from app.services.worker_telemetry import record_worker_error, record_worker_success
+from app.services.worker_telemetry import (
+    persist_worker_heartbeat_with_factory,
+    record_worker_error,
+    record_worker_success,
+)
 
 logger = logging.getLogger(__name__)
 READING_PRESENCE_ADVISORY_LOCK_KEY = 4201002
@@ -51,21 +57,116 @@ async def process_due_alerts_once(
     locale: str = DEFAULT_LOCALE,
 ) -> int:
     now = now or datetime.now(timezone.utc)
-    async with _advisory_lock_guard(READING_PRESENCE_ADVISORY_LOCK_KEY) as acquired:
-        if not acquired:
-            logger.info("reading_presence_skipped_lock_held")
-            return 0
-        async with AsyncSessionLocal() as session:
-            service = ReadingPresenceService(ReadingPresenceRepository(session))
-            delivered = await service.deliver_due(
-                now,
-                recipient_resolver=get_verified_parent_email,
-                email_sender=_sender_for_locale(locale),
-                parent_email_unavailable=ParentEmailUnavailable,
-                parent_lookup_failed=ParentEmailLookupFailed,
+    try:
+        async with _advisory_lock_guard(READING_PRESENCE_ADVISORY_LOCK_KEY) as acquired:
+            if not acquired:
+                logger.info("reading_presence_skipped_lock_held")
+                return 0
+            async with AsyncSessionLocal() as session:
+                service = ReadingPresenceService(ReadingPresenceRepository(session))
+                delivered = await service.deliver_due(
+                    now,
+                    recipient_resolver=get_verified_parent_email,
+                    email_sender=_sender_for_locale(locale),
+                    parent_email_unavailable=ParentEmailUnavailable,
+                    parent_lookup_failed=ParentEmailLookupFailed,
+                )
+            record_worker_success(_WORKER_KEY)
+            return delivered
+    except asyncio.CancelledError:
+        raise
+    except Exception as error:
+        record_worker_error(_WORKER_KEY, error)
+        raise
+
+
+_EVENT_PRESENCE_TASKS: set[asyncio.Task[Any]] = set()
+_EVENT_PRESENCE_SEMAPHORES: dict[int, asyncio.Semaphore] = {}
+
+
+def _event_presence_semaphore() -> asyncio.Semaphore:
+    loop_id = id(asyncio.get_running_loop())
+    sem = _EVENT_PRESENCE_SEMAPHORES.get(loop_id)
+    if sem is None:
+        sem = asyncio.Semaphore(1)
+        _EVENT_PRESENCE_SEMAPHORES[loop_id] = sem
+    return sem
+
+
+async def _run_scheduled_presence_delivery(*, now: datetime | None = None) -> int:
+    await asyncio.sleep(0)
+    sem = _event_presence_semaphore()
+    async with sem:
+        try:
+            delivered = int(await process_due_alerts_once(now=now))
+            await persist_worker_heartbeat_with_factory(
+                AsyncSessionLocal,
+                _WORKER_KEY,
+                execution_mode="on_demand",
+                ok=True,
+                items_processed=delivered,
+                source="presence_confirm",
             )
-        record_worker_success(_WORKER_KEY)
-        return delivered
+            return delivered
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            record_worker_error(_WORKER_KEY, exc)
+            await persist_worker_heartbeat_with_factory(
+                AsyncSessionLocal,
+                _WORKER_KEY,
+                execution_mode="on_demand",
+                ok=False,
+                items_processed=0,
+                source="presence_confirm",
+                error_code=type(exc).__name__,
+            )
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="reading_presence_event_delivery_failed",
+                stage="event_trigger",
+                exception=exc,
+            )
+            return 0
+
+
+def schedule_reading_presence_delivery(
+    *,
+    now: datetime | None = None,
+    force: bool = False,
+) -> asyncio.Task[Any] | None:
+    """Single-flight bounded event-driven trigger for due presence alerts."""
+    from app.database.config import APP_ENVIRONMENT
+
+    if not force:
+        app_env = (os.getenv("APP_ENVIRONMENT") or APP_ENVIRONMENT or "").strip().lower()
+        if app_env == "test":
+            return None
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    active_tasks = [t for t in list(_EVENT_PRESENCE_TASKS) if not t.done()]
+    if active_tasks:
+        return active_tasks[0]
+    task = loop.create_task(
+        _run_scheduled_presence_delivery(now=now),
+        name="reading_presence_event_delivery",
+    )
+    _EVENT_PRESENCE_TASKS.add(task)
+    task.add_done_callback(_EVENT_PRESENCE_TASKS.discard)
+    return task
+
+
+async def shutdown_scheduled_presence_tasks(*, timeout_seconds: float = 5.0) -> None:
+    if not _EVENT_PRESENCE_TASKS:
+        return
+    pending = [task for task in list(_EVENT_PRESENCE_TASKS) if not task.done()]
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.wait(pending, timeout=timeout_seconds)
 
 
 def validate_worker_configuration() -> None:

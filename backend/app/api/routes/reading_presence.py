@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_parent_id
+from app.jobs.reading_presence_alert_worker import schedule_reading_presence_delivery
 from app.repositories.reading_presence_repository import ReadingPresenceRepository
 from app.schemas.reading_presence import (
     PresenceAlertArm,
@@ -101,10 +102,19 @@ async def confirm_alert(
     actor_id: UUID = Depends(require_parent_id),
     db: AsyncSession = Depends(get_db),
 ) -> PresenceAlertRead:
+    now = utcnow()
     try:
-        return to_read(await build_service(db).confirm(actor_id, alert_id, utcnow()))
+        alert = await build_service(db).confirm(actor_id, alert_id, now)
     except PresenceNotFound as error:
         raise map_error(error) from None
+    due_at = getattr(alert, "DueAt", None)
+    status_val = str(getattr(alert, "Status", "PENDING") or "PENDING").upper()
+    if due_at is not None and status_val == "PENDING":
+        cmp_due = due_at if due_at.tzinfo is not None else due_at.replace(tzinfo=timezone.utc)
+        cmp_now = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+        if cmp_now >= cmp_due:
+            schedule_reading_presence_delivery(now=cmp_now)
+    return to_read(alert)
 
 
 @router.post("/alerts/{alert_id}/cancel", response_model=PresenceAlertRead)

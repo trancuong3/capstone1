@@ -15,7 +15,13 @@
     "auditLogsTitle": "Registros de auditoría",
     "healthTitle": "Estado operativo",
     "protectedLoadingAria": "Cargando el área de administración",
-    "protectedLoadingStatus": "Cargando datos de administración..."
+    "protectedLoadingStatus": "Cargando datos de administración...",
+    "bookDetailTitle": "Detalles del libro",
+    "karaokeEditTitle": "Editar canción",
+    "karaokeNewTitle": "Crear nueva canción",
+    "karaokeTitle": "Gestión de canciones",
+    "ocrReviewTitle": "Revisión OCR de página",
+    "vireadTrainingTitle": "Entrenamiento OCR"
   },
   "layout": {
     "skipToContent": "Saltar navegación, ir al contenido de administración",
@@ -35,7 +41,12 @@
     },
     "signOut": "Cerrar sesión",
     "signingOut": "Cerrando sesión...",
-    "signOutError": "No se puede cerrar la sesión en este momento. Por favor, inténtalo de nuevo."
+    "signOutError": "No se puede cerrar la sesión en este momento. Por favor, inténtalo de nuevo.",
+    "groups": {
+      "content": "Contenido",
+      "systemAi": "Sistema e IA",
+      "users": "Usuarios"
+    }
   },
   "login": {
     "areaLabel": "Área de administración",
@@ -97,7 +108,9 @@
     "sessionInvalidTitle": "Sesión de inicio de sesión no válida",
     "yes": "Sí",
     "no": "No",
-    "notYet": "Aún no"
+    "notYet": "Aún no",
+    "breadcrumbAria": "Ruta de navegación",
+    "clearSearch": "Limpiar búsqueda"
   },
   "auditLogs": {
     "title": "Registros de auditoría",
@@ -117,7 +130,22 @@
     "viewMetadataDetails": "Ver detalles de metadatos ({count} caracteres)",
     "loadMoreError": "No se pueden cargar más registros. Los registros anteriores permanecen sin cambios.",
     "retryLoadMore": "Reintentar carga",
-    "loadMore": "Cargar más"
+    "loadMore": "Cargar más",
+    "clearFilters": "Limpiar filtros",
+    "columns": {
+      "action": "Acción",
+      "metadata": "Metadatos",
+      "resource": "Recurso",
+      "timestamp": "Fecha y hora"
+    },
+    "drawerTitleFallback": "Detalles del evento",
+    "eventIdLabel": "ID del evento",
+    "filterActionPlaceholder": "ej.: book.read, parent.update…",
+    "filterAria": "Filtros de registros de auditoría",
+    "filterResourcePlaceholder": "ej.: book, parent, song…",
+    "inspectBtn": "Detalles",
+    "inspectEventAria": "Inspeccionar evento {action}",
+    "tableAria": "Tabla de registros de auditoría"
   },
   "health": {
     "title": "Estado operativo",
@@ -137,7 +165,14 @@
       "healthy": "Verificado",
       "failed": "Error encontrado",
       "unknown": "No verificado",
-      "disabled": "No ejecutándose"
+      "disabled": "No ejecutándose",
+      "cached": "Caché precalculada",
+      "client_side": "En el navegador",
+      "cloud_ready": "Nube lista",
+      "local_only": "Solo local",
+      "remote_delegated": "Delegado remoto",
+      "scheduled": "Programado",
+      "standby": "En espera"
     },
     "queueDepthLabel": "Cola",
     "queueDepthValue": "{count, plural, =0 {0 tareas} one {# tarea} other {# tareas}}",
@@ -186,8 +221,87 @@
       "Queued": "En cola",
       "Quota exhausted": "Límite excedido",
       "Unsupported": "No soportado",
-      "Unknown": "Desconocido"
-    }
+      "Unknown": "Desconocido",
+      "Local only": "Solo local",
+      "Scheduled": "Programado",
+      "Standby": "En espera"
+    },
+    "actionHintLabel": "Acción sugerida",
+    "audioCacheErrorDetail": "Código de diagnóstico: {code}",
+    "audioCacheErrorTitle": "No se pudieron cargar las métricas de la caché TTS precalculada",
+    "audioCachePercentUsed": "{percent} utilizado",
+    "audioCacheUnlimited": "Sin límite",
+    "audioCacheUsageAria": "Uso de {label}: {percent}%",
+    "autoRefresh30s": "30 s",
+    "autoRefresh60s": "60 s",
+    "autoRefreshActive": "Actualización automática cada {seconds}s",
+    "autoRefreshLabel": "Autoactualizar",
+    "autoRefreshOff": "Desactivado",
+    "autoRefreshPaused": "Autoactualización pausada mientras la pestaña está oculta",
+    "clearTtsCache": "Limpiar caché TTS",
+    "clearTtsCacheError": "No se pudo limpiar la caché TTS del navegador en este momento.",
+    "clearTtsCacheSuccess": "Se limpió la caché TTS del navegador.",
+    "clearWasmCache": "Limpiar caché del modelo STT",
+    "clearWasmCacheError": "No se pudo limpiar la caché del modelo STT en este momento.",
+    "clearWasmCacheSuccess": "Se limpió la caché del modelo STT en el navegador.",
+    "clearingCache": "Limpiando…",
+    "deviceProbeError": "No se pudieron inspeccionar completamente las capacidades del dispositivo actual.",
+    "dismissErrorAria": "Descartar aviso de error",
+    "errorHttpStatus": "HTTP {status}",
+    "errorRequestId": "ID de solicitud: {requestId}",
+    "filterAria": "Filtrar servicios por estado",
+    "filteredEmpty": "Ningún servicio coincide con este filtro de estado.",
+    "filters": {
+      "all": "Todos",
+      "attention": "Requiere atención",
+      "healthy": "Activos",
+      "local_only": "Solo local",
+      "standby": "En espera"
+    },
+    "groups": {
+      "core": "Infraestructura central",
+      "coreDesc": "API, base de datos y almacenamiento de objetos esenciales para la plataforma.",
+      "localOnlyWorkers": "Solo local / Delegado remoto / Desactivado por configuración",
+      "localOnlyWorkersToggleHint": "{count} elementos",
+      "ocr": "Pipeline OCR y motores IA",
+      "ocrDesc": "Worker OCR remoto, 4 motores de reconocimiento y corrección con IA.",
+      "voice": "Voz y caché de audio",
+      "voiceDesc": "Texto a voz, voz a texto y caché de audio precalculada.",
+      "workers": "Workers en segundo plano y Cron",
+      "workersDesc": "Tareas programadas, colas de moderación y workers de eventos de lectura."
+    },
+    "kpiAria": "Métricas de estado de servicios",
+    "kpiTotalDetail": "/ {total} servicios",
+    "ocrEnginesSubheading": "Motores de reconocimiento OCR",
+    "probeDevice": "Comprobar dispositivo",
+    "probingDevice": "Comprobando dispositivo…",
+    "refreshTimeoutError": "La comprobación de estado agotó el tiempo tras 15 segundos.",
+    "refreshWarningBody": "Se muestra la captura más reciente. Inténtalo de nuevo.",
+    "refreshWarningTitle": "No se pudo actualizar el estado más reciente",
+    "refreshing": "Actualizando…",
+    "resetFilter": "Mostrar todos los servicios",
+    "sttEnvAndroidWebView": "Android WebView",
+    "sttEnvIosWebView": "iOS WebView",
+    "sttEnvPwa": "Aplicación PWA",
+    "sttInsecureContextWarning": "El contexto no es HTTPS seguro; el micrófono y algunas API del navegador pueden estar restringidos.",
+    "sttMicNeedsHttps": "Se requiere HTTPS para el micrófono",
+    "sttMicNoMediaDevices": "getUserMedia no disponible",
+    "sttModelBytesDetail": "{used} / {total}",
+    "sttModelCacheError": "Error de lectura en IndexedDB ({code})",
+    "sttNoIndexedDbWarning": "IndexedDB no está disponible; no se pueden guardar modelos STT ni caché TTS localmente.",
+    "summaryAllHealthy": "Los {healthy} servicios funcionan con normalidad.",
+    "summaryAria": "Resumen operativo del sistema",
+    "summaryAttentionSegment": "{count} requieren atención",
+    "summaryHealthySegment": "{count} activos",
+    "summaryLocalOnlySegment": "{count} solo locales",
+    "summaryStandbySegment": "{count} en espera",
+    "ttsCacheBrowserEmpty": "Vacía (0 elementos)",
+    "ttsCacheBrowserError": "Error de caché ({code})",
+    "ttsCacheBrowserHitsMisses": "Aciertos: {hits} · Fallos: {misses}",
+    "wakeOcrError": "No se pudo despertar el worker OCR. Inténtalo de nuevo.",
+    "wakeOcrRechecking": "Volviendo a comprobar automáticamente en unos segundos…",
+    "wakeOcrWorker": "Despertar worker OCR",
+    "wakingOcrWorker": "Despertando…"
   },
   "parents": {
     "title": "Gestión de padres",
@@ -264,7 +378,8 @@
       "childGrade": "Grado {grade}",
       "authNotConfigured": "No se pueden cargar el correo electrónico y el número de teléfono porque el backend no está configurado con permisos de acceso a Supabase Auth.",
       "authNotFound": "No se encontró ninguna cuenta de Supabase Auth vinculada a este perfil. La información del perfil y del niño se muestra igualmente.",
-      "authUnavailable": "No se puede cargar la información de contacto de Supabase Auth en este momento. Comprueba la configuración o intenta recargar."
+      "authUnavailable": "No se puede cargar la información de contacto de Supabase Auth en este momento. Comprueba la configuración o intenta recargar.",
+      "parentIdLabel": "ID del padre/madre"
     },
     "modal": {
       "createTitle": "Añadir padre",
@@ -301,6 +416,16 @@
         "genericUpdate": "No se puede actualizar la cuenta en este momento. Inténtalo de nuevo.",
         "fallback": "No se puede actualizar la cuenta en este momento. Los datos introducidos se han conservado."
       }
+    },
+    "copiedId": "Copiado",
+    "copyId": "Copiar ID",
+    "copyIdAria": "Copiar ID {id}",
+    "directoryAria": "Lista de cuentas de padres",
+    "overviewAria": "Resumen de padres",
+    "searchToolbarAria": "Buscar padres",
+    "tableHeaders": {
+      "actions": "Acciones",
+      "parent": "Padre/Madre"
     }
   },
   "books": {
@@ -415,7 +540,13 @@
         "maxInt": "El grado máximo debe ser un número entero del 1 al 5.",
         "maxRange": "El grado máximo debe estar entre 1 y 5.",
         "gradeOrder": "El curso mínimo no puede ser mayor que el curso máximo."
-      }
+      },
+      "authorPlaceholder": "ej.: Charles Perrault",
+      "livePreviewDesc": "Cuando no se sube una portada personalizada, ViRead genera automáticamente una portada tipográfica clara con el título, el autor y el rango de grados.",
+      "livePreviewHeading": "Vista previa de la portada",
+      "livePreviewTitleFallback": "Título del nuevo libro",
+      "namePlaceholder": "ej.: El gato con botas (nombre interno del catálogo)",
+      "titlePlaceholder": "ej.: El gato con botas"
     },
     "detail": {
       "eyebrow": "Detalles del libro",
@@ -462,7 +593,18 @@
       "ocrQueueCheckNow": "Comprobar ahora",
       "queuedNewPageBadge": "Página nueva #{index} · Guardada en cola OCR",
       "pageQueuedOfflineBadge": "Guardada en cola OCR — Esperando servidor",
-      "pageQueuedOnlineBadge": "Reprocesando OCR…"
+      "pageQueuedOnlineBadge": "Reprocesando OCR…",
+      "copiedId": "Copiado",
+      "copyIdAria": "Copiar ID del libro",
+      "openOcrShort": "Abrir revisión OCR",
+      "publishRuleToggle": "Reglas de publicación para la biblioteca infantil",
+      "statNeedsReview": "Por revisar",
+      "statProcessing": "Procesando",
+      "statTotalPages": "Total de páginas",
+      "statVerified": "Verificadas",
+      "summaryStripAria": "Resumen del libro",
+      "toggleAiBatchBtn": "Ejecutar revisión IA por lotes",
+      "toggleUploadBtn": "Subir páginas"
     },
     "editor": {
       "loading": "Cargando metadatos del libro…",
@@ -498,7 +640,14 @@
       "cannotRetireTitle": "No se puede desactivar el libro",
       "safetyBlocked": "La seguridad infantil aún no permite este libro en la biblioteca. Completa OCR verificado y confirma que la seguridad coincide con el candidato para todas las páginas; los hallazgos HIGH o NOT_RECOMMENDED siguen bloqueados.",
       "invalidMetadata": "Los metadatos actuales no son válidos. Corrige el título y el rango de cursos en el formulario y guárdalos antes de activar.",
-      "genericToggleError": "Solicitud no confirmada. Comprueba los permisos de administrador o la conexión con el backend e inténtalo de nuevo."
+      "genericToggleError": "Solicitud no confirmada. Comprueba los permisos de administrador o la conexión con el backend e inténtalo de nuevo.",
+      "closeCoverStudio": "Cerrar Cover Studio",
+      "coverDesc": "Actualiza la portada del libro (subir, recortar 3:4, rotar o generar portada con IA) sin modificar las páginas de lectura ni las revisiones verificadas.",
+      "coverHeading": "Portada del libro",
+      "dangerZoneActiveDesc": "Desactivar oculta el libro de la biblioteca para padres, pero conserva todas las páginas, revisiones e historial de lectura.",
+      "dangerZoneHeading": "Ciclo de vida del libro",
+      "dangerZoneRetiredDesc": "Este libro está desactivado actualmente. Puedes reactivarlo cuando los metadatos y las páginas OCR cumplan los requisitos.",
+      "openCoverStudio": "Abrir Cover Studio"
     },
     "uploader": {
       "heading": "Sube imágenes de páginas o documentos y ejecuta el OCR",
@@ -526,11 +675,13 @@
         "noValidFiles": "No hay archivos válidos para subir. Verifique el formato, el tamaño y las dimensiones de la imagen.",
         "someInvalidFiles": "Algunos archivos no son válidos y no se han subido. Los archivos válidos se siguen procesando."
       },
-      "workerOfflineTitle": "El servidor OCR está temporalmente apagado",
+      "workerOfflineTitle": "El servicio de procesamiento OCR está sin conexión",
       "workerOfflineBody": "Aún puedes subir imágenes o PDF/DOCX ahora: se guardarán de forma duradera en la cola y se procesarán automáticamente cuando el servidor OCR vuelva a encenderse.",
-      "workerUnreachableTitle": "No se pudo comprobar el estado del servidor OCR",
+      "workerUnreachableTitle": "No se pudo verificar el estado del servicio OCR",
       "workerUnreachableBody": "El servidor está iniciando o la red es lenta. Puedes volver a comprobar o subir páginas para guardarlas en la cola OCR.",
-      "recheckWorkerBtn": "Volver a comprobar conexión OCR"
+      "recheckWorkerBtn": "Comprobar conexión OCR de nuevo",
+      "workerOfflineDesc": "Aún puedes subir imágenes o archivos PDF/DOCX ahora: el sistema los pondrá en cola de forma segura y ejecutará OCR automáticamente cuando el servicio vuelva a estar en línea.",
+      "workerUnreachableDesc": "El backend puede estar iniciando o la red estar lenta. Puedes volver a comprobar la conexión o subir archivos para encolar el OCR."
     },
     "imagePreview": {
       "hideButton": "Ocultar imagen de la página {pageNumber}",
@@ -587,8 +738,25 @@
         "savedNoChanges": "La IA no propuso modificaciones y realizó un análisis de seguridad. Pendiente de revisión por el administrador de las imágenes, los derechos de uso y la verificación manual.",
         "savedPrefix": "Borrador de IA guardado y pendiente de verificación manual por el administrador: {detail}",
         "failedKeepReview": "El procesamiento de la IA falló; la página permanece en estado NEEDS_REVIEW (no se VERIFICA automáticamente). {detail}"
+      },
+      "statusBadges": {
+        "failed": "Requiere revisión",
+        "saved": "Borrador guardado",
+        "verified": "Verificado"
       }
-    }
+    },
+    "emptyFilteredDesc": "Prueba cambiar el término de búsqueda o restablecer los filtros para ver todo el catálogo de libros.",
+    "filterToolbarAria": "Filtros del catálogo de libros",
+    "kpi": {
+      "activeBooks": "Libros activos",
+      "childLibraryEligible": "Apto para biblioteca infantil",
+      "needsReview": "Requiere revisión OCR",
+      "needsReviewDetail": "{count} páginas pendientes de revisión",
+      "total": "Total de libros"
+    },
+    "listAria": "Lista de libros de administración",
+    "resetFilters": "Restablecer",
+    "searchPlaceholder": "Buscar por nombre, título o autor…"
   },
   "metadataQuality": {
     "title": "Calidad de los datos del libro",
@@ -620,7 +788,8 @@
       "invalidGradeRange": "Rango de cursos no válido",
       "invalidGradeRangeDetail": "Fuera del curso 1–5 o el curso mínimo supera al curso máximo",
       "duplicateGroups": "Posibles duplicados",
-      "duplicateGroupsDetail": "{count} libros en grupos candidatos"
+      "duplicateGroupsDetail": "{count} libros en grupos candidatos",
+      "missingMetadataSummary": "Sin autor: {missingAuthor} · Grados no válidos: {invalidGrade}"
     },
     "issuesHeading": "Libros que necesitan revisión",
     "duplicateNote": "Los duplicados se identifican en función del título y el autor después de recortar los espacios en blanco y omitir mayúsculas y minúsculas.",
@@ -662,7 +831,8 @@
     "lifecycleLabels": {
       "ACTIVE": "Activo",
       "RETIRED": "Detenido"
-    }
+    },
+    "searchPlaceholder": "Buscar por título o autor…"
   },
   "contentQuality": {
     "eyebrow": "Administración de calidad de libros",
@@ -680,7 +850,9 @@
       "RESOLVED": "Resuelto",
       "REJECTED": "Rechazado",
       "REPORTED_BOOKS": "Libros reportados",
-      "REPORTED_PAGES": "Páginas reportadas"
+      "REPORTED_PAGES": "Páginas reportadas",
+      "reportedScope": "Libros reportados",
+      "reportedScopeDetail": "Páginas reportadas: {pages} · Rechazados: {rejected}"
     },
     "reportIssueTypes": {
       "BOOK_METADATA_ERROR": "Información del libro incorrecta",
@@ -859,7 +1031,14 @@
       "scanning": "Escaneando…",
       "scanWholeBook": "Escanear libro completo",
       "paginationAria": "Paginación de control de calidad del libro",
-      "itemLabel": "libro"
+      "itemLabel": "libro",
+      "kpiApprovedDetail": "Listo: {ready} · Aprobado por Admin: {approved} · Auto-publicado: {published}",
+      "kpiApprovedGroup": "Apto / Aprobado",
+      "kpiAria": "Resumen de aprobación y seguridad de libros",
+      "kpiCopyrightDetail": "Seguridad y derechos de autor: {both}",
+      "kpiProcessingDetail": "Escaneando: {processing} · Obsoleto: {stale} · Error de escaneo: {failed}",
+      "kpiProcessingGroup": "Procesando / Requiere reescaneo",
+      "statusBreakdownToggle": "Ver desglose detallado por estado ({count} grupos)"
     },
     "bookDetail": {
       "subheading": "Calidad del libro, historial de IA, hallazgos y revisión del ADMIN",
@@ -987,7 +1166,12 @@
       "checkAndFixPage": "Comprobar y editar página",
       "rescanPage": "Volver a escanear esta página",
       "noFindingThisScan": "No hay hallazgos en esta comprobación.",
-      "noScanResultYet": "La página no tiene resultados de comprobación; vea el estado y el motivo arriba."
+      "noScanResultYet": "La página no tiene resultados de comprobación; vea el estado y el motivo arriba.",
+      "compactFindingsDetail": "HIGH {high} · MEDIUM {medium} · {pages} páginas con alertas",
+      "compactMetricsToggle": "Ver métricas detalladas de IA, flujos y hash de evaluación",
+      "compactOcrDetail": "Hash válido: {valid}/{total} · Sin escanear: {unscanned}",
+      "compactPipelineDetail": "Obsoleto: {stale} · Procesando: {processing}",
+      "compactSafetyDetail": "Corrección: {proofreading}"
     }
   },
   "userBooks": {
@@ -1085,7 +1269,8 @@
       "suspendedBook": "Libro privado suspendido.",
       "rejected": "Esta versión de página ha sido rechazada.",
       "suspendedWithTitle": "Libro privado \"{title}\" suspendido. La familia propietaria no puede leerlo inmediatamente."
-    }
+    },
+    "kpiAria": "Resumen de moderación de libros de usuarios"
   },
   "flow2": {
     "filters": {
@@ -1438,7 +1623,9 @@
       "providerUnavailable": "no disponible",
       "providerChecking": "comprobando",
       "noProviderEvents": "No hay eventos del proveedor.",
-      "safetyDisclaimer": "Los resultados de la IA no garantizan una seguridad absoluta del contenido. Con los flujos de trabajo de IA, solo puede guardar como VERIFICADO después de que un Administrador confirme la Seguridad para el Candidato actual correcto."
+      "safetyDisclaimer": "Los resultados de la IA no garantizan una seguridad absoluta del contenido. Con los flujos de trabajo de IA, solo puede guardar como VERIFICADO después de que un Administrador confirme la Seguridad para el Candidato actual correcto.",
+      "emptyDesc": "Ejecuta CONFIRMAR Y EJECUTAR IA en la barra inferior para corregir ortografía y escanear la seguridad infantil.",
+      "emptyTitle": "Aún no hay resultados de seguridad IA para esta revisión"
     },
     "tabs": {
       "words": "Comprobar palabras y posiciones",
@@ -1566,12 +1753,91 @@
       "noWords": "Aún no hay palabras en esta revisión.",
       "addWord": "Añadir palabra",
       "deleteWord": "Eliminar palabra",
-      "finishReview": "Finalizar revisión"
+      "finishReview": "Finalizar revisión",
+      "hashColumnLabel": "#"
     },
     "historyView": {
       "heading": "Historial de procesamiento OCR",
       "subtitle": "{title} · Página {pageNumber} · Revisión R{revisionNo}",
       "mobileCardAria": "Seleccionar revisión {revisionNo}"
+    },
+    "smartBlocks": {
+      "acceptClearBtn": "Aceptar bloques claros",
+      "blockCardAria": "Bloque {typeLabel}",
+      "circuitBreakerDesc": "La proporción prevista de texto excluido superó el 35 % de la página, por lo que el sistema conservó estos bloques y los movió a Requiere verificación para revisión manual.",
+      "circuitBreakerTitle": "Protección contra pérdida de contenido activada",
+      "cropReviewTitle": "Se conservó el marco original de la imagen para evitar recortar texto",
+      "decisions": {
+        "EXCLUDE": "Excluido",
+        "KEEP": "Conservar",
+        "REVIEW": "Requiere verificación"
+      },
+      "editBtn": "Editar texto",
+      "editLabel": "Editar texto del bloque",
+      "emptyClean": "Aún no se ha conservado ningún bloque de contenido limpio.",
+      "emptyExcluded": "No se excluyó ruido ni números de página en esta página.",
+      "emptyReview": "No quedan bloques por verificar en esta página.",
+      "excludeBtn": "Excluir",
+      "geometryMeta": "Inclinación estimada: {angle}° · Área de página: {area}% · {gutterReason}",
+      "heading": "Revisión de extracción inteligente de OCR",
+      "headingWithPage": "Revisión de extracción inteligente de OCR — Página {pageNumber}",
+      "keepBtn": "Conservar",
+      "loaderDesc": "Separa automáticamente el contenido principal de lectura de los números de página, encabezados repetidos y texto sobrante (nunca elimina contenido principal automáticamente).",
+      "loaderError": "No se pudieron clasificar los bloques de texto inteligentes para esta página.",
+      "loaderOpenBtn": "Abrir clasificación inteligente de bloques",
+      "loaderReextractBtn": "Reanalizar bloques de texto",
+      "manualOverrideBadge": "Editado manualmente",
+      "noImageFallback": "Sin imagen original adjunta — aún se muestran los {count} bloques de texto analizados.",
+      "notices": {
+        "acceptClearAll": "Se confirmaron todos los {confirmed} bloques claros.",
+        "acceptClearRemoteRemaining": "Bloques claros aceptados. Quedan {remaining} bloques pendientes de verificación manual.",
+        "acceptClearWithRemaining": "Se confirmaron {confirmed} bloques claros. Todavía quedan {remaining} bloques que requieren verificación manual.",
+        "editSaved": "Texto del bloque actualizado y conservado en el contenido de lectura.",
+        "emptyEditError": "El texto del bloque no puede quedar vacío al guardar cambios.",
+        "excluded": "Bloque de texto excluido del contenido de lectura.",
+        "humanEditReason": "El usuario editó el texto de este bloque.",
+        "humanExcludeReason": "El usuario eligió excluir este bloque.",
+        "humanKeepReason": "El usuario eligió conservar este bloque.",
+        "humanRestoreReason": "Bloque restaurado al contenido de lectura.",
+        "kept": "Bloque de texto conservado en el contenido de lectura.",
+        "nothingToUndo": "No hay acciones para deshacer.",
+        "restored": "Bloque de texto restaurado al contenido de lectura.",
+        "saved": "Cambios del bloque de contenido guardados.",
+        "undone": "Se deshizo la acción más reciente.",
+        "updateFailed": "No se pudo actualizar la decisión de este bloque. Inténtalo de nuevo.",
+        "updated": "Estado del bloque de contenido actualizado."
+      },
+      "originalImageAlt": "Imagen original de la página del libro",
+      "originalImageAltWithPage": "Imagen original de la página {pageNumber}",
+      "overlayAria": "Superposición de regiones de texto extraído",
+      "previewEmpty": "No hay texto de lectura disponible tras el filtrado.",
+      "previewHeading": "Contenido de lectura para niños",
+      "previewReviewNotice": "La vista previa incluye actualmente {count} bloques por verificar para evitar perder contenido de lectura.",
+      "readingOrderMeta": "Orden de lectura #{order} · Confianza {confidence}%",
+      "reasonPrefix": "Motivo:",
+      "restoreBtn": "Restaurar",
+      "reviewBanner": "Los bloques siguientes se mantienen temporalmente en la vista previa para evitar perder texto. Elige Conservar o Excluir para cada bloque.",
+      "saveEditBtn": "Guardar edición",
+      "shadowModeDesc": "Las decisiones de filtrado de ruido se registran para comparación y aún no modifican el texto oficial de lectura.",
+      "shadowModeTitle": "Ejecutando en modo de comparación (Shadow)",
+      "summaryLine": "Tipo de página: {pageKind} · {retention}% caracteres conservados ({keep} conservados, {excluded} excluidos, {review} por verificar)",
+      "tabs": {
+        "clean": "Contenido limpio",
+        "excluded": "Excluidos",
+        "original": "Imagen original",
+        "preview": "Vista previa de lectura",
+        "review": "Por verificar"
+      },
+      "tabsAria": "Modos de vista de extracción OCR",
+      "undoBtn": "Deshacer"
+    },
+    "workbenchTabs": {
+      "ariaLabel": "Espacio de trabajo de revisión OCR",
+      "draft": "Texto y revisión",
+      "history": "Historial de revisiones",
+      "safety": "Seguridad IA",
+      "smartBlocks": "Bloques inteligentes V2",
+      "words": "Palabras y BBox"
     }
   },
   "training": {
@@ -1720,7 +1986,15 @@
       "closeDriftSuccess": "Trabajo con error de configuración cerrado. La ejecución y el punto de control se conservan, el candidato aún no ha sido evaluado/aprobado; el sistema puede crear un nuevo trabajo basado en la configuración bloqueada correctamente.",
       "closeDriftFailed": "No se puede cerrar este candidato; el estado o el linaje pueden haber cambiado.",
       "closeUnbenchmarkedSuccess": "Candidato no evaluado cerrado; la ejecución y el punto de control se conservan. El sistema generará automáticamente un Locked Test y un trabajo de reemplazo una vez que haya suficiente holdout VERIFIED independiente disponible.",
-      "closeUnbenchmarkedFailed": "No se puede cerrar el candidato. Es posible que el worker siga ejecutándose, que el candidato ya tenga una evaluación o que el linaje haya cambiado."
+      "closeUnbenchmarkedFailed": "No se puede cerrar el candidato. Es posible que el worker siga ejecutándose, que el candidato ya tenga una evaluación o que el linaje haya cambiado.",
+      "flow2AlreadyTrained": "El conjunto de datos y la configuración actuales de Flow 2 ya tienen un resultado de entrenamiento previo. Añade nuevas muestras VERIFIED o evalúa el candidato actual.",
+      "flow2NoEligibleSamples": "Aún no hay muestras limpias de Flow 2 elegibles para crear una instantánea.",
+      "flow2Paused": "Flow 2 está en pausa (VIREAD_FLOW2_INGESTION_PAUSED=true).",
+      "flow2ScheduleBlocked": "No se puede encolar Flow 2 ({reason}).",
+      "flow2Scheduled": "Se creó la instantánea de Flow 2 ({train} entrenamiento / {validation} validación) y se encoló el trabajo {jobId} ({status}).",
+      "flow2TrainValRequired": "La instantánea tiene actualmente {train} de entrenamiento y {validation} de validación; se requieren ambos conjuntos para encolar Colab.",
+      "flow2TriggerFailed": "Error al crear la instantánea o encolar el entrenamiento de Flow 2.",
+      "flow2UnresolvedJob": "Ya existe un trabajo de entrenamiento sin finalizar en la cola; no se creó uno nuevo."
     },
     "flow1": {
       "badgeEyebrow": "Flujo 1 Nuevo · Reemplazo Directo de Modelo",
@@ -1888,7 +2162,10 @@
         "APPS_SCRIPT_ACCESS_DENIED": "La aplicación web Apps Script está bloqueando el acceso anónimo. En script.google.com, vuelva a implementar con 'Quién tiene acceso: Cualquiera' (sigue protegido por la firma HMAC-SHA256).",
         "BRIDGE_SECRET_MISMATCH": "La firma del puente de Apps Script no coincide o falta VIREAD_BRIDGE_SECRET en las propiedades del script de script.google.com.",
         "DRIVE_SCOPE_MISMATCH": "El alcance de OAuth es incorrecto; se requiere el permiso mínimo drive.file. Por favor, vuelva a conectar y otorgue el permiso de carpeta específico de la aplicación.",
-        "genericCode": "Código de error: {code}. Compruebe su conexión a Google Drive o haga clic en Comprobar conexión y almacenamiento."
+        "genericCode": "Código de error: {code}. Compruebe su conexión a Google Drive o haga clic en Comprobar conexión y almacenamiento.",
+        "DESKTOP_REQUIRES_WINDOWS": "Los servidores Linux no admiten montajes locales de Google Drive for Desktop. Conéctate mediante Apps Script Bridge.",
+        "DESKTOP_UNAVAILABLE_CLOUD": "Los servidores en la nube (Render) no pueden acceder a Google Drive for Desktop (G:\\) en un equipo personal. Cambia a Apps Script Bridge.",
+        "ENCRYPTION_KEY_MISSING": "Falta la variable VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY (>= 32 caracteres) en el servidor."
       },
       "notices": {
         "redirectingOauth": "Redirigiendo a la autenticación OAuth 2.0 de Google (solicitando solo el permiso mínimo drive.file)…",
@@ -1909,8 +2186,37 @@
         "disconnectConfirm": "¿Desconectar Google Drive del Flujo 2? Los datos originales del libro y los archivos guardados en Drive no se eliminarán; los nuevos elementos de salida esperarán de forma segura (no se sincronizarán con Supabase).",
         "disconnected": "Google Drive desconectado de forma segura y token de actualización eliminado del backend.",
         "disconnectFailed": "No se puede desconectar Google Drive en este momento."
-      }
-    }
+      },
+      "desktopCloudWarningMid": "(solo legible en la unidad local G:\\ de Windows). Para que el backend en la nube (Render) y Google Colab lean/escriban en Drive, cambia a",
+      "desktopCloudWarningPrefix": "La conexión actual usa",
+      "disconnectModalConfirm": "Desconectar",
+      "disconnectModalTitle": "¿Desconectar Google Drive?"
+    },
+    "colabGuideAnd": "y",
+    "colabGuideMid1": ", selecciona Runtime",
+    "colabGuideMid2": ", activa los 2 Colab Secrets",
+    "colabGuidePrefix": "Abre el cuaderno",
+    "colabGuideSuffix": " y luego pulsa",
+    "colabGuideTitle": "Guía para ejecutar Colab Free GPU T4 (0 VND)",
+    "driveUnavailableDesc": "El backend no devolvió el estado de conexión de Google Drive para Flow 2.",
+    "driveUnavailableTitle": "Google Drive no configurado",
+    "errors": {
+      "loadFailed": "No se pudo cargar el estado de entrenamiento. Verifica los permisos de Admin y las migraciones de VietOCR V2.",
+      "serviceUnavailable": "El servicio de administración de entrenamiento VietOCR no está disponible."
+    },
+    "kpiGridAria": "Métricas de entrenamiento OCR",
+    "tabs": {
+      "drive": "Google Drive",
+      "flow1": "Reemplazo de modelo Flow 1",
+      "flow2": "Entrenamiento y evaluación Flow 2",
+      "overview": "Resumen y Runtime"
+    },
+    "tabsAria": "Secciones de entrenamiento OCR",
+    "triggerFlow2Btn": "Crear instantánea y encolar entrenamiento Flow 2",
+    "workerExecutionModeLabel": "Modo de ejecución:",
+    "workerWebHeavyDisabled": "Desactivado (usa el botón de abajo)",
+    "workerWebHeavyEnabled": "Activado",
+    "workerWebHeavyLabel": "Worker web en segundo plano:"
   },
   "karaoke": {
     "library": {
@@ -1950,7 +2256,11 @@
         "DRAFT": "Borrador",
         "PUBLISHED": "Visible",
         "HIDDEN": "Oculto"
-      }
+      },
+      "emptyTitle": "Aún no hay canciones",
+      "filterAria": "Filtros de biblioteca de canciones",
+      "hasCoverBadge": "Con portada",
+      "searchPlaceholder": "Introduce el título de la canción o autor…"
     },
     "workspace": {
       "retryLoad": "Intentar recargar",
@@ -2357,6 +2667,24 @@
       "listenDraftFirst": "Escucha y confirma primero el borrador actual.",
       "draftMissingReviewContent": "El borrador no tiene contenido para confirmar su aprobación.",
       "noResultToPreview": "Aún no hay ningún resultado para escuchar."
+    },
+    "confirm": {
+      "continueAction": "Continuar",
+      "editLyricsTitle": "¿Editar letras sincronizadas?",
+      "expandRepeatsAction": "Confirmar expansión",
+      "expandRepeatsTitle": "¿Expandir notación de repeticiones?",
+      "leaveAction": "Salir de la página",
+      "leaveTitle": "¿Salir de esta página?",
+      "publishAction": "Confirmar publicación",
+      "publishTitle": "¿Publicar canción?",
+      "reloadAction": "Recargar versión guardada",
+      "reloadTitle": "¿Recargar desde el servidor?",
+      "replaceAudioAction": "Reemplazar audio",
+      "replaceAudioTitle": "¿Reemplazar archivo de audio MP3?",
+      "replaceLyricsAction": "Reemplazar letras",
+      "replaceLyricsTitle": "¿Reemplazar toda la letra actual?",
+      "resplitAction": "Confirmar nueva división",
+      "resplitTitle": "¿Volver a dividir las sílabas de esta línea?"
     }
   },
   "pageUploadRuntime": {
@@ -2377,5 +2705,44 @@
     "reloadAfterUploadFailed": "No se pudo recargar la lista de páginas tras la subida. Es posible que se hayan guardado los datos; recarga para verificar.",
     "reprocessIncomplete": "La tarea de reprocesamiento OCR no terminó. Inténtalo de nuevo.",
     "reprocessQueuedWindows": "Solicitud de re-OCR guardada en la cola — Se procesará automáticamente al volver el servidor"
+  },
+  "qualityHub": {
+    "description": "Revisa metadatos del catálogo, resuelve reportes de padres, aprueba la seguridad de libros y modera libros privados en un centro unificado.",
+    "eyebrow": "Operaciones de calidad",
+    "tabs": {
+      "approval": "Aprobación y seguridad",
+      "metadata": "Metadatos de libros",
+      "reports": "Reportes de usuarios",
+      "userBooks": "Libros de usuarios y Flow 2"
+    },
+    "tabsAria": "Secciones de gestión de calidad de libros"
+  },
+  "taskCenter": {
+    "backgroundProcessing": "Procesando en segundo plano…",
+    "closeAria": "Cerrar centro de tareas de IA",
+    "defaultBookLabel": "Libro",
+    "elapsedHours": "{hours} h",
+    "elapsedHoursMinutes": "{hours} h {minutes} min",
+    "elapsedMinutes": "{minutes} min",
+    "elapsedMinutesSeconds": "{minutes} min {seconds} s",
+    "elapsedRunning": "En ejecución {elapsed}",
+    "elapsedSeconds": "{seconds} s",
+    "emptyDescription": "Cuando subas páginas, extraigas OCR o generes portadas, el progreso en vivo aparecerá aquí.",
+    "emptyTitle": "Aún no hay tareas de IA",
+    "openAria": "Abrir centro de tareas de IA",
+    "pageSeparator": " • Página {pageNumber}",
+    "pillFailed": "Tareas fallidas ({count})",
+    "pillIdle": "Tareas IA",
+    "pillRunning": "IA en curso ({count})",
+    "pillWaitingReview": "Por verificar ({count})",
+    "processingAria": "Procesando {title}",
+    "progressAria": "Progreso de {title}",
+    "refreshAria": "Actualizar lista de tareas",
+    "stagePrefix": "Paso: {stage}",
+    "subtitle": "Las tareas en segundo plano siguen ejecutándose de forma segura aunque cambies de página.",
+    "title": "Centro de tareas de IA",
+    "viewResultAction": "Ver resultado",
+    "workerOfflineBanner": "Esperando a que el worker de IA vuelva a conectarse. Las tareas están guardadas y continuarán automáticamente.",
+    "pillWaitingForWorker": "Cola de OCR ({count})"
   }
 }

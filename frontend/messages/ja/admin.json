@@ -15,7 +15,13 @@
     "auditLogsTitle": "監査ログ",
     "healthTitle": "運用状況",
     "protectedLoadingAria": "管理エリアを読み込み中",
-    "protectedLoadingStatus": "管理データを読み込み中…"
+    "protectedLoadingStatus": "管理データを読み込み中…",
+    "bookDetailTitle": "書籍詳細",
+    "karaokeEditTitle": "楽曲を編集",
+    "karaokeNewTitle": "新しい楽曲を作成",
+    "karaokeTitle": "楽曲管理",
+    "ocrReviewTitle": "ページOCR確認",
+    "vireadTrainingTitle": "OCR学習"
   },
   "layout": {
     "skipToContent": "ナビゲーションをスキップして管理コンテンツへ",
@@ -35,7 +41,12 @@
     },
     "signOut": "サインアウト",
     "signingOut": "サインアウト中…",
-    "signOutError": "現在ログアウトできません。再度お試しください。"
+    "signOutError": "現在ログアウトできません。再度お試しください。",
+    "groups": {
+      "content": "コンテンツ",
+      "systemAi": "システム & AI",
+      "users": "ユーザー"
+    }
   },
   "login": {
     "areaLabel": "管理エリア",
@@ -97,7 +108,9 @@
     "sessionInvalidTitle": "ログインセッションが無効です",
     "yes": "はい",
     "no": "いいえ",
-    "notYet": "未完了"
+    "notYet": "未完了",
+    "breadcrumbAria": "パンくずリスト",
+    "clearSearch": "検索をクリア"
   },
   "auditLogs": {
     "title": "監査ログ",
@@ -117,7 +130,22 @@
     "viewMetadataDetails": "メタデータの詳細を表示 ({count} 文字)",
     "loadMoreError": "これ以上のログを読み込めません。以前のレコードは保持されます。",
     "retryLoadMore": "再試行",
-    "loadMore": "さらに読み込む"
+    "loadMore": "さらに読み込む",
+    "clearFilters": "フィルターをクリア",
+    "columns": {
+      "action": "操作",
+      "metadata": "メタデータ",
+      "resource": "リソース",
+      "timestamp": "日時"
+    },
+    "drawerTitleFallback": "イベント詳細",
+    "eventIdLabel": "イベントID",
+    "filterActionPlaceholder": "例: book.read, parent.update…",
+    "filterAria": "監査ログフィルター",
+    "filterResourcePlaceholder": "例: book, parent, song…",
+    "inspectBtn": "詳細",
+    "inspectEventAria": "イベント {action} の詳細を表示",
+    "tableAria": "監査ログテーブル"
   },
   "health": {
     "title": "運用状況",
@@ -137,7 +165,14 @@
       "healthy": "確認済み",
       "failed": "エラー発生",
       "unknown": "未確認",
-      "disabled": "未実行"
+      "disabled": "未実行",
+      "cached": "事前生成キャッシュ",
+      "client_side": "クライアント側実行",
+      "cloud_ready": "クラウド準備完了",
+      "local_only": "ローカルのみ",
+      "remote_delegated": "リモート委任",
+      "scheduled": "定期スケジュール",
+      "standby": "待機中"
     },
     "queueDepthLabel": "キュー",
     "queueDepthValue": "{count, plural, =0 {0件のタスク} other {#件のタスク}}",
@@ -186,8 +221,87 @@
       "Queued": "キュー済み",
       "Quota exhausted": "制限超過",
       "Unsupported": "サポートされていません",
-      "Unknown": "不明"
-    }
+      "Unknown": "不明",
+      "Local only": "ローカルのみ",
+      "Scheduled": "定期実行",
+      "Standby": "待機中"
+    },
+    "actionHintLabel": "推奨アクション",
+    "audioCacheErrorDetail": "診断コード: {code}",
+    "audioCacheErrorTitle": "事前生成TTSキャッシュの統計を読み込めませんでした",
+    "audioCachePercentUsed": "{percent} 使用中",
+    "audioCacheUnlimited": "無制限",
+    "audioCacheUsageAria": "{label} の使用率: {percent}%",
+    "autoRefresh30s": "30秒",
+    "autoRefresh60s": "60秒",
+    "autoRefreshActive": "{seconds}秒ごとに自動更新",
+    "autoRefreshLabel": "自動更新",
+    "autoRefreshOff": "オフ",
+    "autoRefreshPaused": "タブが非表示の間は自動更新を一時停止中",
+    "clearTtsCache": "TTSキャッシュを削除",
+    "clearTtsCacheError": "現在ブラウザのTTSキャッシュを削除できません。",
+    "clearTtsCacheSuccess": "ブラウザのTTSキャッシュを削除しました。",
+    "clearWasmCache": "STTモデルキャッシュを削除",
+    "clearWasmCacheError": "現在STTモデルキャッシュを削除できません。",
+    "clearWasmCacheSuccess": "ブラウザのSTTモデルキャッシュを削除しました。",
+    "clearingCache": "削除中…",
+    "deviceProbeError": "現在のデバイス機能を完全に検査できませんでした。",
+    "dismissErrorAria": "エラー通知を閉じる",
+    "errorHttpStatus": "HTTP {status}",
+    "errorRequestId": "リクエストID: {requestId}",
+    "filterAria": "ステータスでサービスを絞り込む",
+    "filteredEmpty": "このステータスフィルターに一致するサービスはありません。",
+    "filters": {
+      "all": "すべて",
+      "attention": "要注意",
+      "healthy": "稼働中",
+      "local_only": "ローカルのみ",
+      "standby": "待機中"
+    },
+    "groups": {
+      "core": "コアインフラ",
+      "coreDesc": "プラットフォームの中核となるAPI、データベース、オブジェクトストレージ。",
+      "localOnlyWorkers": "ローカルのみ / リモート委任 / 設定により無効",
+      "localOnlyWorkersToggleHint": "{count} 件",
+      "ocr": "OCRパイプライン & AIエンジン",
+      "ocrDesc": "リモートOCRワーカー、4つの文字認識エンジン、AI校正。",
+      "voice": "音声 & オーディオキャッシュ",
+      "voiceDesc": "音声合成（TTS）、音声認識（STT）、事前生成オーディオキャッシュ。",
+      "workers": "バックグラウンドワーカー & Cron",
+      "workersDesc": "定期ジョブ、審査キュー、読書イベント処理ワーカー。"
+    },
+    "kpiAria": "サービスステータス指標",
+    "kpiTotalDetail": "/ {total} サービス",
+    "ocrEnginesSubheading": "OCR認識エンジン",
+    "probeDevice": "デバイスを確認",
+    "probingDevice": "デバイスを確認中…",
+    "refreshTimeoutError": "ヘルスチェック要求が15秒でタイムアウトしました。",
+    "refreshWarningBody": "最新のスナップショットを保持しています。もう一度お試しください。",
+    "refreshWarningTitle": "最新のステータスを更新できませんでした",
+    "refreshing": "更新中…",
+    "resetFilter": "すべてのサービスを表示",
+    "sttEnvAndroidWebView": "Android WebView",
+    "sttEnvIosWebView": "iOS WebView",
+    "sttEnvPwa": "PWAアプリ",
+    "sttInsecureContextWarning": "安全なHTTPS接続ではありません。マイクや一部ブラウザAPIが制限される場合があります。",
+    "sttMicNeedsHttps": "マイク使用にはHTTPSが必要",
+    "sttMicNoMediaDevices": "getUserMedia非対応",
+    "sttModelBytesDetail": "{used} / {total}",
+    "sttModelCacheError": "IndexedDB読み込みエラー ({code})",
+    "sttNoIndexedDbWarning": "IndexedDBが利用できないため、ローカルSTTモデルやTTSキャッシュを保存できません。",
+    "summaryAllHealthy": "全 {healthy} サービスが正常に稼働しています。",
+    "summaryAria": "システム稼働状況サマリー",
+    "summaryAttentionSegment": "{count} 件要注意",
+    "summaryHealthySegment": "{count} 件稼働中",
+    "summaryLocalOnlySegment": "{count} 件ローカルのみ",
+    "summaryStandbySegment": "{count} 件待機中",
+    "ttsCacheBrowserEmpty": "空（0 件）",
+    "ttsCacheBrowserError": "キャッシュエラー ({code})",
+    "ttsCacheBrowserHitsMisses": "ヒット: {hits} · ミス: {misses}",
+    "wakeOcrError": "OCRワーカーの起動コマンドを送信できませんでした。再試行してください。",
+    "wakeOcrRechecking": "数秒後に自動で再確認します…",
+    "wakeOcrWorker": "OCRワーカーを起動",
+    "wakingOcrWorker": "起動中…"
   },
   "parents": {
     "title": "保護者管理",
@@ -264,7 +378,8 @@
       "childGrade": "学年 {grade}",
       "authNotConfigured": "バックエンドでSupabase Authのアクセス権限が設定されていないため、メールアドレスと電話番号を読み込めません。",
       "authNotFound": "このプロフィールに紐付けられたSupabase Authアカウントが見つかりません。プロフィールとお子様の情報は引き続き表示されます。",
-      "authUnavailable": "現在、Supabase Authから連絡先情報を読み込めません。設定を確認するか、再読み込みしてください。"
+      "authUnavailable": "現在、Supabase Authから連絡先情報を読み込めません。設定を確認するか、再読み込みしてください。",
+      "parentIdLabel": "保護者ID"
     },
     "modal": {
       "createTitle": "保護者を追加",
@@ -301,6 +416,16 @@
         "genericUpdate": "現在アカウントを更新できません。再度お試しください。",
         "fallback": "現在アカウントを更新できません。入力されたデータは保持されています。"
       }
+    },
+    "copiedId": "コピー済み",
+    "copyId": "IDをコピー",
+    "copyIdAria": "ID {id} をコピー",
+    "directoryAria": "保護者アカウント一覧",
+    "overviewAria": "保護者概要",
+    "searchToolbarAria": "保護者を検索",
+    "tableHeaders": {
+      "actions": "操作",
+      "parent": "保護者"
     }
   },
   "books": {
@@ -415,7 +540,13 @@
         "maxInt": "最大学年は1から5の整数である必要があります。",
         "maxRange": "最大学年は1から5の間である必要があります。",
         "gradeOrder": "最小学年は最大学年を超えてはなりません。"
-      }
+      },
+      "authorPlaceholder": "例: シャルル・ペロー",
+      "livePreviewDesc": "独自の表紙画像をアップロードしない場合、ViReadがタイトル・著者・対象学年から鮮明なタイポグラフィ表紙を自動生成します。",
+      "livePreviewHeading": "表紙プレビュー",
+      "livePreviewTitleFallback": "新しい書籍のタイトル",
+      "namePlaceholder": "例: 長靴をはいた猫（内部管理名）",
+      "titlePlaceholder": "例: 長靴をはいた猫"
     },
     "detail": {
       "eyebrow": "本の詳細",
@@ -462,7 +593,18 @@
       "ocrQueueCheckNow": "今すぐ確認",
       "queuedNewPageBadge": "新規ページ #{index} · OCR待機キュー保存済み",
       "pageQueuedOfflineBadge": "OCR待機キュー保存済み — サーバー起動待ち",
-      "pageQueuedOnlineBadge": "OCR再処理中…"
+      "pageQueuedOnlineBadge": "OCR再処理中…",
+      "copiedId": "コピー済み",
+      "copyIdAria": "書籍IDをコピー",
+      "openOcrShort": "OCR確認を開く",
+      "publishRuleToggle": "子ども向け図書館の公開ルール",
+      "statNeedsReview": "要確認",
+      "statProcessing": "処理中",
+      "statTotalPages": "総ページ数",
+      "statVerified": "確認済み",
+      "summaryStripAria": "書籍サマリー",
+      "toggleAiBatchBtn": "AI一括チェックを実行",
+      "toggleUploadBtn": "ページをアップロード"
     },
     "editor": {
       "loading": "書籍メタデータを読み込み中…",
@@ -498,7 +640,14 @@
       "cannotRetireTitle": "書籍を非アクティブ化できません",
       "safetyBlocked": "Child Safetyの基準により、この書籍はライブラリに追加できません。すべてのページでOCR VERIFIEDを完了し、SafetyがCandidateと一致することを確認してください。HIGHまたはNOT_RECOMMENDEDの判定がある場合、引き続きブロックされます。",
       "invalidMetadata": "現在のメタデータは無効です。フォームのタイトルと学年範囲を修正し、有効化する前に保存してください。",
-      "genericToggleError": "リクエストが確認されませんでした。管理者の権限またはバックエンド接続を確認してからやり直してください。"
+      "genericToggleError": "リクエストが確認されませんでした。管理者の権限またはバックエンド接続を確認してからやり直してください。",
+      "closeCoverStudio": "カバー編集を閉じる",
+      "coverDesc": "読書ページや確認済みリビジョンを変更せずに、表紙を更新（アップロード、3:4トリミング、回転、AI表紙生成）します。",
+      "coverHeading": "書籍の表紙",
+      "dangerZoneActiveDesc": "非公開にすると保護者ライブラリから非表示になりますが、すべてのページ・リビジョン・読書履歴は保持されます。",
+      "dangerZoneHeading": "書籍のライフサイクル",
+      "dangerZoneRetiredDesc": "この書籍は現在停止中です。メタデータとOCRページが要件を満たしたら再公開できます。",
+      "openCoverStudio": "カバー編集を開く"
     },
     "uploader": {
       "heading": "書籍のページ画像またはドキュメントをアップロードしてOCRを実行",
@@ -526,11 +675,13 @@
         "noValidFiles": "有効なアップロードファイルがありません。形式、サイズ、画像寸法を確認してください。",
         "someInvalidFiles": "一部のファイルが無効なためアップロードされませんでした。有効なファイルは引き続き処理中です。"
       },
-      "workerOfflineTitle": "OCRサーバーは一時的にオフラインです",
+      "workerOfflineTitle": "OCR処理サービスは現在オフラインです",
       "workerOfflineBody": "画像やPDF/DOCXは今すぐアップロードできます。ページは待機キューに安全に保存され、OCRサーバーが復旧すると自動的に処理されます。",
-      "workerUnreachableTitle": "OCRサーバーの状態を確認できませんでした",
+      "workerUnreachableTitle": "OCRサービスの状態を確認できませんでした",
       "workerUnreachableBody": "バックエンドが起動中か通信が不安定です。再確認するか、OCR待機キューへアップロードできます。",
-      "recheckWorkerBtn": "OCR接続を再確認"
+      "recheckWorkerBtn": "OCR接続を再確認",
+      "workerOfflineDesc": "今すぐ画像やPDF/DOCXをアップロードできます。システムが安全にキューへ保存し、OCRサービス復帰後に自動処理します。",
+      "workerUnreachableDesc": "バックエンド起動中または通信遅延の可能性があります。接続を再確認するか、ファイルをアップロードしてOCRキューに追加できます。"
     },
     "imagePreview": {
       "hideButton": "{pageNumber}ページの画像を非表示",
@@ -587,8 +738,25 @@
         "savedNoChanges": "AIは修正を提案せず、安全スキャンを実行しました。画像、使用権、手動確認の管理者レビューをお待ちください。",
         "savedPrefix": "AIドラフトを保存しました。管理者の手動確認をお待ちください: {detail}",
         "failedKeepReview": "AI処理に失敗しました。ページはNEEDS_REVIEWステータスのままです（自動的にVERIFIEDにはなりません）。{detail}"
+      },
+      "statusBadges": {
+        "failed": "確認が必要",
+        "saved": "下書き保存済み",
+        "verified": "確認済み"
       }
-    }
+    },
+    "emptyFilteredDesc": "キーワードを変更するかフィルターをリセットして、書籍一覧全体を表示してください。",
+    "filterToolbarAria": "書籍ライブラリフィルター",
+    "kpi": {
+      "activeBooks": "公開中の書籍",
+      "childLibraryEligible": "子ども図書館対象",
+      "needsReview": "OCR確認待ち",
+      "needsReviewDetail": "{count} ページが確認待ち",
+      "total": "書籍合計"
+    },
+    "listAria": "管理用書籍一覧",
+    "resetFilters": "リセット",
+    "searchPlaceholder": "書籍名、タイトル、または著者で検索…"
   },
   "metadataQuality": {
     "title": "書籍データ品質",
@@ -620,7 +788,8 @@
       "invalidGradeRange": "学年範囲が無効です",
       "invalidGradeRangeDetail": "グレード1～5の範囲外、または最小グレードが最大グレードを超えています",
       "duplicateGroups": "重複の可能性",
-      "duplicateGroupsDetail": "{count} 冊の書籍が候補グループに含まれています"
+      "duplicateGroupsDetail": "{count} 冊の書籍が候補グループに含まれています",
+      "missingMetadataSummary": "著者未入力: {missingAuthor} · 無効な学年: {invalidGrade}"
     },
     "issuesHeading": "確認が必要な書籍",
     "duplicateNote": "重複は、空白を除去し大文字小文字を区別せずに、タイトルと著者に基づいて識別されます。",
@@ -662,7 +831,8 @@
     "lifecycleLabels": {
       "ACTIVE": "稼働中",
       "RETIRED": "停止中"
-    }
+    },
+    "searchPlaceholder": "タイトルまたは著者で検索…"
   },
   "contentQuality": {
     "eyebrow": "書籍品質管理",
@@ -680,7 +850,9 @@
       "RESOLVED": "解決済み",
       "REJECTED": "拒否されました",
       "REPORTED_BOOKS": "報告された書籍",
-      "REPORTED_PAGES": "報告されたページ"
+      "REPORTED_PAGES": "報告されたページ",
+      "reportedScope": "報告された書籍",
+      "reportedScopeDetail": "報告ページ: {pages} · 却下: {rejected}"
     },
     "reportIssueTypes": {
       "BOOK_METADATA_ERROR": "書籍情報の誤り",
@@ -859,7 +1031,14 @@
       "scanning": "スキャン中…",
       "scanWholeBook": "書籍全体をスキャン",
       "paginationAria": "品質チェックのページネーション",
-      "itemLabel": "冊"
+      "itemLabel": "冊",
+      "kpiApprovedDetail": "準備完了: {ready} · 管理者承認: {approved} · 自動公開: {published}",
+      "kpiApprovedGroup": "適格 / 承認済み",
+      "kpiAria": "書籍の承認と安全性の概要",
+      "kpiCopyrightDetail": "安全性と著作権の両方: {both}",
+      "kpiProcessingDetail": "スキャン中: {processing} · 要再スキャン: {stale} · 失敗: {failed}",
+      "kpiProcessingGroup": "処理中 / 要再スキャン",
+      "statusBreakdownToggle": "ステータス別の詳細内訳を表示（{count} グループ）"
     },
     "bookDetail": {
       "subheading": "書籍品質、AI履歴、調査結果、およびADMINレビュー",
@@ -987,7 +1166,12 @@
       "checkAndFixPage": "ページを確認・編集",
       "rescanPage": "このページを再スキャン",
       "noFindingThisScan": "このチェックに検出結果はありません。",
-      "noScanResultYet": "ページにチェック結果がありません。上記のステータスと理由を確認してください。"
+      "noScanResultYet": "ページにチェック結果がありません。上記のステータスと理由を確認してください。",
+      "compactFindingsDetail": "HIGH {high} · MEDIUM {medium} · {pages} ページに警告",
+      "compactMetricsToggle": "詳細なAI指標・ワークフロー・評価ハッシュを表示",
+      "compactOcrDetail": "有効ハッシュ: {valid}/{total} · 未スキャン: {unscanned}",
+      "compactPipelineDetail": "要再スキャン: {stale} · 処理中: {processing}",
+      "compactSafetyDetail": "校正: {proofreading}"
     }
   },
   "userBooks": {
@@ -1085,7 +1269,8 @@
       "suspendedBook": "プライベートブックを停止しました。",
       "rejected": "このページバージョンを拒否しました。",
       "suspendedWithTitle": "プライベートブック「{title}」を停止しました。所有する家族はすぐに読むことができません。"
-    }
+    },
+    "kpiAria": "ユーザー書籍審査キュー概要"
   },
   "flow2": {
     "filters": {
@@ -1438,7 +1623,9 @@
       "providerUnavailable": "利用不可",
       "providerChecking": "確認中",
       "noProviderEvents": "プロバイダーイベントなし",
-      "safetyDisclaimer": "AIの結果はコンテンツの絶対的な安全性を保証するものではありません。AIワークフローでは、管理者が現在の候補に対して安全性を確認した後にのみ「検証済み」として保存できます。"
+      "safetyDisclaimer": "AIの結果はコンテンツの絶対的な安全性を保証するものではありません。AIワークフローでは、管理者が現在の候補に対して安全性を確認した後にのみ「検証済み」として保存できます。",
+      "emptyDesc": "下部アクションバーの「確定してAIを実行」を押すと、誤字校正と子ども向け安全性スキャンを実行します。",
+      "emptyTitle": "このリビジョンのAI安全性結果はまだありません"
     },
     "tabs": {
       "words": "単語と位置を確認",
@@ -1566,12 +1753,91 @@
       "noWords": "このリビジョンにはまだ単語がありません。",
       "addWord": "単語を追加",
       "deleteWord": "単語を削除",
-      "finishReview": "確認を完了"
+      "finishReview": "確認を完了",
+      "hashColumnLabel": "#"
     },
     "historyView": {
       "heading": "OCR処理履歴",
       "subtitle": "{title} · ページ {pageNumber} · リビジョン R{revisionNo}",
       "mobileCardAria": "リビジョン {revisionNo} を選択"
+    },
+    "smartBlocks": {
+      "acceptClearBtn": "明確なブロックを承認",
+      "blockCardAria": "{typeLabel} ブロック",
+      "circuitBreakerDesc": "除外予定のテキスト比率がページの35%を超えたため、システムはこれらのブロックを保持し、手動確認用の「要検証」へ移動しました。",
+      "circuitBreakerTitle": "コンテンツ欠落防止ガードが作動しました",
+      "cropReviewTitle": "文字切れを防ぐため元画像の枠を維持しています",
+      "decisions": {
+        "EXCLUDE": "除外済み",
+        "KEEP": "保持",
+        "REVIEW": "要検証"
+      },
+      "editBtn": "テキスト編集",
+      "editLabel": "ブロックのテキストを編集",
+      "emptyClean": "保持されているクリーンな本文ブロックはまだありません。",
+      "emptyExcluded": "このページで除外されたノイズやページ番号はありません。",
+      "emptyReview": "このページに追加検証が必要なブロックはありません。",
+      "excludeBtn": "除外",
+      "geometryMeta": "推定傾き: {angle}° · ページ領域: {area}% · {gutterReason}",
+      "heading": "スマートOCR抽出コンテンツ確認",
+      "headingWithPage": "スマートOCR抽出コンテンツ確認 — ページ {pageNumber}",
+      "keepBtn": "保持",
+      "loaderDesc": "ページ番号・柱・不要な文字から本文を自動分離します（本文を自動削除することはありません）。",
+      "loaderError": "このページのスマートテキストブロック分類に失敗しました。",
+      "loaderOpenBtn": "スマートブロック分類を開く",
+      "loaderReextractBtn": "テキストブロックを再解析",
+      "manualOverrideBadge": "手動編集済み",
+      "noImageFallback": "元画像が添付されていませんが、解析済みの全 {count} ブロックを表示しています。",
+      "notices": {
+        "acceptClearAll": "明確な {confirmed} ブロックをすべて承認しました。",
+        "acceptClearRemoteRemaining": "明確なブロックを承認しました。残り {remaining} ブロックは手動検証が必要です。",
+        "acceptClearWithRemaining": "{confirmed} 個の明確なブロックを承認しました。残り {remaining} ブロックを手動検証してください。",
+        "editSaved": "ブロックのテキストを更新し、本文として保持しました。",
+        "emptyEditError": "保存時にブロックのテキストを空にすることはできません。",
+        "excluded": "テキストブロックを本文から除外しました。",
+        "humanEditReason": "ユーザーがこのブロックのテキストを編集しました。",
+        "humanExcludeReason": "ユーザーがこのブロックの除外を選択しました。",
+        "humanKeepReason": "ユーザーがこのブロックの保持を選択しました。",
+        "humanRestoreReason": "ブロックを本文へ復元しました。",
+        "kept": "テキストブロックを本文として保持しました。",
+        "nothingToUndo": "元に戻せる操作はありません。",
+        "restored": "テキストブロックを本文へ復元しました。",
+        "saved": "コンテンツブロックの変更を保存しました。",
+        "undone": "直前の操作を元に戻しました。",
+        "updateFailed": "このブロックの判定を更新できませんでした。もう一度お試しください。",
+        "updated": "コンテンツブロックの状態を更新しました。"
+      },
+      "originalImageAlt": "書籍ページの元画像",
+      "originalImageAltWithPage": "ページ {pageNumber} の元画像",
+      "overlayAria": "抽出テキスト領域のオーバーレイ",
+      "previewEmpty": "フィルタリング後に表示できる本文テキストがありません。",
+      "previewHeading": "子ども向け読書本文",
+      "previewReviewNotice": "本文の取りこぼしを防ぐため、プレビューには現在 {count} 個の要検証ブロックが含まれています。",
+      "readingOrderMeta": "読み順 #{order} · 信頼度 {confidence}%",
+      "reasonPrefix": "理由:",
+      "restoreBtn": "復元",
+      "reviewBanner": "テキスト欠落を防ぐため、以下のブロックは一時的にプレビューへ保持されています。各ブロックについて保持または除外を選択してください。",
+      "saveEditBtn": "編集を保存",
+      "shadowModeDesc": "ノイズ除去の判定は比較用に記録されており、正式な読書テキストはまだ変更されません。",
+      "shadowModeTitle": "比較モードで稼働中（Shadow）",
+      "summaryLine": "ページ種別: {pageKind} · 文字保持率 {retention}%（保持 {keep}、除外 {excluded}、要検証 {review}）",
+      "tabs": {
+        "clean": "クリーン本文",
+        "excluded": "除外済み",
+        "original": "元画像",
+        "preview": "読書プレビュー",
+        "review": "要検証"
+      },
+      "tabsAria": "OCR抽出の表示モード",
+      "undoBtn": "元に戻す"
+    },
+    "workbenchTabs": {
+      "ariaLabel": "OCR確認ワークスペース",
+      "draft": "本文と確認",
+      "history": "リビジョン履歴",
+      "safety": "AIセーフティ",
+      "smartBlocks": "スマートブロック V2",
+      "words": "単語とBBox"
     }
   },
   "training": {
@@ -1720,7 +1986,15 @@
       "closeDriftSuccess": "設定エラーのジョブを閉じました。実行とチェックポイントは保持され、候補はまだベンチマーク/承認されていません。システムは正しくロックされた設定に基づいて新しいジョブを作成する可能性があります。",
       "closeDriftFailed": "この候補を閉じられません。ステータスまたは系統が変更された可能性があります。",
       "closeUnbenchmarkedSuccess": "ベンチマーク未完了の候補を閉じました。実行とチェックポイントは保持されます。十分な独立したVERIFIEDホールドアウトが利用可能になると、システムが自動的にLocked Testと代替ジョブを生成します。",
-      "closeUnbenchmarkedFailed": "候補を閉じられません。ワーカーがまだ実行中か、候補に既にベンチマークがあるか、系統が変更されています。"
+      "closeUnbenchmarkedFailed": "候補を閉じられません。ワーカーがまだ実行中か、候補に既にベンチマークがあるか、系統が変更されています。",
+      "flow2AlreadyTrained": "現在のFlow 2データセットと設定には既存の学習結果があります。新しいVERIFIEDサンプルを追加するか、既存の候補を評価してください。",
+      "flow2NoEligibleSamples": "スナップショットを作成できるクリーンなFlow 2サンプルがまだありません。",
+      "flow2Paused": "Flow 2は一時停止中です（VIREAD_FLOW2_INGESTION_PAUSED=true）。",
+      "flow2ScheduleBlocked": "Flow 2をキューに追加できません（{reason}）。",
+      "flow2Scheduled": "Flow 2スナップショットを作成（学習 {train} / 検証 {validation}）し、ジョブ {jobId}（{status}）をキューに追加しました。",
+      "flow2TrainValRequired": "現在のスナップショットは学習 {train} 件・検証 {validation} 件です。Colabキューには両方の分割が必要です。",
+      "flow2TriggerFailed": "スナップショット作成またはFlow 2学習のキュー追加に失敗しました。",
+      "flow2UnresolvedJob": "未完了の学習ジョブがすでにキューにあるため、新規ジョブは作成されませんでした。"
     },
     "flow1": {
       "badgeEyebrow": "ストリーム1 新規 · 直接モデル置換",
@@ -1888,7 +2162,10 @@
         "APPS_SCRIPT_ACCESS_DENIED": "Apps Script Web Appが匿名アクセスをブロックしています。script.google.comで「アクセス権: 全員 (Anyone)」オプションを選択して再デプロイしてください（HMAC-SHA256署名で保護されます）。",
         "BRIDGE_SECRET_MISMATCH": "Apps Script Bridgeの署名が一致しないか、script.google.comのScript PropertiesにVIREAD_BRIDGE_SECRETが設定されていません。",
         "DRIVE_SCOPE_MISMATCH": "OAuthのスコープが最小限のdrive.fileになっていません。再接続し、アプリ専用フォルダーの権限を正しく許可してください。",
-        "genericCode": "エラーコード: {code}。Google Driveの接続を確認するか、「接続とストレージを確認」を押してください。"
+        "genericCode": "エラーコード: {code}。Google Driveの接続を確認するか、「接続とストレージを確認」を押してください。",
+        "DESKTOP_REQUIRES_WINDOWS": "LinuxサーバーはGoogle Drive for Desktopのローカルマウントに非対応です。Apps Script Bridge経由で接続してください。",
+        "DESKTOP_UNAVAILABLE_CLOUD": "クラウドサーバー（Render）は個人PC上のGoogle Drive for Desktop（G:\\）へアクセスできません。Apps Script Bridgeへ切り替えてください。",
+        "ENCRYPTION_KEY_MISSING": "サーバーに環境変数 VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY（32文字以上）が設定されていません。"
       },
       "notices": {
         "redirectingOauth": "GoogleのOAuth 2.0認証ページにリダイレクトしています（最小限のdrive.file権限のみを要求）…",
@@ -1909,8 +2186,37 @@
         "disconnectConfirm": "Google DriveをPipeline 2から切断しますか？元の書籍データとDriveに保存されたファイルは削除されません。新しいアウトボックス項目は安全に待機状態となります（Supabaseには同期されません）。",
         "disconnected": "Google Driveを安全に切断し、バックエンドからリフレッシュトークンを削除しました。",
         "disconnectFailed": "現在、Google Driveを切断できません。"
-      }
-    }
+      },
+      "desktopCloudWarningMid": "（ローカルWindowsの G:\\ ドライブでのみ読み取り可能）。クラウドバックエンド（Render）とGoogle ColabからDriveを読み書きするには次へ切り替えてください：",
+      "desktopCloudWarningPrefix": "現在の接続方式：",
+      "disconnectModalConfirm": "接続解除",
+      "disconnectModalTitle": "Google Driveの接続を解除しますか？"
+    },
+    "colabGuideAnd": "および",
+    "colabGuideMid1": "、Runtime を選択",
+    "colabGuideMid2": "、2つの Colab Secrets を有効化",
+    "colabGuidePrefix": "ノートブックを開く",
+    "colabGuideSuffix": "、その後クリック",
+    "colabGuideTitle": "Colab無料 T4 GPU 実行ガイド（0 VND）",
+    "driveUnavailableDesc": "バックエンドからFlow 2のGoogle Drive接続ステータスが返されませんでした。",
+    "driveUnavailableTitle": "Google Drive未設定",
+    "errors": {
+      "loadFailed": "学習ステータスを読み込めませんでした。管理者権限とVietOCR V2マイグレーションを確認してください。",
+      "serviceUnavailable": "VietOCR学習管理サービスは利用できません。"
+    },
+    "kpiGridAria": "OCR学習指標",
+    "tabs": {
+      "drive": "Google Drive",
+      "flow1": "Flow 1 モデル入替",
+      "flow2": "Flow 2 学習と評価",
+      "overview": "概要とランタイム"
+    },
+    "tabsAria": "OCR学習セクション",
+    "triggerFlow2Btn": "スナップショット作成 & Flow 2学習をキュー追加",
+    "workerExecutionModeLabel": "実行モード:",
+    "workerWebHeavyDisabled": "無効（下のボタンから起動）",
+    "workerWebHeavyEnabled": "有効",
+    "workerWebHeavyLabel": "Webバックグラウンドワーカー:"
   },
   "karaoke": {
     "library": {
@@ -1950,7 +2256,11 @@
         "DRAFT": "下書き",
         "PUBLISHED": "表示中",
         "HIDDEN": "非表示"
-      }
+      },
+      "emptyTitle": "まだ楽曲がありません",
+      "filterAria": "楽曲ライブラリフィルター",
+      "hasCoverBadge": "カバーあり",
+      "searchPlaceholder": "曲名または著者を入力…"
     },
     "workspace": {
       "retryLoad": "再読み込みを試す",
@@ -2357,6 +2667,24 @@
       "listenDraftFirst": "先に現在の下書きを試聴して確認してください。",
       "draftMissingReviewContent": "下書きに承認確認用の内容がありません。",
       "noResultToPreview": "まだ試聴できる結果がありません。"
+    },
+    "confirm": {
+      "continueAction": "続行",
+      "editLyricsTitle": "タイミング済み歌詞を編集しますか？",
+      "expandRepeatsAction": "展開を確定",
+      "expandRepeatsTitle": "繰り返し記号を展開しますか？",
+      "leaveAction": "ページを離れる",
+      "leaveTitle": "このページを離れますか？",
+      "publishAction": "公開を確定",
+      "publishTitle": "楽曲を公開しますか？",
+      "reloadAction": "保存版を再読み込み",
+      "reloadTitle": "サーバーから再読み込みしますか？",
+      "replaceAudioAction": "音源を置換",
+      "replaceAudioTitle": "MP3音源ファイルを置き換えますか？",
+      "replaceLyricsAction": "歌詞を置換",
+      "replaceLyricsTitle": "現在の歌詞をすべて置き換えますか？",
+      "resplitAction": "再分割を確定",
+      "resplitTitle": "この行の音節を再分割しますか？"
     }
   },
   "pageUploadRuntime": {
@@ -2377,5 +2705,44 @@
     "reloadAfterUploadFailed": "アップロード後にページ一覧を再読み込みできませんでした。データは保存済みの可能性があるため、再読み込みして確認してください。",
     "reprocessIncomplete": "ページの OCR 再処理が完了しませんでした。もう一度お試しください。",
     "reprocessQueuedWindows": "OCR再実行リクエストを待機キューに保存しました — OCRサーバー復旧後に自動処理されます"
+  },
+  "qualityHub": {
+    "description": "カタログのメタデータ確認、保護者報告の処理、書籍の安全性承認、ユーザー投稿本の審査を1つの画面で管理します。",
+    "eyebrow": "品質運用",
+    "tabs": {
+      "approval": "承認・安全性",
+      "metadata": "書籍メタデータ",
+      "reports": "ユーザー報告",
+      "userBooks": "ユーザー書籍 & Flow 2"
+    },
+    "tabsAria": "書籍品質管理セクション"
+  },
+  "taskCenter": {
+    "backgroundProcessing": "バックグラウンド処理中…",
+    "closeAria": "AIタスクセンターを閉じる",
+    "defaultBookLabel": "書籍",
+    "elapsedHours": "{hours}時間",
+    "elapsedHoursMinutes": "{hours}時間{minutes}分",
+    "elapsedMinutes": "{minutes}分",
+    "elapsedMinutesSeconds": "{minutes}分{seconds}秒",
+    "elapsedRunning": "{elapsed} 経過",
+    "elapsedSeconds": "{seconds}秒",
+    "emptyDescription": "ページのアップロード、OCR抽出、表紙生成を行うと、リアルタイムの進捗がここに表示されます。",
+    "emptyTitle": "AIタスクはまだありません",
+    "openAria": "AIタスクセンターを開く",
+    "pageSeparator": " • ページ {pageNumber}",
+    "pillFailed": "失敗タスク ({count})",
+    "pillIdle": "AIタスク",
+    "pillRunning": "AI実行中 ({count})",
+    "pillWaitingReview": "要確認 ({count})",
+    "processingAria": "{title} を処理中",
+    "progressAria": "{title} の進捗",
+    "refreshAria": "タスクリストを更新",
+    "stagePrefix": "工程: {stage}",
+    "subtitle": "別ページへ移動してもバックグラウンドタスクは安全に継続されます。",
+    "title": "AIタスクセンター",
+    "viewResultAction": "結果を見る",
+    "workerOfflineBanner": "AIワーカーの再接続を待機しています。タスクは安全に保存されており自動で再開されます。",
+    "pillWaitingForWorker": "OCR待機中 ({count})"
   }
 }

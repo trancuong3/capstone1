@@ -143,6 +143,12 @@ class RuntimeConfigurationDiagnosticsTests(unittest.TestCase):
 
 
 class StorageHealthTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        runtime_diagnostics.clear_storage_health_cache()
+
+    def tearDown(self):
+        runtime_diagnostics.clear_storage_health_cache()
+
     async def test_missing_storage_config_fails_without_network(self):
         with (
             patch.object(runtime_diagnostics, "SUPABASE_STORAGE_BUCKET", ""),
@@ -151,6 +157,9 @@ class StorageHealthTests(unittest.IsolatedAsyncioTestCase):
             result = await runtime_diagnostics.probe_storage_health()
         client.assert_not_called()
         self.assertEqual(result["status"], "UNAVAILABLE")
+        self.assertEqual(result["service_group"], "core")
+        self.assertEqual(result["criticality"], "core")
+        self.assertEqual(result["execution_mode"], "always_on")
         self.assertNotIn("private", repr(result))
 
     async def test_storage_head_success_and_access_denied_without_exposing_key(self):
@@ -164,6 +173,12 @@ class StorageHealthTests(unittest.IsolatedAsyncioTestCase):
         ):
             client.head.return_value = MagicMock(status_code=200)
             ready = await runtime_diagnostics.probe_storage_health()
+            # Second call within 15s TTL is served from RAM cache (no extra network call).
+            cached_ready = await runtime_diagnostics.probe_storage_health()
+            self.assertEqual(cached_ready["status"], "HEALTHY")
+            self.assertEqual(client.head.await_count, 1)
+
+            runtime_diagnostics.clear_storage_health_cache()
             client.head.return_value = MagicMock(status_code=403)
             denied = await runtime_diagnostics.probe_storage_health()
         self.assertEqual(ready["status"], "HEALTHY")

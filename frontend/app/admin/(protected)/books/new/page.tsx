@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { AdminNewBookScreen } from "@/components/admin/admin-new-book-screen";
-import { AdminServicesProvider } from "@/components/providers/admin-services-provider";
 import { translateMessage } from "@/lib/i18n/formatter";
 import { getServerI18n } from "@/lib/i18n/server";
 import { viMessages } from "@/messages/vi";
@@ -16,10 +15,7 @@ export async function generateMetadata(): Promise<Metadata> {
     ),
   };
 }
+
 export default function Page() {
-  return (
-    <AdminServicesProvider>
-      <AdminNewBookScreen />
-    </AdminServicesProvider>
-  );
+  return <AdminNewBookScreen />;
 }
