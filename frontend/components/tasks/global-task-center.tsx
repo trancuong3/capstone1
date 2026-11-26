@@ -354,7 +354,10 @@ export function GlobalTaskCenter({
     >
       <span className="flex min-w-0 items-center gap-2">
         {allActiveWaitingForWorker ? (
-          <Clock aria-hidden="true" className="size-4 shrink-0 text-amber-700" />
+          <Clock
+            aria-hidden="true"
+            className="size-4 shrink-0 text-amber-700"
+          />
         ) : activeCount > 0 ? (
           <Loader2
             aria-hidden="true"
