@@ -370,6 +370,17 @@ class LocalOcrScanService:
             if not await self.repository.child_belongs_to_parent(child_id, actor_id):
                 raise HTTPException(status_code=404, detail="Child profile not found")
 
+        # Release read-only auth transaction before image processing & remote /health check.
+        if not (
+            getattr(self.repository.db, "new", None)
+            or getattr(self.repository.db, "dirty", None)
+            or getattr(self.repository.db, "deleted", None)
+        ):
+            try:
+                await self.repository.db.rollback()
+            except Exception:
+                pass
+
         clean_bytes, image_sha256 = await self._validate_and_normalize_image(file)
 
         if idempotency_key is not None:
@@ -746,6 +757,17 @@ class LocalOcrScanService:
             if not await self.repository.child_belongs_to_parent(child_id, actor_id):
                 raise HTTPException(status_code=404, detail="Child profile not found")
 
+        # Release read-only auth transaction before image processing & remote /health check.
+        if not (
+            getattr(self.repository.db, "new", None)
+            or getattr(self.repository.db, "dirty", None)
+            or getattr(self.repository.db, "deleted", None)
+        ):
+            try:
+                await self.repository.db.rollback()
+            except Exception:
+                pass
+
         clean_bytes, image_sha256 = await self._validate_and_normalize_image(file)
         with Image.open(BytesIO(clean_bytes)) as img:
             width, height = img.size
@@ -950,17 +972,39 @@ class LocalOcrScanService:
         ):
             raise HTTPException(status_code=404, detail="Scan OCR job not found")
 
+        if str(job.Status or "").upper() == "QUEUED":
+            from app.services.remote_ocr_wakeup import (
+                maybe_nudge_ocr_wakeup_for_stale_queued_job,
+            )
+
+            maybe_nudge_ocr_wakeup_for_stale_queued_job(
+                job_id=job.Id,
+                created_at=job.CreatedAt,
+                reason="local_scan_poll_nudge",
+            )
+
         if job.Status in ("SUCCEEDED", "DEAD_LETTER", "CANCELLED"):
             await job_service._cleanup_local_scan_temp_object(job)
             try:
                 await self.repository.db.commit()
             except Exception:
                 await self.repository.db.rollback()
+                job = await job_service.repo.get(job_id) or job
 
-        worker_online = await job_service.has_online_worker()
-        return await self._serialize_scan_job(
-            job, worker_online=worker_online, request_id=request_id
+        serialized = await self._serialize_scan_job(
+            job, worker_online=False, request_id=request_id
         )
+        if not (
+            getattr(self.repository.db, "new", None)
+            or getattr(self.repository.db, "dirty", None)
+            or getattr(self.repository.db, "deleted", None)
+        ):
+            try:
+                await self.repository.db.rollback()
+            except Exception:
+                pass
+        worker_online = await job_service.has_online_worker()
+        return serialized.model_copy(update={"worker_online": worker_online})
 
     async def cancel_scan_page_job(
         self,
@@ -984,10 +1028,20 @@ class LocalOcrScanService:
 
         await job_service.cancel_job(job_id, reason="USER_CANCELLED")
         refreshed = await job_service.repo.get(job_id) or job
-        worker_online = await job_service.has_online_worker()
-        return await self._serialize_scan_job(
-            refreshed, worker_online=worker_online, request_id=request_id
+        serialized = await self._serialize_scan_job(
+            refreshed, worker_online=False, request_id=request_id
         )
+        if not (
+            getattr(self.repository.db, "new", None)
+            or getattr(self.repository.db, "dirty", None)
+            or getattr(self.repository.db, "deleted", None)
+        ):
+            try:
+                await self.repository.db.rollback()
+            except Exception:
+                pass
+        worker_online = await job_service.has_online_worker()
+        return serialized.model_copy(update={"worker_online": worker_online})
 
 
 async def cleanup_expired_local_scan_objects(

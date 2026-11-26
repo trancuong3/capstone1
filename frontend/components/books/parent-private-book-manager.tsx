@@ -499,7 +499,8 @@ function ParentPrivateBookManagerContent({
       }
       pollInFlightRef.current = true;
       try {
-        await Promise.all([loadDetail(true), maybePollWorkerHealth(false)]);
+        void maybePollWorkerHealth(false).catch(() => undefined);
+        await loadDetail(true);
         idleTicks += 1;
       } finally {
         pollInFlightRef.current = false;

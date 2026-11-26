@@ -488,9 +488,11 @@ async def collect_remote_ocr_health() -> dict[str, Any]:
     # Hugging Face Space in Quiet Standby reports accurate readiness and resets HF's 48h timer.
     from app.services.remote_ocr_wakeup import (
         is_remote_worker_wakeup_configured,
+        peek_remote_ocr_probe_degraded,
         probe_configured_remote_ocr_worker_health,
     )
 
+    remote_probe_degraded = False
     if is_remote_worker_wakeup_configured():
         passive_probe = await probe_configured_remote_ocr_worker_health()
         if isinstance(passive_probe, dict) and passive_probe.get("online"):
@@ -515,8 +517,10 @@ async def collect_remote_ocr_health() -> dict[str, Any]:
                     latest_online_engines = probe_engines
             elif not latest_online_engines and probe_engines:
                 latest_online_engines = probe_engines
+        if not any_online_ready and peek_remote_ocr_probe_degraded():
+            remote_probe_degraded = True
 
-    return {
+    out: dict[str, Any] = {
         "mode": "remote_worker",
         "ready": any_online_ready,
         "heartbeat_ttl_seconds": ttl_seconds,
@@ -524,3 +528,6 @@ async def collect_remote_ocr_health() -> dict[str, Any]:
         "workers": serialized_workers,
         "queue": queue,
     }
+    if remote_probe_degraded:
+        out["probe_degraded"] = True
+    return out

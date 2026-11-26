@@ -3,32 +3,45 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
 from pathlib import Path
+import socket
 import tempfile
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
 
+# Ensure standalone execution (`python -m unittest test_hf_zero_cost_ocr_and_concurrency.py -v`)
+# succeeds without requiring external CI shell env setup.
+os.environ.setdefault("APP_ENVIRONMENT", "test")
+os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost:5432/test")
+os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
+os.environ.setdefault("SUPABASE_KEY", "test-publishable-key")
+
 import httpx
 
 from app.database.session import DatabaseConcurrencyLimiter
-from app.models import Book, OcrInferenceJob, OcrWorkerHeartbeat
+from app.models import Book, OcrInferenceJob, OcrWorkerHeartbeat, ParentBookPageSubmission
 from app.services.ocr_inference_job_service import (
     JOB_KIND_LOCAL_SCAN,
     OcrInferenceJobService,
     _post_ocr_concurrency_limit,
     clear_active_model_manifest_cache,
+    compute_candidate_hash,
+    schedule_parent_submission_post_ocr,
+    shutdown_post_ocr_tasks,
 )
 from app.services.remote_ocr_wakeup import (
     _dispatch_wakeup_with_hybrid_grace,
+    _validate_production_target_dns,
     clear_remote_ocr_wakeup_cache_for_tests,
     get_configured_remote_ocr_worker_url,
     maybe_keep_warm_hf_space_from_cron,
     probe_configured_remote_ocr_worker_health,
+    send_remote_ocr_wakeup,
     set_remote_ocr_wakeup_transport_for_tests,
     shutdown_remote_ocr_wakeup_tasks,
 )
@@ -734,6 +747,478 @@ class TestHfZeroCostOcrAndConcurrency(unittest.TestCase):
                     self.assertTrue(all(code == 200 for code in tts_stt_codes))
                     self.assertLessEqual(peak_permits, 8)
                     self.assertEqual(limiter.active, 0)
+
+        asyncio.run(_scenario())
+
+    def test_ssrf_blocks_redirects_and_dns_rebinding_in_production(self) -> None:
+        redirect_targets_hit: list[str] = []
+
+        async def redirect_handler(request: httpx.Request) -> httpx.Response:
+            redirect_targets_hit.append(str(request.url))
+            if request.url.host == "viread-ocr-worker.hf.space":
+                return httpx.Response(
+                    307,
+                    headers={"Location": "http://169.254.169.254/latest/meta-data/"},
+                )
+            return httpx.Response(200, json={"ready": True, "ok": True})
+
+        set_remote_ocr_wakeup_transport_for_tests(httpx.MockTransport(redirect_handler))
+
+        async def _scenario() -> None:
+            with patch.dict(
+                os.environ,
+                {
+                    "APP_ENVIRONMENT": "production",
+                    "VIREAD_OCR_REMOTE_WORKER_URL": SPACE_URL,
+                    "VIREAD_OCR_WORKER_TOKEN": WORKER_TOKEN,
+                    "VIREAD_HF_SPACE_TOKEN": HF_READ_TOKEN,
+                },
+                clear=False,
+            ):
+                health = await probe_configured_remote_ocr_worker_health(force_refresh=True)
+                self.assertIsNone(health)
+                woke = await send_remote_ocr_wakeup(bypass_coalesce=True)
+                self.assertFalse(woke)
+                # Redirect target MUST NEVER be contacted or receive tokens!
+                self.assertTrue(
+                    all("169.254.169.254" not in url for url in redirect_targets_hit),
+                    msg=f"Redirect followed to metadata endpoint: {redirect_targets_hit}",
+                )
+
+            # DNS rebinding check (tested with _CUSTOM_TRANSPORT=None and mocked getaddrinfo)
+            set_remote_ocr_wakeup_transport_for_tests(None)
+            loop = asyncio.get_running_loop()
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "APP_ENVIRONMENT": "production",
+                        "VIREAD_OCR_REMOTE_WORKER_URL": "https://rebind.example.com",
+                    },
+                    clear=False,
+                ),
+                patch.object(
+                    loop,
+                    "getaddrinfo",
+                    return_value=[
+                        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))
+                    ],
+                ),
+            ):
+                clear_remote_ocr_wakeup_cache_for_tests()
+                self.assertFalse(
+                    await _validate_production_target_dns("https://rebind.example.com")
+                )
+
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "APP_ENVIRONMENT": "production",
+                        "VIREAD_OCR_REMOTE_WORKER_URL": SPACE_URL,
+                    },
+                    clear=False,
+                ),
+                patch.object(
+                    loop,
+                    "getaddrinfo",
+                    return_value=[
+                        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("34.195.210.12", 443))
+                    ],
+                ),
+            ):
+                clear_remote_ocr_wakeup_cache_for_tests()
+                self.assertTrue(await _validate_production_target_dns(SPACE_URL))
+
+        asyncio.run(_scenario())
+
+    def test_rollback_expire_all_safety_on_scan_job_poll_cancel_and_retry(self) -> None:
+        """Regression test: real SQLAlchemy rollback() expires ORM objects; polling/cancel/retry must never raise MissingGreenlet."""
+        from sqlalchemy.exc import MissingGreenlet
+        from app.repositories.local_ocr_scan_repository import LocalOcrScanRepository
+        from app.services.local_ocr_scan_service import LocalOcrScanService
+
+        health_probes = 0
+
+        async def transport_handler(request: httpx.Request) -> httpx.Response:
+            nonlocal health_probes
+            if request.url.path == "/health":
+                health_probes += 1
+                return httpx.Response(
+                    200,
+                    json={
+                        "status": "ok",
+                        "worker_status": "IDLE",
+                        "standby_mode": "quiet_standby",
+                        "worker_id": "hf-space-1",
+                        "ready": True,
+                    },
+                )
+            return httpx.Response(200, json={"ok": True, "woken": True})
+
+        set_remote_ocr_wakeup_transport_for_tests(httpx.MockTransport(transport_handler))
+
+        class StrictExpireOnRollbackSession(FakeAsyncSession):
+            def __init__(self, st: InMemoryDbState):
+                super().__init__(st)
+                self._in_tx = False
+                self._loaded_objs: list[object] = []
+
+            def in_transaction(self) -> bool:
+                return self._in_tx
+
+            async def scalar(self, query):
+                self._in_tx = True
+                res = await super().scalar(query)
+                if res is not None and hasattr(res, "__mapper__"):
+                    self._loaded_objs.append(res)
+                return res
+
+            async def scalars(self, query):
+                self._in_tx = True
+                res = await super().scalars(query)
+                for item in res.all():
+                    if hasattr(item, "__mapper__"):
+                        self._loaded_objs.append(item)
+                return res
+
+            async def commit(self) -> None:
+                await super().commit()
+                self._in_tx = False
+
+            async def rollback(self) -> None:
+                await super().rollback()
+                self._in_tx = False
+                # Simulate SQLAlchemy sync_session.expire_all(): accessing ORM attributes
+                # synchronously after rollback raises MissingGreenlet!
+                for obj in list(self._loaded_objs):
+                    for attr in ("Status", "CreatedAt", "UpdatedAt", "ErrorCode", "ResultPayload"):
+                        if hasattr(type(obj), attr):
+                            pass
+                    object.__setattr__(obj, "_expired_after_rollback", True)
+                self._loaded_objs.clear()
+
+        async def _scenario() -> None:
+            state = InMemoryDbState()
+            parent_id = uuid4()
+            state.roles[parent_id] = "parent"
+
+            seed_db = FakeAsyncSession(state)
+            svc_seed = OcrInferenceJobService(seed_db)  # type: ignore[arg-type]
+            job = await svc_seed.enqueue_job(
+                job_kind=JOB_KIND_LOCAL_SCAN,
+                owner_user_id=parent_id,
+                image_path="local-scans/p1/scan.jpg",
+                image_sha256="f" * 64,
+            )
+            await seed_db.commit()
+
+            orig_getattribute = OcrInferenceJob.__getattribute__
+
+            def _strict_getattr(self_obj: OcrInferenceJob, name: str):
+                if name in {"Status", "CreatedAt", "UpdatedAt", "ResultPayload", "ErrorCode"}:
+                    if orig_getattribute(self_obj, "__dict__").get("_expired_after_rollback"):
+                        raise MissingGreenlet("Simulated expired ORM attribute access after rollback()")
+                return orig_getattribute(self_obj, name)
+
+            with (
+                patch.object(OcrInferenceJob, "__getattribute__", _strict_getattr),
+                patch.dict(
+                    os.environ,
+                    {
+                        "VIREAD_OCR_REMOTE_WORKER_URL": SPACE_URL,
+                        "VIREAD_OCR_WORKER_TOKEN": WORKER_TOKEN,
+                        "VIREAD_HF_SPACE_TOKEN": HF_READ_TOKEN,
+                    },
+                    clear=False,
+                ),
+            ):
+                # 1. Poll get_scan_page_job on cold /health cache -> must serialize before rollback & probe!
+                poll_db = StrictExpireOnRollbackSession(state)
+                repo = LocalOcrScanRepository(poll_db)  # type: ignore[arg-type]
+                repo.profile_role = lambda _uid: asyncio.sleep(0, result="parent")  # type: ignore[method-assign]
+                scan_svc = LocalOcrScanService(repo)
+                polled = await scan_svc.get_scan_page_job(parent_id, job.Id, request_id="req-1")
+                self.assertEqual(polled.status, "QUEUED")
+                self.assertTrue(polled.worker_online)
+                self.assertEqual(health_probes, 1)
+
+                # Clear expired marker on shared in-memory job before next request
+                job.__dict__.pop("_expired_after_rollback", None)
+                clear_remote_ocr_wakeup_cache_for_tests()
+
+                # 2. retry_job on ACTIVE job must serialize BEFORE rollback!
+                job.Status = "RUNNING"
+                retry_db = StrictExpireOnRollbackSession(state)
+                retry_res = await OcrInferenceJobService(retry_db).retry_job(job.Id)  # type: ignore[arg-type]
+                self.assertEqual(retry_res["status"], "RUNNING")
+                job.__dict__.pop("_expired_after_rollback", None)
+
+                # 3. cancel_scan_page_job on cold /health cache -> must serialize before rollback!
+                job.Status = "QUEUED"
+                cancel_db = StrictExpireOnRollbackSession(state)
+                cancel_repo = LocalOcrScanRepository(cancel_db)  # type: ignore[arg-type]
+                cancel_repo.profile_role = lambda _uid: asyncio.sleep(0, result="parent")  # type: ignore[method-assign]
+                cancelled = await LocalOcrScanService(cancel_repo).cancel_scan_page_job(
+                    parent_id, job.Id, request_id="req-2"
+                )
+                self.assertEqual(cancelled.status, "CANCELLED")
+                self.assertTrue(cancelled.worker_online)
+                await shutdown_remote_ocr_wakeup_tasks()
+
+        asyncio.run(_scenario())
+
+    def test_cold_boot_503_waking_space_sets_probe_degraded_and_self_heals_via_poll_nudge(
+        self,
+    ) -> None:
+        space_sleeping = True
+        wakeup_hits = 0
+
+        async def transport_handler(request: httpx.Request) -> httpx.Response:
+            nonlocal wakeup_hits
+            if request.url.path == "/health":
+                if space_sleeping:
+                    return httpx.Response(503, text="<html>Space is waking up...</html>")
+                return httpx.Response(
+                    200,
+                    json={
+                        "status": "ok",
+                        "worker_status": "IDLE",
+                        "standby_mode": "quiet_standby",
+                        "worker_id": "hf-space-cold-1",
+                        "ready": True,
+                    },
+                )
+            if request.url.path == "/wakeup":
+                wakeup_hits += 1
+                if space_sleeping:
+                    return httpx.Response(503, text="<html>Space is waking up...</html>")
+                return httpx.Response(200, json={"ok": True, "woken": True})
+            return httpx.Response(404)
+
+        set_remote_ocr_wakeup_transport_for_tests(httpx.MockTransport(transport_handler))
+
+        async def _scenario() -> None:
+            nonlocal space_sleeping, wakeup_hits
+            state = InMemoryDbState()
+
+            class _SessionCtx:
+                async def __aenter__(self):
+                    s = FakeAsyncSession(state)
+                    s.execute = self._fake_execute  # type: ignore[method-assign]
+                    return s
+
+                async def __aexit__(self, *_a):
+                    return False
+
+                @staticmethod
+                async def _fake_execute(_q):
+                    class _Row:
+                        queued = 1
+                        claimed = 0
+                        running = 0
+                        failed_retryable = 0
+                        dead_letter = 0
+                        succeeded = 0
+                        cancelled = 0
+                        expired_leases = 0
+                        oldest_pending_created = None
+                        latest_succeeded_at = None
+
+                    class _Res:
+                        def one(self):
+                            return _Row()
+
+                    return _Res()
+
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "VIREAD_OCR_REMOTE_WORKER_URL": SPACE_URL,
+                        "VIREAD_OCR_WORKER_TOKEN": WORKER_TOKEN,
+                        "VIREAD_HF_SPACE_TOKEN": HF_READ_TOKEN,
+                    },
+                    clear=False,
+                ),
+                patch("app.database.session.AsyncSessionLocal", side_effect=_SessionCtx),
+            ):
+                # 1. While HF Space returns 503 waking screen, /health reports probe_degraded=True!
+                diag_waking = await collect_remote_ocr_health()
+                self.assertFalse(diag_waking["ready"])
+                self.assertTrue(diag_waking.get("probe_degraded"))
+
+                # 2. Job was queued 20s ago while Space was 503-sleeping; now Space finishes booting!
+                db = FakeAsyncSession(state)
+                svc = OcrInferenceJobService(db)  # type: ignore[arg-type]
+                stale_job = OcrInferenceJob(
+                    Id=uuid4(),
+                    JobKind=JOB_KIND_LOCAL_SCAN,
+                    Status="QUEUED",
+                    Priority=10,
+                    OwnerUserId=uuid4(),
+                    ImageBucket="private-books",
+                    ImagePath="local-scans/u1/waking.jpg",
+                    ImageSha256="9" * 64,
+                    ExpectedVersion=1,
+                    FencingToken=0,
+                    AttemptCount=0,
+                    MaxAttempts=3,
+                    CreatedAt=datetime.now(timezone.utc) - timedelta(seconds=20),
+                    UpdatedAt=datetime.now(timezone.utc) - timedelta(seconds=20),
+                )
+                db.add(stale_job)
+                await db.commit()
+
+                space_sleeping = False
+                wakeup_hits = 0
+                status_payload = await svc.get_job_status_payload(stale_job.Id)
+                self.assertEqual(status_payload["status"], "QUEUED")
+                await asyncio.sleep(0.08)
+                self.assertEqual(wakeup_hits, 1)
+
+                # Subsequent polls within active burst window MUST NOT spam /wakeup!
+                _ = await svc.get_job_status_payload(stale_job.Id)
+                await asyncio.sleep(0.05)
+                self.assertEqual(wakeup_hits, 1)
+                await shutdown_remote_ocr_wakeup_tasks()
+
+        asyncio.run(_scenario())
+
+    def test_concurrent_parent_post_ocr_429_rate_limit_serializes_without_stalling(
+        self,
+    ) -> None:
+        """Verify _post_ocr_concurrency_limit()==1 + 429 retry backoff processes queued parent submissions cleanly."""
+        from app.services.ocr_ai.orchestrator import OcrOrchestrationError
+
+        async def _scenario() -> None:
+            state = InMemoryDbState()
+            book_id = uuid4()
+            parent_id = uuid4()
+            img_bytes = b"parent-book-page-jpeg"
+            img_sha = hashlib.sha256(img_bytes).hexdigest()
+
+            for idx in (1, 2):
+                ocr_txt = f"Bé đọc trang {idx}"
+                cand_hash = compute_candidate_hash(
+                    ocr_txt, source_sha256=img_sha, is_image_only=False
+                )
+                sub = ParentBookPageSubmission(
+                    Id=uuid4(),
+                    BookId=book_id,
+                    OwnerParentId=parent_id,
+                    BatchId=uuid4(),
+                    BatchTotalPages=2,
+                    SourcePageNumber=idx,
+                    TargetPageNumber=idx,
+                    SourceFileName=f"p{idx}.jpg",
+                    SourceFormat="IMAGE",
+                    SourceStoragePath=f"private/{idx}.jpg",
+                    SourceSha256=img_sha,
+                    ImageWidth=800,
+                    ImageHeight=1000,
+                    SourceType="PARENT_OWNED_PHOTO",
+                    SourceNote="Sách gia đình tự chụp",
+                    SubmissionVersion=1,
+                    OptimisticLockVersion=1,
+                    WorkflowStatus="CHECKING",
+                    OcrStatus="COMPLETED",
+                    OcrText=ocr_txt,
+                    OcrWordsJson=[
+                        {"text": "Bé", "bbox": [0.1, 0.1, 0.1, 0.05]},
+                        {"text": "đọc", "bbox": [0.22, 0.1, 0.1, 0.05]},
+                        {"text": "trang", "bbox": [0.35, 0.1, 0.1, 0.05]},
+                        {"text": str(idx), "bbox": [0.48, 0.1, 0.1, 0.05]},
+                    ],
+                    IsImageOnly=False,
+                    ProofreadStatus="PENDING",
+                    ToolCheckStatus="PENDING",
+                    CandidateText=ocr_txt,
+                    CandidateHash=cand_hash,
+                    TempExpiresAt=datetime.now(timezone.utc) + timedelta(days=7),
+                    CreatedAt=datetime.now(timezone.utc),
+                    UpdatedAt=datetime.now(timezone.utc),
+                )
+                state.tables[ParentBookPageSubmission].append(sub)
+
+            sub1, sub2 = state.tables[ParentBookPageSubmission]
+            in_flight = 0
+            peak_in_flight = 0
+            proofread_calls = 0
+
+            class _RateLimitedCloudProofreader:
+                async def correct(self, text: str, *_a, **_kw) -> str:
+                    nonlocal in_flight, peak_in_flight, proofread_calls
+                    in_flight += 1
+                    peak_in_flight = max(peak_in_flight, in_flight)
+                    proofread_calls += 1
+                    try:
+                        await asyncio.sleep(0.015)
+                        if proofread_calls == 1:
+                            err = OcrOrchestrationError("PROVIDER_QUOTA")
+                            err.status_code = 429  # type: ignore[attr-defined]
+                            raise err
+                        return text
+                    finally:
+                        in_flight -= 1
+
+            class _CloudSafetyRunner:
+                async def analyze(self, _text: str) -> dict[str, object]:
+                    return {
+                        "suitability": "SUITABLE",
+                        "findings": [],
+                        "provider_events": [{"chunk_id": 0, "availability": True, "provider": "gemini"}],
+                    }
+
+            class _SessionCtx:
+                async def __aenter__(self):
+                    return FakeAsyncSession(state)
+
+                async def __aexit__(self, *_a):
+                    return False
+
+            from app.services.ocr_inference_job_service import (
+                run_parent_submission_post_ocr as orig_run_parent_submission_post_ocr,
+            )
+
+            async def _patched_post_ocr(sub_id):
+                return await orig_run_parent_submission_post_ocr(
+                    sub_id,
+                    proofread_orchestrator=_RateLimitedCloudProofreader(),
+                    safety_orchestrator=_CloudSafetyRunner(),
+                    download_bytes=lambda _p: img_bytes,
+                )
+
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "VIREAD_WEB_DISABLE_HEAVY_WORKERS": "true",
+                        "OCR_CLOUD_CORRECTION_ENABLED": "true",
+                        "PRIVATE_BOOK_ALLOW_CLOUD_AI": "true",
+                    },
+                    clear=False,
+                ),
+                patch("app.services.ocr_inference_job_service.AsyncSessionLocal", side_effect=_SessionCtx),
+                patch(
+                    "app.services.ocr_inference_job_service.run_parent_submission_post_ocr",
+                    side_effect=_patched_post_ocr,
+                ),
+            ):
+                os.environ.pop("VIREAD_POST_OCR_CONCURRENCY", None)
+                self.assertEqual(_post_ocr_concurrency_limit(), 1)
+                t1 = schedule_parent_submission_post_ocr(sub1.Id)
+                t2 = schedule_parent_submission_post_ocr(sub2.Id)
+                assert t1 is not None and t2 is not None
+                await asyncio.gather(t1, t2)
+                await shutdown_post_ocr_tasks()
+
+                self.assertEqual(peak_in_flight, 1)
+                self.assertEqual(proofread_calls, 3)  # sub1: 429 + 200; sub2: 200
+                self.assertEqual(sub1.WorkflowStatus, "PASSED_READY_TO_ADD")
+                self.assertEqual(sub2.WorkflowStatus, "PASSED_READY_TO_ADD")
+                self.assertFalse(sub1.ToolCheckScopeJson.get("local_ai_enforced", True))
+                self.assertFalse(sub2.ToolCheckScopeJson.get("local_ai_enforced", True))
 
         asyncio.run(_scenario())
 

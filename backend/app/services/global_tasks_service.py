@@ -744,6 +744,8 @@ class GlobalTasksService:
         active_only: bool = False,
     ) -> GlobalTaskListResponse:
         """Aggregate all durable workflows strictly isolated to `(actor_id, actor_role)`."""
+        in_tx_fn = getattr(self.db, "in_transaction", None)
+        was_in_tx = bool(in_tx_fn()) if callable(in_tx_fn) else False
         actor_role = await self.require_actor_role(actor_id)
         worker_online = await self.repo.is_remote_ocr_worker_online(
             ttl_seconds=worker_heartbeat_ttl_seconds()
@@ -760,7 +762,7 @@ class GlobalTasksService:
                 if valid_cache:
                     worker_online = bool(cached_probe and cached_probe.get("online"))
                 else:
-                    if not (
+                    if not was_in_tx and not (
                         getattr(self.db, "new", None)
                         or getattr(self.db, "dirty", None)
                         or getattr(self.db, "deleted", None)
