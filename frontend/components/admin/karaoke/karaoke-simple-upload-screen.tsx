@@ -1564,6 +1564,7 @@ export function KaraokeSimpleUploadScreen({
                 </div>
               </div>
               {preview?.cover_url ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
                 <img
                   src={preview.cover_url}
                   alt={t("karaoke.simpleUpload.coverAlt", { title })}

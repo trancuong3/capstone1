@@ -842,201 +842,203 @@ export function AdminHealthScreen() {
     }
   }, []);
 
-  const executeHealthFetch = useCallback(
-    async (options?: { readonly syncMarkRefreshing?: boolean }) => {
-      clearWakeRecheckTimer();
-      const seq = ++healthRequestSeqRef.current;
-      healthAbortRef.current?.abort();
-      const controller = new AbortController();
-      healthAbortRef.current = controller;
-      isRefreshingRef.current = true;
+  const fetchHealthAsync = useCallback(async () => {
+    clearWakeRecheckTimer();
+    const seq = ++healthRequestSeqRef.current;
+    healthAbortRef.current?.abort();
+    const controller = new AbortController();
+    healthAbortRef.current = controller;
+    isRefreshingRef.current = true;
 
-      if (options?.syncMarkRefreshing !== false) {
-        setIsRefreshing(true);
-        setErrorDismissed(false);
+    let timedOut = false;
+    const timeoutId = globalThis.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, HEALTH_FETCH_TIMEOUT_MS);
+
+    try {
+      const nextSnapshot = await health.get(controller.signal);
+      if (!mountedRef.current || seq !== healthRequestSeqRef.current) {
+        return;
       }
-
-      let timedOut = false;
-      const timeoutId = globalThis.setTimeout(() => {
-        timedOut = true;
-        controller.abort();
-      }, HEALTH_FETCH_TIMEOUT_MS);
-
-      try {
-        const nextSnapshot = await health.get(controller.signal);
-        if (!mountedRef.current || seq !== healthRequestSeqRef.current) {
-          return;
-        }
-        setSnapshot(nextSnapshot);
-        setFetchError(null);
-        setErrorDismissed(false);
-      } catch (err) {
-        if (!mountedRef.current || seq !== healthRequestSeqRef.current) {
-          return;
-        }
-        if (!timedOut && controller.signal.aborted) {
-          return;
-        }
-        if (timedOut) {
-          setFetchError({
-            status: null,
-            requestId: null,
-            message: t(
-              "health.refreshTimeoutError",
-              undefined,
-              "Yêu cầu kiểm tra vượt quá thời gian chờ 15 giây.",
-            ),
-            isTimeout: true,
-          });
-        } else if (isServiceError(err)) {
-          setFetchError({
-            status: err.status > 0 ? err.status : null,
-            requestId: err.request_id || null,
-            message: err.message || null,
-            isTimeout: false,
-          });
-        } else {
-          setFetchError({
-            status: null,
-            requestId: null,
-            message: null,
-            isTimeout: false,
-          });
-        }
-      } finally {
-        globalThis.clearTimeout(timeoutId);
-        if (mountedRef.current && seq === healthRequestSeqRef.current) {
-          isRefreshingRef.current = false;
-          setIsInitialLoading(false);
-          setIsRefreshing(false);
-        }
+      setSnapshot(nextSnapshot);
+      setFetchError(null);
+      setErrorDismissed(false);
+    } catch (err) {
+      if (!mountedRef.current || seq !== healthRequestSeqRef.current) {
+        return;
       }
-    },
-    [clearWakeRecheckTimer, health, t],
-  );
-
-  const probeClientDevice = useCallback(
-    async (options?: { readonly syncMarkProbing?: boolean }) => {
-      const seq = ++clientProbeSeqRef.current;
-      if (options?.syncMarkProbing !== false) {
-        setIsProbingClient(true);
-        setClientProbeError(false);
+      if (!timedOut && controller.signal.aborted) {
+        return;
       }
-
-      if (micPermissionStatusRef.current) {
-        micPermissionStatusRef.current.onchange = null;
-        micPermissionStatusRef.current = null;
-      }
-
-      try {
-        const wasmCaps = detectBrowserWasmSttSupport();
-        const [wasmCache, ttsCache] = await Promise.all([
-          getWasmModelCacheStatus().catch(
-            (): WasmModelCacheStatus => ({
-              ready: false,
-              cachedFiles: 0,
-              expectedFiles: 4,
-              cachedBytes: 0,
-              totalBytes: 0,
-              supported: false,
-              error: "PROBE_FAILED",
-            }),
+      if (timedOut) {
+        setFetchError({
+          status: null,
+          requestId: null,
+          message: t(
+            "health.refreshTimeoutError",
+            undefined,
+            "Yêu cầu kiểm tra vượt quá thời gian chờ 15 giây.",
           ),
-          getBrowserTtsCacheStats().catch(
-            (): BrowserTtsCacheStats => ({
-              supported: false,
-              entryCount: 0,
-              usedBytes: 0,
-              quotaBytes: 0,
-              hits: 0,
-              misses: 0,
-              error: "PROBE_FAILED",
-            }),
-          ),
-        ]);
-
-        const hasMediaDevices =
-          typeof navigator !== "undefined" &&
-          typeof navigator.mediaDevices?.getUserMedia === "function";
-
-        let micPermission: PermissionState | "unsupported" = "unsupported";
-        if (
-          typeof navigator !== "undefined" &&
-          typeof navigator.permissions?.query === "function"
-        ) {
-          let permTimer: ReturnType<typeof setTimeout> | null = null;
-          try {
-            const perm = await Promise.race<PermissionStatus | null>([
-              navigator.permissions.query({
-                name: "microphone" as PermissionName,
-              }),
-              new Promise<null>((resolve) => {
-                permTimer = globalThis.setTimeout(
-                  () => resolve(null),
-                  MIC_PERMISSION_TIMEOUT_MS,
-                );
-              }),
-            ]);
-            if (permTimer !== null) {
-              globalThis.clearTimeout(permTimer);
-            }
-            if (
-              perm &&
-              mountedRef.current &&
-              seq === clientProbeSeqRef.current
-            ) {
-              micPermission = perm.state;
-              micPermissionStatusRef.current = perm;
-              perm.onchange = () => {
-                if (!mountedRef.current || seq !== clientProbeSeqRef.current) {
-                  return;
-                }
-                setClientCaps((prev) =>
-                  prev ? { ...prev, micPermission: perm.state } : prev,
-                );
-              };
-            }
-          } catch {
-            if (permTimer !== null) {
-              globalThis.clearTimeout(permTimer);
-            }
-            micPermission = "unsupported";
-          }
-        }
-
-        if (!mountedRef.current || seq !== clientProbeSeqRef.current) {
-          return;
-        }
-
-        setClientCaps({
-          wasmCaps,
-          wasmCache,
-          ttsCache,
-          micPermission,
-          hasMediaDevices,
-          environment: detectDeviceEnvironment(),
+          isTimeout: true,
         });
-        setClientProbeError(false);
-      } catch {
-        if (!mountedRef.current || seq !== clientProbeSeqRef.current) {
-          return;
-        }
-        setClientProbeError(true);
-      } finally {
-        if (mountedRef.current && seq === clientProbeSeqRef.current) {
-          setIsProbingClient(false);
+      } else if (isServiceError(err)) {
+        setFetchError({
+          status: err.status > 0 ? err.status : null,
+          requestId: err.request_id || null,
+          message: err.message || null,
+          isTimeout: false,
+        });
+      } else {
+        setFetchError({
+          status: null,
+          requestId: null,
+          message: null,
+          isTimeout: false,
+        });
+      }
+    } finally {
+      globalThis.clearTimeout(timeoutId);
+      if (mountedRef.current && seq === healthRequestSeqRef.current) {
+        isRefreshingRef.current = false;
+        setIsInitialLoading(false);
+        setIsRefreshing(false);
+      }
+    }
+  }, [clearWakeRecheckTimer, health, t]);
+
+  const executeHealthFetch = useCallback(async () => {
+    setIsRefreshing(true);
+    setErrorDismissed(false);
+    await fetchHealthAsync();
+  }, [fetchHealthAsync]);
+
+  const probeClientAsync = useCallback(async () => {
+    const seq = ++clientProbeSeqRef.current;
+
+    if (micPermissionStatusRef.current) {
+      micPermissionStatusRef.current.onchange = null;
+      micPermissionStatusRef.current = null;
+    }
+
+    try {
+      const wasmCaps = detectBrowserWasmSttSupport();
+      const [wasmCache, ttsCache] = await Promise.all([
+        getWasmModelCacheStatus().catch(
+          (): WasmModelCacheStatus => ({
+            ready: false,
+            cachedFiles: 0,
+            expectedFiles: 4,
+            cachedBytes: 0,
+            totalBytes: 0,
+            supported: false,
+            error: "PROBE_FAILED",
+          }),
+        ),
+        getBrowserTtsCacheStats().catch(
+          (): BrowserTtsCacheStats => ({
+            supported: false,
+            entryCount: 0,
+            usedBytes: 0,
+            quotaBytes: 0,
+            hits: 0,
+            misses: 0,
+            error: "PROBE_FAILED",
+          }),
+        ),
+      ]);
+
+      const hasMediaDevices =
+        typeof navigator !== "undefined" &&
+        typeof navigator.mediaDevices?.getUserMedia === "function";
+
+      let micPermission: PermissionState | "unsupported" = "unsupported";
+      if (
+        typeof navigator !== "undefined" &&
+        typeof navigator.permissions?.query === "function"
+      ) {
+        let permTimer: ReturnType<typeof setTimeout> | null = null;
+        try {
+          const perm = await Promise.race<PermissionStatus | null>([
+            navigator.permissions.query({
+              name: "microphone" as PermissionName,
+            }),
+            new Promise<null>((resolve) => {
+              permTimer = globalThis.setTimeout(
+                () => resolve(null),
+                MIC_PERMISSION_TIMEOUT_MS,
+              );
+            }),
+          ]);
+          if (permTimer !== null) {
+            globalThis.clearTimeout(permTimer);
+          }
+          if (
+            perm &&
+            mountedRef.current &&
+            seq === clientProbeSeqRef.current
+          ) {
+            micPermission = perm.state;
+            micPermissionStatusRef.current = perm;
+            perm.onchange = () => {
+              if (!mountedRef.current || seq !== clientProbeSeqRef.current) {
+                return;
+              }
+              setClientCaps((prev) =>
+                prev ? { ...prev, micPermission: perm.state } : prev,
+              );
+            };
+          }
+        } catch {
+          if (permTimer !== null) {
+            globalThis.clearTimeout(permTimer);
+          }
+          micPermission = "unsupported";
         }
       }
-    },
-    [],
-  );
+
+      if (!mountedRef.current || seq !== clientProbeSeqRef.current) {
+        return;
+      }
+
+      setClientCaps({
+        wasmCaps,
+        wasmCache,
+        ttsCache,
+        micPermission,
+        hasMediaDevices,
+        environment: detectDeviceEnvironment(),
+      });
+      setClientProbeError(false);
+    } catch {
+      if (!mountedRef.current || seq !== clientProbeSeqRef.current) {
+        return;
+      }
+      setClientProbeError(true);
+    } finally {
+      if (mountedRef.current && seq === clientProbeSeqRef.current) {
+        setIsProbingClient(false);
+      }
+    }
+  }, []);
+
+  const probeClientDevice = useCallback(async () => {
+    setIsProbingClient(true);
+    setClientProbeError(false);
+    await probeClientAsync();
+  }, [probeClientAsync]);
 
   useEffect(() => {
     mountedRef.current = true;
-    void executeHealthFetch({ syncMarkRefreshing: false });
-    void probeClientDevice({ syncMarkProbing: false }).catch(() => undefined);
+    let active = true;
+    queueMicrotask(() => {
+      if (!active || !mountedRef.current) return;
+      void fetchHealthAsync();
+      void probeClientAsync().catch(() => undefined);
+    });
 
     return () => {
+      active = false;
       mountedRef.current = false;
       healthRequestSeqRef.current += 1;
       clientProbeSeqRef.current += 1;
@@ -1048,14 +1050,13 @@ export function AdminHealthScreen() {
         micPermissionStatusRef.current = null;
       }
     };
-  }, [clearWakeRecheckTimer, executeHealthFetch, probeClientDevice]);
+  }, [clearWakeRecheckTimer, fetchHealthAsync, probeClientAsync]);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
     const handleVisibility = () => {
       setIsTabHidden(document.hidden);
     };
-    handleVisibility();
     document.addEventListener("visibilitychange", handleVisibility);
     return () => {
       document.removeEventListener("visibilitychange", handleVisibility);
@@ -1405,7 +1406,11 @@ export function AdminHealthScreen() {
         ),
       );
     }
-    if (fetchError.requestId) {
+    if (
+      fetchError.requestId &&
+      (!fetchError.message ||
+        !fetchError.message.includes(fetchError.requestId))
+    ) {
       parts.push(
         t(
           "health.errorRequestId",

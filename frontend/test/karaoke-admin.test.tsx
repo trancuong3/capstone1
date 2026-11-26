@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
@@ -180,10 +181,15 @@ describe("karaoke admin editor", () => {
     await screen.findByText(/Bài hát vừa thay đổi/);
     expect(screen.getByLabelText("Tên bài hát")).toHaveValue("Không được mất");
     expect(screen.getByRole("button", { name: "Lưu bản nháp" })).toBeDisabled();
-    vi.mocked(window.confirm).mockReturnValueOnce(false);
     fireEvent.click(screen.getByRole("button", { name: "Tải lại từ máy chủ" }));
+    const cancelDialog = screen.getByRole("alertdialog");
+    fireEvent.click(within(cancelDialog).getByRole("button", { name: "Hủy" }));
     expect(service.get).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Tải lại từ máy chủ" }));
+    const confirmDialog = screen.getByRole("alertdialog");
+    fireEvent.click(
+      within(confirmDialog).getByRole("button", { name: "Tải lại bản lưu" }),
+    );
     await waitFor(() =>
       expect(screen.getByLabelText("Tên bài hát")).toHaveValue(
         "Bài hát của bé",
@@ -231,6 +237,11 @@ describe("karaoke admin editor", () => {
     );
     expect(publish).toBeEnabled();
     fireEvent.click(publish);
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Xác nhận xuất bản",
+      }),
+    );
     await screen.findByText("Đã xuất bản bài hát.");
     expect(service.publish).toHaveBeenCalledWith(
       songId,
@@ -273,14 +284,23 @@ describe("karaoke admin editor", () => {
     const file = new File(["test-only bytes"], "song.mp3", {
       type: "audio/mpeg",
     });
-    vi.mocked(window.confirm).mockReturnValueOnce(false);
     fireEvent.change(screen.getByLabelText("File nhạc MP3"), {
       target: { files: [file] },
     });
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Hủy",
+      }),
+    );
     expect(service.upload).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText("File nhạc MP3"), {
       target: { files: [file] },
     });
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Thay nhạc",
+      }),
+    );
     await screen.findByText(/Đã tải nhạc; các mốc/);
     expect(service.upload).toHaveBeenCalledWith(
       songId,
@@ -319,12 +339,18 @@ describe("karaoke admin editor", () => {
     fireEvent.change(screen.getByLabelText("Tên bài hát"), {
       target: { value: "Sửa" },
     });
-    vi.mocked(window.confirm).mockReturnValue(false);
     expect(
       fireEvent.click(
         screen.getByRole("link", { name: "Về danh sách bài hát" }),
       ),
     ).toBe(false);
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Hủy",
+      }),
+    );
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     const event = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);

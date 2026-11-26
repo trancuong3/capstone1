@@ -1,5 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminBookForm } from "@/components/admin/admin-book-form";
 import { AdminBooksScreen } from "@/components/admin/admin-books-screen";
@@ -471,5 +472,39 @@ describe("admin components", () => {
 
     await user.keyboard("{Escape}");
     expect(onDrawerClose).toHaveBeenCalledOnce();
+  });
+
+  it("keeps focus inside AdminDrawer inputs when parent re-renders with an inline onClose handler", async () => {
+    const user = userEvent.setup();
+    const onFinalClose = vi.fn();
+
+    function ControlledDrawerHarness() {
+      const [note, setNote] = useState("");
+      return (
+        <AdminDrawer
+          isOpen
+          onClose={() => onFinalClose(note)}
+          title="Ghi chú kiểm duyệt"
+        >
+          <label htmlFor="drawer-note">Ghi chú</label>
+          <input
+            id="drawer-note"
+            onChange={(event) => setNote(event.target.value)}
+            value={note}
+          />
+        </AdminDrawer>
+      );
+    }
+
+    render(<ControlledDrawerHarness />);
+    const noteInput = screen.getByLabelText("Ghi chú");
+    await user.click(noteInput);
+    await user.type(noteInput, "abc");
+
+    expect(noteInput).toHaveValue("abc");
+    expect(noteInput).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(onFinalClose).toHaveBeenCalledWith("abc");
   });
 });

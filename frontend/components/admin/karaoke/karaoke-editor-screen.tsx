@@ -1,8 +1,13 @@
 "use client";
 
+import { ArrowLeft, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
+import {
+  KaraokeConfirmModal,
+  type KaraokeConfirmRequest,
+} from "@/components/admin/karaoke/karaoke-confirm-modal";
 import { LyricTimingEditor } from "@/components/admin/karaoke/lyric-timing-editor";
 import { SongMediaUpload } from "@/components/admin/karaoke/song-media-upload";
 import { SongMetadataForm } from "@/components/admin/karaoke/song-metadata-form";
@@ -29,6 +34,7 @@ import {
 const emptyLyrics: KaraokeLyrics = { format_version: 1, lines: [] };
 const fingerprint = (metadata: KaraokeMetadata, lyrics: KaraokeLyrics) =>
   JSON.stringify({ metadata, lyrics });
+
 function metadataFrom(value: KaraokeMetadata): KaraokeMetadata {
   return {
     title: value.title,
@@ -67,7 +73,10 @@ export function KaraokeEditorScreen({
   const [validation, setValidation] = useState<KaraokeValidation | null>(null);
   const [reviewed, setReviewed] = useState(false);
   const [focusTarget, setFocusTarget] = useState<TimingFocus>();
+  const [confirmRequest, setConfirmRequest] =
+    useState<KaraokeConfirmRequest | null>(null);
   const action = useRef<AbortController | null>(null);
+  const bypassLeaveGuard = useRef(false);
   const dirty = fingerprint(metadata, lyrics) !== saved;
   const draft = detail?.draft;
 
@@ -111,11 +120,13 @@ export function KaraokeEditorScreen({
       ? t("karaoke.editor.leaveBusyConfirm")
       : t("karaoke.editor.leaveDirtyConfirm");
     function unload(event: BeforeUnloadEvent) {
+      if (bypassLeaveGuard.current) return;
       event.preventDefault();
       event.returnValue = "";
     }
     function navigate(event: MouseEvent) {
       if (
+        bypassLeaveGuard.current ||
         event.defaultPrevented ||
         event.button !== 0 ||
         event.ctrlKey ||
@@ -140,10 +151,29 @@ export function KaraokeEditorScreen({
         target.search === location.search
       )
         return;
-      if (!window.confirm(message)) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
+      event.preventDefault();
+      event.stopPropagation();
+      const targetHref = target.href;
+      const sameOrigin = target.origin === location.origin;
+      const nextPath = `${target.pathname}${target.search}${target.hash}`;
+      setConfirmRequest({
+        title: t(
+          "karaoke.confirm.leaveTitle",
+          undefined,
+          "Rời khỏi trang hiện tại?",
+        ),
+        description: message,
+        confirmLabel: t("karaoke.confirm.leaveAction", undefined, "Rời trang"),
+        variant: "destructive",
+        onConfirm: () => {
+          bypassLeaveGuard.current = true;
+          if (sameOrigin && typeof router.push === "function") {
+            router.push(nextPath);
+          } else {
+            window.location.assign(targetHref);
+          }
+        },
+      });
     }
     window.addEventListener("beforeunload", unload);
     document.addEventListener("click", navigate, true);
@@ -151,7 +181,7 @@ export function KaraokeEditorScreen({
       window.removeEventListener("beforeunload", unload);
       document.removeEventListener("click", navigate, true);
     };
-  }, [dirty, busy, t]);
+  }, [dirty, busy, router, t]);
 
   async function run<T>(
     label: string,
@@ -249,17 +279,35 @@ export function KaraokeEditorScreen({
       );
     }
   }
-  function reload() {
-    if (
-      !songId ||
-      (dirty && !window.confirm(t("karaoke.editor.reloadConfirm")))
-    )
-      return;
+  function executeReload() {
+    if (!songId) return;
     void run(
       t("karaoke.editor.reloading"),
       (signal) => service.get(songId, signal),
       adopt,
     );
+  }
+  function reload() {
+    if (!songId) return;
+    if (dirty) {
+      setConfirmRequest({
+        title: t(
+          "karaoke.confirm.reloadTitle",
+          undefined,
+          "Tải lại bản từ máy chủ?",
+        ),
+        description: t("karaoke.editor.reloadConfirm"),
+        confirmLabel: t(
+          "karaoke.confirm.reloadAction",
+          undefined,
+          "Tải lại bản lưu",
+        ),
+        variant: "destructive",
+        onConfirm: executeReload,
+      });
+      return;
+    }
+    executeReload();
   }
   function loadPreview() {
     if (!songId || !detail || !draft || dirty || conflict) return;
@@ -282,7 +330,7 @@ export function KaraokeEditorScreen({
     reviewed;
   if (loading) return <AdminLoading label={t("karaoke.editor.loadingSong")} />;
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-5">
       <AdminPageHeader
         eyebrow={t("karaoke.editor.eyebrow")}
         title={
@@ -292,20 +340,31 @@ export function KaraokeEditorScreen({
         }
         description={t("karaoke.editor.description")}
         actions={
-          <ButtonLink href="/admin/karaoke" variant="secondary">
+          <ButtonLink
+            fullWidth={false}
+            href="/admin/karaoke"
+            size="admin"
+            variant="outline"
+          >
+            <ArrowLeft aria-hidden className="size-4 viread-rtl-flip" />
             {t("karaoke.editor.backToSongs")}
           </ButtonLink>
         }
       />
       {error && <StatusMessage tone="error">{error}</StatusMessage>}
       {simpleHref && (
-        <ButtonLink
-          href={detail ? `/admin/karaoke/${detail.song_id}/edit` : simpleHref}
-          variant="quiet"
-          className="sm:w-auto"
-        >
-          {t("karaoke.editor.backToWizard")}
-        </ButtonLink>
+        <div>
+          <ButtonLink
+            fullWidth={false}
+            href={
+              detail ? `/admin/karaoke/${detail.song_id}/edit` : simpleHref
+            }
+            size="admin"
+            variant="outline"
+          >
+            {t("karaoke.editor.backToWizard")}
+          </ButtonLink>
+        </div>
       )}
       {detail?.processing_review?.required &&
         !detail.processing_review.reviewed && (
@@ -314,8 +373,8 @@ export function KaraokeEditorScreen({
           </StatusMessage>
         )}
       {conflict && (
-        <details className="rounded-control border border-border bg-white p-4">
-          <summary className="cursor-pointer font-bold">
+        <details className="rounded-xl border border-border bg-white p-4">
+          <summary className="cursor-pointer text-sm font-bold text-ink">
             {t("karaoke.editor.backupSummary")}
           </summary>
           <label className="mt-3 grid gap-2 text-sm">
@@ -325,14 +384,14 @@ export function KaraokeEditorScreen({
               readOnly
               value={JSON.stringify({ ...metadata, lyrics }, null, 2)}
               rows={10}
-              className="w-full rounded-control border border-border p-3 font-mono"
+              className="w-full rounded-control border border-border p-3 font-mono text-xs"
             />
           </label>
         </details>
       )}
       {notice && <StatusMessage tone="success">{notice}</StatusMessage>}
       {busy && (
-        <p role="status" className="font-bold">
+        <p role="status" className="text-sm font-bold text-ink">
           {busy}
           {t("karaoke.editor.busyKeepOpenSuffix")}
         </p>
@@ -340,15 +399,17 @@ export function KaraokeEditorScreen({
       {songId && (
         <div className="flex flex-wrap items-center gap-3">
           <Button
-            variant="quiet"
-            className="sm:w-auto"
             disabled={!!busy}
+            fullWidth={false}
             onClick={reload}
+            size="admin"
+            variant="outline"
           >
+            <RefreshCw aria-hidden className="size-4" />
             {t("karaoke.editor.reloadFromServer")}
           </Button>
           {detail && (
-            <p className="text-sm text-muted">
+            <p className="text-sm text-muted tabular-nums">
               {t("karaoke.editor.revisionMeta", {
                 revision: formatNumber(detail.revision),
                 state: dirty
@@ -362,30 +423,35 @@ export function KaraokeEditorScreen({
       {songId && !detail ? (
         <StatusMessage>{t("karaoke.editor.songNotLoaded")}</StatusMessage>
       ) : detail && !draft ? (
-        <Card>
-          <h2 className="text-xl font-extrabold" dir="auto">
+        <Card className="bg-white p-5">
+          <h2 className="text-lg font-extrabold text-ink" dir="auto">
             {detail.published?.title}
           </h2>
-          <p>{t("karaoke.editor.publishedReadonlyBanner")}</p>
-          <Button
-            className="sm:w-auto"
-            disabled={disabled}
-            onClick={() =>
-              void run(
-                t("karaoke.editor.creatingRevision"),
-                (signal) =>
-                  service.createDraft(detail.song_id, detail.revision, signal),
-                adopt,
-              )
-            }
-          >
-            {t("karaoke.editor.createDraftFromPublished")}
-          </Button>
+          <p className="text-sm text-muted">
+            {t("karaoke.editor.publishedReadonlyBanner")}
+          </p>
+          <div>
+            <Button
+              disabled={disabled}
+              fullWidth={false}
+              onClick={() =>
+                void run(
+                  t("karaoke.editor.creatingRevision"),
+                  (signal) =>
+                    service.createDraft(detail.song_id, detail.revision, signal),
+                  adopt,
+                )
+              }
+              size="admin"
+            >
+              {t("karaoke.editor.createDraftFromPublished")}
+            </Button>
+          </div>
         </Card>
       ) : (
         <>
-          <Card>
-            <h2 className="text-xl font-extrabold">
+          <Card className="bg-white p-5">
+            <h2 className="text-lg font-extrabold text-ink">
               {t("karaoke.editor.section1Heading")}
             </h2>
             <fieldset disabled={disabled}>
@@ -400,16 +466,23 @@ export function KaraokeEditorScreen({
                 }}
               />
             </fieldset>
-            <Button className="sm:w-auto" disabled={disabled} onClick={save}>
-              {songId
-                ? t("karaoke.editor.saveDraftBtn")
-                : t("karaoke.editor.createDraftBtn")}
-            </Button>
+            <div>
+              <Button
+                disabled={disabled}
+                fullWidth={false}
+                onClick={save}
+                size="admin"
+              >
+                {songId
+                  ? t("karaoke.editor.saveDraftBtn")
+                  : t("karaoke.editor.createDraftBtn")}
+              </Button>
+            </div>
           </Card>
           {draft && detail && (
             <>
-              <Card>
-                <h2 className="text-xl font-extrabold">
+              <Card className="bg-white p-5">
+                <h2 className="text-lg font-extrabold text-ink">
                   {t("karaoke.editor.section2Heading")}
                 </h2>
                 <SongMediaUpload
@@ -442,23 +515,26 @@ export function KaraokeEditorScreen({
                   }}
                 />
               </Card>
-              <Card>
-                <h2 className="text-xl font-extrabold">
+              <Card className="bg-white p-5">
+                <h2 className="text-lg font-extrabold text-ink">
                   {t("karaoke.editor.section3Heading")}
                 </h2>
                 <p className="text-sm text-muted">
                   {t("karaoke.editor.section3Desc")}
                 </p>
-                <Button
-                  className="sm:w-auto"
-                  variant="secondary"
-                  disabled={disabled || dirty || !draft.has_audio}
-                  onClick={loadPreview}
-                >
-                  {preview
-                    ? t("karaoke.editor.reloadPreviewBtn")
-                    : t("karaoke.editor.loadPreviewBtn")}
-                </Button>
+                <div>
+                  <Button
+                    disabled={disabled || dirty || !draft.has_audio}
+                    fullWidth={false}
+                    onClick={loadPreview}
+                    size="admin"
+                    variant="secondary"
+                  >
+                    {preview
+                      ? t("karaoke.editor.reloadPreviewBtn")
+                      : t("karaoke.editor.loadPreviewBtn")}
+                  </Button>
+                </div>
                 {preview ? (
                   <KaraokePlayer
                     source={preview}
@@ -489,39 +565,85 @@ export function KaraokeEditorScreen({
                     focusTarget={focusTarget}
                   />
                 )}
-                <Button
-                  className="sm:w-auto"
-                  disabled={disabled}
-                  onClick={save}
-                >
-                  {t("karaoke.editor.saveLyricsTimingBtn")}
-                </Button>
+                <div>
+                  <Button
+                    disabled={disabled}
+                    fullWidth={false}
+                    onClick={save}
+                    size="admin"
+                  >
+                    {t("karaoke.editor.saveLyricsTimingBtn")}
+                  </Button>
+                </div>
               </Card>
-              <Card>
-                <h2 className="text-xl font-extrabold">
+              <Card className="bg-white p-5">
+                <h2 className="text-lg font-extrabold text-ink">
                   {t("karaoke.editor.section4Heading")}
                 </h2>
-                <p>{t("karaoke.editor.section4Desc")}</p>
-                <Button
-                  variant="secondary"
-                  className="sm:w-auto"
-                  disabled={disabled || dirty}
-                  onClick={() =>
-                    void run(
-                      t("karaoke.editor.validatingPublish"),
-                      (signal) =>
-                        service.validate(
-                          detail.song_id,
-                          detail.revision,
-                          draft.id,
-                          signal,
+                <p className="text-sm text-muted">
+                  {t("karaoke.editor.section4Desc")}
+                </p>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <Button
+                    disabled={disabled || dirty}
+                    fullWidth={false}
+                    onClick={() =>
+                      void run(
+                        t("karaoke.editor.validatingPublish"),
+                        (signal) =>
+                          service.validate(
+                            detail.song_id,
+                            detail.revision,
+                            draft.id,
+                            signal,
+                          ),
+                        setValidation,
+                      )
+                    }
+                    size="admin"
+                    variant="secondary"
+                  >
+                    {t("karaoke.editor.validatePublishBtn")}
+                  </Button>
+                  <Button
+                    disabled={!canPublish}
+                    fullWidth={false}
+                    onClick={() =>
+                      setConfirmRequest({
+                        title: t(
+                          "karaoke.confirm.publishTitle",
+                          undefined,
+                          "Xuất bản bài hát?",
                         ),
-                      setValidation,
-                    )
-                  }
-                >
-                  {t("karaoke.editor.validatePublishBtn")}
-                </Button>
+                        description: t("karaoke.editor.publishConfirm"),
+                        confirmLabel: t(
+                          "karaoke.confirm.publishAction",
+                          undefined,
+                          "Xác nhận xuất bản",
+                        ),
+                        variant: "primary",
+                        onConfirm: () =>
+                          void run(
+                            t("karaoke.editor.publishing"),
+                            (signal) =>
+                              service.publish(
+                                detail.song_id,
+                                detail.revision,
+                                draft.id,
+                                signal,
+                              ),
+                            (data) => {
+                              adopt(data);
+                              setNotice(t("karaoke.editor.publishedNotice"));
+                            },
+                          ),
+                      })
+                    }
+                    size="admin"
+                  >
+                    {t("karaoke.editor.publishBtn")}
+                  </Button>
+                </div>
                 {validation && (
                   <StatusMessage
                     tone={validation.valid ? "success" : "warning"}
@@ -544,7 +666,7 @@ export function KaraokeEditorScreen({
                               {issue.line_id ? (
                                 <button
                                   type="button"
-                                  className="min-h-11 text-start underline"
+                                  className="min-h-10 text-start underline"
                                   onClick={() =>
                                     setFocusTarget({
                                       lineId: issue.line_id!,
@@ -571,34 +693,16 @@ export function KaraokeEditorScreen({
                     )}
                   </StatusMessage>
                 )}
-                <Button
-                  className="sm:w-auto"
-                  disabled={!canPublish}
-                  onClick={() => {
-                    if (window.confirm(t("karaoke.editor.publishConfirm")))
-                      void run(
-                        t("karaoke.editor.publishing"),
-                        (signal) =>
-                          service.publish(
-                            detail.song_id,
-                            detail.revision,
-                            draft.id,
-                            signal,
-                          ),
-                        (data) => {
-                          adopt(data);
-                          setNotice(t("karaoke.editor.publishedNotice"));
-                        },
-                      );
-                  }}
-                >
-                  {t("karaoke.editor.publishBtn")}
-                </Button>
               </Card>
             </>
           )}
         </>
       )}
+
+      <KaraokeConfirmModal
+        onClose={() => setConfirmRequest(null)}
+        request={confirmRequest}
+      />
     </div>
   );
 }

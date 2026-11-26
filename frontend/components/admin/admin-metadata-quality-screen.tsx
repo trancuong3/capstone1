@@ -69,7 +69,6 @@ export function AdminMetadataQualityScreen({
   >("");
   const [offset, setOffset] = useState(0);
   const requestIdRef = useRef(0);
-  const lastRefreshSignalRef = useRef(refreshSignal);
   const limit = 10;
 
   const load = useCallback(async () => {
@@ -102,18 +101,24 @@ export function AdminMetadataQualityScreen({
   }, [issueType, lifecycle, metadataQuality, offset, search]);
 
   useEffect(() => {
+    void refreshSignal;
+    const requestId = requestIdRef;
+    if (!search.trim()) {
+      let cancelled = false;
+      void Promise.resolve().then(() => {
+        if (!cancelled) void load();
+      });
+      return () => {
+        cancelled = true;
+        requestId.current += 1;
+      };
+    }
     const timeout = globalThis.setTimeout(() => void load(), 180);
     return () => {
       globalThis.clearTimeout(timeout);
-      requestIdRef.current += 1;
+      requestId.current += 1;
     };
-  }, [load]);
-
-  useEffect(() => {
-    if (refreshSignal === lastRefreshSignalRef.current) return;
-    lastRefreshSignalRef.current = refreshSignal;
-    void load();
-  }, [load, refreshSignal]);
+  }, [load, refreshSignal, search]);
 
   function clearFilters() {
     setSearch("");

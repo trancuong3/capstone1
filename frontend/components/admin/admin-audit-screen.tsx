@@ -54,6 +54,7 @@ export function AdminAuditScreen() {
   const [loadMoreError, setLoadMoreError] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<AuditLogDTO | null>(null);
+  const closeSelectedEvent = useCallback(() => setSelectedEvent(null), []);
   const appendRequestRef = useRef(false);
   const requestIdRef = useRef(0);
 
@@ -363,7 +364,7 @@ export function AdminAuditScreen() {
         footer={
           <Button
             fullWidth={false}
-            onClick={() => setSelectedEvent(null)}
+            onClick={closeSelectedEvent}
             size="admin"
             variant="outline"
           >
@@ -371,7 +372,7 @@ export function AdminAuditScreen() {
           </Button>
         }
         isOpen={selectedEvent !== null}
-        onClose={() => setSelectedEvent(null)}
+        onClose={closeSelectedEvent}
         size="md"
         title={
           selectedEvent?.action ??

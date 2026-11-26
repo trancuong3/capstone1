@@ -1,7 +1,7 @@
 "use client";
 
 import { BookUser, Database, Flag, RefreshCw, ShieldCheck } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 import { AdminBookContentQualityScreen } from "@/components/admin/admin-book-content-quality-screen";
 import { AdminMetadataQualityScreen } from "@/components/admin/admin-metadata-quality-screen";
@@ -67,15 +67,18 @@ export function AdminQualityHubScreen({
   initialTab = "metadata",
 }: AdminQualityHubScreenProps) {
   const t = useTranslations("admin");
+  const [prevInitialTab, setPrevInitialTab] =
+    useState<QualityHubTab>(initialTab);
   const [activeTab, setActiveTab] = useState<QualityHubTab>(initialTab);
   const [refreshSignal, setRefreshSignal] = useState(0);
   const tabRefs = useRef<Partial<Record<QualityHubTab, HTMLButtonElement | null>>>(
     {},
   );
 
-  useEffect(() => {
+  if (prevInitialTab !== initialTab) {
+    setPrevInitialTab(initialTab);
     setActiveTab(initialTab);
-  }, [initialTab]);
+  }
 
   const selectTab = useCallback((nextTab: QualityHubTab) => {
     setActiveTab(nextTab);

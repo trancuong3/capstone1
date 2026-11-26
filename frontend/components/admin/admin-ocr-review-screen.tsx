@@ -5,11 +5,17 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  FileText,
+  History,
+  Layers,
   RefreshCw,
   RotateCcw,
   Save,
+  ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   X,
+  ZoomIn,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -22,7 +28,12 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
+import {
+  AdminBadge,
+  AdminLoading,
+  AdminPageHeader,
+  AdminStatusBadge,
+} from "@/components/admin/admin-ui";
 import { SmartOcrBlockReviewLoader } from "@/components/admin/smart-ocr-block-review";
 import { PageIllustrationStudio } from "@/components/books/page-illustration-studio";
 import { Button, ButtonLink } from "@/components/common/button";
@@ -33,6 +44,7 @@ import { ResponsiveTable } from "@/components/common/responsive-table";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { cn } from "@/lib/utils/cn";
 import { isServiceError } from "@/lib/api/service-error";
 import { translateMessage } from "@/lib/i18n/formatter";
 import { DEFAULT_LOCALE } from "@/lib/i18n/locales";
@@ -64,6 +76,7 @@ import type {
 type LoadError = "not-found" | "unavailable" | "safe";
 type WordFilter = "all" | "review" | "risk" | "disagreement" | "red" | "green";
 type WordReviewColorGroup = "green" | "yellow" | "red";
+type OcrWorkbenchTab = "draft" | "words" | "safety" | "blocks" | "history";
 type AiTokenChange = {
   readonly index: number;
   readonly original: string;
@@ -815,23 +828,24 @@ function OcrImageViewer({
 
   return (
     <>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-2xl font-semibold">
+      <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-extrabold text-ink">
           {t("ocrReview.canvas.originalImageHeading")}
         </h2>
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-sm text-muted">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted tabular-nums">
             {t("ocrReview.canvas.dimensions", {
               width: formatNumber(image.width),
               height: formatNumber(image.height),
             })}
           </span>
           <button
-            className="min-h-10 rounded-control border border-border px-3 text-sm font-semibold text-primary hover:bg-canvas"
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-ink transition-colors hover:bg-surface-subtle focus-visible:outline-2 focus-visible:outline-primary"
             onClick={() => setIsExpanded(true)}
             ref={expandButtonRef}
             type="button"
           >
+            <ZoomIn aria-hidden="true" className="size-3.5 text-primary" />
             {t("ocrReview.canvas.zoomImage")}
           </button>
         </div>
@@ -844,8 +858,9 @@ function OcrImageViewer({
             <Button
               fullWidth={false}
               onClick={() => setIsExpanded(false)}
+              size="admin"
               type="button"
-              variant="secondary"
+              variant="outline"
             >
               {t("ocrReview.canvas.closeImage")}
             </Button>
@@ -895,6 +910,9 @@ export function AdminOcrReviewScreen({
   // Next's compatibility layer can return null outside the App Router (e.g. tests).
   const preferredRevisionId = searchParams?.get("revisionId") ?? null;
   const activeView = searchParams?.get("view") ?? "review";
+  const [activeTab, setActiveTab] = useState<OcrWorkbenchTab>(() =>
+    activeView === "history" ? "history" : "draft",
+  );
   const [book, setBook] = useState<AdminBookDTO | null>(null);
   const [image, setImage] = useState<AdminPageImageUI | null>(null);
   const [history, setHistory] = useState<
@@ -1302,6 +1320,7 @@ export function AdminOcrReviewScreen({
       restoreWorkflowReview(selectedWorkflow, selected);
       setImage(selectedImage);
       setNotice(null);
+      setActiveTab((current) => (current === "history" ? "draft" : current));
     } catch {
       if (
         !mountedRef.current ||
@@ -2074,6 +2093,7 @@ export function AdminOcrReviewScreen({
       setImage(nextImage);
       applyDetail(result);
       setHistory(nextHistory);
+      setActiveTab("draft");
       setNotice(t("ocrReview.notices.reprocessCreated"));
     } catch {
       if (
@@ -2133,6 +2153,7 @@ export function AdminOcrReviewScreen({
         "replacement-page-image",
       ) as HTMLInputElement | null;
       if (input) input.value = "";
+      setActiveTab("draft");
       setNotice(t("ocrReview.notices.reuploadCreated"));
     } catch {
       if (
@@ -2427,30 +2448,688 @@ export function AdminOcrReviewScreen({
     );
   }
 
-  if (activeView === "history") {
-    return (
-      <AdminOcrHistoryPanel
-        backHref={viewHref("review")}
-        bookTitle={book.title}
-        busy={busy}
-        detail={detail}
-        history={history}
-        notice={notice}
-        noticeTone={noticeTone}
-        onChooseRevision={(revisionId) => void chooseRevision(revisionId)}
-        onReload={() => void load()}
-        onReprocess={() => void reprocess()}
-        onReplacementFileChange={setReplacementFile}
-        onReplaceImage={() => void replaceImageAndReprocess()}
-        pageNumber={image.page_number}
-        replacementFile={replacementFile}
-      />
-    );
-  }
+  const resolvedBookTitle = book.title.trim() || t("books.detail.missingTitle");
+  const workbenchTabs: ReadonlyArray<{
+    readonly id: OcrWorkbenchTab;
+    readonly label: string;
+    readonly badge?: number | null;
+    readonly badgeTone?: "warning" | "danger" | "neutral" | "info" | "success";
+  }> = [
+    {
+      id: "draft",
+      label: t("ocrReview.workbenchTabs.draft", undefined, "Văn bản & Duyệt"),
+    },
+    {
+      id: "words",
+      label: t("ocrReview.workbenchTabs.words", undefined, "Từ & BBox"),
+      badge:
+        wordsNeedingReview.length > 0
+          ? wordsNeedingReview.length
+          : words.length,
+      badgeTone: wordsNeedingReview.length > 0 ? "warning" : "neutral",
+    },
+    {
+      id: "safety",
+      label: t("ocrReview.workbenchTabs.safety", undefined, "AI Safety"),
+      badge: aiWorkflow ? aiWorkflow.findings.length : null,
+      badgeTone: workflowHasHighRisk
+        ? "danger"
+        : aiWorkflow?.findings.length
+          ? "warning"
+          : aiWorkflow
+            ? "success"
+            : "neutral",
+    },
+    {
+      id: "blocks",
+      label: t(
+        "ocrReview.workbenchTabs.smartBlocks",
+        undefined,
+        "Khối thông minh V2",
+      ),
+    },
+    {
+      id: "history",
+      label: t(
+        "ocrReview.workbenchTabs.history",
+        undefined,
+        "Lịch sử Revision",
+      ),
+      badge: history.length,
+      badgeTone: "neutral",
+    },
+  ];
+
+  const aiWorkflowCard = aiWorkflow ? (
+    <section
+      className="rounded-xl border border-border bg-white p-4 shadow-2xs sm:p-5"
+      data-testid="admin-ai-workflow"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-2.5">
+        <div>
+          <h2 className="text-base font-extrabold text-ink">
+            {t("ocrReview.safetyPanel.heading")}
+          </h2>
+          <p className="mt-0.5 text-xs text-muted">
+            {t("ocrReview.safetyPanel.subtitle")}
+          </p>
+        </div>
+        <AdminBadge
+          dot
+          tone={
+            aiWorkflow.status === "FAILED"
+              ? "danger"
+              : aiWorkflow.status === "READY_FOR_ADMIN_REVIEW"
+                ? "success"
+                : "info"
+          }
+        >
+          {aiWorkflow.status === "READY_FOR_ADMIN_REVIEW"
+            ? t("ocrReview.safetyPanel.readyForReview")
+            : aiWorkflow.status === "FAILED"
+              ? t("ocrReview.safetyPanel.errorStatus", {
+                  code: aiWorkflow.error_code ?? "UNKNOWN",
+                })
+              : aiWorkflow.stage === "PROOFREADING"
+                ? t("ocrReview.safetyPanel.proofreadingRunning")
+                : aiWorkflow.stage === "CHILD_SAFETY_SCANNING"
+                  ? t("ocrReview.safetyPanel.safetyRunning")
+                  : t("ocrReview.safetyPanel.pendingStatus")}
+        </AdminBadge>
+      </div>
+
+      <div className="mt-3.5 grid gap-2.5 sm:grid-cols-2">
+        <div className="min-w-0 rounded-lg border border-border bg-surface-subtle/60 p-2.5">
+          <p className="text-[11px] font-semibold text-muted">
+            {t("ocrReview.safetyPanel.overallSuitabilityLabel")}
+          </p>
+          <p className="mt-0.5 break-words text-sm font-extrabold text-ink">
+            {aiWorkflow.suitability ?? t("ocrReview.safetyPanel.noResultBadge")}
+          </p>
+        </div>
+        <div className="min-w-0 rounded-lg border border-border bg-surface-subtle/60 p-2.5">
+          <p className="text-[11px] font-semibold text-muted">
+            {t("ocrReview.safetyPanel.textSafetyHeading")}
+          </p>
+          <p className="mt-0.5 break-words text-sm font-extrabold text-ink">
+            {aiWorkflow.text_safety_status ?? aiWorkflow.safety_status}
+          </p>
+        </div>
+        <div className="min-w-0 rounded-lg border border-border bg-surface-subtle/60 p-2.5 sm:col-span-2">
+          <p className="text-[11px] font-semibold text-muted">
+            {t("ocrReview.safetyPanel.imageSafetyHeading")}
+          </p>
+          <p
+            className="mt-0.5 break-words text-sm font-extrabold text-ink"
+            data-testid="image-safety-status"
+          >
+            {workflowImageSafetyStatus === "ADMIN_CONFIRMED_SAFE"
+              ? t("ocrReview.safetyPanel.imageSafeLabel")
+              : workflowImageSafetyStatus === "ADMIN_FLAGGED_UNSAFE"
+                ? t("ocrReview.safetyPanel.imageUnsafeLabel")
+                : t("ocrReview.safetyPanel.imageUnassessedLabel")}
+          </p>
+        </div>
+        <div className="min-w-0 rounded-lg border border-border bg-surface-subtle/60 p-2.5">
+          <p className="text-[11px] font-semibold text-muted">
+            {t("ocrReview.safetyPanel.candidateVersionLabel")}
+          </p>
+          <p className="mt-0.5 break-words text-sm font-extrabold text-ink tabular-nums">
+            {formatNumber(aiWorkflow.candidate_version)}
+          </p>
+        </div>
+        <div className="min-w-0 rounded-lg border border-border bg-surface-subtle/60 p-2.5">
+          <p className="text-[11px] font-semibold text-muted">
+            {t("ocrReview.safetyPanel.safetyHashMatchLabel")}
+          </p>
+          <p className="mt-0.5 break-words text-sm font-extrabold text-ink">
+            {candidateEditPending
+              ? t("ocrReview.safetyPanel.savingCandidateLabel")
+              : aiWorkflow.hash_match
+                ? t("ocrReview.safetyPanel.hashMatchLabel")
+                : t("ocrReview.safetyPanel.hashMismatchLabel")}
+          </p>
+        </div>
+      </div>
+
+      <div
+        className="mt-3.5 rounded-lg border border-border bg-surface-subtle/50 p-3"
+        data-testid="image-safety-review-panel"
+      >
+        <p className="text-xs font-extrabold text-ink">
+          {t("ocrReview.safetyPanel.manualImageHeading")}
+        </p>
+        <p className="mt-0.5 text-xs text-muted">
+          {t("ocrReview.safetyPanel.manualImageDesc")}
+        </p>
+        <div className="mt-2.5 flex flex-col gap-2.5">
+          <label className="block w-full text-xs font-bold text-ink">
+            {t("ocrReview.safetyPanel.imageNoteLabel")}
+            <input
+              className="mt-1 h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal focus-visible:border-primary focus-visible:outline-2 focus-visible:outline-primary"
+              maxLength={500}
+              onChange={(event) => setImageSafetyReason(event.target.value)}
+              placeholder={t("ocrReview.safetyPanel.imageNotePlaceholder")}
+              type="text"
+              value={imageSafetyReason}
+            />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              disabled={busy !== null}
+              isLoading={busy === "workflow"}
+              onClick={() => void decideImageSafety("ADMIN_CONFIRMED_SAFE")}
+              size="admin"
+              type="button"
+              variant="secondary"
+            >
+              <CheckCircle2 aria-hidden="true" className="size-3.5 shrink-0" />
+              {t("ocrReview.safetyPanel.confirmImageSafeBtn")}
+            </Button>
+            <Button
+              disabled={busy !== null || !imageSafetyReason.trim()}
+              isLoading={busy === "workflow"}
+              onClick={() => void decideImageSafety("ADMIN_FLAGGED_UNSAFE")}
+              size="admin"
+              type="button"
+              variant="destructive-outline"
+            >
+              {t("ocrReview.safetyPanel.flagImageUnsafeBtn")}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {aiWorkflow.uncertain_word_indices.length > 0 ? (
+        <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+          {t("ocrReview.safetyPanel.uncertainWordsNote", {
+            count: formatNumber(aiWorkflow.uncertain_word_indices.length),
+            indices: aiWorkflow.uncertain_word_indices
+              .map((index) => index + 1)
+              .join(", "),
+          })}
+        </p>
+      ) : null}
+
+      <dl className="mt-3 grid gap-1.5 break-all rounded-lg border border-border bg-surface-subtle/40 p-2.5 font-mono text-[11px]">
+        <div>
+          <dt className="font-bold text-ink">
+            {t("ocrReview.safetyPanel.candidateHashKey")}
+          </dt>
+          <dd className="text-muted">
+            {aiWorkflow.candidate_hash ?? t("common.emptyDash")}
+          </dd>
+        </div>
+        <div>
+          <dt className="font-bold text-ink">
+            {t("ocrReview.safetyPanel.safetyInputHashKey")}
+          </dt>
+          <dd className="text-muted">
+            {aiWorkflow.safety_input_hash ?? t("common.emptyDash")}
+          </dd>
+        </div>
+        <div>
+          <dt className="font-bold text-ink">
+            {t("ocrReview.safetyPanel.finalApprovedHashKey")}
+          </dt>
+          <dd className="text-muted">
+            {aiWorkflow.final_approved_text_hash ??
+              t("ocrReview.safetyPanel.notConfirmedFinal")}
+          </dd>
+        </div>
+      </dl>
+
+      {aiWorkflow.status === "FAILED" || aiWorkflow.safety_status === "FAILED"
+        ? (() => {
+            const safetyFailure =
+              aiWorkflow.stage === "CHILD_SAFETY_SCANNING" ||
+              (aiWorkflow.proofread_text !== null &&
+                aiWorkflow.safety_status === "FAILED");
+            const failureEvent = [...aiWorkflow.provider_events]
+              .reverse()
+              .find(
+                (event) =>
+                  Boolean(event.error_code) &&
+                  (!event.stage || event.stage === aiWorkflow.stage),
+              );
+            const failedStageEvent = [...aiWorkflow.review_history]
+              .reverse()
+              .find(
+                (event) =>
+                  event.event === "WORKFLOW_STAGE_FAILED" &&
+                  event.stage ===
+                    (safetyFailure ? "CHILD_SAFETY_SCANNING" : "PROOFREADING"),
+              );
+            const recordedFailureCode = failedStageEvent?.error_code;
+            const failureCode =
+              aiWorkflow.error_code ??
+              (typeof recordedFailureCode === "string"
+                ? recordedFailureCode
+                : null);
+            const failureMessage =
+              failureCode === "INVALID_EVIDENCE"
+                ? t("ocrReview.safetyPanel.stageFailures.evidenceMismatch")
+                : failureCode === "INVALID_JSON"
+                  ? t("ocrReview.safetyPanel.stageFailures.invalidJson")
+                  : failureCode === "MISSING_REQUIRED_FIELDS"
+                    ? t("ocrReview.safetyPanel.stageFailures.missingFields")
+                    : failureCode === "INVALID_OUTPUT_SCHEMA"
+                      ? t("ocrReview.safetyPanel.stageFailures.schemaMismatch")
+                      : failureCode === "PROVIDER_TIMEOUT"
+                        ? t("ocrReview.safetyPanel.stageFailures.timeout")
+                        : failureCode === "PROVIDER_UNAVAILABLE"
+                          ? t("ocrReview.safetyPanel.stageFailures.unavailable")
+                          : safetyFailure
+                            ? t(
+                                "ocrReview.safetyPanel.stageFailures.safetyIncomplete",
+                              )
+                            : t(
+                                "ocrReview.safetyPanel.stageFailures.proofreadIncomplete",
+                              );
+            return (
+              <div
+                className="mt-3 rounded-lg border border-amber-400 bg-amber-50 p-3 text-xs text-amber-950"
+                role="alert"
+              >
+                <p className="font-bold">
+                  {safetyFailure
+                    ? t("ocrReview.safetyPanel.stageFailures.safetyTitle")
+                    : t("ocrReview.safetyPanel.stageFailures.proofreadTitle")}
+                </p>
+                <p className="mt-1">{failureMessage}</p>
+                <p className="mt-1">
+                  {t("ocrReview.safetyPanel.failureCodeLine", {
+                    code: failureCode ?? "UNKNOWN",
+                  })}
+                  {failureEvent?.provider
+                    ? ` · Provider ${String(failureEvent.provider)}`
+                    : ""}
+                  {failureEvent?.model
+                    ? ` · Model ${String(failureEvent.model)}`
+                    : ""}
+                  {failureEvent?.duration_ms != null
+                    ? t("ocrReview.safetyPanel.httpStatusPart", {
+                        status: "",
+                      }).replace("HTTP ", "") &&
+                      ` · ${String(failureEvent.duration_ms)} ms`
+                    : ""}
+                  {t("ocrReview.safetyPanel.attemptSuffix", {
+                    attempts: formatNumber(aiWorkflow.attempts),
+                  })}
+                  {` · ${formatDateTime(aiWorkflow.updated_at)}`}
+                </p>
+                <p className="mt-1">
+                  {safetyFailure
+                    ? t("ocrReview.safetyPanel.retrySafetyHint")
+                    : t("ocrReview.safetyPanel.retryProofreadHint")}
+                </p>
+              </div>
+            );
+          })()
+        : null}
+
+      {aiWorkflow.status === "READY_FOR_ADMIN_REVIEW" &&
+      aiWorkflow.safety_status === "STALE" ? (
+        <p
+          className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950"
+          role="status"
+        >
+          {t("ocrReview.safetyPanel.candidateChangedWarning")}
+        </p>
+      ) : null}
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {aiWorkflow.status === "FAILED" ||
+        (aiWorkflow.proofread_text !== null &&
+          (aiWorkflow.safety_status === "FAILED" ||
+            aiWorkflow.safety_status === "STALE") &&
+          !["QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING"].includes(
+            aiWorkflow.status,
+          )) ? (
+          <Button
+            disabled={busy !== null}
+            isLoading={busy === "workflow"}
+            onClick={() => void retryWorkflow()}
+            size="admin"
+            type="button"
+            variant="secondary"
+          >
+            <RefreshCw aria-hidden="true" className="size-3.5 shrink-0" />
+            {aiWorkflow.status === "FAILED" &&
+            aiWorkflow.stage === "PROOFREADING"
+              ? t("ocrReview.safetyPanel.retryProofreadBtn")
+              : t("ocrReview.safetyPanel.retrySafetyBtn")}
+          </Button>
+        ) : null}
+        {aiWorkflow.safety_status === "PROVISIONAL" &&
+        aiWorkflow.hash_match &&
+        (aiWorkflow.findings.length > 0 ||
+          aiWorkflow.suitability !== "SUITABLE") ? (
+          <label className="basis-full text-xs font-bold text-ink">
+            {t("ocrReview.safetyPanel.reviewReasonLabel")}
+            <textarea
+              className="mt-1 min-h-20 w-full rounded-control border border-border bg-white p-2.5 text-sm font-normal focus-visible:border-primary focus-visible:outline-2 focus-visible:outline-primary"
+              maxLength={500}
+              onChange={(event) => setSafetyDecisionReason(event.target.value)}
+              value={safetyDecisionReason}
+            />
+          </label>
+        ) : null}
+        {aiWorkflow.safety_status === "PROVISIONAL" && aiWorkflow.hash_match ? (
+          <Button
+            disabled={
+              busy !== null ||
+              candidateEditPending ||
+              ((Boolean(aiWorkflow.findings.length) ||
+                aiWorkflow.suitability !== "SUITABLE") &&
+                !safetyDecisionReason.trim())
+            }
+            isLoading={busy === "workflow"}
+            onClick={() => void decideSafety(true)}
+            size="admin"
+            type="button"
+            variant="secondary"
+          >
+            <CheckCircle2 aria-hidden="true" className="size-3.5 shrink-0" />
+            {t("ocrReview.safetyPanel.confirmSafetyBtn")}
+          </Button>
+        ) : aiWorkflow.safety_status === "CONFIRMED" &&
+          aiWorkflow.hash_match ? (
+          <Button
+            disabled={busy !== null}
+            isLoading={busy === "workflow"}
+            onClick={() => void decideSafety(false)}
+            size="admin"
+            type="button"
+            variant="outline"
+          >
+            {t("ocrReview.safetyPanel.clearSafetyConfirmBtn")}
+          </Button>
+        ) : null}
+      </div>
+
+      <section className="mt-4">
+        <h3 className="text-xs font-extrabold uppercase tracking-wide text-muted">
+          {t("ocrReview.safetyPanel.findingsHeading")}
+        </h3>
+        {aiWorkflow.findings.length ? (
+          <ul className="mt-2 grid gap-2.5">
+            {aiWorkflow.findings.map((finding, index) => {
+              const severity = String(
+                finding.severity ?? "REVIEW",
+              ).toUpperCase();
+              const category = String(
+                finding.category ?? "OTHER_SENSITIVE",
+              ).replaceAll("_", " ");
+              const evidence = String(finding.evidence_text ?? "");
+              const compactEvidence =
+                evidence.length > 240
+                  ? evidence.slice(0, 240).trimEnd() + "…"
+                  : evidence;
+              const high = severity === "HIGH";
+              return (
+                <li key={String(finding.finding_id ?? index)}>
+                  <details
+                    className={
+                      "rounded-lg border p-3 " +
+                      (high
+                        ? "border-red-400 bg-red-50"
+                        : "border-border bg-white")
+                    }
+                  >
+                    <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 focus-visible:outline-2 focus-visible:outline-primary">
+                      <span className="text-xs font-extrabold">{category}</span>
+                      <span className="text-xs text-muted">
+                        {String(finding.content_type ?? "MENTION").replaceAll(
+                          "_",
+                          " ",
+                        )}
+                      </span>
+                      <span
+                        className={
+                          "rounded-full px-2 py-0.5 text-xs font-extrabold " +
+                          (high
+                            ? "bg-red-700 text-white"
+                            : "bg-surface-subtle text-ink")
+                        }
+                      >
+                        {severity}
+                      </span>
+                      <span className="ms-auto text-xs font-semibold text-primary">
+                        {t("ocrReview.safetyPanel.openDetail")}
+                      </span>
+                    </summary>
+                    <div className="mt-2.5 border-t border-border pt-2.5">
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-muted">
+                        {t("ocrReview.safetyPanel.evidenceLabel")}
+                      </p>
+                      <blockquote className="mt-1 border-s-2 border-primary ps-3 text-xs">
+                        <span
+                          className="viread-learning-content"
+                          dir="ltr"
+                          lang="vi"
+                        >
+                          “{compactEvidence}”
+                        </span>
+                        <span className="ms-2 font-mono text-[11px] text-muted">
+                          [{String(finding.evidence_start ?? "?")}–
+                          {String(finding.evidence_end ?? "?")}]
+                        </span>
+                      </blockquote>
+                      {evidence.length > 240 ? (
+                        <details className="mt-2 text-xs">
+                          <summary className="cursor-pointer font-bold text-primary">
+                            {t("ocrReview.safetyPanel.viewFullQuote", {
+                              length: formatNumber(evidence.length),
+                            })}
+                          </summary>
+                          <blockquote
+                            className="viread-learning-content mt-1.5 border-s-2 border-primary ps-3"
+                            dir="ltr"
+                            lang="vi"
+                          >
+                            “{evidence}”
+                          </blockquote>
+                        </details>
+                      ) : null}
+                      <p className="mt-2.5 text-[11px] font-bold uppercase tracking-wide text-muted">
+                        {t("ocrReview.safetyPanel.explanationLabel")}
+                      </p>
+                      <p className="mt-0.5 text-xs">
+                        {String(finding.explanation ?? "")}
+                      </p>
+                      <p className="mt-2.5 text-[11px] font-bold uppercase tracking-wide text-muted">
+                        {t("ocrReview.safetyPanel.recommendationLabel")}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted">
+                        {String(finding.recommendation ?? "")}
+                      </p>
+                    </div>
+                  </details>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="mt-1.5 text-xs text-muted">
+            {aiWorkflow.safety_status === "PROVISIONAL" ||
+            aiWorkflow.safety_status === "CONFIRMED" ||
+            aiWorkflow.safety_status === "AUTO_CONFIRMED"
+              ? t("ocrReview.safetyPanel.noFindings")
+              : t("ocrReview.safetyPanel.findingsPending")}
+          </p>
+        )}
+      </section>
+
+      {aiWorkflow.safety_history.length > 0 ? (
+        <section className="mt-4">
+          <h3 className="text-xs font-extrabold uppercase tracking-wide text-muted">
+            {t("ocrReview.safetyPanel.historyHeading")}
+          </h3>
+          <p className="mt-0.5 text-xs text-muted">
+            {t("ocrReview.safetyPanel.historyDesc")}
+          </p>
+          <div className="mt-2 grid gap-2">
+            {aiWorkflow.safety_history.map((scan, scanIndex) => {
+              const historicalFindings = Array.isArray(scan.findings)
+                ? scan.findings.filter(
+                    (item): item is Record<string, unknown> =>
+                      typeof item === "object" &&
+                      item !== null &&
+                      !Array.isArray(item),
+                  )
+                : [];
+              return (
+                <details
+                  className="rounded-lg border border-border p-2.5"
+                  key={`${String(scan.scan_id ?? scanIndex)}-${scanIndex}`}
+                >
+                  <summary className="cursor-pointer text-xs font-bold">
+                    {t("ocrReview.safetyPanel.scanStatusLine", {
+                      status: String(scan.status ?? "UNKNOWN"),
+                      suitability: String(
+                        scan.suitability ??
+                          t("ocrReview.safetyPanel.noSuitabilityFallback"),
+                      ),
+                      count: formatNumber(historicalFindings.length),
+                    })}
+                    {scan.content_hash
+                      ? t("ocrReview.safetyPanel.scanHashPrefix", {
+                          hash: String(scan.content_hash).slice(0, 12),
+                        })
+                      : t("ocrReview.safetyPanel.noHashSuffix")}
+                  </summary>
+                  {historicalFindings.length ? (
+                    <ul className="mt-2 grid gap-2">
+                      {historicalFindings.map((finding, findingIndex) => (
+                        <li
+                          className="border-s-2 border-border ps-2.5 text-xs"
+                          key={`${String(finding.finding_id ?? findingIndex)}-${findingIndex}`}
+                        >
+                          <p className="font-bold">
+                            {String(finding.category ?? "OTHER_SENSITIVE")} ·{" "}
+                            {String(finding.severity ?? "UNKNOWN")}
+                          </p>
+                          <p
+                            className="viread-learning-content"
+                            dir="ltr"
+                            lang="vi"
+                          >
+                            “{String(finding.evidence_text ?? "")}”
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-1.5 text-xs text-muted">
+                      {t("ocrReview.safetyPanel.noHistoricalFindings")}
+                    </p>
+                  )}
+                </details>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      <details className="mt-4 rounded-lg border border-border bg-surface-subtle/40 p-2.5">
+        <summary className="cursor-pointer text-xs font-bold text-ink">
+          {t("ocrReview.safetyPanel.provenanceHeading")}
+        </summary>
+        <p className="mt-1.5 break-all font-mono text-[11px] text-muted">
+          {t("ocrReview.safetyPanel.provenanceRunPrefix", {
+            runId: String(
+              aiWorkflow.proofread_metadata.run_id ?? aiWorkflow.workflow_id,
+            ),
+            promptVersion: String(
+              aiWorkflow.proofread_metadata.prompt_version ??
+                t("common.emptyDash"),
+            ),
+            duration: String(
+              aiWorkflow.proofread_metadata.processing_time_ms ?? 0,
+            ),
+            safetyPrompt: String(
+              aiWorkflow.safety_metadata.prompt_version ??
+                t("common.emptyDash"),
+            ),
+          })}
+        </p>
+        {aiWorkflow.provider_events.length ? (
+          <ul className="mt-2 grid gap-1.5 text-[11px]">
+            {aiWorkflow.provider_events.map((event, index) => (
+              <li
+                className="rounded-md bg-white p-2 ring-1 ring-border/70"
+                key={`${String(event.provider ?? "provider")}-${index}`}
+              >
+                <span className="font-bold">
+                  {String(event.provider ?? t("common.emptyDash"))}
+                </span>
+                {" · "}
+                {String(event.model ?? t("common.emptyDash"))}
+                {" · "}
+                {event.availability === true
+                  ? t("ocrReview.safetyPanel.providerAvailable")
+                  : event.availability === false
+                    ? t("ocrReview.safetyPanel.providerUnavailable")
+                    : t("ocrReview.safetyPanel.providerChecking")}
+                {t("ocrReview.safetyPanel.httpStatusPart", {
+                  status: String(event.http_status ?? t("common.emptyDash")),
+                })}
+                {" · "}
+                {String(event.duration_ms ?? 0)} ms
+                {event.output_mode ? ` · ${String(event.output_mode)}` : ""}
+                {Number(event.retry_count ?? 0) > 0
+                  ? t("ocrReview.safetyPanel.fallbackRetryPart", {
+                      count: String(event.retry_count),
+                    })
+                  : ""}
+                {event.error_code ? ` · ${String(event.error_code)}` : ""}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-1.5 text-xs text-muted">
+            {t("ocrReview.safetyPanel.noProviderEvents")}
+          </p>
+        )}
+      </details>
+
+      <p className="mt-3 text-[11px] leading-relaxed text-muted">
+        {t("ocrReview.safetyPanel.safetyDisclaimer")}
+      </p>
+    </section>
+  ) : null;
 
   return (
-    <>
+    <div className="space-y-4">
       <AdminPageHeader
+        actions={
+          <ButtonLink
+            href={`/admin/books/${encodeURIComponent(bookId)}`}
+            size="admin"
+            variant="outline"
+          >
+            <ArrowLeft
+              aria-hidden="true"
+              className="size-3.5 shrink-0 rtl:rotate-180"
+            />
+            {t("ocrReview.header.backToDetail")}
+          </ButtonLink>
+        }
+        badge={<OcrRevisionStatus status={detail.verification_status} />}
+        breadcrumbs={[
+          { label: t("books.detail.backToBooks"), href: "/admin/books" },
+          {
+            label: resolvedBookTitle,
+            href: `/admin/books/${encodeURIComponent(bookId)}`,
+          },
+          {
+            label: t("books.detail.pageNumber", {
+              pageNumber: formatNumber(image.page_number),
+            }),
+          },
+        ]}
+        description={t("ocrReview.header.description")}
         eyebrow={t("ocrReview.header.eyebrow", {
           title: book.title,
           pageNumber: formatNumber(image.page_number),
@@ -2458,19 +3137,10 @@ export function AdminOcrReviewScreen({
         title={t("ocrReview.header.title", {
           revisionNo: formatNumber(detail.revision_no),
         })}
-        description={t("ocrReview.header.description")}
-        actions={<OcrRevisionStatus status={detail.verification_status} />}
       />
-      <Link
-        className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-semibold text-primary focus-visible:outline-3 focus-visible:outline-primary"
-        href={`/admin/books/${bookId}`}
-      >
-        <ArrowLeft aria-hidden className="size-5 rtl:rotate-180" />{" "}
-        {t("ocrReview.header.backToDetail")}
-      </Link>
+
       {detail.verification_status === "VERIFIED" ? (
         <StatusMessage
-          className="mb-6"
           title={t("ocrReview.header.verifiedBannerTitle")}
           tone="success"
         >
@@ -2478,20 +3148,20 @@ export function AdminOcrReviewScreen({
         </StatusMessage>
       ) : detail.verification_status === "PROCESSING" ? (
         <StatusMessage
-          className="mb-6"
           title={t("ocrReview.header.processingBannerTitle")}
           tone="info"
         >
           {t("ocrReview.header.processingBannerDesc")}
         </StatusMessage>
       ) : null}
+
       {notice ? (
-        <StatusMessage className="mb-6" tone={noticeTone}>
-          {notice}
-        </StatusMessage>
+        <StatusMessage tone={noticeTone}>{notice}</StatusMessage>
       ) : null}
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(420px,1fr)]">
-        <Card className="bg-white xl:sticky xl:top-4 xl:self-start">
+
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(440px,0.95fr)]">
+        {/* Left Sticky Pane: ONLY Image + BBox Canvas + Compact Zoom & Color-Legend Bar */}
+        <section className="rounded-xl border border-border bg-white p-4 shadow-2xs xl:sticky xl:top-6 xl:max-h-[calc(100dvh-7rem)] xl:overflow-auto">
           <OcrImageViewer
             book={book}
             draftTokens={draftTokens}
@@ -2502,91 +3172,10 @@ export function AdminOcrReviewScreen({
             verificationStatus={detail.verification_status}
             words={words}
           />
-          <section
-            aria-label={t("ocrReview.diagnostics.ariaLabel")}
-            className="mt-4 rounded-control border border-border bg-canvas p-4"
-          >
-            <h2 className="font-extrabold text-ink">
-              {t("ocrReview.diagnostics.heading")}
-            </h2>
-            <p className="mt-1 text-xs text-muted">
-              {t("ocrReview.diagnostics.subtitle")}
-            </p>
-            <dl className="mt-3 grid gap-2 text-sm">
-              <div>
-                <dt className="font-semibold">
-                  {t("ocrReview.diagnostics.actualModel")}
-                </dt>
-                <dd>{runtimeEvidence.modelProfile}</dd>
-              </div>
-              <div>
-                <dt className="font-semibold">
-                  {t("ocrReview.diagnostics.verifiedSha")}
-                </dt>
-                <dd className="break-all font-mono text-xs">
-                  {runtimeEvidence.checkpointSha256 ??
-                    t("ocrReview.diagnostics.noCheckpointEvidence")}
-                </dd>
-              </div>
-              <div>
-                <dt className="font-semibold">
-                  {t("ocrReview.diagnostics.loadInferenceStatus")}
-                </dt>
-                <dd>
-                  {runtimeEvidence.modelLoadStatus}
-                  {" · "}
-                  {runtimeEvidence.modelInferenceStatus}
-                </dd>
-              </div>
-              <div>
-                <dt className="font-semibold">
-                  {t("ocrReview.diagnostics.fallbackLabel")}
-                </dt>
-                <dd>
-                  {runtimeEvidence.fallbackReason ??
-                    t("ocrReview.diagnostics.noFallbackRecorded")}
-                </dd>
-              </div>
-              <div>
-                <dt className="font-semibold">
-                  {t("ocrReview.diagnostics.vietocrPackageLabel")}
-                </dt>
-                <dd>
-                  {runtimeEvidence.engineVersion ??
-                    t("ocrReview.diagnostics.unknownEngineVersion")}
-                </dd>
-              </div>
-            </dl>
-            {!runtimeEvidence.verified ? (
-              <p className="mt-2 text-xs text-muted">
-                {t("ocrReview.diagnostics.unverifiedRuntimeWarning")}
-              </p>
-            ) : null}
-          </section>
-          <section className="mt-4 rounded-control border border-border bg-canvas p-4">
-            <h2 className="font-extrabold text-ink">
-              {t("ocrReview.originalOcr.heading")}
-            </h2>
-            {detail.original_ocr_text ? (
-              <p
-                className="viread-learning-content mt-2 whitespace-pre-wrap text-sm leading-7 text-ink"
-                dir="ltr"
-                lang="vi"
-              >
-                {detail.original_ocr_text}
-              </p>
-            ) : (
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-muted">
-                {t("ocrReview.originalOcr.missingSnapshot")}
-              </p>
-            )}
-          </section>
-          <p className="mt-3 text-sm leading-6 text-muted">
-            {t("ocrReview.legend.description")}
-          </p>
+
           <div
             aria-label={t("ocrReview.legend.countsAria")}
-            className="mt-4 grid grid-cols-3 gap-2"
+            className="mt-3 grid grid-cols-3 gap-2"
             role="group"
           >
             {(
@@ -2595,81 +3184,40 @@ export function AdminOcrReviewScreen({
                   id: "green",
                   label: t("ocrReview.legend.green"),
                   count: colorCounts.green,
-                  cardClass: "border-green-600/50 bg-green-50 text-green-900",
+                  cardClass:
+                    "border-emerald-200 bg-success-surface/70 text-success-ink",
                 },
                 {
                   id: "yellow",
                   label: t("ocrReview.legend.yellow"),
                   count: colorCounts.yellow,
-                  cardClass: "border-amber-600/50 bg-amber-50 text-amber-950",
+                  cardClass:
+                    "border-amber-200 bg-warning-surface/70 text-warning",
                 },
                 {
                   id: "red",
                   label: t("ocrReview.legend.red"),
                   count: colorCounts.red,
-                  cardClass: "border-red-600/50 bg-red-50 text-red-900",
+                  cardClass:
+                    "border-danger/25 bg-danger-surface/70 text-danger",
                 },
               ] as const
             ).map((state) => (
               <div
-                className={`grid min-h-20 content-center gap-1 rounded-control border p-2 text-center text-xs font-semibold ${state.cardClass}`}
+                className={`flex flex-col items-center justify-center rounded-lg border px-2 py-2 text-center text-[11px] font-bold leading-tight ${state.cardClass}`}
                 key={state.id}
               >
-                <strong className="text-xl leading-none">
+                <strong className="text-base leading-none tabular-nums">
                   {formatNumber(state.count)}
                 </strong>
-                <span>{state.label}</span>
+                <span className="mt-1">{state.label}</span>
               </div>
             ))}
           </div>
-          <div
-            aria-label={t("ocrReview.legend.detailsAria")}
-            className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted"
-          >
-            <span>
-              {t("ocrReview.legend.verifiedCount")}{" "}
-              {formatNumber(
-                words.filter((word) => {
-                  const status = getWordReviewStatus(
-                    word,
-                    detail.verification_status,
-                  );
-                  return status === "verified" || status === "reference_match";
-                }).length,
-              )}
-            </span>
-            <span>
-              {t("ocrReview.legend.consensusCount")}{" "}
-              {formatNumber(
-                words.filter(
-                  (word) =>
-                    getWordReviewStatus(word, detail.verification_status) ===
-                    "engine_agreement",
-                ).length,
-              )}
-            </span>
-            <span>
-              {t("ocrReview.legend.disagreementCount")}{" "}
-              {formatNumber(
-                words.filter(
-                  (word) =>
-                    getWordReviewStatus(word, detail.verification_status) ===
-                    "engine_disagreement",
-                ).length,
-              )}
-            </span>
-            <span>
-              {t("ocrReview.legend.uncalibratedCount")}{" "}
-              {formatNumber(
-                words.filter(
-                  (word) => word.ocr_evidence?.calibrated_word_accuracy == null,
-                ).length,
-              )}
-            </span>
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-3">
+
+          <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2.5">
             <button
-              className="min-h-10 rounded-control border border-border px-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-9 items-center rounded-control border border-border bg-white px-2.5 text-xs font-bold text-ink transition-colors hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50"
               disabled={!nextWordToReview}
               onClick={() => {
                 if (nextWordToReview) {
@@ -2680,7 +3228,7 @@ export function AdminOcrReviewScreen({
             >
               {t("ocrReview.legend.goToReviewBtn")}
             </button>
-            <span className="text-xs font-semibold text-muted">
+            <span className="text-xs font-semibold text-muted tabular-nums">
               {nextWordToReview
                 ? t("ocrReview.legend.nextReviewPosition", {
                     current: formatNumber(nextReviewPosition),
@@ -2689,1131 +3237,546 @@ export function AdminOcrReviewScreen({
                 : t("ocrReview.legend.noWordsToReview")}
             </span>
           </div>
-        </Card>
 
-        <div className="grid content-start gap-6">
-          <Card className="bg-white">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-2xl font-semibold">
+          <details className="mt-2.5 border-t border-border pt-2 text-xs text-muted">
+            <summary className="cursor-pointer font-semibold text-primary hover:underline">
+              {t("ocrReview.legend.detailsAria")}
+            </summary>
+            <p className="mt-1.5 leading-relaxed">
+              {t("ocrReview.legend.description")}
+            </p>
+            <div
+              aria-label={t("ocrReview.legend.detailsAria")}
+              className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px]"
+            >
+              <span>
+                {t("ocrReview.legend.verifiedCount")}{" "}
+                {formatNumber(
+                  words.filter((word) => {
+                    const status = getWordReviewStatus(
+                      word,
+                      detail.verification_status,
+                    );
+                    return (
+                      status === "verified" || status === "reference_match"
+                    );
+                  }).length,
+                )}
+              </span>
+              <span>
+                {t("ocrReview.legend.consensusCount")}{" "}
+                {formatNumber(
+                  words.filter(
+                    (word) =>
+                      getWordReviewStatus(word, detail.verification_status) ===
+                      "engine_agreement",
+                  ).length,
+                )}
+              </span>
+              <span>
+                {t("ocrReview.legend.disagreementCount")}{" "}
+                {formatNumber(
+                  words.filter(
+                    (word) =>
+                      getWordReviewStatus(word, detail.verification_status) ===
+                      "engine_disagreement",
+                  ).length,
+                )}
+              </span>
+              <span>
+                {t("ocrReview.legend.uncalibratedCount")}{" "}
+                {formatNumber(
+                  words.filter(
+                    (word) =>
+                      word.ocr_evidence?.calibrated_word_accuracy == null,
+                  ).length,
+                )}
+              </span>
+            </div>
+          </details>
+        </section>
+
+        {/* Right Pane: Segmented Tabs + Sticky Bottom Action Bar */}
+        <div className="flex min-w-0 flex-col gap-4">
+          <div
+            aria-label={t(
+              "ocrReview.workbenchTabs.ariaLabel",
+              undefined,
+              "Khu vực làm việc duyệt OCR",
+            )}
+            className="flex flex-wrap gap-1 rounded-xl border border-border bg-surface-subtle p-1"
+            role="tablist"
+          >
+            {workbenchTabs.map((tab) => {
+              const isSelected = activeTab === tab.id;
+              const TabIcon =
+                tab.id === "draft"
+                  ? FileText
+                  : tab.id === "words"
+                    ? SlidersHorizontal
+                    : tab.id === "safety"
+                      ? ShieldCheck
+                      : tab.id === "blocks"
+                        ? Layers
+                        : History;
+              return (
+                <button
+                  aria-controls={`ocr-workbench-panel-${tab.id}`}
+                  aria-selected={isSelected}
+                  className={cn(
+                    "inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                    isSelected
+                      ? "bg-white text-primary shadow-2xs ring-1 ring-border"
+                      : "text-muted hover:text-ink",
+                  )}
+                  id={`ocr-workbench-tab-${tab.id}`}
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  role="tab"
+                  type="button"
+                >
+                  <TabIcon aria-hidden="true" className="size-3.5 shrink-0" />
+                  <span>{tab.label}</span>
+                  {tab.badge !== undefined && tab.badge !== null ? (
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 py-0.5 text-[11px] font-extrabold tabular-nums",
+                        tab.badgeTone === "danger"
+                          ? "bg-danger-surface text-danger"
+                          : tab.badgeTone === "warning"
+                            ? "bg-warning-surface text-warning"
+                            : tab.badgeTone === "success"
+                              ? "bg-success-surface text-success-ink"
+                              : isSelected
+                                ? "bg-sky text-primary-hover"
+                                : "bg-white text-muted",
+                      )}
+                    >
+                      {formatNumber(tab.badge)}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Tab 1: Văn bản & Duyệt */}
+          <div
+            aria-labelledby="ocr-workbench-tab-draft"
+            className={activeTab === "draft" ? "space-y-4" : "hidden"}
+            id="ocr-workbench-panel-draft"
+            role="tabpanel"
+          >
+            <section className="rounded-xl border border-border bg-white p-4 shadow-2xs sm:p-5">
+              <div className="mb-3">
+                <h2 className="text-base font-extrabold text-ink">
                   {t("ocrReview.draft.heading")}
                 </h2>
-                <p className="mt-1 text-sm text-muted">
+                <p className="mt-0.5 text-xs text-muted">
                   {t("ocrReview.draft.subtitle")}
                 </p>
               </div>
-            </div>
-            <label className="grid gap-2 font-semibold" htmlFor="ocr-text">
-              {t("ocrReview.draft.label")}
-              <textarea
-                aria-describedby="ocr-help"
-                className="viread-learning-content min-h-60 max-h-[32rem] resize-y rounded-control border border-border bg-white p-4 font-normal leading-7 outline-none focus:border-primary focus:outline-3 focus:outline-primary/30 disabled:bg-canvas"
-                dir="ltr"
-                disabled={
-                  verified ||
-                  detail.lifecycle_status !== "ACTIVE" ||
-                  busy !== null
-                }
-                id="ocr-text"
-                lang="vi"
-                onChange={(event) => handleDraftTextChange(event.target.value)}
-                value={draftText}
-              />
-            </label>
-            <p className="mt-2 text-sm text-muted" id="ocr-help">
-              {t("ocrReview.draft.aiHint")}
-            </p>
-            {busy === "ai_correct" ? (
-              <div
-                aria-live="polite"
-                className="mt-4 grid gap-3 rounded-control border border-purple-300 bg-purple-50 p-4 text-sm text-purple-950"
-                role="status"
+              <label
+                className="grid gap-1.5 text-xs font-bold text-ink"
+                htmlFor="ocr-text"
               >
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <span className="font-semibold">
-                    {aiProgress?.status === "QUEUED"
-                      ? t("ocrReview.draft.statusQueued")
-                      : aiProgress?.status === "PROOFREADING"
-                        ? t("ocrReview.draft.statusProofreadingChunk", {
-                            completed: formatNumber(
-                              aiProgress.progress.completed_chunks,
-                            ),
-                            total: formatNumber(
-                              aiProgress.progress.total_chunks,
-                            ),
-                          })
-                        : aiProgress?.status === "CHILD_SAFETY_SCANNING"
-                          ? t("ocrReview.draft.statusSafetyRunning")
-                          : aiProgress?.status === "FAILED"
-                            ? t("ocrReview.draft.statusFailed")
-                            : aiProgress?.status === "READY_FOR_ADMIN_REVIEW"
-                              ? t("ocrReview.draft.statusCompleted")
-                              : t("ocrReview.draft.statusPreparing")}
-                  </span>
-                  <Button
-                    className="min-h-9 w-auto border-red-300 px-3 text-red-800 hover:bg-red-50"
-                    onClick={cancelAiCorrection}
-                    type="button"
-                    variant="secondary"
-                  >
-                    <X aria-hidden className="size-4" />{" "}
-                    {t("ocrReview.draft.stopTrackingBtn")}
-                  </Button>
-                </div>
-                <progress
-                  aria-label={t("ocrReview.draft.progressAria")}
-                  className="h-2 w-full accent-purple-700"
-                  max={aiProgress?.progress.total_chunks ?? 1}
-                  value={aiProgress?.progress.completed_chunks ?? 0}
+                {t("ocrReview.draft.label")}
+                <textarea
+                  aria-describedby="ocr-help"
+                  className="viread-learning-content min-h-56 max-h-[30rem] resize-y rounded-control border border-border bg-white p-3.5 text-base font-normal leading-7 outline-none focus:border-primary focus:outline-3 focus:outline-primary/30 disabled:bg-surface-subtle"
+                  dir="ltr"
+                  disabled={
+                    verified ||
+                    detail.lifecycle_status !== "ACTIVE" ||
+                    busy !== null
+                  }
+                  id="ocr-text"
+                  lang="vi"
+                  onChange={(event) =>
+                    handleDraftTextChange(event.target.value)
+                  }
+                  value={draftText}
                 />
-                <span className="text-xs text-purple-900">
-                  {t("ocrReview.draft.suggestionOnlyNote")}
-                </span>
-              </div>
-            ) : null}
-            {wordSyncError ? (
+              </label>
               <p
-                aria-live="polite"
-                className="mt-3 rounded-control border border-red-500/50 bg-red-50 p-3 text-sm text-red-800"
-                role="alert"
+                className="mt-2 text-xs leading-relaxed text-muted"
+                id="ocr-help"
               >
-                {wordSyncError}
+                {t("ocrReview.draft.aiHint")}
               </p>
-            ) : null}
-            {aiSuggestion !== null ? (
-              <section
-                aria-labelledby="ai-correction-review-title"
-                className="mt-4 grid gap-4 rounded-control border border-purple-300 bg-purple-50 p-4"
-                role="region"
-              >
-                <div>
-                  <h3
-                    className="text-lg font-semibold text-purple-950"
-                    id="ai-correction-review-title"
-                  >
-                    {t("ocrReview.draft.diffHeading")}
-                  </h3>
-                  <p className="mt-1 text-sm text-purple-900">
-                    {t("ocrReview.draft.diffSubtitle", {
-                      count: formatNumber(aiChanges.length),
-                    })}
-                  </p>
-                  <p
+
+              {busy === "ai_correct" ? (
+                <div
+                  aria-live="polite"
+                  className="mt-3 grid gap-2.5 rounded-lg border border-purple-300 bg-purple-50 p-3.5 text-xs text-purple-950"
+                  role="status"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-bold">
+                      {aiProgress?.status === "QUEUED"
+                        ? t("ocrReview.draft.statusQueued")
+                        : aiProgress?.status === "PROOFREADING"
+                          ? t("ocrReview.draft.statusProofreadingChunk", {
+                              completed: formatNumber(
+                                aiProgress.progress.completed_chunks,
+                              ),
+                              total: formatNumber(
+                                aiProgress.progress.total_chunks,
+                              ),
+                            })
+                          : aiProgress?.status === "CHILD_SAFETY_SCANNING"
+                            ? t("ocrReview.draft.statusSafetyRunning")
+                            : aiProgress?.status === "FAILED"
+                              ? t("ocrReview.draft.statusFailed")
+                              : aiProgress?.status === "READY_FOR_ADMIN_REVIEW"
+                                ? t("ocrReview.draft.statusCompleted")
+                                : t("ocrReview.draft.statusPreparing")}
+                    </span>
+                    <Button
+                      onClick={cancelAiCorrection}
+                      size="admin"
+                      type="button"
+                      variant="destructive-outline"
+                    >
+                      <X aria-hidden="true" className="size-3.5 shrink-0" />
+                      {t("ocrReview.draft.stopTrackingBtn")}
+                    </Button>
+                  </div>
+                  <progress
+                    aria-label={t("ocrReview.draft.progressAria")}
+                    className="h-2 w-full accent-purple-700"
+                    max={aiProgress?.progress.total_chunks ?? 1}
+                    value={aiProgress?.progress.completed_chunks ?? 0}
+                  />
+                  <span className="text-[11px] text-purple-900">
+                    {t("ocrReview.draft.suggestionOnlyNote")}
+                  </span>
+                </div>
+              ) : null}
+
+              {wordSyncError ? (
+                <p
+                  aria-live="polite"
+                  className="mt-3 rounded-lg border border-danger/35 bg-danger-surface p-3 text-xs font-semibold text-danger"
+                  role="alert"
+                >
+                  {wordSyncError}
+                </p>
+              ) : null}
+
+              {aiSuggestion !== null ? (
+                <section
+                  aria-labelledby="ai-correction-review-title"
+                  className="mt-4 grid gap-3 rounded-lg border border-purple-300 bg-purple-50 p-3.5"
+                  role="region"
+                >
+                  <div>
+                    <h3
+                      className="text-sm font-extrabold text-purple-950"
+                      id="ai-correction-review-title"
+                    >
+                      {t("ocrReview.draft.diffHeading")}
+                    </h3>
+                    <p className="mt-1 text-xs text-purple-900">
+                      {t("ocrReview.draft.diffSubtitle", {
+                        count: formatNumber(aiChanges.length),
+                      })}
+                    </p>
+                    <p
+                      aria-live="polite"
+                      className="mt-1 text-xs font-bold text-purple-950"
+                    >
+                      {t("ocrReview.draft.diffSelectionCount", {
+                        selected: formatNumber(aiAcceptedChanges.size),
+                        total: formatNumber(aiChanges.length),
+                      })}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      onClick={() =>
+                        setAiAcceptedChanges(
+                          new Set(aiChanges.map((change) => change.index)),
+                        )
+                      }
+                      size="admin"
+                      type="button"
+                      variant="secondary"
+                    >
+                      {t("ocrReview.draft.selectAll")}
+                    </Button>
+                    <Button
+                      onClick={() => setAiAcceptedChanges(new Set())}
+                      size="admin"
+                      type="button"
+                      variant="outline"
+                    >
+                      {t("ocrReview.draft.deselectAll")}
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        setAiSuggestion(null);
+                        setAiAcceptedChanges(new Set());
+                        setAiDiffPage(0);
+                        setNotice(t("ocrReview.notices.aiRejectedAll"));
+                      }}
+                      size="admin"
+                      type="button"
+                      variant="outline"
+                    >
+                      {t("ocrReview.draft.rejectSuggestions")}
+                    </Button>
+                  </div>
+                  <div
                     aria-live="polite"
-                    className="mt-1 text-sm font-semibold text-purple-950"
+                    className="text-xs font-semibold text-muted"
                   >
-                    {t("ocrReview.draft.diffSelectionCount", {
-                      selected: formatNumber(aiAcceptedChanges.size),
-                      total: formatNumber(aiChanges.length),
+                    {t("common:pagination.pageStatus", {
+                      page: formatNumber(
+                        Math.min(aiDiffPage + 1, aiDiffPageCount),
+                      ),
+                      totalPages: formatNumber(aiDiffPageCount),
+                    })}
+                    {aiChanges.length > aiDiffPageSize
+                      ? t("ocrReview.draft.diffPageSizeSuffix", {
+                          size: formatNumber(aiDiffPageSize),
+                        })
+                      : ""}
+                  </div>
+                  <ul className="grid gap-2">
+                    {visibleAiChanges.map((change) => {
+                      const originalWord = words[change.index];
+                      const originalStatus = originalWord
+                        ? getWordReviewStatus(
+                            originalWord,
+                            detail.verification_status,
+                          )
+                        : "needs_review";
+                      const originalPaddleLineScore = originalWord
+                        ? getPaddleLineScoreForWord(
+                            detail.ocr_metadata,
+                            originalWord,
+                          )
+                        : null;
+                      const originalScoreLabel = originalWord
+                        ? getWordScoreLabel(
+                            originalWord,
+                            detail.ocr_metadata,
+                            t,
+                          )
+                        : t("ocrReview.scoreLabels.missingWordScore");
+                      return (
+                        <li
+                          className="rounded-lg border border-purple-200 bg-white p-3"
+                          key={change.index}
+                        >
+                          <label className="flex cursor-pointer items-start gap-2.5">
+                            <input
+                              aria-label={t(
+                                "ocrReview.draft.reviewChangeAria",
+                                {
+                                  num: formatNumber(change.index + 1),
+                                },
+                              )}
+                              checked={aiAcceptedChanges.has(change.index)}
+                              className="mt-1 size-4 accent-purple-700"
+                              onChange={(event) => {
+                                setAiAcceptedChanges((current) => {
+                                  const next = new Set(current);
+                                  if (event.target.checked)
+                                    next.add(change.index);
+                                  else next.delete(change.index);
+                                  return next;
+                                });
+                              }}
+                              type="checkbox"
+                            />
+                            <span className="min-w-0 text-sm">
+                              <span className="block text-xs text-muted">
+                                {t("ocrReview.draft.wordNumber", {
+                                  num: formatNumber(change.index + 1),
+                                })}
+                              </span>
+                              <span
+                                className="viread-learning-content flex flex-wrap items-center gap-2 break-words"
+                                dir="ltr"
+                                lang="vi"
+                              >
+                                <del
+                                  className={`rounded border px-1.5 py-0.5 ${getWordReviewBadgeColor(originalStatus, originalWord, originalPaddleLineScore)}`}
+                                >
+                                  {change.original}
+                                </del>
+                                <span aria-hidden="true" className="text-muted">
+                                  →
+                                </span>
+                                <strong className="rounded border border-amber-400 bg-amber-100 px-1.5 py-0.5 text-amber-950">
+                                  {change.proposed}
+                                </strong>
+                              </span>
+                              <span className="mt-1.5 grid gap-0.5 text-xs">
+                                <span>
+                                  {t("ocrReview.draft.ocrWordPrefix")}{" "}
+                                  {getWordReviewLabel(
+                                    originalStatus,
+                                    originalWord,
+                                    originalPaddleLineScore,
+                                    t,
+                                  )}{" "}
+                                  · {originalScoreLabel}
+                                </span>
+                                <span className="text-amber-900">
+                                  {t("ocrReview.draft.whyAiSuggested")}
+                                </span>
+                              </span>
+                            </span>
+                          </label>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {aiDiffPageCount > 1 ? (
+                    <div className="flex items-center justify-between gap-2">
+                      <Button
+                        disabled={aiDiffPage === 0}
+                        onClick={() =>
+                          setAiDiffPage((page) => Math.max(0, page - 1))
+                        }
+                        size="admin"
+                        type="button"
+                        variant="outline"
+                      >
+                        <ChevronLeft
+                          aria-hidden="true"
+                          className="size-3.5 rtl:rotate-180"
+                        />
+                        {t("ocrReview.draft.prevDiffPage")}
+                      </Button>
+                      <Button
+                        disabled={aiDiffPage + 1 >= aiDiffPageCount}
+                        onClick={() =>
+                          setAiDiffPage((page) =>
+                            Math.min(aiDiffPageCount - 1, page + 1),
+                          )
+                        }
+                        size="admin"
+                        type="button"
+                        variant="outline"
+                      >
+                        {t("ocrReview.draft.nextDiffPage")}
+                        <ChevronRight
+                          aria-hidden="true"
+                          className="size-3.5 rtl:rotate-180"
+                        />
+                      </Button>
+                    </div>
+                  ) : null}
+                  <div className="flex flex-wrap items-center justify-end gap-2 border-t border-purple-200 pt-2.5">
+                    <Button
+                      onClick={applySelectedAiChanges}
+                      size="admin"
+                      type="button"
+                      variant="primary"
+                    >
+                      <CheckCircle2
+                        aria-hidden="true"
+                        className="size-3.5 shrink-0"
+                      />
+                      {t("ocrReview.draft.confirmAiSelectionBtn")}
+                    </Button>
+                  </div>
+                </section>
+              ) : null}
+
+              <div className="mt-3 border-t border-border pt-2.5">
+                <button
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline focus-visible:outline-2 focus-visible:outline-primary"
+                  onClick={() => setActiveTab("history")}
+                  type="button"
+                >
+                  <History aria-hidden="true" className="size-3.5 shrink-0" />
+                  {t("ocrReview.tabs.ariaLabel")}
+                </button>
+              </div>
+            </section>
+
+            {activeTab === "draft" ? aiWorkflowCard : null}
+          </div>
+
+          {/* Tab 2: Từ & BBox */}
+          <div
+            aria-labelledby="ocr-workbench-tab-words"
+            className={activeTab === "words" ? "space-y-4" : "hidden"}
+            id="ocr-workbench-panel-words"
+            role="tabpanel"
+          >
+            <section className="rounded-xl border border-border bg-white p-4 shadow-2xs sm:p-5">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2.5">
+                <div>
+                  <h2 className="text-base font-extrabold text-ink">
+                    {t("ocrReview.wordsPanel.heading")}
+                  </h2>
+                  <p className="mt-0.5 text-xs text-muted">
+                    {t("ocrReview.wordsPanel.prioritySummary", {
+                      attention: formatNumber(
+                        colorCounts.red + colorCounts.yellow,
+                      ),
+                      good: formatNumber(colorCounts.green),
                     })}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button
-                    className="min-h-9 w-auto px-3"
-                    onClick={() =>
-                      setAiAcceptedChanges(
-                        new Set(aiChanges.map((change) => change.index)),
-                      )
-                    }
+                    disabled={verified || busy !== null || words.length === 0}
+                    onClick={reconcileAllMatchedWords}
+                    size="admin"
                     type="button"
-                    variant="secondary"
+                    variant="outline"
                   >
-                    {t("ocrReview.draft.selectAll")}
-                  </Button>
-                  <Button
-                    className="min-h-9 w-auto px-3"
-                    onClick={() => setAiAcceptedChanges(new Set())}
-                    type="button"
-                    variant="secondary"
-                  >
-                    {t("ocrReview.draft.deselectAll")}
-                  </Button>
-                  <Button
-                    className="min-h-9 w-auto px-3"
-                    onClick={() => {
-                      setAiSuggestion(null);
-                      setAiAcceptedChanges(new Set());
-                      setAiDiffPage(0);
-                      setNotice(t("ocrReview.notices.aiRejectedAll"));
-                    }}
-                    type="button"
-                    variant="quiet"
-                  >
-                    {t("ocrReview.draft.rejectSuggestions")}
-                  </Button>
-                </div>
-                <div
-                  aria-live="polite"
-                  className="text-xs font-semibold text-muted"
-                >
-                  {t("common:pagination.pageStatus", {
-                    page: formatNumber(
-                      Math.min(aiDiffPage + 1, aiDiffPageCount),
-                    ),
-                    totalPages: formatNumber(aiDiffPageCount),
-                  })}
-                  {aiChanges.length > aiDiffPageSize
-                    ? t("ocrReview.draft.diffPageSizeSuffix", {
-                        size: formatNumber(aiDiffPageSize),
-                      })
-                    : ""}
-                </div>
-                <ul className="grid gap-2">
-                  {visibleAiChanges.map((change) => {
-                    const originalWord = words[change.index];
-                    const originalStatus = originalWord
-                      ? getWordReviewStatus(
-                          originalWord,
-                          detail.verification_status,
-                        )
-                      : "needs_review";
-                    const originalPaddleLineScore = originalWord
-                      ? getPaddleLineScoreForWord(
-                          detail.ocr_metadata,
-                          originalWord,
-                        )
-                      : null;
-                    const originalScoreLabel = originalWord
-                      ? getWordScoreLabel(originalWord, detail.ocr_metadata, t)
-                      : t("ocrReview.scoreLabels.missingWordScore");
-                    return (
-                      <li
-                        className="rounded-control border border-purple-200 bg-white p-3"
-                        key={change.index}
-                      >
-                        <label className="flex cursor-pointer items-start gap-3">
-                          <input
-                            aria-label={t("ocrReview.draft.reviewChangeAria", {
-                              num: formatNumber(change.index + 1),
-                            })}
-                            checked={aiAcceptedChanges.has(change.index)}
-                            className="mt-1 size-4 accent-purple-700"
-                            onChange={(event) => {
-                              setAiAcceptedChanges((current) => {
-                                const next = new Set(current);
-                                if (event.target.checked)
-                                  next.add(change.index);
-                                else next.delete(change.index);
-                                return next;
-                              });
-                            }}
-                            type="checkbox"
-                          />
-                          <span className="min-w-0 text-sm">
-                            <span className="block text-xs text-muted">
-                              {t("ocrReview.draft.wordNumber", {
-                                num: formatNumber(change.index + 1),
-                              })}
-                            </span>
-                            <span
-                              className="viread-learning-content flex flex-wrap items-center gap-2 break-words"
-                              dir="ltr"
-                              lang="vi"
-                            >
-                              <del
-                                className={`rounded border px-1.5 py-0.5 ${getWordReviewBadgeColor(originalStatus, originalWord, originalPaddleLineScore)}`}
-                              >
-                                {change.original}
-                              </del>
-                              <span aria-hidden="true" className="text-muted">
-                                →
-                              </span>
-                              <strong className="rounded border border-amber-400 bg-amber-100 px-1.5 py-0.5 text-amber-950">
-                                {change.proposed}
-                              </strong>
-                            </span>
-                            <span className="mt-2 grid gap-1 text-xs">
-                              <span>
-                                {t("ocrReview.draft.ocrWordPrefix")}{" "}
-                                {getWordReviewLabel(
-                                  originalStatus,
-                                  originalWord,
-                                  originalPaddleLineScore,
-                                  t,
-                                )}{" "}
-                                · {originalScoreLabel}
-                              </span>
-                              <span className="text-amber-900">
-                                {t("ocrReview.draft.whyAiSuggested")}
-                              </span>
-                            </span>
-                          </span>
-                        </label>
-                      </li>
-                    );
-                  })}
-                </ul>
-                {aiDiffPageCount > 1 ? (
-                  <div className="flex items-center justify-between gap-3">
-                    <Button
-                      className="min-h-9 w-auto px-3"
-                      disabled={aiDiffPage === 0}
-                      onClick={() =>
-                        setAiDiffPage((page) => Math.max(0, page - 1))
-                      }
-                      type="button"
-                      variant="secondary"
-                    >
-                      <ChevronLeft
-                        aria-hidden
-                        className="size-4 rtl:rotate-180"
-                      />{" "}
-                      {t("ocrReview.draft.prevDiffPage")}
-                    </Button>
-                    <Button
-                      className="min-h-9 w-auto px-3"
-                      disabled={aiDiffPage + 1 >= aiDiffPageCount}
-                      onClick={() =>
-                        setAiDiffPage((page) =>
-                          Math.min(aiDiffPageCount - 1, page + 1),
-                        )
-                      }
-                      type="button"
-                      variant="secondary"
-                    >
-                      {t("ocrReview.draft.nextDiffPage")}{" "}
-                      <ChevronRight
-                        aria-hidden
-                        className="size-4 rtl:rotate-180"
-                      />
-                    </Button>
-                  </div>
-                ) : null}
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-purple-200 pt-3">
-                  <Button
-                    className="sm:w-auto"
-                    onClick={applySelectedAiChanges}
-                    type="button"
-                  >
-                    <CheckCircle2 aria-hidden className="size-4" />{" "}
-                    {t("ocrReview.draft.confirmAiSelectionBtn")}
-                  </Button>
-                </div>
-              </section>
-            ) : null}
-            <div className="mt-4 flex flex-wrap gap-3">
-              {verified ? (
-                <Button
-                  className="sm:w-auto"
-                  disabled={
-                    busy !== null ||
-                    detail.lifecycle_status !== "ACTIVE" ||
-                    !isCurrentVerifiedRevision
-                  }
-                  isLoading={busy === "edit"}
-                  onClick={() => void createEditDraft()}
-                  variant="secondary"
-                >
-                  <Save aria-hidden className="size-4" />{" "}
-                  {t("ocrReview.draft.createDraftToEditBtn")}
-                </Button>
-              ) : (
-                <>
-                  <Button
-                    className="sm:w-auto"
-                    disabled={
-                      busy !== null ||
-                      detail.lifecycle_status !== "ACTIVE" ||
-                      wordSyncError !== null
-                    }
-                    isLoading={busy === "save"}
-                    onClick={() => void saveDraft()}
-                    variant="secondary"
-                  >
-                    <Save aria-hidden className="size-4" />{" "}
-                    {t("ocrReview.draft.saveDraftBtn")}
-                  </Button>
-
-                  <Button
-                    className="sm:w-auto"
-                    disabled={
-                      busy !== null ||
-                      detail.lifecycle_status !== "ACTIVE" ||
-                      words.length === 0 ||
-                      wordSyncError !== null ||
-                      candidateEditPending ||
-                      workflowFinalApprovalBlocked ||
-                      aiSuggestion !== null ||
-                      (aiWorkflow !== null &&
-                        [
-                          "QUEUED",
-                          "PROOFREADING",
-                          "CHILD_SAFETY_SCANNING",
-                        ].includes(aiWorkflow.status))
-                    }
-                    isLoading={busy === "verify" || busy === "ai_correct"}
-                    onClick={() => void verifyRevision()}
-                    type="button"
-                  >
-                    {proofreadAudit ? (
-                      <CheckCircle2 aria-hidden className="size-4" />
-                    ) : (
-                      <Sparkles aria-hidden className="size-4" />
-                    )}
-                    {busy === "ai_correct"
-                      ? t("ocrReview.draft.runningAiBtn")
-                      : proofreadAudit || aiWorkflow?.proofread_text
-                        ? t("ocrReview.draft.verifyFinalBtn")
-                        : t("ocrReview.draft.confirmRunAiBtn")}
-                  </Button>
-                  {aiWorkflow?.proofread_text &&
-                  workflowFinalApprovalBlocked ? (
-                    <p
-                      className="basis-full text-sm text-amber-900"
-                      role="status"
-                    >
-                      {workflowHasHighRisk
-                        ? t("ocrReview.draft.blockedHighSafety")
-                        : workflowImageFlaggedUnsafe
-                          ? t("ocrReview.draft.blockedUnsafeImage")
-                          : workflowImageUnassessed
-                            ? t("ocrReview.draft.blockedUnassessedImage")
-                            : aiWorkflow.safety_status !== "CONFIRMED" &&
-                                !workflowCanAutoConfirmSafety
-                              ? t("ocrReview.draft.blockedIncompleteSafety")
-                              : t("ocrReview.draft.blockedStaleSafety")}
-                    </p>
-                  ) : null}
-                  {aiCheckUnavailable && proofreadAudit === null ? (
-                    <Button
-                      className="sm:w-auto"
-                      disabled={busy !== null}
-                      onClick={continueManualVerification}
-                      type="button"
-                      variant="secondary"
-                    >
-                      {t("ocrReview.draft.continueManualVerify")}
-                    </Button>
-                  ) : null}
-                </>
-              )}
-            </div>
-          </Card>
-
-          {aiWorkflow ? (
-            <Card className="bg-white" data-testid="admin-ai-workflow">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-2xl font-black">
-                    {t("ocrReview.safetyPanel.heading")}
-                  </h2>
-                  <p className="mt-1 text-sm text-muted">
-                    {t("ocrReview.safetyPanel.subtitle")}
-                  </p>
-                </div>
-                <span className="rounded-full border border-border px-3 py-1 text-sm font-bold">
-                  {aiWorkflow.status === "READY_FOR_ADMIN_REVIEW"
-                    ? t("ocrReview.safetyPanel.readyForReview")
-                    : aiWorkflow.status === "FAILED"
-                      ? t("ocrReview.safetyPanel.errorStatus", {
-                          code: aiWorkflow.error_code ?? "UNKNOWN",
-                        })
-                      : aiWorkflow.stage === "PROOFREADING"
-                        ? t("ocrReview.safetyPanel.proofreadingRunning")
-                        : aiWorkflow.stage === "CHILD_SAFETY_SCANNING"
-                          ? t("ocrReview.safetyPanel.safetyRunning")
-                          : t("ocrReview.safetyPanel.pendingStatus")}
-                </span>
-              </div>
-
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <div className="min-w-0 rounded-control bg-canvas p-3">
-                  <p className="text-xs text-muted">
-                    {t("ocrReview.safetyPanel.overallSuitabilityLabel")}
-                  </p>
-                  <p className="mt-1 break-words font-extrabold text-ink">
-                    {aiWorkflow.suitability ??
-                      t("ocrReview.safetyPanel.noResultBadge")}
-                  </p>
-                </div>
-                <div className="min-w-0 rounded-control bg-canvas p-3">
-                  <p className="text-xs text-muted">
-                    {t("ocrReview.safetyPanel.textSafetyHeading")}
-                  </p>
-                  <p className="mt-1 break-words font-extrabold text-ink">
-                    {aiWorkflow.text_safety_status ?? aiWorkflow.safety_status}
-                  </p>
-                </div>
-                <div className="min-w-0 rounded-control bg-canvas p-3 sm:col-span-2">
-                  <p className="text-xs text-muted">
-                    {t("ocrReview.safetyPanel.imageSafetyHeading")}
-                  </p>
-                  <p
-                    className="mt-1 break-words font-extrabold text-ink"
-                    data-testid="image-safety-status"
-                  >
-                    {workflowImageSafetyStatus === "ADMIN_CONFIRMED_SAFE"
-                      ? t("ocrReview.safetyPanel.imageSafeLabel")
-                      : workflowImageSafetyStatus === "ADMIN_FLAGGED_UNSAFE"
-                        ? t("ocrReview.safetyPanel.imageUnsafeLabel")
-                        : t("ocrReview.safetyPanel.imageUnassessedLabel")}
-                  </p>
-                </div>
-                <div className="min-w-0 rounded-control bg-canvas p-3">
-                  <p className="text-xs text-muted">
-                    {t("ocrReview.safetyPanel.candidateVersionLabel")}
-                  </p>
-                  <p className="mt-1 break-words font-extrabold text-ink">
-                    {formatNumber(aiWorkflow.candidate_version)}
-                  </p>
-                </div>
-                <div className="min-w-0 rounded-control bg-canvas p-3">
-                  <p className="text-xs text-muted">
-                    {t("ocrReview.safetyPanel.safetyHashMatchLabel")}
-                  </p>
-                  <p className="mt-1 break-words font-extrabold text-ink">
-                    {candidateEditPending
-                      ? t("ocrReview.safetyPanel.savingCandidateLabel")
-                      : aiWorkflow.hash_match
-                        ? t("ocrReview.safetyPanel.hashMatchLabel")
-                        : t("ocrReview.safetyPanel.hashMismatchLabel")}
-                  </p>
-                </div>
-              </div>
-
-              <div
-                className="mt-4 rounded-control border border-border bg-canvas/60 p-3"
-                data-testid="image-safety-review-panel"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-extrabold text-ink">
-                      {t("ocrReview.safetyPanel.manualImageHeading")}
-                    </p>
-                    <p className="mt-1 text-xs text-muted">
-                      {t("ocrReview.safetyPanel.manualImageDesc")}
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-3 flex flex-col gap-3">
-                  <label className="block w-full text-xs font-bold text-ink">
-                    {t("ocrReview.safetyPanel.imageNoteLabel")}
-                    <input
-                      className="mt-1 h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal"
-                      maxLength={500}
-                      onChange={(event) =>
-                        setImageSafetyReason(event.target.value)
-                      }
-                      placeholder={t(
-                        "ocrReview.safetyPanel.imageNotePlaceholder",
-                      )}
-                      type="text"
-                      value={imageSafetyReason}
+                    <CheckCircle2
+                      aria-hidden="true"
+                      className="size-3.5 shrink-0"
                     />
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      className="h-10 w-auto px-3"
-                      disabled={busy !== null}
-                      isLoading={busy === "workflow"}
-                      onClick={() =>
-                        void decideImageSafety("ADMIN_CONFIRMED_SAFE")
-                      }
-                      type="button"
-                      variant="secondary"
-                    >
-                      <CheckCircle2 aria-hidden className="size-4" />{" "}
-                      {t("ocrReview.safetyPanel.confirmImageSafeBtn")}
-                    </Button>
-                    <Button
-                      className="h-10 w-auto px-3"
-                      disabled={busy !== null || !imageSafetyReason.trim()}
-                      isLoading={busy === "workflow"}
-                      onClick={() =>
-                        void decideImageSafety("ADMIN_FLAGGED_UNSAFE")
-                      }
-                      type="button"
-                      variant="secondary"
-                    >
-                      {t("ocrReview.safetyPanel.flagImageUnsafeBtn")}
-                    </Button>
-                  </div>
+                    {t("ocrReview.wordsPanel.alignedBadge")}
+                  </Button>
+                  <Button
+                    disabled={verified || busy !== null}
+                    onClick={syncTextFromWords}
+                    size="admin"
+                    variant="outline"
+                  >
+                    {t("ocrReview.wordsPanel.syncFromWordsBtn")}
+                  </Button>
                 </div>
               </div>
-
-              {aiWorkflow.uncertain_word_indices.length > 0 ? (
-                <p className="mt-4 rounded-control border border-amber-400 bg-amber-50 p-3 text-sm text-amber-950">
-                  {t("ocrReview.safetyPanel.uncertainWordsNote", {
-                    count: formatNumber(
-                      aiWorkflow.uncertain_word_indices.length,
-                    ),
-                    indices: aiWorkflow.uncertain_word_indices
-                      .map((index) => index + 1)
-                      .join(", "),
-                  })}
-                </p>
-              ) : null}
-
-              <dl className="mt-4 grid gap-2 break-all rounded-control border border-border p-3 font-mono text-xs">
-                <div>
-                  <dt className="font-bold">
-                    {t("ocrReview.safetyPanel.candidateHashKey")}
-                  </dt>
-                  <dd>{aiWorkflow.candidate_hash ?? t("common.emptyDash")}</dd>
-                </div>
-                <div>
-                  <dt className="font-bold">
-                    {t("ocrReview.safetyPanel.safetyInputHashKey")}
-                  </dt>
-                  <dd>
-                    {aiWorkflow.safety_input_hash ?? t("common.emptyDash")}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="font-bold">
-                    {t("ocrReview.safetyPanel.finalApprovedHashKey")}
-                  </dt>
-                  <dd>
-                    {aiWorkflow.final_approved_text_hash ??
-                      t("ocrReview.safetyPanel.notConfirmedFinal")}
-                  </dd>
-                </div>
-              </dl>
-
-              {aiWorkflow.status === "FAILED" ||
-              aiWorkflow.safety_status === "FAILED"
-                ? (() => {
-                    const safetyFailure =
-                      aiWorkflow.stage === "CHILD_SAFETY_SCANNING" ||
-                      (aiWorkflow.proofread_text !== null &&
-                        aiWorkflow.safety_status === "FAILED");
-                    const failureEvent = [...aiWorkflow.provider_events]
-                      .reverse()
-                      .find(
-                        (event) =>
-                          Boolean(event.error_code) &&
-                          (!event.stage || event.stage === aiWorkflow.stage),
-                      );
-                    const failedStageEvent = [...aiWorkflow.review_history]
-                      .reverse()
-                      .find(
-                        (event) =>
-                          event.event === "WORKFLOW_STAGE_FAILED" &&
-                          event.stage ===
-                            (safetyFailure
-                              ? "CHILD_SAFETY_SCANNING"
-                              : "PROOFREADING"),
-                      );
-                    const recordedFailureCode = failedStageEvent?.error_code;
-                    const failureCode =
-                      aiWorkflow.error_code ??
-                      (typeof recordedFailureCode === "string"
-                        ? recordedFailureCode
-                        : null);
-                    const failureMessage =
-                      failureCode === "INVALID_EVIDENCE"
-                        ? t(
-                            "ocrReview.safetyPanel.stageFailures.evidenceMismatch",
-                          )
-                        : failureCode === "INVALID_JSON"
-                          ? t("ocrReview.safetyPanel.stageFailures.invalidJson")
-                          : failureCode === "MISSING_REQUIRED_FIELDS"
-                            ? t(
-                                "ocrReview.safetyPanel.stageFailures.missingFields",
-                              )
-                            : failureCode === "INVALID_OUTPUT_SCHEMA"
-                              ? t(
-                                  "ocrReview.safetyPanel.stageFailures.schemaMismatch",
-                                )
-                              : failureCode === "PROVIDER_TIMEOUT"
-                                ? t(
-                                    "ocrReview.safetyPanel.stageFailures.timeout",
-                                  )
-                                : failureCode === "PROVIDER_UNAVAILABLE"
-                                  ? t(
-                                      "ocrReview.safetyPanel.stageFailures.unavailable",
-                                    )
-                                  : safetyFailure
-                                    ? t(
-                                        "ocrReview.safetyPanel.stageFailures.safetyIncomplete",
-                                      )
-                                    : t(
-                                        "ocrReview.safetyPanel.stageFailures.proofreadIncomplete",
-                                      );
-                    return (
-                      <div
-                        className="mt-4 rounded-control border border-amber-500 bg-amber-50 p-3 text-sm text-amber-950"
-                        role="alert"
-                      >
-                        <p className="font-bold">
-                          {safetyFailure
-                            ? t(
-                                "ocrReview.safetyPanel.stageFailures.safetyTitle",
-                              )
-                            : t(
-                                "ocrReview.safetyPanel.stageFailures.proofreadTitle",
-                              )}
-                        </p>
-                        <p className="mt-1">{failureMessage}</p>
-                        <p className="mt-1">
-                          {t("ocrReview.safetyPanel.failureCodeLine", {
-                            code: failureCode ?? "UNKNOWN",
-                          })}
-                          {failureEvent?.provider
-                            ? ` · Provider ${String(failureEvent.provider)}`
-                            : ""}
-                          {failureEvent?.model
-                            ? ` · Model ${String(failureEvent.model)}`
-                            : ""}
-                          {failureEvent?.duration_ms != null
-                            ? t("ocrReview.safetyPanel.httpStatusPart", {
-                                status: "",
-                              }).replace("HTTP ", "") &&
-                              ` · ${String(failureEvent.duration_ms)} ms`
-                            : ""}
-                          {t("ocrReview.safetyPanel.attemptSuffix", {
-                            attempts: formatNumber(aiWorkflow.attempts),
-                          })}
-                          {` · ${formatDateTime(aiWorkflow.updated_at)}`}
-                        </p>
-                        <p className="mt-1">
-                          {safetyFailure
-                            ? t("ocrReview.safetyPanel.retrySafetyHint")
-                            : t("ocrReview.safetyPanel.retryProofreadHint")}
-                        </p>
-                      </div>
-                    );
-                  })()
-                : null}
-
-              {aiWorkflow.status === "READY_FOR_ADMIN_REVIEW" &&
-              aiWorkflow.safety_status === "STALE" ? (
-                <p
-                  className="mt-4 rounded-control border border-amber-400 bg-amber-50 p-3 text-sm text-amber-950"
-                  role="status"
-                >
-                  {t("ocrReview.safetyPanel.candidateChangedWarning")}
-                </p>
-              ) : null}
-
-              <div className="mt-4 flex flex-wrap gap-2">
-                {aiWorkflow.status === "FAILED" ||
-                (aiWorkflow.proofread_text !== null &&
-                  (aiWorkflow.safety_status === "FAILED" ||
-                    aiWorkflow.safety_status === "STALE") &&
-                  !["QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING"].includes(
-                    aiWorkflow.status,
-                  )) ? (
-                  <Button
-                    className="h-10 w-auto px-3"
-                    disabled={busy !== null}
-                    isLoading={busy === "workflow"}
-                    onClick={() => void retryWorkflow()}
-                    type="button"
-                    variant="secondary"
-                  >
-                    <RefreshCw aria-hidden className="size-4" />
-                    {aiWorkflow.status === "FAILED" &&
-                    aiWorkflow.stage === "PROOFREADING"
-                      ? t("ocrReview.safetyPanel.retryProofreadBtn")
-                      : t("ocrReview.safetyPanel.retrySafetyBtn")}
-                  </Button>
-                ) : null}
-                {aiWorkflow.safety_status === "PROVISIONAL" &&
-                aiWorkflow.hash_match &&
-                (aiWorkflow.findings.length > 0 ||
-                  aiWorkflow.suitability !== "SUITABLE") ? (
-                  <label className="basis-full text-sm font-bold text-ink">
-                    {t("ocrReview.safetyPanel.reviewReasonLabel")}
-                    <textarea
-                      className="mt-1 min-h-20 w-full rounded-control border border-border bg-white p-3 font-normal"
-                      maxLength={500}
-                      onChange={(event) =>
-                        setSafetyDecisionReason(event.target.value)
-                      }
-                      value={safetyDecisionReason}
-                    />
-                  </label>
-                ) : null}
-                {aiWorkflow.safety_status === "PROVISIONAL" &&
-                aiWorkflow.hash_match ? (
-                  <Button
-                    className="h-10 w-auto px-3"
-                    disabled={
-                      busy !== null ||
-                      candidateEditPending ||
-                      ((Boolean(aiWorkflow.findings.length) ||
-                        aiWorkflow.suitability !== "SUITABLE") &&
-                        !safetyDecisionReason.trim())
-                    }
-                    isLoading={busy === "workflow"}
-                    onClick={() => void decideSafety(true)}
-                    type="button"
-                    variant="secondary"
-                  >
-                    <CheckCircle2 aria-hidden className="size-4" />{" "}
-                    {t("ocrReview.safetyPanel.confirmSafetyBtn")}
-                  </Button>
-                ) : aiWorkflow.safety_status === "CONFIRMED" &&
-                  aiWorkflow.hash_match ? (
-                  <Button
-                    className="h-10 w-auto px-3"
-                    disabled={busy !== null}
-                    isLoading={busy === "workflow"}
-                    onClick={() => void decideSafety(false)}
-                    type="button"
-                    variant="secondary"
-                  >
-                    {t("ocrReview.safetyPanel.clearSafetyConfirmBtn")}
-                  </Button>
-                ) : null}
-              </div>
-
-              <section className="mt-5">
-                <h3 className="font-extrabold">
-                  {t("ocrReview.safetyPanel.findingsHeading")}
-                </h3>
-                {aiWorkflow.findings.length ? (
-                  <ul className="mt-2 grid gap-3">
-                    {aiWorkflow.findings.map((finding, index) => {
-                      const severity = String(
-                        finding.severity ?? "REVIEW",
-                      ).toUpperCase();
-                      const category = String(
-                        finding.category ?? "OTHER_SENSITIVE",
-                      ).replaceAll("_", " ");
-                      const evidence = String(finding.evidence_text ?? "");
-                      const compactEvidence =
-                        evidence.length > 240
-                          ? evidence.slice(0, 240).trimEnd() + "…"
-                          : evidence;
-                      const high = severity === "HIGH";
-                      return (
-                        <li key={String(finding.finding_id ?? index)}>
-                          <details
-                            className={
-                              "rounded-control border p-3 " +
-                              (high
-                                ? "border-red-400 bg-red-50"
-                                : "border-border bg-white")
-                            }
-                          >
-                            <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 focus-visible:outline-3 focus-visible:outline-primary">
-                              <span className="font-extrabold">{category}</span>
-                              <span className="text-xs text-muted">
-                                {String(
-                                  finding.content_type ?? "MENTION",
-                                ).replaceAll("_", " ")}
-                              </span>
-                              <span
-                                className={
-                                  "rounded-full px-2.5 py-1 text-xs font-extrabold " +
-                                  (high
-                                    ? "bg-red-700 text-white"
-                                    : "bg-canvas text-ink")
-                                }
-                              >
-                                {severity}
-                              </span>
-                              <span className="ms-auto text-xs text-muted">
-                                {t("ocrReview.safetyPanel.openDetail")}
-                              </span>
-                            </summary>
-                            <div className="mt-3 border-t border-border pt-3">
-                              <p className="text-xs font-bold uppercase tracking-wide text-muted">
-                                {t("ocrReview.safetyPanel.evidenceLabel")}
-                              </p>
-                              <blockquote className="mt-1 border-s-2 border-primary ps-3 text-sm">
-                                <span
-                                  className="viread-learning-content"
-                                  dir="ltr"
-                                  lang="vi"
-                                >
-                                  “{compactEvidence}”
-                                </span>
-                                <span className="ms-2 font-mono text-xs text-muted">
-                                  [{String(finding.evidence_start ?? "?")}–
-                                  {String(finding.evidence_end ?? "?")}]
-                                </span>
-                              </blockquote>
-                              {evidence.length > 240 ? (
-                                <details className="mt-2 text-sm">
-                                  <summary className="cursor-pointer font-bold text-primary">
-                                    {t("ocrReview.safetyPanel.viewFullQuote", {
-                                      length: formatNumber(evidence.length),
-                                    })}
-                                  </summary>
-                                  <blockquote
-                                    className="viread-learning-content mt-2 border-s-2 border-primary ps-3"
-                                    dir="ltr"
-                                    lang="vi"
-                                  >
-                                    “{evidence}”
-                                  </blockquote>
-                                </details>
-                              ) : null}
-                              <p className="mt-3 text-xs font-bold uppercase tracking-wide text-muted">
-                                {t("ocrReview.safetyPanel.explanationLabel")}
-                              </p>
-                              <p className="mt-1 text-sm">
-                                {String(finding.explanation ?? "")}
-                              </p>
-                              <p className="mt-3 text-xs font-bold uppercase tracking-wide text-muted">
-                                {t("ocrReview.safetyPanel.recommendationLabel")}
-                              </p>
-                              <p className="mt-1 text-sm text-muted">
-                                {String(finding.recommendation ?? "")}
-                              </p>
-                            </div>
-                          </details>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : (
-                  <p className="mt-2 text-sm text-muted">
-                    {aiWorkflow.safety_status === "PROVISIONAL" ||
-                    aiWorkflow.safety_status === "CONFIRMED" ||
-                    aiWorkflow.safety_status === "AUTO_CONFIRMED"
-                      ? t("ocrReview.safetyPanel.noFindings")
-                      : t("ocrReview.safetyPanel.findingsPending")}
-                  </p>
-                )}
-              </section>
-
-              {aiWorkflow.safety_history.length > 0 ? (
-                <section className="mt-5">
-                  <h3 className="font-extrabold">
-                    {t("ocrReview.safetyPanel.historyHeading")}
-                  </h3>
-                  <p className="mt-1 text-xs text-muted">
-                    {t("ocrReview.safetyPanel.historyDesc")}
-                  </p>
-                  <div className="mt-2 grid gap-2">
-                    {aiWorkflow.safety_history.map((scan, scanIndex) => {
-                      const historicalFindings = Array.isArray(scan.findings)
-                        ? scan.findings.filter(
-                            (item): item is Record<string, unknown> =>
-                              typeof item === "object" &&
-                              item !== null &&
-                              !Array.isArray(item),
-                          )
-                        : [];
-                      return (
-                        <details
-                          className="rounded-control border border-border p-3"
-                          key={`${String(scan.scan_id ?? scanIndex)}-${scanIndex}`}
-                        >
-                          <summary className="cursor-pointer text-sm font-bold">
-                            {t("ocrReview.safetyPanel.scanStatusLine", {
-                              status: String(scan.status ?? "UNKNOWN"),
-                              suitability: String(
-                                scan.suitability ??
-                                  t(
-                                    "ocrReview.safetyPanel.noSuitabilityFallback",
-                                  ),
-                              ),
-                              count: formatNumber(historicalFindings.length),
-                            })}
-                            {scan.content_hash
-                              ? t("ocrReview.safetyPanel.scanHashPrefix", {
-                                  hash: String(scan.content_hash).slice(0, 12),
-                                })
-                              : t("ocrReview.safetyPanel.noHashSuffix")}
-                          </summary>
-                          {historicalFindings.length ? (
-                            <ul className="mt-2 grid gap-2">
-                              {historicalFindings.map(
-                                (finding, findingIndex) => {
-                                  return (
-                                    <li
-                                      className="border-s-2 border-border ps-3 text-sm"
-                                      key={`${String(finding.finding_id ?? findingIndex)}-${findingIndex}`}
-                                    >
-                                      <p className="font-bold">
-                                        {String(
-                                          finding.category ?? "OTHER_SENSITIVE",
-                                        )}{" "}
-                                        ·{" "}
-                                        {String(finding.severity ?? "UNKNOWN")}
-                                      </p>
-                                      <p
-                                        className="viread-learning-content"
-                                        dir="ltr"
-                                        lang="vi"
-                                      >
-                                        “{String(finding.evidence_text ?? "")}”
-                                      </p>
-                                    </li>
-                                  );
-                                },
-                              )}
-                            </ul>
-                          ) : (
-                            <p className="mt-2 text-sm">
-                              {t("ocrReview.safetyPanel.noHistoricalFindings")}
-                            </p>
-                          )}
-                        </details>
-                      );
-                    })}
-                  </div>
-                </section>
-              ) : null}
-
-              <section className="mt-5">
-                <h3 className="font-extrabold">
-                  {t("ocrReview.safetyPanel.provenanceHeading")}
-                </h3>
-                <p className="mt-1 break-all font-mono text-xs text-muted">
-                  {t("ocrReview.safetyPanel.provenanceRunPrefix", {
-                    runId: String(
-                      aiWorkflow.proofread_metadata.run_id ??
-                        aiWorkflow.workflow_id,
-                    ),
-                    promptVersion: String(
-                      aiWorkflow.proofread_metadata.prompt_version ??
-                        t("common.emptyDash"),
-                    ),
-                    duration: String(
-                      aiWorkflow.proofread_metadata.processing_time_ms ?? 0,
-                    ),
-                    safetyPrompt: String(
-                      aiWorkflow.safety_metadata.prompt_version ??
-                        t("common.emptyDash"),
-                    ),
-                  })}
-                </p>
-                {aiWorkflow.provider_events.length ? (
-                  <ul className="mt-2 grid gap-2 text-xs">
-                    {aiWorkflow.provider_events.map((event, index) => (
-                      <li
-                        className="rounded-control bg-canvas p-3"
-                        key={`${String(event.provider ?? "provider")}-${index}`}
-                      >
-                        <span className="font-bold">
-                          {String(event.provider ?? t("common.emptyDash"))}
-                        </span>
-                        {" · "}
-                        {String(event.model ?? t("common.emptyDash"))}
-                        {" · "}
-                        {event.availability === true
-                          ? t("ocrReview.safetyPanel.providerAvailable")
-                          : event.availability === false
-                            ? t("ocrReview.safetyPanel.providerUnavailable")
-                            : t("ocrReview.safetyPanel.providerChecking")}
-                        {t("ocrReview.safetyPanel.httpStatusPart", {
-                          status: String(
-                            event.http_status ?? t("common.emptyDash"),
-                          ),
-                        })}
-                        {" · "}
-                        {String(event.duration_ms ?? 0)} ms
-                        {event.output_mode
-                          ? ` · ${String(event.output_mode)}`
-                          : ""}
-                        {Number(event.retry_count ?? 0) > 0
-                          ? t("ocrReview.safetyPanel.fallbackRetryPart", {
-                              count: String(event.retry_count),
-                            })
-                          : ""}
-                        {event.error_code
-                          ? ` · ${String(event.error_code)}`
-                          : ""}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="mt-2 text-sm text-muted">
-                    {t("ocrReview.safetyPanel.noProviderEvents")}
-                  </p>
-                )}
-              </section>
-
-              <p className="mt-4 text-xs text-muted">
-                {t("ocrReview.safetyPanel.safetyDisclaimer")}
+              <p className="mb-3 text-xs text-muted">
+                {t("ocrReview.wordsPanel.hint")}
               </p>
-            </Card>
-          ) : null}
-          <div className="grid gap-3">
-            <ButtonLink
-              className="sm:max-w-[280px]"
-              href={viewHref("words")}
-              size="compact"
-              variant="secondary"
-            >
-              {t("ocrReview.tabs.words")}
-            </ButtonLink>
-            <ButtonLink
-              className="sm:max-w-[280px]"
-              href={viewHref("history")}
-              size="compact"
-              variant="secondary"
-            >
-              {t("ocrReview.tabs.revisions")}
-            </ButtonLink>
-          </div>
-
-          <details className="rounded-card border border-border bg-white p-4">
-            <summary className="cursor-pointer rounded-control font-semibold text-primary focus-visible:outline-3 focus-visible:outline-primary">
-              {t("ocrReview.tabs.ariaLabel")}
-            </summary>
-            <div className="mt-4 grid gap-6">
-              <Card className="bg-white">
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h2 className="text-2xl font-semibold">
-                      {t("ocrReview.wordsPanel.heading")}
-                    </h2>
-                    <p className="mt-1 text-sm text-muted">
-                      {t("ocrReview.wordsPanel.prioritySummary", {
-                        attention: formatNumber(
-                          colorCounts.red + colorCounts.yellow,
-                        ),
-                        good: formatNumber(colorCounts.green),
-                      })}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      className="min-h-11 h-auto w-auto px-3 text-sm"
-                      disabled={verified || busy !== null || words.length === 0}
-                      onClick={reconcileAllMatchedWords}
-                      type="button"
-                      variant="secondary"
-                    >
-                      <CheckCircle2 aria-hidden className="size-4" />{" "}
-                      {t("ocrReview.wordsPanel.alignedBadge")}
-                    </Button>
-                    <Button
-                      className="min-h-11 h-auto w-auto px-3 text-sm"
-                      disabled={verified || busy !== null}
-                      onClick={syncTextFromWords}
-                      variant="secondary"
-                    >
-                      {t("ocrReview.wordsPanel.syncFromWordsBtn")}
-                    </Button>
-                  </div>
-                </div>
-                <p className="mb-4 text-sm text-muted">
-                  {t("ocrReview.wordsPanel.hint")}
-                </p>
-                <div
-                  aria-live="polite"
-                  className="mb-4 rounded-control border border-border bg-canvas px-3 py-2 text-sm text-muted"
-                  role="status"
-                >
-                  <span className="font-semibold">
-                    {t("ocrReview.wordsPanel.alignmentLabel")}{" "}
-                  </span>
-                  {textAlignment.canCompare ? (
-                    <>
-                      {t("ocrReview.wordsPanel.alignmentCount", {
-                        matched: formatNumber(textAlignment.matched),
-                        total: formatNumber(words.length),
-                        different: formatNumber(textAlignment.different),
-                      })}
-                    </>
-                  ) : (
-                    t("ocrReview.wordsPanel.alignmentMismatch")
-                  )}
-                </div>
-                <div
-                  aria-label={t("ocrReview.wordsPanel.filterAria")}
-                  className="mb-4 flex flex-wrap gap-2"
-                  role="group"
-                >
+              <div
+                aria-live="polite"
+                className="mb-3 rounded-lg border border-border bg-surface-subtle/60 px-3 py-2 text-xs text-muted"
+                role="status"
+              >
+                <span className="font-bold text-ink">
+                  {t("ocrReview.wordsPanel.alignmentLabel")}{" "}
+                </span>
+                {textAlignment.canCompare ? (
+                  <>
+                    {t("ocrReview.wordsPanel.alignmentCount", {
+                      matched: formatNumber(textAlignment.matched),
+                      total: formatNumber(words.length),
+                      different: formatNumber(textAlignment.different),
+                    })}
+                  </>
+                ) : (
+                  t("ocrReview.wordsPanel.alignmentMismatch")
+                )}
+              </div>
+              <div
+                aria-label={t("ocrReview.wordsPanel.filterAria")}
+                className="mb-3 flex flex-wrap gap-1.5"
+                role="group"
+              >
                   {(
                     [
                       {
@@ -4473,67 +4436,127 @@ export function AdminOcrReviewScreen({
                     })
                   )}
                 </div>
-              </Card>
+            </section>
+          </div>
 
-              <Card className="bg-white">
-                <h2 className="mb-3 text-2xl font-semibold">
-                  {t("ocrReview.revisionsPanel.heading")}
-                </h2>
-                <div className="grid gap-2">
-                  {history.map((revision) => (
-                    <button
-                      className={
-                        revision.page_revision_id === detail.page_revision_id
-                          ? "rounded-control border-2 border-primary bg-sky p-3 text-start"
-                          : "rounded-control border border-border p-3 text-start"
-                      }
-                      key={revision.page_revision_id}
-                      disabled={busy !== null}
-                      onClick={() =>
-                        void chooseRevision(revision.page_revision_id)
-                      }
-                      type="button"
-                    >
-                      <span className="font-semibold">
-                        Revision R{formatNumber(revision.revision_no)}
-                      </span>
-                      <span className="ms-2 text-sm text-muted">
-                        {revision.verification_status}
-                        {revision.is_current_verified
-                          ? t("ocrReview.revisionsPanel.currentSuffix")
-                          : ""}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                <div className="mt-4 grid gap-3">
-                  <label
-                    className="grid gap-2 text-sm font-semibold"
-                    htmlFor="replacement-page-image"
+          {/* Tab 3: AI Safety */}
+          <div
+            aria-labelledby="ocr-workbench-tab-safety"
+            className={activeTab === "safety" ? "space-y-4" : "hidden"}
+            id="ocr-workbench-panel-safety"
+            role="tabpanel"
+          >
+            {activeTab === "safety" ? (
+              aiWorkflowCard ?? (
+                <section className="rounded-xl border border-border bg-white p-5 text-center shadow-2xs">
+                  <ShieldCheck
+                    aria-hidden="true"
+                    className="mx-auto mb-2 size-7 text-muted"
+                  />
+                  <h2 className="text-sm font-extrabold text-ink">
+                    {t(
+                      "ocrReview.safetyPanel.emptyTitle",
+                      undefined,
+                      "Chưa có kết quả AI Safety cho revision này",
+                    )}
+                  </h2>
+                  <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-muted">
+                    {t(
+                      "ocrReview.safetyPanel.emptyDesc",
+                      undefined,
+                      "Chạy XÁC NHẬN & CHẠY AI ở thanh thao tác bên dưới để tự động rà soát chính tả và quét an toàn trẻ em.",
+                    )}
+                  </p>
+                </section>
+              )
+            ) : null}
+          </div>
+
+          {/* Tab 4: Khối thông minh V2 */}
+          <div
+            aria-labelledby="ocr-workbench-tab-blocks"
+            className={activeTab === "blocks" ? "space-y-4" : "hidden"}
+            id="ocr-workbench-panel-blocks"
+            role="tabpanel"
+          >
+            <section className="rounded-xl border border-border bg-white p-4 shadow-2xs sm:p-5">
+              <SmartOcrBlockReviewLoader
+                pageId={pageId}
+                pageImageUrl={image.preview_url}
+                pageNumber={image.page_number}
+              />
+            </section>
+          </div>
+
+          {/* Tab 5: Lịch sử Revision + Diagnostics + Original OCR */}
+          <div
+            aria-labelledby="ocr-workbench-tab-history"
+            className={activeTab === "history" ? "space-y-4" : "hidden"}
+            id="ocr-workbench-panel-history"
+            role="tabpanel"
+          >
+            <section className="space-y-4 rounded-xl border border-border bg-white p-4 shadow-2xs sm:p-5">
+              <h2 className="text-base font-extrabold text-ink">
+                {t("ocrReview.revisionsPanel.heading")}
+              </h2>
+
+              <div className="grid gap-2">
+                {history.map((revision) => (
+                  <button
+                    className={cn(
+                      "flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-start transition-colors",
+                      revision.page_revision_id === detail.page_revision_id
+                        ? "border-primary bg-sky/40 ring-1 ring-primary/30"
+                        : "border-border bg-white hover:bg-surface-subtle/60",
+                    )}
+                    disabled={busy !== null}
+                    key={revision.page_revision_id}
+                    onClick={() =>
+                      void chooseRevision(revision.page_revision_id)
+                    }
+                    type="button"
                   >
-                    {t("ocrReview.revisionsPanel.reuploadLabel")}
-                    <input
-                      id="replacement-page-image"
-                      accept="image/jpeg,image/png,image/webp"
-                      className="block w-full rounded-control border border-border bg-white p-3 text-sm"
-                      disabled={
-                        busy !== null || detail.lifecycle_status !== "ACTIVE"
-                      }
-                      onChange={(event) =>
-                        setReplacementFile(event.target.files?.[0] ?? null)
-                      }
-                      type="file"
-                    />
-                  </label>
-                  {replacementFile ? (
-                    <p className="text-sm text-muted">
-                      {t("ocrReview.revisionsPanel.selectedFile", {
-                        fileName: replacementFile.name,
-                      })}
-                    </p>
-                  ) : null}
+                    <span className="text-sm font-extrabold text-ink">
+                      Revision R{formatNumber(revision.revision_no)}
+                      {revision.is_current_verified ? (
+                        <span className="ms-1.5 text-xs font-semibold text-primary">
+                          {t("ocrReview.revisionsPanel.currentSuffix")}
+                        </span>
+                      ) : null}
+                    </span>
+                    <AdminStatusBadge status={revision.verification_status} />
+                  </button>
+                ))}
+              </div>
+
+              <div className="space-y-2.5 border-t border-border pt-4">
+                <label
+                  className="grid gap-1.5 text-xs font-bold text-ink"
+                  htmlFor="replacement-page-image"
+                >
+                  {t("ocrReview.revisionsPanel.reuploadLabel")}
+                  <input
+                    accept="image/jpeg,image/png,image/webp"
+                    className="block w-full rounded-control border border-border bg-white px-3 py-2 text-xs file:me-2 file:rounded file:border-0 file:bg-sky file:px-2.5 file:py-1 file:text-xs file:font-bold file:text-primary-hover"
+                    disabled={
+                      busy !== null || detail.lifecycle_status !== "ACTIVE"
+                    }
+                    id="replacement-page-image"
+                    onChange={(event) =>
+                      setReplacementFile(event.target.files?.[0] ?? null)
+                    }
+                    type="file"
+                  />
+                </label>
+                {replacementFile ? (
+                  <p className="text-xs text-muted">
+                    {t("ocrReview.revisionsPanel.selectedFile", {
+                      fileName: replacementFile.name,
+                    })}
+                  </p>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
                   <Button
-                    className="sm:w-auto"
                     disabled={
                       busy !== null ||
                       !replacementFile ||
@@ -4541,37 +4564,245 @@ export function AdminOcrReviewScreen({
                     }
                     isLoading={busy === "reupload"}
                     onClick={() => void replaceImageAndReprocess()}
+                    size="admin"
                     type="button"
                     variant="secondary"
                   >
-                    <RefreshCw aria-hidden className="size-4" />{" "}
+                    <RefreshCw
+                      aria-hidden="true"
+                      className="size-3.5 shrink-0"
+                    />
                     {t("ocrReview.revisionsPanel.reuploadBtn")}
                   </Button>
+                  <Button
+                    disabled={
+                      busy !== null || detail.lifecycle_status !== "ACTIVE"
+                    }
+                    isLoading={busy === "reprocess"}
+                    onClick={() => void reprocess()}
+                    size="admin"
+                    type="button"
+                    variant="outline"
+                  >
+                    <RotateCcw
+                      aria-hidden="true"
+                      className="size-3.5 shrink-0"
+                    />
+                    {t("ocrReview.revisionsPanel.reprocessBtn")}
+                  </Button>
+                  <Button
+                    disabled={busy !== null}
+                    onClick={() => void load()}
+                    size="admin"
+                    type="button"
+                    variant="outline"
+                  >
+                    <RefreshCw
+                      aria-hidden="true"
+                      className="size-3.5 shrink-0"
+                    />
+                    {t("ocrReview.revisionsPanel.reloadDataBtn")}
+                  </Button>
                 </div>
+              </div>
+            </section>
+
+            {/* Original Immutable OCR & Runtime Diagnostics cleanly housed here */}
+            <details className="rounded-xl border border-border bg-white p-4 shadow-2xs">
+              <summary className="cursor-pointer text-xs font-extrabold text-ink">
+                {t("ocrReview.originalOcr.heading")}
+              </summary>
+              {detail.original_ocr_text ? (
+                <p
+                  className="viread-learning-content mt-2 whitespace-pre-wrap text-xs leading-6 text-ink"
+                  dir="ltr"
+                  lang="vi"
+                >
+                  {detail.original_ocr_text}
+                </p>
+              ) : (
+                <p className="mt-2 whitespace-pre-wrap text-xs leading-6 text-muted">
+                  {t("ocrReview.originalOcr.missingSnapshot")}
+                </p>
+              )}
+            </details>
+
+            <details className="rounded-xl border border-border bg-white p-4 shadow-2xs">
+              <summary className="cursor-pointer text-xs font-extrabold text-ink">
+                {t("ocrReview.diagnostics.heading")}
+              </summary>
+              <section
+                aria-label={t("ocrReview.diagnostics.ariaLabel")}
+                className="mt-2.5"
+              >
+                <p className="text-xs text-muted">
+                  {t("ocrReview.diagnostics.subtitle")}
+                </p>
+                <dl className="mt-2.5 grid gap-2 text-xs sm:grid-cols-2">
+                  <div>
+                    <dt className="font-bold text-ink">
+                      {t("ocrReview.diagnostics.actualModel")}
+                    </dt>
+                    <dd className="text-muted">
+                      {runtimeEvidence.modelProfile}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-bold text-ink">
+                      {t("ocrReview.diagnostics.loadInferenceStatus")}
+                    </dt>
+                    <dd className="text-muted">
+                      {runtimeEvidence.modelLoadStatus}
+                      {" · "}
+                      {runtimeEvidence.modelInferenceStatus}
+                    </dd>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <dt className="font-bold text-ink">
+                      {t("ocrReview.diagnostics.verifiedSha")}
+                    </dt>
+                    <dd className="break-all font-mono text-[11px] text-muted">
+                      {runtimeEvidence.checkpointSha256 ??
+                        t("ocrReview.diagnostics.noCheckpointEvidence")}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-bold text-ink">
+                      {t("ocrReview.diagnostics.fallbackLabel")}
+                    </dt>
+                    <dd className="text-muted">
+                      {runtimeEvidence.fallbackReason ??
+                        t("ocrReview.diagnostics.noFallbackRecorded")}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-bold text-ink">
+                      {t("ocrReview.diagnostics.vietocrPackageLabel")}
+                    </dt>
+                    <dd className="text-muted">
+                      {runtimeEvidence.engineVersion ??
+                        t("ocrReview.diagnostics.unknownEngineVersion")}
+                    </dd>
+                  </div>
+                </dl>
+                {!runtimeEvidence.verified ? (
+                  <p className="mt-2 text-xs text-muted">
+                    {t("ocrReview.diagnostics.unverifiedRuntimeWarning")}
+                  </p>
+                ) : null}
+              </section>
+            </details>
+          </div>
+
+          {/* Sticky Bottom Save / AI / Verify Action Bar */}
+          <div className="sticky bottom-3 z-20 rounded-xl border border-border bg-white/95 p-3.5 shadow-md backdrop-blur-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              {verified ? (
                 <Button
-                  className="mt-4 sm:w-auto"
                   disabled={
-                    busy !== null || detail.lifecycle_status !== "ACTIVE"
+                    busy !== null ||
+                    detail.lifecycle_status !== "ACTIVE" ||
+                    !isCurrentVerifiedRevision
                   }
-                  isLoading={busy === "reprocess"}
-                  onClick={() => void reprocess()}
+                  isLoading={busy === "edit"}
+                  onClick={() => void createEditDraft()}
+                  size="admin"
                   variant="secondary"
                 >
-                  <RotateCcw aria-hidden className="size-4" />{" "}
-                  {t("ocrReview.revisionsPanel.reprocessBtn")}
+                  <Save aria-hidden="true" className="size-4 shrink-0" />
+                  {t("ocrReview.draft.createDraftToEditBtn")}
                 </Button>
-                <Button
-                  className="mt-4 sm:w-auto"
-                  disabled={busy !== null}
-                  onClick={() => void load()}
-                  variant="quiet"
-                >
-                  <RefreshCw aria-hidden className="size-4" />{" "}
-                  {t("ocrReview.revisionsPanel.reloadDataBtn")}
-                </Button>
-              </Card>
+              ) : (
+                <>
+                  <Button
+                    disabled={
+                      busy !== null ||
+                      detail.lifecycle_status !== "ACTIVE" ||
+                      wordSyncError !== null
+                    }
+                    isLoading={busy === "save"}
+                    onClick={() => void saveDraft()}
+                    size="admin"
+                    variant="outline"
+                  >
+                    <Save aria-hidden="true" className="size-4 shrink-0" />
+                    {t("ocrReview.draft.saveDraftBtn")}
+                  </Button>
+
+                  <Button
+                    disabled={
+                      busy !== null ||
+                      detail.lifecycle_status !== "ACTIVE" ||
+                      words.length === 0 ||
+                      wordSyncError !== null ||
+                      candidateEditPending ||
+                      workflowFinalApprovalBlocked ||
+                      aiSuggestion !== null ||
+                      (aiWorkflow !== null &&
+                        [
+                          "QUEUED",
+                          "PROOFREADING",
+                          "CHILD_SAFETY_SCANNING",
+                        ].includes(aiWorkflow.status))
+                    }
+                    isLoading={busy === "verify" || busy === "ai_correct"}
+                    onClick={() => void verifyRevision()}
+                    size="admin"
+                    type="button"
+                    variant="primary"
+                  >
+                    {proofreadAudit ? (
+                      <CheckCircle2
+                        aria-hidden="true"
+                        className="size-4 shrink-0"
+                      />
+                    ) : (
+                      <Sparkles
+                        aria-hidden="true"
+                        className="size-4 shrink-0"
+                      />
+                    )}
+                    {busy === "ai_correct"
+                      ? t("ocrReview.draft.runningAiBtn")
+                      : proofreadAudit || aiWorkflow?.proofread_text
+                        ? t("ocrReview.draft.verifyFinalBtn")
+                        : t("ocrReview.draft.confirmRunAiBtn")}
+                  </Button>
+
+                  {aiCheckUnavailable && proofreadAudit === null ? (
+                    <Button
+                      disabled={busy !== null}
+                      onClick={continueManualVerification}
+                      size="admin"
+                      type="button"
+                      variant="outline"
+                    >
+                      {t("ocrReview.draft.continueManualVerify")}
+                    </Button>
+                  ) : null}
+
+                  {aiWorkflow?.proofread_text &&
+                  workflowFinalApprovalBlocked ? (
+                    <p
+                      className="basis-full text-xs font-medium text-warning"
+                      role="status"
+                    >
+                      {workflowHasHighRisk
+                        ? t("ocrReview.draft.blockedHighSafety")
+                        : workflowImageFlaggedUnsafe
+                          ? t("ocrReview.draft.blockedUnsafeImage")
+                          : workflowImageUnassessed
+                            ? t("ocrReview.draft.blockedUnassessedImage")
+                            : aiWorkflow.safety_status !== "CONFIRMED" &&
+                                !workflowCanAutoConfirmSafety
+                              ? t("ocrReview.draft.blockedIncompleteSafety")
+                              : t("ocrReview.draft.blockedStaleSafety")}
+                    </p>
+                  ) : null}
+                </>
+              )}
             </div>
-          </details>
+          </div>
           <details className="rounded-card border border-border bg-white p-4">
             <summary className="min-h-11 cursor-pointer py-2 font-bold text-ink">
               Phân loại khối chữ thông minh (V2)
@@ -4614,7 +4845,7 @@ export function AdminOcrReviewScreen({
           </details>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -4623,20 +4854,7 @@ function OcrRevisionStatus({
 }: {
   status: AdminPageRevisionDetailDTO["verification_status"];
 }) {
-  const tone =
-    status === "VERIFIED"
-      ? "bg-success-surface text-success-ink"
-      : status === "PROCESSING"
-        ? "bg-sky text-primary-hover"
-        : "bg-warning-surface text-warning";
-
-  return (
-    <span
-      className={`inline-flex min-h-9 min-w-[220px] items-center rounded-full px-4 text-sm font-bold ${tone}`}
-    >
-      {status}
-    </span>
-  );
+  return <AdminStatusBadge status={status} />;
 }
 
 function AdminOcrWordReviewPanel({
@@ -4682,25 +4900,23 @@ function AdminOcrWordReviewPanel({
   const readOnly = status !== "NEEDS_REVIEW" || busy;
 
   return (
-    <section className="mx-auto flex w-full max-w-[640px] flex-col gap-4">
-      <ButtonLink className="sm:max-w-[240px]" href={backHref} variant="quiet">
-        {t("ocrReview.bboxView.backBtn")}
-      </ButtonLink>
-      <header className="flex flex-col gap-2">
-        <h1 className="text-heading font-extrabold text-ink">
-          {t("ocrReview.bboxView.heading")}
-        </h1>
-        <p className="text-sm text-muted">
-          {t("ocrReview.bboxView.subtitle", {
-            title: bookTitle,
-            pageNumber: formatNumber(pageNumber),
-            revisionNo: formatNumber(revisionNo),
-          })}
-        </p>
-        <OcrRevisionStatus status={status} />
-      </header>
+    <section className="mx-auto flex w-full max-w-[680px] flex-col gap-4">
+      <AdminPageHeader
+        actions={
+          <ButtonLink href={backHref} size="admin" variant="outline">
+            {t("ocrReview.bboxView.backBtn")}
+          </ButtonLink>
+        }
+        badge={<OcrRevisionStatus status={status} />}
+        description={t("ocrReview.bboxView.subtitle", {
+          title: bookTitle,
+          pageNumber: formatNumber(pageNumber),
+          revisionNo: formatNumber(revisionNo),
+        })}
+        title={t("ocrReview.bboxView.heading")}
+      />
 
-      <Card className="gap-4 bg-white sm:p-8">
+      <Card className="gap-4 bg-white sm:p-6">
         <h2 className="text-2xl font-extrabold text-ink">
           {t("ocrReview.bboxView.sectionHeading")}
         </h2>
@@ -4854,184 +5070,31 @@ function AdminOcrWordReviewPanel({
           <StatusMessage tone="error">{wordSyncError}</StatusMessage>
         ) : null}
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="flex flex-wrap gap-2">
           <Button
-            className="min-h-12"
             disabled={readOnly}
             onClick={onAddWord}
-            size="compact"
+            size="admin"
             variant="secondary"
           >
             {t("ocrReview.bboxView.addWord")}
           </Button>
           <Button
-            className="min-h-12"
             disabled={readOnly || !selected}
             onClick={() => selected && onRemoveWord(selected.word_index)}
-            size="compact"
-            variant="quiet"
+            size="admin"
+            variant="destructive-outline"
           >
             {t("ocrReview.bboxView.deleteWord")}
           </Button>
         </div>
       </Card>
 
-      <Button className="sm:max-w-[280px]" onClick={onComplete}>
-        {t("ocrReview.bboxView.finishReview")}
-      </Button>
-    </section>
-  );
-}
-
-function AdminOcrHistoryPanel({
-  backHref,
-  bookTitle,
-  busy,
-  detail,
-  history,
-  notice,
-  noticeTone = "info",
-  onChooseRevision,
-  onReload,
-  onReprocess,
-  onReplacementFileChange,
-  onReplaceImage,
-  pageNumber,
-  replacementFile,
-}: {
-  backHref: string;
-  bookTitle: string;
-  busy:
-    | "edit"
-    | "save"
-    | "verify"
-    | "reprocess"
-    | "reupload"
-    | "ai_correct"
-    | "workflow"
-    | null;
-  detail: AdminPageRevisionDetailDTO;
-  history: readonly AdminRevisionSummaryUI[];
-  notice: string | null;
-  noticeTone?: "info" | "error";
-  onChooseRevision: (revisionId: string) => void;
-  onReload: () => void;
-  onReprocess: () => void;
-  onReplacementFileChange: (file: File | null) => void;
-  onReplaceImage: () => void;
-  pageNumber: number;
-  replacementFile: File | null;
-}) {
-  const t = useTranslations("admin");
-  const { formatNumber } = useI18n();
-  const processing = detail.verification_status === "PROCESSING";
-  const canChangeImage = detail.lifecycle_status === "ACTIVE" && !processing;
-
-  return (
-    <section className="mx-auto flex w-full max-w-[640px] flex-col gap-4">
-      <ButtonLink className="sm:max-w-[240px]" href={backHref} variant="quiet">
-        {t("ocrReview.bboxView.backBtn")}
-      </ButtonLink>
-      <header className="flex flex-col gap-2">
-        <h1 className="text-heading font-extrabold text-ink">
-          {t("ocrReview.historyView.heading")}
-        </h1>
-        <p className="text-sm text-muted">
-          {t("ocrReview.historyView.subtitle", {
-            title: bookTitle,
-            pageNumber: formatNumber(pageNumber),
-            revisionNo: formatNumber(detail.revision_no),
-          })}
-        </p>
-        <OcrRevisionStatus status={detail.verification_status} />
-      </header>
-
-      {notice ? (
-        <StatusMessage tone={noticeTone}>{notice}</StatusMessage>
-      ) : null}
-
-      <Card className="gap-4 bg-white sm:p-8">
-        <h2 className="text-2xl font-extrabold text-ink">
-          {t("ocrReview.revisionsPanel.heading")}
-        </h2>
-        <div className="grid gap-2">
-          {history.map((revision) => {
-            const selected =
-              revision.page_revision_id === detail.page_revision_id;
-            return (
-              <button
-                className={`rounded-card p-4 text-start ${selected ? "bg-sky" : "border border-border"}`}
-                key={revision.page_revision_id}
-                onClick={() => onChooseRevision(revision.page_revision_id)}
-                type="button"
-              >
-                <span className="block font-extrabold text-ink">
-                  Revision R{formatNumber(revision.revision_no)}
-                </span>
-                <span className="mt-1 block text-sm text-muted">
-                  {revision.verification_status} ·{" "}
-                  {revision.is_current_verified
-                    ? t("ocrReview.revisionsPanel.currentLabel")
-                    : t("ocrReview.revisionsPanel.viewingSuffix")}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        <label
-          className="grid gap-2 text-center text-sm font-semibold text-ink"
-          htmlFor="replacement-page-image"
-        >
-          {t("ocrReview.revisionsPanel.reuploadLabel")}
-          <input
-            id="replacement-page-image"
-            accept="image/jpeg,image/png,image/webp"
-            className="block w-full rounded-control border border-border bg-white p-3 text-sm"
-            disabled={busy !== null || !canChangeImage}
-            onChange={(event) =>
-              onReplacementFileChange(event.target.files?.[0] ?? null)
-            }
-            type="file"
-          />
-        </label>
-        {replacementFile ? (
-          <p className="text-sm text-muted">
-            {t("ocrReview.revisionsPanel.selectedFile", {
-              fileName: replacementFile.name,
-            })}
-          </p>
-        ) : null}
-        <Button
-          className="min-h-12"
-          disabled={busy !== null || !replacementFile || !canChangeImage}
-          isLoading={busy === "reupload"}
-          onClick={onReplaceImage}
-          size="compact"
-          variant="secondary"
-        >
-          {t("ocrReview.revisionsPanel.reuploadBtn")}
+      <div>
+        <Button onClick={onComplete} size="admin" variant="primary">
+          {t("ocrReview.bboxView.finishReview")}
         </Button>
-        <Button
-          className="min-h-12"
-          disabled={busy !== null || !canChangeImage}
-          isLoading={busy === "reprocess"}
-          onClick={onReprocess}
-          size="compact"
-          variant="secondary"
-        >
-          {t("ocrReview.revisionsPanel.reprocessBtn")}
-        </Button>
-        <Button
-          className="min-h-12"
-          disabled={busy !== null}
-          onClick={onReload}
-          size="compact"
-          variant="quiet"
-        >
-          {t("ocrReview.revisionsPanel.reloadDataBtn")}
-        </Button>
-      </Card>
+      </div>
     </section>
   );
 }

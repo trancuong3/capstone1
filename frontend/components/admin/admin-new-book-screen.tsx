@@ -1,7 +1,6 @@
 "use client";
 
-import { ArrowLeft, ImagePlus, X } from "lucide-react";
-import Link from "next/link";
+import { ImagePlus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   useCallback,
@@ -11,10 +10,10 @@ import {
   useState,
   type ChangeEvent,
 } from "react";
+
 import { AdminBookForm } from "@/components/admin/admin-book-form";
 import { AdminPageHeader } from "@/components/admin/admin-ui";
 import { Button } from "@/components/common/button";
-import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useTranslations } from "@/hooks/use-i18n";
@@ -175,41 +174,34 @@ export function AdminNewBookScreen({
   );
 
   return (
-    <section className="figma-form-page mx-auto flex w-full max-w-[960px] flex-col gap-4">
+    <section className="space-y-4">
       <AdminPageHeader
-        title={t("books.new.title")}
+        breadcrumbs={[
+          { label: t("books.detail.backToBooks"), href: "/admin/books" },
+          { label: t("books.new.title") },
+        ]}
         description={t("books.new.description")}
+        eyebrow={t("books.eyebrow")}
+        title={t("books.new.title")}
       />
-      <Link
-        className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-primary"
-        href="/admin/books"
-      >
-        <ArrowLeft aria-hidden className="size-5 rtl:rotate-180" />{" "}
-        {t("books.new.cancelAndBack")}
-      </Link>
-      <Card className="max-w-3xl bg-white sm:px-8 sm:py-8">
-        <StatusMessage
-          className="mb-5"
-          tone="info"
-          title={t("books.new.notPublishedTitle")}
-        >
-          {t("books.new.notPublishedDesc")}
-        </StatusMessage>
-        <h2 className="mb-4 text-2xl font-extrabold text-ink">
-          {t("books.new.infoHeading")}
-        </h2>
-        <AdminBookForm
-          cancelHref="/admin/books"
-          coverSourceType={stagedCoverFile ? "USER_UPLOAD" : null}
-          coverStudioSlot={coverStudioSlot}
-          coverUrl={stagedCoverPreviewUrl}
-          initial={{ min_grade: 1, max_grade: 5 }}
-          onSubmit={handleCreateBook}
-          showLiveCoverPreview
-          submitErrorFallback={t("books.new.errors.createFailed")}
-          submitLabel={t("books.new.submit")}
-        />
-      </Card>
+      <AdminBookForm
+        bookId="new-book-preview"
+        cancelHref="/admin/books"
+        coverSourceType={stagedCoverFile ? "USER_UPLOAD" : null}
+        coverStudioSlot={coverStudioSlot}
+        coverUrl={stagedCoverPreviewUrl}
+        errorFallbackMessage={t("books.new.errors.createFailed")}
+        formBanner={
+          <StatusMessage title={t("books.new.notPublishedTitle")} tone="info">
+            {t("books.new.notPublishedDesc")}
+          </StatusMessage>
+        }
+        formHeading={t("books.new.infoHeading")}
+        initial={{ min_grade: 1, max_grade: 5 }}
+        onSubmit={handleCreateBook}
+        showLiveCoverPreview
+        submitLabel={t("books.new.submit")}
+      />
     </section>
   );
 }

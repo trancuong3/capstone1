@@ -1,10 +1,19 @@
 "use client";
 
+import { Eye, EyeOff, Music2, Plus } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
-import { karaokeInputClass } from "@/components/admin/karaoke/song-metadata-form";
+import {
+  AdminBadge,
+  AdminLoading,
+  AdminPageHeader,
+  AdminSearchInput,
+  AdminSelect,
+  AdminStatusBadge,
+  AdminToolbar,
+} from "@/components/admin/admin-ui";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
+import { EmptyState } from "@/components/common/empty-state";
 import { Modal } from "@/components/common/modal";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
@@ -22,6 +31,14 @@ export const karaokeStatusLabels = {
   PUBLISHED: "Đang hiển thị",
   HIDDEN: "Đã ẩn",
 };
+
+function resolveCoverUrl(
+  item: AdminKaraokeList["items"][number],
+): string | null {
+  const candidate = (item as { cover_url?: unknown }).cover_url;
+  return typeof candidate === "string" && candidate.trim() ? candidate : null;
+}
+
 export function KaraokeLibraryScreen() {
   const service = useAdminKaraoke();
   const t = useTranslations("admin");
@@ -108,6 +125,12 @@ export function KaraokeLibraryScreen() {
     setError("");
     setQuery({ search: search.trim(), status, offset: 0 });
   }
+  function clearSearch() {
+    setSearch("");
+    setLoading(true);
+    setError("");
+    setQuery({ search: "", status, offset: 0 });
+  }
   async function confirmVisibility() {
     const item = pendingVisibilityItem;
     if (!item || mutation.current) return;
@@ -138,59 +161,70 @@ export function KaraokeLibraryScreen() {
     }
   }
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-5">
       <AdminPageHeader
         eyebrow={t("karaoke.library.eyebrow")}
         title={t("karaoke.library.title")}
         description={t("karaoke.library.description")}
         actions={
-          <ButtonLink href="/admin/karaoke/new">
+          <ButtonLink fullWidth={false} href="/admin/karaoke/new" size="admin">
+            <Plus aria-hidden className="size-4" />
             {t("karaoke.library.createSong")}
           </ButtonLink>
         }
       />
-      <Card>
-        <form
-          onSubmit={filter}
-          className="grid items-end gap-4 md:grid-cols-[2fr_1fr_auto]"
+
+      <form onSubmit={filter}>
+        <AdminToolbar
+          actions={
+            <Button disabled={busy} fullWidth={false} size="admin" type="submit">
+              {t("karaoke.library.apply")}
+            </Button>
+          }
+          ariaLabel={t(
+            "karaoke.library.filterAria",
+            undefined,
+            "Bộ lọc thư viện bài hát",
+          )}
         >
-          <label className="grid gap-2 font-bold">
-            {t("karaoke.library.searchLabel")}
-            <input
-              className={karaokeInputClass}
-              value={search}
-              maxLength={120}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </label>
-          <label className="grid gap-2 font-bold">
-            {t("karaoke.library.statusLabel")}
-            <select
-              className={karaokeInputClass}
-              value={status}
-              onChange={(e) => setStatus(e.target.value as typeof status)}
-            >
-              <option value="">{t("common.all")}</option>
-              {KARAOKE_STATUS_KEYS.map((value) => (
-                <option key={value} value={value}>
-                  {t(`karaoke.library.statuses.${value}`)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <Button type="submit" disabled={busy}>
-            {t("karaoke.library.apply")}
-          </Button>
-        </form>
-      </Card>
+          <AdminSearchInput
+            label={t("karaoke.library.searchLabel")}
+            maxLength={120}
+            onChange={setSearch}
+            onClear={clearSearch}
+            placeholder={t(
+              "karaoke.library.searchPlaceholder",
+              undefined,
+              "Nhập tên bài hát hoặc tác giả…",
+            )}
+            value={search}
+          />
+          <AdminSelect
+            containerClassName="w-full sm:w-48"
+            label={t("karaoke.library.statusLabel")}
+            onChange={(value) => setStatus(value as typeof status)}
+            options={[
+              { value: "", label: t("common.all") },
+              ...KARAOKE_STATUS_KEYS.map((value) => ({
+                value,
+                label: t(`karaoke.library.statuses.${value}`),
+              })),
+            ]}
+            value={status}
+          />
+        </AdminToolbar>
+      </form>
+
       {error && (
         <StatusMessage tone="error">
           {error}
           <Button
-            className="mt-3 sm:w-auto"
-            variant="quiet"
-            onClick={refresh}
+            className="mt-3"
             disabled={busy}
+            fullWidth={false}
+            onClick={refresh}
+            size="admin"
+            variant="outline"
           >
             {t("karaoke.library.retryReload")}
           </Button>
@@ -203,86 +237,164 @@ export function KaraokeLibraryScreen() {
         data && (
           <>
             {!data.items.length ? (
-              <Card>
-                <p>{t("karaoke.library.empty")}</p>
-              </Card>
+              <EmptyState
+                action={
+                  <ButtonLink
+                    fullWidth={false}
+                    href="/admin/karaoke/new"
+                    size="admin"
+                  >
+                    <Plus aria-hidden className="size-4" />
+                    {t("karaoke.library.createSong")}
+                  </ButtonLink>
+                }
+                description={t("karaoke.library.empty")}
+                icon={<Music2 aria-hidden className="size-7 text-primary" />}
+                title={t(
+                  "karaoke.library.emptyTitle",
+                  undefined,
+                  "Chưa có bài hát nào",
+                )}
+              />
             ) : (
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {data.items.map((item) => (
-                  <Card key={item.song_id}>
-                    <p className="text-sm font-bold text-primary-hover">
-                      {t(`karaoke.library.statuses.${item.status}`)}
-                      {item.published_version_id && item.draft_version_id
-                        ? t("karaoke.library.hasDraftEditSuffix")
-                        : ""}
-                    </p>
-                    <h2
-                      className="break-words text-xl font-extrabold"
-                      dir="auto"
-                    >
-                      {item.title || t("karaoke.library.untitled")}
-                    </h2>
-                    {item.processing_summary && (
-                      <p className="rounded-control bg-sky px-3 py-2 text-sm font-bold text-primary-hover">
-                        {t("karaoke.library.processingPrefix")}{" "}
-                        {t(
-                          `karaoke.processing.statusLabels.${item.processing_summary.status}`,
+                {data.items.map((item) => {
+                  const coverUrl = resolveCoverUrl(item);
+                  const displayTitle =
+                    item.title || t("karaoke.library.untitled");
+                  const statusLabel = `${t(`karaoke.library.statuses.${item.status}`)}${
+                    item.published_version_id && item.draft_version_id
+                      ? t("karaoke.library.hasDraftEditSuffix")
+                      : ""
+                  }`;
+                  const processingTone =
+                    item.processing_summary?.status === "FAILED"
+                      ? "danger"
+                      : item.processing_summary?.status === "NEEDS_REVIEW"
+                        ? "warning"
+                        : item.processing_summary?.status === "READY" ||
+                            item.processing_summary?.status === "APPLIED"
+                          ? "success"
+                          : "info";
+
+                  return (
+                    <Card className="gap-3.5 bg-white p-4" key={item.song_id}>
+                      <div className="flex items-start gap-3">
+                        {coverUrl ? (
+                          // Signed/dynamic remote media URLs are rendered directly without Next image host proxying.
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            alt={displayTitle}
+                            className="size-14 shrink-0 rounded-xl border border-border object-cover"
+                            src={coverUrl}
+                          />
+                        ) : (
+                          <div
+                            aria-hidden="true"
+                            className="grid size-14 shrink-0 place-items-center rounded-xl border border-primary/20 bg-sky/70 text-primary-hover"
+                          >
+                            <Music2 className="size-6" />
+                          </div>
                         )}
-                      </p>
-                    )}
-                    <p className="break-words text-muted">
-                      {t("karaoke.library.metaLine", {
-                        author:
-                          item.author || t("karaoke.library.unknownAuthor"),
-                        minGrade: item.min_grade,
-                        maxGrade: item.max_grade,
-                        duration:
-                          item.has_audio && item.duration_ms !== null
-                            ? t("karaoke.library.durationValue", {
-                                time: formatKaraokeTime(item.duration_ms),
-                              })
-                            : t("karaoke.library.noAudio"),
-                      })}
-                    </p>
-                    <div className="mt-auto flex flex-wrap gap-2">
-                      <ButtonLink
-                        href={`/admin/karaoke/${item.song_id}/edit`}
-                        variant="secondary"
-                        className="sm:w-auto"
-                      >
-                        {item.processing_summary &&
-                        ["READY", "NEEDS_REVIEW"].includes(
-                          item.processing_summary.status,
-                        )
-                          ? t("karaoke.library.viewResults")
-                          : item.processing_summary &&
-                              ["QUEUED", "RUNNING"].includes(
-                                item.processing_summary.status,
-                              )
-                            ? t("karaoke.library.continueCreating")
-                            : item.processing_summary?.status === "FAILED"
-                              ? t("karaoke.library.viewErrorRetry")
-                              : t("karaoke.library.detailEdit")}
-                      </ButtonLink>
-                      {item.published_version_id && (
-                        <Button
-                          variant="quiet"
-                          className="sm:w-auto"
-                          disabled={busy}
-                          onClick={() => setPendingVisibilityItem(item)}
-                        >
-                          {item.status === "HIDDEN"
-                            ? t("karaoke.library.showSong")
-                            : t("karaoke.library.hideSong")}
-                        </Button>
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <AdminStatusBadge
+                              label={statusLabel}
+                              status={item.status}
+                            />
+                            {item.has_cover ? (
+                              <AdminBadge tone="neutral">
+                                {t(
+                                  "karaoke.library.hasCoverBadge",
+                                  undefined,
+                                  "Có bìa",
+                                )}
+                              </AdminBadge>
+                            ) : null}
+                          </div>
+                          <h2
+                            className="line-clamp-2 break-words text-base font-extrabold leading-snug text-ink"
+                            dir="auto"
+                          >
+                            {displayTitle}
+                          </h2>
+                        </div>
+                      </div>
+
+                      {item.processing_summary && (
+                        <div>
+                          <AdminBadge dot tone={processingTone}>
+                            {t("karaoke.library.processingPrefix")}{" "}
+                            {t(
+                              `karaoke.processing.statusLabels.${item.processing_summary.status}`,
+                            )}
+                          </AdminBadge>
+                        </div>
                       )}
-                    </div>
-                  </Card>
-                ))}
+
+                      <p className="break-words text-sm text-muted tabular-nums">
+                        {t("karaoke.library.metaLine", {
+                          author:
+                            item.author || t("karaoke.library.unknownAuthor"),
+                          minGrade: item.min_grade,
+                          maxGrade: item.max_grade,
+                          duration:
+                            item.has_audio && item.duration_ms !== null
+                              ? t("karaoke.library.durationValue", {
+                                  time: formatKaraokeTime(item.duration_ms),
+                                })
+                              : t("karaoke.library.noAudio"),
+                        })}
+                      </p>
+
+                      <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-border/70 pt-3">
+                        <ButtonLink
+                          fullWidth={false}
+                          href={`/admin/karaoke/${item.song_id}/edit`}
+                          size="admin"
+                          variant="secondary"
+                        >
+                          {item.processing_summary &&
+                          ["READY", "NEEDS_REVIEW"].includes(
+                            item.processing_summary.status,
+                          )
+                            ? t("karaoke.library.viewResults")
+                            : item.processing_summary &&
+                                ["QUEUED", "RUNNING"].includes(
+                                  item.processing_summary.status,
+                                )
+                              ? t("karaoke.library.continueCreating")
+                              : item.processing_summary?.status === "FAILED"
+                                ? t("karaoke.library.viewErrorRetry")
+                                : t("karaoke.library.detailEdit")}
+                        </ButtonLink>
+                        {item.published_version_id && (
+                          <Button
+                            disabled={busy}
+                            fullWidth={false}
+                            onClick={() => setPendingVisibilityItem(item)}
+                            size="admin"
+                            variant="outline"
+                          >
+                            {item.status === "HIDDEN" ? (
+                              <Eye aria-hidden className="size-4" />
+                            ) : (
+                              <EyeOff aria-hidden className="size-4" />
+                            )}
+                            {item.status === "HIDDEN"
+                              ? t("karaoke.library.showSong")
+                              : t("karaoke.library.hideSong")}
+                          </Button>
+                        )}
+                      </div>
+                    </Card>
+                  );
+                })}
               </div>
             )}
             <PaginationBar
               ariaLabel={t("karaoke.library.paginationAria")}
+              compact
               disabled={busy}
               itemLabel={t("karaoke.library.itemLabel")}
               nextLabel={t("karaoke.library.nextLabel")}
@@ -308,13 +420,14 @@ export function KaraokeLibraryScreen() {
         closeOnBackdropClick={!busy}
         closeOnEscape={!busy}
         footer={
-          <div className="flex flex-wrap justify-end gap-3">
+          <div className="flex flex-wrap justify-end gap-2">
             <Button
               disabled={busy}
               fullWidth={false}
               onClick={() => setPendingVisibilityItem(null)}
+              size="admin"
               type="button"
-              variant="secondary"
+              variant="outline"
             >
               {t("common.cancel")}
             </Button>
@@ -323,6 +436,7 @@ export function KaraokeLibraryScreen() {
               fullWidth={false}
               isLoading={busy}
               onClick={() => void confirmVisibility()}
+              size="admin"
               type="button"
               variant={
                 pendingVisibilityItem?.status === "HIDDEN"
@@ -349,7 +463,7 @@ export function KaraokeLibraryScreen() {
         }
         tone="paper"
       >
-        <p className="text-body text-ink">
+        <p className="text-sm leading-relaxed text-ink">
           {pendingVisibilityItem
             ? t("karaoke.library.modalVisibilityDesc", {
                 action:
