@@ -231,7 +231,10 @@ describe("OCR pipeline UX & polling hardening", () => {
 
     const { container } = render(<CameraPreview enableScanner />);
     const video = container.querySelector("video") as HTMLVideoElement;
-    Object.defineProperty(video, "readyState", { value: 4, configurable: true });
+    Object.defineProperty(video, "readyState", {
+      value: 4,
+      configurable: true,
+    });
     Object.defineProperty(video, "videoWidth", {
       value: 1200,
       configurable: true,
@@ -310,7 +313,10 @@ describe("OCR pipeline UX & polling hardening", () => {
       return Response.json({}, { status: 404 });
     });
 
-    const svc = createAdminPageService({ pollIntervalMs: 5, maxPollAttempts: 10 });
+    const svc = createAdminPageService({
+      pollIntervalMs: 5,
+      maxPollAttempts: 10,
+    });
     const progressEvents: Array<Record<string, unknown>> = [];
     const pdfFile = new File(["%PDF-1.4 mock"], "sample.pdf", {
       type: "application/pdf",
@@ -400,7 +406,9 @@ describe("OCR pipeline UX & polling hardening", () => {
       updated_at: "2026-11-26T00:00:00Z",
     };
 
-    apiFetchFixture.mockImplementation(async () => Response.json(queuedWorkflow));
+    apiFetchFixture.mockImplementation(async () =>
+      Response.json(queuedWorkflow),
+    );
 
     const svc = createOcrReviewService();
     const promise = svc.runCombinedWorkflow(PAGE_ID, REV_ID, "Xin chào", []);

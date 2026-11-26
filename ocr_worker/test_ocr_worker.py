@@ -61,6 +61,14 @@ class TestOcrWorkerServiceAndClient(unittest.TestCase):
             cfg = sys.modules["app.database.config"]
             self.assertIsNone(cfg.SUPABASE_ADMIN_KEY)
             self.assertIsNone(cfg.DATABASE_URL)
+            self.assertTrue(callable(cfg.supabase_admin_headers))
+            self.assertEqual(cfg.supabase_admin_headers(), {"apikey": ""})
+            self.assertEqual(
+                cfg.supabase_admin_headers("sb_secret_abc", extra={"X-Test": "1"}),
+                {"apikey": "sb_secret_abc", "X-Test": "1"},
+            )
+            self.assertTrue(cfg.is_supabase_jwt_key("eyJ.payload.sig"))
+            self.assertFalse(cfg.is_supabase_jwt_key("sb_secret_abc"))
 
     def test_health_and_version_independent_engine_states(self):
         runtime = OcrRuntimeManager(worker_id="test-ocr-1")

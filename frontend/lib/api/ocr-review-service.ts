@@ -170,10 +170,7 @@ function isTransientWorkflowPollError(error: unknown): boolean {
   return error instanceof TypeError;
 }
 
-function waitForJobPoll(
-  signal?: AbortSignal,
-  delayMs = 3_000,
-): Promise<void> {
+function waitForJobPoll(signal?: AbortSignal, delayMs = 3_000): Promise<void> {
   return new Promise((resolve, reject) => {
     const timeout = globalThis.setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
@@ -512,7 +509,9 @@ export function createOcrReviewService(): OcrReviewService {
         }
         const delayMs = Math.min(
           8_000,
-          Math.round(3_000 * Math.pow(1.25, Math.min(5, Math.floor(pollAttempt / 4)))),
+          Math.round(
+            3_000 * Math.pow(1.25, Math.min(5, Math.floor(pollAttempt / 4))),
+          ),
         );
         pollAttempt += 1;
         await waitForJobPoll(signal, delayMs).catch(async (error: unknown) => {
@@ -620,7 +619,9 @@ export function createOcrReviewService(): OcrReviewService {
         }
         const delayMs = Math.min(
           8_000,
-          Math.round(3_000 * Math.pow(1.25, Math.min(5, Math.floor(pollAttempt / 4)))),
+          Math.round(
+            3_000 * Math.pow(1.25, Math.min(5, Math.floor(pollAttempt / 4))),
+          ),
         );
         pollAttempt += 1;
         await waitForJobPoll(signal, delayMs);
