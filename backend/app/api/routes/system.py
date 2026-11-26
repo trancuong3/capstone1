@@ -1337,11 +1337,11 @@ class AdminSystemService:
         items.append(cache_item)
 
         items.append(AdminHealthItemRead(**storage_details, checked_at=checked_at))
-        items.append(
-            AdminHealthItemRead(**collect_email_delivery_health(), checked_at=checked_at)
-        )
         items.extend(AdminHealthItemRead(**entry, checked_at=checked_at) for entry in ocr_details)
         if workers is not None:
+            items.append(
+                AdminHealthItemRead(**collect_email_delivery_health(), checked_at=checked_at)
+            )
             metrics: dict[str, dict[str, object]] = {}
             try:
                 raw_metrics = await asyncio.wait_for(

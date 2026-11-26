@@ -140,9 +140,9 @@ class ParentEmailNotificationRepository:
 
     async def get_preferences(self, parent_id: UUID) -> ParentEmailPreference | None:
         return await self.db.scalar(
-            select(ParentEmailPreference).where(
-                ParentEmailPreference.ParentId == parent_id
-            )
+            select(ParentEmailPreference)
+            .where(ParentEmailPreference.ParentId == parent_id)
+            .execution_options(populate_existing=True)
         )
 
     async def get_profile(self, parent_id: UUID) -> Profile | None:
@@ -285,9 +285,9 @@ class ParentEmailNotificationRepository:
         self, dedupe_key: str
     ) -> ParentEmailDelivery | None:
         return await self.db.scalar(
-            select(ParentEmailDelivery).where(
-                ParentEmailDelivery.DedupeKey == dedupe_key
-            )
+            select(ParentEmailDelivery)
+            .where(ParentEmailDelivery.DedupeKey == dedupe_key)
+            .execution_options(populate_existing=True)
         )
 
     async def delivery_exists(self, dedupe_key: str) -> bool:
@@ -377,7 +377,9 @@ class ParentEmailNotificationRepository:
         await self.db.commit()
         if reclaimed_id is None:
             return None
-        return await self.db.get(ParentEmailDelivery, reclaimed_id)
+        return await self.db.get(
+            ParentEmailDelivery, reclaimed_id, populate_existing=True
+        )
 
     async def finish_delivery(
         self,
