@@ -168,7 +168,11 @@ export async function installReadingExperience(
     if (route.request().method() === "OPTIONS")
       return route.fulfill({ status: 204, headers });
     const path = new URL(route.request().url()).pathname;
-    if (path.startsWith("/reading/history")) return route.fallback();
+    if (
+      path.startsWith("/reading/history") ||
+      path === "/reading/scan-page-ocr/jobs"
+    )
+      return route.fallback();
     if (path === base) return respond(route, session());
     if (path === base + "/page" || path === `/reading/pages/${ids.page}`)
       return respond(route, {

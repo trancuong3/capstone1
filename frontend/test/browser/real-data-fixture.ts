@@ -1244,6 +1244,18 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
           "Chưa cấu hình nhà cung cấp tạo ảnh AI miễn phí.",
         v2_storage_degraded: false,
       });
+    if (
+      request.method() === "GET" &&
+      path === "/games/picture-description/catalog"
+    )
+      return respond(route, { samples: [], book_pages: [] });
+    if (
+      request.method() === "GET" &&
+      path === "/games/picture-description/sessions"
+    )
+      return respond(route, []);
+    if (request.method() === "GET" && path === "/games/sentence-shooter/books")
+      return respond(route, []);
     state.unexpected.push(`unknown:${path}`);
     return respond(route, {}, 404);
   });
