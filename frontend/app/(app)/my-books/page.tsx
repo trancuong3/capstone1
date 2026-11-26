@@ -1,12 +1,27 @@
 import type { Metadata } from "next";
 
 import { ParentMyBooksScreen } from "@/components/books/parent-my-books-screen";
+import { translateMessage } from "@/lib/i18n/formatter";
+import { getServerI18n } from "@/lib/i18n/server";
+import { viMessages } from "@/messages/vi";
 
-export const metadata: Metadata = {
-  title: "Sách của tôi | ViRead",
-  description:
-    "Tạo và quản lý sách riêng của gia đình với kiểm tra OCR, chính tả và an toàn cho trẻ.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const { locale, messages } = await getServerI18n();
+  return {
+    title: translateMessage(
+      messages,
+      viMessages,
+      locale,
+      "books.myBooks.pageTitle",
+    ),
+    description: translateMessage(
+      messages,
+      viMessages,
+      locale,
+      "books.myBooks.pageDescription",
+    ),
+  };
+}
 
 interface MyBooksPageProps {
   searchParams?: Promise<{ page?: string | string[] }>;

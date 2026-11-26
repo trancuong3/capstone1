@@ -1,0 +1,77 @@
+{
+  "parent": {
+    "navLabel": "Parent navigation",
+    "skipToContent": "Skip navigation, go to content",
+    "dashboard": "Overview",
+    "myBooks": "My books",
+    "reports": "Progress",
+    "readingManagement": "Reading management",
+    "sessions": "History",
+    "sessionsLong": "Reading history",
+    "entertainment": "Entertainment",
+    "difficultWords": "Difficult Words",
+    "children": "Child Profiles",
+    "parentProfile": "Parent Profile",
+    "parentProfileLong": "Parent Profile",
+    "settings": "Settings",
+    "helpSupport": "Help & Support",
+    "moreTitle": "More Features",
+    "booksShort": "Books",
+    "scannerShort": "Scan",
+    "moreButton": "More",
+    "mobileAriaLabel": "Quick mobile navigation",
+    "moreDescriptions": {
+      "myBooks": "Upload and manage your family's books",
+      "readingManagement": "Goals, reading schedule, and saved books for your child",
+      "sessions": "Review completed reading sessions",
+      "entertainment": "Language games, storytelling, and karaoke",
+      "difficultWords": "Practice words your child often misreads"
+    }
+  },
+  "admin": {
+    "navLabel": "Admin navigation",
+    "skipToContent": "Skip navigation, go to admin content",
+    "badge": "Admin",
+    "karaoke": "Songs",
+    "parents": "Parents",
+    "books": "Book Library",
+    "metadataQuality": "Book Quality",
+    "auditLogs": "Audit Logs",
+    "training": "OCR Training",
+    "health": "Operations",
+    "moreTitle": "More Admin",
+    "mobileQualityShort": "Quality",
+    "mobileOcrShort": "OCR",
+    "mobileMoreDescriptions": {
+      "auditLogs": "Track admin audit logs",
+      "training": "Train and operate VietOCR V2 model",
+      "health": "System status, OCR worker, and voice"
+    }
+  },
+  "accountMenu": {
+    "openAria": "Open account menu",
+    "closeAria": "Close account menu",
+    "menuAria": "ViRead account menu",
+    "shortMenuAria": "Account menu",
+    "accountNavAria": "ViRead Account",
+    "profileSection": "Profile",
+    "accountSection": "Account",
+    "helpSection": "Help",
+    "sessionSection": "Session",
+    "defaultAccountLabel": "ViRead Account"
+  },
+  "childSwitcher": {
+    "selectedAria": "Selected child: {alias}, tap to switch",
+    "openAria": "Quick switch child",
+    "compactLabel": "{alias} · Gr {grade}",
+    "selectChild": "Select child",
+    "listAria": "Quick switch child profile",
+    "gradeLabel": "· Grade {grade}",
+    "manageChildren": "Manage child profiles"
+  },
+  "footer": {
+    "ariaLabel": "ViRead information",
+    "logoDashboardAria": "ViRead - Go to dashboard",
+    "logoHomeAria": "ViRead - Go to home"
+  }
+}

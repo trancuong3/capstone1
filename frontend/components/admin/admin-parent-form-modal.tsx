@@ -5,11 +5,16 @@ import { Button } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
+import { useTranslations } from "@/hooks/use-i18n";
 import type {
   AdminParentCreateInput,
   AdminParentUpdateInput,
 } from "@/lib/api/admin-parent-service";
 import { isServiceError } from "@/lib/api/service-error";
+import { translateMessage } from "@/lib/i18n/formatter";
+import { DEFAULT_LOCALE } from "@/lib/i18n/locales";
+import type { TranslateFn } from "@/lib/i18n/types";
+import { viMessages } from "@/messages/vi";
 
 export interface AdminParentFormValues {
   readonly display_name: string;
@@ -36,32 +41,46 @@ interface AdminParentFormModalProps {
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const phonePattern = /^\+?[0-9][0-9\s().-]{5,24}$/;
 
-export function getAdminParentMutationErrorMessage(error: unknown): string {
+const defaultTranslate: TranslateFn = (key, params, fallback) =>
+  translateMessage(
+    viMessages,
+    viMessages,
+    DEFAULT_LOCALE,
+    key.includes(".") && !key.startsWith("admin.") ? `admin.${key}` : key,
+    params,
+    fallback,
+  );
+
+export function getAdminParentMutationErrorMessage(
+  error: unknown,
+  t: TranslateFn = defaultTranslate,
+): string {
   if (isServiceError(error)) {
     switch (error.status) {
       case 401:
-        return "Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.";
+        return t("parents.modal.errors.unauthorized");
       case 403:
-        return "Tài khoản hiện tại không có quyền quản trị phụ huynh.";
+        return t("parents.modal.errors.forbidden");
       case 404:
-        return "Không tìm thấy tài khoản phụ huynh. Hãy tải lại danh sách.";
+        return t("parents.modal.errors.notFound");
       case 409:
-        return "Email hoặc số điện thoại đã được một tài khoản khác sử dụng.";
+        return t("parents.modal.errors.conflict");
       case 422:
-        return "Thông tin chưa hợp lệ. Vui lòng kiểm tra lại các trường.";
+        return t("parents.modal.errors.validation");
       case 500:
       case 503:
         return error.request_id
-          ? "Dịch vụ quản trị hoặc Supabase Auth đang gặp sự cố. Mã yêu cầu: " +
-              error.request_id
-          : "Dịch vụ quản trị hoặc Supabase Auth đang tạm thời không khả dụng.";
+          ? t("parents.modal.errors.serviceErrorWithRequest", {
+              requestId: error.request_id,
+            })
+          : t("parents.modal.errors.serviceError");
       default:
         return error.status === 0
-          ? "Không thể kết nối đến máy chủ. Kiểm tra mạng rồi thử lại."
-          : "Không thể cập nhật tài khoản lúc này. Vui lòng thử lại.";
+          ? t("parents.modal.errors.networkError")
+          : t("parents.modal.errors.genericUpdate");
     }
   }
-  return "Không thể cập nhật tài khoản lúc này. Dữ liệu đã nhập vẫn được giữ.";
+  return t("parents.modal.errors.fallback");
 }
 
 export function AdminParentFormModal({
@@ -75,6 +94,7 @@ export function AdminParentFormModal({
   onSubmit,
   onSuccess,
 }: AdminParentFormModalProps) {
+  const t = useTranslations("admin");
   const [values, setValues] = useState<AdminParentFormValues>(initialValues);
   const [fieldErrors, setFieldErrors] = useState<
     Partial<Record<keyof AdminParentFormValues, string>>
@@ -109,35 +129,35 @@ export function AdminParentFormModal({
     const nextErrors: Partial<Record<keyof AdminParentFormValues, string>> = {};
 
     if (!displayName) {
-      nextErrors.display_name = "Vui lòng nhập tên hiển thị.";
+      nextErrors.display_name = t(
+        "parents.modal.validation.displayNameRequired",
+      );
     } else if (displayName.length > 120) {
-      nextErrors.display_name = "Tên hiển thị không được vượt quá 120 ký tự.";
+      nextErrors.display_name = t("parents.modal.validation.displayNameMax");
     }
 
     if (mode === "create" && !email) {
-      nextErrors.email = "Email là trường bắt buộc.";
+      nextErrors.email = t("parents.modal.validation.emailRequired");
     } else if (email && !emailPattern.test(email)) {
-      nextErrors.email = "Email chưa đúng định dạng.";
+      nextErrors.email = t("parents.modal.validation.emailInvalid");
     } else if (
       mode === "edit" &&
       contactInfoEditable &&
       originalEmail &&
       !email
     ) {
-      nextErrors.email =
-        "Backend hiện không hỗ trợ xóa email. Hãy giữ giá trị hiện tại hoặc nhập email mới.";
+      nextErrors.email = t("parents.modal.validation.emailCannotClear");
     }
 
     if (phone && (phone.length > 30 || !phonePattern.test(phone))) {
-      nextErrors.phone = "Số điện thoại chưa đúng định dạng.";
+      nextErrors.phone = t("parents.modal.validation.phoneInvalid");
     } else if (
       mode === "edit" &&
       contactInfoEditable &&
       originalPhone &&
       !phone
     ) {
-      nextErrors.phone =
-        "Backend hiện không hỗ trợ xóa số điện thoại. Hãy giữ giá trị hiện tại hoặc nhập số mới.";
+      nextErrors.phone = t("parents.modal.validation.phoneCannotClear");
     }
 
     setFieldErrors(nextErrors);
@@ -161,7 +181,7 @@ export function AdminParentFormModal({
       if (contactInfoEditable && email !== originalEmail) input.email = email;
       if (contactInfoEditable && phone !== originalPhone) input.phone = phone;
       if (Object.keys(input).length === 0) {
-        setFormError("Chưa có thay đổi nào để lưu.");
+        setFormError(t("parents.modal.noChangesError"));
         return;
       }
       submission = { mode, input };
@@ -172,7 +192,7 @@ export function AdminParentFormModal({
     try {
       await onSubmit(submission);
     } catch (error) {
-      setFormError(getAdminParentMutationErrorMessage(error));
+      setFormError(getAdminParentMutationErrorMessage(error, t));
       submitLockRef.current = false;
       setSaving(false);
       return;
@@ -187,7 +207,11 @@ export function AdminParentFormModal({
     <Modal
       isOpen={isOpen}
       onClose={close}
-      title={mode === "create" ? "Thêm Parent" : "Sửa hồ sơ Parent"}
+      title={
+        mode === "create"
+          ? t("parents.modal.createTitle")
+          : t("parents.modal.editTitle")
+      }
       tone="paper"
     >
       {isLoading ? (
@@ -197,18 +221,18 @@ export function AdminParentFormModal({
           role="status"
         >
           <p className="font-semibold text-muted">
-            Đang tải thông tin tài khoản…
+            {t("parents.modal.loading")}
           </p>
         </div>
       ) : (
         <form className="grid gap-4" noValidate onSubmit={handleSubmit}>
           {formError ? (
             <StatusMessage tone="error" title={formError}>
-              Thông tin đã nhập vẫn được giữ. Hãy kiểm tra lỗi và thử lại.
+              {t("parents.modal.errorPreservedHint")}
             </StatusMessage>
           ) : null}
           <TextField
-            label="Tên hiển thị"
+            label={t("parents.modal.displayNameLabel")}
             autoComplete="name"
             value={values.display_name}
             onChange={(event) =>
@@ -220,7 +244,7 @@ export function AdminParentFormModal({
             disabled={saving}
           />
           <TextField
-            label="Email"
+            label={t("parents.modal.emailLabel")}
             type="email"
             autoComplete="email"
             value={values.email}
@@ -230,7 +254,7 @@ export function AdminParentFormModal({
             disabled={saving || (mode === "edit" && !contactInfoEditable)}
           />
           <TextField
-            label="Số điện thoại"
+            label={t("parents.modal.phoneLabel")}
             type="tel"
             autoComplete="tel"
             value={values.phone}
@@ -240,14 +264,15 @@ export function AdminParentFormModal({
             disabled={saving || (mode === "edit" && !contactInfoEditable)}
           />
           {mode === "edit" && !contactInfoEditable ? (
-            <StatusMessage tone="warning" title="Thông tin liên hệ chỉ đọc">
-              {contactInfoMessage ??
-                "Backend chưa xác nhận được thông tin Supabase Auth. Tên hiển thị vẫn có thể chỉnh sửa."}
+            <StatusMessage
+              tone="warning"
+              title={t("parents.modal.readOnlyContactTitle")}
+            >
+              {contactInfoMessage ?? t("parents.modal.readOnlyContactNote")}
             </StatusMessage>
           ) : (
             <p className="text-sm text-muted">
-              Email và số điện thoại được cập nhật qua Supabase Auth ở backend.
-              API hiện không hỗ trợ xóa trống hai trường này.
+              {t("parents.modal.contactSyncNote")}
             </p>
           )}
           <div className="flex flex-col gap-4">
@@ -258,10 +283,12 @@ export function AdminParentFormModal({
               type="button"
               variant="secondary"
             >
-              Hủy
+              {t("common.cancel")}
             </Button>
             <Button disabled={isLoading} isLoading={saving} type="submit">
-              {mode === "create" ? "Tạo Parent" : "Lưu thay đổi"}
+              {mode === "create"
+                ? t("parents.modal.createSubmit")
+                : t("parents.modal.editSubmit")}
             </Button>
           </div>
         </form>

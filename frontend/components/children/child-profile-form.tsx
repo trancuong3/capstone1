@@ -2,6 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight } from "lucide-react";
+import { useMemo } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
 
@@ -10,18 +11,8 @@ import { ProfileAvatarUpload } from "@/components/common/profile-avatar-upload";
 import { SelectField } from "@/components/common/select-field";
 import { TextField } from "@/components/common/text-field";
 import { useHydrated } from "@/hooks/use-hydrated";
+import { useI18n } from "@/hooks/use-i18n";
 import type { ChildProfileCreateDTO } from "@/types/child";
-
-const childProfileSchema = z.object({
-  alias: z.string().trim().min(1, "Ba mẹ vui lòng nhập tên gọi của bé."),
-  grade: z.coerce
-    .number<number>()
-    .int("Lớp của bé cần là số nguyên từ 1 đến 5.")
-    .min(1, "Ba mẹ vui lòng chọn lớp từ 1 đến 5.")
-    .max(5, "Ba mẹ vui lòng chọn lớp từ 1 đến 5."),
-});
-
-type ChildProfileFormValues = z.input<typeof childProfileSchema>;
 
 interface ChildProfileFormProps {
   defaultValues?: Pick<ChildProfileCreateDTO, "alias" | "grade">;
@@ -48,7 +39,24 @@ export function ChildProfileForm({
   onAvatarFileChange,
   onAvatarRemove,
 }: ChildProfileFormProps) {
+  const { t } = useI18n();
   const isHydrated = useHydrated();
+
+  const childProfileSchema = useMemo(
+    () =>
+      z.object({
+        alias: z.string().trim().min(1, t("validation.childAliasRequired")),
+        grade: z.coerce
+          .number<number>()
+          .int(t("validation.childGradeInt"))
+          .min(1, t("validation.childGradeRange"))
+          .max(5, t("validation.childGradeRange")),
+      }),
+    [t],
+  );
+
+  type ChildProfileFormValues = z.input<typeof childProfileSchema>;
+
   const {
     control,
     formState: { errors, isSubmitting },
@@ -81,18 +89,18 @@ export function ChildProfileForm({
       <TextField
         autoComplete="off"
         error={errors.alias?.message}
-        label="Tên gọi của bé"
-        placeholder="Bé An"
+        label={t("parent.children.aliasLabel")}
+        placeholder={t("parent.children.aliasPlaceholder")}
         {...register("alias")}
       />
       <SelectField
         error={errors.grade?.message}
-        label="Lớp của bé"
+        label={t("parent.children.gradeFieldLabel")}
         {...register("grade")}
       >
         {[1, 2, 3, 4, 5].map((grade) => (
           <option key={grade} value={grade}>
-            Lớp {grade}
+            {t("parent.children.gradeLabel", { grade })}
           </option>
         ))}
       </SelectField>
@@ -107,10 +115,13 @@ export function ChildProfileForm({
       />
       <Button disabled={!isHydrated} isLoading={isSubmitting} type="submit">
         {isSubmitting
-          ? "Đang lưu…"
-          : (submitLabel ?? (mode === "create" ? "Lưu hồ sơ" : "Lưu thay đổi"))}
+          ? t("common.actions.saving")
+          : (submitLabel ??
+            (mode === "create"
+              ? t("parent.children.saveProfile")
+              : t("parent.profile.saveChanges")))}
         {!isSubmitting ? (
-          <ArrowRight aria-hidden="true" className="size-5" />
+          <ArrowRight aria-hidden="true" className="size-5 viread-rtl-flip" />
         ) : null}
       </Button>
     </form>

@@ -1,0 +1,97 @@
+{
+  "brand": {
+    "name": "ViRead",
+    "tagline": "お子様の読書をサポートする、親子のためのプラットフォーム。"
+  },
+  "actions": {
+    "save": "保存",
+    "saving": "保存中…",
+    "cancel": "キャンセル",
+    "close": "閉じる",
+    "confirm": "確認",
+    "continue": "続ける",
+    "back": "戻る",
+    "retry": "再試行",
+    "reload": "再読み込み",
+    "search": "検索",
+    "clear": "クリア",
+    "filter": "フィルター",
+    "edit": "編集",
+    "delete": "クリア",
+    "create": "新規作成",
+    "upload": "アップロード",
+    "download": "ダウンロード",
+    "open": "開く",
+    "viewDetails": "詳細を表示",
+    "select": "選択",
+    "apply": "適用"
+  },
+  "states": {
+    "loading": "読み込み中…",
+    "empty": "データがありません。",
+    "unavailable": "情報を読み込めませんでした",
+    "ready": "準備完了",
+    "completed": "完了",
+    "inProgress": "進行中",
+    "pending": "保留中",
+    "error": "エラーが発生しました",
+    "imageLoadFailed": "ページ画像の読み込みに失敗しました",
+    "retryReload": "再読み込みを試す"
+  },
+  "avatar": {
+    "defaultAlt": "アバター"
+  },
+  "pagination": {
+    "summary": "{page} / {totalPages} ページ",
+    "itemsCount": "{count, plural, =0 {項目なし} other {# 項目}}",
+    "previous": "前のページ",
+    "next": "次のページ",
+    "previousShort": "前へ",
+    "nextShort": "次へ",
+    "navAria": "ページネーション",
+    "navAriaWithLabel": "{itemLabel} リストをナビゲート",
+    "rangeSummary": "{start}–{end} / {total} を表示中",
+    "rangeSummaryWithLabel": "{start}–{end} / {total} {itemLabel} を表示中"
+  },
+  "languageSelector": {
+    "label": "インターフェース言語",
+    "buttonAriaLabel": "インターフェース言語を選択（現在: {language}）",
+    "dialogTitle": "言語を選択",
+    "searchLabel": "言語を検索",
+    "searchPlaceholder": "言語名またはコードで検索…",
+    "clearSearch": "検索キーワードをクリア",
+    "popularHeading": "人気の言語",
+    "allHeading": "すべての言語",
+    "searchResultsHeading": "検索結果",
+    "emptySearch": "\"{query}\" に一致する言語が見つかりませんでした。",
+    "currentBadge": "現在使用中",
+    "loadingLocale": "言語を読み込み中…",
+    "switchedNotice": "インターフェースを {language} に変更しました。",
+    "closeButton": "言語リストを閉じる"
+  },
+  "footer": {
+    "copyright": "© {year} ViRead. 無断転載を禁じます。",
+    "adminCopyright": "© {year} ViRead.",
+    "adminNotice": "ViRead 管理エリア。",
+    "parentDescription": "お子様の読書スキルの向上と学習進捗の記録をサポートする、親子のためのプラットフォーム。",
+    "contactHeading": "連絡先情報",
+    "quickLinksHeading": "クイックリンク",
+    "organization": "デュータン大学",
+    "contactEmail": "vireadforyou@gmail.com",
+    "contactPhone": "0905373633"
+  },
+  "notFound": {
+    "pageTitle": "ページが見つかりません",
+    "title": "ページが見つかりません",
+    "description": "お探しのページは存在しないか、移動された可能性があります。",
+    "backHome": "ダッシュボードに戻る",
+    "backLogin": "ログインページに戻る"
+  },
+  "errorPage": {
+    "title": "問題が発生しました",
+    "description": "このページの表示中に ViRead で予期せぬエラーが発生しました。再試行するか、ダッシュボードに戻ってください。",
+    "globalTitle": "アプリケーションで一時的な問題が発生しています",
+    "globalDescription": "現在アプリケーションのインターフェースを読み込めません。ページを再読み込みしてください。",
+    "backHome": "ダッシュボードに戻る"
+  }
+}

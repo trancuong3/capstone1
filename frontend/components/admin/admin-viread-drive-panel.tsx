@@ -17,14 +17,19 @@ import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useTranslations } from "@/hooks/use-i18n";
+import type { TranslateFn } from "@/lib/i18n/types";
 import type {
   GoogleDriveSelfTestResult,
   GoogleDriveTrainingStatus,
 } from "@/lib/api/viread-training-service";
 
-function formatBytes(bytes: number | null | undefined): string {
+function formatBytes(
+  bytes: number | null | undefined,
+  unknownLabel: string,
+): string {
   if (bytes === null || bytes === undefined || Number.isNaN(bytes)) {
-    return "Chưa rõ";
+    return unknownLabel;
   }
   const gib = 1024 * 1024 * 1024;
   const mib = 1024 * 1024;
@@ -37,36 +42,39 @@ function formatBytes(bytes: number | null | undefined): string {
   return `${Math.max(0, Math.round(bytes / 1024))} KiB`;
 }
 
-function statusBadge(status: GoogleDriveTrainingStatus): {
+function statusBadge(
+  status: GoogleDriveTrainingStatus,
+  t: TranslateFn,
+): {
   label: string;
   toneClass: string;
 } {
   if (!status.migration_applied) {
     return {
-      label: "Chờ migration DB",
+      label: t("training.drive.statuses.DB_MIGRATION_REQUIRED"),
       toneClass: "bg-amber-100 text-amber-900 border-amber-300",
     };
   }
   if (status.connected && status.status === "CONNECTED") {
     return {
-      label: "Đã kết nối (Private)",
+      label: t("training.drive.statuses.CONNECTED"),
       toneClass: "bg-emerald-100 text-emerald-900 border-emerald-300",
     };
   }
   if (status.status === "TOKEN_REVOKED") {
     return {
-      label: "Token bị thu hồi",
+      label: t("training.drive.statuses.TOKEN_REVOKED"),
       toneClass: "bg-rose-100 text-rose-900 border-rose-300",
     };
   }
   if (status.status === "ERROR") {
     return {
-      label: "Lỗi kết nối Drive",
+      label: t("training.drive.statuses.ERROR"),
       toneClass: "bg-rose-100 text-rose-900 border-rose-300",
     };
   }
   return {
-    label: "Chưa kết nối",
+    label: t("training.drive.statuses.DISCONNECTED"),
     toneClass: "bg-slate-100 text-slate-800 border-slate-300",
   };
 }
@@ -81,36 +89,39 @@ function quotaBarColor(warningLevel: string): string {
   return "bg-emerald-600";
 }
 
-function recoveryHint(errorCode: string | null | undefined): string | null {
+function recoveryHint(
+  errorCode: string | null | undefined,
+  t: TranslateFn,
+): string | null {
   if (!errorCode) return null;
   if (errorCode === "DRIVE_MIGRATION_PENDING") {
-    return "Cần áp dụng migration SQL Flow 2 Google Drive trên database trước khi kết nối tài khoản.";
+    return t("training.drive.guides.DB_MIGRATION_REQUIRED");
   }
   if (errorCode === "DRIVE_TOKEN_REVOKED") {
-    return "Google đã thu hồi refresh token hoặc token hết hạn. Hãy bấm Kết nối Google Drive để cấp quyền lại.";
+    return t("training.drive.guides.DRIVE_TOKEN_REVOKED");
   }
   if (errorCode === "DRIVE_QUOTA_EXCEEDED") {
-    return "Dung lượng Google Drive miễn phí sắp chạm ngưỡng an toàn. Upload đã tạm dừng an toàn (không chuyển về Supabase); hãy dọn thùng rác Drive hoặc lưu trữ các run cũ đã kiểm toán.";
+    return t("training.drive.guides.DRIVE_QUOTA_LOW");
   }
   if (errorCode === "DRIVE_ACCOUNT_EMAIL_MISMATCH") {
-    return "Tài khoản Google vừa chọn không khớp tài khoản chủ sở hữu Drive được khóa trên server. Hãy kết nối lại đúng tài khoản Gmail chủ sở hữu.";
+    return t("training.drive.guides.DRIVE_ACCOUNT_MISMATCH");
   }
   if (errorCode === "DRIVE_BRIDGE_ACCESS_DENIED") {
-    return "Apps Script Web App đang chặn truy cập ẩn danh. Trong script.google.com hãy Deploy lại với tùy chọn 'Ai có quyền truy cập: Bất kỳ ai (Anyone)' (vẫn bảo vệ bằng chữ ký HMAC-SHA256).";
+    return t("training.drive.guides.APPS_SCRIPT_ACCESS_DENIED");
   }
   if (
     errorCode === "DRIVE_BRIDGE_SECRET_NOT_SET" ||
     errorCode === "DRIVE_AUTH_FAILED"
   ) {
-    return "Chữ ký Apps Script Bridge không khớp hoặc chưa cài VIREAD_BRIDGE_SECRET trong Script Properties của script.google.com.";
+    return t("training.drive.guides.BRIDGE_SECRET_MISMATCH");
   }
   if (
     errorCode === "DRIVE_SCOPE_MISSING" ||
     errorCode === "DRIVE_SCOPE_TOO_BROAD"
   ) {
-    return "Quyền OAuth không đúng phạm vi tối thiểu drive.file. Hãy kết nối lại và chấp thuận đúng quyền thư mục riêng của ứng dụng.";
+    return t("training.drive.guides.DRIVE_SCOPE_MISMATCH");
   }
-  return `Mã lỗi: ${errorCode}. Kiểm tra lại kết nối Google Drive hoặc bấm Kiểm tra kết nối & dung lượng.`;
+  return t("training.drive.guides.genericCode", { code: errorCode });
 }
 
 export function AdminVireadDrivePanel({
@@ -121,6 +132,7 @@ export function AdminVireadDrivePanel({
   onUpdated: () => Promise<void>;
 }) {
   const { vireadTraining } = useAdminServices();
+  const t = useTranslations("admin");
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{
     tone: "info" | "error";
@@ -136,7 +148,7 @@ export function AdminVireadDrivePanel({
     status.drive_desktop_readiness?.default_mount_path ?? "",
   );
 
-  const badge = statusBadge(status);
+  const badge = statusBadge(status, t);
   const quota = status.quota;
   const isAppsScriptConnected =
     status.connected &&
@@ -175,7 +187,7 @@ export function AdminVireadDrivePanel({
       const result = await vireadTraining.startDriveConnect(redirectUri);
       setFeedback({
         tone: "info",
-        text: "Đang chuyển hướng tới trang xác thực OAuth 2.0 của Google (chỉ xin quyền tối thiểu drive.file)…",
+        text: t("training.drive.notices.redirectingOauth"),
       });
       if (typeof window !== "undefined") {
         window.location.assign(result.authorization_url);
@@ -183,7 +195,7 @@ export function AdminVireadDrivePanel({
     } catch {
       setFeedback({
         tone: "error",
-        text: "Không thể khởi tạo OAuth Google Drive. Kiểm tra cấu hình VIREAD_GDRIVE_OAUTH_* và VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY trên server.",
+        text: t("training.drive.notices.oauthInitFailed"),
       });
     } finally {
       setBusyAction(null);
@@ -196,7 +208,7 @@ export function AdminVireadDrivePanel({
     if (!trimmedUrl) {
       setFeedback({
         tone: "error",
-        text: "Vui lòng dán URL Web App từ script.google.com (dạng https://script.google.com/macros/s/.../exec).",
+        text: t("training.drive.notices.invalidAppsScriptUrl"),
       });
       return;
     }
@@ -212,7 +224,9 @@ export function AdminVireadDrivePanel({
       setShowBridgeForm(false);
       setFeedback({
         tone: "info",
-        text: `Đã kết nối Google Drive riêng tư (${connected.account_email ?? "owner"}) qua Apps Script Bridge (0 thẻ, không hết hạn 7 ngày).`,
+        text: t("training.drive.notices.appsScriptConnected", {
+          account: connected.account_email ?? "owner",
+        }),
       });
       await onUpdated();
     } catch (err) {
@@ -220,8 +234,8 @@ export function AdminVireadDrivePanel({
       setFeedback({
         tone: "error",
         text: detail
-          ? `Kết nối Apps Script Bridge thất bại: ${detail}`
-          : "Kết nối Apps Script Bridge thất bại. Kiểm tra lại URL Web App, VIREAD_BRIDGE_SECRET và quyền 'Bất kỳ ai (Anyone)'.",
+          ? t("training.drive.notices.appsScriptFailedDetail", { detail })
+          : t("training.drive.notices.appsScriptFailed"),
       });
     } finally {
       setBusyAction(null);
@@ -244,7 +258,9 @@ export function AdminVireadDrivePanel({
       setShowDesktopForm(false);
       setFeedback({
         tone: "info",
-        text: `Đã kết nối Google Drive for Desktop (${connected.account_email ?? "owner"}) — dữ liệu từ mọi acc Colab sẽ đồng bộ thẳng vào Drive của bạn.`,
+        text: t("training.drive.notices.desktopConnected", {
+          account: connected.account_email ?? "owner",
+        }),
       });
       await onUpdated();
     } catch (err) {
@@ -252,8 +268,8 @@ export function AdminVireadDrivePanel({
       setFeedback({
         tone: "error",
         text: detail
-          ? `Kết nối Google Drive for Desktop thất bại: ${detail}`
-          : "Không tìm thấy thư mục Google Drive for Desktop. Hãy mở Google Drive trên Windows, đăng nhập tài khoản chủ Drive rồi nhập đường dẫn (vd: G:\\My Drive).",
+          ? t("training.drive.notices.desktopFailedDetail", { detail })
+          : t("training.drive.notices.desktopFailed"),
       });
     } finally {
       setBusyAction(null);
@@ -271,14 +287,14 @@ export function AdminVireadDrivePanel({
         text:
           refreshed.health_detail ||
           (refreshed.connected
-            ? "Đã xác minh kết nối Google Drive, thư mục Flow 2 và dung lượng còn lại."
-            : "Kiểm tra Google Drive phát hiện lỗi. Xem mã lỗi và hướng dẫn khắc phục bên dưới."),
+            ? t("training.drive.notices.checkOk")
+            : t("training.drive.notices.checkError")),
       });
       await onUpdated();
     } catch {
       setFeedback({
         tone: "error",
-        text: "Không thể kiểm tra kết nối Google Drive lúc này.",
+        text: t("training.drive.notices.checkException"),
       });
     } finally {
       setBusyAction(null);
@@ -296,14 +312,14 @@ export function AdminVireadDrivePanel({
       setFeedback({
         tone: result.ok ? "info" : "error",
         text: result.ok
-          ? "Kiểm thử upload / xác minh SHA-256 / đọc lại / xóa tệp trong _selftest thành công (100% riêng tư)."
-          : "Kiểm thử Google Drive không đạt toàn bộ điều kiện.",
+          ? t("training.drive.notices.selfTestOk")
+          : t("training.drive.notices.selfTestFailed"),
       });
       await onUpdated();
     } catch {
       setFeedback({
         tone: "error",
-        text: "Kiểm thử upload/đọc/xóa trên Google Drive thất bại. Kiểm tra quyền ghi và dung lượng trống.",
+        text: t("training.drive.notices.selfTestException"),
       });
     } finally {
       setBusyAction(null);
@@ -312,11 +328,7 @@ export function AdminVireadDrivePanel({
 
   async function handleDisconnect() {
     if (!vireadTraining || busyAction) return;
-    if (
-      !globalThis.confirm(
-        "Ngắt kết nối Google Drive khỏi Luồng 2? Dữ liệu sách gốc và tệp đã lưu trên Drive không bị xóa; outbox mới sẽ tạm chờ an toàn (không chuyển về Supabase).",
-      )
-    ) {
+    if (!globalThis.confirm(t("training.drive.notices.disconnectConfirm"))) {
       return;
     }
     setBusyAction("disconnect");
@@ -326,20 +338,21 @@ export function AdminVireadDrivePanel({
       await vireadTraining.disconnectDrive();
       setFeedback({
         tone: "info",
-        text: "Đã ngắt kết nối Google Drive an toàn và xóa refresh token khỏi backend.",
+        text: t("training.drive.notices.disconnected"),
       });
       await onUpdated();
     } catch {
       setFeedback({
         tone: "error",
-        text: "Không thể ngắt kết nối Google Drive lúc này.",
+        text: t("training.drive.notices.disconnectFailed"),
       });
     } finally {
       setBusyAction(null);
     }
   }
 
-  const hint = recoveryHint(status.last_error_code);
+  const hint = recoveryHint(status.last_error_code, t);
+  const unknownBytes = t("common.unknown");
 
   return (
     <Card className="mb-6 bg-white">
@@ -348,7 +361,7 @@ export function AdminVireadDrivePanel({
           <div className="flex flex-wrap items-center gap-2">
             <HardDrive aria-hidden className="size-5 text-primary" />
             <h2 className="text-xl font-black">
-              Lưu trữ Luồng 2 · Google Drive (0 VNĐ)
+              {t("training.drive.heading")}
             </h2>
             <span
               className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-extrabold ${badge.toneClass}`}
@@ -357,10 +370,7 @@ export function AdminVireadDrivePanel({
             </span>
           </div>
           <p className="mt-1 text-sm text-muted">
-            Toàn bộ ảnh crop dòng, nhãn đã xác minh, dataset snapshot,
-            checkpoint và báo cáo benchmark Luồng 2 được lưu riêng tư trên
-            Google Drive. Supabase chỉ giữ metadata; không tự chuyển fallback về
-            Supabase khi Drive đầy hoặc mất kết nối.
+            {t("training.drive.description")}
           </p>
         </div>
       </div>
@@ -386,14 +396,15 @@ export function AdminVireadDrivePanel({
           <p>
             {desktopReady || bridgeReady ? (
               <>
-                Không cần Google Cloud Console hay thẻ thanh toán: dùng{" "}
-                <strong>Google Drive for Desktop</strong> (giữ nguyên Bảo vệ
-                nâng cao) hoặc <strong>Apps Script Bridge</strong> ở nút bên
-                dưới.
+                {t("training.drive.noCloudCardHintPrefix")}
+                <strong>{t("training.drive.desktopMethod")}</strong>
+                {t("training.drive.noCloudCardHintMid")}
+                <strong>{t("training.drive.appsScriptMethod")}</strong>
+                {t("training.drive.noCloudCardHintSuffix")}
               </>
             ) : (
               <>
-                Server chưa đủ biến môi trường OAuth Google Drive (
+                {t("training.drive.missingOauthEnvPrefix")}
                 <code className="font-mono text-xs">
                   VIREAD_GDRIVE_OAUTH_CLIENT_ID
                 </code>
@@ -409,7 +420,7 @@ export function AdminVireadDrivePanel({
                 <code className="font-mono text-xs">
                   VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY
                 </code>
-                ). Cấu hình phía server rồi bấm Kết nối Google Drive.
+                {t("training.drive.missingOauthEnvSuffix")}
               </>
             )}
           </p>
@@ -418,24 +429,28 @@ export function AdminVireadDrivePanel({
 
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <div className="rounded-control border border-border p-4 text-sm">
-          <p className="font-extrabold">Tài khoản & quyền truy cập</p>
+          <p className="font-extrabold">{t("training.drive.accountHeading")}</p>
           <dl className="mt-2 space-y-1.5">
             <div className="flex justify-between gap-2">
-              <dt className="text-muted">Tài khoản Google</dt>
+              <dt className="text-muted">
+                {t("training.drive.googleAccountLabel")}
+              </dt>
               <dd className="break-all font-semibold">
-                {status.account_email || "Chưa kết nối"}
+                {status.account_email || t("training.drive.notConnected")}
               </dd>
             </div>
             {status.required_account_email ? (
               <div className="flex justify-between gap-2">
-                <dt className="text-muted">Tài khoản chủ Drive (khóa cứng)</dt>
+                <dt className="text-muted">
+                  {t("training.drive.ownerEmailLabel")}
+                </dt>
                 <dd className="break-all font-mono text-xs font-semibold text-primary">
                   {status.required_account_email}
                 </dd>
               </div>
             ) : null}
             <div className="flex justify-between gap-2">
-              <dt className="text-muted">Phạm vi quyền (Scope)</dt>
+              <dt className="text-muted">{t("training.drive.scopeLabel")}</dt>
               <dd className="flex items-center gap-1 font-mono text-xs">
                 {status.scope_valid ? (
                   <>
@@ -445,25 +460,29 @@ export function AdminVireadDrivePanel({
                     />
                     <span>
                       {isDesktopConnected
-                        ? "Google Drive for Desktop (chính chủ · 0 thẻ)"
+                        ? t("training.drive.desktopScopeValue")
                         : isAppsScriptConnected
-                          ? "Apps Script Bridge (riêng tư · 0 thẻ)"
-                          : "drive.file (tối thiểu)"}
+                          ? t("training.drive.appsScriptScopeValue")
+                          : t("training.drive.defaultScopeValue")}
                     </span>
                   </>
                 ) : (
-                  <span>{status.oauth_scope || "Chưa cấp quyền"}</span>
+                  <span>
+                    {status.oauth_scope || t("training.drive.noScope")}
+                  </span>
                 )}
               </dd>
             </div>
             <div className="flex justify-between gap-2">
-              <dt className="text-muted">Thư mục dành riêng</dt>
-              <dd className="break-all text-right font-mono text-xs">
+              <dt className="text-muted">{t("training.drive.folderLabel")}</dt>
+              <dd className="break-all text-end font-mono text-xs">
                 {status.root_folder_path}
               </dd>
             </div>
             <div className="flex justify-between gap-2">
-              <dt className="text-muted">Provider ghi Luồng 2</dt>
+              <dt className="text-muted">
+                {t("training.drive.providerLabel")}
+              </dt>
               <dd className="font-mono text-xs font-bold">{status.provider}</dd>
             </div>
           </dl>
@@ -471,7 +490,7 @@ export function AdminVireadDrivePanel({
 
         <div className="rounded-control border border-border p-4 text-sm">
           <div className="flex items-center justify-between gap-2">
-            <p className="font-extrabold">Dung lượng miễn phí & Quota Guard</p>
+            <p className="font-extrabold">{t("training.drive.quotaHeading")}</p>
             <span className="font-mono text-xs font-bold text-muted">
               {quota.warning_level}
             </span>
@@ -484,17 +503,32 @@ export function AdminVireadDrivePanel({
               />
             </div>
             <div className="mt-2 flex flex-wrap justify-between gap-2 text-xs text-muted">
-              <span>Đã dùng: {formatBytes(quota.usage_bytes)}</span>
-              <span>Còn trống: {formatBytes(quota.available_bytes)}</span>
-              <span>Giới hạn: {formatBytes(quota.limit_bytes)}</span>
+              <span>
+                {t("training.drive.usedBytes", {
+                  size: formatBytes(quota.usage_bytes, unknownBytes),
+                })}
+              </span>
+              <span>
+                {t("training.drive.availableBytes", {
+                  size: formatBytes(quota.available_bytes, unknownBytes),
+                })}
+              </span>
+              <span>
+                {t("training.drive.limitBytes", {
+                  size: formatBytes(quota.limit_bytes, unknownBytes),
+                })}
+              </span>
             </div>
           </div>
           <p className="mt-2 text-xs text-muted">
-            Vùng đệm an toàn bắt buộc:{" "}
-            <strong>{formatBytes(quota.min_free_buffer_bytes)}</strong> ·{" "}
+            {t("training.drive.safetyBufferPrefix")}
+            <strong>
+              {formatBytes(quota.min_free_buffer_bytes, unknownBytes)}
+            </strong>{" "}
+            ·{" "}
             {quota.can_accept_upload
-              ? "Sẵn sàng nhận upload Luồng 2."
-              : "Upload tạm dừng an toàn (chưa kết nối hoặc chạm ngưỡng quota)."}
+              ? t("training.drive.readyForUpload")
+              : t("training.drive.pausedUpload")}
           </p>
         </div>
       </div>
@@ -503,19 +537,25 @@ export function AdminVireadDrivePanel({
         <div className="mt-4 rounded-control border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-950">
           <div className="flex items-center gap-2 font-bold">
             <CheckCircle2 aria-hidden className="size-4" />
-            <span>Kết quả kiểm thử Google Drive (_selftest)</span>
+            <span>{t("training.drive.selftestHeading")}</span>
           </div>
           <p className="mt-1">
-            Đường dẫn:{" "}
+            {t("training.drive.pathPrefix")}
             <code className="font-mono">{selfTestResult.logical_path}</code> ·
             SHA-256:{" "}
             <code className="font-mono">
-              {selfTestResult.sha256?.slice(0, 16) ?? "—"}…
-            </code>{" "}
-            · Riêng tư:{" "}
-            <strong>{selfTestResult.is_private ? "Có" : "Không"}</strong> · Đã
-            dọn sau kiểm thử:{" "}
-            <strong>{selfTestResult.deleted_after_test ? "Có" : "Chưa"}</strong>
+              {selfTestResult.sha256?.slice(0, 16) ?? t("common.emptyDash")}…
+            </code>
+            {t("training.drive.privateLabel")}
+            <strong>
+              {selfTestResult.is_private ? t("common.yes") : t("common.no")}
+            </strong>
+            {t("training.drive.cleanedAfterTestLabel")}
+            <strong>
+              {selfTestResult.deleted_after_test
+                ? t("common.yes")
+                : t("common.notYet")}
+            </strong>
           </p>
         </div>
       ) : null}
@@ -523,28 +563,26 @@ export function AdminVireadDrivePanel({
       {showDesktopForm ? (
         <div className="mt-4 rounded-control border border-primary/30 bg-slate-50 p-4 text-sm">
           <p className="font-extrabold">
-            Kết nối Google Drive for Desktop (chính chủ Google · giữ nguyên Bảo
-            vệ nâng cao · 0 thẻ)
+            {t("training.drive.desktopModalHeading")}
           </p>
           <p className="mt-1 text-xs text-muted">
-            Đăng nhập ứng dụng <strong>Google Drive for Desktop</strong> trên
-            Windows bằng đúng tài khoản chủ Drive
+            {t("training.drive.desktopModalDescPrefix")}
+            <strong>{t("training.drive.desktopMethod")}</strong>
+            {t("training.drive.desktopModalDescMid")}
             {status.required_account_email
               ? ` (${status.required_account_email})`
               : ""}
-            . ViRead Backend sẽ lưu toàn bộ dữ liệu Luồng 2 và resume checkpoint
-            của mọi tài khoản Colab vào thư mục đồng bộ này.
+            {t("training.drive.desktopModalDescSuffix")}
           </p>
           <div className="mt-3">
             <label className="block text-xs font-semibold">
-              Đường dẫn ổ Google Drive trên Windows (để trống để tự nhận diện ổ
-              G:\My Drive)
+              {t("training.drive.desktopPathLabel")}
               <input
                 className="mt-1 w-full rounded-control border border-border bg-white px-3 py-2 font-mono text-xs"
                 onChange={(e) => setDesktopPath(e.target.value)}
                 placeholder={
                   detectedMounts[0]?.drive_root ??
-                  "G:\\My Drive (hoặc G:\\Drive của tôi)"
+                  t("training.drive.desktopPathPlaceholder")
                 }
                 type="text"
                 value={desktopPath}
@@ -552,7 +590,7 @@ export function AdminVireadDrivePanel({
             </label>
             {detectedMounts.length > 0 ? (
               <p className="mt-1 text-xs text-emerald-700">
-                Đã tự phát hiện ổ Google Drive:{" "}
+                {t("training.drive.detectedDrivePrefix")}
                 <code className="font-mono">
                   {detectedMounts[0].drive_root}
                 </code>
@@ -566,8 +604,8 @@ export function AdminVireadDrivePanel({
               onClick={() => void handleConnectDesktop()}
               variant="primary"
             >
-              <Link2 aria-hidden className="size-4" /> Xác minh & Lưu kết nối
-              Drive Desktop
+              <Link2 aria-hidden className="size-4" />{" "}
+              {t("training.drive.verifyAndSaveDesktopBtn")}
             </Button>
             <Button
               className="sm:w-auto"
@@ -575,7 +613,7 @@ export function AdminVireadDrivePanel({
               onClick={() => setShowDesktopForm(false)}
               variant="secondary"
             >
-              Đóng
+              {t("common.close")}
             </Button>
           </div>
         </div>
@@ -584,30 +622,30 @@ export function AdminVireadDrivePanel({
       {showBridgeForm ? (
         <div className="mt-4 rounded-control border border-primary/30 bg-slate-50 p-4 text-sm">
           <p className="font-extrabold">
-            Kết nối Google Drive bằng Apps Script Bridge (0 VNĐ · 0 thẻ · Không
-            hết hạn 7 ngày)
+            {t("training.drive.appsScriptHeading")}
           </p>
           <p className="mt-1 text-xs text-muted">
-            Mở <code className="font-mono">https://script.google.com/</code>{" "}
-            bằng đúng tài khoản chủ Drive
+            {t("training.drive.appsScriptStep1Prefix")}
+            <code className="font-mono">https://script.google.com/</code>{" "}
+            {t("training.drive.appsScriptStep1Mid")}
             {status.required_account_email
               ? ` (${status.required_account_email})`
               : ""}
-            , dán mã nguồn trong{" "}
+            {t("training.drive.appsScriptStep1CodeRef")}
             <code className="font-mono">
               scripts/google-apps-script/viread_flow2_drive_bridge.gs
             </code>
-            , thiết lập <code className="font-mono">VIREAD_BRIDGE_SECRET</code>{" "}
-            trong Script Properties rồi Deploy dạng Web App (Execute as: Me, Who
-            has access: Anyone).
+            {t("training.drive.appsScriptStep1Secret")}
+            <code className="font-mono">VIREAD_BRIDGE_SECRET</code>{" "}
+            {t("training.drive.appsScriptStep1End")}
           </p>
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <label className="block text-xs font-semibold">
-              URL ứng dụng web (Apps Script Web App URL)
+              {t("training.drive.appsScriptUrlLabel")}
               <input
                 className="mt-1 w-full rounded-control border border-border bg-white px-3 py-2 font-mono text-xs"
                 onChange={(e) => setBridgeUrl(e.target.value)}
-                placeholder="https://script.google.com/macros/s/.../exec"
+                placeholder={t("training.drive.appsScriptUrlPlaceholder")}
                 type="url"
                 value={bridgeUrl}
               />
@@ -615,15 +653,15 @@ export function AdminVireadDrivePanel({
             <label className="block text-xs font-semibold">
               VIREAD_BRIDGE_SECRET{" "}
               {serverBridgeSecretConfigured
-                ? "(để trống sẽ tự dùng khóa đã cài sẵn trên server)"
-                : "(bắt buộc >= 32 ký tự)"}
+                ? t("training.drive.secretConfiguredSuffix")
+                : t("training.drive.secretRequiredSuffix")}
               <input
                 className="mt-1 w-full rounded-control border border-border bg-white px-3 py-2 font-mono text-xs"
                 onChange={(e) => setBridgeSecret(e.target.value)}
                 placeholder={
                   serverBridgeSecretConfigured
-                    ? "Đã cấu hình sẵn trên server (có thể bỏ trống)"
-                    : "Dán chuỗi bí mật >= 32 ký tự khớp Script Properties"
+                    ? t("training.drive.secretConfiguredPlaceholder")
+                    : t("training.drive.secretRequiredPlaceholder")
                 }
                 type="password"
                 value={bridgeSecret}
@@ -637,8 +675,8 @@ export function AdminVireadDrivePanel({
               onClick={() => void handleConnectAppsScript()}
               variant="primary"
             >
-              <Link2 aria-hidden className="size-4" /> Xác minh & Lưu kết nối
-              Bridge
+              <Link2 aria-hidden className="size-4" />{" "}
+              {t("training.drive.verifyAndSaveBridgeBtn")}
             </Button>
             <Button
               className="sm:w-auto"
@@ -646,7 +684,7 @@ export function AdminVireadDrivePanel({
               onClick={() => setShowBridgeForm(false)}
               variant="secondary"
             >
-              Đóng
+              {t("common.close")}
             </Button>
           </div>
         </div>
@@ -669,8 +707,8 @@ export function AdminVireadDrivePanel({
           >
             <Link2 aria-hidden className="size-4" />{" "}
             {isDesktopConnected
-              ? "Đổi thư mục Drive Desktop"
-              : "Kết nối Google Drive for Desktop (0 thẻ)"}
+              ? t("training.drive.changeDesktopFolderBtn")
+              : t("training.drive.connectDesktopBtn")}
           </Button>
         ) : null}
 
@@ -690,8 +728,8 @@ export function AdminVireadDrivePanel({
           >
             <Link2 aria-hidden className="size-4" />{" "}
             {isAppsScriptConnected
-              ? "Đổi URL Apps Script Bridge"
-              : "Kết nối không cần thẻ (Apps Script)"}
+              ? t("training.drive.changeAppsScriptBtn")
+              : t("training.drive.connectAppsScriptBtn")}
           </Button>
         ) : null}
 
@@ -708,8 +746,8 @@ export function AdminVireadDrivePanel({
           >
             <Link2 aria-hidden className="size-4" />{" "}
             {status.connected
-              ? "Kết nối lại Google Drive"
-              : "Kết nối Google Drive"}
+              ? t("training.drive.reconnectOauthBtn")
+              : t("training.drive.connectOauthBtn")}
           </Button>
         ) : null}
 
@@ -719,8 +757,8 @@ export function AdminVireadDrivePanel({
           onClick={() => void handleHealthCheck()}
           variant="secondary"
         >
-          <RefreshCw aria-hidden className="size-4" /> Kiểm tra kết nối & dung
-          lượng
+          <RefreshCw aria-hidden className="size-4" />{" "}
+          {t("training.drive.checkConnectionBtn")}
         </Button>
 
         <Button
@@ -729,8 +767,8 @@ export function AdminVireadDrivePanel({
           onClick={() => void handleSelfTest()}
           variant="secondary"
         >
-          <FlaskConical aria-hidden className="size-4" /> Kiểm thử Upload / Đọc
-          / Xóa
+          <FlaskConical aria-hidden className="size-4" />{" "}
+          {t("training.drive.selfTestBtn")}
         </Button>
 
         {status.connected ? (
@@ -740,7 +778,8 @@ export function AdminVireadDrivePanel({
             onClick={() => void handleDisconnect()}
             variant="secondary"
           >
-            <Unplug aria-hidden className="size-4" /> Ngắt kết nối an toàn
+            <Unplug aria-hidden className="size-4" />{" "}
+            {t("training.drive.disconnectBtn")}
           </Button>
         ) : null}
       </div>

@@ -1,6 +1,9 @@
+"use client";
+
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
+import { useTranslations } from "@/hooks/use-i18n";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
 import { ViReadLogo } from "@/components/common/viread-logo";
@@ -18,7 +21,8 @@ export function BookChildHeader({
   fullBleedDesktop = false,
   mobileLabel,
 }: BookChildHeaderProps) {
-  const contextLabel = mobileLabel ?? "Chọn sách cho bé";
+  const t = useTranslations("books");
+  const contextLabel = mobileLabel ?? t("childHeader.defaultMobileLabel");
 
   return (
     <header
@@ -34,26 +38,35 @@ export function BookChildHeader({
         <ViReadLogo href="/dashboard" />
       </span>
       <Link
-        aria-label={`Quay lại: ${contextLabel}`}
-        className="flex min-h-12 min-w-0 flex-1 items-center gap-2 rounded-control px-1 text-left font-semibold text-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+        aria-label={t("childHeader.backAria", { context: contextLabel })}
+        className="flex min-h-12 min-w-0 flex-1 items-center gap-2 rounded-control px-1 text-start font-semibold text-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
         href={backHref}
       >
-        <ArrowLeft aria-hidden="true" className="size-5 shrink-0 text-ink" />
+        <ArrowLeft
+          aria-hidden="true"
+          className="viread-rtl-flip size-5 shrink-0 text-ink"
+        />
         <span className="hidden shrink-0 text-body text-ink sm:block">
-          Quay lại
+          {t("childHeader.back")}
         </span>
-        <span className="truncate text-sm font-bold text-ink sm:ml-8 sm:text-xl sm:font-extrabold">
+        <span className="truncate text-sm font-bold text-ink sm:ms-8 sm:text-xl sm:font-extrabold">
           {contextLabel}
         </span>
       </Link>
       {child ? (
         <Link
           href="/dashboard?focus=child-selection"
-          aria-label={`Đổi hồ sơ: ${child.alias}, lớp ${child.grade}`}
+          aria-label={t("childHeader.switchChildAria", {
+            alias: child.alias,
+            grade: child.grade,
+          })}
           className="inline-flex min-h-12 max-w-[144px] shrink-0 items-center truncate rounded-control bg-sky px-2.5 py-2 text-xs font-semibold text-primary focus-visible:outline-3 focus-visible:outline-primary sm:w-[220px] sm:max-w-none sm:px-3 sm:text-sm"
         >
           <span className="truncate">
-            {child.alias} · Lớp {child.grade}
+            {t("childHeader.childMeta", {
+              alias: child.alias,
+              grade: child.grade,
+            })}
           </span>
         </Link>
       ) : null}

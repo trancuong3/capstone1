@@ -19,6 +19,7 @@ vi.mock("@/hooks/use-admin-services", () => ({
 
 vi.mock("@/components/common/authenticated-image", () => ({
   AuthenticatedImage: ({ alt, src }: { alt: string; src: string }) => (
+    // eslint-disable-next-line @next/next/no-img-element
     <img alt={alt} data-testid="auth-crop-image" src={src} />
   ),
 }));

@@ -13,6 +13,7 @@ import {
 import { requestApi } from "@/lib/api/api-client";
 import { adminRevisionDetailSchema } from "@/lib/api/ocr-review-service";
 import { isServiceError, ServiceError } from "@/lib/api/service-error";
+import { translateRuntime } from "@/lib/i18n/runtime";
 
 export interface RevisionService {
   list(pageId: string): Promise<readonly AdminRevisionSummaryUI[]>;
@@ -117,7 +118,7 @@ export function createRevisionService(options?: {
             retryable: finalJob.status !== "CANCELLED",
             message:
               finalJob.error_message ||
-              "Tác vụ OCR lại trang chưa hoàn tất. Vui lòng thử lại.",
+              translateRuntime("admin.pageUploadRuntime.reprocessIncomplete"),
           });
         }
         if (finalJob.status !== "SUCCEEDED") {
@@ -126,8 +127,9 @@ export function createRevisionService(options?: {
             status: 503,
             request_id: finalJob.id,
             retryable: true,
-            message:
-              "Trang đã được xếp hàng chờ máy chủ OCR Windows xử lý lại. Vui lòng làm mới sau khi hoàn tất.",
+            message: translateRuntime(
+              "admin.pageUploadRuntime.reprocessQueuedWindows",
+            ),
           });
         }
         if (finalJob.revision_id) {

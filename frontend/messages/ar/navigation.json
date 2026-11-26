@@ -1,0 +1,77 @@
+{
+  "parent": {
+    "navLabel": "تنقل الأبوين",
+    "skipToContent": "تخطي التنقل والانتقال إلى المحتوى",
+    "dashboard": "نظرة عامة",
+    "myBooks": "كتبـي",
+    "reports": "التقدم",
+    "readingManagement": "إدارة القراءة",
+    "sessions": "السجل",
+    "sessionsLong": "سجل القراءة",
+    "entertainment": "الترفيه",
+    "difficultWords": "كلمات صعبة التدريب",
+    "children": "ملفات تعريف الأطفال",
+    "parentProfile": "ملف تعريف ولي الأمر",
+    "parentProfileLong": "ملف تعريف ولي الأمر",
+    "settings": "الإعدادات",
+    "helpSupport": "المساعدة والدعم",
+    "moreTitle": "المزيد من الميزات",
+    "booksShort": "الكتب",
+    "scannerShort": "مسح ضوئي",
+    "moreButton": "المزيد",
+    "mobileAriaLabel": "التنقل السريع عبر الهواتف المحمولة",
+    "moreDescriptions": {
+      "myBooks": "تحميل وإدارة كتب عائلتك",
+      "readingManagement": "الأهداف، جدول القراءة، والكتب المحفوظة لطفلك",
+      "sessions": "مراجعة جلسات القراءة المكتملة",
+      "entertainment": "ألعاب اللغة، سرد القصص، والكاريوكي",
+      "difficultWords": "التدرب على الكلمات التي يخطئ طفلك في قراءتها غالباً"
+    }
+  },
+  "admin": {
+    "navLabel": "تنقل الإدارة",
+    "skipToContent": "تخطي التنقل والانتقال إلى محتوى الإدارة",
+    "badge": "الإدارة",
+    "karaoke": "الأغاني",
+    "parents": "أولياء الأمور",
+    "books": "مكتبة الكتب",
+    "metadataQuality": "جودة الكتب",
+    "auditLogs": "سجلات التدقيق",
+    "training": "تدريب التعرف الضوئي (OCR)",
+    "health": "العمليات",
+    "moreTitle": "إدارة إضافية",
+    "mobileQualityShort": "الجودة",
+    "mobileOcrShort": "OCR",
+    "mobileMoreDescriptions": {
+      "auditLogs": "تتبع سجلات تدقيق الإدارة",
+      "training": "تدريب وتشغيل نموذج VietOCR V2",
+      "health": "حالة النظام، عامل التعرف الضوئي (OCR Worker)، والصوت"
+    }
+  },
+  "accountMenu": {
+    "openAria": "فتح قائمة الحساب",
+    "closeAria": "إغلاق قائمة الحساب",
+    "menuAria": "قائمة حساب ViRead",
+    "shortMenuAria": "قائمة الحساب",
+    "accountNavAria": "حسابي في ViRead",
+    "profileSection": "الملف الشخصي",
+    "accountSection": "الحساب",
+    "helpSection": "المساعدة",
+    "sessionSection": "جلسة تسجيل الدخول",
+    "defaultAccountLabel": "حسابي في ViRead"
+  },
+  "childSwitcher": {
+    "selectedAria": "الطفل المختار: {alias}، اضغط للتبديل",
+    "openAria": "تبديل سريع للطفل",
+    "compactLabel": "{alias} · الصف {grade}",
+    "selectChild": "اختر طفلاً",
+    "listAria": "تبديل سريع لملف الطفل",
+    "gradeLabel": "· الصف {grade}",
+    "manageChildren": "إدارة ملفات الأطفال"
+  },
+  "footer": {
+    "ariaLabel": "معلومات ViRead",
+    "logoDashboardAria": "ViRead - الانتقال إلى لوحة التحكم",
+    "logoHomeAria": "ViRead - الانتقال إلى الصفحة الرئيسية"
+  }
+}

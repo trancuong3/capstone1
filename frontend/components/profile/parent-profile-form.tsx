@@ -6,6 +6,7 @@ import { Button } from "@/components/common/button";
 import { ProfileAvatarUpload } from "@/components/common/profile-avatar-upload";
 import { TextField } from "@/components/common/text-field";
 import { useHydrated } from "@/hooks/use-hydrated";
+import { useI18n } from "@/hooks/use-i18n";
 import { useProfileService } from "@/hooks/use-profile-service";
 import type { ParentProfileDTO } from "@/types/profile";
 
@@ -45,21 +46,6 @@ function canonicalStoredPhone(value: string | null): string | null {
   return value ? canonicalPhoneInput(value) : null;
 }
 
-function formatCreatedDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Chưa có thông tin";
-
-  return new Intl.DateTimeFormat("vi-VN", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(date);
-}
-
-function getRoleLabel(role: ParentProfileDTO["role"]): string {
-  return role === "admin" ? "Quản trị viên" : "Phụ huynh";
-}
-
 export function ParentProfileForm({
   onCancel,
   onSaved,
@@ -67,6 +53,7 @@ export function ParentProfileForm({
   profile,
   displayName,
 }: ParentProfileFormProps) {
+  const { t, formatDate, formatList } = useI18n();
   const isHydrated = useHydrated();
   const profileService = useProfileService();
   const [name, setName] = useState(profile.display_name ?? displayName);
@@ -84,6 +71,12 @@ export function ParentProfileForm({
   const [formError, setFormError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  function getRoleLabel(role: ParentProfileDTO["role"]): string {
+    return role === "admin"
+      ? t("parent.profile.roleAdmin")
+      : t("parent.profile.roleParent");
+  }
+
   function validate(): boolean {
     const nextErrors: Partial<Record<EditableField, string>> = {};
     const nextName = name.trim();
@@ -94,26 +87,27 @@ export function ParentProfileForm({
       .toLowerCase();
 
     if (!nextName) {
-      nextErrors.display_name = "Ba mẹ vui lòng nhập tên hiển thị.";
+      nextErrors.display_name = t("validation.displayNameRequired");
     } else if (nextName.length > 120) {
-      nextErrors.display_name = "Tên hiển thị không được dài quá 120 ký tự.";
+      nextErrors.display_name = t("validation.displayNameMaxLength", {
+        max: 120,
+      });
     }
 
     if (currentEmail && !nextEmail) {
-      nextErrors.email = "Ba mẹ vui lòng nhập email.";
+      nextErrors.email = t("validation.parentEmailRequired");
     }
 
     if (nextEmail !== currentEmail && nextEmail) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
-        nextErrors.email = "Ba mẹ vui lòng nhập email hợp lệ.";
+        nextErrors.email = t("validation.parentEmailInvalid");
       } else if (profile.email?.trim().toLowerCase() === nextEmail) {
-        nextErrors.email = "Email mới phải khác email hiện tại.";
+        nextErrors.email = t("validation.emailMustDiffer");
       }
     }
 
     if (nextPhone && !canonicalPhoneInput(nextPhone)) {
-      nextErrors.contact_phone =
-        "Nhập số hợp lệ, ví dụ 0912345678 hoặc +84912345678.";
+      nextErrors.contact_phone = t("validation.phoneInvalidExample");
     }
 
     setErrors(nextErrors);
@@ -129,6 +123,7 @@ export function ParentProfileForm({
     let currentProfile = profile;
     let activeField: EditableField = "display_name";
     const savedChanges: string[] = [];
+    let hasPendingEmailChange = false;
     const nextName = name.trim();
     const nextEmail = email.trim().toLowerCase();
     const nextPhone = phone.trim();
@@ -142,7 +137,7 @@ export function ParentProfileForm({
         currentProfile = await profileService.update({
           display_name: nextName,
         });
-        savedChanges.push("tên hiển thị");
+        savedChanges.push(t("parent.profile.fields.displayName"));
       }
 
       const nextCanonicalPhone = nextPhone
@@ -153,18 +148,21 @@ export function ParentProfileForm({
         currentProfile =
           await profileService.updateContactPhone(nextCanonicalPhone);
         savedChanges.push(
-          nextCanonicalPhone ? "số điện thoại" : "xóa số điện thoại",
+          nextCanonicalPhone
+            ? t("parent.profile.fields.contactPhone")
+            : t("parent.profile.fields.removePhone"),
         );
       }
 
       if (nextEmail && nextEmail !== currentEmail) {
         activeField = "email";
+        hasPendingEmailChange = true;
         if (profile.pending_email?.trim().toLowerCase() === nextEmail) {
           await profileService.resendEmailChange(nextEmail);
-          savedChanges.push("email xác minh");
+          savedChanges.push(t("parent.profile.fields.emailVerify"));
         } else {
           await profileService.requestEmailChange(nextEmail);
-          savedChanges.push("yêu cầu đổi email");
+          savedChanges.push(t("parent.profile.fields.emailChangeRequest"));
         }
         try {
           currentProfile = await profileService.get();
@@ -176,33 +174,41 @@ export function ParentProfileForm({
       if (selectedAvatarFile) {
         activeField = "avatar";
         currentProfile = await profileService.uploadAvatar(selectedAvatarFile);
-        savedChanges.push("ảnh đại diện");
+        savedChanges.push(t("parent.profile.fields.avatar"));
       } else if (isAvatarRemoved && profile.avatar_url) {
         activeField = "avatar";
         currentProfile = await profileService.removeAvatar();
-        savedChanges.push("xóa ảnh đại diện");
+        savedChanges.push(t("parent.profile.fields.removeAvatar"));
       }
 
       onSaved(
         currentProfile,
-        savedChanges.includes("yêu cầu đổi email") ||
-          savedChanges.includes("email xác minh")
-          ? "Đã lưu thay đổi. Email mới chỉ có hiệu lực sau khi ba mẹ xác minh."
+        hasPendingEmailChange
+          ? t("parent.profile.savedWithEmailPending")
           : savedChanges.length
-            ? "Đã lưu các thay đổi hồ sơ."
-            : "Thông tin hồ sơ đã được cập nhật.",
+            ? t("parent.profile.savedChanges")
+            : t("parent.profile.savedNoChanges"),
       );
     } catch (error) {
       if (savedChanges.length) onPartialSaved(currentProfile);
 
-      const message = safeErrorMessage(
-        error,
-        "Chưa lưu được thay đổi. Ba mẹ vui lòng thử lại sau.",
-      );
+      const message = safeErrorMessage(error, t("parent.profile.saveError"));
       setErrors((current) => ({ ...current, [activeField]: message }));
+      const failedFieldLabel =
+        activeField === "avatar"
+          ? t("parent.profile.fields.avatar")
+          : activeField === "email"
+            ? t("parent.profile.fields.email")
+            : activeField === "contact_phone"
+              ? t("parent.profile.fields.contactPhone")
+              : t("parent.profile.fields.displayName");
       setFormError(
         savedChanges.length
-          ? `Đã lưu ${savedChanges.join(", ")}; chưa lưu được thay đổi liên quan đến ${activeField === "avatar" ? "ảnh đại diện" : activeField === "email" ? "email" : activeField === "contact_phone" ? "số điện thoại" : "tên hiển thị"}. ${message}`
+          ? t("parent.profile.partialSaveError", {
+              saved: formatList(savedChanges),
+              field: failedFieldLabel,
+              detail: message,
+            })
           : null,
       );
     } finally {
@@ -223,7 +229,7 @@ export function ParentProfileForm({
   return (
     <form
       aria-busy={isSaving}
-      aria-label="Chỉnh sửa hồ sơ ba mẹ"
+      aria-label={t("parent.profile.editFormAria")}
       className="flex flex-col gap-4"
       noValidate
       onSubmit={(event) => void saveChanges(event)}
@@ -249,10 +255,10 @@ export function ParentProfileForm({
       <TextField
         autoComplete="name"
         error={errors.display_name}
-        label="Họ và tên"
+        label={t("parent.profile.fullNameLabel")}
         maxLength={120}
         onChange={(event) => setName(event.target.value)}
-        placeholder="Ví dụ: Nguyễn Minh Anh"
+        placeholder={t("parent.profile.fullNamePlaceholder")}
         value={name}
       />
       <div className="flex flex-col gap-2">
@@ -260,22 +266,22 @@ export function ParentProfileForm({
           autoComplete="email"
           error={errors.email}
           inputMode="email"
-          label="Email"
+          label={t("parent.profile.emailShortLabel")}
           maxLength={254}
           onChange={(event) => setEmail(event.target.value)}
-          placeholder="name@example.com"
+          placeholder={t("parent.profile.emailPlaceholder")}
           type="email"
           value={email}
         />
         {profile.pending_email ? (
           <p className="text-sm text-warning">
-            Đang chờ xác minh email mới:{" "}
+            {t("parent.profile.pendingEmailPrefix")}{" "}
             <strong>{profile.pending_email}</strong>
           </p>
         ) : null}
         {profile.email_verified === false ? (
           <p className="text-sm text-muted">
-            Email mới chỉ được cập nhật sau khi xác minh.
+            {t("parent.profile.emailVerifyHint")}
           </p>
         ) : null}
       </div>
@@ -283,10 +289,10 @@ export function ParentProfileForm({
         autoComplete="tel"
         error={errors.contact_phone}
         inputMode="tel"
-        label="Số điện thoại"
+        label={t("parent.profile.phoneShortLabel")}
         maxLength={16}
         onChange={(event) => setPhone(event.target.value)}
-        placeholder="0912345678 hoặc +84912345678"
+        placeholder={t("parent.profile.phonePlaceholder")}
         type="tel"
         value={phone}
       />
@@ -298,28 +304,37 @@ export function ParentProfileForm({
       ) : null}
 
       <div className="rounded-card bg-sky p-4">
-        <h3 className="font-extrabold text-ink">Đổi email</h3>
+        <h3 className="font-extrabold text-ink">
+          {t("parent.profile.changeEmailHeading")}
+        </h3>
         <p className="mt-2 text-body text-muted">
-          Email mới chỉ có hiệu lực sau khi ba mẹ xác minh.
+          {t("parent.profile.changeEmailNotice")}
         </p>
       </div>
       <details>
         <summary className="cursor-pointer text-sm font-semibold text-primary">
-          Thông tin tài khoản
+          {t("parent.profile.accountDetailsSummary")}
         </summary>
         <dl className="mt-3 grid gap-3 sm:grid-cols-2">
           <div className="rounded-control bg-canvas p-4">
-            <dt className="text-sm font-semibold text-muted">Vai trò</dt>
+            <dt className="text-sm font-semibold text-muted">
+              {t("parent.profile.roleLabel")}
+            </dt>
             <dd className="mt-1 text-label font-semibold text-ink">
               {getRoleLabel(profile.role)}
             </dd>
           </div>
           <div className="rounded-control bg-canvas p-4">
             <dt className="text-sm font-semibold text-muted">
-              Ngày tạo tài khoản
+              {t("parent.profile.createdAtLabel")}
             </dt>
             <dd className="mt-1 text-label font-semibold text-ink">
-              {formatCreatedDate(profile.created_at)}
+              {formatDate(profile.created_at, {
+                day: "2-digit",
+                month: "2-digit",
+                year: "numeric",
+                fallback: t("parent.profile.noInfo"),
+              })}
             </dd>
           </div>
         </dl>
@@ -333,7 +348,7 @@ export function ParentProfileForm({
           type="button"
           variant="quiet"
         >
-          Hủy
+          {t("common.actions.cancel")}
         </Button>
         <Button
           className="sm:px-6"
@@ -341,7 +356,9 @@ export function ParentProfileForm({
           isLoading={isSaving}
           type="submit"
         >
-          {isSaving ? "Đang lưu…" : "Lưu thay đổi"}
+          {isSaving
+            ? t("common.actions.saving")
+            : t("parent.profile.saveChanges")}
         </Button>
       </div>
     </form>

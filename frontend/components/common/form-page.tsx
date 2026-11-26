@@ -4,6 +4,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
+import { useTranslations } from "@/hooks/use-i18n";
 
 /** A separate editor view, matching Figma's detailed-action screens. */
 export function FormPage({
@@ -21,6 +22,7 @@ export function FormPage({
   width?: "wide" | "standard";
   panelTitle?: string;
 }) {
+  const tCommon = useTranslations("common");
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     window.scrollTo?.({ top: 0, behavior: "instant" });
@@ -32,8 +34,8 @@ export function FormPage({
       className={`figma-form-page mx-auto flex w-full flex-col gap-4 ${width === "standard" ? "max-w-[960px]" : "max-w-[1120px]"}`}
     >
       <Button className="sm:max-w-60" variant="quiet" onClick={onBack}>
-        <ArrowLeft aria-hidden="true" className="size-4" />
-        Quay lại
+        <ArrowLeft aria-hidden="true" className="size-4 viread-rtl-flip" />
+        {tCommon("actions.back")}
       </Button>
       <h1
         ref={heading}
@@ -51,7 +53,7 @@ export function FormPage({
         ) : null}
         {children}
         <Button className="sm:max-w-60" variant="quiet" onClick={onBack}>
-          Hủy
+          {tCommon("actions.cancel")}
         </Button>
       </Card>
     </section>

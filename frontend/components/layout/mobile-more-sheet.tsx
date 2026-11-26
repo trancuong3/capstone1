@@ -4,12 +4,15 @@ import { ChevronRight, X, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef } from "react";
 
+import { useI18n } from "@/hooks/use-i18n";
 import { cn } from "@/lib/utils/cn";
 
 export interface MobileMoreSheetItem {
   readonly href: string;
   readonly label: string;
+  readonly labelKey?: string;
   readonly description?: string;
+  readonly descriptionKey?: string;
   readonly icon: LucideIcon;
   readonly isActive?: (pathname: string) => boolean;
 }
@@ -32,10 +35,12 @@ export function MobileMoreSheet({
   isOpen,
   onClose,
   pathname,
-  title = "Tính năng khác",
+  title,
   items,
 }: MobileMoreSheetProps) {
+  const { t } = useI18n();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const resolvedTitle = title ?? t("navigation.parent.moreTitle");
 
   useEffect(() => {
     if (!isOpen) return;
@@ -62,7 +67,7 @@ export function MobileMoreSheet({
       role="presentation"
     >
       <button
-        aria-label="Đóng bảng tính năng khác"
+        aria-label={t("accessibility.closeMoreSheet")}
         className="fixed inset-0 bg-ink/40 backdrop-blur-[1px]"
         onClick={onClose}
         tabIndex={-1}
@@ -81,10 +86,10 @@ export function MobileMoreSheet({
         />
         <div className="mb-3 flex items-center justify-between gap-2 px-1">
           <h2 className="text-lg font-extrabold text-ink" id={`${id}-title`}>
-            {title}
+            {resolvedTitle}
           </h2>
           <button
-            aria-label="Đóng"
+            aria-label={t("accessibility.closeSheet")}
             className="flex size-12 items-center justify-center rounded-full text-muted transition-colors hover:bg-canvas hover:text-ink focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
             onClick={onClose}
             ref={closeButtonRef}
@@ -93,50 +98,67 @@ export function MobileMoreSheet({
             <X aria-hidden="true" className="size-5" />
           </button>
         </div>
-        <nav aria-label={title} className="grid gap-1.5">
-          {items.map(({ href, label, description, icon: Icon, isActive }) => {
-            const active = isActive
-              ? isActive(pathname)
-              : defaultRouteActive(pathname, href);
-            return (
-              <Link
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "flex min-h-12 items-center gap-3 rounded-control px-3 py-2.5 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
-                  active
-                    ? "bg-sky text-primary-hover"
-                    : "bg-white text-ink hover:bg-canvas",
-                )}
-                href={href}
-                key={href}
-                onClick={onClose}
-              >
-                <span
-                  aria-hidden="true"
+        <nav aria-label={resolvedTitle} className="grid gap-1.5">
+          {items.map(
+            ({
+              href,
+              label,
+              labelKey,
+              description,
+              descriptionKey,
+              icon: Icon,
+              isActive,
+            }) => {
+              const active = isActive
+                ? isActive(pathname)
+                : defaultRouteActive(pathname, href);
+              const resolvedLabel = labelKey ? t(labelKey) : label;
+              const resolvedDescription = descriptionKey
+                ? t(descriptionKey)
+                : description;
+
+              return (
+                <Link
+                  aria-current={active ? "page" : undefined}
                   className={cn(
-                    "flex size-10 shrink-0 items-center justify-center rounded-control",
-                    active ? "bg-white text-primary" : "bg-canvas text-primary",
+                    "flex min-h-12 items-center gap-3 rounded-control px-3 py-2.5 text-start transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                    active
+                      ? "bg-sky text-primary-hover"
+                      : "bg-white text-ink hover:bg-canvas",
                   )}
+                  href={href}
+                  key={href}
+                  onClick={onClose}
                 >
-                  <Icon className="size-5" strokeWidth={1.9} />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-bold">
-                    {label}
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "flex size-10 shrink-0 items-center justify-center rounded-control",
+                      active
+                        ? "bg-white text-primary"
+                        : "bg-canvas text-primary",
+                    )}
+                  >
+                    <Icon className="size-5" strokeWidth={1.9} />
                   </span>
-                  {description ? (
-                    <span className="block truncate text-xs text-muted">
-                      {description}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-bold">
+                      {resolvedLabel}
                     </span>
-                  ) : null}
-                </span>
-                <ChevronRight
-                  aria-hidden="true"
-                  className="size-4 shrink-0 text-muted"
-                />
-              </Link>
-            );
-          })}
+                    {resolvedDescription ? (
+                      <span className="block truncate text-xs text-muted">
+                        {resolvedDescription}
+                      </span>
+                    ) : null}
+                  </span>
+                  <ChevronRight
+                    aria-hidden="true"
+                    className="size-4 shrink-0 text-muted viread-rtl-flip"
+                  />
+                </Link>
+              );
+            },
+          )}
         </nav>
       </section>
     </div>

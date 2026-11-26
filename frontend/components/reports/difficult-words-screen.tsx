@@ -13,6 +13,7 @@ import { ChildSelector } from "@/components/reports/child-selector";
 import { DifficultWordBookCard } from "@/components/reports/difficult-word-book-card";
 import { DifficultWordPracticePanel } from "@/components/reports/difficult-word-practice-panel";
 import { ReportPageHeader } from "@/components/reports/report-page-header";
+import { useTranslations } from "@/hooks/use-i18n";
 import { useReportServices } from "@/hooks/use-report-services";
 import { groupDifficultWordsByBook } from "@/lib/api/difficult-word-service";
 import { isServiceError } from "@/lib/api/service-error";
@@ -50,6 +51,7 @@ export function DifficultWordsScreen({
   readonly requestedChildId?: string;
   readonly requestedPracticeWord?: string;
 }) {
+  const t = useTranslations("difficultWords");
   const { childService, difficultWordService } = useReportServices();
   const [requestKey, setRequestKey] = useState(0);
   const [periodDays, setPeriodDays] = useState<number>(
@@ -299,7 +301,7 @@ export function DifficultWordsScreen({
     return (
       <section
         aria-busy="true"
-        aria-label="Đang tải từ cần luyện"
+        aria-label={t("screen.loadingAria")}
         className="mx-auto flex max-w-[1280px] flex-col gap-6"
       >
         <Skeleton className="h-32 rounded-[24px]" />
@@ -314,49 +316,53 @@ export function DifficultWordsScreen({
     return (
       <EmptyState
         headingLevel={1}
-        action={<ButtonLink href="/children/new">Tạo hồ sơ bé</ButtonLink>}
-        description="Tạo hồ sơ và bắt đầu đọc để hệ thống có bằng chứng."
+        action={
+          <ButtonLink href="/children/new">
+            {t("screen.createChildAction")}
+          </ButtonLink>
+        }
+        description={t("screen.noChildDescription")}
         icon={<Volume2 aria-hidden="true" className="size-10 text-primary" />}
-        title="Chưa có hồ sơ bé"
+        title={t("screen.noChildTitle")}
       />
     );
   if (state.status === "unavailable")
     return (
       <section className="mx-auto flex w-full max-w-[960px] flex-col gap-4">
         <h1 className="text-heading font-extrabold text-ink">
-          Dữ liệu đang chờ bổ sung
+          {t("screen.unsupportedTitle")}
         </h1>
         <StatusMessage tone="info">
-          Dữ liệu của mục này chưa sẵn sàng theo định dạng hiện tại. Không có dữ
-          liệu mẫu thay thế.
+          {t("screen.unsupportedDescription")}
         </StatusMessage>
         <Button
           className="sm:w-auto sm:self-start sm:px-8"
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
-          <RefreshCw aria-hidden="true" className="size-5" /> Thử lại
+          <RefreshCw aria-hidden="true" className="size-5" />{" "}
+          {t("screen.retry")}
         </Button>
         <ButtonLink
           className="sm:w-auto sm:self-start"
           href="/children"
           variant="secondary"
         >
-          Quản lý hồ sơ bé
+          {t("screen.manageChildren")}
         </ButtonLink>
       </section>
     );
   if (state.status === "not-found")
     return (
-      <StatusMessage title="Không tìm thấy dữ liệu" tone="error">
-        Dữ liệu không tồn tại hoặc không thuộc tài khoản hiện tại.
+      <StatusMessage title={t("screen.notFoundTitle")} tone="error">
+        {t("screen.notFoundDescription")}
       </StatusMessage>
     );
   if (state.status === "error")
     return (
       <div className="mx-auto flex max-w-[960px] flex-col gap-4">
-        <StatusMessage title="Chưa tải được từ cần luyện" tone="error">
-          Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
+        <StatusMessage title={t("screen.loadErrorTitle")} tone="error">
+          {t("screen.loadErrorDescription")}
         </StatusMessage>
         <Button
           className="sm:w-auto sm:self-start sm:px-8"
@@ -364,7 +370,7 @@ export function DifficultWordsScreen({
           variant="secondary"
         >
           <RefreshCw aria-hidden="true" className="size-5" />
-          Thử lại
+          {t("screen.retry")}
         </Button>
       </div>
     );
@@ -379,13 +385,16 @@ export function DifficultWordsScreen({
               href={`/reports?childId=${encodeURIComponent(state.child.id)}`}
               variant="secondary"
             >
-              <ArrowLeft aria-hidden="true" className="size-5" />
-              Báo cáo
+              <ArrowLeft
+                aria-hidden="true"
+                className="viread-rtl-flip size-5"
+              />
+              {t("screen.backToReports")}
             </ButtonLink>
           }
-          description={`Tổng hợp theo từng cuốn sách trong ${periodDays} ngày gần nhất; bé chỉ cần đọc đúng một lần rõ tiếng để hoàn thành từ.`}
-          eyebrow="Cùng luyện mỗi ngày"
-          title={`Từ cần luyện của ${state.child.alias}`}
+          description={t("screen.headerDescription", { days: periodDays })}
+          eyebrow={t("screen.eyebrow")}
+          title={t("screen.headerTitle", { alias: state.child.alias })}
         />
       </div>
 
@@ -428,17 +437,20 @@ export function DifficultWordsScreen({
 
             <div className="flex flex-col gap-2.5 sm:hidden">
               <div
-                aria-label="Lọc nhanh theo trạng thái luyện"
+                aria-label={t("screen.quickFilterAria")}
                 className="flex items-center gap-2 overflow-x-auto pb-0.5"
                 role="group"
               >
                 {(
                   [
-                    { value: "ALL", label: "Tất cả" },
-                    { value: "NOT_PRACTICED", label: "Chưa luyện" },
-                    { value: "IN_PROGRESS", label: "Đang luyện" },
-                    { value: "NEEDS_MORE_PRACTICE", label: "Cần thêm" },
-                    { value: "COMPLETED", label: "Đã xong" },
+                    { value: "ALL", key: "screen.quickAll" },
+                    { value: "NOT_PRACTICED", key: "screen.quickNotPracticed" },
+                    { value: "IN_PROGRESS", key: "screen.quickInProgress" },
+                    {
+                      value: "NEEDS_MORE_PRACTICE",
+                      key: "screen.quickNeedsMore",
+                    },
+                    { value: "COMPLETED", key: "screen.quickCompleted" },
                   ] as const
                 ).map((pill) => {
                   const active = statusFilter === pill.value;
@@ -457,7 +469,7 @@ export function DifficultWordsScreen({
                       }}
                       type="button"
                     >
-                      {pill.label}
+                      {t(pill.key)}
                     </button>
                   );
                 })}
@@ -465,8 +477,8 @@ export function DifficultWordsScreen({
             </div>
 
             <SelectField
-              aria-label="Chọn khoảng thời gian"
-              label="Khoảng thời gian"
+              aria-label={t("screen.periodAria")}
+              label={t("screen.periodLabel")}
               onChange={(event) => {
                 const parsed = Number.parseInt(event.target.value, 10);
                 if (Number.isSafeInteger(parsed) && parsed > 0) {
@@ -475,26 +487,38 @@ export function DifficultWordsScreen({
               }}
               value={String(periodDays)}
             >
-              <option value="30">30 ngày gần nhất</option>
-              <option value="90">90 ngày gần nhất</option>
-              <option value="180">180 ngày gần nhất</option>
+              <option value="30">
+                {t("screen.periodOption", { days: 30 })}
+              </option>
+              <option value="90">
+                {t("screen.periodOption", { days: 90 })}
+              </option>
+              <option value="180">
+                {t("screen.periodOption", { days: 180 })}
+              </option>
             </SelectField>
 
             <div className="hidden sm:contents">
               <SelectField
-                aria-label="Lọc theo trạng thái luyện"
-                label="Trạng thái luyện"
+                aria-label={t("screen.statusFilterAria")}
+                label={t("screen.statusFilterLabel")}
                 onChange={(event) => {
                   setStatusFilter(event.target.value as StatusFilterValue);
                   setBookGroupPage(1);
                 }}
                 value={statusFilter}
               >
-                <option value="ALL">Tất cả trạng thái</option>
-                <option value="NOT_PRACTICED">Chưa luyện</option>
-                <option value="IN_PROGRESS">Đang luyện</option>
-                <option value="NEEDS_MORE_PRACTICE">Cần luyện thêm</option>
-                <option value="COMPLETED">Đã hoàn thành</option>
+                <option value="ALL">{t("screen.statusAll")}</option>
+                <option value="NOT_PRACTICED">
+                  {t("screen.statusNotPracticed")}
+                </option>
+                <option value="IN_PROGRESS">
+                  {t("screen.statusInProgress")}
+                </option>
+                <option value="NEEDS_MORE_PRACTICE">
+                  {t("screen.statusNeedsMore")}
+                </option>
+                <option value="COMPLETED">{t("screen.statusCompleted")}</option>
               </SelectField>
             </div>
           </div>
@@ -504,15 +528,17 @@ export function DifficultWordsScreen({
               <div className="flex flex-col gap-1">
                 <div className="inline-flex items-center gap-2 text-sm font-extrabold text-[#0E6D76]">
                   <Sparkles aria-hidden="true" className="size-4" />
-                  Tiến độ luyện từ của {state.child.alias}
+                  {t("screen.progressTitle", { alias: state.child.alias })}
                 </div>
                 <p className="text-lg font-extrabold text-[#213C42]">
-                  {summaryStats.completed}/{summaryStats.total} từ đã đọc đúng (
-                  {summaryStats.percent}%)
+                  {t("screen.progressCount", {
+                    completed: summaryStats.completed,
+                    total: summaryStats.total,
+                    percent: summaryStats.percent,
+                  })}
                 </p>
                 <p className="text-xs text-[#526970]">
-                  Chọn một từ trên thẻ sách hoặc bấm nút bên cạnh để bé bắt đầu
-                  luyện nhanh bằng giọng nói.
+                  {t("screen.progressHint")}
                 </p>
               </div>
               {firstPendingGlobalWord ? (
@@ -528,8 +554,10 @@ export function DifficultWordsScreen({
                 >
                   <Mic aria-hidden="true" className="size-5" />
                   {summaryStats.remaining > 0
-                    ? `Luyện ${summaryStats.remaining} từ cần ôn`
-                    : "Ôn lại từ đã đọc"}
+                    ? t("screen.practiceRemainingAction", {
+                        count: summaryStats.remaining,
+                      })
+                    : t("screen.reviewCompletedAction")}
                 </Button>
               ) : null}
             </div>
@@ -541,14 +569,14 @@ export function DifficultWordsScreen({
                 <ButtonLink
                   href={`/books?childId=${encodeURIComponent(state.child.id)}`}
                 >
-                  Tiếp tục đọc sách
+                  {t("screen.continueReadingAction")}
                 </ButtonLink>
               }
-              description="Các buổi đọc đã lưu chưa ghi nhận từ cần luyện trong khoảng thời gian đang chọn."
+              description={t("screen.emptyDescription")}
               icon={
                 <Volume2 aria-hidden="true" className="size-10 text-primary" />
               }
-              title="Chưa có từ cần luyện"
+              title={t("screen.emptyTitle")}
             />
           ) : filteredWords.length === 0 ? (
             <EmptyState
@@ -558,14 +586,14 @@ export function DifficultWordsScreen({
                   onClick={() => setStatusFilter("ALL")}
                   variant="secondary"
                 >
-                  Xem tất cả từ ({state.words.length})
+                  {t("screen.viewAllWords", { count: state.words.length })}
                 </Button>
               }
-              description="Chưa có từ nào khớp trạng thái luyện đang chọn."
+              description={t("screen.emptyFilterDescription")}
               icon={
                 <Volume2 aria-hidden="true" className="size-10 text-primary" />
               }
-              title="Không có từ phù hợp bộ lọc"
+              title={t("screen.emptyFilterTitle")}
             />
           ) : (
             <>
@@ -597,8 +625,8 @@ export function DifficultWordsScreen({
                   ))}
               </div>
               <PaginationBar
-                ariaLabel="Phân trang nhóm sách từ cần luyện"
-                itemLabel="cuốn sách"
+                ariaLabel={t("screen.paginationAria")}
+                itemLabel={t("screen.paginationItemLabel")}
                 onPageChange={setBookGroupPage}
                 page={bookGroupPage}
                 pageSize={BOOK_GROUPS_PAGE_SIZE}

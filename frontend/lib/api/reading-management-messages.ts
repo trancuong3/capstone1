@@ -1,27 +1,64 @@
+import { translateMessage } from "@/lib/i18n/formatter";
+import {
+  DEFAULT_LOCALE,
+  normalizeLocale,
+  type SupportedLocale,
+} from "@/lib/i18n/locales";
+import { readLocaleCookie } from "@/lib/i18n/persistence";
+import type { MessagesDictionary } from "@/lib/i18n/types";
+import { getCachedLocaleMessages } from "@/messages/loader";
+import { viMessages } from "@/messages/vi";
+
 /**
  * Backend `detail` strings of Reading Management conflicts (HTTP 409) mapped to
- * parent-facing Vietnamese text. Only these authored strings may reach the UI.
+ * parent-facing i18n keys. Only these authored strings may reach the UI.
  */
-export const readingManagementMessages: Readonly<Record<string, string>> = {
+export const readingManagementMessageKeys: Readonly<Record<string, string>> = {
   "An active goal with the same metric and period already overlaps these dates":
-    "Bé đã có mục tiêu cùng loại và cùng chu kỳ trong khoảng ngày này. Hãy sửa mục tiêu cũ hoặc kết thúc nó trước.",
-  "The end date is already in the past":
-    "Ngày kết thúc đã qua. Hãy chọn một ngày từ hôm nay trở đi.",
+    "errors.readingManagement.overlappingGoal",
+  "The end date is already in the past": "errors.readingManagement.endDatePast",
   "The end date must not be before the start date":
-    "Ngày kết thúc không được trước ngày bắt đầu.",
+    "errors.readingManagement.endDateBeforeStart",
   "The plan end date is already in the past":
-    "Ngày kết thúc của kế hoạch đã qua. Hãy chọn một ngày từ hôm nay trở đi.",
+    "errors.readingManagement.planEndDatePast",
   "The plan has no reading day between its start and end dates":
-    "Khoảng ngày đã chọn không có ngày đọc nào trong tuần. Hãy chọn thêm ngày đọc hoặc kéo dài ngày kết thúc.",
+    "errors.readingManagement.noReadingDayInRange",
   "The selected book is not available to read":
-    "Sách đã chọn hiện chưa thể đọc. Hãy chọn sách khác.",
+    "errors.readingManagement.bookUnavailable",
   "A reminder with the same time and overlapping days already exists":
-    "Đã có lịch nhắc cùng giờ vào những ngày này. Hãy sửa lịch nhắc đó thay vì tạo thêm.",
+    "errors.readingManagement.duplicateReminder",
   "The requested state transition is not allowed":
-    "Thao tác này không còn phù hợp với trạng thái hiện tại. Hãy tải lại trang rồi thử lại.",
+    "errors.readingManagement.invalidTransition",
 };
 
-const knownMessages = new Set(Object.values(readingManagementMessages));
+export const readingManagementMessages: Readonly<Record<string, string>> =
+  Object.fromEntries(
+    Object.entries(readingManagementMessageKeys).map(([detail, key]) => [
+      detail,
+      translateMessage(viMessages, viMessages, DEFAULT_LOCALE, key),
+    ]),
+  );
+
+const knownDefaultMessages = new Set(Object.values(readingManagementMessages));
+
+function resolveRuntimeLocale(): SupportedLocale {
+  const cookieLocale = readLocaleCookie();
+  if (cookieLocale) return cookieLocale;
+  if (typeof document !== "undefined") {
+    return normalizeLocale(document.documentElement?.lang) ?? DEFAULT_LOCALE;
+  }
+  return DEFAULT_LOCALE;
+}
+
+function getKnownConflictMessages(locale: SupportedLocale): Set<string> {
+  const activeMessages: MessagesDictionary =
+    getCachedLocaleMessages(locale) ?? viMessages;
+  const set = new Set(knownDefaultMessages);
+  for (const key of Object.values(readingManagementMessageKeys)) {
+    set.add(translateMessage(activeMessages, viMessages, locale, key));
+  }
+  return set;
+}
 
 /**
  * The specific, parent-facing reason when a mutation was refused by a business
@@ -34,10 +71,12 @@ export function conflictMessage(error: unknown): string | null {
     "status" in error &&
     error.status === 409 &&
     "message" in error &&
-    typeof error.message === "string" &&
-    knownMessages.has(error.message)
+    typeof error.message === "string"
   ) {
-    return error.message;
+    const locale = resolveRuntimeLocale();
+    if (getKnownConflictMessages(locale).has(error.message)) {
+      return error.message;
+    }
   }
   return null;
 }

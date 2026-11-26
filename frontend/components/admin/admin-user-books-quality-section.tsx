@@ -22,9 +22,9 @@ import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
 import {
-  ADMIN_USER_BOOK_FILTER_LABELS,
   type AdminUserBookDecisionType,
   type AdminUserBookQueueFilter,
   type AdminUserBookQueueItemDTO,
@@ -63,17 +63,6 @@ const WORKFLOW_TONES: Record<string, string> = {
   CANCELLED: "border-slate-300 bg-slate-100 text-slate-700",
 };
 
-function formatDateTime(value: string): string {
-  try {
-    return new Intl.DateTimeFormat("vi-VN", {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
-}
-
 function getAdminErrorText(error: unknown, fallback: string): string {
   if (isServiceError(error) && error.message) {
     return error.message;
@@ -100,6 +89,7 @@ function UserBookDecisionPanel({
   onSubmitDecision,
   onSuspendBook,
 }: UserBookDecisionPanelProps) {
+  const t = useTranslations("admin");
   const [decisionReason, setDecisionReason] = useState("");
   const [suspendReason, setSuspendReason] = useState("");
 
@@ -120,12 +110,12 @@ function UserBookDecisionPanel({
   return (
     <div className="rounded-card border border-border bg-canvas/60 p-4">
       <label className="flex flex-col gap-1.5 text-xs font-bold text-ink">
-        Lý do quyết định Admin * (tối thiểu 5 ký tự)
+        {t("userBooks.decisionReasonLabel")}
         <textarea
-          aria-label="Lý do quyết định Admin"
+          aria-label={t("userBooks.decisionReasonAria")}
           className="min-h-24 w-full rounded-control border border-border bg-white p-2.5 text-sm font-normal text-ink focus-visible:outline-3 focus-visible:outline-primary"
           onChange={(event) => setDecisionReason(event.target.value)}
-          placeholder="Ghi rõ lý do duyệt phiên bản này, yêu cầu chỉnh sửa hoặc từ chối…"
+          placeholder={t("userBooks.decisionReasonPlaceholder")}
           value={decisionReason}
         />
       </label>
@@ -139,7 +129,7 @@ function UserBookDecisionPanel({
           type="button"
         >
           <ShieldCheck aria-hidden="true" className="size-4" />
-          Duyệt bản này
+          {t("userBooks.approveBtn")}
         </Button>
 
         <Button
@@ -151,7 +141,7 @@ function UserBookDecisionPanel({
           variant="secondary"
         >
           <CheckCircle2 aria-hidden="true" className="size-4" />
-          Yêu cầu sửa
+          {t("userBooks.requestChangesBtn")}
         </Button>
 
         <Button
@@ -163,7 +153,7 @@ function UserBookDecisionPanel({
           variant="destructive"
         >
           <XCircle aria-hidden="true" className="size-4" />
-          Từ chối
+          {t("userBooks.rejectBtn")}
         </Button>
       </div>
 
@@ -171,14 +161,14 @@ function UserBookDecisionPanel({
       {detail.book_moderation_status !== "SUSPENDED" ? (
         <div className="mt-4 border-t border-border pt-3">
           <p className="text-xs font-bold text-ink">
-            Đình chỉ toàn bộ sách riêng (chặn đọc ngay lập tức)
+            {t("userBooks.suspendTitle")}
           </p>
           <div className="mt-2 flex flex-col gap-2 sm:flex-row">
             <input
-              aria-label="Lý do đình chỉ sách riêng"
+              aria-label={t("userBooks.suspendReasonAria")}
               className="min-h-10 flex-1 rounded-control border border-border bg-white px-3 text-xs text-ink"
               onChange={(event) => setSuspendReason(event.target.value)}
-              placeholder="Nhập lý do đình chỉ sách riêng…"
+              placeholder={t("userBooks.suspendReasonPlaceholder")}
               value={suspendReason}
             />
             <Button
@@ -190,16 +180,17 @@ function UserBookDecisionPanel({
               variant="destructive"
             >
               <Ban aria-hidden="true" className="size-3.5" />
-              Đình chỉ
+              {t("userBooks.suspendBtn")}
             </Button>
           </div>
         </div>
       ) : (
         <p className="mt-3 rounded bg-rose-50 p-2 text-xs font-semibold text-rose-900">
-          Sách riêng này hiện đã bị đình chỉ
           {detail.book_suspended_reason
-            ? `: ${detail.book_suspended_reason}`
-            : "."}
+            ? t("userBooks.alreadySuspendedNote", {
+                reason: detail.book_suspended_reason,
+              })
+            : t("userBooks.suspendedBadge")}
         </p>
       )}
     </div>
@@ -215,6 +206,8 @@ export const AdminUserBooksQualitySection = memo(
     onPendingCountChange,
   }: AdminUserBooksQualitySectionProps) {
     const { bookContentQuality } = useAdminServices();
+    const t = useTranslations("admin");
+    const { formatDateTime, formatNumber } = useI18n();
     const [subTab, setSubTab] = useState<"moderation" | "flow2_candidates">(
       "moderation",
     );
@@ -280,10 +273,7 @@ export const AdminUserBooksQualitySection = memo(
         .catch((error: unknown) => {
           if (!active) return;
           setQueueError(
-            getAdminErrorText(
-              error,
-              "Không thể tải danh sách Sách người dùng. Vui lòng thử lại.",
-            ),
+            getAdminErrorText(error, t("userBooks.queueLoadError")),
           );
         })
         .finally(() => {
@@ -299,6 +289,7 @@ export const AdminUserBooksQualitySection = memo(
       queueReloadKey,
       searchText,
       statusFilter,
+      t,
     ]);
 
     const openDetail = useCallback(
@@ -322,10 +313,7 @@ export const AdminUserBooksQualitySection = memo(
           if (requestId !== detailRequestIdRef.current) return;
           setDetail(null);
           setDetailError(
-            getAdminErrorText(
-              error,
-              "Không thể tải chi tiết bản nộp của phụ huynh.",
-            ),
+            getAdminErrorText(error, t("userBooks.detailLoadError")),
           );
         } finally {
           if (requestId === detailRequestIdRef.current) {
@@ -333,7 +321,7 @@ export const AdminUserBooksQualitySection = memo(
           }
         }
       },
-      [bookContentQuality],
+      [bookContentQuality, t],
     );
 
     async function submitDecision(
@@ -347,18 +335,18 @@ export const AdminUserBooksQualitySection = memo(
 
       const trimmedReason = decisionReason.trim();
       if (trimmedReason.length < 5) {
-        setActionError("Vui lòng nhập lý do quyết định tối thiểu 5 ký tự.");
+        setActionError(t("userBooks.errors.decisionReasonMin"));
         return false;
       }
       if (decision === "APPROVE" && !detail.can_approve) {
         setActionError(
           detail.approve_blocked_reason ??
-            "Không thể duyệt phiên bản này do vi phạm chính sách an toàn hoặc trạng thái sách không hợp lệ.",
+            t("userBooks.errors.policyBlockedApprove"),
         );
         return false;
       }
       if (!detail.snapshot_hash) {
-        setActionError("Bản nộp chưa có snapshot hash hợp lệ để quyết định.");
+        setActionError(t("userBooks.errors.missingSnapshotHash"));
         return false;
       }
 
@@ -376,12 +364,16 @@ export const AdminUserBooksQualitySection = memo(
         );
         setActionNotice(
           decision === "APPROVE"
-            ? `Đã phê duyệt đúng phiên bản v${response.approved_submission_version ?? detail.submission_version} (chỉ mở cho gia đình sở hữu thêm trang vào sách riêng).`
+            ? t("userBooks.notices.approved", {
+                version:
+                  response.approved_submission_version ??
+                  detail.submission_version,
+              })
             : decision === "REQUEST_CHANGES"
-              ? "Đã gửi yêu cầu chỉnh sửa tới phụ huynh."
+              ? t("userBooks.notices.requestChanges")
               : decision === "SUSPEND"
-                ? "Đã đình chỉ sách riêng."
-                : "Đã từ chối phiên bản trang này.",
+                ? t("userBooks.notices.suspendedBook")
+                : t("userBooks.notices.rejected"),
         );
         await Promise.all([
           loadQueue(),
@@ -391,17 +383,11 @@ export const AdminUserBooksQualitySection = memo(
       } catch (error) {
         if (isServiceError(error) && error.status === 409) {
           setConflictError(
-            getAdminErrorText(
-              error,
-              "Bản nộp vừa được cập nhật bởi phụ huynh hoặc Admin khác. Hãy tải lại bản mới nhất trước khi quyết định.",
-            ),
+            getAdminErrorText(error, t("userBooks.conflictMessage")),
           );
         } else {
           setActionError(
-            getAdminErrorText(
-              error,
-              "Không thể lưu quyết định kiểm duyệt. Vui lòng thử lại.",
-            ),
+            getAdminErrorText(error, t("userBooks.errors.saveDecisionFailed")),
           );
         }
         return false;
@@ -421,9 +407,7 @@ export const AdminUserBooksQualitySection = memo(
 
       const trimmed = suspendReason.trim() || decisionReason.trim();
       if (trimmed.length < 5) {
-        setActionError(
-          "Vui lòng nhập lý do đình chỉ sách riêng tối thiểu 5 ký tự.",
-        );
+        setActionError(t("userBooks.errors.suspendReasonMin"));
         return false;
       }
 
@@ -431,7 +415,9 @@ export const AdminUserBooksQualitySection = memo(
       try {
         await bookContentQuality.suspendUserBook(detail.book_id, trimmed);
         setActionNotice(
-          `Đã đình chỉ sách riêng "${detail.book_title}". Gia đình sở hữu không thể mở đọc ngay lập tức.`,
+          t("userBooks.notices.suspendedWithTitle", {
+            title: detail.book_title,
+          }),
         );
         await Promise.all([
           loadQueue(),
@@ -440,7 +426,7 @@ export const AdminUserBooksQualitySection = memo(
         return true;
       } catch (error) {
         setActionError(
-          getAdminErrorText(error, "Không thể đình chỉ sách riêng lúc này."),
+          getAdminErrorText(error, t("userBooks.errors.suspendGeneric")),
         );
         return false;
       } finally {
@@ -467,22 +453,16 @@ export const AdminUserBooksQualitySection = memo(
             className="mt-0.5 size-5 shrink-0 text-indigo-700"
           />
           <div>
-            <p className="font-bold">
-              Khu vực kiểm duyệt Sách người dùng (tách biệt hoàn toàn với Sách
-              danh mục)
-            </p>
+            <p className="font-bold">{t("userBooks.headerTitle")}</p>
             <p className="mt-0.5 text-xs text-indigo-900 sm:text-sm">
-              Phê duyệt tại đây chỉ mở quyền cho đúng phụ huynh sở hữu thêm đúng
-              phiên bản trang vào sách riêng của gia đình họ — tuyệt đối không
-              đưa sách riêng ra thư viện chung. Nội dung vi phạm mức chặn an
-              toàn trẻ em (HIGH / NOT_RECOMMENDED) không thể duyệt bỏ qua.
+              {t("userBooks.headerDesc")}
             </p>
           </div>
         </div>
 
         {/* Sub-tab switcher: Moderation vs Flow 2 OCR sample verification */}
         <div
-          aria-label="Phân khu Sách người dùng"
+          aria-label={t("userBooks.subtabsAria")}
           className="flex flex-wrap gap-2"
           role="tablist"
         >
@@ -497,7 +477,7 @@ export const AdminUserBooksQualitySection = memo(
             role="tab"
             type="button"
           >
-            Kiểm duyệt trang sách riêng
+            {t("userBooks.subtabModeration")}
           </button>
           <button
             aria-selected={subTab === "flow2_candidates"}
@@ -510,7 +490,7 @@ export const AdminUserBooksQualitySection = memo(
             role="tab"
             type="button"
           >
-            Xác minh mẫu OCR (Flow 2)
+            {t("userBooks.subtabFlow2")}
           </button>
         </div>
 
@@ -523,10 +503,10 @@ export const AdminUserBooksQualitySection = memo(
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <h2 className="text-lg font-extrabold text-ink">
-                    Hàng đợi kiểm duyệt Sách người dùng
+                    {t("userBooks.queueHeading")}
                   </h2>
                   <p className="mt-1 text-xs text-muted sm:text-sm">
-                    Lọc theo trạng thái cần xử lý hoặc tìm theo tên sách riêng.
+                    {t("userBooks.queueSubtitle")}
                   </p>
                 </div>
                 <Button
@@ -537,13 +517,13 @@ export const AdminUserBooksQualitySection = memo(
                   variant="secondary"
                 >
                   <RefreshCw aria-hidden="true" className="size-4" />
-                  Tải lại hàng đợi
+                  {t("userBooks.reloadQueue")}
                 </Button>
               </div>
 
               {/* 6 Required Status Filter Buttons + All */}
               <div
-                aria-label="Bộ lọc trạng thái Sách người dùng"
+                aria-label={t("userBooks.filterAria")}
                 className="mt-4 flex flex-wrap gap-2"
                 role="group"
               >
@@ -561,7 +541,7 @@ export const AdminUserBooksQualitySection = memo(
                   }}
                   type="button"
                 >
-                  Tất cả
+                  {t("userBooks.filterAll")}
                 </button>
                 {QUEUE_FILTER_KEYS.map((filterKey) => {
                   const count = summary[filterKey] ?? 0;
@@ -582,7 +562,7 @@ export const AdminUserBooksQualitySection = memo(
                       }}
                       type="button"
                     >
-                      {ADMIN_USER_BOOK_FILTER_LABELS[filterKey]}
+                      {t(`userBooks.filters.${filterKey}`)}
                       <span
                         className={
                           "rounded-full px-1.5 py-0.5 text-[11px] tabular-nums " +
@@ -591,7 +571,7 @@ export const AdminUserBooksQualitySection = memo(
                             : "bg-canvas text-ink")
                         }
                       >
-                        {count}
+                        {formatNumber(count)}
                       </span>
                     </button>
                   );
@@ -600,21 +580,19 @@ export const AdminUserBooksQualitySection = memo(
 
               <div className="mt-3 max-w-md">
                 <label className="relative block">
-                  <span className="sr-only">
-                    Tìm sách người dùng theo tên sách
-                  </span>
+                  <span className="sr-only">{t("userBooks.searchLabel")}</span>
                   <Search
                     aria-hidden="true"
-                    className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
+                    className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted"
                   />
                   <input
-                    aria-label="Tìm sách người dùng theo tên sách"
-                    className="min-h-11 w-full rounded-control border border-border bg-white pl-9 pr-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
+                    aria-label={t("userBooks.searchLabel")}
+                    className="min-h-11 w-full rounded-control border border-border bg-white pe-3 ps-9 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
                     onChange={(event) => {
                       setQueueOffset(0);
                       setSearchText(event.target.value);
                     }}
-                    placeholder="Tìm theo tên sách riêng…"
+                    placeholder={t("userBooks.searchPlaceholder")}
                     type="search"
                     value={searchText}
                   />
@@ -624,7 +602,7 @@ export const AdminUserBooksQualitySection = memo(
               {queueError ? (
                 <StatusMessage
                   className="mt-4"
-                  title="Lỗi tải hàng đợi"
+                  title={t("userBooks.queueErrorTitle")}
                   tone="error"
                 >
                   {queueError}
@@ -643,8 +621,8 @@ export const AdminUserBooksQualitySection = memo(
               ) : !queue || queue.items.length === 0 ? (
                 <div className="mt-4">
                   <EmptyState
-                    description="Không có bản nộp sách riêng nào khớp bộ lọc hiện tại."
-                    title="Không có mục cần xử lý"
+                    description={t("userBooks.emptyDesc")}
+                    title={t("userBooks.emptyTitle")}
                   />
                 </div>
               ) : (
@@ -672,11 +650,11 @@ export const AdminUserBooksQualitySection = memo(
                             <span
                               className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-bold ${tone}`}
                             >
-                              {ADMIN_USER_BOOK_FILTER_LABELS[item.queue_status]}
+                              {t(`userBooks.filters.${item.queue_status}`)}
                             </span>
                             {item.moderation_status === "SUSPENDED" ? (
                               <span className="inline-flex items-center rounded-full border border-rose-300 bg-rose-100 px-2 py-0.5 text-xs font-bold text-rose-900">
-                                Đang đình chỉ
+                                {t("userBooks.suspendedBadge")}
                               </span>
                             ) : null}
                             {item.policy_blocked ? (
@@ -685,7 +663,7 @@ export const AdminUserBooksQualitySection = memo(
                                   aria-hidden="true"
                                   className="size-3"
                                 />
-                                Chặn chính sách
+                                {t("userBooks.policyBlockedBadge")}
                               </span>
                             ) : null}
                           </div>
@@ -693,17 +671,25 @@ export const AdminUserBooksQualitySection = memo(
                             {item.book_title}
                           </h3>
                           <p className="mt-0.5 text-xs text-muted">
-                            Chủ sở hữu: <strong>{item.owner_label}</strong>
+                            {t("userBooks.ownerLabel")}{" "}
+                            <strong>{item.owner_label}</strong>
                             {item.latest_submission_version
-                              ? ` · Phiên bản v${item.latest_submission_version}`
+                              ? t("userBooks.versionPrefix", {
+                                  version: item.latest_submission_version,
+                                })
                               : ""}
-                            {" · "}Đã thêm {item.committed_page_count} trang
+                            {" · "}
+                            {t("userBooks.committedPages", {
+                              count: formatNumber(item.committed_page_count),
+                            })}
                           </p>
                           <p className="mt-1 text-xs text-muted">
-                            Chờ duyệt: <strong>{item.pending_count}</strong> ·
-                            Cảnh báo: <strong>{item.flagged_count}</strong> ·
-                            Lỗi: <strong>{item.failed_count}</strong> · Cập
-                            nhật: {formatDateTime(item.latest_submitted_at)}
+                            {t("userBooks.queueItemStats", {
+                              pending: formatNumber(item.pending_count),
+                              flagged: formatNumber(item.flagged_count),
+                              failed: formatNumber(item.failed_count),
+                              time: formatDateTime(item.latest_submitted_at),
+                            })}
                           </p>
                         </div>
 
@@ -719,7 +705,7 @@ export const AdminUserBooksQualitySection = memo(
                             type="button"
                             variant={isSelected ? "primary" : "secondary"}
                           >
-                            Mở để duyệt
+                            {t("userBooks.openForReview")}
                           </Button>
                         </div>
                       </li>
@@ -729,11 +715,11 @@ export const AdminUserBooksQualitySection = memo(
               )}
               {queue ? (
                 <PaginationBar
-                  ariaLabel="Phân trang hàng đợi sách người dùng"
+                  ariaLabel={t("userBooks.paginationAria")}
                   className="mt-4"
                   compact
                   disabled={loadingQueue}
-                  itemLabel="sách"
+                  itemLabel={t("userBooks.itemLabel")}
                   onPageChange={(nextPage) =>
                     setQueueOffset((nextPage - 1) * USER_BOOKS_PAGE_SIZE)
                   }
@@ -747,7 +733,7 @@ export const AdminUserBooksQualitySection = memo(
             {/* Detail Review Panel */}
             {selectedId ? (
               <section
-                aria-label="Chi tiết kiểm duyệt trang sách người dùng"
+                aria-label={t("userBooks.detailAria")}
                 className="rounded-card border-2 border-primary/30 bg-white p-4 shadow-sm sm:p-6"
               >
                 {loadingDetail ? (
@@ -757,10 +743,10 @@ export const AdminUserBooksQualitySection = memo(
                   </div>
                 ) : detailError || !detail ? (
                   <StatusMessage
-                    title="Không thể mở chi tiết bản nộp"
+                    title={t("userBooks.detailErrorTitle")}
                     tone="error"
                   >
-                    {detailError ?? "Không tìm thấy bản nộp."}
+                    {detailError ?? t("userBooks.submissionNotFound")}
                   </StatusMessage>
                 ) : (
                   <div className="flex flex-col gap-5">
@@ -768,7 +754,7 @@ export const AdminUserBooksQualitySection = memo(
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-xs font-bold text-indigo-900">
-                            Sách riêng của phụ huynh
+                            {t("userBooks.privateParentBookTag")}
                           </span>
                           <span
                             className={`rounded-full border px-2.5 py-0.5 text-xs font-bold ${
@@ -780,22 +766,26 @@ export const AdminUserBooksQualitySection = memo(
                           </span>
                           {detail.book_moderation_status === "SUSPENDED" ? (
                             <span className="rounded-full border border-rose-300 bg-rose-100 px-2.5 py-0.5 text-xs font-bold text-rose-900">
-                              Sách đang bị đình chỉ
+                              {t("userBooks.bookSuspendedTag")}
                             </span>
                           ) : null}
                         </div>
                         <h3 className="mt-2 text-xl font-extrabold text-ink">
-                          {detail.book_title} — Trang nguồn{" "}
-                          {detail.source_page_number}/{detail.batch_total_pages}
+                          {t("userBooks.detailHeading", {
+                            title: detail.book_title,
+                            pageNumber: detail.source_page_number,
+                            totalPages: detail.batch_total_pages,
+                          })}
                         </h3>
                         <p className="mt-1 text-xs text-muted">
-                          Chủ sở hữu: <strong>{detail.owner_label}</strong> ·
-                          Phiên bản{" "}
-                          <strong>v{detail.submission_version}</strong> · Khóa
-                          kiểm soát #{detail.optimistic_lock_version}
-                          {detail.snapshot_hash
-                            ? ` · Hash ${detail.snapshot_hash.slice(0, 12)}`
-                            : ""}
+                          {t("userBooks.detailMeta", {
+                            owner: detail.owner_label,
+                            version: detail.submission_version,
+                            lockVersion: detail.optimistic_lock_version,
+                            hashSuffix: detail.snapshot_hash
+                              ? ` · Hash ${detail.snapshot_hash.slice(0, 12)}`
+                              : "",
+                          })}
                         </p>
                       </div>
 
@@ -806,13 +796,13 @@ export const AdminUserBooksQualitySection = memo(
                         variant="secondary"
                       >
                         <RefreshCw aria-hidden="true" className="size-3.5" />
-                        Tải bản mới nhất
+                        {t("userBooks.reloadLatest")}
                       </Button>
                     </div>
 
                     {conflictError ? (
                       <StatusMessage
-                        title="Xung đột phiên bản (409)"
+                        title={t("userBooks.conflictTitle")}
                         tone="warning"
                       >
                         <div className="flex flex-col gap-2">
@@ -829,20 +819,26 @@ export const AdminUserBooksQualitySection = memo(
                               aria-hidden="true"
                               className="size-3.5"
                             />
-                            Tải lại phiên bản mới nhất
+                            {t("userBooks.reloadLatestVersionBtn")}
                           </Button>
                         </div>
                       </StatusMessage>
                     ) : null}
 
                     {actionError ? (
-                      <StatusMessage title="Chưa thể hoàn tất" tone="error">
+                      <StatusMessage
+                        title={t("userBooks.actionIncompleteTitle")}
+                        tone="error"
+                      >
                         {actionError}
                       </StatusMessage>
                     ) : null}
 
                     {actionNotice ? (
-                      <StatusMessage title="Đã lưu quyết định" tone="success">
+                      <StatusMessage
+                        title={t("userBooks.decisionSavedTitle")}
+                        tone="success"
+                      >
                         {actionNotice}
                       </StatusMessage>
                     ) : null}
@@ -851,31 +847,35 @@ export const AdminUserBooksQualitySection = memo(
                       {/* Left Column: Authenticated Page Image */}
                       <div className="lg:col-span-5">
                         <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">
-                          Ảnh trang gốc (tải qua proxy xác thực Admin)
+                          {t("userBooks.sourceImageHeading")}
                         </p>
                         <div className="overflow-hidden rounded-card border border-border bg-cream p-3">
                           <AuthenticatedImage
-                            alt={`Ảnh trang nguồn ${detail.source_page_number} của ${detail.book_title}`}
+                            alt={t("userBooks.sourceImageAlt", {
+                              pageNumber: detail.source_page_number,
+                              title: detail.book_title,
+                            })}
                             className="mx-auto max-h-[420px] w-full object-contain"
                             src={detail.image_url}
                           />
                         </div>
                         <div className="mt-3 rounded-control border border-border bg-canvas p-3 text-xs">
                           <p className="font-bold text-ink">
-                            Khai báo từ phụ huynh (chỉ tham khảo)
+                            {t("userBooks.parentDeclarationHeading")}
                           </p>
                           <p className="mt-1">
-                            <strong>Nguồn:</strong> {detail.source_type_label}
+                            <strong>{t("userBooks.sourceTypeLabel")}</strong>{" "}
+                            {detail.source_type_label}
                           </p>
                           {detail.source_note ? (
                             <p className="mt-1">
-                              <strong>Ghi chú nguồn:</strong>{" "}
+                              <strong>{t("userBooks.sourceNoteLabel")}</strong>{" "}
                               {detail.source_note}
                             </p>
                           ) : null}
                           {detail.parent_request_note ? (
                             <p className="mt-1">
-                              <strong>Lời nhắn gửi Admin:</strong>{" "}
+                              <strong>{t("userBooks.parentNoteLabel")}</strong>{" "}
                               {detail.parent_request_note}
                             </p>
                           ) : null}
@@ -888,41 +888,69 @@ export const AdminUserBooksQualitySection = memo(
                         <div className="grid gap-3 sm:grid-cols-2">
                           <div className="rounded-control border border-border bg-canvas p-3">
                             <p className="text-xs font-bold text-muted">
-                              Văn bản OCR gốc
+                              {t("userBooks.originalOcrHeading")}
                             </p>
-                            <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-ink">
-                              {detail.ocr_text?.trim() ||
-                                "(Không trích xuất được chữ / trang chỉ có hình)"}
-                            </p>
+                            {detail.ocr_text?.trim() ? (
+                              <p
+                                className="viread-learning-content mt-1 whitespace-pre-wrap text-xs leading-relaxed text-ink"
+                                dir="ltr"
+                                lang="vi"
+                              >
+                                {detail.ocr_text}
+                              </p>
+                            ) : (
+                              <p className="mt-1 text-xs leading-relaxed text-muted">
+                                {t("userBooks.originalOcrEmpty")}
+                              </p>
+                            )}
                           </div>
                           <div className="rounded-control border border-border bg-white p-3">
                             <p className="text-xs font-bold text-ink">
-                              Văn bản đề xuất thêm vào sách
+                              {t("userBooks.proposedTextHeading")}
                             </p>
-                            <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-ink">
-                              {detail.candidate_text?.trim() ||
-                                "(Trang ảnh không có văn bản)"}
-                            </p>
+                            {detail.candidate_text?.trim() ? (
+                              <p
+                                className="viread-learning-content mt-1 whitespace-pre-wrap text-xs leading-relaxed text-ink"
+                                dir="ltr"
+                                lang="vi"
+                              >
+                                {detail.candidate_text}
+                              </p>
+                            ) : (
+                              <p className="mt-1 text-xs leading-relaxed text-muted">
+                                {t("userBooks.proposedTextEmpty")}
+                              </p>
+                            )}
                           </div>
                         </div>
 
                         {/* Tool Check Summary & Scope */}
                         <div className="rounded-control border border-border bg-slate-50 p-3 text-xs">
                           <p className="font-bold text-ink">
-                            Kết quả Tool Check · {detail.tool_check_status}
+                            {t("userBooks.toolCheckHeading", {
+                              status: detail.tool_check_status,
+                            })}
                             {detail.tool_check_suitability
                               ? ` (${detail.tool_check_suitability})`
                               : ""}
                           </p>
                           <p className="mt-1 text-slate-700">
-                            Phạm vi: {detail.tool_check_scope.modality} · Đã
-                            quét {detail.tool_check_scope.chunks_checked}/
-                            {detail.tool_check_scope.total_chunks} đoạn ·{" "}
-                            {detail.tool_check_scope.local_ai_enforced
-                              ? "Ollama local bắt buộc"
-                              : "AI mặc định"}{" "}
-                            · Quét bản quyền:{" "}
-                            {detail.tool_check_scope.copyright_scanner_status}.
+                            {t("userBooks.toolCheckScope", {
+                              modality: detail.tool_check_scope.modality,
+                              checked: formatNumber(
+                                detail.tool_check_scope.chunks_checked,
+                              ),
+                              total: formatNumber(
+                                detail.tool_check_scope.total_chunks,
+                              ),
+                              engineMode: detail.tool_check_scope
+                                .local_ai_enforced
+                                ? t("userBooks.engineOllamaLocal")
+                                : t("userBooks.engineDefaultAi"),
+                              copyrightStatus:
+                                detail.tool_check_scope
+                                  .copyright_scanner_status,
+                            })}
                           </p>
                         </div>
 
@@ -934,8 +962,11 @@ export const AdminUserBooksQualitySection = memo(
                                 aria-hidden="true"
                                 className="size-4 shrink-0"
                               />
-                              Cảnh báo Tool Check (
-                              {detail.tool_check_findings.length})
+                              {t("userBooks.findingsHeading", {
+                                count: formatNumber(
+                                  detail.tool_check_findings.length,
+                                ),
+                              })}
                             </p>
                             <ul className="mt-2 space-y-2 text-xs">
                               {detail.tool_check_findings.map(
@@ -967,9 +998,15 @@ export const AdminUserBooksQualitySection = memo(
                                     {finding.excerpt ? (
                                       <details className="mt-1.5">
                                         <summary className="cursor-pointer font-semibold text-primary">
-                                          Xem đoạn nhạy cảm bị gắn cờ
+                                          {t(
+                                            "userBooks.revealSensitiveExcerpt",
+                                          )}
                                         </summary>
-                                        <p className="mt-1 rounded bg-slate-100 p-2 font-mono text-[11px] text-ink">
+                                        <p
+                                          className="viread-learning-content mt-1 rounded bg-slate-100 p-2 font-mono text-[11px] text-ink"
+                                          dir="ltr"
+                                          lang="vi"
+                                        >
                                           {finding.excerpt}
                                         </p>
                                       </details>
@@ -984,11 +1021,11 @@ export const AdminUserBooksQualitySection = memo(
                         {/* Policy-Block Warning */}
                         {detail.tool_check_policy_blocked ? (
                           <StatusMessage
-                            title="Nội dung bị chặn theo chính sách an toàn trẻ em"
+                            title={t("userBooks.policyBlockTitle")}
                             tone="error"
                           >
                             {detail.approve_blocked_reason ??
-                              "Phiên bản này bị gắn cờ mức chặn (HIGH / NOT_RECOMMENDED). Nút Duyệt bản này bị vô hiệu hóa; Admin chỉ có thể Yêu cầu sửa, Từ chối hoặc Đình chỉ sách riêng."}
+                              t("userBooks.policyBlockBody")}
                           </StatusMessage>
                         ) : null}
 
@@ -1004,12 +1041,13 @@ export const AdminUserBooksQualitySection = memo(
                         {/* Moderation History */}
                         <div className="rounded-control border border-border bg-white p-3">
                           <p className="text-xs font-bold text-ink">
-                            Lịch sử kiểm duyệt ({detail.history.length})
+                            {t("userBooks.historyHeading", {
+                              count: formatNumber(detail.history.length),
+                            })}
                           </p>
                           {detail.history.length === 0 ? (
                             <p className="mt-1 text-xs text-muted">
-                              Chưa có yêu cầu duyệt hoặc quyết định nào trước
-                              đó.
+                              {t("userBooks.noHistoryYet")}
                             </p>
                           ) : (
                             <ul className="mt-2 space-y-2 text-xs">
@@ -1031,12 +1069,14 @@ export const AdminUserBooksQualitySection = memo(
                                   </div>
                                   {hist.decision_reason ? (
                                     <p className="mt-1 text-ink">
-                                      Lý do Admin: {hist.decision_reason}
+                                      {t("userBooks.historyReason", {
+                                        reason: hist.decision_reason,
+                                      })}
                                     </p>
                                   ) : null}
                                   {hist.parent_request_note ? (
                                     <p className="mt-0.5 text-muted">
-                                      Ghi chú phụ huynh:{" "}
+                                      {t("userBooks.historyParentNote")}{" "}
                                       {hist.parent_request_note}
                                     </p>
                                   ) : null}

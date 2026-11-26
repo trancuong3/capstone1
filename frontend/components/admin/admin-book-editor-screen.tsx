@@ -12,15 +12,16 @@ import { EmptyState } from "@/components/common/empty-state";
 import { Modal } from "@/components/common/modal";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
 import type { AdminBookCreateDTO, AdminBookDTO } from "@/types/admin";
 
-const issueLabels: Record<string, string> = {
-  MISSING_TITLE: "Thiếu tiêu đề",
-  MISSING_AUTHOR: "Chưa có tác giả",
-  INVALID_GRADE_RANGE: "Khoảng lớp không hợp lệ",
-  POSSIBLE_DUPLICATE: "Có thể trùng sách",
-};
+const ISSUE_KEYS = new Set([
+  "MISSING_TITLE",
+  "MISSING_AUTHOR",
+  "INVALID_GRADE_RANGE",
+  "POSSIBLE_DUPLICATE",
+]);
 
 interface AdminBookEditorScreenProps {
   bookId: string;
@@ -34,6 +35,7 @@ export function AdminBookEditorScreen({
   issue,
 }: AdminBookEditorScreenProps) {
   const { books } = useAdminServices();
+  const t = useTranslations("admin");
   const router = useRouter();
   const [book, setBook] = useState<AdminBookDTO | null>(null);
   const [loading, setLoading] = useState(true);
@@ -109,12 +111,12 @@ export function AdminBookEditorScreen({
         tone: "info",
         title:
           nextStatus === "RETIRED"
-            ? "Đã ngừng hoạt động sách"
-            : "Đã kích hoạt lại sách",
+            ? t("books.editor.retiredSuccessTitle")
+            : t("books.editor.reactivatedSuccessTitle"),
         message:
           nextStatus === "RETIRED"
-            ? "Sách không còn xuất hiện trong catalog Parent. Metadata, trang sách, revision và lịch sử đọc vẫn được giữ nguyên."
-            : "Trạng thái mới đã được lưu. Kho sách và dashboard sẽ đọc lại dữ liệu từ API khi mở hoặc tải lại.",
+            ? t("books.editor.retiredSuccessDesc")
+            : t("books.editor.reactivatedSuccessDesc"),
       });
     } catch (cause) {
       setConfirmLifecycleOpen(false);
@@ -122,25 +124,25 @@ export function AdminBookEditorScreen({
         tone: "error",
         title:
           nextStatus === "ACTIVE"
-            ? "Không thể kích hoạt sách"
-            : "Không thể ngừng hoạt động sách",
+            ? t("books.editor.cannotActivateTitle")
+            : t("books.editor.cannotRetireTitle"),
         message:
           nextStatus === "ACTIVE" &&
           isServiceError(cause) &&
           cause.status === 409
-            ? "Child Safety chưa cho phép đưa sách vào thư viện. Hoàn tất OCR VERIFIED và xác nhận Safety khớp Candidate cho tất cả trang; finding HIGH hoặc NOT_RECOMMENDED tiếp tục bị chặn."
+            ? t("books.editor.safetyBlocked")
             : nextStatus === "ACTIVE" &&
                 isServiceError(cause) &&
                 cause.status === 422
-              ? "Metadata hiện tại chưa hợp lệ. Hãy sửa tiêu đề và khoảng lớp ở biểu mẫu rồi lưu trước khi kích hoạt."
-              : "Yêu cầu không được xác nhận. Hãy kiểm tra quyền Admin hoặc kết nối Backend rồi thử lại.",
+              ? t("books.editor.invalidMetadata")
+              : t("books.editor.genericToggleError"),
       });
     } finally {
       setStatusBusy(false);
     }
   }
 
-  if (loading) return <AdminLoading label="Đang tải metadata sách…" />;
+  if (loading) return <AdminLoading label={t("books.editor.loading")} />;
 
   if (error || !book) {
     return (
@@ -148,24 +150,24 @@ export function AdminBookEditorScreen({
         headingLevel={1}
         title={
           error === "not-found"
-            ? "Không tìm thấy sách"
-            : "Không thể tải metadata sách"
+            ? t("books.editor.notFoundTitle")
+            : t("books.editor.loadErrorTitle")
         }
         description={
           error === "not-found"
-            ? "Sách không tồn tại hoặc không còn trong dữ liệu quản trị."
-            : "Không thể tải dữ liệu từ Backend. Vui lòng thử lại."
+            ? t("books.editor.notFoundDesc")
+            : t("books.editor.genericErrorDesc")
         }
         action={
           <div className="flex flex-wrap items-center gap-3">
             <Button onClick={() => void load()} variant="secondary">
-              Thử lại
+              {t("common.retry")}
             </Button>
             <Link
               className="inline-flex min-h-11 items-center rounded-md px-1 font-semibold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
               href="/admin/books"
             >
-              Quay lại kho sách
+              {t("books.detail.backToBooks")}
             </Link>
           </div>
         }
@@ -188,17 +190,18 @@ export function AdminBookEditorScreen({
   return (
     <section className="figma-form-page mx-auto flex w-full max-w-[960px] flex-col gap-4">
       <AdminPageHeader
-        title="Chỉnh sửa metadata sách"
-        description="Cập nhật tên sách, tiêu đề và khoảng lớp; giữ nguyên trang sách, revision và lịch sử đọc."
+        title={t("books.editor.title")}
+        description={t("books.editor.description")}
       />
-      {issue && issueLabels[issue] ? (
+      {issue && ISSUE_KEYS.has(issue) ? (
         <StatusMessage
           className="mb-5"
           tone="info"
-          title={`Cần xử lý: ${issueLabels[issue]}`}
+          title={t("books.editor.issueTitle", {
+            issue: t(`books.editor.issueLabels.${issue}`),
+          })}
         >
-          Kiểm tra trường liên quan bên dưới. Dashboard chỉ xóa cảnh báo sau khi
-          tải lại dữ liệu từ Backend và điều kiện đó đã được khắc phục.
+          {t("books.editor.issueHint")}
         </StatusMessage>
       ) : null}
       <div className="flex flex-wrap items-center gap-4">
@@ -210,8 +213,8 @@ export function AdminBookEditorScreen({
           variant="secondary"
         >
           {book.lifecycle_status === "ACTIVE"
-            ? "Ngừng hoạt động"
-            : "Kích hoạt lại"}
+            ? t("books.editor.retire")
+            : t("books.editor.reactivate")}
         </Button>
       </div>
       {notice ? (
@@ -220,12 +223,14 @@ export function AdminBookEditorScreen({
         </StatusMessage>
       ) : null}
       <Card className="w-full bg-white sm:px-8 sm:py-8">
-        <h2 className="text-2xl font-extrabold text-ink">Thông tin sách</h2>
+        <h2 className="text-2xl font-extrabold text-ink">
+          {t("books.editor.infoHeading")}
+        </h2>
         <AdminBookForm
           cancelHref={cancelHref}
           initial={initial}
           onSubmit={saveMetadata}
-          submitLabel="Lưu metadata"
+          submitLabel={t("books.editor.submitLabel")}
         />
       </Card>
       <Modal
@@ -240,7 +245,7 @@ export function AdminBookEditorScreen({
               type="button"
               variant="secondary"
             >
-              Hủy
+              {t("common.cancel")}
             </Button>
             <Button
               disabled={statusBusy}
@@ -253,8 +258,8 @@ export function AdminBookEditorScreen({
               }
             >
               {book.lifecycle_status === "ACTIVE"
-                ? "Xác nhận ngừng hoạt động"
-                : "Xác nhận kích hoạt lại"}
+                ? t("books.editor.confirmRetire")
+                : t("books.editor.confirmReactivate")}
             </Button>
           </div>
         }
@@ -266,15 +271,15 @@ export function AdminBookEditorScreen({
         showCloseButton={!statusBusy}
         title={
           book.lifecycle_status === "ACTIVE"
-            ? "Ngừng hoạt động sách?"
-            : "Kích hoạt lại sách?"
+            ? t("books.editor.modalRetireTitle")
+            : t("books.editor.modalReactivateTitle")
         }
         tone="paper"
       >
         <p className="text-body text-ink">
           {book.lifecycle_status === "ACTIVE"
-            ? "Ngừng hoạt động sách này? Trang sách và lịch sử đọc sẽ được giữ nguyên."
-            : "Kích hoạt lại sách này trong catalog dành cho phụ huynh?"}
+            ? t("books.editor.modalRetireBody")
+            : t("books.editor.modalReactivateBody")}
         </p>
       </Modal>
     </section>

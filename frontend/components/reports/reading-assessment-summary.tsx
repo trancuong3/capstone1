@@ -1,3 +1,6 @@
+"use client";
+
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { cn } from "@/lib/utils/cn";
 import type { ReadingAssessmentMetricsDTO } from "@/types/reading";
 
@@ -10,6 +13,8 @@ export function ReadingAssessmentSummary({
   readonly scopeLabel?: string;
   readonly embedded?: boolean;
 }) {
+  const { formatNumber } = useI18n();
+  const t = useTranslations("reports");
   if (!assessment) return null;
 
   const firstPassTotal =
@@ -21,22 +26,22 @@ export function ReadingAssessmentSummary({
 
   const retryMetrics = [
     {
-      label: "Bé đã tự sửa đúng",
+      label: t("overview.firstPassSummary.selfCorrected"),
       value: assessment.self_corrected_words,
       valueClass: "text-success-ink",
     },
     {
-      label: "Còn cần luyện",
+      label: t("overview.firstPassSummary.stillNeedsPractice"),
       value: assessment.unresolved_words,
       valueClass: assessment.unresolved_words > 0 ? "text-danger" : "text-ink",
     },
     {
-      label: "Lượt luyện đã nhận diện",
+      label: t("overview.firstPassSummary.recognizedRetries"),
       value: assessment.retry_attempts,
       valueClass: "text-ink",
     },
     {
-      label: "Đã luyện đủ ba lần",
+      label: t("overview.firstPassSummary.maxRetriesReached"),
       value: assessment.skipped_after_retry_limit,
       valueClass: "text-ink",
     },
@@ -44,7 +49,7 @@ export function ReadingAssessmentSummary({
 
   return (
     <section
-      aria-label="Kết quả lượt đầu và luyện lại"
+      aria-label={t("overview.firstPassSummary.regionAria")}
       className={cn(
         "border border-border",
         embedded ? "rounded-control bg-canvas/55" : "rounded-card bg-white",
@@ -53,10 +58,10 @@ export function ReadingAssessmentSummary({
       <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border px-4 py-3.5 sm:px-6">
         <div>
           <h3 className="text-lg font-extrabold text-ink">
-            Lượt đọc đầu và phần luyện thêm
+            {t("overview.firstPassSummary.heading")}
           </h3>
           <p className="mt-0.5 text-sm text-muted">
-            Tự sửa đúng được ghi nhận riêng và không thay đổi kết quả lượt đầu.
+            {t("overview.firstPassSummary.subtitle")}
           </p>
         </div>
         {scopeLabel ? (
@@ -70,19 +75,23 @@ export function ReadingAssessmentSummary({
         <div className="flex flex-col justify-between gap-4 p-4 sm:p-5">
           <div>
             <h4 className="text-xs font-extrabold tracking-wide text-primary">
-              Đánh giá lượt đầu
+              {t("overview.firstPassSummary.firstPassTitle")}
             </h4>
             <dl className="mt-3 grid grid-cols-2 gap-4">
               <div>
-                <dt className="text-sm text-muted">Đúng lượt đầu</dt>
+                <dt className="text-sm text-muted">
+                  {t("overview.firstPassSummary.firstPassCorrect")}
+                </dt>
                 <dd className="mt-1 text-2xl font-extrabold tabular-nums text-success-ink">
-                  {assessment.first_pass_correct}
+                  {formatNumber(assessment.first_pass_correct)}
                 </dd>
               </div>
               <div>
-                <dt className="text-sm text-muted">Cần luyện ở lượt đầu</dt>
+                <dt className="text-sm text-muted">
+                  {t("overview.firstPassSummary.firstPassNeedsPractice")}
+                </dt>
                 <dd className="mt-1 text-2xl font-extrabold tabular-nums text-ink">
-                  {assessment.first_pass_incorrect}
+                  {formatNumber(assessment.first_pass_incorrect)}
                 </dd>
               </div>
             </dl>
@@ -90,10 +99,13 @@ export function ReadingAssessmentSummary({
           {firstPassCorrectPct !== null ? (
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-xs font-semibold text-muted">
-                <span>Tỷ lệ đúng lượt đầu</span>
+                <span>{t("overview.firstPassSummary.firstPassAccuracy")}</span>
                 <span className="tabular-nums text-ink">
-                  {firstPassCorrectPct}% ({assessment.first_pass_correct}/
-                  {firstPassTotal} từ)
+                  {firstPassCorrectPct}%{" "}
+                  {t("overview.firstPassSummary.firstPassWordsCount", {
+                    correct: formatNumber(assessment.first_pass_correct),
+                    total: formatNumber(firstPassTotal),
+                  })}
                 </span>
               </div>
               <div
@@ -112,7 +124,7 @@ export function ReadingAssessmentSummary({
         <div className="flex flex-col justify-between gap-4 p-4 sm:p-5">
           <div>
             <h4 className="text-xs font-extrabold tracking-wide text-primary">
-              Luyện thêm
+              {t("overview.firstPassSummary.retrySectionTitle")}
             </h4>
             <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
               {retryMetrics.map(({ label, value, valueClass }) => (
@@ -121,7 +133,7 @@ export function ReadingAssessmentSummary({
                   <dd
                     className={`mt-1 text-xl font-extrabold tabular-nums ${valueClass}`}
                   >
-                    {value}
+                    {formatNumber(value)}
                   </dd>
                 </div>
               ))}
@@ -130,13 +142,15 @@ export function ReadingAssessmentSummary({
 
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-canvas px-3.5 py-2.5 text-sm ring-1 ring-inset ring-border/80">
             <div className="flex items-baseline gap-2">
-              <span className="font-semibold text-muted">Chưa nghe rõ</span>
+              <span className="font-semibold text-muted">
+                {t("overview.firstPassSummary.uncertainLabel")}
+              </span>
               <span className="text-base font-extrabold tabular-nums text-ink">
-                {assessment.recognition_uncertain}
+                {formatNumber(assessment.recognition_uncertain)}
               </span>
             </div>
             <span className="text-xs text-muted">
-              Ghi nhận riêng, không tính là lỗi phát âm đã xác nhận.
+              {t("overview.firstPassSummary.uncertainNote")}
             </span>
           </div>
         </div>

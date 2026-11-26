@@ -15,6 +15,7 @@ import {
 import { clearApiReadCache, runCoalescedApiGet } from "@/lib/api/read-cache";
 import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
 import { clearUserCache } from "@/lib/cache/user-query-cache";
+import { translateRuntime } from "@/lib/i18n/runtime";
 
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { getApiBaseUrl } from "@/lib/supabase/config";
@@ -126,7 +127,7 @@ function createHttpError(
     code: mapErrorCode(response.status),
     message: extractErrorMessage(
       payload,
-      "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
+      translateRuntime("errors.clientRuntime.genericParentRetry"),
     ),
     status: response.status,
     request_id: response.headers.get("x-request-id") ?? "",
@@ -219,7 +220,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       throw new ServiceError({
         code: "NETWORK_ERROR",
-        message: "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
+        message: translateRuntime("errors.clientRuntime.genericParentRetry"),
         status: 0,
         request_id: "",
         retryable: true,
@@ -245,7 +246,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       throw new ServiceError({
         code: "NETWORK_ERROR",
-        message: "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
+        message: translateRuntime("errors.clientRuntime.genericParentRetry"),
         status: response.status,
         request_id: response.headers.get("x-request-id") ?? "",
         retryable: false,
@@ -348,7 +349,7 @@ function normalizeUpdatedProfile(
   if (!id || !role || !createdAt) {
     throw new ServiceError({
       code: "NETWORK_ERROR",
-      message: "Dữ liệu hồ sơ trả về từ server không hợp lệ.",
+      message: translateRuntime("errors.clientRuntime.invalidProfilePayload"),
       status: 200,
       request_id: "",
       retryable: false,
@@ -385,9 +386,7 @@ function normalizeVietnamesePhone(value: string): string {
     return compact;
   }
 
-  throw new Error(
-    "Số điện thoại chưa đúng định dạng. Ba mẹ vui lòng kiểm tra lại.",
-  );
+  throw new Error(translateRuntime("errors.clientRuntime.invalidPhoneFormat"));
 }
 
 function safeAuthChangeError(
@@ -404,21 +403,23 @@ function safeAuthChangeError(
     info.code === "over_request_rate_limit" ||
     info.code === "over_email_send_rate_limit"
   ) {
-    return new Error("Ba mẹ thao tác quá nhanh. Vui lòng đợi rồi thử lại.");
+    return new Error(translateRuntime("errors.clientRuntime.rateLimitedWait"));
   }
 
   if (info.code === "email_exists" || info.code === "user_already_exists") {
-    return new Error("Email này đã được tài khoản khác sử dụng.");
+    return new Error(
+      translateRuntime("errors.clientRuntime.emailAlreadyInUse"),
+    );
   }
 
   if (operation === "email") {
     return new Error(
-      "Chưa gửi được yêu cầu đổi email. Ba mẹ vui lòng kiểm tra cấu hình email và thử lại.",
+      translateRuntime("errors.clientRuntime.emailChangeRequestFailed"),
     );
   }
 
   return new Error(
-    "Chưa gửi lại được email xác minh. Ba mẹ vui lòng thử lại sau.",
+    translateRuntime("errors.clientRuntime.resendVerificationFailed"),
   );
 }
 
@@ -553,7 +554,9 @@ export function createProfileService(): ProfileService {
         !normalizedEmail ||
         !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
       ) {
-        throw new Error("Email chưa đúng định dạng.");
+        throw new Error(
+          translateRuntime("errors.clientRuntime.invalidEmailFormat"),
+        );
       }
 
       const supabase = createBrowserSupabaseClient();
@@ -561,13 +564,15 @@ export function createProfileService(): ProfileService {
         await supabase.auth.getUser();
       if (currentUserError || !currentUserData.user) {
         throw new Error(
-          "Phiên đăng nhập đã hết hạn. Ba mẹ vui lòng đăng nhập lại.",
+          translateRuntime("errors.clientRuntime.sessionExpiredParent"),
         );
       }
       if (
         currentUserData.user.email?.trim().toLowerCase() === normalizedEmail
       ) {
-        throw new Error("Email mới giống email hiện tại.");
+        throw new Error(
+          translateRuntime("errors.clientRuntime.newEmailSameAsCurrent"),
+        );
       }
 
       const { error } = await supabase.auth.updateUser(
@@ -580,7 +585,9 @@ export function createProfileService(): ProfileService {
     async resendEmailChange(email: string): Promise<void> {
       const normalizedEmail = email.trim().toLowerCase();
       if (!normalizedEmail) {
-        throw new Error("Không có email đang chờ xác minh.");
+        throw new Error(
+          translateRuntime("errors.clientRuntime.noPendingEmailChange"),
+        );
       }
 
       const supabase = createBrowserSupabaseClient();

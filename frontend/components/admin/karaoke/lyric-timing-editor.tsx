@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import {
   importLyrics,
   MAX_LYRICS_BYTES,
@@ -65,6 +66,8 @@ const TimingEditorForm = memo(function TimingEditorForm({
   onSave,
   focusTarget,
 }: TimingEditorProps) {
+  const t = useTranslations("admin");
+  const { formatNumber } = useI18n();
   const [page, setPage] = useState(0);
   const [paste, setPaste] = useState("");
   const [error, setError] = useState("");
@@ -94,7 +97,7 @@ const TimingEditorForm = memo(function TimingEditorForm({
       const result = importLyrics(text, format, duration);
       if (
         lyrics.lines.length &&
-        !window.confirm("Thay thế toàn bộ lời và mốc thời gian đang nhập?")
+        !window.confirm(t("karaoke.lyricEditor.replaceConfirm"))
       )
         return;
       onChange(result.lyrics);
@@ -102,11 +105,13 @@ const TimingEditorForm = memo(function TimingEditorForm({
       setError("");
       setNotice(
         result.suggestedEnds
-          ? "Mốc kết thúc LRC chỉ là gợi ý từ câu tiếp theo/thời lượng nhạc. Hãy nghe và chỉnh lại trước khi xuất bản."
-          : "Đã nhập lời. Hãy kiểm tra và căn thời gian từng dòng.",
+          ? t("karaoke.lyricEditor.lrcNotice")
+          : t("karaoke.lyricEditor.importedNotice"),
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Không đọc được lời.");
+      setError(
+        e instanceof Error ? e.message : t("karaoke.lyricEditor.readError"),
+      );
     }
   }
   async function readFile(file?: File) {
@@ -121,7 +126,7 @@ const TimingEditorForm = memo(function TimingEditorForm({
         (extension === "json" ? MAX_LYRICS_JSON_BYTES : MAX_LYRICS_BYTES) ||
       !["txt", "lrc", "json"].includes(extension ?? "")
     ) {
-      setError("Chọn TXT/LRC UTF-8 tối đa 256 KiB hoặc JSON tối đa 2 MiB.");
+      setError(t("karaoke.lyricEditor.fileLimitError"));
       return;
     }
     setReading(true);
@@ -132,9 +137,7 @@ const TimingEditorForm = memo(function TimingEditorForm({
         apply(text, extension as "txt" | "lrc" | "json");
     } catch {
       if (ticket === generation.current)
-        setError(
-          "Không đọc được file UTF-8. Nội dung hiện tại được giữ nguyên.",
-        );
+        setError(t("karaoke.lyricEditor.utf8Error"));
     } finally {
       if (mounted.current && request === fileRequest.current) setReading(false);
     }
@@ -181,12 +184,16 @@ const TimingEditorForm = memo(function TimingEditorForm({
   return (
     <div className="grid gap-5">
       <fieldset disabled={disabled || reading} className="grid min-w-0 gap-4">
-        <legend className="mb-3 font-bold">Nhập lời (tối đa 300 dòng)</legend>
+        <legend className="mb-3 font-bold">
+          {t("karaoke.lyricEditor.importLegend")}
+        </legend>
         <label className="grid gap-2 font-bold">
-          Dán lời thuần văn bản
+          {t("karaoke.lyricEditor.pasteLabel")}
           <textarea
             rows={4}
-            className={karaokeInputClass}
+            className={`${karaokeInputClass} viread-learning-content`}
+            dir="ltr"
+            lang="vi"
             value={paste}
             maxLength={100000}
             onChange={(e) => setPaste(e.target.value)}
@@ -199,13 +206,13 @@ const TimingEditorForm = memo(function TimingEditorForm({
             disabled={!paste.trim()}
             onClick={() => apply(paste, "txt")}
           >
-            Nhập lời đã dán
+            {t("karaoke.lyricEditor.importPastedBtn")}
           </Button>
           <label className="grid min-w-0 gap-2 text-sm font-bold">
-            Nhập file TXT / LRC / JSON
+            {t("karaoke.lyricEditor.importFileLabel")}
             <input
               type="file"
-              aria-label="File lời bài hát"
+              aria-label={t("karaoke.lyricEditor.importFileAria")}
               accept=".txt,.lrc,.json"
               className="max-w-full"
               onChange={(e) => {
@@ -217,18 +224,28 @@ const TimingEditorForm = memo(function TimingEditorForm({
           </label>
         </div>
       </fieldset>
-      {reading && <p role="status">Đang đọc file lời…</p>}
+      {reading && (
+        <p role="status">{t("karaoke.lyricEditor.readingFileStatus")}</p>
+      )}
       {error && <StatusMessage tone="error">{error}</StatusMessage>}
       {notice && <StatusMessage>{notice}</StatusMessage>}
       <p className="text-sm text-muted">
-        Thời gian dùng mili giây (1 giây = 1000 ms). Để trống khi chưa căn. Bật
-        nghe thử để đánh dấu theo vị trí âm thanh thật.
+        {t("karaoke.lyricEditor.timingHint")}
       </p>
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-sm" role="status">
           {lyrics.format_version === 2
-            ? `Chạy từng tiếng · ${lyrics.lines.filter((l) => l.syllables?.length && !unitIssues.some((e) => e.lineId === l.id)).length}/${lyrics.lines.length} câu đã căn tiếng`
-            : "Lời theo câu · Chọn Căn từng tiếng để nâng cấp bản nháp"}
+            ? t("karaoke.lyricEditor.syllableAlignedSummary", {
+                aligned: formatNumber(
+                  lyrics.lines.filter(
+                    (l) =>
+                      l.syllables?.length &&
+                      !unitIssues.some((e) => e.lineId === l.id),
+                  ).length,
+                ),
+                total: formatNumber(lyrics.lines.length),
+              })
+            : t("karaoke.lyricEditor.lineByLineHint")}
         </p>
         <Button
           className="sm:w-auto"
@@ -246,16 +263,18 @@ const TimingEditorForm = memo(function TimingEditorForm({
             URL.revokeObjectURL(url);
           }}
         >
-          Xuất lời và mốc JSON
+          {t("karaoke.lyricEditor.exportJsonBtn")}
         </Button>
       </div>
       <fieldset disabled={disabled || reading} className="grid min-w-0 gap-4">
-        <legend className="sr-only">Chỉnh lời và thời gian</legend>
+        <legend className="sr-only">
+          {t("karaoke.lyricEditor.editLegend")}
+        </legend>
         {pageCount > 1 && (
           <label className="grid gap-2 font-bold sm:max-w-sm">
-            Trang chỉnh lời
+            {t("karaoke.lyricEditor.pageNavLabel")}
             <select
-              aria-label="Trang chỉnh lời"
+              aria-label={t("karaoke.lyricEditor.pageNavLabel")}
               className={karaokeInputClass}
               value={currentPage}
               onChange={(event) => {
@@ -266,14 +285,21 @@ const TimingEditorForm = memo(function TimingEditorForm({
             >
               {Array.from({ length: pageCount }, (_, index) => (
                 <option key={index} value={index}>
-                  Dòng {index * LINES_PER_PAGE + 1}–
-                  {Math.min((index + 1) * LINES_PER_PAGE, lyrics.lines.length)}{" "}
-                  / {lyrics.lines.length}
+                  {t("karaoke.lyricEditor.pageRangeWithTotal", {
+                    start: formatNumber(index * LINES_PER_PAGE + 1),
+                    end: formatNumber(
+                      Math.min(
+                        (index + 1) * LINES_PER_PAGE,
+                        lyrics.lines.length,
+                      ),
+                    ),
+                    total: formatNumber(lyrics.lines.length),
+                  })}
                 </option>
               ))}
             </select>
             <span className="text-sm font-normal text-muted">
-              Chia trang để chỉnh lời mượt hơn; khi lưu vẫn lưu toàn bộ bài hát.
+              {t("karaoke.lyricEditor.paginationNote")}
             </span>
           </label>
         )}
@@ -281,6 +307,7 @@ const TimingEditorForm = memo(function TimingEditorForm({
           .slice(firstLine, firstLine + LINES_PER_PAGE)
           .map((item, offset) => {
             const i = firstLine + offset;
+            const num = formatNumber(i + 1);
             return (
               <div
                 key={item.id}
@@ -289,9 +316,11 @@ const TimingEditorForm = memo(function TimingEditorForm({
                 className="grid min-w-0 gap-3 rounded-control border border-border p-4"
               >
                 <label className="grid gap-2 font-bold">
-                  Lời dòng {i + 1}
+                  {t("karaoke.lyricEditor.lineTextLabel", { num })}
                   <input
-                    className={karaokeInputClass}
+                    className={`${karaokeInputClass} viread-learning-content`}
+                    dir="ltr"
+                    lang="vi"
                     value={item.text}
                     maxLength={300}
                     onChange={(e) =>
@@ -302,12 +331,15 @@ const TimingEditorForm = memo(function TimingEditorForm({
                 <div className="grid gap-3 sm:grid-cols-2">
                   {(
                     [
-                      ["start_ms", "Bắt đầu"],
-                      ["end_ms", "Kết thúc"],
+                      ["start_ms", t("karaoke.lyricEditor.startLabel")],
+                      ["end_ms", t("karaoke.lyricEditor.endLabel")],
                     ] as const
                   ).map(([key, label]) => (
                     <label className="grid gap-2 font-bold" key={key}>
-                      {label} dòng {i + 1} (ms)
+                      {t("karaoke.lyricEditor.lineTimeInputLabel", {
+                        label,
+                        num,
+                      })}
                       <input
                         type="number"
                         min={0}
@@ -328,8 +360,10 @@ const TimingEditorForm = memo(function TimingEditorForm({
                   ))}
                 </div>
                 <p className="text-sm tabular-nums text-muted">
-                  Mốc phút:giây.mili-giây: {formatLyricTimestamp(item.start_ms)}{" "}
-                  → {formatLyricTimestamp(item.end_ms)}
+                  {t("karaoke.lyricEditor.timestampPreview", {
+                    start: formatLyricTimestamp(item.start_ms),
+                    end: formatLyricTimestamp(item.end_ms),
+                  })}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -345,7 +379,7 @@ const TimingEditorForm = memo(function TimingEditorForm({
                       });
                     }}
                   >
-                    Căn từng tiếng dòng {i + 1}
+                    {t("karaoke.lyricEditor.alignSyllablesBtn", { num })}
                   </Button>
                   <Button
                     className="sm:w-auto"
@@ -356,7 +390,7 @@ const TimingEditorForm = memo(function TimingEditorForm({
                         update(item.id, { start_ms: player.getCurrentMs() });
                     }}
                   >
-                    Đánh dấu đầu dòng {i + 1}
+                    {t("karaoke.lyricEditor.markStartBtn", { num })}
                   </Button>
                   <Button
                     className="sm:w-auto"
@@ -367,7 +401,7 @@ const TimingEditorForm = memo(function TimingEditorForm({
                         update(item.id, { end_ms: player.getCurrentMs() });
                     }}
                   >
-                    Đánh dấu cuối dòng {i + 1}
+                    {t("karaoke.lyricEditor.markEndBtn", { num })}
                   </Button>
                   <Button
                     className="sm:w-auto"
@@ -383,7 +417,7 @@ const TimingEditorForm = memo(function TimingEditorForm({
                         void player?.play(item.start_ms, item.end_ms);
                     }}
                   >
-                    Nghe dòng {i + 1}
+                    {t("karaoke.lyricEditor.playLineBtn", { num })}
                   </Button>
                   <Button
                     className="sm:w-auto"
@@ -395,7 +429,7 @@ const TimingEditorForm = memo(function TimingEditorForm({
                       })
                     }
                   >
-                    Xóa dòng {i + 1}
+                    {t("karaoke.lyricEditor.deleteLineBtn", { num })}
                   </Button>
                 </div>
                 {lyrics.format_version === 2 && selectedId === item.id && (
@@ -444,33 +478,43 @@ const TimingEditorForm = memo(function TimingEditorForm({
             setSelection({ id: null, request: focusTarget?.request });
           }}
         >
-          Thêm dòng lời
+          {t("karaoke.lyricEditor.addLineBtn")}
         </Button>
       </fieldset>
       {issues.length > 0 && (
         <StatusMessage
           tone="warning"
-          title={`Cần căn lại ${issues.length} mục`}
+          title={t("karaoke.lyricEditor.issuesTitle", {
+            count: formatNumber(issues.length),
+          })}
         >
           <ul className="list-inside list-disc">
             {issues.slice(0, 8).map((issue) => (
               <li key={issue}>{issue}</li>
             ))}
           </ul>
-          {issues.length > 8 && <p>Và {issues.length - 8} mục khác.</p>}
+          {issues.length > 8 && (
+            <p>
+              {t("karaoke.lyricEditor.moreIssues", {
+                count: formatNumber(issues.length - 8),
+              })}
+            </p>
+          )}
         </StatusMessage>
       )}
       {unitIssues.length > 0 && (
         <StatusMessage
           tone="warning"
-          title={`Cần kiểm tra ${unitIssues.length} mục tiếng`}
+          title={t("karaoke.lyricEditor.unitIssuesTitle", {
+            count: formatNumber(unitIssues.length),
+          })}
         >
           <ul>
             {unitIssues.slice(0, 12).map((issue, i) => (
               <li key={i}>
                 <button
                   type="button"
-                  className="min-h-11 text-left underline"
+                  className="min-h-11 text-start underline"
                   onClick={() => {
                     player?.pause?.();
                     setSelection({
@@ -484,9 +528,12 @@ const TimingEditorForm = memo(function TimingEditorForm({
                     );
                   }}
                 >
-                  Dòng{" "}
-                  {lyrics.lines.findIndex((l) => l.id === issue.lineId) + 1}:{" "}
-                  {issue.message}
+                  {t("karaoke.lyricEditor.lineIssuePrefix", {
+                    num: formatNumber(
+                      lyrics.lines.findIndex((l) => l.id === issue.lineId) + 1,
+                    ),
+                    message: issue.message,
+                  })}
                 </button>
               </li>
             ))}

@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { Button } from "@/components/common/button";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import {
   scanCameraFrameForBook,
   scanCameraFrameGlobal,
@@ -43,6 +44,8 @@ export function CameraPreview({
   onCameraUnavailable,
   onPickDeviceImage,
 }: CameraPreviewProps) {
+  const { formatNumber } = useI18n();
+  const t = useTranslations("ocr");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const mountedRef = useRef(false);
@@ -316,8 +319,8 @@ export function CameraPreview({
                   matched: false,
                   status_code: "LOW_CONFIDENCE",
                   message: response.matched_page
-                    ? "ViRead nhận diện được trang nhưng thiếu thông tin cuốn sách. Ba mẹ hãy căn chỉnh và quét lại nhé."
-                    : "ViRead chưa nhận được thông tin trang sách hợp lệ. Ba mẹ hãy căn chỉnh và quét lại nhé.",
+                    ? t("camera.missingBookInfo")
+                    : t("camera.invalidPageInfo"),
                 });
               }
             } else {
@@ -332,7 +335,7 @@ export function CameraPreview({
               framing_valid: false,
               matched: false,
               status_code: "INVALID_IMAGE",
-              message: "Đang kết nối với ViRead. Giữ sách yên trong khung.",
+              message: t("camera.connectingMessage"),
               confidence: 0,
               matched_page: null,
             });
@@ -357,6 +360,7 @@ export function CameraPreview({
     onBookPageDetected,
     onPageDetected,
     stopCamera,
+    t,
   ]);
 
   // Sequential non-overlapping auto-scan loop: schedules the next capture ONLY after
@@ -391,13 +395,15 @@ export function CameraPreview({
   if (!enableScanner) {
     return (
       <section
-        aria-label="Bản xem trước camera mô phỏng"
+        aria-label={t("camera.mockPreviewAria")}
         className="relative flex min-h-0 w-full items-center justify-center rounded-card bg-desk p-4 sm:flex-1 sm:p-8"
       >
-        <div className="absolute right-3 top-3 z-20 inline-flex items-center gap-2 rounded-control bg-white/90 px-3 py-2 text-[13px] font-semibold text-muted sm:right-5 sm:top-5">
+        <div className="end-3 top-3 absolute z-20 inline-flex items-center gap-2 rounded-control bg-white/90 px-3 py-2 text-[13px] font-semibold text-muted sm:end-5 sm:top-5">
           <VideoOff aria-hidden="true" className="size-4" />
-          <span className="hidden sm:inline">Mô phỏng · không ghi hình</span>
-          <span className="sr-only sm:hidden">Mô phỏng, không ghi hình</span>
+          <span className="hidden sm:inline">
+            {t("camera.mockBadgeDesktop")}
+          </span>
+          <span className="sr-only sm:hidden">{t("camera.mockBadgeSr")}</span>
         </div>
         {children}
       </section>
@@ -409,16 +415,15 @@ export function CameraPreview({
 
   return (
     <section
-      aria-label="Khung camera nhận diện trang sách ViRead"
+      aria-label={t("camera.frameRegionAria")}
       className="relative flex w-full flex-col gap-4 rounded-card bg-desk p-3 sm:p-6"
     >
       {/* Thanh trạng thái hướng dẫn bé đặt sách */}
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-cream px-3.5 py-2.5 sm:px-4 sm:py-3">
         <p className="text-sm font-semibold text-ink sm:text-body">
           {cameraSuspended
-            ? "Camera đang tạm nghỉ khi bạn rời màn hình. Bấm Bật lại camera để tiếp tục quét."
-            : (scanResult?.message ??
-              "Đặt trang sách dọc gọn vào khung 4 góc bên dưới để nhận diện nhanh nhất.")}
+            ? t("camera.pausedStatus")
+            : (scanResult?.message ?? t("camera.alignGuideStatus"))}
         </p>
 
         {scanResult && !cameraSuspended ? (
@@ -433,10 +438,13 @@ export function CameraPreview({
             )}
           >
             {isMatched
-              ? `Trang ${scanResult.matched_page?.page_number} · Độ chính xác ${Math.round(scanResult.confidence * 100)}%`
+              ? t("camera.matchedConfidence", {
+                  page: formatNumber(scanResult.matched_page?.page_number ?? 0),
+                  confidence: Math.round(scanResult.confidence * 100),
+                })
               : isFrameValid
-                ? "Đã đúng khung · Đang tìm trang…"
-                : "Chưa đúng khung"}
+                ? t("camera.alignedFindingPage")
+                : t("camera.notAligned")}
           </span>
         ) : null}
       </div>
@@ -450,36 +458,34 @@ export function CameraPreview({
           <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center text-white">
             <Camera aria-hidden="true" className="size-11 text-sky" />
             <p className="text-lg font-extrabold sm:text-[20px]">
-              Camera đã tạm dừng để tiết kiệm pin & bảo mật
+              {t("camera.pausedTitle")}
             </p>
             <p className="max-w-md text-sm text-white/85 sm:text-body">
-              Bấm nút bên dưới để mở lại camera sau ngay lập tức hoặc chọn ảnh
-              trang sách từ máy.
+              {t("camera.pausedBody")}
             </p>
             <Button
               className="min-h-12 w-full max-w-[260px]"
               onClick={resumeCamera}
             >
               <Play aria-hidden="true" className="size-4" />
-              Bật lại camera
+              {t("camera.resumeCamera")}
             </Button>
           </div>
         ) : cameraDenied ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-white">
             <VideoOff aria-hidden="true" className="size-10 text-muted" />
             <p className="text-lg font-semibold sm:text-[20px]">
-              Chưa bật được Camera trên thiết bị
+              {t("camera.deniedTitle")}
             </p>
             <p className="max-w-md text-sm text-white/80 sm:text-body">
-              Ba mẹ vui lòng cấp quyền sử dụng Camera cho ViRead hoặc dùng nút
-              Chọn ảnh trang sách ở bên dưới nhé.
+              {t("camera.deniedBody")}
             </p>
             <Button
               className="mt-1 min-h-12 w-full max-w-[260px]"
               onClick={resumeCamera}
               variant="secondary"
             >
-              Thử bật lại camera
+              {t("camera.retryCamera")}
             </Button>
           </div>
         ) : (
@@ -512,7 +518,7 @@ export function CameraPreview({
 
                 <div className="flex flex-wrap items-center justify-between gap-1.5">
                   <span className="rounded-control bg-white/92 px-2.5 py-1 text-xs font-bold text-ink shadow">
-                    Khung trang sách
+                    {t("camera.frameBoxLabel")}
                   </span>
                   {isScanning ? (
                     <span className="inline-flex items-center gap-1.5 rounded-control bg-primary px-2.5 py-1 text-xs font-bold text-white shadow">
@@ -520,17 +526,21 @@ export function CameraPreview({
                         aria-hidden="true"
                         className="size-3.5 animate-spin"
                       />
-                      Đang quét…
+                      {t("camera.scanningBadge")}
                     </span>
                   ) : null}
                 </div>
 
                 <div className="mx-auto rounded-control bg-black/65 px-3 py-1.5 text-center text-xs font-semibold text-white sm:text-[14px]">
                   {isMatched
-                    ? `Đã khớp — Trang ${scanResult?.matched_page?.page_number}`
+                    ? t("camera.matchedOverlay", {
+                        page: formatNumber(
+                          scanResult?.matched_page?.page_number ?? 0,
+                        ),
+                      })
                     : isFrameValid
-                      ? "Khung hợp lệ · Giữ yên để khớp trang"
-                      : "Canh 4 mép trang sách gọn trong khung"}
+                      ? t("camera.holdSteadyOverlay")
+                      : t("camera.alignCornersOverlay")}
                 </div>
               </div>
             </div>
@@ -548,7 +558,7 @@ export function CameraPreview({
           onClick={() => void captureAndScan()}
         >
           <Camera aria-hidden="true" className="size-5" />
-          Chụp & Quét ngay
+          {t("camera.captureAndScan")}
         </Button>
 
         <Button
@@ -557,7 +567,7 @@ export function CameraPreview({
           onClick={() => setAutoScan((prev) => !prev)}
           variant="secondary"
         >
-          {autoScan ? "Tự động quét: ĐANG BẬT" : "Tự động quét: ĐANG TẮT"}
+          {autoScan ? t("camera.autoScanOn") : t("camera.autoScanOff")}
         </Button>
 
         {onPickDeviceImage ? (
@@ -567,7 +577,7 @@ export function CameraPreview({
             variant="secondary"
           >
             <FileImage aria-hidden="true" className="size-5" />
-            Chụp bằng Camera máy / Chọn ảnh nét (OCR)
+            {t("camera.fallbackUploadAction")}
           </Button>
         ) : null}
       </div>

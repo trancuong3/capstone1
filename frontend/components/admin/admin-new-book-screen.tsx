@@ -9,9 +9,11 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useTranslations } from "@/hooks/use-i18n";
 
 export function AdminNewBookScreen() {
   const { books } = useAdminServices();
+  const t = useTranslations("admin");
   const router = useRouter();
   const [name, setName] = useState("");
   const [title, setTitle] = useState("");
@@ -37,11 +39,11 @@ export function AdminNewBookScreen() {
     const max = Number(maxGrade);
 
     if (!normalizedName) {
-      setNameError("Vui lòng nhập tên sách.");
+      setNameError(t("books.new.errors.nameRequired"));
       return;
     }
     if (!normalizedTitle) {
-      setTitleError("Vui lòng nhập tiêu đề sách.");
+      setTitleError(t("books.new.errors.titleRequired"));
       return;
     }
     if (
@@ -53,9 +55,7 @@ export function AdminNewBookScreen() {
       max > 5 ||
       min > max
     ) {
-      setError(
-        "Khối lớp nhỏ nhất và lớn nhất phải là số nguyên từ 1 đến 5, đồng thời khối nhỏ nhất không được lớn hơn khối lớn nhất.",
-      );
+      setError(t("books.new.errors.gradeInvalid"));
       return;
     }
 
@@ -71,9 +71,7 @@ export function AdminNewBookScreen() {
       });
       router.push(`/admin/books/${created.id}`);
     } catch {
-      setError(
-        "Không thể tạo sách. Hãy kiểm tra quyền Admin, kết nối Backend và thử lại.",
-      );
+      setError(t("books.new.errors.createFailed"));
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -83,35 +81,35 @@ export function AdminNewBookScreen() {
   return (
     <section className="figma-form-page mx-auto flex w-full max-w-[960px] flex-col gap-4">
       <AdminPageHeader
-        title="Tạo sách mới"
-        description="Tạo đầu sách trước khi tải ảnh trang, chạy OCR và hoàn tất Child Safety."
+        title={t("books.new.title")}
+        description={t("books.new.description")}
       />
       <Link
         className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-extrabold text-primary focus-visible:outline-3 focus-visible:outline-primary"
         href="/admin/books"
       >
-        <ArrowLeft aria-hidden className="size-5" /> Hủy và quay lại
+        <ArrowLeft aria-hidden className="size-5 rtl:rotate-180" />{" "}
+        {t("books.new.cancelAndBack")}
       </Link>
       <Card className="max-w-3xl bg-white sm:px-8 sm:py-8">
         <StatusMessage
           className="mb-5"
           tone="info"
-          title="Sách chưa được đưa vào thư viện trẻ em"
+          title={t("books.new.notPublishedTitle")}
         >
-          Sau khi tạo, hãy tải các trang và hoàn tất OCR, Proofreading, Child
-          Safety cùng xác nhận của Admin cho từng trang. Backend sẽ chỉ cho trẻ
-          truy cập khi toàn bộ nội dung hiện tại đã được xác minh và không có
-          finding mức HIGH hoặc suitability NOT_RECOMMENDED.
+          {t("books.new.notPublishedDesc")}
         </StatusMessage>
         {error ? (
           <StatusMessage className="mb-5" tone="error">
             {error}
           </StatusMessage>
         ) : null}
-        <h2 className="text-2xl font-extrabold text-ink">Thông tin sách</h2>
+        <h2 className="text-2xl font-extrabold text-ink">
+          {t("books.new.infoHeading")}
+        </h2>
         <form className="grid gap-4" noValidate onSubmit={submit}>
           <label className="grid gap-2 font-semibold" htmlFor="book-name">
-            Tên sách *
+            {t("books.new.nameLabel")}
             <input
               id="book-name"
               aria-describedby={nameError ? "book-name-error" : undefined}
@@ -136,7 +134,7 @@ export function AdminNewBookScreen() {
             ) : null}
           </label>
           <label className="grid gap-2 font-semibold" htmlFor="book-title">
-            Tiêu đề sách *
+            {t("books.new.titleLabel")}
             <input
               id="book-title"
               aria-describedby={titleError ? "book-title-error" : undefined}
@@ -161,7 +159,7 @@ export function AdminNewBookScreen() {
             ) : null}
           </label>
           <label className="grid gap-2 font-semibold" htmlFor="book-author">
-            Tác giả
+            {t("books.new.authorLabel")}
             <input
               id="book-author"
               className="min-h-12 rounded-control border border-border px-4 font-normal focus:border-primary focus:outline-3 focus:outline-primary/30"
@@ -175,7 +173,7 @@ export function AdminNewBookScreen() {
               className="grid gap-2 font-semibold"
               htmlFor="book-min-grade"
             >
-              Khối lớp nhỏ nhất *
+              {t("books.new.minGradeLabel")}
               <select
                 id="book-min-grade"
                 className="min-h-12 rounded-control border border-border px-4 font-normal focus-visible:outline-3 focus-visible:outline-primary"
@@ -194,7 +192,7 @@ export function AdminNewBookScreen() {
               className="grid gap-2 font-semibold"
               htmlFor="book-max-grade"
             >
-              Khối lớp lớn nhất *
+              {t("books.new.maxGradeLabel")}
               <select
                 id="book-max-grade"
                 className="min-h-12 rounded-control border border-border px-4 font-normal focus-visible:outline-3 focus-visible:outline-primary"
@@ -217,10 +215,10 @@ export function AdminNewBookScreen() {
               size="compact"
               type="submit"
             >
-              Tạo sách
+              {t("books.new.submit")}
             </Button>
             <ButtonLink href="/admin/books" size="compact" variant="quiet">
-              Hủy
+              {t("common.cancel")}
             </ButtonLink>
           </div>
         </form>

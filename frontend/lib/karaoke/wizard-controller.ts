@@ -3,6 +3,7 @@ import {
   type AdminKaraokeService,
 } from "@/lib/api/admin-karaoke-service";
 import { isServiceError } from "@/lib/api/service-error";
+import { translateRuntime } from "@/lib/i18n/runtime";
 import {
   KaraokeDraftSaveQueue,
   type AutosaveView,
@@ -124,7 +125,10 @@ export class KaraokeWizardController {
     for (const listener of this.listeners) listener();
   }
   private attach(detail: AdminKaraokeDetail) {
-    if (this.queue) throw new Error("Bản nháp đã có hàng đợi lưu.");
+    if (this.queue)
+      throw new Error(
+        translateRuntime("admin.karaoke.wizardRuntime.queueAlreadyAttached"),
+      );
     const queue = new KaraokeDraftSaveQueue(detail, this.service);
     const processing = new KaraokeProcessingSession(this.service, queue);
     this.queue = queue;
@@ -169,8 +173,7 @@ export class KaraokeWizardController {
         this.appliedSeen = applied;
         this.acceptDraft(queue.getSnapshot().detail);
         this.set({
-          notice:
-            "Đã dùng kết quả trong bản nháp. Hãy nghe và kiểm tra trước khi xuất bản.",
+          notice: translateRuntime("admin.karaoke.wizardRuntime.appliedNotice"),
         });
         void this.loadDraftPreview();
       }
@@ -276,7 +279,9 @@ export class KaraokeWizardController {
       this.set({
         rawLyrics,
         lyricsError:
-          error instanceof Error ? error.message : "Lời chưa hợp lệ.",
+          error instanceof Error
+            ? error.message
+            : translateRuntime("admin.karaoke.wizardRuntime.invalidLyrics"),
       });
     }
   };
@@ -307,8 +312,8 @@ export class KaraokeWizardController {
     ) {
       this.set({
         error: audio
-          ? "Chọn MP3 không rỗng, tối đa 20 MiB và 5 phút."
-          : "Chọn JPEG/PNG/WebP không rỗng, tối đa 2 MiB.",
+          ? translateRuntime("admin.karaoke.wizardRuntime.invalidAudioFile")
+          : translateRuntime("admin.karaoke.wizardRuntime.invalidCoverFile"),
       });
       return;
     }
@@ -342,7 +347,9 @@ export class KaraokeWizardController {
             ? karaokeErrorMessage(error)
             : error instanceof Error
               ? error.message
-              : "Chưa hoàn tất yêu cầu; nội dung được giữ lại.",
+              : translateRuntime(
+                  "admin.karaoke.wizardRuntime.requestIncomplete",
+                ),
         });
     } finally {
       this.actionFlight = false;
@@ -350,9 +357,15 @@ export class KaraokeWizardController {
     }
   }
   private async upload(kind: "audio" | "reference" | "cover", file: File) {
-    if (!this.queue) throw new Error("Chưa tạo bản nháp.");
+    if (!this.queue)
+      throw new Error(
+        translateRuntime("admin.karaoke.wizardRuntime.draftNotCreated"),
+      );
     await this.queue.enqueueMutation(async (before, signal) => {
-      if (!before.draft) throw new Error("Bản nháp không còn hiện hành.");
+      if (!before.draft)
+        throw new Error(
+          translateRuntime("admin.karaoke.wizardRuntime.draftNoLongerCurrent"),
+        );
       let detail: AdminKaraokeDetail;
       try {
         detail =
@@ -444,107 +457,139 @@ export class KaraokeWizardController {
     );
   }
   createAndProcess = () =>
-    this.run("Đang chuẩn bị bài hát…", async () => {
-      if (!this.canProcess())
-        throw new Error(
-          "Tự động tạo karaoke chưa sẵn sàng. Bạn vẫn có thể dùng chỉnh sửa nâng cao.",
-        );
-      if (this.view.lyricsError || !this.view.rawLyrics.trim())
-        throw new Error(
-          this.view.lyricsError || "Hãy dán lời đúng với bản thu.",
-        );
-      if (!this.view.file && !this.view.detail?.draft?.has_audio)
-        throw new Error("Hãy chọn bài MP3 có giọng hát.");
-      if (
-        this.view.mode === "INSTRUMENTAL_WITH_REFERENCE" &&
-        !this.view.reference &&
-        !this.view.detail?.draft?.has_reference_audio
-      )
-        throw new Error(
-          "Hãy chọn bản hát đối chiếu cùng bản phối với nhạc nền.",
-        );
-      if (!this.view.detail) {
-        this.creationIntent ??= {
-          ...metadataOf(this.view.metadata),
-          creation_request_id: crypto.randomUUID(),
-        };
-        const detail = await this.service.create(
-          this.creationIntent,
-          this.controller.signal,
-        );
-        if (!this.active) return;
-        this.attach(detail);
-      }
-      if (!this.queue || !this.processing)
-        throw new Error("Bản nháp chưa sẵn sàng.");
-      const rejected = this.rejectedUpload;
-      const replacement =
-        rejected?.kind === "audio"
-          ? this.view.file
-          : rejected?.kind === "reference"
-            ? this.view.reference
-            : this.view.cover;
-      const queueError = this.queue.getSnapshot().error;
-      if (
-        rejected &&
-        replacement &&
-        replacement !== rejected.file &&
-        isServiceError(queueError) &&
-        [413, 415, 422].includes(queueError.status)
-      ) {
-        // A new user-selected file after a definitive rejection, never an ambiguous timeout.
-        const saved = await this.service.get(
-          rejected.before.song_id,
-          this.controller.signal,
-        );
+    this.run(
+      translateRuntime("admin.karaoke.wizardRuntime.preparingSong"),
+      async () => {
+        if (!this.canProcess())
+          throw new Error(
+            translateRuntime("admin.karaoke.wizardRuntime.autoNotReady"),
+          );
+        if (this.view.lyricsError || !this.view.rawLyrics.trim())
+          throw new Error(
+            this.view.lyricsError ||
+              translateRuntime(
+                "admin.karaoke.wizardRuntime.pasteLyricsRequired",
+              ),
+          );
+        if (!this.view.file && !this.view.detail?.draft?.has_audio)
+          throw new Error(
+            translateRuntime("admin.karaoke.wizardRuntime.selectVocalMp3"),
+          );
         if (
-          saved.song_id !== rejected.before.song_id ||
-          saved.revision !== rejected.before.revision ||
-          JSON.stringify(saved.draft) !== JSON.stringify(rejected.before.draft)
+          this.view.mode === "INSTRUMENTAL_WITH_REFERENCE" &&
+          !this.view.reference &&
+          !this.view.detail?.draft?.has_reference_audio
         )
           throw new Error(
-            "Bản trên máy chủ đã đổi. Nội dung đang nhập được giữ; hãy đối chiếu trước khi tiếp tục.",
+            translateRuntime(
+              "admin.karaoke.wizardRuntime.selectReferenceAudio",
+            ),
           );
-        this.queue.reconcile(saved, true);
-        // Editable metadata/lyrics remain in this view and are saved after the new upload ACK.
-        this.rejectedUpload = null;
-      }
-      const uploadedNewAudio = !!this.view.file;
-      if (this.view.file) {
-        this.set({ busy: "Đang tải nhạc lên…" });
-        await this.upload("audio", this.view.file);
-      }
-      if (this.view.reference) {
-        this.set({ busy: "Đang tải bản hát đối chiếu…" });
-        await this.upload("reference", this.view.reference);
-      }
-      if (this.view.cover) {
-        this.set({ busy: "Đang tải ảnh bìa…" });
-        await this.upload("cover", this.view.cover);
-      }
-      if (!this.active) return;
-      const lyrics =
-        this.view.lyrics.format_version === 2
-          ? this.view.lyrics
-          : prepareWizardLyrics(
-              this.view.rawLyrics,
-              this.view.lyrics,
-              this.view.detail?.draft?.duration_ms ?? null,
+        if (!this.view.detail) {
+          this.creationIntent ??= {
+            ...metadataOf(this.view.metadata),
+            creation_request_id: crypto.randomUUID(),
+          };
+          const detail = await this.service.create(
+            this.creationIntent,
+            this.controller.signal,
+          );
+          if (!this.active) return;
+          this.attach(detail);
+        }
+        if (!this.queue || !this.processing)
+          throw new Error(
+            translateRuntime("admin.karaoke.wizardRuntime.draftNotReady"),
+          );
+        const rejected = this.rejectedUpload;
+        const replacement =
+          rejected?.kind === "audio"
+            ? this.view.file
+            : rejected?.kind === "reference"
+              ? this.view.reference
+              : this.view.cover;
+        const queueError = this.queue.getSnapshot().error;
+        if (
+          rejected &&
+          replacement &&
+          replacement !== rejected.file &&
+          isServiceError(queueError) &&
+          [413, 415, 422].includes(queueError.status)
+        ) {
+          // A new user-selected file after a definitive rejection, never an ambiguous timeout.
+          const saved = await this.service.get(
+            rejected.before.song_id,
+            this.controller.signal,
+          );
+          if (
+            saved.song_id !== rejected.before.song_id ||
+            saved.revision !== rejected.before.revision ||
+            JSON.stringify(saved.draft) !==
+              JSON.stringify(rejected.before.draft)
+          )
+            throw new Error(
+              translateRuntime(
+                "admin.karaoke.wizardRuntime.serverVersionChanged",
+              ),
             );
-      this.set({ lyrics, busy: "Đang lưu lời và gửi xử lý…" });
-      this.queue.updateSnapshot(this.snapshot());
-      await this.queue.flush();
-      this.acceptApplied = true;
-      await this.processing.start(
-        this.view.mode,
-        this.view.detail?.draft?.audio_sha256 &&
-          this.view.detail.processing_review?.required &&
-          this.view.mode === "VOCAL_TRACK" &&
-          !uploadedNewAudio
-          ? "ORIGINAL_RECORDING"
-          : "DRAFT_AUDIO",
-      );
-    });
+          this.queue.reconcile(saved, true);
+          // Editable metadata/lyrics remain in this view and are saved after the new upload ACK.
+          this.rejectedUpload = null;
+        }
+        const uploadedNewAudio = !!this.view.file;
+        if (this.view.file) {
+          this.set({
+            busy: translateRuntime(
+              "admin.karaoke.wizardRuntime.uploadingAudio",
+            ),
+          });
+          await this.upload("audio", this.view.file);
+        }
+        if (this.view.reference) {
+          this.set({
+            busy: translateRuntime(
+              "admin.karaoke.wizardRuntime.uploadingReference",
+            ),
+          });
+          await this.upload("reference", this.view.reference);
+        }
+        if (this.view.cover) {
+          this.set({
+            busy: translateRuntime(
+              "admin.karaoke.wizardRuntime.uploadingCover",
+            ),
+          });
+          await this.upload("cover", this.view.cover);
+        }
+        if (!this.active) return;
+        const lyrics =
+          this.view.lyrics.format_version === 2
+            ? this.view.lyrics
+            : prepareWizardLyrics(
+                this.view.rawLyrics,
+                this.view.lyrics,
+                this.view.detail?.draft?.duration_ms ?? null,
+              );
+        this.set({
+          lyrics,
+          busy: translateRuntime(
+            "admin.karaoke.wizardRuntime.savingLyricsAndProcessing",
+          ),
+        });
+        this.queue.updateSnapshot(this.snapshot());
+        await this.queue.flush();
+        this.acceptApplied = true;
+        await this.processing.start(
+          this.view.mode,
+          this.view.detail?.draft?.audio_sha256 &&
+            this.view.detail.processing_review?.required &&
+            this.view.mode === "VOCAL_TRACK" &&
+            !uploadedNewAudio
+            ? "ORIGINAL_RECORDING"
+            : "DRAFT_AUDIO",
+        );
+      },
+    );
   flush = async () => {
     if (
       this.view.lyricsError ||
@@ -553,44 +598,58 @@ export class KaraokeWizardController {
       this.view.cover
     )
       throw new Error(
-        "Còn lời chưa hợp lệ hoặc file chưa tải lên. Hãy hoàn tất hoặc bỏ lựa chọn file trước khi chuyển chế độ.",
+        translateRuntime("admin.karaoke.wizardRuntime.finishBeforeSwitchMode"),
       );
     if (this.queue) await this.queue.flush();
     else if (this.view.edited)
       throw new Error(
-        "Bài chưa được lưu. Hãy tạo karaoke hoặc sao chép nội dung trước khi rời trang.",
+        translateRuntime("admin.karaoke.wizardRuntime.unsavedLeaveWarning"),
       );
   };
   cancel = () =>
-    this.run("Đang hủy xử lý…", async () => {
-      try {
-        await this.processing?.cancel();
-      } catch (error) {
-        if (isServiceError(error) && error.status === 409 && this.view.detail) {
-          const current = await this.service.get(
-            this.view.detail.song_id,
-            this.controller.signal,
-          );
-          if (current.processing_summary?.status === "APPLIED") {
-            this.set({
-              notice:
-                "Kết quả đã được áp dụng ở lượt khác. Hãy đối chiếu bản đã lưu, không có rollback tự động.",
-            });
+    this.run(
+      translateRuntime("admin.karaoke.wizardRuntime.cancellingProcessing"),
+      async () => {
+        try {
+          await this.processing?.cancel();
+        } catch (error) {
+          if (
+            isServiceError(error) &&
+            error.status === 409 &&
+            this.view.detail
+          ) {
+            const current = await this.service.get(
+              this.view.detail.song_id,
+              this.controller.signal,
+            );
+            if (current.processing_summary?.status === "APPLIED") {
+              this.set({
+                notice: translateRuntime(
+                  "admin.karaoke.wizardRuntime.appliedElsewhereNotice",
+                ),
+              });
+            }
           }
+          throw error;
         }
-        throw error;
-      }
-    });
+      },
+    );
   retry = (ack: boolean) =>
-    this.run("Đang gửi lượt thử lại…", async () => {
-      this.acceptApplied = true;
-      await this.processing?.retry(ack);
-    });
+    this.run(
+      translateRuntime("admin.karaoke.wizardRuntime.retryingProcessing"),
+      async () => {
+        this.acceptApplied = true;
+        await this.processing?.retry(ack);
+      },
+    );
   apply = () =>
-    this.run("Đang dùng kết quả…", async () => {
-      this.acceptApplied = true;
-      await this.processing?.apply();
-    });
+    this.run(
+      translateRuntime("admin.karaoke.wizardRuntime.applyingResult"),
+      async () => {
+        this.acceptApplied = true;
+        await this.processing?.apply();
+      },
+    );
   private acceptDraft(detail: AdminKaraokeDetail) {
     if (detail.draft)
       this.set({
@@ -608,22 +667,25 @@ export class KaraokeWizardController {
     return { ticket: ++this.readTicket, signal: this.readController.signal };
   }
   loadStagingPreview = () =>
-    this.run("Đang tải kết quả nghe thử…", async () => {
-      const context = this.readContext();
-      const job = this.view.processing?.job;
-      if (!job || !this.processing) return;
-      const source = await this.processing.getPreview(context.signal);
-      if (
-        this.active &&
-        context.ticket === this.readTicket &&
-        this.view.processing?.job?.id === job.id
-      )
-        this.set({
-          preview: { kind: "staging", source },
-          referencePreview: null,
-          referenceError: "",
-        });
-    });
+    this.run(
+      translateRuntime("admin.karaoke.wizardRuntime.loadingStagingPreview"),
+      async () => {
+        const context = this.readContext();
+        const job = this.view.processing?.job;
+        if (!job || !this.processing) return;
+        const source = await this.processing.getPreview(context.signal);
+        if (
+          this.active &&
+          context.ticket === this.readTicket &&
+          this.view.processing?.job?.id === job.id
+        )
+          this.set({
+            preview: { kind: "staging", source },
+            referencePreview: null,
+            referenceError: "",
+          });
+      },
+    );
   loadDraftPreview = async () => {
     if (!this.queue || !this.active) return;
     if (
@@ -633,8 +695,9 @@ export class KaraokeWizardController {
       this.view.lyricsError
     ) {
       this.set({
-        error:
-          "Còn file chưa tải hoặc lời chưa hợp lệ. Hãy hoàn tất trước khi nghe bản nháp đã lưu.",
+        error: translateRuntime(
+          "admin.karaoke.wizardRuntime.finishBeforeDraftPreview",
+        ),
       });
       return;
     }
@@ -679,45 +742,58 @@ export class KaraokeWizardController {
     }
   };
   loadReference = () =>
-    this.run("Đang tải bản hát đối chiếu…", async () => {
-      const detail = await this.queue?.flush();
-      const fingerprint =
-        detail?.processing_review?.current_content_fingerprint;
-      if (!detail?.draft || !fingerprint) return;
-      const context = this.readContext();
-      this.set({ referenceError: "" });
-      try {
-        const referencePreview = await this.service.getDraftReferencePreview(
-          detail.song_id,
-          detail.revision,
-          detail.draft.id,
-          fingerprint,
-          context.signal,
-        );
-        if (
-          this.active &&
-          context.ticket === this.readTicket &&
-          this.queue?.getSnapshot().detail.revision === detail.revision
-        )
-          this.set({ referencePreview });
-      } catch (error) {
-        if (this.active && !context.signal.aborted)
-          this.set({
-            referenceError:
-              isServiceError(error) && error.status === 422
-                ? "Bản nháp chưa có bản hát đối chiếu. Bạn vẫn có thể nghe nhạc nền."
-                : karaokeErrorMessage(error),
-          });
-      }
-    });
+    this.run(
+      translateRuntime("admin.karaoke.wizardRuntime.loadingReference"),
+      async () => {
+        const detail = await this.queue?.flush();
+        const fingerprint =
+          detail?.processing_review?.current_content_fingerprint;
+        if (!detail?.draft || !fingerprint) return;
+        const context = this.readContext();
+        this.set({ referenceError: "" });
+        try {
+          const referencePreview = await this.service.getDraftReferencePreview(
+            detail.song_id,
+            detail.revision,
+            detail.draft.id,
+            fingerprint,
+            context.signal,
+          );
+          if (
+            this.active &&
+            context.ticket === this.readTicket &&
+            this.queue?.getSnapshot().detail.revision === detail.revision
+          )
+            this.set({ referencePreview });
+        } catch (error) {
+          if (this.active && !context.signal.aborted)
+            this.set({
+              referenceError:
+                isServiceError(error) && error.status === 422
+                  ? translateRuntime(
+                      "admin.karaoke.wizardRuntime.missingReferenceFallback",
+                    )
+                  : karaokeErrorMessage(error),
+            });
+        }
+      },
+    );
   confirmReview = (ids: string[], listened: boolean) =>
-    this.run("Đang xác nhận bản đã nghe…", async () => {
-      if (!listened) throw new Error("Hãy nghe và xác nhận bản nháp hiện tại.");
-      if (this.view.detail?.processing_review?.required)
-        await this.processing?.confirmReview(ids, listened);
-      else this.set({ manualReviewed: true });
-      await this.loadDraftPreview();
-    });
+    this.run(
+      translateRuntime("admin.karaoke.wizardRuntime.confirmingReview"),
+      async () => {
+        if (!listened)
+          throw new Error(
+            translateRuntime(
+              "admin.karaoke.wizardRuntime.listenAndConfirmFirst",
+            ),
+          );
+        if (this.view.detail?.processing_review?.required)
+          await this.processing?.confirmReview(ids, listened);
+        else this.set({ manualReviewed: true });
+        await this.loadDraftPreview();
+      },
+    );
   canPublish = () =>
     !this.view.save?.dirty &&
     !this.view.lyricsError &&
@@ -729,60 +805,75 @@ export class KaraokeWizardController {
       ? this.view.detail.processing_review.reviewed
       : this.view.manualReviewed);
   publish = () =>
-    this.run("Đang xuất bản…", async () => {
-      if (!this.queue) return;
-      // The server independently enforces structural checks and the review stamp.
-      const before = this.queue.getSnapshot().detail;
-      if (
-        !before.draft ||
-        this.view.preview?.kind !== "draft" ||
-        this.view.preview.source.revision !== before.revision ||
-        (before.processing_review?.required &&
-          !before.processing_review.reviewed) ||
-        (!before.processing_review?.required && !this.view.manualReviewed) ||
-        !this.view.validation?.valid
-      )
-        throw new Error(
-          "Hãy hoàn tất kiểm tra và duyệt đúng bản nháp trước khi xuất bản.",
-        );
-      await this.queue.enqueueMutation(async (current, signal) => {
-        if (!current.draft || current.revision !== before.revision)
-          throw new Error("Nội dung đã thay đổi; hãy nghe và kiểm tra lại.");
-        const detail = await this.service.publish(
-          current.song_id,
-          current.revision,
-          current.draft.id,
-          signal,
-        );
-        return { value: detail, detail };
-      });
-      this.set({
-        preview: null,
-        referencePreview: null,
-        edited: false,
-        notice: "Đã xuất bản bài hát. Trẻ chỉ thấy bản đã xuất bản này.",
-      });
-    });
+    this.run(
+      translateRuntime("admin.karaoke.wizardRuntime.publishing"),
+      async () => {
+        if (!this.queue) return;
+        // The server independently enforces structural checks and the review stamp.
+        const before = this.queue.getSnapshot().detail;
+        if (
+          !before.draft ||
+          this.view.preview?.kind !== "draft" ||
+          this.view.preview.source.revision !== before.revision ||
+          (before.processing_review?.required &&
+            !before.processing_review.reviewed) ||
+          (!before.processing_review?.required && !this.view.manualReviewed) ||
+          !this.view.validation?.valid
+        )
+          throw new Error(
+            translateRuntime(
+              "admin.karaoke.wizardRuntime.completeReviewBeforePublish",
+            ),
+          );
+        await this.queue.enqueueMutation(async (current, signal) => {
+          if (!current.draft || current.revision !== before.revision)
+            throw new Error(
+              translateRuntime(
+                "admin.karaoke.wizardRuntime.contentChangedRecheck",
+              ),
+            );
+          const detail = await this.service.publish(
+            current.song_id,
+            current.revision,
+            current.draft.id,
+            signal,
+          );
+          return { value: detail, detail };
+        });
+        this.set({
+          preview: null,
+          referencePreview: null,
+          edited: false,
+          notice: translateRuntime(
+            "admin.karaoke.wizardRuntime.publishedNotice",
+          ),
+        });
+      },
+    );
   reloadSaved = () =>
-    this.run("Đang đối chiếu bản đã lưu…", async () => {
-      if (!this.view.detail || !this.queue) return;
-      const detail = await this.service.get(
-        this.view.detail.song_id,
-        this.controller.signal,
-      );
-      this.queue.reconcile(detail, true);
-      this.acceptDraft(detail);
-      this.set({
-        file: null,
-        reference: null,
-        cover: null,
-        preview: null,
-        referencePreview: null,
-        validation: null,
-        error: "",
-        notice:
-          "Đã nạp bản lưu trên máy chủ. File chưa được tải lên cần chọn lại.",
-      });
-      this.processing?.refresh();
-    });
+    this.run(
+      translateRuntime("admin.karaoke.wizardRuntime.reloadingSaved"),
+      async () => {
+        if (!this.view.detail || !this.queue) return;
+        const detail = await this.service.get(
+          this.view.detail.song_id,
+          this.controller.signal,
+        );
+        this.queue.reconcile(detail, true);
+        this.acceptDraft(detail);
+        this.set({
+          file: null,
+          reference: null,
+          cover: null,
+          preview: null,
+          referencePreview: null,
+          validation: null,
+          error: "",
+          notice: translateRuntime(
+            "admin.karaoke.wizardRuntime.reloadedSavedNotice",
+          ),
+        });
+        this.processing?.refresh();
+      },
+    );
 }

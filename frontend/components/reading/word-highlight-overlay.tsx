@@ -1,3 +1,6 @@
+"use client";
+
+import { useTranslations } from "@/hooks/use-i18n";
 import type { ReadingPageDTO } from "@/types/reading";
 import type { RealtimeAlignmentSnapshot } from "@/lib/reading/realtime-alignment";
 
@@ -103,10 +106,11 @@ export function WordHighlightOverlay({
   hesitationWordIds,
   previewSnapshot,
 }: WordHighlightOverlayProps) {
+  const t = useTranslations("reading");
   const word = page.words.find((item) => item.word_id === currentWordId);
 
   return (
-    <>
+    <span className="viread-learning-content contents" dir="ltr" lang="vi">
       {page.words.map((item) => {
         const status = getWordStatus(
           item.word_id,
@@ -143,9 +147,9 @@ export function WordHighlightOverlay({
           data-overlay-word-id={word.word_id}
           data-current-word="true"
         >
-          Vùng tô sáng từ hiện tại theo bounding box
+          {t("pageViewer.overlayAria")}
         </span>
       )}
-    </>
+    </span>
   );
 }

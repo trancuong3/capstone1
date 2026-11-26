@@ -1,29 +1,38 @@
+"use client";
+
 import Link from "next/link";
+
 import { ViReadLogo } from "@/components/common/viread-logo";
-import { cn } from "@/lib/utils/cn";
+import { useTranslations } from "@/hooks/use-i18n";
 import { VIREAD_SUPPORT_EMAIL } from "@/lib/config/contact";
+import { cn } from "@/lib/utils/cn";
 
 interface SiteFooterProps {
   readonly className?: string;
   readonly variant?: "public" | "admin" | "parent";
 }
-const parentLinks = [
-  { href: "/dashboard", label: "Tổng quan" },
-  { href: "/reports", label: "Tiến bộ" },
-  { href: "/sessions", label: "Lịch sử đọc" },
-  { href: "/children", label: "Hồ sơ bé" },
-  { href: "/profile", label: "Hồ sơ phụ huynh" },
-  { href: "/help-support", label: "Trợ giúp & hỗ trợ" },
-] as const;
+
 const linkClass =
   "underline-offset-4 hover:text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
 
 export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
+  const tCommon = useTranslations("common");
+  const tNav = useTranslations("navigation");
   const isParent = variant === "parent";
   const isAdmin = variant === "admin";
+
+  const parentLinks = [
+    { href: "/dashboard", label: tNav("parent.dashboard") },
+    { href: "/reports", label: tNav("parent.reports") },
+    { href: "/sessions", label: tNav("parent.sessionsLong") },
+    { href: "/children", label: tNav("parent.children") },
+    { href: "/profile", label: tNav("parent.parentProfileLong") },
+    { href: "/help-support", label: tNav("parent.helpSupport") },
+  ] as const;
+
   return (
     <footer
-      aria-label="Thông tin ViRead"
+      aria-label={tNav("footer.ariaLabel")}
       className={cn(
         "site-colophon mt-auto w-full shrink-0 border-t border-border bg-white",
         className,
@@ -32,7 +41,9 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
       <div className="mx-auto flex w-full max-w-[1440px] flex-col gap-4 px-4 py-6 sm:px-8 xl:px-16">
         <ViReadLogo
           ariaLabel={
-            isParent ? "ViRead - về tổng quan" : "ViRead - về trang chủ"
+            isParent
+              ? tNav("footer.logoDashboardAria")
+              : tNav("footer.logoHomeAria")
           }
           href={isParent ? "/dashboard" : isAdmin ? "/admin/parents" : "/login"}
         />
@@ -40,11 +51,10 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
           <div className="grid gap-6 md:grid-cols-3 md:gap-8">
             <section aria-labelledby="footer-viread-brand">
               <h2 className="font-bold text-ink" id="footer-viread-brand">
-                ViRead
+                {tCommon("brand.name")}
               </h2>
               <p className="mt-2 max-w-md text-sm leading-[1.4] text-muted">
-                Nền tảng đồng hành cùng ba mẹ, hỗ trợ trẻ phát triển kỹ năng đọc
-                sách và theo dõi quá trình học tập.
+                {tCommon("footer.parentDescription")}
               </p>
             </section>
             <section
@@ -52,10 +62,10 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
               className="min-w-0"
             >
               <h2 className="font-bold text-ink" id="footer-viread-contact">
-                Thông tin liên hệ
+                {tCommon("footer.contactHeading")}
               </h2>
               <address className="mt-2 space-y-1 text-sm not-italic text-muted">
-                <p>Đại học Duy Tân</p>
+                <p>{tCommon("footer.organization")}</p>
                 <p>
                   <a
                     className={cn(linkClass, "break-all")}
@@ -66,14 +76,14 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
                 </p>
                 <p>
                   <a className={linkClass} href="tel:0905373633">
-                    0905373633
+                    {tCommon("footer.contactPhone")}
                   </a>
                 </p>
               </address>
             </section>
             <nav aria-labelledby="footer-viread-links">
               <h2 className="font-bold text-ink" id="footer-viread-links">
-                Truy cập nhanh
+                {tCommon("footer.quickLinksHeading")}
               </h2>
               <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted">
                 {parentLinks.map(({ href, label }) => (
@@ -87,12 +97,14 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
             </nav>
           </div>
         ) : isAdmin ? (
-          <p className="text-sm text-muted">Khu vực quản trị ViRead.</p>
+          <p className="text-sm text-muted">{tCommon("footer.adminNotice")}</p>
         ) : null}
         <p
           className={cn("text-sm leading-[1.4] text-muted", isParent && "mt-4")}
         >
-          © 2026 ViRead.{!isAdmin ? " Bảo lưu mọi quyền." : ""}
+          {isAdmin
+            ? tCommon("footer.adminCopyright", { year: 2026 })
+            : tCommon("footer.copyright", { year: 2026 })}
         </p>
       </div>
     </footer>

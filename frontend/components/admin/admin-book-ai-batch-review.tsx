@@ -11,7 +11,9 @@ import {
   markAiPageRevisionSkipped,
   useSkippedAiPageIds,
 } from "@/hooks/use-admin-ai-batch-skipped-pages";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
+import type { TranslateFn } from "@/lib/i18n/types";
 import {
   normalizeVietnameseWord,
   syncPageTextToWords,
@@ -87,15 +89,16 @@ function updateBatchSession(
   batchListeners.get(bookId)?.forEach((listener) => listener());
 }
 
-function pageErrorMessage(cause: unknown): string {
+function pageErrorMessage(cause: unknown, t: TranslateFn): string {
   if (isServiceError(cause)) return cause.message;
   if (cause instanceof Error) return cause.message;
-  return "Lỗi khi rà soát trang; bản nháp hiện tại được giữ nguyên.";
+  return t("books.aiBatch.errors.genericPage");
 }
 
 function preparePage(
   detail: AdminPageRevisionDetailDTO,
   correctedText: string,
+  t: TranslateFn,
 ): {
   readonly request: AdminRevisionVerifyRequestDTO;
   readonly changes: number;
@@ -103,7 +106,7 @@ function preparePage(
   const originalText = detail.draft_text?.normalize("NFC").trim() ?? "";
   const originalTokens = tokenizePageText(originalText);
   if (!originalText || originalTokens.length === 0) {
-    throw new Error("Trang không có văn bản nháp để AI rà soát.");
+    throw new Error(t("books.aiBatch.errors.noDraft"));
   }
   if (
     detail.words.length !== originalTokens.length ||
@@ -116,14 +119,10 @@ function preparePage(
           word.normalized_text,
     )
   ) {
-    throw new Error(
-      "Danh sách từ và vùng OCR không khớp chắc chắn. Trang được giữ nguyên để Admin rà soát riêng.",
-    );
+    throw new Error(t("books.aiBatch.errors.wordMismatch"));
   }
   if (detail.words.some((word) => word.geometry_quality === "invalid")) {
-    throw new Error(
-      "Có vùng OCR không hợp lệ. Trang được giữ nguyên để Admin rà soát riêng.",
-    );
+    throw new Error(t("books.aiBatch.errors.invalidWordBox"));
   }
 
   const sync = syncPageTextToWords(
@@ -135,9 +134,7 @@ function preparePage(
     sync.tokens.length !== originalTokens.length ||
     sync.tokens.length !== detail.words.length
   ) {
-    throw new Error(
-      "AI đã trả về số từ khác với vùng OCR. Không thể ghép an toàn; trang được giữ nguyên.",
-    );
+    throw new Error(t("books.aiBatch.errors.aiWordCountMismatch"));
   }
 
   const suggestions = sync.tokens.flatMap((proposed, index) => {
@@ -178,6 +175,8 @@ export function AdminBookAiBatchReview({
   onCompleted: () => void;
 }) {
   const { ocr } = useAdminServices();
+  const t = useTranslations("admin");
+  const { formatNumber } = useI18n();
   const session = useSyncExternalStore(
     (onChange) => subscribeBatchSession(bookId, onChange),
     () => getBatchSession(bookId),
@@ -263,13 +262,10 @@ export function AdminBookAiBatchReview({
           detail.verification_status !== "NEEDS_REVIEW" ||
           detail.lifecycle_status !== "ACTIVE"
         ) {
-          throw new Error(
-            "Revision đã thay đổi hoặc không còn chờ duyệt. Hãy tải lại danh sách trang.",
-          );
+          throw new Error(t("books.aiBatch.errors.revisionChanged"));
         }
         const originalText = detail.draft_text?.normalize("NFC").trim() ?? "";
-        if (!originalText)
-          throw new Error("Trang chưa có văn bản OCR để rà soát.");
+        if (!originalText) throw new Error(t("books.aiBatch.errors.noOcrText"));
 
         const workflow = await ocr.runCombinedWorkflow(
           pageId,
@@ -294,13 +290,16 @@ export function AdminBookAiBatchReview({
         if (controller.signal.aborted) break;
         if (workflow.status === "FAILED" || !workflow.proofread_text) {
           throw new Error(
-            `Workflow AI chưa hoàn tất (${workflow.error_code ?? "FAILED"}). Nội dung OCR gốc được giữ nguyên để Admin kiểm tra.`,
+            t("books.aiBatch.errors.workflowIncomplete", {
+              errorCode: workflow.error_code ?? "FAILED",
+            }),
           );
         }
 
         const prepared = preparePage(
           detail,
           workflow.proofread_text.normalize("NFC"),
+          t,
         );
         const saved = await ocr.saveDraft(
           pageId,
@@ -314,7 +313,7 @@ export function AdminBookAiBatchReview({
           saved.page_revision_id !== revisionId ||
           saved.verification_status !== "NEEDS_REVIEW"
         ) {
-          throw new Error("Backend chưa xác nhận đã lưu đúng bản nháp.");
+          throw new Error(t("books.aiBatch.errors.draftConfirmFailed"));
         }
 
         const savedResult: BatchPageResult = {
@@ -326,8 +325,10 @@ export function AdminBookAiBatchReview({
           adminReviewRequired: true,
           message:
             prepared.changes > 0
-              ? `AI đã đề xuất ${prepared.changes} sửa đổi & quét an toàn văn bản. Đã lưu bản nháp — chờ Admin kiểm tra ảnh, quyền sử dụng và xác minh thủ công.`
-              : "AI không đề xuất sửa đổi & đã quét an toàn văn bản. Chờ Admin kiểm tra ảnh, quyền sử dụng và xác minh thủ công.",
+              ? t("books.aiBatch.errors.savedWithChanges", {
+                  changes: formatNumber(prepared.changes),
+                })
+              : t("books.aiBatch.errors.savedNoChanges"),
           request: prepared.request,
         };
         completed = [...completed, savedResult];
@@ -341,6 +342,7 @@ export function AdminBookAiBatchReview({
         const previousResult = completed.find(
           (result) => result.pageId === pageId,
         );
+        const detailMessage = pageErrorMessage(cause, t);
         const failedResult: BatchPageResult = draftSaved
           ? {
               ...previousResult,
@@ -350,9 +352,9 @@ export function AdminBookAiBatchReview({
               status: "saved",
               changes: previousResult?.changes ?? 0,
               adminReviewRequired: true,
-              message:
-                "Bản nháp AI đã được lưu và chờ Admin xác minh thủ công: " +
-                pageErrorMessage(cause),
+              message: t("books.aiBatch.errors.savedPrefix", {
+                detail: detailMessage,
+              }),
             }
           : {
               pageId,
@@ -361,7 +363,9 @@ export function AdminBookAiBatchReview({
               status: "failed",
               changes: 0,
               adminReviewRequired: true,
-              message: `AI không xử lý được; trang giữ nguyên trạng thái NEEDS_REVIEW (không tự động VERIFIED). ${pageErrorMessage(cause)}`,
+              message: t("books.aiBatch.errors.failedKeepReview", {
+                detail: detailMessage,
+              }),
             };
         markAiPageRevisionSkipped(bookId, revisionId);
         const existingIndex = completed.findIndex(
@@ -393,8 +397,12 @@ export function AdminBookAiBatchReview({
         ...current,
         notice: {
           tone: "warning",
-          title: "Đã dừng rà soát",
-          message: `${completed.filter((item) => item.status === "verified").length} trang đã được lưu và xác minh. Nếu trang đang làm đã lưu xong nhưng chưa xác minh, bản nháp vẫn được giữ ở trạng thái NEEDS_REVIEW.`,
+          title: t("books.aiBatch.stoppedTitle"),
+          message: t("books.aiBatch.stoppedMessage", {
+            verified: formatNumber(
+              completed.filter((item) => item.status === "verified").length,
+            ),
+          }),
         },
       }));
     } else if (completed.length === 0) {
@@ -402,9 +410,8 @@ export function AdminBookAiBatchReview({
         ...current,
         notice: {
           tone: "info",
-          title: "Không có trang cần rà soát",
-          message:
-            "Hãy tải lại danh sách hoặc chờ OCR các trang mới hoàn tất trước khi chạy AI.",
+          title: t("books.aiBatch.noneTitle"),
+          message: t("books.aiBatch.noneMessage"),
         },
       }));
     } else {
@@ -421,8 +428,12 @@ export function AdminBookAiBatchReview({
         ...current,
         notice: {
           tone: failedCount > 0 || savedCount > 0 ? "warning" : "success",
-          title: "Đã xử lý xong từng trang",
-          message: `${verifiedCount} trang đã tự lưu và xác minh; ${savedCount} trang có bản nháp đã lưu nhưng cần Admin xác minh; ${failedCount} trang được giữ nguyên và chuyển sang Admin xác minh. Các revision lỗi sẽ không bị AI quét lại.`,
+          title: t("books.aiBatch.doneTitle"),
+          message: t("books.aiBatch.doneMessage", {
+            verified: formatNumber(verifiedCount),
+            saved: formatNumber(savedCount),
+            failed: formatNumber(failedCount),
+          }),
         },
       }));
     }
@@ -439,15 +450,10 @@ export function AdminBookAiBatchReview({
         <div>
           <h2 className="flex items-center gap-2 text-xl font-black">
             <Sparkles aria-hidden className="size-5 text-primary" />
-            AI rà soát chính tả &amp; an toàn từng trang (chờ Admin xác minh)
+            {t("books.aiBatch.heading")}
           </h2>
           <p className="mt-2 text-sm leading-6 text-muted">
-            AI xử lý lần lượt các trang NEEDS_REVIEW để đề xuất sửa chính tả OCR
-            và quét an toàn nội dung văn bản (hỗ trợ fallback sang Ollama cục bộ
-            khi cloud gặp lỗi). Hệ thống tuyệt đối không tự động VERIFIED trang
-            hoặc tự động xuất bản sách: Admin cần mở từng trang để đối chiếu
-            ảnh, xác nhận an toàn hình ảnh, kiểm tra hồ sơ quyền sử dụng và bấm
-            xác minh thủ công.
+            {t("books.aiBatch.description")}
           </p>
         </div>
 
@@ -470,16 +476,26 @@ export function AdminBookAiBatchReview({
               />
               <div className="min-w-0">
                 <p className="font-bold text-ink">
-                  Đang rà soát trang {progress.pageNumber} · {progress.current}/
-                  {progress.total}
+                  {t("books.aiBatch.progressLine", {
+                    pageNumber: formatNumber(progress.pageNumber),
+                    current: formatNumber(progress.current),
+                    total: formatNumber(progress.total),
+                  })}
                 </p>
                 <p className="mt-1 text-sm text-muted">
-                  {results.filter((item) => item.status === "verified").length}{" "}
-                  trang đã xác minh và lưu bền vững.{" "}
+                  {t("books.aiBatch.progressVerifiedSuffix", {
+                    count: formatNumber(
+                      results.filter((item) => item.status === "verified")
+                        .length,
+                    ),
+                  })}{" "}
                   {progress.totalChunks > 0
-                    ? `Đang xử lý đoạn ${progress.completedChunks}/${progress.totalChunks}. `
-                    : "Đang tải ảnh, kiểm tra văn bản và chuẩn bị các đoạn xử lý. "}
-                  Có thể mất một lúc; hãy giữ trang này mở.
+                    ? t("books.aiBatch.progressChunkLine", {
+                        completed: formatNumber(progress.completedChunks),
+                        total: formatNumber(progress.totalChunks),
+                      })
+                    : t("books.aiBatch.progressPreparingLine")}
+                  {t("books.aiBatch.progressKeepOpenHint")}
                 </p>
                 <div
                   aria-hidden
@@ -496,11 +512,16 @@ export function AdminBookAiBatchReview({
         ) : null}
 
         {results.length > 0 ? (
-          <div className="grid gap-2" aria-label="Kết quả rà soát theo trang">
+          <div
+            className="grid gap-2"
+            aria-label={t("books.aiBatch.resultsAria")}
+          >
             <p className="text-sm font-bold text-ink">
-              Kết quả: {verifiedResults.length} trang đã xác minh ·{" "}
-              {savedResults.length} bản nháp đã lưu, cần Admin xác minh ·{" "}
-              {failedResults.length} trang cần Admin xác minh
+              {t("books.aiBatch.resultsSummary", {
+                verified: formatNumber(verifiedResults.length),
+                saved: formatNumber(savedResults.length),
+                failed: formatNumber(failedResults.length),
+              })}
             </p>
             <ul className="grid max-h-72 gap-2 overflow-y-auto rounded-control border border-border p-3">
               {results.map((result) => (
@@ -509,7 +530,11 @@ export function AdminBookAiBatchReview({
                   key={`${result.pageId}:${result.revisionId}`}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-2">
-                    <span className="font-bold">Trang {result.pageNumber}</span>
+                    <span className="font-bold">
+                      {t("books.aiBatch.pageLabel", {
+                        pageNumber: formatNumber(result.pageNumber),
+                      })}
+                    </span>
                     <span
                       className={
                         result.adminReviewRequired
@@ -529,21 +554,32 @@ export function AdminBookAiBatchReview({
                       className="w-fit font-bold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
                       href={`/admin/books/${encodeURIComponent(bookId)}/pages/${encodeURIComponent(result.pageId)}`}
                     >
-                      Mở trang để Admin xác minh
+                      {t("books.aiBatch.openPageForVerify")}
                     </Link>
                   ) : null}
                   {result.request?.proofread_audit.suggestions.length ? (
                     <details className="rounded-control bg-sky/30 p-3">
                       <summary className="cursor-pointer font-semibold text-primary">
-                        Xem {result.changes} sửa đổi của trang{" "}
-                        {result.pageNumber}
+                        {t("books.aiBatch.viewChanges", {
+                          changes: formatNumber(result.changes),
+                          pageNumber: formatNumber(result.pageNumber),
+                        })}
                       </summary>
                       <ul className="mt-2 grid gap-1">
                         {result.request.proofread_audit.suggestions.map(
                           (suggestion) => (
                             <li key={suggestion.word_index}>
-                              Từ {suggestion.word_index + 1}: “
-                              {suggestion.original}” → “{suggestion.proposed}”
+                              {t("books.aiBatch.wordChangeLabel", {
+                                wordIndex: suggestion.word_index + 1,
+                              })}{" "}
+                              <span
+                                className="viread-learning-content"
+                                dir="ltr"
+                                lang="vi"
+                              >
+                                “{suggestion.original}” → “{suggestion.proposed}
+                                ”
+                              </span>
                             </li>
                           ),
                         )}
@@ -563,7 +599,8 @@ export function AdminBookAiBatchReview({
               onClick={stopReview}
               variant="secondary"
             >
-              <X aria-hidden className="size-4" /> Dừng rà soát
+              <X aria-hidden className="size-4" />{" "}
+              {t("books.aiBatch.stopButton")}
             </Button>
           ) : (
             <Button
@@ -573,10 +610,18 @@ export function AdminBookAiBatchReview({
             >
               <Sparkles aria-hidden className="size-4" />
               {waitingPages.length > 0
-                ? `${results.length ? "Tiếp tục rà soát" : "Chạy AI đề xuất sửa"} ${waitingPages.length} trang`
+                ? results.length > 0
+                  ? t("books.aiBatch.runButtonContinue", {
+                      count: formatNumber(waitingPages.length),
+                    })
+                  : t("books.aiBatch.runButtonStart", {
+                      count: formatNumber(waitingPages.length),
+                    })
                 : skippedPageIds.size > 0
-                  ? `${skippedPageIds.size} revision đã xử lý; không quét lại`
-                  : "Không có trang cần AI rà soát"}
+                  ? t("books.aiBatch.skippedSummary", {
+                      count: formatNumber(skippedPageIds.size),
+                    })
+                  : t("books.aiBatch.noPagesButton")}
             </Button>
           )}
         </div>

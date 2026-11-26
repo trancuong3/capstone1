@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ViRead</string>
+    <string name="loading_title">ViRead খোলা হচ্ছে</string>
+    <string name="loading_subtitle">ViRead লোড হচ্ছে…</string>
+    <string name="loading_hint_stage2">সার্ভারের সাথে সংযোগ করা হচ্ছে…</string>
+    <string name="loading_hint_stage3">সার্ভার চালু হচ্ছে, অনুগ্রহ করে অপেক্ষা করুন…</string>
+    <string name="loading_cold_start_hint">সার্ভার চালু হচ্ছে (cold-start), অনুগ্রহ করে একটু অপেক্ষা করুন…</string>
+    <string name="error_title_network">ViRead সার্ভারে সংযোগ করা যাচ্ছে না</string>
+    <string name="error_title_server">ViRead সার্ভার চালু হচ্ছে বা ব্যস্ত আছে</string>
+    <string name="error_title_timeout">ViRead-এর সাথে সংযোগ করা যাচ্ছে না</string>
+    <string name="error_title_tls">অবৈধ নিরাপত্তা শংসাপত্র</string>
+    <string name="offline_message">ViRead সার্ভারে সংযোগ করা যাচ্ছে না। অনুগ্রহ করে Wi-Fi / মোবাইল নেটওয়ার্ক বা সার্ভার ঠিকানা পরীক্ষা করে আবার চেষ্টা করুন বোতামে চাপ দিন।</string>
+    <string name="timeout_message">ViRead সার্ভার ধীরে সাড়া দিচ্ছে। নেটওয়ার্ক সংযোগ পরীক্ষা করে আবার চেষ্টা করুন বোতামে চাপ দিন। প্রথমবার চালু হলে সার্ভার শুরু হতে ৩০–৬০ সেকেন্ড সময় লাগতে পারে।</string>
+    <string name="server_5xx_message">ViRead সার্ভার ব্যস্ত বা পুনরায় চালু হচ্ছে (%1$d)। কয়েক সেকেন্ড অপেক্ষা করে আবার চেষ্টা করুন বোতামে চাপ দিন।</string>
+    <string name="tls_error_message">সার্ভারের HTTPS নিরাপত্তা শংসাপত্রটি অবৈধ হওয়ায় আপনার পারিবারিক অ্যাকাউন্ট সুরক্ষিত রাখতে ViRead সংযোগটি আটকে দিয়েছে।</string>
+    <string name="no_network_toast">ডিভাইসে এই মুহূর্তে ইন্টারনেট বা Wi-Fi সংযোগ নেই।</string>
+    <string name="network_ready_toast">নেটওয়ার্ক সংযোগ পাওয়া গেছে। ViRead পুনরায় লোড হচ্ছে…</string>
+    <string name="retry_button">আবার চেষ্টা করুন</string>
+    <string name="open_home_button">সাইন-ইন পৃষ্ঠায় যান</string>
+    <string name="check_connection_button">সংযোগ পুনরায় পরীক্ষা করুন</string>
+    <string name="configure_lan_server_button">LAN HTTPS সার্ভার পরিবর্তন করুন (Debug)</string>
+    <string name="lan_dialog_title">LAN HTTPS সার্ভার কনফিগার করুন (Debug)</string>
+    <string name="lan_dialog_hint">একই Wi-Fi-তে থাকা Next.js সার্ভারের HTTPS ঠিকানা লিখুন (যেমন: https://192.168.1.10:8443)। HTTP বা localhost গ্রহণযোগ্য নয়।</string>
+    <string name="lan_dialog_save">সংরক্ষণ ও সংযোগ করুন</string>
+    <string name="lan_dialog_reset">ডিফল্ট পুনরুদ্ধার করুন</string>
+    <string name="lan_dialog_cancel">বন্ধ করুন</string>
+    <string name="lan_invalid_url_toast">অবৈধ ঠিকানা। শুধুমাত্র বৈধ LAN HTTPS অরিজিন গ্রহণযোগ্য (সাব-পাথ বা HTTP নয়)।</string>
+    <string name="file_chooser_title">বইয়ের পাতার ছবি বাছুন, ছবি তুলুন বা PDF/DOCX নির্বাচন করুন</string>
+    <string name="permission_denied_title">এই সুবিধাটি ব্যবহারের জন্য অনুমতি প্রয়োজন</string>
+    <string name="permission_denied_message">ViRead-এর জন্য ক্যামেরা বা মাইক্রোফোনের অনুমতি বন্ধ রয়েছে। আপনি যেকোনো সময় অ্যাপ সেটিংস খুলে তা চালু করতে পারেন।</string>
+    <string name="open_app_settings_button">অ্যাপ সেটিংস খুলুন</string>
+    <string name="back_exit_confirm_toast">ViRead থেকে বের হতে আবার চাপুন</string>
+</resources>

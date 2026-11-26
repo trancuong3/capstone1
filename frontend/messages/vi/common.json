@@ -1,0 +1,97 @@
+{
+  "brand": {
+    "name": "ViRead",
+    "tagline": "Nền tảng đồng hành cùng ba mẹ và bé trên hành trình đọc sách."
+  },
+  "actions": {
+    "save": "Lưu",
+    "saving": "Đang lưu…",
+    "cancel": "Hủy",
+    "close": "Đóng",
+    "confirm": "Xác nhận",
+    "continue": "Tiếp tục",
+    "back": "Quay lại",
+    "retry": "Thử lại",
+    "reload": "Tải lại",
+    "search": "Tìm kiếm",
+    "clear": "Xóa",
+    "filter": "Lọc",
+    "edit": "Chỉnh sửa",
+    "delete": "Xóa",
+    "create": "Tạo mới",
+    "upload": "Tải lên",
+    "download": "Tải xuống",
+    "open": "Mở",
+    "viewDetails": "Xem chi tiết",
+    "select": "Chọn",
+    "apply": "Áp dụng"
+  },
+  "states": {
+    "loading": "Đang tải…",
+    "empty": "Chưa có dữ liệu.",
+    "unavailable": "Không thể tải thông tin",
+    "ready": "Sẵn sàng",
+    "completed": "Hoàn thành",
+    "inProgress": "Đang thực hiện",
+    "pending": "Đang chờ",
+    "error": "Đã xảy ra lỗi",
+    "imageLoadFailed": "Không tải được ảnh trang",
+    "retryReload": "Thử tải lại"
+  },
+  "avatar": {
+    "defaultAlt": "Ảnh đại diện"
+  },
+  "pagination": {
+    "summary": "Trang {page} / {totalPages}",
+    "itemsCount": "{count, plural, =0 {Không có mục nào} other {# mục}}",
+    "previous": "Trang trước",
+    "next": "Trang sau",
+    "previousShort": "Trước",
+    "nextShort": "Tiếp",
+    "navAria": "Phân trang",
+    "navAriaWithLabel": "Điều hướng danh sách {itemLabel}",
+    "rangeSummary": "Đang xem {start}–{end} / {total}",
+    "rangeSummaryWithLabel": "Đang xem {start}–{end} / {total} {itemLabel}"
+  },
+  "languageSelector": {
+    "label": "Ngôn ngữ giao diện",
+    "buttonAriaLabel": "Chọn ngôn ngữ giao diện, hiện tại: {language}",
+    "dialogTitle": "Chọn ngôn ngữ",
+    "searchLabel": "Tìm ngôn ngữ",
+    "searchPlaceholder": "Tìm theo tên ngôn ngữ hoặc mã…",
+    "clearSearch": "Xóa từ khóa tìm kiếm",
+    "popularHeading": "Ngôn ngữ phổ biến",
+    "allHeading": "Tất cả ngôn ngữ",
+    "searchResultsHeading": "Kết quả tìm kiếm",
+    "emptySearch": "Không tìm thấy ngôn ngữ phù hợp với \"{query}\".",
+    "currentBadge": "Đang dùng",
+    "loadingLocale": "Đang tải ngôn ngữ…",
+    "switchedNotice": "Đã chuyển giao diện sang {language}.",
+    "closeButton": "Đóng danh sách ngôn ngữ"
+  },
+  "footer": {
+    "copyright": "© {year} ViRead. Bảo lưu mọi quyền.",
+    "adminCopyright": "© {year} ViRead.",
+    "adminNotice": "Khu vực quản trị ViRead.",
+    "parentDescription": "Nền tảng đồng hành cùng ba mẹ, hỗ trợ trẻ phát triển kỹ năng đọc sách và theo dõi quá trình học tập.",
+    "contactHeading": "Thông tin liên hệ",
+    "quickLinksHeading": "Truy cập nhanh",
+    "organization": "Đại học Duy Tân",
+    "contactEmail": "vireadforyou@gmail.com",
+    "contactPhone": "0905373633"
+  },
+  "notFound": {
+    "pageTitle": "Không tìm thấy trang",
+    "title": "Không tìm thấy trang",
+    "description": "Trang ba mẹ đang tìm không tồn tại hoặc đã được chuyển sang địa chỉ khác.",
+    "backHome": "Về tổng quan",
+    "backLogin": "Về trang đăng nhập"
+  },
+  "errorPage": {
+    "title": "Đã có sự cố xảy ra",
+    "description": "ViRead gặp lỗi không mong muốn khi hiển thị trang này. Ba mẹ vui lòng thử lại hoặc quay về trang tổng quan.",
+    "globalTitle": "Ứng dụng tạm thời gặp sự cố",
+    "globalDescription": "Không thể tải giao diện ứng dụng lúc này. Ba mẹ vui lòng thử tải lại trang.",
+    "backHome": "Về tổng quan"
+  }
+}

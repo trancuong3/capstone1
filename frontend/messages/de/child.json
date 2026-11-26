@@ -1,0 +1,36 @@
+{
+  "list": {
+    "title": "Kinderprofile",
+    "subtitle": "Informationen und Lesestufen für jedes Kind verwalten.",
+    "addChild": "Kinderprofil hinzufügen",
+    "empty": "Noch keine Kinderprofile vorhanden. Erstellen Sie das erste Profil für Ihr Kind."
+  },
+  "switcher": {
+    "selectChild": "Kind auswählen",
+    "quickSwitchAria": "Kind schnell wechseln",
+    "selectedAria": "Ausgewähltes Kind: {alias}, zum Wechseln tippen",
+    "gradeLabel": "Klasse {grade}",
+    "gradeShort": "Kl. {grade}",
+    "manageChildren": "Kindesprofile verwalten"
+  },
+  "form": {
+    "createTitle": "Kinderprofil erstellen",
+    "editTitle": "Kinderprofil aktualisieren",
+    "aliasLabel": "Spitzname",
+    "gradeLabel": "Klassenstufe",
+    "ageLabel": "Alter",
+    "saveSuccess": "Kinderprofil gespeichert."
+  },
+  "count": "{count, plural, =0 {Keine Kinderprofile} one {# Kinderprofil} other {# Kinderprofile}}",
+  "selector": {
+    "label": "Kinderprofil",
+    "selectAria": "Profil auswählen, um Daten anzuzeigen",
+    "optionLabel": "{alias} · Klasse {grade}"
+  },
+  "verification": {
+    "loading": "Kindprofil wird verifiziert…",
+    "errorTitle": "Kindprofil konnte nicht verifiziert werden",
+    "errorBody": "Das Profil konnte nicht diesem Konto zugeordnet werden. Bitte versuchen Sie es erneut.",
+    "retry": "Erneut versuchen"
+  }
+}

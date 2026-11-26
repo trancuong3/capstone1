@@ -1,0 +1,36 @@
+{
+  "list": {
+    "title": "孩子档案",
+    "subtitle": "管理每个孩子的资料和阅读水平。",
+    "addChild": "添加孩子资料",
+    "empty": "暂无孩子资料。请创建您的第一个资料。"
+  },
+  "switcher": {
+    "selectChild": "选择孩子",
+    "quickSwitchAria": "快速切换孩子",
+    "selectedAria": "当前选择：{alias}，点击切换",
+    "gradeLabel": "{grade} 年级",
+    "gradeShort": "{grade} 年级",
+    "manageChildren": "管理孩子档案"
+  },
+  "form": {
+    "createTitle": "创建孩子资料",
+    "editTitle": "更新孩子资料",
+    "aliasLabel": "昵称",
+    "gradeLabel": "年级",
+    "ageLabel": "年龄",
+    "saveSuccess": "孩子资料已保存。"
+  },
+  "count": "{count, plural, =0 {暂无孩子资料} other {# 位孩子}}",
+  "selector": {
+    "label": "孩子资料",
+    "selectAria": "选择资料以查看数据",
+    "optionLabel": "{alias} · {grade} 年级"
+  },
+  "verification": {
+    "loading": "正在验证孩子资料…",
+    "errorTitle": "无法验证孩子资料",
+    "errorBody": "无法确认该资料属于当前账户。请重试。",
+    "retry": "重试"
+  }
+}

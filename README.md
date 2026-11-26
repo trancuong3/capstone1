@@ -11,7 +11,6 @@ ViRead là dự án đồng hành cùng bé đọc sách, gồm frontend **Next.
 
 Xem [hướng dẫn đóng góp](CONTRIBUTING.md) và [tài liệu triển khai Render/Supabase](docs/RENDER_SUPABASE_DEPLOYMENT.md).
 
-
 ## Bắt đầu nhanh
 
 ### 1. Clone repository
@@ -77,6 +76,7 @@ Route Parent và Admin được bảo vệ phía server. Ứng dụng xác minh 
 - **Báo cáo:** tiến bộ, lịch sử phiên, từ cần luyện và bài tập/AI Tutor theo các typed API. Số liệu không đủ evidence phải giữ trạng thái không xác định, không tự suy diễn lỗi của bé.
 - **Quản trị OCR:** tạo/sửa sách, upload/trích xuất/reprocess, OCR revision, verify, audit và health; có worker/flow quản lý model/training trong code.
 - **Các luồng khác:** karaoke, voice, picture description, trò chơi và worker nhắc đọc (tính khả dụng phụ thuộc cấu hình riêng).
+- **Đa ngôn ngữ & Quốc tế hóa (i18n):** mặc định Tiếng Việt (`vi`) với cấu trúc mở rộng 30 ngôn ngữ (hiện đã xuất bản **11 ngôn ngữ** đạt 100% / 5.136 key, gồm cả RTL `ar`/`he`), lazy-load 0đ không dùng dịch thuật API khi chạy, giữ nguyên pipeline OCR/STT/TTS Tiếng Việt và nội dung học đọc `dir="ltr" lang="vi"`; hỗ trợ đa ngôn ngữ cho email/error backend và Android WebView (`values-*/strings.xml`).
 - **Frontend responsive:** chung codebase cho desktop/tablet/mobile; mock/fixture phục vụ test vẫn tồn tại nhưng không đại diện trạng thái dữ liệu production.
 
 **Giới hạn:** sự hiện diện của route/test không đảm bảo tất cả tích hợp thiết bị, model, provider, realtime hay luồng worker chạy được trong mọi môi trường. Xem tests/CI và cấu hình dịch vụ cho từng phần; không khẳng định đã hoàn thành AI training chỉ dựa vào tên flow.
@@ -108,6 +108,7 @@ capstone1/
 
 - [Hướng dẫn frontend chi tiết](frontend/README.md)
 - [Báo cáo nghiệm thu frontend](frontend/FRONTEND_ACCEPTANCE_REPORT.md)
+- [Hệ thống Đa ngôn ngữ & Quốc tế hóa (i18n)](docs/features/internationalization/ARCHITECTURE.md) — [Danh sách 30 ngôn ngữ & trạng thái phát hành](docs/features/internationalization/SUPPORTED_LANGUAGES.md), [Báo cáo độ phủ 5.136 key](docs/features/internationalization/TRANSLATION_COVERAGE.md), [Báo cáo kiểm thử](docs/features/internationalization/TEST_REPORT.md), [Hiệu năng](docs/features/internationalization/PERFORMANCE_REPORT.md), [Bảo mật](docs/features/internationalization/SECURITY_REVIEW.md), [Android](docs/features/internationalization/ANDROID_VERIFICATION.md), [Hướng dẫn thêm ngôn ngữ](docs/features/internationalization/HOW_TO_ADD_LANGUAGE.md)
 - [Quy tắc đóng góp](CONTRIBUTING.md)
 - [Triển khai, bảo mật và benchmark AI OCR đa nhà cung cấp](docs/admin-ocr-local-deployment.md)
 

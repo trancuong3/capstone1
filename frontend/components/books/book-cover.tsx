@@ -105,18 +105,22 @@ export function BookCover({
       {!showTitle ? null : titleAsHeading ? (
         <h2
           className={cn(
-            "line-clamp-2 text-center text-2xl font-extrabold leading-snug text-ink",
+            "viread-learning-content line-clamp-2 text-center text-2xl font-extrabold leading-snug text-ink",
             compact && "text-xs leading-tight",
           )}
+          dir="ltr"
+          lang="vi"
         >
           {book.title}
         </h2>
       ) : (
         <p
           className={cn(
-            "line-clamp-2 text-center text-2xl font-extrabold leading-snug text-ink",
+            "viread-learning-content line-clamp-2 text-center text-2xl font-extrabold leading-snug text-ink",
             compact && "text-xs leading-tight",
           )}
+          dir="ltr"
+          lang="vi"
         >
           {book.title}
         </p>

@@ -4,6 +4,7 @@ import { BookOpen, Check, Mic, Pause, Volume2, VolumeX } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/common/button";
+import { useTranslations } from "@/hooks/use-i18n";
 import { cn } from "@/lib/utils/cn";
 
 interface ReadingControlsProps {
@@ -39,12 +40,13 @@ export function ReadingControls({
   onChoosePage,
   voiceSettings,
 }: ReadingControlsProps) {
+  const t = useTranslations("reading");
   const finishDisabled = disabled;
 
   return (
     <div className="mx-auto w-full max-w-[1104px]">
       <nav
-        aria-label="Điều khiển buổi đọc"
+        aria-label={t("controls.toolbarAria")}
         data-reading-controls
         className={cn(
           "grid grid-cols-3 gap-1.5 sm:gap-2 lg:gap-3",
@@ -58,7 +60,7 @@ export function ReadingControls({
         )}
       >
         <Button
-          aria-label="Tạm dừng buổi đọc"
+          aria-label={t("controls.pauseAria")}
           className={dockButtonClass}
           disabled={pauseDisabled ?? disabled}
           onClick={onPause}
@@ -67,17 +69,17 @@ export function ReadingControls({
         >
           <Pause aria-hidden="true" className="size-5 shrink-0 lg:size-6" />
           <span className="max-w-full text-center whitespace-normal break-words">
-            Tạm dừng
+            {t("controls.pause")}
           </span>
         </Button>
 
         <Button
           aria-label={
             isPlayingSample
-              ? "Dừng đọc mẫu"
+              ? t("controls.stopSampleAria")
               : retryMode
-                ? "Nghe mẫu từ cần đọc lại"
-                : "Nghe đọc mẫu cả trang"
+                ? t("controls.sampleWordAria")
+                : t("controls.samplePageAria")
           }
           className={dockButtonClass}
           disabled={disabled}
@@ -96,10 +98,10 @@ export function ReadingControls({
 
           <span className="max-w-full text-center whitespace-normal break-words">
             {isPlayingSample
-              ? "Dừng mẫu"
+              ? t("controls.stopSample")
               : retryMode
-                ? "Nghe mẫu từ"
-                : "Nghe mẫu"}
+                ? t("controls.sampleWord")
+                : t("controls.samplePage")}
           </span>
         </Button>
 
@@ -108,10 +110,10 @@ export function ReadingControls({
         <Button
           aria-label={
             isListening
-              ? "Dừng nhận diện giọng nói"
+              ? t("controls.stopMicAria")
               : retryMode
-                ? "Bật mic"
-                : "Bé đọc với nhận diện giọng nói"
+                ? t("controls.enableMicAria")
+                : t("controls.startChildReadAria")
           }
           className={cn(dockButtonClass, "font-extrabold")}
           disabled={disabled}
@@ -132,13 +134,17 @@ export function ReadingControls({
           )}
 
           <span className="max-w-full text-center whitespace-normal break-words">
-            {isListening ? "Dừng mic" : retryMode ? "Bật mic" : "Bé đọc"}
+            {isListening
+              ? t("controls.stopMic")
+              : retryMode
+                ? t("controls.enableMic")
+                : t("controls.childRead")}
           </span>
         </Button>
 
         {!retryMode && (
           <Button
-            aria-label="Chọn trang"
+            aria-label={t("controls.choosePageAria")}
             className={dockButtonClass}
             disabled={disabled || !onChoosePage}
             onClick={onChoosePage}
@@ -150,13 +156,17 @@ export function ReadingControls({
               className="size-5 shrink-0 lg:size-6"
             />
             <span className="max-w-full text-center whitespace-normal break-words">
-              Chọn trang
+              {t("controls.choosePage")}
             </span>
           </Button>
         )}
 
         <Button
-          aria-label={retryMode ? "Hoàn thành đọc lại" : "Kết thúc buổi đọc"}
+          aria-label={
+            retryMode
+              ? t("controls.finishRetryAria")
+              : t("controls.finishSessionAria")
+          }
           className={cn(
             dockButtonClass,
             (retryMode ? Boolean(voiceSettings) : !voiceSettings) &&
@@ -169,7 +179,7 @@ export function ReadingControls({
         >
           <Check aria-hidden="true" className="size-5 shrink-0 lg:size-6" />
           <span className="max-w-full text-center whitespace-normal break-words">
-            {retryMode ? "Hoàn thành" : "Xong"}
+            {retryMode ? t("controls.finishRetry") : t("controls.done")}
           </span>
         </Button>
       </nav>

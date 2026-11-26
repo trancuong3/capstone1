@@ -10,35 +10,16 @@ import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { useBookContentReportService } from "@/hooks/use-book-content-report-service";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
 import type {
-  BookContentIssueType,
   BookContentReportDetailDTO,
   BookContentReportDTO,
-  BookContentReportStatus,
 } from "@/types/book-content-quality";
 
-const issueLabels: Record<BookContentIssueType, string> = {
-  BOOK_METADATA_ERROR: "Sai thông tin sách",
-  SPELLING_ERROR: "Sai chính tả",
-  MISSING_CONTENT: "Thiếu từ hoặc câu",
-  OCR_MISMATCH: "Nội dung không khớp ảnh gốc",
-  IMAGE_QUALITY_ERROR: "Ảnh trang sách bị lỗi",
-  DUPLICATE_PAGE: "Trang có dấu hiệu bị trùng",
-  PAGE_ORDER_ERROR: "Trang sai thứ tự",
-  CHILD_SAFETY_CONCERN: "Nội dung có dấu hiệu không phù hợp cho trẻ em",
-  COPYRIGHT_CONCERN: "Nghi ngại bản quyền / quyền sử dụng",
-  OTHER: "Lỗi khác",
-};
-
-const statusLabels: Record<BookContentReportStatus, string> = {
-  OPEN: "Đã tiếp nhận",
-  UNDER_REVIEW: "Đang kiểm tra",
-  RESOLVED: "Đã xử lý",
-  REJECTED: "Không đủ căn cứ",
-};
-
 export function ParentBookReportsScreen() {
+  const { formatDateTime } = useI18n();
+  const t = useTranslations("books");
   const reportService = useBookContentReportService();
   const [items, setItems] = useState<BookContentReportDTO[]>([]);
   const [total, setTotal] = useState(0);
@@ -69,7 +50,7 @@ export function ParentBookReportsScreen() {
     } catch {
       setDetailError({
         reportId,
-        message: "Không thể tải chi tiết phản hồi của báo cáo này.",
+        message: t("bookReports.detailLoadError"),
       });
     } finally {
       setLoadingDetailId(null);
@@ -114,13 +95,13 @@ export function ParentBookReportsScreen() {
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-label font-bold text-primary">
-            ViRead · Phụ huynh
+            {t("bookReports.eyebrow")}
           </p>
           <h1 className="mt-1 text-heading font-extrabold text-ink">
-            Báo cáo chất lượng sách
+            {t("bookReports.heading")}
           </h1>
           <p className="mt-2 max-w-2xl text-body text-muted">
-            Theo dõi các vấn đề ba mẹ đã gửi và trạng thái xử lý của Admin.
+            {t("bookReports.subtitle")}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -131,33 +112,33 @@ export function ParentBookReportsScreen() {
             variant="secondary"
           >
             <RefreshCw aria-hidden className="size-4" />
-            Tải lại
+            {t("bookReports.reload")}
           </Button>
           <ButtonLink className="w-auto" href="/books" size="compact">
-            Thư viện sách
+            {t("bookReports.libraryLink")}
           </ButtonLink>
         </div>
       </header>
 
       {loading ? (
-        <AdminLoading label="Đang tải báo cáo của ba mẹ…" />
+        <AdminLoading label={t("bookReports.loading")} />
       ) : error ? (
         <StatusMessage
           tone="error"
           title={
             error === "auth"
-              ? "Phiên đăng nhập đã hết hạn"
+              ? t("bookReports.errorExpired")
               : error === "forbidden"
-                ? "Tài khoản không có quyền xem báo cáo"
-                : "Không thể tải báo cáo"
+                ? t("bookReports.errorForbidden")
+                : t("bookReports.errorGeneric")
           }
         >
-          Vui lòng tải lại trang hoặc đăng nhập lại trước khi tiếp tục.
+          {t("bookReports.errorHint")}
         </StatusMessage>
       ) : items.length === 0 ? (
         <EmptyState
-          title="Chưa có báo cáo nào"
-          description="Khi phát hiện thông tin sách hoặc nội dung trang chưa chính xác, ba mẹ có thể gửi báo cáo từ trang chi tiết sách."
+          title={t("bookReports.emptyTitle")}
+          description={t("bookReports.emptyDescription")}
         />
       ) : (
         <div className="grid gap-4">
@@ -168,18 +149,22 @@ export function ParentBookReportsScreen() {
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 className="break-words font-semibold text-ink">
+                  <h2
+                    className="viread-learning-content break-words font-semibold text-ink"
+                    dir="ltr"
+                    lang="vi"
+                  >
                     {item.book_title}
                   </h2>
                   <p className="mt-1 text-sm text-muted">
-                    {issueLabels[item.issue_type]}
+                    {t(`reportDialog.issueTypes.${item.issue_type}`)}
                     {item.page_number !== null
-                      ? ` · Trang ${item.page_number}`
-                      : " · Toàn bộ sách"}
+                      ? t("reportDialog.pageSuffix", { page: item.page_number })
+                      : t("reportDialog.wholeBookSuffix")}
                   </p>
                 </div>
                 <span className="rounded-full bg-sky px-3 py-1 text-sm font-semibold text-primary-hover">
-                  {statusLabels[item.status]}
+                  {t(`reportDialog.statuses.${item.status}`)}
                 </span>
               </div>
               <p className="mt-3 break-words whitespace-pre-wrap text-sm leading-6 text-ink">
@@ -187,26 +172,31 @@ export function ParentBookReportsScreen() {
               </p>
               {item.reported_text ? (
                 <p className="mt-2 break-words text-sm text-muted">
-                  Nội dung nghi ngờ:{" "}
-                  <span className="font-semibold text-ink">
+                  {t("bookReports.suspectedPrefix")}
+                  <span
+                    className="viread-learning-content font-semibold text-ink"
+                    dir="ltr"
+                    lang="vi"
+                  >
                     {item.reported_text}
                   </span>
                 </p>
               ) : null}
               <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3 text-xs text-muted">
                 <span className="break-all">
-                  Mã báo cáo: <span className="font-mono">{item.id}</span>
+                  {t("bookReports.reportIdPrefix")}
+                  <span className="font-mono">{item.id}</span>
                 </span>
                 <time dateTime={item.created_at}>
-                  {new Intl.DateTimeFormat("vi-VN", {
+                  {formatDateTime(item.created_at, {
                     dateStyle: "medium",
                     timeStyle: "short",
-                  }).format(new Date(item.created_at))}
+                  })}
                 </time>
               </div>
               {item.scan_run_id ? (
                 <p className="mt-2 break-all text-xs text-muted">
-                  Mã yêu cầu kiểm tra toàn sách:{" "}
+                  {t("bookReports.wholeBookScanPrefix")}
                   <span className="font-mono">{item.scan_run_id}</span>
                 </p>
               ) : null}
@@ -220,8 +210,8 @@ export function ParentBookReportsScreen() {
                   variant="secondary"
                 >
                   {selectedDetail?.id === item.id
-                    ? "Ẩn phản hồi Admin"
-                    : "Xem chi tiết & phản hồi Admin"}
+                    ? t("bookReports.hideAdminResponse")
+                    : t("bookReports.showAdminResponse")}
                 </Button>
               </div>
               {detailError?.reportId === item.id && loadingDetailId === null ? (
@@ -234,17 +224,19 @@ export function ParentBookReportsScreen() {
                   className="mt-3 rounded-control border border-border bg-canvas p-3 text-sm"
                   data-testid="parent-report-detail"
                 >
-                  <p className="font-bold text-ink">Phản hồi từ Admin</p>
+                  <p className="font-bold text-ink">
+                    {t("bookReports.adminResponseTitle")}
+                  </p>
                   <p className="mt-1 text-muted">
                     {selectedDetail.admin_resolution_note ??
-                      "Admin đang tiếp nhận và chưa có ghi chú xử lý cuối cùng."}
+                      t("bookReports.adminResponsePending")}
                   </p>
                   {selectedDetail.history.length ? (
                     <ul className="mt-2 grid gap-1 border-t border-border pt-2 text-xs text-muted">
                       {selectedDetail.history.map((entry, idx) => (
                         <li key={`${entry.created_at}:${idx}`}>
                           <span className="font-semibold text-ink">
-                            {statusLabels[entry.to_status]}
+                            {t(`reportDialog.statuses.${entry.to_status}`)}
                           </span>
                           {entry.note ? ` · ${entry.note}` : ""}
                         </li>
@@ -259,9 +251,9 @@ export function ParentBookReportsScreen() {
       )}
 
       <PaginationBar
-        ariaLabel="Phân trang báo cáo chất lượng sách"
+        ariaLabel={t("bookReports.paginationAria")}
         disabled={loading}
-        itemLabel="báo cáo"
+        itemLabel={t("bookReports.paginationItemLabel")}
         onPageChange={(nextPage) => setOffset((nextPage - 1) * limit)}
         page={currentPage}
         pageSize={limit}

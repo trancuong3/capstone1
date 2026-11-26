@@ -21,22 +21,12 @@ import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
+import type { TranslateFn } from "@/lib/i18n/types";
 import type { AdminParentDetailDTO } from "@/types/admin";
 
 type LoadError = "auth" | "forbidden" | "not-found" | "unavailable";
-
-function formatDate(value: string) {
-  const date = new Date(value);
-
-  return Number.isNaN(date.getTime())
-    ? "Không rõ"
-    : new Intl.DateTimeFormat("vi-VN", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }).format(date);
-}
 
 function getLoadError(error: unknown): LoadError {
   if (!isServiceError(error)) return "unavailable";
@@ -51,14 +41,17 @@ function getLoadError(error: unknown): LoadError {
   return "unavailable";
 }
 
-function contactMessage(status: AdminParentDetailDTO["contact_info_status"]) {
+function contactMessage(
+  status: AdminParentDetailDTO["contact_info_status"],
+  t: TranslateFn,
+) {
   switch (status) {
     case "not_configured":
-      return "Chưa thể tải email và số điện thoại vì backend chưa được cấu hình quyền truy xuất Supabase Auth.";
+      return t("parents.detail.authNotConfigured");
     case "user_not_found":
-      return "Không tìm thấy tài khoản Supabase Auth liên kết với hồ sơ này. Thông tin hồ sơ và trẻ em vẫn được hiển thị.";
+      return t("parents.detail.authNotFound");
     case "lookup_failed":
-      return "Không thể tải thông tin liên hệ từ Supabase Auth lúc này. Hãy kiểm tra cấu hình hoặc thử tải lại.";
+      return t("parents.detail.authUnavailable");
     case "available":
       return null;
   }
@@ -66,6 +59,8 @@ function contactMessage(status: AdminParentDetailDTO["contact_info_status"]) {
 
 export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
   const { parents } = useAdminServices();
+  const t = useTranslations("admin");
+  const { formatDate, locale } = useI18n();
   const [parent, setParent] = useState<AdminParentDetailDTO | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<LoadError | null>(null);
@@ -117,7 +112,7 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
   }, [load]);
 
   const contactNotice = parent
-    ? contactMessage(parent.contact_info_status)
+    ? contactMessage(parent.contact_info_status, t)
     : null;
 
   function openEdit() {
@@ -143,20 +138,22 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
 
   function handleEditSuccess() {
     setEditOpen(false);
-    setActionNotice("Đã cập nhật hồ sơ Parent.");
+    setActionNotice(t("parents.notices.updated"));
   }
 
   const fallbackContact =
     parent?.contact_info_status === "available"
-      ? "Chưa cung cấp"
-      : "Chưa khả dụng";
+      ? t("common.notProvided")
+      : t("common.notAvailable");
 
   return (
     <>
       <AdminPageHeader
-        eyebrow="Quản lý tài khoản"
-        title={parent?.display_name?.trim() || "Chi tiết phụ huynh"}
-        description="Thông tin tài khoản phụ huynh và các hồ sơ trẻ em được liên kết."
+        eyebrow={t("parents.eyebrow")}
+        title={
+          parent?.display_name?.trim() || t("parents.detail.titleFallback")
+        }
+        description={t("parents.detail.description")}
         actions={
           <>
             {parent ? (
@@ -166,7 +163,7 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
                 variant="secondary"
               >
                 <Pencil aria-hidden className="size-5" />
-                Sửa hồ sơ
+                {t("parents.detail.editProfile")}
               </Button>
             ) : null}
             <ButtonLink
@@ -175,7 +172,7 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
               variant="quiet"
             >
               <UsersRound aria-hidden className="size-5" />
-              Danh sách phụ huynh
+              {t("parents.detail.backToList")}
             </ButtonLink>
           </>
         }
@@ -192,38 +189,38 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
       {actionError ? (
         <div className="mb-4">
           <StatusMessage tone="error" title={actionError}>
-            Vui lòng thử lại.
+            {t("parents.detail.retryHint")}
           </StatusMessage>
         </div>
       ) : null}
       {loading ? (
-        <AdminLoading label="Đang tải thông tin phụ huynh…" />
+        <AdminLoading label={t("parents.detail.loading")} />
       ) : error ? (
         <StatusMessage
           tone="error"
           title={
             error === "auth"
-              ? "Phiên đăng nhập không hợp lệ"
+              ? t("common.sessionInvalidTitle")
               : error === "forbidden"
-                ? "Bạn không có quyền xem thông tin phụ huynh"
+                ? t("parents.detail.forbiddenTitle")
                 : error === "not-found"
-                  ? "Không tìm thấy phụ huynh"
-                  : "Không thể tải thông tin phụ huynh"
+                  ? t("parents.detail.notFoundTitle")
+                  : t("parents.detail.loadErrorTitle")
           }
         >
           <div className="flex flex-col items-start gap-3">
             <p>
               {error === "auth"
-                ? "Vui lòng đăng nhập lại bằng tài khoản quản trị."
+                ? t("parents.detail.authDesc")
                 : error === "forbidden"
-                  ? "Chỉ tài khoản có role admin mới được phép xem thông tin này."
+                  ? t("parents.detail.forbiddenDesc")
                   : error === "not-found"
-                    ? "Hồ sơ không tồn tại hoặc ID không hợp lệ."
-                    : "Có lỗi khi kết nối đến hệ thống. Vui lòng thử lại."}
+                    ? t("parents.detail.notFoundDesc")
+                    : t("parents.detail.genericDesc")}
             </p>
             {error === "auth" ? (
               <ButtonLink href="/admin/login" className="sm:w-auto">
-                Đăng nhập lại
+                {t("common.signInAgain")}
               </ButtonLink>
             ) : error === "not-found" || error === "forbidden" ? null : (
               <Button
@@ -232,7 +229,7 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
                 variant="secondary"
               >
                 <RefreshCw aria-hidden className="size-5" />
-                Thử lại
+                {t("common.retry")}
               </Button>
             )}
           </div>
@@ -240,13 +237,15 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
       ) : parent ? (
         <div className="grid gap-6">
           <Card className="bg-white">
-            <h2 className="text-xl font-bold text-ink">Thông tin Parent</h2>
+            <h2 className="text-xl font-bold text-ink">
+              {t("parents.detail.infoHeading")}
+            </h2>
 
             <dl className="grid gap-4 sm:grid-cols-2">
               <div className="min-w-0 rounded-control border border-border bg-white px-4 py-3">
                 <dt className="mb-1 flex items-center gap-2 text-sm font-semibold text-muted">
                   <Mail aria-hidden className="size-4" />
-                  Email
+                  {t("parents.emailLabel")}
                 </dt>
                 <dd className="break-words font-semibold">
                   {parent.email?.trim() || fallbackContact}
@@ -255,7 +254,7 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
               <div className="min-w-0 rounded-control border border-border bg-white px-4 py-3">
                 <dt className="mb-1 flex items-center gap-2 text-sm font-semibold text-muted">
                   <Phone aria-hidden className="size-4" />
-                  Số điện thoại
+                  {t("parents.detail.phone")}
                 </dt>
                 <dd className="break-words font-semibold">
                   {parent.phone?.trim() || fallbackContact}
@@ -264,10 +263,15 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
               <div className="min-w-0 rounded-control border border-border bg-white px-4 py-3">
                 <dt className="mb-1 flex items-center gap-2 text-sm font-semibold text-muted">
                   <CalendarDays aria-hidden className="size-4" />
-                  Ngày tạo hồ sơ
+                  {t("parents.detail.profileCreatedAt")}
                 </dt>
                 <dd className="font-semibold">
-                  {formatDate(parent.created_at)}
+                  {formatDate(parent.created_at, {
+                    year: "numeric",
+                    month: "2-digit",
+                    day: "2-digit",
+                    fallback: t("common.unknown"),
+                  })}
                 </dd>
               </div>
               <div className="min-w-0 rounded-control border border-border bg-white px-4 py-3">
@@ -295,19 +299,20 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
                   id="children-heading"
                   className="text-xl font-semibold text-ink"
                 >
-                  Hồ sơ trẻ em liên kết
+                  {t("parents.detail.linkedChildrenHeading")}
                 </h2>
                 <p className="mt-1 text-sm text-muted">
-                  {parent.children.length} hồ sơ trẻ em được liên kết với phụ
-                  huynh này.
+                  {t("parents.detail.linkedChildrenCount", {
+                    count: parent.children.length,
+                  })}
                 </p>
               </div>
             </div>
 
             {parent.children.length === 0 ? (
               <EmptyState
-                title="Phụ huynh chưa có hồ sơ trẻ em"
-                description="Các hồ sơ trẻ em liên kết với phụ huynh sẽ xuất hiện tại đây."
+                title={t("parents.detail.noChildrenTitle")}
+                description={t("parents.detail.noChildrenDesc")}
               />
             ) : (
               <div className="grid gap-4 sm:grid-cols-2">
@@ -320,17 +325,17 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
                       aria-hidden="true"
                       className="grid size-14 shrink-0 place-items-center rounded-full bg-sky text-lg font-bold text-primary"
                     >
-                      {child.alias
-                        .trim()
-                        .charAt(0)
-                        .toLocaleUpperCase("vi-VN") || "B"}
+                      {child.alias.trim().charAt(0).toLocaleUpperCase(locale) ||
+                        "B"}
                     </div>
                     <div className="min-w-0">
                       <h3 className="break-words text-lg font-bold text-ink">
                         {child.alias}
                       </h3>
                       <p className="mt-1 text-sm text-muted">
-                        Lớp {child.grade}
+                        {t("parents.detail.childGrade", {
+                          grade: child.grade,
+                        })}
                       </p>
                     </div>
                   </Card>

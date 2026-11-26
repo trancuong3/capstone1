@@ -1,0 +1,36 @@
+{
+  "list": {
+    "title": "兒童檔案",
+    "subtitle": "管理每位孩子的資訊與閱讀等級。",
+    "addChild": "新增孩子檔案",
+    "empty": "尚未建立孩子檔案。請為孩子建立第一個檔案。"
+  },
+  "switcher": {
+    "selectChild": "選擇兒童",
+    "quickSwitchAria": "快速切換兒童",
+    "selectedAria": "目前選擇：{alias}，點擊切換",
+    "gradeLabel": "{grade} 年級",
+    "gradeShort": "{grade} 年級",
+    "manageChildren": "管理兒童檔案"
+  },
+  "form": {
+    "createTitle": "建立孩子檔案",
+    "editTitle": "更新孩子檔案",
+    "aliasLabel": "暱稱",
+    "gradeLabel": "年級",
+    "ageLabel": "年齡",
+    "saveSuccess": "孩子檔案已儲存。"
+  },
+  "count": "{count, plural, =0 {尚無孩子檔案} other {# 位孩子}}",
+  "selector": {
+    "label": "孩子檔案",
+    "selectAria": "選擇檔案以查看資料",
+    "optionLabel": "{alias} · {grade} 年級"
+  },
+  "verification": {
+    "loading": "正在驗證孩子檔案…",
+    "errorTitle": "無法驗證孩子檔案",
+    "errorBody": "無法確認該檔案屬於目前帳號。請家長再試一次。",
+    "retry": "重試"
+  }
+}

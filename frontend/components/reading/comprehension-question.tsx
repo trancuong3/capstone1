@@ -14,6 +14,7 @@ import { BookChildHeader } from "@/components/books/book-child-header";
 import { Button } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useTranslations } from "@/hooks/use-i18n";
 import { useReadingServices } from "@/hooks/use-reading-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { createSpeechService } from "@/lib/api/speech-service";
@@ -95,6 +96,7 @@ export function ComprehensionQuestion({
   onComplete,
   sessionId,
 }: ComprehensionQuestionProps) {
+  const t = useTranslations("reading");
   const { comprehensionService } = useReadingServices();
   const speechService = useMemo(() => createSpeechService(), []);
   const speechPlayer = useSpeechPlayer();
@@ -347,12 +349,19 @@ export function ComprehensionQuestion({
         const chosen = activeValue.choices.find((c) => c.value === answer);
         const encourage = storyHint
           ? adaptTextToTeacherPersona(
-              chosen ? `Con vừa chọn ${chosen.label}. ${storyHint}` : storyHint,
+              chosen
+                ? t("comprehension.chosenCorrectFeedback", {
+                    label: chosen.label,
+                    hint: storyHint,
+                  })
+                : storyHint,
               getEffectiveTeacherPersona().gender,
             )
           : chosen
             ? adaptTextToTeacherPersona(
-                `Con vừa chọn ${chosen.label}. Chưa đúng rồi, mình nhớ lại chi tiết trong bài đọc rồi chọn lại nhé!`,
+                t("comprehension.chosenWrongFeedback", {
+                  label: chosen.label,
+                }),
                 getEffectiveTeacherPersona().gender,
               )
             : prompts.next("quizTryAgain");
@@ -378,6 +387,7 @@ export function ComprehensionQuestion({
       sessionId,
       speakGuarded,
       stopAllVoice,
+      t,
     ],
   );
 
@@ -777,10 +787,10 @@ export function ComprehensionQuestion({
 
   return (
     <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
-      <BookChildHeader child={child} mobileLabel="Bạn nhỏ cùng đọc" />
+      <BookChildHeader child={child} mobileLabel={t("session.mobileLabel")} />
       <div className="mx-auto flex w-full max-w-[700px] flex-col gap-4">
         <h1 className="text-heading font-extrabold text-ink sm:text-center">
-          Mình cùng trả lời nhé
+          {t("comprehension.heading")}
         </h1>
         <div
           aria-hidden="true"
@@ -801,15 +811,21 @@ export function ComprehensionQuestion({
         </div>
 
         {loadState.status === "loading" ? (
-          <div aria-label="Đang tải câu hỏi" className="space-y-4">
+          <div
+            aria-label={t("comprehension.loadingAria")}
+            className="space-y-4"
+          >
             <Skeleton className="h-40 rounded-card" />
             <Skeleton className="h-18 rounded-card" />
             <Skeleton className="h-18 rounded-card" />
           </div>
         ) : loadState.status === "error" ? (
           <div className="space-y-4">
-            <StatusMessage title="Chưa tải được câu hỏi" tone="error">
-              Có lỗi xảy ra. Bé có thể thử lại mà không ảnh hưởng buổi đọc.
+            <StatusMessage
+              title={t("comprehension.loadErrorTitle")}
+              tone="error"
+            >
+              {t("comprehension.loadErrorDesc")}
             </StatusMessage>
             <Button
               onClick={() => {
@@ -819,7 +835,7 @@ export function ComprehensionQuestion({
               variant="secondary"
             >
               <RefreshCw aria-hidden="true" className="size-5" />
-              Thử lại
+              {t("comprehension.retry")}
             </Button>
           </div>
         ) : (
@@ -840,7 +856,7 @@ export function ComprehensionQuestion({
                     className="inline-flex min-h-11 items-center gap-1.5 rounded-control bg-white px-3 py-1.5 text-sm font-semibold text-primary shadow-xs hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
                   >
                     <Volume2 aria-hidden="true" className="size-4" />
-                    Nghe lại
+                    {t("comprehension.replayAudio")}
                   </button>
                   <button
                     type="button"
@@ -851,18 +867,22 @@ export function ComprehensionQuestion({
                     {voicePausedByUser ? (
                       <>
                         <Mic aria-hidden="true" className="size-4" />
-                        Bật nghe giọng nói
+                        {t("comprehension.enableVoice")}
                       </>
                     ) : (
                       <>
                         <MicOff aria-hidden="true" className="size-4" />
-                        Tạm dừng nghe
+                        {t("comprehension.pauseVoice")}
                       </>
                     )}
                   </button>
                 </div>
               </div>
-              <p className="mt-4 text-[26px] font-semibold text-ink sm:text-heading">
+              <p
+                className="viread-learning-content mt-4 text-[26px] font-semibold text-ink sm:text-heading"
+                dir="ltr"
+                lang="vi"
+              >
                 {loadState.value.question.prompt}
               </p>
             </div>
@@ -880,7 +900,7 @@ export function ComprehensionQuestion({
                     data-reading-choice={beingRead ? "true" : undefined}
                     data-preview-choice={previewing ? "true" : undefined}
                     className={cn(
-                      "flex min-h-18 w-full items-center gap-6 rounded-card border-2 p-4 text-left text-body font-semibold text-ink transition duration-150 ease-out focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                      "flex min-h-18 w-full items-center gap-6 rounded-card border-2 p-4 text-start text-body font-semibold text-ink transition duration-150 ease-out focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
                       // Hover only applies to answers that can still be chosen.
                       "enabled:cursor-pointer enabled:hover:border-primary enabled:hover:bg-cream enabled:hover:font-semibold enabled:hover:shadow-md",
                       !correct &&
@@ -907,7 +927,13 @@ export function ComprehensionQuestion({
                     <span className="w-8 shrink-0 text-purple-ink">
                       {choice.id}
                     </span>
-                    <span className="flex-1 text-center">{choice.label}</span>
+                    <span
+                      className="viread-learning-content flex-1 text-center"
+                      dir="ltr"
+                      lang="vi"
+                    >
+                      {choice.label}
+                    </span>
                     {beingRead ? (
                       <Volume2
                         aria-hidden="true"
@@ -929,8 +955,8 @@ export function ComprehensionQuestion({
                 {adaptTextToTeacherPersona(
                   feedbackNote ??
                     (result.is_correct
-                      ? "Đúng rồi. Bé nhớ rất tốt."
-                      : "Gần đúng rồi, thử lại nhé."),
+                      ? t("comprehension.correctPraise")
+                      : t("comprehension.tryAgainHint")),
                   getEffectiveTeacherPersona().gender,
                 )}
               </StatusMessage>
@@ -947,16 +973,16 @@ export function ComprehensionQuestion({
                     )
                   : voicePhase === "reading"
                     ? adaptTextToTeacherPersona(
-                        "Cô đang đọc câu hỏi và các đáp án cho bé nghe…",
+                        t("comprehension.readingOptionsStatus"),
                         getEffectiveTeacherPersona().gender,
                       )
                     : voicePhase === "listening"
                       ? adaptTextToTeacherPersona(
-                          "Bé nói đáp án A, B, C hoặc chạm vào lựa chọn bé thích nhé.",
+                          t("comprehension.voicePromptStatus"),
                           getEffectiveTeacherPersona().gender,
                         )
                       : adaptTextToTeacherPersona(
-                          "Không cần vội. Bé cứ nghĩ một chút nhé.",
+                          t("comprehension.noRushHint"),
                           getEffectiveTeacherPersona().gender,
                         )}
               </p>
@@ -968,9 +994,12 @@ export function ComprehensionQuestion({
                 onClick={advanceToNextQuestion}
               >
                 {questionTotal !== undefined && !hasNextQuestion
-                  ? "Hoàn thành"
-                  : "Câu tiếp theo"}
-                <ArrowRight aria-hidden="true" className="size-5" />
+                  ? t("comprehension.finish")
+                  : t("comprehension.nextQuestion")}
+                <ArrowRight
+                  aria-hidden="true"
+                  className="viread-rtl-flip size-5"
+                />
               </Button>
             ) : null}
           </>

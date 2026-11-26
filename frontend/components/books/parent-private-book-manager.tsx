@@ -35,6 +35,7 @@ import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useParentPrivateBookService } from "@/hooks/use-parent-private-book-service";
 import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
 import {
@@ -70,15 +71,15 @@ const WORKFLOW_BADGE_STYLES: Record<SubmissionWorkflowStatus, string> = {
   CANCELLED: "border-slate-300 bg-slate-100 text-slate-700",
 };
 
-const STAGE_LABELS: Record<string, string> = {
-  PENDING: "Đang xếp hàng chờ OCR",
-  RUNNING: "Đang nhận diện OCR",
-  COMPLETED: "Hoàn tất",
-  PASSED: "Đạt",
-  FLAGGED: "Có cảnh báo",
-  NO_TEXT_DETECTED: "Trang ảnh / không có chữ",
-  SKIPPED: "Bỏ qua (ảnh)",
-  FAILED: "Lỗi",
+const STAGE_LABEL_KEYS: Record<string, string> = {
+  PENDING: "privateManager.statusLabels.PENDING",
+  RUNNING: "privateManager.statusLabels.RUNNING",
+  COMPLETED: "privateManager.statusLabels.COMPLETED",
+  PASSED: "privateManager.statusLabels.PASSED",
+  FLAGGED: "privateManager.statusLabels.FLAGGED",
+  NO_TEXT_DETECTED: "privateManager.statusLabels.NO_TEXT_DETECTED",
+  SKIPPED: "privateManager.statusLabels.SKIPPED",
+  FAILED: "privateManager.statusLabels.FAILED",
 };
 
 function generateClientKey(): string {
@@ -121,60 +122,73 @@ function parseBookSourceDeclaration(raw: string | null): {
   return { sourceType: "OWNED_PHYSICAL_BOOK", sourceNote: cleaned };
 }
 
-function describeToolCheckScope(scope: ToolCheckScopeDTO): string {
+type BooksTranslateFn = ReturnType<typeof useTranslations>;
+
+function describeToolCheckScope(
+  scope: ToolCheckScopeDTO,
+  t: BooksTranslateFn,
+): string {
   const parts: string[] = [];
   if (scope.modality === "TEXT_ONLY") {
-    parts.push("Kiểm tra an toàn trẻ em dựa trên văn bản OCR");
+    parts.push(t("privateManager.toolScopeBase"));
   } else {
-    parts.push(`Phạm vi: ${scope.modality}`);
+    parts.push(
+      t("privateManager.toolScopeModality", { modality: scope.modality }),
+    );
   }
   if (scope.local_ai_enforced) {
-    parts.push("chạy mô hình cục bộ (Ollama local)");
+    parts.push(t("privateManager.toolScopeLocalModel"));
   }
   if (!scope.image_visual_safety_checked) {
-    parts.push("chưa tự động phân tích hình ảnh minh họa");
+    parts.push(t("privateManager.toolScopeNoImage"));
   }
   if (scope.copyright_scanner_status === "NOT_CONFIGURED") {
-    parts.push("chưa có công cụ quét bản quyền tự động");
+    parts.push(t("privateManager.toolScopeNoCopyright"));
   }
   if (scope.total_chunks > 0) {
     parts.push(
-      `đã kiểm tra ${scope.chunks_checked}/${scope.total_chunks} đoạn`,
+      t("privateManager.toolScopeChunks", {
+        checked: scope.chunks_checked,
+        total: scope.total_chunks,
+      }),
     );
   }
   return `${parts.join("; ")}.`;
 }
 
-function lockReasonForSubmission(sub: ParentPageSubmissionDTO): string | null {
+function lockReasonForSubmission(
+  sub: ParentPageSubmissionDTO,
+  t: BooksTranslateFn,
+): string | null {
   if (sub.can_add_to_book) return null;
   if (sub.workflow_status === "ADDED_TO_BOOK") {
-    return "Trang này đã được thêm vào sách đọc.";
+    return t("privateManager.reasonAdded");
   }
   if (sub.tool_check_policy_blocked) {
-    return "Nội dung vi phạm mức chặn an toàn trẻ em. Hãy sửa nội dung hoặc thay ảnh trang khác.";
+    return t("privateManager.reasonBlocked");
   }
   if (sub.workflow_status === "CHECKING") {
-    return "Đang chạy OCR, rà chính tả và kiểm tra an toàn.";
+    return t("privateManager.reasonChecking");
   }
   if (sub.workflow_status === "NEEDS_ADMIN_REVIEW") {
-    return "Tool Check đã gắn cờ hoặc trang cần người xem xét. Phải gửi Admin duyệt đúng phiên bản này trước khi thêm vào sách.";
+    return t("privateManager.reasonNeedsAdminReview");
   }
   if (sub.workflow_status === "PENDING_ADMIN") {
-    return "Đang chờ Admin duyệt đúng phiên bản này.";
+    return t("privateManager.reasonPendingAdmin");
   }
   if (sub.workflow_status === "REJECTED") {
-    return "Admin đã từ chối phiên bản này. Hãy sửa nội dung hoặc tải lại trang khác.";
+    return t("privateManager.reasonRejected");
   }
   if (sub.workflow_status === "CHECK_FAILED") {
-    return "Bước kiểm tra gặp lỗi. Hãy bấm Thử lại kiểm tra trước khi thêm trang.";
+    return t("privateManager.reasonCheckFailed");
   }
   if (sub.workflow_status === "NEEDS_RECHECK") {
-    return "Nội dung đã thay đổi và cần kiểm tra lại trước khi thêm vào sách.";
+    return t("privateManager.reasonNeedsRecheck");
   }
   if (sub.proofread_suggestions.length > 0 && !sub.spelling_accepted) {
-    return "Vui lòng xem và chấp nhận đề xuất chính tả trước khi thêm vào sách.";
+    return t("privateManager.reasonNeedProofreadAccept");
   }
-  return "Trang chưa đủ điều kiện để thêm vào sách đọc.";
+  return t("privateManager.reasonFallback");
 }
 
 type SubmissionFilterGroup =
@@ -206,11 +220,12 @@ function submissionFilterGroup(
 
 function describeStageErrorHint(
   code: string | null | undefined,
+  t: BooksTranslateFn,
 ): string | null {
   if (!code) return null;
   const upper = code.toUpperCase();
   if (upper.includes("TIMEOUT")) {
-    return "Xử lý quá thời gian chờ do mạng hoặc dịch vụ bận — bấm Thử lại kiểm tra cho trang này.";
+    return t("privateManager.workerErrorTimeout");
   }
   if (
     upper.includes("UNAVAILABLE") ||
@@ -218,17 +233,17 @@ function describeStageErrorHint(
     upper.includes("CONNECT") ||
     upper.includes("WORKER")
   ) {
-    return "Dịch vụ OCR/AI tạm dừng hoặc đang khởi động — các trang khác vẫn giữ nguyên, bạn có thể thử lại riêng trang này.";
+    return t("privateManager.workerErrorPaused");
   }
   if (
     upper.includes("BUSY") ||
     upper.includes("RATE") ||
     upper.includes("429")
   ) {
-    return "Hàng đợi xử lý đang quá tải — chờ ít giây rồi bấm Thử lại kiểm tra.";
+    return t("privateManager.workerErrorOverloaded");
   }
   if (upper.includes("OCR")) {
-    return "Chưa đọc được chữ rõ từ ảnh trang — hãy thử lại hoặc tải ảnh sắc nét hơn.";
+    return t("privateManager.workerErrorNoText");
   }
   return null;
 }
@@ -262,6 +277,8 @@ function ParentPrivateBookManagerContent({
   currentUserId,
   returnPage = 1,
 }: ParentPrivateBookManagerProps & { currentUserId: string }) {
+  const { formatNumber } = useI18n();
+  const t = useTranslations("books");
   const service = useParentPrivateBookService();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -351,12 +368,7 @@ function ParentPrivateBookManagerContent({
           setDetail(null);
           setNotFound(true);
         } else {
-          setLoadError(
-            errorText(
-              error,
-              "Không thể tải chi tiết sách riêng. Vui lòng thử lại.",
-            ),
-          );
+          setLoadError(errorText(error, t("privateManager.loadErrorFallback")));
         }
       } finally {
         if (!silent && requestId === detailRequestIdRef.current) {
@@ -364,7 +376,7 @@ function ParentPrivateBookManagerContent({
         }
       }
     },
-    [bookId, service],
+    [bookId, service, t],
   );
 
   useEffect(() => {
@@ -390,12 +402,7 @@ function ParentPrivateBookManagerContent({
           setDetail(null);
           setNotFound(true);
         } else {
-          setLoadError(
-            errorText(
-              error,
-              "Không thể tải chi tiết sách riêng. Vui lòng thử lại.",
-            ),
-          );
+          setLoadError(errorText(error, t("privateManager.loadErrorFallback")));
         }
       })
       .finally(() => {
@@ -405,7 +412,7 @@ function ParentPrivateBookManagerContent({
       detailRequestIdRef.current += 1;
       controller.abort();
     };
-  }, [bookId, currentUserId, service]);
+  }, [bookId, currentUserId, service, t]);
 
   // Auto-poll while any submission is CHECKING + inspect OCR worker online state
   const hasCheckingSubmission = Boolean(
@@ -437,7 +444,7 @@ function ParentPrivateBookManagerContent({
     setActionError(null);
     setActionNotice(null);
     if (!selectedFile) {
-      setActionError("Vui lòng chọn ảnh trang sách hoặc tài liệu PDF/DOCX.");
+      setActionError(t("privateManager.selectFileRequired"));
       return;
     }
 
@@ -456,15 +463,15 @@ function ParentPrivateBookManagerContent({
       }
       setUploadIdempotencyKey(generateClientKey());
       setActionNotice(
-        `Đã nhận ${response.total_pages} trang từ tệp (${response.source_format}). Hệ thống đang chạy OCR, rà chính tả và kiểm tra an toàn.`,
+        t("privateManager.uploadAcceptedNotice", {
+          total: response.total_pages,
+          format: response.source_format,
+        }),
       );
       await loadDetail(true);
     } catch (error) {
       setActionError(
-        errorText(
-          error,
-          "Không thể tải tệp lên. Kiểm tra định dạng (JPEG/PNG/WebP/BMP/TIFF/PDF/DOCX), dung lượng (≤ 50 MB) và số trang (≤ 30 trang).",
-        ),
+        errorText(error, t("privateManager.uploadFailedFallback")),
       );
     } finally {
       setUploading(false);
@@ -484,12 +491,14 @@ function ParentPrivateBookManagerContent({
         sub.candidate_hash,
       );
       setActionNotice(
-        `Đã xác nhận đề xuất chính tả cho trang nguồn ${sub.source_page_number}.`,
+        t("privateManager.proofreadAcceptedNotice", {
+          page: sub.source_page_number,
+        }),
       );
       await loadDetail(true);
     } catch (error) {
       setActionError(
-        errorText(error, "Không thể xác nhận chính tả. Vui lòng tải lại."),
+        errorText(error, t("privateManager.proofreadAcceptErrorFallback")),
       );
     } finally {
       setBusyKey(null);
@@ -509,17 +518,16 @@ function ParentPrivateBookManagerContent({
       });
       setActionNotice(
         result.book_readable_for_children
-          ? `Đã thêm trang ${result.page_number} vào sách riêng. Bé đã có thể mở sách để đọc!`
-          : `Đã thêm trang ${result.page_number} vào sách. Hãy hoàn tất các trang đang giữ lại trong cùng tài liệu để bé có thể đọc trọn bộ.`,
+          ? t("privateManager.committedReadableNotice", {
+              page: result.page_number,
+            })
+          : t("privateManager.committedHoldNotice", {
+              page: result.page_number,
+            }),
       );
       await loadDetail(true);
     } catch (error) {
-      setActionError(
-        errorText(
-          error,
-          "Không thể thêm trang vào sách. Phiên bản hoặc trạng thái duyệt chưa hợp lệ.",
-        ),
-      );
+      setActionError(errorText(error, t("privateManager.commitErrorFallback")));
       await loadDetail(true);
     } finally {
       setBusyKey(null);
@@ -542,15 +550,14 @@ function ParentPrivateBookManagerContent({
       setReviewFormSubId(null);
       setReviewRequestNote("");
       setActionNotice(
-        `Đã gửi phiên bản v${sub.submission_version} sang Admin để xem xét.`,
+        t("privateManager.submittedAdminNotice", {
+          version: sub.submission_version,
+        }),
       );
       await loadDetail(true);
     } catch (error) {
       setActionError(
-        errorText(
-          error,
-          "Không thể gửi yêu cầu xem xét tới Admin. Vui lòng tải lại.",
-        ),
+        errorText(error, t("privateManager.submitAdminErrorFallback")),
       );
     } finally {
       setBusyKey(null);
@@ -563,12 +570,10 @@ function ParentPrivateBookManagerContent({
     setActionNotice(null);
     try {
       await service.retrySubmission(bookId, sub.id, "AUTO");
-      setActionNotice(
-        `Đã xếp hàng thử lại bước bị lỗi (giữ nguyên các bước đã hoàn tất trước đó).`,
-      );
+      setActionNotice(t("privateManager.retriedNotice"));
       await loadDetail(true);
     } catch (error) {
-      setActionError(errorText(error, "Không thể thử lại kiểm tra lúc này."));
+      setActionError(errorText(error, t("privateManager.retryErrorFallback")));
     } finally {
       setBusyKey(null);
     }
@@ -587,13 +592,11 @@ function ParentPrivateBookManagerContent({
         auto_recheck: true,
       });
       setEditingSubId(null);
-      setActionNotice(
-        "Đã tạo phiên bản mới từ chỉnh sửa của bạn và xếp hàng kiểm tra lại từ đầu (Rà chính tả → Tool Check an toàn).",
-      );
+      setActionNotice(t("privateManager.editedSubmissionNotice"));
       await loadDetail(true);
     } catch (error) {
       setActionError(
-        errorText(error, "Không thể lưu chỉnh sửa trang. Vui lòng tải lại."),
+        errorText(error, t("privateManager.editSubmissionErrorFallback")),
       );
     } finally {
       setBusyKey(null);
@@ -621,11 +624,11 @@ function ParentPrivateBookManagerContent({
     setActionNotice(null);
     const trimmedTitle = editBookTitle.trim();
     if (!trimmedTitle) {
-      setActionError("Tên sách riêng không được để trống.");
+      setActionError(t("myBooks.validationTitleEmpty"));
       return;
     }
     if (editBookMinGrade > editBookMaxGrade) {
-      setActionError("Lớp tối thiểu không được lớn hơn lớp tối đa.");
+      setActionError(t("myBooks.validationGradeOrder"));
       return;
     }
     setBusyKey("book:edit");
@@ -641,14 +644,15 @@ function ParentPrivateBookManagerContent({
       setShowEditBookForm(false);
       setActionNotice(
         updated.pending_submission_count > 0
-          ? `Đã sửa sách "${updated.title}". Toàn bộ ${updated.pending_submission_count} trang đã được đưa về kiểm tra lại từ đầu (OCR → Rà chính tả → Tool Check an toàn).`
-          : `Đã cập nhật thông tin sách "${updated.title}".`,
+          ? t("myBooks.updatedRecheckNotice", {
+              title: updated.title,
+              count: updated.pending_submission_count,
+            })
+          : t("myBooks.updatedNotice", { title: updated.title }),
       );
       await loadDetail(true);
     } catch (error) {
-      setActionError(
-        errorText(error, "Không thể sửa thông tin sách. Vui lòng thử lại."),
-      );
+      setActionError(errorText(error, t("myBooks.updateErrorFallback")));
     } finally {
       setBusyKey(null);
     }
@@ -662,9 +666,7 @@ function ParentPrivateBookManagerContent({
       await service.delete(bookId);
       router.push(backHref);
     } catch (error) {
-      setActionError(
-        errorText(error, "Không thể xóa sách riêng. Vui lòng thử lại."),
-      );
+      setActionError(errorText(error, t("myBooks.deleteErrorFallback")));
     } finally {
       setBusyKey(null);
     }
@@ -698,12 +700,12 @@ function ParentPrivateBookManagerContent({
       });
       setEditingPageId(null);
       setActionNotice(
-        `Đã sửa trang ${page.page_number}. Trang đã được tạm gỡ khỏi sách đọc và xếp hàng kiểm tra lại từ đầu.`,
+        t("privateManager.editedPageNotice", { page: page.page_number }),
       );
       await loadDetail(true);
     } catch (error) {
       setActionError(
-        errorText(error, "Không thể sửa trang này. Vui lòng kiểm tra lại."),
+        errorText(error, t("privateManager.editPageErrorFallback")),
       );
     } finally {
       setBusyKey(null);
@@ -721,15 +723,14 @@ function ParentPrivateBookManagerContent({
       await service.replaceCommittedPageFile(bookId, page.page_id, file);
       setEditingPageId(null);
       setActionNotice(
-        `Đã thay ảnh trang ${page.page_number}. Trang đã được tạm gỡ khỏi sách đọc và đang chạy kiểm tra lại toàn bộ từ đầu (OCR → Rà chính tả → Tool Check an toàn).`,
+        t("privateManager.replacedPageImageNotice", {
+          page: page.page_number,
+        }),
       );
       await loadDetail(true);
     } catch (error) {
       setActionError(
-        errorText(
-          error,
-          "Không thể thay ảnh cho trang này. Hãy chọn đúng 1 ảnh hợp lệ.",
-        ),
+        errorText(error, t("privateManager.replaceImageErrorFallback")),
       );
     } finally {
       setBusyKey(null);
@@ -747,12 +748,12 @@ function ParentPrivateBookManagerContent({
         setEditingPageId(null);
       }
       setActionNotice(
-        `Đã xóa trang ${page.page_number} khỏi sách đọc (không cần kiểm tra lại các trang khác).`,
+        t("privateManager.deletedPageNotice", { page: page.page_number }),
       );
       await loadDetail(true);
     } catch (error) {
       setActionError(
-        errorText(error, "Không thể xóa trang này. Vui lòng thử lại."),
+        errorText(error, t("privateManager.deletePageErrorFallback")),
       );
     } finally {
       setBusyKey(null);
@@ -772,15 +773,13 @@ function ParentPrivateBookManagerContent({
         sub.source_type,
         sub.source_note,
       );
-      setActionNotice(
-        "Đã thay ảnh trang mới. Kết quả kiểm tra và phê duyệt cũ đã bị hủy; hệ thống đang kiểm tra lại toàn bộ.",
-      );
+      setActionNotice(t("privateManager.replacedSubmissionImageNotice"));
       await loadDetail(true);
     } catch (error) {
       setActionError(
         errorText(
           error,
-          "Không thể thay ảnh trang. Hãy chọn đúng 1 ảnh hợp lệ.",
+          t("privateManager.replaceSubmissionImageErrorFallback"),
         ),
       );
     } finally {
@@ -794,10 +793,12 @@ function ParentPrivateBookManagerContent({
     setActionNotice(null);
     try {
       await service.cancelSubmission(bookId, sub.id);
-      setActionNotice("Đã hủy bản tải lên đang chờ.");
+      setActionNotice(t("privateManager.cancelledSubmissionNotice"));
       await loadDetail(true);
     } catch (error) {
-      setActionError(errorText(error, "Không thể hủy trang này."));
+      setActionError(
+        errorText(error, t("privateManager.cancelSubmissionErrorFallback")),
+      );
     } finally {
       setBusyKey(null);
     }
@@ -826,12 +827,15 @@ function ParentPrivateBookManagerContent({
               variant="secondary"
               className="max-w-64"
             >
-              <ArrowLeft aria-hidden="true" className="size-4" />
-              Về Sách của tôi
+              <ArrowLeft
+                aria-hidden="true"
+                className="viread-rtl-flip size-4"
+              />
+              {t("privateManager.backToMyBooks")}
             </ButtonLink>
           }
-          description="Sách riêng không tồn tại hoặc không thuộc tài khoản của bạn."
-          title="Không tìm thấy sách riêng"
+          description={t("privateManager.notFoundDescription")}
+          title={t("privateManager.notFoundTitle")}
         />
       </section>
     );
@@ -840,8 +844,8 @@ function ParentPrivateBookManagerContent({
   if (loadError || !detail) {
     return (
       <section className="mx-auto flex w-full max-w-[760px] flex-col gap-4 px-4 py-10">
-        <StatusMessage title="Chưa tải được sách riêng" tone="error">
-          {loadError ?? "Không thể tải dữ liệu."}
+        <StatusMessage title={t("privateManager.loadErrorTitle")} tone="error">
+          {loadError ?? t("privateManager.loadDataFallback")}
         </StatusMessage>
         <Button
           className="sm:w-auto sm:self-start"
@@ -849,7 +853,7 @@ function ParentPrivateBookManagerContent({
           variant="secondary"
         >
           <RefreshCw aria-hidden="true" className="size-4" />
-          Thử lại
+          {t("catalog.retry")}
         </Button>
       </section>
     );
@@ -917,8 +921,8 @@ function ParentPrivateBookManagerContent({
           href={backHref}
           className="inline-flex min-h-10 items-center gap-1.5 text-sm font-bold text-primary hover:underline"
         >
-          <ArrowLeft aria-hidden="true" className="size-4" />
-          Quay lại Sách của tôi
+          <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-4" />
+          {t("privateManager.backLink")}
         </Link>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -929,7 +933,7 @@ function ParentPrivateBookManagerContent({
             variant="secondary"
           >
             <RefreshCw aria-hidden="true" className="size-4" />
-            Làm mới trạng thái
+            {t("privateManager.refreshStatus")}
           </Button>
           {book.readable_for_children && !isSuspended ? (
             <ButtonLink
@@ -938,12 +942,12 @@ function ParentPrivateBookManagerContent({
               fullWidth={false}
             >
               <BookOpen aria-hidden="true" className="size-4" />
-              Mở đọc cùng bé
+              {t("myBooks.openReadWithChild")}
             </ButtonLink>
           ) : (
             <Button className="w-auto" disabled fullWidth={false} type="button">
               <BookOpen aria-hidden="true" className="size-4" />
-              Chưa mở đọc cùng bé
+              {t("myBooks.notOpenReadYet")}
             </Button>
           )}
         </div>
@@ -955,23 +959,33 @@ function ParentPrivateBookManagerContent({
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-0.5 text-xs font-bold text-emerald-800">
                 <Lock aria-hidden="true" className="size-3" />
-                Sách riêng của gia đình
+                {t("card.privateFamilyBadge")}
               </span>
               <span className="text-xs font-semibold text-muted">
-                Lớp {book.min_grade}
-                {book.min_grade !== book.max_grade ? `–${book.max_grade}` : ""}
+                {book.min_grade === book.max_grade
+                  ? t("card.gradeSingle", { grade: book.min_grade })
+                  : t("card.gradeRange", {
+                      min: book.min_grade,
+                      max: book.max_grade,
+                    })}
               </span>
               <span className="text-xs text-muted">·</span>
               <span className="text-xs font-semibold text-ink">
-                {book.committed_page_count} trang đã thêm vào sách đọc
+                {t("privateManager.committedPagesSummary", {
+                  count: formatNumber(book.committed_page_count),
+                })}
               </span>
             </div>
-            <h1 className="book-title mt-2 break-words text-3xl text-ink sm:text-4xl">
+            <h1
+              className="book-title viread-learning-content mt-2 break-words text-3xl text-ink sm:text-4xl"
+              dir="ltr"
+              lang="vi"
+            >
               {book.title}
             </h1>
             {book.author ? (
               <p className="mt-1 break-words text-sm text-muted">
-                Tác giả: {book.author}
+                {t("privateManager.authorPrefix", { author: book.author })}
               </p>
             ) : null}
             <p className="mt-2 text-xs text-muted">{book.privacy_notice}</p>
@@ -990,10 +1004,10 @@ function ParentPrivateBookManagerContent({
               variant="secondary"
             >
               <Pencil aria-hidden="true" className="size-3.5" />
-              Sửa sách
+              {t("myBooks.editBook")}
             </Button>
             <button
-              aria-label={`Xóa sách ${book.title}`}
+              aria-label={t("myBooks.deleteBookAria", { title: book.title })}
               className="inline-flex min-h-10 items-center gap-1.5 rounded-control border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
               disabled={busyKey !== null}
               onClick={() => {
@@ -1003,28 +1017,28 @@ function ParentPrivateBookManagerContent({
               type="button"
             >
               <Trash2 aria-hidden="true" className="size-3.5" />
-              Xóa sách
+              {t("myBooks.deleteBook")}
             </button>
           </div>
         </div>
 
         {showEditBookForm ? (
           <form
-            aria-label="Chỉnh sửa thông tin sách riêng"
+            aria-label={t("privateManager.editInfoAria")}
             className="flex flex-col gap-3 rounded-control border border-amber-300 bg-amber-50/60 p-4 text-xs"
             onSubmit={(event) => void handleSaveBookEdit(event)}
           >
             <p className="font-bold text-amber-950">
-              Lưu ý: Khi sửa thông tin sách, toàn bộ các trang của sách sẽ được
-              đưa về kiểm tra lại từ đầu (OCR → Rà chính tả → Tool Check an
-              toàn) và tạm khóa đọc cùng bé cho đến khi hoàn tất.
+              {t("privateManager.editInfoRecheckNotice")}
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="flex flex-col gap-1 font-semibold text-ink">
-                Tên sách *
+                {t("myBooks.titleLabel")}
                 <input
-                  aria-label="Tên sách chỉnh sửa"
-                  className="min-h-10 rounded-control border border-border bg-white px-3 text-sm text-ink"
+                  aria-label={t("myBooks.editTitleAria")}
+                  className="viread-learning-content min-h-10 rounded-control border border-border bg-white px-3 text-sm text-ink"
+                  dir="ltr"
+                  lang="vi"
                   onChange={(event) => setEditBookTitle(event.target.value)}
                   required
                   type="text"
@@ -1032,10 +1046,12 @@ function ParentPrivateBookManagerContent({
                 />
               </label>
               <label className="flex flex-col gap-1 font-semibold text-ink">
-                Tác giả
+                {t("myBooks.editAuthorLabel")}
                 <input
-                  aria-label="Tác giả chỉnh sửa"
-                  className="min-h-10 rounded-control border border-border bg-white px-3 text-sm text-ink"
+                  aria-label={t("myBooks.editAuthorAria")}
+                  className="viread-learning-content min-h-10 rounded-control border border-border bg-white px-3 text-sm text-ink"
+                  dir="ltr"
+                  lang="vi"
                   onChange={(event) => setEditBookAuthor(event.target.value)}
                   type="text"
                   value={editBookAuthor}
@@ -1044,9 +1060,9 @@ function ParentPrivateBookManagerContent({
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="flex flex-col gap-1 font-semibold text-ink">
-                Từ lớp
+                {t("myBooks.editMinGradeLabel")}
                 <select
-                  aria-label="Từ lớp chỉnh sửa"
+                  aria-label={t("myBooks.editMinGradeAria")}
                   className="min-h-10 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
                   onChange={(event) =>
                     setEditBookMinGrade(Number(event.target.value))
@@ -1055,15 +1071,15 @@ function ParentPrivateBookManagerContent({
                 >
                   {CHILD_GRADES.map((grade) => (
                     <option key={grade} value={grade}>
-                      Lớp {grade}
+                      {t("card.gradeSingle", { grade })}
                     </option>
                   ))}
                 </select>
               </label>
               <label className="flex flex-col gap-1 font-semibold text-ink">
-                Đến lớp
+                {t("myBooks.editMaxGradeLabel")}
                 <select
-                  aria-label="Đến lớp chỉnh sửa"
+                  aria-label={t("myBooks.editMaxGradeAria")}
                   className="min-h-10 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
                   onChange={(event) =>
                     setEditBookMaxGrade(Number(event.target.value))
@@ -1072,7 +1088,7 @@ function ParentPrivateBookManagerContent({
                 >
                   {CHILD_GRADES.map((grade) => (
                     <option key={grade} value={grade}>
-                      Lớp {grade}
+                      {t("card.gradeSingle", { grade })}
                     </option>
                   ))}
                 </select>
@@ -1080,9 +1096,9 @@ function ParentPrivateBookManagerContent({
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="flex flex-col gap-1 font-semibold text-ink">
-                Nguồn nội dung sách
+                {t("privateManager.editSourceLabel")}
                 <select
-                  aria-label="Nguồn nội dung sách chỉnh sửa"
+                  aria-label={t("privateManager.editSourceAria")}
                   className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
                   onChange={(event) =>
                     setEditBookSourceType(event.target.value as SourceUsageType)
@@ -1091,15 +1107,15 @@ function ParentPrivateBookManagerContent({
                 >
                   {SOURCE_USAGE_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
-                      {opt.label}
+                      {t(`sourceUsage.${opt.value}`)}
                     </option>
                   ))}
                 </select>
               </label>
               <label className="flex flex-col gap-1 font-semibold text-ink">
-                Ghi chú nguồn
+                {t("myBooks.editSourceNoteLabel")}
                 <input
-                  aria-label="Ghi chú nguồn sách chỉnh sửa"
+                  aria-label={t("privateManager.editSourceNoteAria")}
                   className="min-h-10 rounded-control border border-border bg-white px-3 text-xs text-ink"
                   onChange={(event) =>
                     setEditBookSourceNote(event.target.value)
@@ -1115,7 +1131,7 @@ function ParentPrivateBookManagerContent({
                 isLoading={busyKey === "book:edit"}
                 type="submit"
               >
-                Lưu & kiểm tra lại toàn bộ
+                {t("myBooks.saveAndRecheckAll")}
               </Button>
               <Button
                 className="min-h-10 w-auto px-3 text-xs"
@@ -1123,7 +1139,7 @@ function ParentPrivateBookManagerContent({
                 type="button"
                 variant="secondary"
               >
-                Hủy
+                {t("reportDialog.cancel")}
               </Button>
             </div>
           </form>
@@ -1132,16 +1148,13 @@ function ParentPrivateBookManagerContent({
         {confirmDeleteBook ? (
           <div
             role="alertdialog"
-            aria-label={`Xác nhận xóa sách ${book.title}`}
+            aria-label={t("myBooks.deleteDialogAria", { title: book.title })}
             className="flex flex-col gap-2.5 rounded-control border border-rose-300 bg-rose-50 p-4 text-xs text-rose-950"
           >
             <p className="font-bold">
-              Xác nhận xóa sách &ldquo;{book.title}&rdquo;?
+              {t("myBooks.deleteDialogTitle", { title: book.title })}
             </p>
-            <p>
-              Sách và các trang thuộc sách này sẽ bị xóa ngay khỏi Sách của tôi
-              và không cần kiểm tra lại.
-            </p>
+            <p>{t("privateManager.deleteBookConfirmBody")}</p>
             <div className="flex flex-wrap gap-2">
               <Button
                 className="min-h-10 w-auto bg-rose-700 px-4 text-xs text-white hover:bg-rose-800"
@@ -1149,7 +1162,7 @@ function ParentPrivateBookManagerContent({
                 onClick={() => void handleDeleteBook()}
                 type="button"
               >
-                Xác nhận xóa sách
+                {t("privateManager.confirmDeleteBook")}
               </Button>
               <Button
                 className="min-h-10 w-auto px-3 text-xs"
@@ -1157,7 +1170,7 @@ function ParentPrivateBookManagerContent({
                 type="button"
                 variant="secondary"
               >
-                Hủy
+                {t("reportDialog.cancel")}
               </Button>
             </div>
           </div>
@@ -1178,62 +1191,69 @@ function ParentPrivateBookManagerContent({
       ) : null}
 
       {isSuspended ? (
-        <StatusMessage title="Sách riêng đang bị đình chỉ" tone="error">
+        <StatusMessage
+          title={t("privateManager.suspendedAlertTitle")}
+          tone="error"
+        >
           {book.suspended_reason
-            ? `Lý do từ Admin: ${book.suspended_reason}. `
+            ? t("privateManager.suspendedAdminReason", {
+                reason: book.suspended_reason,
+              })
             : ""}
-          Bé không thể mở đọc hoặc tải thêm trang cho tới khi vấn đề được xử lý.
+          {t("privateManager.suspendedDefaultNotice")}
         </StatusMessage>
       ) : null}
 
       {book.has_held_multipage_batch ? (
         <StatusMessage
-          title="Tài liệu nhiều trang đang có trang bị giữ lại"
+          title={t("privateManager.holdingAlertTitle")}
           tone="warning"
         >
-          Có ít nhất một trang trong cùng tệp tải lên đang kiểm tra hoặc cần
-          Admin duyệt. Sách sẽ chỉ mở đọc cho bé khi toàn bộ trang hợp lệ trong
-          tệp đã được thêm hoặc các trang bị giữ đã được hủy/xử lý.
+          {t("privateManager.holdingAlertBody")}
         </StatusMessage>
       ) : null}
 
       {actionError ? (
-        <StatusMessage title="Không thể thực hiện" tone="error">
+        <StatusMessage
+          title={t("privateManager.actionErrorTitle")}
+          tone="error"
+        >
           {actionError}
         </StatusMessage>
       ) : null}
 
       {actionNotice ? (
-        <StatusMessage title="Cập nhật thành công" tone="success">
+        <StatusMessage
+          title={t("privateManager.actionSuccessTitle")}
+          tone="success"
+        >
           {actionNotice}
         </StatusMessage>
       ) : null}
 
       {/* Upload Section */}
       <form
-        aria-label="Tải ảnh trang hoặc tài liệu vào sách riêng"
+        aria-label={t("privateManager.uploadSectionAria")}
         className="flex flex-col gap-4 rounded-card border border-border bg-white p-5 shadow-sm"
         onSubmit={(event) => void handleUpload(event)}
       >
         <div>
           <h2 className="text-xl font-extrabold text-ink">
-            Tải ảnh trang hoặc tài liệu
+            {t("privateManager.uploadTitle")}
           </h2>
           <p className="mt-1 text-sm text-muted">
-            Hỗ trợ JPEG, PNG, WebP, BMP, TIFF, PDF, DOCX · tối đa{" "}
-            <strong>30 trang mỗi tệp</strong> (≤ 50 MB). Mỗi trang tự động chạy:{" "}
-            <strong>OCR → Rà chính tả → Tool Check an toàn</strong>.
+            {t("privateManager.uploadSubtitle")}
           </p>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
           <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
-            Chọn tệp trang sách hoặc tài liệu *
+            {t("privateManager.chooseFileLabel")}
             <input
               ref={fileInputRef}
               accept={ACCEPTED_UPLOAD_EXTENSIONS}
-              aria-label="Chọn tệp trang sách hoặc tài liệu"
-              className="block w-full cursor-pointer rounded-control border border-dashed border-primary/50 bg-canvas p-3 text-sm text-ink file:mr-3 file:rounded-control file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white hover:file:bg-primary-hover"
+              aria-label={t("privateManager.chooseFileAria")}
+              className="block w-full cursor-pointer rounded-control border border-dashed border-primary/50 bg-canvas p-3 text-sm text-ink file:me-3 file:rounded-control file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white hover:file:bg-primary-hover"
               disabled={uploading || isSuspended}
               onChange={(event) => {
                 const file = event.target.files?.[0] ?? null;
@@ -1244,16 +1264,18 @@ function ParentPrivateBookManagerContent({
             />
             {selectedFile ? (
               <span className="text-xs font-medium text-emerald-800">
-                Đã chọn: {selectedFile.name} (
-                {(selectedFile.size / 1024).toFixed(1)} KB)
+                {t("privateManager.selectedFileSummary", {
+                  name: selectedFile.name,
+                  sizeMb: (selectedFile.size / (1024 * 1024)).toFixed(2),
+                })}
               </span>
             ) : null}
           </label>
 
           <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
-            Khai báo nguồn nội dung (phục vụ gia đình / rà soát)
+            {t("privateManager.uploadSourceLabel")}
             <select
-              aria-label="Khai báo nguồn nội dung"
+              aria-label={t("privateManager.uploadSourceAria")}
               className="min-h-12 rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
               disabled={uploading || isSuspended}
               onChange={(event) =>
@@ -1263,7 +1285,7 @@ function ParentPrivateBookManagerContent({
             >
               {SOURCE_USAGE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
-                  {opt.label}
+                  {t(`sourceUsage.${opt.value}`)}
                 </option>
               ))}
             </select>
@@ -1271,13 +1293,13 @@ function ParentPrivateBookManagerContent({
         </div>
 
         <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
-          Ghi chú nguồn / bản quyền (không bắt buộc)
+          {t("privateManager.uploadSourceNoteLabel")}
           <input
-            aria-label="Ghi chú nguồn hoặc bản quyền"
+            aria-label={t("privateManager.uploadSourceNoteAria")}
             className="min-h-11 rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
             disabled={uploading || isSuspended}
             onChange={(event) => setUploadSourceNote(event.target.value)}
-            placeholder="Ví dụ: Chụp từ sách giấy gia đình đã mua cho bé luyện đọc"
+            placeholder={t("privateManager.uploadSourceNotePlaceholder")}
             type="text"
             value={uploadSourceNote}
           />
@@ -1291,12 +1313,14 @@ function ParentPrivateBookManagerContent({
             type="submit"
           >
             <FileUp aria-hidden="true" className="size-4" />
-            {uploading ? "Đang tải lên và xếp hàng…" : "Tải lên & kiểm tra"}
+            {uploading
+              ? t("privateManager.uploadingButton")
+              : t("privateManager.uploadButton")}
           </Button>
           {hasCheckingSubmission ? (
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary">
               <Clock3 aria-hidden="true" className="size-4 animate-spin" />
-              Đang tự động cập nhật tiến trình kiểm tra…
+              {t("privateManager.autoPollingHint")}
             </span>
           ) : null}
         </div>
@@ -1311,18 +1335,19 @@ function ParentPrivateBookManagerContent({
           id="submissions-heading"
           className="text-xl font-extrabold text-ink"
         >
-          Các trang đang kiểm tra & duyệt ({activeSubmissions.length})
+          {t("privateManager.submissionsHeading", {
+            count: activeSubmissions.length,
+          })}
         </h2>
 
         {activeSubmissions.length === 0 ? (
           <div className="rounded-card border border-dashed border-border bg-white p-6 text-center text-sm text-muted">
-            Chưa có trang nào được tải lên. Hãy chọn ảnh hoặc tệp PDF/DOCX ở
-            trên để bắt đầu chạy OCR, rà chính tả và kiểm tra an toàn.
+            {t("privateManager.noSubmissionsHint")}
           </div>
         ) : (
           <>
             <div
-              aria-label="Lọc trạng thái từng trang"
+              aria-label={t("privateManager.filterAria")}
               className="flex flex-wrap items-center gap-2"
               role="group"
             >
@@ -1330,27 +1355,39 @@ function ParentPrivateBookManagerContent({
                 [
                   {
                     key: "ALL",
-                    label: `Tất cả (${activeSubmissions.length})`,
+                    label: t("privateManager.filterAll", {
+                      count: activeSubmissions.length,
+                    }),
                   },
                   {
                     key: "CHECKING",
-                    label: `Đang kiểm tra (${submissionCounts.CHECKING})`,
+                    label: t("privateManager.filterChecking", {
+                      count: submissionCounts.CHECKING,
+                    }),
                   },
                   {
                     key: "READY",
-                    label: `Sẵn sàng thêm (${submissionCounts.READY})`,
+                    label: t("privateManager.filterReady", {
+                      count: submissionCounts.READY,
+                    }),
                   },
                   {
                     key: "ADMIN",
-                    label: `Chờ / Cần Admin (${submissionCounts.ADMIN})`,
+                    label: t("privateManager.filterAdmin", {
+                      count: submissionCounts.ADMIN,
+                    }),
                   },
                   {
                     key: "FAILED",
-                    label: `Lỗi kiểm tra (${submissionCounts.FAILED})`,
+                    label: t("privateManager.filterFailed", {
+                      count: submissionCounts.FAILED,
+                    }),
                   },
                   {
                     key: "ADDED",
-                    label: `Đã thêm (${submissionCounts.ADDED})`,
+                    label: t("privateManager.filterAdded", {
+                      count: submissionCounts.ADDED,
+                    }),
                   },
                 ] as const
               ).map((pill) => {
@@ -1377,7 +1414,7 @@ function ParentPrivateBookManagerContent({
             </div>
             {activeSubmissions.length > 1 ? (
               <div
-                aria-label="Tổng quan nhanh trạng thái các trang"
+                aria-label={t("privateManager.overviewAria")}
                 className="flex flex-wrap gap-1.5 border-t border-border pt-3"
               >
                 {activeSubmissions.map((sub, index) => {
@@ -1403,7 +1440,10 @@ function ParentPrivateBookManagerContent({
                           });
                         });
                       }}
-                      title={`Trang nguồn ${sub.source_page_number}: ${sub.workflow_status_label}`}
+                      title={t("privateManager.overviewChipTitle", {
+                        page: sub.source_page_number,
+                        status: sub.workflow_status_label,
+                      })}
                       type="button"
                     >
                       <span>Tr.{sub.source_page_number}</span>
@@ -1423,40 +1463,45 @@ function ParentPrivateBookManagerContent({
               >
                 {workerFailureCount > 0 ? (
                   <p className="font-semibold">
-                    Có {workerFailureCount} trang gặp lỗi OCR/AI (dịch vụ kiểm
-                    tra có thể đang bận hoặc tạm ngắt). Các trang đạt chuẩn hoặc
-                    chờ Admin bên cạnh không bị ảnh hưởng — hãy bấm «Thử lại
-                    kiểm tra» ở từng trang bị lỗi.
+                    {t("privateManager.workerFailuresSummary", {
+                      count: workerFailureCount,
+                    })}
                   </p>
                 ) : ocrWorkerOffline && pendingOcrCount > 0 ? (
                   <p className="font-semibold">
-                    Đang chờ máy chủ OCR Windows bật (hàng đợi an toàn —{" "}
-                    {pendingOcrCount} trang đã được lưu an toàn và sẽ tự động
-                    nhận diện ngay khi máy chủ OCR hoạt động).
+                    {t("privateManager.windowsOcrQueueWaiting", {
+                      count: pendingOcrCount,
+                    })}
                   </p>
                 ) : runningOcrCount > 0 ? (
                   <p className="font-semibold">
-                    Đang nhận diện OCR {runningOcrCount} trang
+                    {t("privateManager.ocrRunningStatus", {
+                      running: runningOcrCount,
+                    })}
                     {pendingOcrCount > 0
-                      ? ` (${pendingOcrCount} trang đang xếp hàng tiếp theo)`
+                      ? t("privateManager.ocrQueuedSuffix", {
+                          count: pendingOcrCount,
+                        })
                       : ""}
-                    . Các trang đã kiểm tra xong vẫn hiển thị đầy đủ để bạn thao
-                    tác ngay.
+                    {t("privateManager.ocrOtherPagesStillVisible")}
                   </p>
                 ) : (
                   <p className="font-semibold">
                     {pendingOcrCount > 0
-                      ? `Đang xếp hàng chờ OCR cho ${pendingOcrCount} trang`
-                      : `Đang xử lý song song ${submissionCounts.CHECKING} trang ở chế độ nền`}
-                    . Các trang đã kiểm tra xong vẫn hiển thị đầy đủ để bạn thao
-                    tác ngay.
+                      ? t("privateManager.ocrQueuedOnlyStatus", {
+                          count: pendingOcrCount,
+                        })
+                      : t("privateManager.backgroundProcessingStatus", {
+                          count: submissionCounts.CHECKING,
+                        })}
+                    {t("privateManager.ocrOtherPagesStillVisible")}
                   </p>
                 )}
               </div>
             ) : null}
             {visibleSubmissions.length === 0 ? (
               <div className="rounded-card border border-dashed border-border bg-white p-6 text-center text-sm text-muted">
-                Không có trang nào thuộc nhóm trạng thái đang lọc.
+                {t("privateManager.noFilterMatches")}
               </div>
             ) : null}
             <div className="flex flex-col gap-4">
@@ -1464,11 +1509,20 @@ function ParentPrivateBookManagerContent({
                 const badgeStyle =
                   WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
                   "border-border bg-canvas text-ink";
-                const lockReason = lockReasonForSubmission(sub);
+                const lockReason = lockReasonForSubmission(sub, t);
                 const isEditing = editingSubId === sub.id;
                 const isReviewFormOpen = reviewFormSubId === sub.id;
                 const isSubBusy =
                   busyKey !== null && busyKey.endsWith(`:${sub.id}`);
+                const ocrHint = describeStageErrorHint(sub.ocr_error_code, t);
+                const proofreadHint = describeStageErrorHint(
+                  sub.proofread_error_code,
+                  t,
+                );
+                const toolCheckHint = describeStageErrorHint(
+                  sub.tool_check_error_code,
+                  t,
+                );
 
                 return (
                   <article
@@ -1482,17 +1536,24 @@ function ParentPrivateBookManagerContent({
                       <div className="w-full shrink-0 lg:w-48">
                         <div className="relative h-56 w-full overflow-hidden rounded-control border border-border bg-cream">
                           <AuthenticatedImage
-                            alt={`Ảnh trang nguồn ${sub.source_page_number} của ${sub.source_file_name}`}
+                            alt={t("privateManager.sourceImageAlt", {
+                              page: sub.source_page_number,
+                              file: sub.source_file_name,
+                            })}
                             className="h-full w-full object-contain p-2"
                             src={sub.image_url}
                           />
                         </div>
                         <p className="mt-1.5 truncate text-xs text-muted">
-                          {sub.source_file_name} · Trang nguồn{" "}
-                          {sub.source_page_number}/{sub.batch_total_pages}
+                          {t("privateManager.sourcePageMeta", {
+                            file: sub.source_file_name,
+                            page: `${sub.source_page_number}/${sub.batch_total_pages}`,
+                          })}
                         </p>
                         <p className="text-[11px] font-mono text-muted">
-                          Phiên bản v{sub.submission_version}
+                          {t("privateManager.versionBadge", {
+                            version: sub.submission_version,
+                          })}
                           {sub.candidate_hash
                             ? ` · #${sub.candidate_hash.slice(0, 8)}`
                             : ""}
@@ -1510,7 +1571,7 @@ function ParentPrivateBookManagerContent({
                             </span>
                             {sub.is_image_only ? (
                               <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-950">
-                                Trang chỉ có hình / không đọc được chữ
+                                {t("privateManager.imageOnlyBadge")}
                               </span>
                             ) : null}
                             {sub.tool_check_policy_blocked ? (
@@ -1519,92 +1580,98 @@ function ParentPrivateBookManagerContent({
                                   aria-hidden="true"
                                   className="size-3.5"
                                 />
-                                Chặn theo chính sách an toàn
+                                {t("privateManager.blockedPolicyBadge")}
                               </span>
                             ) : null}
                           </div>
 
                           {sub.workflow_status !== "ADDED_TO_BOOK" ? (
                             <button
-                              aria-label={`Hủy trang nguồn ${sub.source_page_number}`}
+                              aria-label={t("privateManager.cancelPageAria", {
+                                page: sub.source_page_number,
+                              })}
                               className="inline-flex min-h-9 items-center gap-1 rounded-control border border-border px-2.5 text-xs font-semibold text-muted hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700"
                               disabled={isSubBusy}
                               onClick={() => void handleCancelSubmission(sub)}
                               type="button"
                             >
                               <Trash2 aria-hidden="true" className="size-3.5" />
-                              Hủy trang
+                              {t("privateManager.cancelPage")}
                             </button>
                           ) : null}
                         </div>
 
                         {/* 3-Stage Status Strip */}
                         <div
-                          aria-label="Tiến trình 3 bước kiểm tra"
+                          aria-label={t("privateManager.pipelineAria")}
                           className="grid gap-2 sm:grid-cols-3"
                         >
                           <div className="rounded-control border border-border bg-canvas px-3 py-2 text-xs">
                             <p className="font-bold text-ink">
-                              1. OCR tiếng Việt
+                              {t("privateManager.stepOcrTitle")}
                             </p>
                             <p className="mt-0.5 text-muted">
                               {sub.ocr_status === "PENDING" && ocrWorkerOffline
-                                ? "Chờ máy chủ OCR Windows bật"
-                                : (STAGE_LABELS[sub.ocr_status] ??
-                                  sub.ocr_status)}
+                                ? t("privateManager.waitingWindowsOcrShort")
+                                : STAGE_LABEL_KEYS[sub.ocr_status]
+                                  ? t(STAGE_LABEL_KEYS[sub.ocr_status])
+                                  : sub.ocr_status}
                               {sub.ocr_error_code
                                 ? ` (${sub.ocr_error_code})`
                                 : ""}
                             </p>
-                            {describeStageErrorHint(sub.ocr_error_code) ? (
+                            {ocrHint ? (
                               <p className="mt-1 text-[11px] font-medium text-rose-800">
-                                {describeStageErrorHint(sub.ocr_error_code)}
+                                {ocrHint}
                               </p>
                             ) : null}
                           </div>
                           <div className="rounded-control border border-border bg-canvas px-3 py-2 text-xs">
-                            <p className="font-bold text-ink">2. Rà chính tả</p>
+                            <p className="font-bold text-ink">
+                              {t("privateManager.stepProofreadTitle")}
+                            </p>
                             <p className="mt-0.5 text-muted">
-                              {STAGE_LABELS[sub.proofread_status] ??
-                                sub.proofread_status}
+                              {STAGE_LABEL_KEYS[sub.proofread_status]
+                                ? t(STAGE_LABEL_KEYS[sub.proofread_status])
+                                : sub.proofread_status}
                               {sub.proofread_suggestions.length > 0
-                                ? ` · ${sub.proofread_suggestions.length} đề xuất`
+                                ? t(
+                                    "privateManager.proofreadSuggestionsSuffix",
+                                    {
+                                      count: sub.proofread_suggestions.length,
+                                    },
+                                  )
                                 : ""}
                               {sub.proofread_error_code
                                 ? ` (${sub.proofread_error_code})`
                                 : ""}
                             </p>
-                            {describeStageErrorHint(
-                              sub.proofread_error_code,
-                            ) ? (
+                            {proofreadHint ? (
                               <p className="mt-1 text-[11px] font-medium text-rose-800">
-                                {describeStageErrorHint(
-                                  sub.proofread_error_code,
-                                )}
+                                {proofreadHint}
                               </p>
                             ) : null}
                           </div>
                           <div className="rounded-control border border-border bg-canvas px-3 py-2 text-xs">
                             <p className="font-bold text-ink">
-                              3. Tool Check an toàn
+                              {t("privateManager.stepSafetyTitle")}
                             </p>
                             <p className="mt-0.5 text-muted">
-                              {STAGE_LABELS[sub.tool_check_status] ??
-                                sub.tool_check_status}
+                              {STAGE_LABEL_KEYS[sub.tool_check_status]
+                                ? t(STAGE_LABEL_KEYS[sub.tool_check_status])
+                                : sub.tool_check_status}
                               {sub.tool_check_findings_count > 0
-                                ? ` · ${sub.tool_check_findings_count} cảnh báo`
+                                ? t("privateManager.safetyFindingsSuffix", {
+                                    count: sub.tool_check_findings_count,
+                                  })
                                 : ""}
                               {sub.tool_check_error_code
                                 ? ` (${sub.tool_check_error_code})`
                                 : ""}
                             </p>
-                            {describeStageErrorHint(
-                              sub.tool_check_error_code,
-                            ) ? (
+                            {toolCheckHint ? (
                               <p className="mt-1 text-[11px] font-medium text-rose-800">
-                                {describeStageErrorHint(
-                                  sub.tool_check_error_code,
-                                )}
+                                {toolCheckHint}
                               </p>
                             ) : null}
                           </div>
@@ -1612,8 +1679,10 @@ function ParentPrivateBookManagerContent({
 
                         {/* Tool Check Scope Disclosure */}
                         <p className="rounded-control border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
-                          <strong>Phạm vi Tool Check:</strong>{" "}
-                          {describeToolCheckScope(sub.tool_check_scope)}
+                          <strong>
+                            {t("privateManager.toolCheckScopeLabel")}
+                          </strong>{" "}
+                          {describeToolCheckScope(sub.tool_check_scope, t)}
                         </p>
 
                         {/* Parent Notice from Tool Check (non-sensitive summary) */}
@@ -1626,8 +1695,10 @@ function ParentPrivateBookManagerContent({
                                 className="size-4 shrink-0"
                               />
                               {sub.tool_check_findings_count > 0
-                                ? `Tool Check phát hiện ${sub.tool_check_findings_count} điểm cần người lớn xem xét.`
-                                : "Trang cần Admin xem xét trước khi thêm vào sách."}
+                                ? t("privateManager.toolCheckFlaggedNotice", {
+                                    count: sub.tool_check_findings_count,
+                                  })
+                                : t("privateManager.toolCheckAdminNotice")}
                             </p>
                             {sub.tool_check_parent_notice ? (
                               <p className="mt-1">
@@ -1641,9 +1712,13 @@ function ParentPrivateBookManagerContent({
                         {sub.candidate_text ? (
                           <div className="rounded-control border border-border bg-canvas/70 p-3">
                             <p className="text-xs font-bold text-ink">
-                              Nội dung dự kiến thêm vào sách:
+                              {t("privateManager.previewTextLabel")}
                             </p>
-                            <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-ink">
+                            <p
+                              className="viread-learning-content mt-1 whitespace-pre-wrap text-sm leading-relaxed text-ink"
+                              dir="ltr"
+                              lang="vi"
+                            >
                               {sub.candidate_text}
                             </p>
                           </div>
@@ -1654,10 +1729,13 @@ function ParentPrivateBookManagerContent({
                           <div className="rounded-control border border-sky-200 bg-sky/40 p-3">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <p className="text-xs font-bold text-primary-hover">
-                                Đề xuất chính tả (
-                                {sub.proofread_suggestions.length})
+                                {t("privateManager.proofreadSectionTitle", {
+                                  count: sub.proofread_suggestions.length,
+                                })}
                                 {sub.uncertain_word_indices.length > 0
-                                  ? ` · ${sub.uncertain_word_indices.length} từ cần chú ý`
+                                  ? t("privateManager.uncertainWordsSuffix", {
+                                      count: sub.uncertain_word_indices.length,
+                                    })
                                   : ""}
                               </p>
                               {sub.spelling_accepted ? (
@@ -1666,7 +1744,7 @@ function ParentPrivateBookManagerContent({
                                     aria-hidden="true"
                                     className="size-3.5"
                                   />
-                                  Đã chấp nhận đề xuất
+                                  {t("privateManager.proofreadAcceptedBadge")}
                                 </span>
                               ) : (
                                 <Button
@@ -1676,7 +1754,7 @@ function ParentPrivateBookManagerContent({
                                   type="button"
                                   variant="secondary"
                                 >
-                                  Chấp nhận đề xuất chính tả
+                                  {t("privateManager.proofreadAcceptAction")}
                                 </Button>
                               )}
                             </div>
@@ -1685,16 +1763,24 @@ function ParentPrivateBookManagerContent({
                                 .slice(0, 6)
                                 .map((s, idx) => (
                                   <li key={idx}>
-                                    <span className="line-through text-rose-700">
+                                    <span
+                                      className="viread-learning-content line-through text-rose-700"
+                                      dir="ltr"
+                                      lang="vi"
+                                    >
                                       {s.original}
                                     </span>{" "}
                                     →{" "}
-                                    <span className="font-bold text-emerald-800">
+                                    <span
+                                      className="viread-learning-content font-bold text-emerald-800"
+                                      dir="ltr"
+                                      lang="vi"
+                                    >
                                       {s.suggested}
                                     </span>
                                     {s.uncertain ? (
-                                      <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-900">
-                                        cần kiểm tra
+                                      <span className="ms-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-900">
+                                        {t("privateManager.needsCheckWordNote")}
                                       </span>
                                     ) : null}
                                   </li>
@@ -1713,16 +1799,20 @@ function ParentPrivateBookManagerContent({
                             }`}
                           >
                             <p className="font-bold">
-                              Quyết định từ Admin:{" "}
+                              {t("privateManager.adminDecisionPrefix")}{" "}
                               {sub.admin_decision === "APPROVE"
-                                ? "Đã phê duyệt đúng phiên bản này"
+                                ? t("privateManager.adminDecisionApproved")
                                 : sub.admin_decision === "REQUEST_CHANGES"
-                                  ? "Yêu cầu chỉnh sửa"
-                                  : "Đã từ chối"}
+                                  ? t(
+                                      "privateManager.adminDecisionRequestChanges",
+                                    )
+                                  : t("privateManager.adminDecisionRejected")}
                             </p>
                             {sub.admin_decision_reason ? (
                               <p className="mt-1">
-                                Lý do: {sub.admin_decision_reason}
+                                {t("privateManager.adminReasonPrefix", {
+                                  reason: sub.admin_decision_reason,
+                                })}
                               </p>
                             ) : null}
                           </div>
@@ -1732,16 +1822,18 @@ function ParentPrivateBookManagerContent({
                         {isEditing ? (
                           <div className="rounded-control border border-primary/40 bg-canvas p-3">
                             <p className="text-xs font-bold text-ink">
-                              Chỉnh sửa nội dung hoặc nguồn trang
+                              {t("privateManager.editSubmissionTitle")}
                             </p>
                             <p className="mt-0.5 text-xs text-amber-900">
-                              Lưu ý: Chỉnh sửa sẽ tạo phiên bản mới, hủy kết quả
-                              kiểm tra / phê duyệt cũ và kiểm tra lại từ đầu (Rà
-                              chính tả → Tool Check an toàn).
+                              {t("privateManager.editSubmissionNote")}
                             </p>
                             <textarea
-                              aria-label="Chỉnh sửa văn bản trang"
-                              className="mt-2 min-h-24 w-full rounded-control border border-border bg-white p-2.5 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
+                              aria-label={t(
+                                "privateManager.editSubmissionTextAria",
+                              )}
+                              className="viread-learning-content mt-2 min-h-24 w-full rounded-control border border-border bg-white p-2.5 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
+                              dir="ltr"
+                              lang="vi"
                               onChange={(event) =>
                                 setEditText(event.target.value)
                               }
@@ -1749,7 +1841,9 @@ function ParentPrivateBookManagerContent({
                             />
                             <div className="mt-2 grid gap-2 sm:grid-cols-2">
                               <select
-                                aria-label="Nguồn nội dung khi chỉnh sửa"
+                                aria-label={t(
+                                  "privateManager.editSubmissionSourceAria",
+                                )}
                                 className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
                                 onChange={(event) =>
                                   setEditSourceType(
@@ -1760,17 +1854,21 @@ function ParentPrivateBookManagerContent({
                               >
                                 {SOURCE_USAGE_OPTIONS.map((opt) => (
                                   <option key={opt.value} value={opt.value}>
-                                    {opt.label}
+                                    {t(`sourceUsage.${opt.value}`)}
                                   </option>
                                 ))}
                               </select>
                               <input
-                                aria-label="Ghi chú nguồn khi chỉnh sửa"
+                                aria-label={t(
+                                  "privateManager.editSubmissionSourceNoteAria",
+                                )}
                                 className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
                                 onChange={(event) =>
                                   setEditSourceNote(event.target.value)
                                 }
-                                placeholder="Ghi chú nguồn…"
+                                placeholder={t(
+                                  "privateManager.sourceNoteShortPlaceholder",
+                                )}
                                 value={editSourceNote}
                               />
                             </div>
@@ -1781,7 +1879,7 @@ function ParentPrivateBookManagerContent({
                                 onClick={() => void handleSaveEdit(sub)}
                                 type="button"
                               >
-                                Lưu phiên bản mới & kiểm tra lại
+                                {t("privateManager.saveNewVersionAction")}
                               </Button>
                               <Button
                                 className="min-h-10 w-auto px-3 text-xs"
@@ -1789,7 +1887,7 @@ function ParentPrivateBookManagerContent({
                                 type="button"
                                 variant="secondary"
                               >
-                                Đóng
+                                {t("privateManager.closeAction")}
                               </Button>
                             </div>
                           </div>
@@ -1799,14 +1897,17 @@ function ParentPrivateBookManagerContent({
                         {isReviewFormOpen ? (
                           <div className="rounded-control border border-amber-400 bg-amber-50/70 p-3">
                             <p className="text-xs font-bold text-amber-950">
-                              Gửi phiên bản v{sub.submission_version} sang Admin
-                              xem xét
+                              {t("privateManager.submitAdminTitle", {
+                                version: sub.submission_version,
+                              })}
                             </p>
                             <div className="mt-2 grid gap-2 sm:grid-cols-2">
                               <label className="flex flex-col gap-1 text-xs font-semibold text-ink">
-                                Nguồn nội dung
+                                {t("privateManager.submitAdminSourceLabel")}
                                 <select
-                                  aria-label="Nguồn nội dung gửi Admin"
+                                  aria-label={t(
+                                    "privateManager.submitAdminSourceAria",
+                                  )}
                                   className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
                                   onChange={(event) =>
                                     setReviewSourceType(
@@ -1817,33 +1918,41 @@ function ParentPrivateBookManagerContent({
                                 >
                                   {SOURCE_USAGE_OPTIONS.map((opt) => (
                                     <option key={opt.value} value={opt.value}>
-                                      {opt.label}
+                                      {t(`sourceUsage.${opt.value}`)}
                                     </option>
                                   ))}
                                 </select>
                               </label>
                               <label className="flex flex-col gap-1 text-xs font-semibold text-ink">
-                                Ghi chú nguồn
+                                {t("privateManager.submitAdminSourceNoteLabel")}
                                 <input
-                                  aria-label="Ghi chú nguồn gửi Admin"
+                                  aria-label={t(
+                                    "privateManager.submitAdminSourceNoteAria",
+                                  )}
                                   className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
                                   onChange={(event) =>
                                     setReviewSourceNote(event.target.value)
                                   }
-                                  placeholder="Ví dụ: Sách gia đình mua cho bé"
+                                  placeholder={t(
+                                    "privateManager.submitAdminSourceNotePlaceholder",
+                                  )}
                                   value={reviewSourceNote}
                                 />
                               </label>
                             </div>
                             <label className="mt-2 flex flex-col gap-1 text-xs font-semibold text-ink">
-                              Lời nhắn cho Admin (giải thích ngữ cảnh)
+                              {t("privateManager.submitAdminMessageLabel")}
                               <textarea
-                                aria-label="Lời nhắn cho Admin"
+                                aria-label={t(
+                                  "privateManager.submitAdminMessageAria",
+                                )}
                                 className="min-h-20 rounded-control border border-border bg-white p-2 text-xs text-ink"
                                 onChange={(event) =>
                                   setReviewRequestNote(event.target.value)
                                 }
-                                placeholder="Ví dụ: Đây là truyện ngụ ngôn lớp 2, mong Admin xem xét duyệt trang này."
+                                placeholder={t(
+                                  "privateManager.submitAdminMessagePlaceholder",
+                                )}
                                 value={reviewRequestNote}
                               />
                             </label>
@@ -1857,7 +1966,7 @@ function ParentPrivateBookManagerContent({
                                 type="button"
                               >
                                 <Send aria-hidden="true" className="size-3.5" />
-                                Xác nhận gửi Admin
+                                {t("privateManager.confirmSendAdmin")}
                               </Button>
                               <Button
                                 className="min-h-10 w-auto px-3 text-xs"
@@ -1865,7 +1974,7 @@ function ParentPrivateBookManagerContent({
                                 type="button"
                                 variant="secondary"
                               >
-                                Hủy
+                                {t("reportDialog.cancel")}
                               </Button>
                             </div>
                           </div>
@@ -1888,7 +1997,7 @@ function ParentPrivateBookManagerContent({
                                 aria-hidden="true"
                                 className="size-4"
                               />
-                              Thêm trang vào sách
+                              {t("privateManager.commitPageAction")}
                             </Button>
                           ) : (
                             <span className="inline-flex min-h-10 items-center gap-1.5 rounded-control bg-teal-50 px-3 text-xs font-bold text-teal-900">
@@ -1896,7 +2005,7 @@ function ParentPrivateBookManagerContent({
                                 aria-hidden="true"
                                 className="size-4"
                               />
-                              Đã thêm vào sách đọc
+                              {t("privateManager.committedPageBadge")}
                             </span>
                           )}
 
@@ -1915,7 +2024,7 @@ function ParentPrivateBookManagerContent({
                               variant="secondary"
                             >
                               <Send aria-hidden="true" className="size-4" />
-                              Gửi Admin xem xét
+                              {t("privateManager.sendAdminAction")}
                             </Button>
                           ) : null}
 
@@ -1933,7 +2042,7 @@ function ParentPrivateBookManagerContent({
                                 aria-hidden="true"
                                 className="size-4"
                               />
-                              Thử lại kiểm tra
+                              {t("privateManager.retryCheckAction")}
                             </Button>
                           ) : null}
 
@@ -1957,7 +2066,7 @@ function ParentPrivateBookManagerContent({
                                   aria-hidden="true"
                                   className="size-3.5"
                                 />
-                                Sửa nội dung
+                                {t("privateManager.editContentAction")}
                               </Button>
 
                               <label className="inline-flex min-h-10 cursor-pointer items-center gap-1.5 rounded-control border border-border bg-white px-3 text-xs font-semibold text-ink hover:bg-canvas">
@@ -1965,10 +2074,13 @@ function ParentPrivateBookManagerContent({
                                   aria-hidden="true"
                                   className="size-3.5"
                                 />
-                                Thay ảnh
+                                {t("privateManager.replaceImageAction")}
                                 <input
                                   accept={ACCEPTED_UPLOAD_EXTENSIONS}
-                                  aria-label={`Thay ảnh cho trang nguồn ${sub.source_page_number}`}
+                                  aria-label={t(
+                                    "privateManager.replaceSubmissionImageAria",
+                                    { page: sub.source_page_number },
+                                  )}
                                   className="sr-only"
                                   disabled={isSubBusy}
                                   onChange={(event) => {
@@ -1990,7 +2102,7 @@ function ParentPrivateBookManagerContent({
                           <p className="text-xs font-medium text-amber-900">
                             <Lock
                               aria-hidden="true"
-                              className="mr-1 inline size-3.5 align-text-bottom"
+                              className="me-1 inline size-3.5 align-text-bottom"
                             />
                             {lockReason}
                           </p>
@@ -2002,9 +2114,9 @@ function ParentPrivateBookManagerContent({
               })}
             </div>
             <PaginationBar
-              ariaLabel="Phân trang các trang đang kiểm tra"
+              ariaLabel={t("privateManager.submissionsPaginationAria")}
               compact
-              itemLabel="trang"
+              itemLabel={t("privateManager.pageItemLabel")}
               onPageChange={setSubmissionsPage}
               page={safeSubmissionsPage}
               pageSize={SUBMISSIONS_PAGE_SIZE}
@@ -2023,12 +2135,13 @@ function ParentPrivateBookManagerContent({
           id="committed-pages-heading"
           className="text-xl font-extrabold text-ink"
         >
-          Các trang đã thêm vào sách đọc ({committedPages.length})
+          {t("privateManager.committedHeading", {
+            count: committedPages.length,
+          })}
         </h2>
         {committedPages.length === 0 ? (
           <p className="rounded-card border border-border bg-white p-4 text-sm text-muted">
-            Chưa có trang nào trong sách đọc. Sau khi trang đạt kiểm tra (hoặc
-            được Admin duyệt), bấm <strong>Thêm trang vào sách</strong> ở trên.
+            {t("privateManager.committedEmpty")}
           </p>
         ) : (
           <>
@@ -2046,21 +2159,29 @@ function ParentPrivateBookManagerContent({
                   >
                     <div className="h-40 w-full overflow-hidden rounded-control bg-cream">
                       <AuthenticatedImage
-                        alt={`Ảnh trang ${page.page_number}`}
+                        alt={t("privateManager.pageNumberHeading", {
+                          page: page.page_number,
+                        })}
                         className="h-full w-full object-contain p-2"
                         src={page.image_url}
                       />
                     </div>
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-sm font-bold text-ink">
-                        Trang {page.page_number}
+                        {t("privateManager.pageNumberHeading", {
+                          page: page.page_number,
+                        })}
                       </p>
                       <span className="rounded-full bg-teal-50 px-2 py-0.5 text-[11px] font-bold text-teal-800">
-                        Đang mở đọc
+                        {t("privateManager.readingActiveBadge")}
                       </span>
                     </div>
                     {page.verified_text_preview ? (
-                      <p className="line-clamp-3 text-xs text-muted">
+                      <p
+                        className="viread-learning-content line-clamp-3 text-xs text-muted"
+                        dir="ltr"
+                        lang="vi"
+                      >
                         {page.verified_text_preview}
                       </p>
                     ) : null}
@@ -2069,7 +2190,10 @@ function ParentPrivateBookManagerContent({
                       {!isSuspended ? (
                         <>
                           <button
-                            aria-label={`Sửa nội dung trang ${page.page_number}`}
+                            aria-label={t(
+                              "privateManager.editCommittedPageAria",
+                              { page: page.page_number },
+                            )}
                             className="inline-flex min-h-9 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas disabled:opacity-50"
                             disabled={isPageBusy || busyKey !== null}
                             onClick={() =>
@@ -2080,14 +2204,17 @@ function ParentPrivateBookManagerContent({
                             type="button"
                           >
                             <Pencil aria-hidden="true" className="size-3.5" />
-                            Sửa trang
+                            {t("privateManager.editPageAction")}
                           </button>
                           <label className="inline-flex min-h-9 cursor-pointer items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas">
                             <Upload aria-hidden="true" className="size-3.5" />
-                            Thay ảnh
+                            {t("privateManager.replaceImageAction")}
                             <input
                               accept={ACCEPTED_UPLOAD_EXTENSIONS}
-                              aria-label={`Thay ảnh cho trang ${page.page_number}`}
+                              aria-label={t(
+                                "privateManager.replaceCommittedImageAria",
+                                { page: page.page_number },
+                              )}
                               className="sr-only"
                               disabled={isPageBusy || busyKey !== null}
                               onChange={(event) => {
@@ -2106,7 +2233,10 @@ function ParentPrivateBookManagerContent({
                         </>
                       ) : null}
                       <button
-                        aria-label={`Xóa trang ${page.page_number}`}
+                        aria-label={t(
+                          "privateManager.deleteCommittedPageAria",
+                          { page: page.page_number },
+                        )}
                         className="inline-flex min-h-9 items-center gap-1 rounded-control border border-rose-200 bg-white px-2.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
                         disabled={isPageBusy || busyKey !== null}
                         onClick={() => {
@@ -2118,21 +2248,22 @@ function ParentPrivateBookManagerContent({
                         type="button"
                       >
                         <Trash2 aria-hidden="true" className="size-3.5" />
-                        Xóa trang
+                        {t("privateManager.deletePageAction")}
                       </button>
                     </div>
 
                     {isEditingPage ? (
                       <div className="flex flex-col gap-2.5 rounded-control border border-amber-300 bg-amber-50/70 p-3 text-xs">
                         <p className="font-bold text-amber-950">
-                          Lưu ý: Khi sửa trang đã thêm, trang sẽ tạm gỡ khỏi
-                          sách đọc và kiểm tra lại từ đầu (Rà chính tả → Tool
-                          Check an toàn).
+                          {t("privateManager.editCommittedRecheckNote")}
                         </p>
                         <label className="flex flex-col gap-1 font-semibold text-ink">
-                          Số trang
+                          {t("privateManager.committedPageNumberLabel")}
                           <input
-                            aria-label={`Số trang chỉnh sửa trang ${page.page_number}`}
+                            aria-label={t(
+                              "privateManager.committedPageNumberAria",
+                              { page: page.page_number },
+                            )}
                             className="min-h-9 w-28 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
                             min={1}
                             onChange={(event) =>
@@ -2145,10 +2276,15 @@ function ParentPrivateBookManagerContent({
                           />
                         </label>
                         <label className="flex flex-col gap-1 font-semibold text-ink">
-                          Nội dung văn bản trang
+                          {t("privateManager.committedPageTextLabel")}
                           <textarea
-                            aria-label={`Chỉnh sửa văn bản trang ${page.page_number}`}
-                            className="min-h-24 w-full rounded-control border border-border bg-white p-2 text-xs text-ink"
+                            aria-label={t(
+                              "privateManager.committedPageTextAria",
+                              { page: page.page_number },
+                            )}
+                            className="viread-learning-content min-h-24 w-full rounded-control border border-border bg-white p-2 text-xs text-ink"
+                            dir="ltr"
+                            lang="vi"
                             onChange={(event) =>
                               setEditPageText(event.target.value)
                             }
@@ -2156,7 +2292,9 @@ function ParentPrivateBookManagerContent({
                           />
                         </label>
                         <select
-                          aria-label={`Nguồn nội dung trang ${page.page_number}`}
+                          aria-label={t("privateManager.committedSourceAria", {
+                            page: page.page_number,
+                          })}
                           className="min-h-9 rounded-control border border-border bg-white px-2 text-xs text-ink"
                           onChange={(event) =>
                             setEditPageSourceType(
@@ -2167,17 +2305,22 @@ function ParentPrivateBookManagerContent({
                         >
                           {SOURCE_USAGE_OPTIONS.map((opt) => (
                             <option key={opt.value} value={opt.value}>
-                              {opt.label}
+                              {t(`sourceUsage.${opt.value}`)}
                             </option>
                           ))}
                         </select>
                         <input
-                          aria-label={`Ghi chú nguồn trang ${page.page_number}`}
+                          aria-label={t(
+                            "privateManager.committedSourceNoteAria",
+                            { page: page.page_number },
+                          )}
                           className="min-h-9 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
                           onChange={(event) =>
                             setEditPageSourceNote(event.target.value)
                           }
-                          placeholder="Ghi chú nguồn…"
+                          placeholder={t(
+                            "privateManager.sourceNoteShortPlaceholder",
+                          )}
                           type="text"
                           value={editPageSourceNote}
                         />
@@ -2190,7 +2333,7 @@ function ParentPrivateBookManagerContent({
                             }
                             type="button"
                           >
-                            Lưu & kiểm tra lại
+                            {t("privateManager.saveAndRecheckAction")}
                           </Button>
                           <Button
                             className="min-h-9 w-auto px-3 text-xs"
@@ -2198,7 +2341,7 @@ function ParentPrivateBookManagerContent({
                             type="button"
                             variant="secondary"
                           >
-                            Hủy
+                            {t("reportDialog.cancel")}
                           </Button>
                         </div>
                       </div>
@@ -2207,16 +2350,18 @@ function ParentPrivateBookManagerContent({
                     {isConfirmingDelete ? (
                       <div
                         role="alertdialog"
-                        aria-label={`Xác nhận xóa trang ${page.page_number}`}
+                        aria-label={t(
+                          "privateManager.deleteCommittedDialogAria",
+                          { page: page.page_number },
+                        )}
                         className="flex flex-col gap-2 rounded-control border border-rose-300 bg-rose-50 p-3 text-xs text-rose-950"
                       >
                         <p className="font-bold">
-                          Xóa trang {page.page_number} ngay?
+                          {t("privateManager.deleteCommittedDialogTitle", {
+                            page: page.page_number,
+                          })}
                         </p>
-                        <p>
-                          Trang sẽ bị xóa khỏi sách đọc ngay lập tức và không
-                          cần kiểm tra lại các trang khác.
-                        </p>
+                        <p>{t("privateManager.deleteCommittedDialogBody")}</p>
                         <div className="flex flex-wrap gap-2">
                           <Button
                             className="min-h-9 w-auto bg-rose-700 px-3 text-xs text-white hover:bg-rose-800"
@@ -2226,7 +2371,7 @@ function ParentPrivateBookManagerContent({
                             onClick={() => void handleDeleteCommittedPage(page)}
                             type="button"
                           >
-                            Xác nhận xóa
+                            {t("myBooks.confirmDelete")}
                           </Button>
                           <Button
                             className="min-h-9 w-auto px-3 text-xs"
@@ -2234,7 +2379,7 @@ function ParentPrivateBookManagerContent({
                             type="button"
                             variant="secondary"
                           >
-                            Hủy
+                            {t("reportDialog.cancel")}
                           </Button>
                         </div>
                       </div>
@@ -2244,9 +2389,9 @@ function ParentPrivateBookManagerContent({
               })}
             </div>
             <PaginationBar
-              ariaLabel="Phân trang các trang đã thêm vào sách"
+              ariaLabel={t("privateManager.committedPaginationAria")}
               compact
-              itemLabel="trang"
+              itemLabel={t("privateManager.pageItemLabel")}
               onPageChange={setCommittedPage}
               page={safeCommittedPage}
               pageSize={COMMITTED_PAGES_PAGE_SIZE}

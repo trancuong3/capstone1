@@ -28,6 +28,7 @@ import { Button } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAppStore } from "@/components/providers/app-store-provider";
+import { useI18n } from "@/hooks/use-i18n";
 import { useProfileService } from "@/hooks/use-profile-service";
 import {
   readUserCacheWithStale,
@@ -51,6 +52,7 @@ type DashboardState =
   | { status: "error" };
 
 export function DashboardScreen() {
+  const { t } = useI18n();
   const { push, replace } = useRouter();
   const searchParams = useSearchParams();
   const profileService = useProfileService();
@@ -216,8 +218,11 @@ export function DashboardScreen() {
   if (state.status === "error") {
     return (
       <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-7">
-        <StatusMessage title="Chưa tải được tổng quan" tone="error">
-          Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
+        <StatusMessage
+          title={t("parent.dashboard.loadErrorTitle")}
+          tone="error"
+        >
+          {t("auth.errors.generic")}
         </StatusMessage>
         <Button
           className="sm:w-auto sm:self-start sm:px-8"
@@ -225,7 +230,7 @@ export function DashboardScreen() {
           variant="secondary"
         >
           <RefreshCw aria-hidden="true" className="size-5" />
-          Thử lại
+          {t("common.actions.retry")}
         </Button>
       </section>
     );
@@ -242,9 +247,10 @@ export function DashboardScreen() {
   return (
     <section className="family-dashboard">
       <header className="family-title">
-        <h1 className="book-title">Góc đọc gia đình</h1>
+        <h1 className="book-title">{t("parent.dashboard.familyTitle")}</h1>
         <Link href="/children" className="family-inline-link min-h-12">
-          <UsersRound aria-hidden="true" size={17} /> Quản lý hồ sơ
+          <UsersRound aria-hidden="true" size={17} />{" "}
+          {t("parent.dashboard.manageProfiles")}
         </Link>
       </header>
       <div className="family-spread">
@@ -270,21 +276,23 @@ export function DashboardScreen() {
             (selectionRequired ? " family-profiles-prompt" : "")
           }
         >
-          <h2 id="child-selection-title">Chọn hồ sơ trẻ</h2>
+          <h2 id="child-selection-title">
+            {t("parent.dashboard.selectChildHeading")}
+          </h2>
           {selectionRequired && children.length > 0 ? (
             <p role="status" className="family-selection-notice">
               {invalidSelection
-                ? "Hồ sơ đã thay đổi hoặc không còn khả dụng. Vui lòng chọn lại hồ sơ trẻ."
-                : "Vui lòng chọn hồ sơ trẻ trước khi bắt đầu đọc hoặc chơi."}
+                ? t("parent.dashboard.invalidSelectionNotice")
+                : t("parent.dashboard.missingSelectionNotice")}
             </p>
           ) : null}
           {isLoading ? (
             <div
               className="family-profile-list"
-              aria-label="Đang tải hồ sơ trẻ"
+              aria-label={t("parent.dashboard.loadingChildrenAria")}
             >
               <span className="sr-only" role="status">
-                Đang tải…
+                {t("common.states.loading")}
               </span>
               <Skeleton className="h-[68px] w-full rounded-control" />
               <Skeleton className="h-[68px] w-full rounded-control" />
@@ -310,13 +318,13 @@ export function DashboardScreen() {
                 href="/children/new"
                 className="family-inline-link min-h-12"
               >
-                <Plus aria-hidden="true" size={17} /> Tạo hồ sơ bé
+                <Plus aria-hidden="true" size={17} />{" "}
+                {t("parent.dashboard.createChildLink")}
               </Link>
             </>
           ) : (
             <p className="text-muted">
-              Gia đình mình chưa có hồ sơ bé. Mỗi hồ sơ sẽ có tủ sách và lịch sử
-              đọc riêng.
+              {t("parent.dashboard.emptyChildrenDescription")}
             </p>
           )}
         </section>
@@ -337,7 +345,9 @@ export function DashboardScreen() {
                 aria-hidden="true"
                 className="size-5 shrink-0 text-primary"
               />
-              <span className="truncate">Tiến bộ gần đây</span>
+              <span className="truncate">
+                {t("parent.dashboard.recentProgressLink")}
+              </span>
             </Link>
             <Link
               className="flex min-h-12 items-center gap-2.5 rounded-card border border-border bg-white px-3.5 py-3 text-sm font-bold text-ink shadow-xs transition-colors hover:bg-warning-surface/50 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
@@ -351,7 +361,9 @@ export function DashboardScreen() {
                 aria-hidden="true"
                 className="size-5 shrink-0 text-warning"
               />
-              <span className="truncate">Từ cần luyện</span>
+              <span className="truncate">
+                {t("parent.dashboard.difficultWordsLink")}
+              </span>
             </Link>
           </div>
 
@@ -360,7 +372,9 @@ export function DashboardScreen() {
             className="family-tools"
           >
             <div className="family-tools-heading">
-              <h2 id="reading-actions-title">Hoạt động đọc sách</h2>
+              <h2 id="reading-actions-title">
+                {t("parent.dashboard.readingActionsTitle")}
+              </h2>
               <Link
                 href={
                   selectedChild
@@ -369,33 +383,34 @@ export function DashboardScreen() {
                 }
                 className="family-inline-link min-h-12"
               >
-                <History aria-hidden="true" size={16} /> Lịch sử đọc
+                <History aria-hidden="true" size={16} />{" "}
+                {t("parent.dashboard.readingHistoryLink")}
               </Link>
             </div>
             <div className="family-tool-list">
               <button
                 type="button"
-                aria-label="Quét sách"
+                aria-label={t("parent.dashboard.scanBookTitle")}
                 onClick={() => handleReadingAction("/book-scanner")}
               >
                 <Camera aria-hidden="true" />
                 <span>
-                  <strong>Quét sách</strong>
-                  <small>Mở một trang sách giấy bằng camera.</small>
+                  <strong>{t("parent.dashboard.scanBookTitle")}</strong>
+                  <small>{t("parent.dashboard.scanBookDesc")}</small>
                 </span>
-                <ArrowUpRight aria-hidden="true" />
+                <ArrowUpRight aria-hidden="true" className="viread-rtl-flip" />
               </button>
               <button
                 type="button"
-                aria-label="Trò chơi và âm nhạc"
+                aria-label={t("parent.dashboard.entertainmentTitle")}
                 onClick={() => handleReadingAction("/entertainment")}
               >
                 <Music2 aria-hidden="true" />
                 <span>
-                  <strong>Trò chơi và âm nhạc</strong>
-                  <small>Ghép câu, kể chuyện hoặc hát cùng bé.</small>
+                  <strong>{t("parent.dashboard.entertainmentTitle")}</strong>
+                  <small>{t("parent.dashboard.entertainmentDesc")}</small>
                 </span>
-                <ArrowUpRight aria-hidden="true" />
+                <ArrowUpRight aria-hidden="true" className="viread-rtl-flip" />
               </button>
               <Link
                 href={
@@ -406,10 +421,10 @@ export function DashboardScreen() {
               >
                 <BarChart3 aria-hidden="true" />
                 <span>
-                  <strong>Xem tiến bộ</strong>
-                  <small>Theo dõi kết quả qua từng buổi đọc.</small>
+                  <strong>{t("parent.dashboard.progressTitle")}</strong>
+                  <small>{t("parent.dashboard.progressDesc")}</small>
                 </span>
-                <ArrowUpRight aria-hidden="true" />
+                <ArrowUpRight aria-hidden="true" className="viread-rtl-flip" />
               </Link>
             </div>
           </section>

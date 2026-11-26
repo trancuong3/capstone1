@@ -1,3 +1,13 @@
+import { translateMessage } from "@/lib/i18n/formatter";
+import {
+  DEFAULT_LOCALE,
+  normalizeLocale,
+  type SupportedLocale,
+} from "@/lib/i18n/locales";
+import { readLocaleCookie } from "@/lib/i18n/persistence";
+import type { MessagesDictionary } from "@/lib/i18n/types";
+import { getCachedLocaleMessages } from "@/messages/loader";
+import { viMessages } from "@/messages/vi";
 import type {
   PhonicsStepTiming,
   SpeechService,
@@ -155,28 +165,50 @@ interface ActiveMedia {
   resume(): Promise<void>;
 }
 
+function resolveRuntimeLocale(): SupportedLocale {
+  const cookieLocale = readLocaleCookie();
+  if (cookieLocale) return cookieLocale;
+  if (typeof document !== "undefined") {
+    return normalizeLocale(document.documentElement?.lang) ?? DEFAULT_LOCALE;
+  }
+  return DEFAULT_LOCALE;
+}
+
+function tSpeechPlayback(key: string): string {
+  const locale = resolveRuntimeLocale();
+  const activeMessages: MessagesDictionary =
+    getCachedLocaleMessages(locale) ?? viMessages;
+  return translateMessage(activeMessages, viMessages, locale, key);
+}
+
 function stopped(): Error {
   return new DOMException("Audio playback was stopped.", "AbortError");
 }
 
 function unavailable(): Error {
-  return new Error(
-    "Giọng đọc trên máy hiện chưa sẵn sàng. Ba mẹ và bé có thể xem chữ trên màn hình và bấm Thử lại nhé.",
-  );
+  return new Error(tSpeechPlayback("speech.playback.unavailable"));
 }
 
 function isAbort(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
-const LOCKED_VOICE_UNAVAILABLE_NOTICE =
-  "Giọng đọc đã khóa đang tạm bận. ViRead giữ nguyên hướng dẫn bằng chữ để không tự đổi giọng khác — bé bấm Thử lại nhé.";
-const SERVER_FALLBACK_VOICE_NOTICE =
-  "Giọng đã chọn hiện chưa khả dụng, hệ thống đang đọc bằng giọng dự phòng.";
-const ANDROID_NATIVE_FALLBACK_VOICE_NOTICE =
-  "Giọng đọc trên máy chủ chưa bật — ViRead đang dùng giọng tiếng Việt trên thiết bị Android.";
-const BROWSER_FALLBACK_VOICE_NOTICE =
-  "Giọng đọc trên máy chưa bật — ViRead đang dùng giọng Online của trình duyệt.";
+function getLockedVoiceUnavailableNotice(): string {
+  return tSpeechPlayback("speech.playback.lockedVoiceUnavailableNotice");
+}
+
+function getServerFallbackVoiceNotice(): string {
+  return tSpeechPlayback("speech.playback.serverFallbackNotice");
+}
+
+function getAndroidNativeFallbackVoiceNotice(): string {
+  return tSpeechPlayback("speech.playback.androidNativeFallbackNotice");
+}
+
+function getBrowserFallbackVoiceNotice(): string {
+  return tSpeechPlayback("speech.playback.browserFallbackNotice");
+}
+
 const CATALOG_TTS_CACHE_NAME = "viread-catalog-tts-v1";
 
 function canUseGoogleTtsFallback(): boolean {
@@ -818,7 +850,7 @@ export class TtsPlayback {
       voiceId: "android_vi_vn",
       voiceGender: resolveVoiceGender(operation.voice.requestedVoiceId),
     });
-    this.setFallbackNotice(ANDROID_NATIVE_FALLBACK_VOICE_NOTICE);
+    this.setFallbackNotice(getAndroidNativeFallbackVoiceNotice());
 
     const wordList =
       options.words && options.words.length > 0
@@ -947,7 +979,7 @@ export class TtsPlayback {
       }
     }
     if (!canUseGoogleTtsFallback()) {
-      this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+      this.setFallbackNotice(getLockedVoiceUnavailableNotice());
       throw unavailable();
     }
     return this.playBrowserSpeech(operation, text, options);
@@ -975,7 +1007,7 @@ export class TtsPlayback {
     );
     this.ensure(operation);
     if (!resolvedVoice) {
-      this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+      this.setFallbackNotice(getLockedVoiceUnavailableNotice());
       throw unavailable();
     }
     recordTtsEngineUsage({
@@ -985,7 +1017,7 @@ export class TtsPlayback {
       voiceId: operation.voice.requestedVoiceId,
       voiceGender: resolveVoiceGender(operation.voice.requestedVoiceId),
     });
-    this.setFallbackNotice(BROWSER_FALLBACK_VOICE_NOTICE);
+    this.setFallbackNotice(getBrowserFallbackVoiceNotice());
 
     const wordList =
       options.words && options.words.length > 0
@@ -1407,7 +1439,7 @@ export class TtsPlayback {
               );
               continue;
             }
-            this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+            this.setFallbackNotice(getLockedVoiceUnavailableNotice());
             throw unavailable();
           }
 
@@ -1419,7 +1451,7 @@ export class TtsPlayback {
           }
 
           this.setFallbackNotice(
-            fetched.usedFallbackVoice ? SERVER_FALLBACK_VOICE_NOTICE : null,
+            fetched.usedFallbackVoice ? getServerFallbackVoiceNotice() : null,
           );
           try {
             const playbackRate = computeEffectivePlaybackRate(
@@ -1449,12 +1481,12 @@ export class TtsPlayback {
                   wavRetry.audio.type.trim().length > 0 &&
                   !isWavAudioBlob(wavRetry.audio)
                 ) {
-                  this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+                  this.setFallbackNotice(getLockedVoiceUnavailableNotice());
                   throw unavailable();
                 }
                 this.setFallbackNotice(
                   wavRetry.usedFallbackVoice
-                    ? SERVER_FALLBACK_VOICE_NOTICE
+                    ? getServerFallbackVoiceNotice()
                     : null,
                 );
                 const wavPlaybackRate = computeEffectivePlaybackRate(
@@ -1480,11 +1512,11 @@ export class TtsPlayback {
                 ) {
                   throw wavError;
                 }
-                this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+                this.setFallbackNotice(getLockedVoiceUnavailableNotice());
                 throw unavailable();
               }
             }
-            this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+            this.setFallbackNotice(getLockedVoiceUnavailableNotice());
             throw error;
           }
         }
@@ -1787,7 +1819,7 @@ export class TtsPlayback {
                   await playPhonicsViaBrowser();
                   return;
                 }
-                this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+                this.setFallbackNotice(getLockedVoiceUnavailableNotice());
                 throw unavailable();
               }
             }
@@ -1964,7 +1996,7 @@ export class TtsPlayback {
                 );
                 continue;
               }
-              this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+              this.setFallbackNotice(getLockedVoiceUnavailableNotice());
               throw unavailable();
             }
           }
@@ -2164,7 +2196,7 @@ export class TtsPlayback {
           }
           synthesizedTimedOk = true;
           this.setFallbackNotice(
-            timed.usedFallbackVoice ? SERVER_FALLBACK_VOICE_NOTICE : null,
+            timed.usedFallbackVoice ? getServerFallbackVoiceNotice() : null,
           );
           try {
             const timedPlaybackRate = computeEffectivePlaybackRate(
@@ -2264,7 +2296,7 @@ export class TtsPlayback {
             continue;
           }
           this.timedCooldownUntil = Date.now() + 15_000;
-          this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+          this.setFallbackNotice(getLockedVoiceUnavailableNotice());
           throw unavailable();
         }
         completedChunks += 1;
@@ -2470,7 +2502,7 @@ export class TtsPlayback {
           if (active()) {
             if (error instanceof Error && error.name === "NotAllowedError") {
               const blocked = new Error(
-                "Trình duyệt đang chờ bé chạm nút Nghe lại để bật âm thanh.",
+                tSpeechPlayback("speech.playback.autoplayBlocked"),
               );
               blocked.name = "NotAllowedError";
               finish(blocked);
@@ -2524,7 +2556,7 @@ export class TtsPlayback {
 
 class PartialPlaybackError extends Error {
   constructor() {
-    super("Âm thanh bị gián đoạn. Bé có thể nghe lại từ đầu nhé.");
+    super(tSpeechPlayback("speech.playback.partialPlayback"));
   }
 }
 

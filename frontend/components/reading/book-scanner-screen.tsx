@@ -24,6 +24,7 @@ import { useRouter } from "next/navigation";
 import { Button, ButtonLink } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { CameraPreview } from "@/components/reading/camera-preview";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import {
   cancelScanPageOcrJob,
@@ -90,21 +91,26 @@ function sleepWithAbort(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-function describeAsyncJobFailure(job: LocalOcrPageScanJobDTO): string {
+type OcrTranslateFn = ReturnType<typeof useTranslations>;
+
+function describeAsyncJobFailure(
+  job: LocalOcrPageScanJobDTO,
+  t: OcrTranslateFn,
+): string {
   if (job.status === "CANCELLED") {
-    return "Tác vụ nhận diện trang sách đã được hủy. Ba mẹ có thể chọn lại ảnh khác nhé.";
+    return t("scanner.errorCancelled");
   }
   const code = (job.error_code ?? "").toUpperCase();
   if (code.includes("TIMEOUT")) {
-    return "Nhận diện trang sách vượt quá thời gian xử lý. Ba mẹ bấm Thử lại với ảnh này nhé.";
+    return t("scanner.errorTimeout");
   }
   if (code.includes("UNAVAILABLE") || code.includes("WORKER")) {
-    return "Máy chủ OCR Windows tạm chưa kết nối được. Ba mẹ kiểm tra máy chủ OCR rồi bấm Thử lại nhé.";
+    return t("scanner.errorWorkerOffline");
   }
   if (job.error_message && job.error_message.trim()) {
-    return `Chưa nhận diện được chữ tiếng Việt từ ảnh này (${job.error_message.trim()}). Ba mẹ hãy chụp rõ hơn hoặc bấm Thử lại nhé.`;
+    return t("scanner.errorWithDetail", { detail: job.error_message.trim() });
   }
-  return "Chưa nhận diện được trang sách lúc này. Ba mẹ hãy chụp rõ nét, đủ sáng rồi bấm Thử lại nhé.";
+  return t("scanner.errorGeneric");
 }
 
 type LocalOcrScanState =
@@ -146,6 +152,9 @@ type LocalOcrScanState =
     };
 
 export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
+  const { formatNumber } = useI18n();
+  const t = useTranslations("ocr");
+  const tc = useTranslations("child");
   const router = useRouter();
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const [cameraStarted, setCameraStarted] = useState(false);
@@ -228,8 +237,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             fileName: rawFile.name,
             file: null,
             idempotencyKey: null,
-            message:
-              "Ảnh vượt quá giới hạn dung lượng 12 MB sau khi tối ưu. Hãy chọn ảnh trang sách rõ gọn hơn nhé.",
+            message: t("scanner.errorTooLargeAfterOptimize"),
             authExpired: false,
             retryable: false,
           });
@@ -335,7 +343,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               fileName: uploadFile.name,
               file: uploadFile,
               idempotencyKey,
-              message: describeAsyncJobFailure(currentJob),
+              message: describeAsyncJobFailure(currentJob, t),
               authExpired: false,
               retryable: currentJob.status !== "CANCELLED",
             });
@@ -378,8 +386,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           fileName: uploadFile.name,
           file: uploadFile,
           idempotencyKey,
-          message:
-            "Ảnh trang sách vẫn đang nằm trong hàng đợi chờ máy chủ OCR Windows bật. Khi máy chủ sẵn sàng, ba mẹ bấm Thử lại với ảnh này nhé.",
+          message: t("scanner.errorQueuedTooLong"),
           authExpired: false,
           retryable: true,
         });
@@ -397,10 +404,10 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           ? error.retryable || error.status === 504 || error.status === 0
           : true;
         const message = authExpired
-          ? "Phiên đăng nhập đã hết hạn. Ba mẹ vui lòng đăng nhập lại để tiếp tục quét trang sách."
+          ? t("scanner.errorSessionExpired")
           : isServiceError(error)
             ? error.message
-            : "Không thể gửi ảnh tới máy chủ OCR cục bộ. Ba mẹ hãy thử lại nhé.";
+            : t("scanner.errorSubmitFailed");
         setOcrState({
           status: "error",
           fileName: uploadFile.name,
@@ -416,7 +423,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
         }
       }
     },
-    [bookId],
+    [bookId, t],
   );
 
   const handleCancelOcr = useCallback(() => {
@@ -453,8 +460,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           fileName: file.name,
           file: null,
           idempotencyKey: null,
-          message:
-            "Định dạng ảnh chưa hỗ trợ. Hãy chọn ảnh JPG, PNG hoặc WebP.",
+          message: t("scanner.errorUnsupportedFormat"),
           authExpired: false,
           retryable: false,
         });
@@ -468,8 +474,8 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           idempotencyKey: null,
           message:
             file.size <= 0
-              ? "Tệp ảnh bị rỗng. Ba mẹ hãy chọn ảnh khác nhé."
-              : "Ảnh vượt quá giới hạn dung lượng 32 MB. Hãy chọn ảnh nhỏ hơn nhé.",
+              ? t("scanner.errorEmptyFile")
+              : t("scanner.errorFileTooLarge"),
           authExpired: false,
           retryable: false,
         });
@@ -477,7 +483,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
       }
       void runLocalOcrUpload(file, createIdempotencyKey(), childId);
     },
-    [runLocalOcrUpload],
+    [runLocalOcrUpload, t],
   );
 
   if (childState.status === "loading" || childState.status === "redirecting") {
@@ -487,7 +493,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
         className="mx-auto w-full max-w-[960px] px-4 py-8"
       >
         <span className="sr-only" role="status">
-          Đang xác minh hồ sơ trẻ…
+          {tc("verification.loading")}
         </span>
       </section>
     );
@@ -496,13 +502,12 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
   if (childState.status === "error") {
     return (
       <section className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-4 py-8">
-        <StatusMessage title="Không thể xác minh hồ sơ trẻ" tone="error">
-          Chưa thể xác nhận hồ sơ thuộc tài khoản hiện tại. Ba mẹ vui lòng thử
-          lại.
+        <StatusMessage title={tc("verification.errorTitle")} tone="error">
+          {tc("verification.errorBody")}
         </StatusMessage>
         <Button className="sm:w-auto" onClick={retryChild} variant="secondary">
           <RefreshCw aria-hidden="true" className="size-5" />
-          Thử lại
+          {tc("verification.retry")}
         </Button>
       </section>
     );
@@ -520,14 +525,13 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
       <header className="border-b border-border pb-4 sm:pb-5">
         <div>
           <p className="text-label font-semibold text-muted">
-            {child.alias} · Lớp {child.grade}
+            {child.alias} · {tc("switcher.gradeLabel", { grade: child.grade })}
           </p>
           <h1 className="mt-1 text-2xl font-extrabold text-ink sm:text-heading">
-            Đưa trang sách vào khung camera
+            {t("scanner.heading")}
           </h1>
           <p className="mt-2 max-w-[720px] text-sm leading-6 text-muted sm:text-body sm:leading-7">
-            Đặt sách dọc ngay ngắn, đủ sáng trong khung 4 góc, hoặc chụp/chọn
-            ảnh trang sách để nhận diện chữ tiếng Việt bằng OCR chuẩn xác.
+            {t("scanner.guide")}
           </p>
         </div>
       </header>
@@ -535,7 +539,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
       <input
         ref={fileInputRef}
         accept={SCAN_ACCEPT_ATTRIBUTE}
-        aria-label="Chọn ảnh trang sách để quét OCR"
+        aria-label={t("scanner.uploadAria")}
         className="sr-only"
         data-testid="local-ocr-file-input"
         onChange={(event) => handleFileChange(event, child.id)}
@@ -545,7 +549,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
       <input
         ref={nativeCameraInputRef}
         accept="image/jpeg"
-        aria-label="Chụp trực tiếp bằng Camera máy để quét OCR"
+        aria-label={t("scanner.captureAria")}
         capture="environment"
         className="sr-only"
         data-testid="native-camera-ocr-input"
@@ -567,13 +571,13 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             <div className="min-w-0 flex-1">
               <span className="inline-flex rounded-full bg-sky px-2.5 py-0.5 text-xs font-bold text-primary">
                 {ocrState.stage === "optimizing"
-                  ? "Bước 1/2 · Chuẩn hóa ảnh chụp"
-                  : "Bước 2/2 · Gửi ảnh & xếp hàng OCR"}
+                  ? t("scanner.step1Title")
+                  : t("scanner.step2Title")}
               </span>
               <p className="mt-1.5 text-base font-extrabold text-ink">
                 {ocrState.stage === "optimizing"
-                  ? "Đang chuẩn hóa hướng xoay EXIF và tối ưu độ nét ảnh…"
-                  : "Đang gửi ảnh tới hệ thống nhận diện OCR tiếng Việt…"}
+                  ? t("scanner.step1Body")
+                  : t("scanner.step2Body")}
               </p>
               <p className="truncate text-sm text-muted">{ocrState.fileName}</p>
             </div>
@@ -584,7 +588,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             variant="secondary"
           >
             <X aria-hidden="true" className="size-5" />
-            Hủy quét
+            {t("scanner.cancelScan")}
           </Button>
         </div>
       ) : null}
@@ -621,10 +625,10 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
                   <span className="inline-flex rounded-full bg-sky px-2.5 py-0.5 text-xs font-bold text-primary">
                     {ocrState.jobStatus === "CLAIMED" ||
                     ocrState.jobStatus === "RUNNING"
-                      ? "Đang xử lý OCR"
+                      ? t("scanner.jobStatusRunning")
                       : ocrState.jobStatus === "FAILED_RETRYABLE"
-                        ? "Đang tự động thử lại"
-                        : "Đang xếp hàng chờ"}
+                        ? t("scanner.jobStatusRetrying")
+                        : t("scanner.jobStatusQueued")}
                   </span>
                   <span
                     className={cn(
@@ -638,12 +642,12 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
                     {ocrState.workerOnline ? (
                       <>
                         <Wifi aria-hidden="true" className="size-3.5" />
-                        Máy chủ OCR Windows: Đang bật
+                        {t("scanner.workerOnline")}
                       </>
                     ) : (
                       <>
                         <WifiOff aria-hidden="true" className="size-3.5" />
-                        Máy chủ OCR Windows: Đang tắt
+                        {t("scanner.workerOffline")}
                       </>
                     )}
                   </span>
@@ -651,15 +655,15 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
                 <p className="mt-2 text-base font-extrabold text-ink">
                   {ocrState.jobStatus === "CLAIMED" ||
                   ocrState.jobStatus === "RUNNING"
-                    ? "Đang nhận diện trang sách..."
+                    ? t("scanner.jobHeadlineRunning")
                     : ocrState.jobStatus === "FAILED_RETRYABLE"
-                      ? "Đang thử nhận diện lại trang sách..."
+                      ? t("scanner.jobHeadlineRetrying")
                       : ocrState.workerOnline
-                        ? "Ảnh đã vào hàng đợi — đang chờ lượt nhận diện trang sách..."
-                        : "Đang xếp hàng chờ máy chủ OCR Windows bật — ảnh đã được lưu an toàn"}
+                        ? t("scanner.jobHeadlineQueuedOnline")
+                        : t("scanner.jobHeadlineQueuedOffline")}
                 </p>
                 <p className="mt-0.5 truncate text-sm text-muted">
-                  {ocrState.fileName} · Mã tác vụ:{" "}
+                  {t("scanner.jobIdMeta", { fileName: ocrState.fileName })}
                   <code className="font-mono text-xs">{ocrState.jobId}</code>
                 </p>
               </div>
@@ -671,20 +675,20 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             variant="secondary"
           >
             <X aria-hidden="true" className="size-5" />
-            Hủy quét
+            {t("scanner.cancelScan")}
           </Button>
         </div>
       ) : null}
 
       {ocrState.status === "error" ? (
         <div className="flex flex-col gap-3">
-          <StatusMessage title="Chưa quét được trang sách" tone="error">
+          <StatusMessage title={t("scanner.scanFailedTitle")} tone="error">
             {ocrState.message}
           </StatusMessage>
           <div className="flex flex-wrap gap-3">
             {ocrState.authExpired ? (
               <ButtonLink className="min-h-12 sm:w-auto" href="/login">
-                Đăng nhập lại
+                {t("scanner.relogin")}
               </ButtonLink>
             ) : null}
             {!ocrState.authExpired &&
@@ -702,7 +706,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
                 }
               >
                 <RotateCcw aria-hidden="true" className="size-5" />
-                Thử lại với ảnh này
+                {t("scanner.retryWithSameImage")}
               </Button>
             ) : null}
             <Button
@@ -710,7 +714,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               onClick={handleCancelOcr}
               variant="secondary"
             >
-              Chọn ảnh khác
+              {t("scanner.chooseAnotherImage")}
             </Button>
           </div>
         </div>
@@ -718,7 +722,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
 
       {ocrState.status === "succeeded" ? (
         <section
-          aria-label="Kết quả nhận diện OCR tiếng Việt"
+          aria-label={t("scanner.resultRegionAria")}
           className="flex flex-col gap-4 rounded-card border border-emerald-200 bg-white p-4 shadow-sm sm:p-6"
           data-testid="local-ocr-result"
         >
@@ -730,7 +734,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               />
               <div>
                 <h2 className="text-lg font-extrabold text-ink">
-                  Kết quả OCR tiếng Việt (máy chủ cục bộ)
+                  {t("scanner.resultTitle")}
                 </h2>
                 <p className="mt-1 text-sm text-muted">
                   {ocrState.result.message}
@@ -738,14 +742,18 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               </div>
             </div>
             <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800">
-              {ocrState.result.word_count} từ ·{" "}
+              {t("scanner.wordCountSummary", {
+                count: formatNumber(ocrState.result.word_count),
+              })}
               {ocrState.result.provenance.elapsed_ms} ms
             </span>
           </div>
 
           <div
-            className="max-h-60 overflow-y-auto rounded-2xl border border-border bg-cream p-4 text-base leading-relaxed whitespace-pre-wrap text-ink"
+            className="viread-learning-content max-h-60 overflow-y-auto rounded-2xl border border-border bg-cream p-4 text-base leading-relaxed whitespace-pre-wrap text-ink"
             data-testid="local-ocr-text"
+            dir="ltr"
+            lang="vi"
           >
             {ocrState.result.ocr_text}
           </div>
@@ -758,20 +766,20 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               </strong>
             </span>
             <span>
-              Thiết bị:{" "}
+              {t("scanner.deviceLabel")}
               <strong className="text-ink">
                 {ocrState.result.provenance.device.toUpperCase()}
               </strong>
             </span>
             <span>
-              Mã tác vụ:{" "}
+              {t("scanner.taskIdLabel")}
               <code className="break-all text-ink">
                 {ocrState.result.scan_job_id}
               </code>
             </span>
             {ocrState.result.request_id ? (
               <span>
-                Mã yêu cầu:{" "}
+                {t("scanner.requestIdLabel")}
                 <code className="break-all text-ink">
                   {ocrState.result.request_id}
                 </code>
@@ -793,12 +801,13 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
                   )
                 }
               >
-                Mở Trang {ocrState.result.matched_page.page_number} để bắt đầu
-                đọc
+                {t("scanner.openMatchedPage", {
+                  page: formatNumber(ocrState.result.matched_page.page_number),
+                })}
               </Button>
             ) : (
               <ButtonLink className="min-h-14 w-full sm:w-auto" href="/books">
-                Mở thư viện để bắt đầu buổi đọc
+                {t("scanner.openLibraryForReading")}
               </ButtonLink>
             )}
             <Button
@@ -807,17 +816,15 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               variant="secondary"
             >
               <FileImage aria-hidden="true" className="size-5" />
-              Quét ảnh khác
+              {t("scanner.scanAnotherImage")}
             </Button>
           </div>
         </section>
       ) : null}
 
       {cameraUnavailable ? (
-        <StatusMessage title="Camera chưa sẵn sàng" tone="error">
-          Không thể mở camera trực tiếp hoặc quyền camera đang bị tắt. Ba mẹ có
-          thể bấm Chụp bằng Camera máy hoặc Chọn ảnh trang sách để quét OCR
-          ngay.
+        <StatusMessage title={t("scanner.cameraNotReadyTitle")} tone="error">
+          {t("scanner.cameraNotReadyBody")}
         </StatusMessage>
       ) : null}
 
@@ -837,12 +844,10 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           />
           <div>
             <h2 className="text-xl font-extrabold text-ink sm:text-2xl">
-              Camera đang tắt
+              {t("scanner.cameraOffTitle")}
             </h2>
             <p className="mt-3 max-w-[620px] text-sm text-muted sm:mt-4 sm:text-body">
-              Bật khung quét trực tiếp hoặc chụp nét bằng Camera gốc của điện
-              thoại — ảnh tự động chuẩn hóa xoay dọc và giữ sắc nét dấu tiếng
-              Việt.
+              {t("scanner.cameraOffBody")}
             </p>
           </div>
           <div className="grid w-full max-w-[680px] grid-cols-1 gap-3 sm:grid-cols-3">
@@ -854,7 +859,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               }}
             >
               <Camera aria-hidden="true" className="size-5" />
-              Bật camera để quét
+              {t("scanner.enableCameraToScan")}
             </Button>
             <Button
               className="min-h-14 w-full"
@@ -865,7 +870,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               variant="secondary"
             >
               <Camera aria-hidden="true" className="size-5" />
-              Chụp bằng Camera máy
+              {t("scanner.captureNativeCamera")}
             </Button>
             <Button
               className="min-h-14 w-full"
@@ -876,7 +881,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               variant="secondary"
             >
               <FileImage aria-hidden="true" className="size-5" />
-              Chọn ảnh trang sách (OCR)
+              {t("scanner.selectImageButton")}
             </Button>
           </div>
         </div>
@@ -884,10 +889,11 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
 
       {!cameraUnavailable ? (
         <div className="rounded-card bg-sky p-4">
-          <h2 className="font-extrabold text-ink">Sau khi nhận diện</h2>
+          <h2 className="font-extrabold text-ink">
+            {t("scanner.afterMatchTitle")}
+          </h2>
           <p className="mt-2 text-sm text-muted sm:text-body">
-            ViRead mở chi tiết sách để ba mẹ chọn phạm vi trang. Microphone được
-            kiểm tra ở bước chuẩn bị đọc.
+            {t("scanner.afterMatchBody")}
           </p>
         </div>
       ) : null}
@@ -898,7 +904,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           href="/books"
           variant="secondary"
         >
-          Chọn sách từ thư viện
+          {t("scanner.chooseBookFromLibrary")}
         </ButtonLink>
       ) : null}
     </section>

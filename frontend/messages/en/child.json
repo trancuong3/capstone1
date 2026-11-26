@@ -1,0 +1,36 @@
+{
+  "list": {
+    "title": "Child Profiles",
+    "subtitle": "Manage information and reading levels for each child.",
+    "addChild": "Add child profile",
+    "empty": "No child profiles yet. Create your first profile."
+  },
+  "switcher": {
+    "selectChild": "Select child",
+    "quickSwitchAria": "Quick switch child",
+    "selectedAria": "Selected child: {alias}, tap to switch",
+    "gradeLabel": "Grade {grade}",
+    "gradeShort": "G{grade}",
+    "manageChildren": "Manage child profiles"
+  },
+  "form": {
+    "createTitle": "Create child profile",
+    "editTitle": "Update child profile",
+    "aliasLabel": "Nickname",
+    "gradeLabel": "Grade level",
+    "ageLabel": "Age",
+    "saveSuccess": "Child profile saved."
+  },
+  "count": "{count, plural, =0 {No child profiles} one {# child profile} other {# child profiles}}",
+  "selector": {
+    "label": "Child profile",
+    "selectAria": "Select a profile to view data",
+    "optionLabel": "{alias} · Grade {grade}"
+  },
+  "verification": {
+    "loading": "Verifying child profile…",
+    "errorTitle": "Unable to verify child profile",
+    "errorBody": "Could not confirm the profile belongs to this account. Please try again.",
+    "retry": "Retry"
+  }
+}
