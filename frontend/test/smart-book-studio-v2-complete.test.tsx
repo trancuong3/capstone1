@@ -415,27 +415,28 @@ describe("Wave 2B Studio V2 Complete Integration", () => {
     );
 
     // Switcher MUST be visible even when illustration_url is null!
+    // When a legacy page has an original page scan (image_url) and no V2 illustration,
+    // default mode preserves ORIGINAL so image-overlay / image-reference stay intact,
+    // while offering one-tap switching to TEXT ("Đọc chữ").
     const switcher = screen.getByTestId("reading-mode-switcher");
     expect(
-      within(switcher).getByRole("tab", { name: "Đọc chữ" }),
+      within(switcher).getByRole("tab", { name: "Trang gốc đối chiếu" }),
     ).toHaveAttribute("aria-selected", "true");
     expect(
-      within(switcher).getByRole("tab", { name: "Trang gốc đối chiếu" }),
+      within(switcher).getByRole("tab", { name: "Đọc chữ" }),
     ).toBeInTheDocument();
     expect(
       within(switcher).queryByRole("tab", { name: "Đọc có tranh" }),
     ).not.toBeInTheDocument();
 
-    // Switch to ORIGINAL ("Trang gốc đối chiếu") on page 1
-    await user.click(
-      within(switcher).getByRole("tab", { name: "Trang gốc đối chiếu" }),
-    );
+    // Switch to TEXT ("Đọc chữ") on page 1
+    await user.click(within(switcher).getByRole("tab", { name: "Đọc chữ" }));
     expect(screen.getByRole("article")).toHaveAttribute(
       "data-reading-mode",
-      "ORIGINAL",
+      "TEXT",
     );
 
-    // Turn to page 2 (which HAS a verified illustration) -> selected mode ORIGINAL MUST persist!
+    // Turn to page 2 (which HAS a verified illustration) -> selected mode TEXT MUST persist!
     rerender(
       <ReadingLayout
         bookTitle="Mèo con đi học"
@@ -451,7 +452,7 @@ describe("Wave 2B Studio V2 Complete Integration", () => {
 
     expect(screen.getByRole("article")).toHaveAttribute(
       "data-reading-mode",
-      "ORIGINAL",
+      "TEXT",
     );
     const switcherPage2 = screen.getByTestId("reading-mode-switcher");
     const illustratedTab = within(switcherPage2).getByRole("tab", {
