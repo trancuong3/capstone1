@@ -459,8 +459,13 @@ function ParentPrivateBookManagerContent({
 
     const nextDelayMs = () => {
       const offline = workerOnlineRef.current === false;
-      const step = offline ? Math.min(4, idleTicks + 1) : Math.min(3, idleTicks);
-      return Math.min(MAX_POLL_MS, Math.round(BASE_POLL_MS * Math.pow(1.6, step)));
+      const step = offline
+        ? Math.min(4, idleTicks + 1)
+        : Math.min(3, idleTicks);
+      return Math.min(
+        MAX_POLL_MS,
+        Math.round(BASE_POLL_MS * Math.pow(1.6, step)),
+      );
     };
 
     const scheduleNext = (delayMs: number) => {

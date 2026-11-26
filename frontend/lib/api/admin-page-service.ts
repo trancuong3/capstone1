@@ -165,7 +165,10 @@ export async function pollAdminOcrJob(
   } = {},
 ): Promise<AdminOcrJobDTO> {
   const baseIntervalMs = options.pollIntervalMs ?? 1_500;
-  const maxIntervalMs = Math.max(baseIntervalMs, Math.min(8_000, baseIntervalMs * 5));
+  const maxIntervalMs = Math.max(
+    baseIntervalMs,
+    Math.min(8_000, baseIntervalMs * 5),
+  );
   const maxAttempts = options.maxAttempts ?? 60;
   let current = initialJob;
   let consecutiveErrors = 0;
@@ -220,7 +223,10 @@ export async function pollAdminBookOcrJobsBatch(
   } = {},
 ): Promise<readonly AdminOcrJobDTO[]> {
   const baseIntervalMs = options.pollIntervalMs ?? 1_500;
-  const maxIntervalMs = Math.max(baseIntervalMs, Math.min(8_000, baseIntervalMs * 5));
+  const maxIntervalMs = Math.max(
+    baseIntervalMs,
+    Math.min(8_000, baseIntervalMs * 5),
+  );
   const maxAttempts = options.maxAttempts ?? 60;
   const jobMap = new Map<string, AdminOcrJobDTO>();
   for (const job of initialJobs) {
@@ -602,7 +608,11 @@ export function createAdminPageService(options?: {
                   {
                     pollIntervalMs,
                     maxAttempts: maxPollAttempts,
-                    onProgress: ({ completedCount, failedCount, totalCount }) => {
+                    onProgress: ({
+                      completedCount,
+                      failedCount,
+                      totalCount,
+                    }) => {
                       const doneSoFar = completedCount + failedCount;
                       const pct =
                         totalCount > 0

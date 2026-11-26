@@ -150,11 +150,34 @@ def install_zero_db_config_shim() -> None:
     cfg = ModuleType("app.database.config")
     cfg.APP_ENVIRONMENT = os.getenv("APP_ENVIRONMENT", "worker").strip() or "worker"
     cfg.SUPABASE_URL = None
+    cfg.SUPABASE_SECRET_KEY = None
+    cfg.SUPABASE_SERVICE_ROLE_KEY = None
     cfg.SUPABASE_ADMIN_KEY = None
     cfg.SUPABASE_KEY = None
     cfg.SUPABASE_STORAGE_BUCKET = None
+    cfg.SUPABASE_AVATAR_BUCKET = None
     cfg.SUPABASE_PRIVATE_BOOKS_BUCKET = None
     cfg.DATABASE_URL = None
+
+    def _is_supabase_jwt_key(api_key: str | None) -> bool:
+        clean = (api_key or "").strip()
+        return clean.count(".") == 2 and not clean.startswith("sb_")
+
+    def _supabase_admin_headers(
+        api_key: str | None = None,
+        *,
+        extra: dict[str, str] | None = None,
+    ) -> dict[str, str]:
+        key = ((api_key if api_key is not None else cfg.SUPABASE_ADMIN_KEY) or "").strip()
+        headers: dict[str, str] = {"apikey": key}
+        if _is_supabase_jwt_key(key):
+            headers["Authorization"] = f"Bearer {key}"
+        if extra:
+            headers.update(extra)
+        return headers
+
+    cfg.is_supabase_jwt_key = _is_supabase_jwt_key
+    cfg.supabase_admin_headers = _supabase_admin_headers
     sys.modules["app.database.config"] = cfg
 
 

@@ -500,7 +500,8 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               }
               const retryDelay = Math.min(
                 POLL_INTERVAL_MAX_MS,
-                POLL_INTERVAL_WORKER_ONLINE_MS * Math.pow(2, transientFailures - 1),
+                POLL_INTERVAL_WORKER_ONLINE_MS *
+                  Math.pow(2, transientFailures - 1),
               );
               await sleepWithAbort(retryDelay, controller.signal);
               await waitUntilVisible(controller.signal);
