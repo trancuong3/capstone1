@@ -99,14 +99,16 @@ function ValidatedChildProbe() {
 describe("DEF-011 multi-tab and session-scoped child selection sync", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    window.sessionStorage.clear();
     replaceMock.mockReset();
   });
 
   afterEach(() => {
     window.localStorage.clear();
+    window.sessionStorage.clear();
   });
 
-  it("does not persist selectedChildId across cold mounts and clears across users/logout", async () => {
+  it("persists selectedChildId only in user-scoped sessionStorage (never localStorage) and clears across users/logout", async () => {
     const user = userEvent.setup();
     const { rerender } = render(
       <AuthRuntimeContext.Provider value={makeRuntime("user-1")}>
@@ -251,7 +253,7 @@ describe("DEF-011 multi-tab and session-scoped child selection sync", () => {
     expect(screen.getByLabelText("Selected child")).toHaveTextContent("none");
   });
 
-  it("cold mount without explicit childId does not auto-restore a prior tab selection", async () => {
+  it("restores selectedChildId across same-tab F5 reload via sessionStorage, while a new tab starts empty", async () => {
     const user = userEvent.setup();
     const firstMount = render(
       <AuthRuntimeContext.Provider value={makeRuntime("user-1")}>
@@ -266,7 +268,21 @@ describe("DEF-011 multi-tab and session-scoped child selection sync", () => {
     );
     firstMount.unmount();
 
-    // Fresh cold mount (e.g. direct navigation to /books/<id> without ?childId=)
+    // Same-tab F5 reload preserves sessionStorage for user-1
+    const sameTabReload = render(
+      <AuthRuntimeContext.Provider value={makeRuntime("user-1")}>
+        <AppStoreProvider>
+          <StoreInspector />
+        </AppStoreProvider>
+      </AuthRuntimeContext.Provider>,
+    );
+    expect(screen.getByLabelText("Selected child")).toHaveTextContent(
+      "child-a",
+    );
+    sameTabReload.unmount();
+
+    // Brand-new tab has empty sessionStorage (localStorage never persists selectedChildId)
+    window.sessionStorage.clear();
     render(
       <AuthRuntimeContext.Provider value={makeRuntime("user-1")}>
         <AppStoreProvider>

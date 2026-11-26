@@ -288,6 +288,33 @@ def clear_active_model_manifest_cache() -> None:
     _ACTIVE_MODEL_MANIFEST_CACHE = None
 
 
+def _session_in_transaction(db: Any) -> bool:
+    """Return True if `db` already had an open transaction before a read helper ran."""
+    in_tx = getattr(db, "in_transaction", None)
+    if callable(in_tx):
+        try:
+            return bool(in_tx())
+        except Exception:
+            return False
+    return False
+
+
+async def _release_clean_self_opened_transaction(db: Any, *, was_in_tx: bool) -> None:
+    """Release a read-only transaction opened solely by the current helper without expiring caller ORM objects."""
+    if was_in_tx:
+        return
+    if (
+        getattr(db, "new", None)
+        or getattr(db, "dirty", None)
+        or getattr(db, "deleted", None)
+    ):
+        return
+    try:
+        await db.rollback()
+    except Exception:
+        pass
+
+
 _POST_OCR_SEMAPHORE_KEY: tuple[int, int] | None = None
 
 
@@ -1293,6 +1320,7 @@ class OcrInferenceJobService:
         return persisted
 
     async def has_online_worker(self) -> bool:
+        was_in_tx = _session_in_transaction(self.db)
         now = datetime.now(timezone.utc)
         ttl = timedelta(seconds=worker_heartbeat_ttl_seconds())
         workers = await self.repo.list_worker_heartbeats(limit=20)
@@ -1305,6 +1333,7 @@ class OcrInferenceJobService:
                 else worker.LastHeartbeatAt.replace(tzinfo=timezone.utc)
             )
             if (now - hb_at) <= ttl and str(worker.Status or "").upper() != "OFFLINE":
+                await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
                 return True
 
         from app.services.remote_ocr_wakeup import (
@@ -1314,23 +1343,15 @@ class OcrInferenceJobService:
         )
 
         if not is_remote_worker_wakeup_configured():
+            await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
             return False
 
         cache_valid, cached_probe = peek_cached_remote_ocr_worker_health()
         if cache_valid:
+            await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
             return bool(cached_probe and cached_probe.get("online"))
 
-        # Release any clean read-only DB transaction permit before performing outbound HTTP probe.
-        if not (
-            getattr(self.db, "new", None)
-            or getattr(self.db, "dirty", None)
-            or getattr(self.db, "deleted", None)
-        ):
-            try:
-                await self.db.rollback()
-            except Exception:
-                pass
-
+        await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
         probe = await probe_configured_remote_ocr_worker_health()
         return bool(probe and probe.get("online"))
 
@@ -2181,18 +2202,12 @@ class OcrInferenceJobService:
 
     async def get_active_model_manifest(self) -> dict[str, Any]:
         global _ACTIVE_MODEL_MANIFEST_CACHE
+        import copy as _copy
         import time as _time
 
+        was_in_tx = _session_in_transaction(self.db)
         pointer = await self.repo.get_active_model_pointer()
-        if not (
-            getattr(self.db, "new", None)
-            or getattr(self.db, "dirty", None)
-            or getattr(self.db, "deleted", None)
-        ):
-            try:
-                await self.db.rollback()
-            except Exception:
-                pass
+        await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
 
         profile = str((pointer or {}).get("profile") or "ORIGINAL")
         checkpoint_sha = str(
@@ -2220,7 +2235,7 @@ class OcrInferenceJobService:
             and _ACTIVE_MODEL_MANIFEST_CACHE[1] == cache_key
             and now_mono < _ACTIVE_MODEL_MANIFEST_CACHE[0]
         ):
-            return dict(_ACTIVE_MODEL_MANIFEST_CACHE[2])
+            return _copy.deepcopy(_ACTIVE_MODEL_MANIFEST_CACHE[2])
 
         try:
             manifest_bytes = await asyncio.to_thread(self._download_model_ref, str(storage_path))
@@ -2274,7 +2289,7 @@ class OcrInferenceJobService:
         _ACTIVE_MODEL_MANIFEST_CACHE = (
             _time.monotonic() + _ACTIVE_MODEL_MANIFEST_CACHE_TTL_SECONDS,
             cache_key,
-            dict(base),
+            _copy.deepcopy(base),
         )
         return base
 
@@ -2290,16 +2305,9 @@ class OcrInferenceJobService:
     async def get_active_model_artifact_bytes(
         self, *, kind: str, shard_index: int | None = None
     ) -> tuple[bytes, str]:
+        was_in_tx = _session_in_transaction(self.db)
         pointer = await self.repo.get_active_model_pointer()
-        if not (
-            getattr(self.db, "new", None)
-            or getattr(self.db, "dirty", None)
-            or getattr(self.db, "deleted", None)
-        ):
-            try:
-                await self.db.rollback()
-            except Exception:
-                pass
+        await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
         storage_path = (pointer or {}).get("storage_path")
         if not storage_path:
             raise HTTPException(status_code=404, detail="No custom active VietOCR artifact.")
@@ -2337,10 +2345,34 @@ class OcrInferenceJobService:
         job = await self.repo.get(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="OCR inference job not found.")
+        if str(job.Status or "").upper() == "QUEUED":
+            from app.services.remote_ocr_wakeup import (
+                maybe_nudge_ocr_wakeup_for_stale_queued_job,
+            )
+
+            maybe_nudge_ocr_wakeup_for_stale_queued_job(
+                job_id=job.Id,
+                created_at=job.CreatedAt,
+                reason="admin_poll_nudge",
+            )
         return self.serialize_job(job)
 
     async def list_book_jobs_payload(self, book_id: UUID, *, limit: int = 200) -> list[dict[str, Any]]:
         rows = await self.repo.list_for_book(book_id, limit=limit)
+        queued_row = next(
+            (row for row in rows if str(row.Status or "").upper() == "QUEUED"),
+            None,
+        )
+        if queued_row is not None:
+            from app.services.remote_ocr_wakeup import (
+                maybe_nudge_ocr_wakeup_for_stale_queued_job,
+            )
+
+            maybe_nudge_ocr_wakeup_for_stale_queued_job(
+                job_id=queued_row.Id,
+                created_at=queued_row.CreatedAt,
+                reason="admin_book_poll_nudge",
+            )
         return [self.serialize_job(row) for row in rows]
 
     async def retry_job(self, job_id: UUID) -> dict[str, Any]:
@@ -2348,8 +2380,9 @@ class OcrInferenceJobService:
         if job is None:
             raise HTTPException(status_code=404, detail="OCR inference job not found.")
         if job.Status in ACTIVE_JOB_STATUSES:
+            serialized_active = self.serialize_job(job)
             await self.db.rollback()
-            return self.serialize_job(job)
+            return serialized_active
         if job.Status == "SUCCEEDED":
             await self.db.rollback()
             raise HTTPException(

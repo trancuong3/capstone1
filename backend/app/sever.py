@@ -945,7 +945,7 @@ async def get_health(request: Request) -> dict[str, object]:
             remote_info = await asyncio.wait_for(
                 collect_remote_ocr_health(), timeout=ocr_timeout
             )
-            return {
+            payload: dict[str, object] = {
                 "mode": "remote_worker",
                 "ready": bool(remote_info.get("ready", False)),
                 "engines": remote_info.get("engines", {}),
@@ -955,6 +955,9 @@ async def get_health(request: Request) -> dict[str, object]:
                     "heartbeat_ttl_seconds", worker_heartbeat_ttl_seconds()
                 ),
             }
+            if remote_info.get("probe_degraded"):
+                payload["probe_degraded"] = True
+            return payload
         except Exception:
             return {
                 "mode": "remote_worker",

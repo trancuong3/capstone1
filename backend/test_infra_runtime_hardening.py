@@ -50,6 +50,7 @@ class DatabaseTransactionPoolerConfigTests(unittest.TestCase):
             }
         )
         base_env.pop("DATABASE_FORCE_NULL_POOL", None)
+        base_env.pop("DATABASE_POOL_PRE_PING", None)
 
         check_bounded = (
             f"import sys; sys.path.insert(0, {str(BACKEND_ROOT)!r});"
@@ -59,8 +60,8 @@ class DatabaseTransactionPoolerConfigTests(unittest.TestCase):
             "assert isinstance(pool, AsyncAdaptedQueuePool), type(pool);"
             "assert pool.size() == 2, pool.size();"
             "assert pool._max_overflow == 2, pool._max_overflow;"
-            "assert pool._recycle == 300, pool._recycle;"
-            "assert pool._pre_ping is True, pool._pre_ping;"
+            "assert pool._recycle == 180, pool._recycle;"
+            "assert pool._pre_ping is False, pool._pre_ping;"
             "assert getattr(pool._pool, 'use_lifo', False) is True;"
             "assert session.asyncpg_connect_args['statement_cache_size'] == 0;"
             "assert session.sqlalchemy_database_url.query['prepared_statement_cache_size'] == '0';"
@@ -76,6 +77,24 @@ class DatabaseTransactionPoolerConfigTests(unittest.TestCase):
         )
         self.assertEqual(proc_bounded.returncode, 0, msg=proc_bounded.stderr or proc_bounded.stdout)
         self.assertIn("BOUNDED_TRANSACTION_POOL_OK", proc_bounded.stdout)
+
+        pre_ping_env = {**base_env, "DATABASE_POOL_PRE_PING": "true"}
+        check_pre_ping = (
+            f"import sys; sys.path.insert(0, {str(BACKEND_ROOT)!r});"
+            "from app.database import session;"
+            "assert session.engine.pool._pre_ping is True, session.engine.pool._pre_ping;"
+            "print('PRE_PING_OVERRIDE_OK')"
+        )
+        proc_pre_ping = subprocess.run(
+            [sys.executable, "-c", check_pre_ping],
+            env=pre_ping_env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        self.assertEqual(proc_pre_ping.returncode, 0, msg=proc_pre_ping.stderr or proc_pre_ping.stdout)
+        self.assertIn("PRE_PING_OVERRIDE_OK", proc_pre_ping.stdout)
 
         forced_env = {**base_env, "DATABASE_FORCE_NULL_POOL": "true"}
         check_null = (

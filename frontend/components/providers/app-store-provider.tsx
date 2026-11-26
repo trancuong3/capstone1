@@ -14,9 +14,15 @@ import {
 
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { clearApiReadCache } from "@/lib/api/read-cache";
+import {
+  clearPersistedSelectedChild,
+  getSelectedChildStorageKey,
+  normalizeSelectedChildId,
+  readSessionSelectedChildId,
+  writeSessionSelectedChildId,
+} from "@/lib/cache/selected-child-storage";
 import type { ChildProfileDTO } from "@/types/child";
 
-const SELECTED_CHILD_STORAGE_PREFIX = "viread:selected-child:";
 const SELECTED_CHILD_SYNC_CHANNEL = "viread:selected-child-sync";
 const SELECTED_CHILD_SIGNAL_KEY = "viread:selected-child-signal";
 
@@ -24,16 +30,6 @@ interface ChildSyncMessage {
   userId: string;
   childId: string | null;
   nonce: string;
-}
-
-function getUserStorageKey(userId: string | null): string | null {
-  return userId ? `${SELECTED_CHILD_STORAGE_PREFIX}${userId}` : null;
-}
-
-function normalizeChildId(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed || null;
 }
 
 function broadcastChildSelection(
@@ -105,7 +101,9 @@ export function AppStoreProvider({
 
   const [selection, setSelection] = useState<SelectionState>(() => ({
     userId: activeUserId,
-    childId: normalizeChildId(initialChildId),
+    childId:
+      normalizeSelectedChildId(initialChildId) ??
+      readSessionSelectedChildId(activeUserId),
     child: null,
   }));
 
@@ -113,12 +111,18 @@ export function AppStoreProvider({
     const previousUserId = previousUserIdRef.current;
     previousUserIdRef.current = activeUserId;
 
-    if (
-      previousUserId &&
-      previousUserId !== activeUserId &&
-      (authRuntime.lastEvent === "SIGNED_OUT" || activeUserId === null)
-    ) {
-      broadcastChildSelection(previousUserId, null, syncChannelRef.current);
+    if (authRuntime.lastEvent === "SIGNED_OUT") {
+      clearPersistedSelectedChild();
+      if (previousUserId && previousUserId !== activeUserId) {
+        broadcastChildSelection(previousUserId, null, syncChannelRef.current);
+      }
+    } else if (previousUserId && previousUserId !== activeUserId) {
+      clearPersistedSelectedChild();
+      if (activeUserId === null) {
+        broadcastChildSelection(previousUserId, null, syncChannelRef.current);
+      }
+    } else if (activeUserId) {
+      clearPersistedSelectedChild(activeUserId);
     }
 
     if (previousUserId !== activeUserId) {
@@ -130,7 +134,8 @@ export function AppStoreProvider({
         ) {
           return {
             userId: activeUserId,
-            childId: current.childId,
+            childId:
+              current.childId ?? readSessionSelectedChildId(activeUserId),
             child: current.child,
           };
         }
@@ -140,10 +145,11 @@ export function AppStoreProvider({
   }, [activeUserId, authRuntime.lastEvent]);
 
   useEffect(() => {
-    const storageKey = getUserStorageKey(activeUserId);
+    const storageKey = getSelectedChildStorageKey(activeUserId);
     if (!activeUserId || typeof window === "undefined") return;
 
     function applySyncedChildId(nextChildId: string | null) {
+      writeSessionSelectedChildId(activeUserId, nextChildId);
       setSelection((current) => {
         if (
           current.userId === activeUserId &&
@@ -176,7 +182,7 @@ export function AppStoreProvider({
           ) {
             return;
           }
-          applySyncedChildId(normalizeChildId(data.childId));
+          applySyncedChildId(normalizeSelectedChildId(data.childId));
         };
       } catch {
         channel = null;
@@ -200,7 +206,7 @@ export function AppStoreProvider({
           ) {
             return;
           }
-          applySyncedChildId(normalizeChildId(parsed.childId));
+          applySyncedChildId(normalizeSelectedChildId(parsed.childId));
         } catch {
           // Ignore malformed signal payloads.
         }
@@ -211,7 +217,7 @@ export function AppStoreProvider({
         return;
       }
       if (storageKey && event.key === storageKey) {
-        applySyncedChildId(normalizeChildId(event.newValue));
+        applySyncedChildId(normalizeSelectedChildId(event.newValue));
       }
     }
 
@@ -232,11 +238,14 @@ export function AppStoreProvider({
     childId: string | null;
     child: ChildProfileDTO | null;
   }>(() => {
-    if (
-      selection.userId === activeUserId ||
-      (selection.userId === null && activeUserId !== null)
-    ) {
+    if (selection.userId === activeUserId) {
       return { childId: selection.childId, child: selection.child };
+    }
+    if (selection.userId === null && activeUserId !== null) {
+      return {
+        childId: selection.childId ?? readSessionSelectedChildId(activeUserId),
+        child: selection.child,
+      };
     }
     return { childId: null, child: null };
   }, [activeUserId, selection.child, selection.childId, selection.userId]);
@@ -267,8 +276,9 @@ export function AppStoreProvider({
 
   const selectChild = useCallback(
     (childId: string) => {
-      const normalized = normalizeChildId(childId);
+      const normalized = normalizeSelectedChildId(childId);
       if (!normalized) return;
+      writeSessionSelectedChildId(activeUserId, normalized);
       broadcastChildSelection(activeUserId, normalized, syncChannelRef.current);
       setSelection((current) =>
         current.userId === activeUserId && current.childId === normalized
@@ -280,6 +290,7 @@ export function AppStoreProvider({
   );
 
   const clearSelectedChild = useCallback(() => {
+    writeSessionSelectedChildId(activeUserId, null);
     broadcastChildSelection(activeUserId, null, syncChannelRef.current);
     setSelection({ userId: activeUserId, childId: null, child: null });
   }, [activeUserId]);

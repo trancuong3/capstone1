@@ -214,10 +214,12 @@ QUEUE_WAIT_SECONDS = float(os.environ.get("VIREAD_VOICE_QUEUE_WAIT_SECONDS", "25
 STT_QUEUE_WAIT_SECONDS = float(os.environ.get("VIREAD_VOICE_STT_QUEUE_WAIT_SECONDS", "15.0"))
 TTS_MEM_CACHE_MAX_ENTRIES = 128
 _TTS_MEM_CACHE: OrderedDict[str, tuple[bytes, float]] = OrderedDict()
-# Precompute 80Hz high-pass SOS filter once instead of solving filter design per STT call.
-_HIGHPASS_80HZ_SOS = scipy_signal.butter(
-    2, 80.0, btype="highpass", fs=16000.0, output="sos"
+# Precompute 60Hz high-pass SOS filter once instead of solving filter design per STT call.
+# 60Hz cuts DC drift/table rumble/50Hz hum while preserving Vietnamese low-register tones (huyền/nặng).
+_HIGHPASS_60HZ_SOS = scipy_signal.butter(
+    2, 60.0, btype="highpass", fs=16000.0, output="sos"
 )
+_HIGHPASS_80HZ_SOS = _HIGHPASS_60HZ_SOS
 _LATEST_INTERIM_SEQ_BY_SESSION: dict[str, int] = {}
 _INTERIM_COUNTER = 0
 
@@ -478,7 +480,7 @@ class VoiceRuntimeEngine:
                 feature_dim=80,
                 decoding_method="modified_beam_search",
                 max_active_paths=4,
-                blank_penalty=-0.05,
+                blank_penalty=0.0,
             )
             logger.info(
                 "Loaded STT (%s, mode=%s) in %.2fs",
@@ -2123,13 +2125,13 @@ async def post_tts_phonics(req: PhonicsSynthesisRequest, request: Request) -> di
 
 
 def preprocess_audio_for_stt(samples16: np.ndarray) -> np.ndarray:
-    """Apply DC offset removal, 80Hz high-pass filter, and gentle child-voice AGC."""
+    """Apply DC offset removal, 60Hz high-pass filter, and gentle child-voice AGC."""
     arr = samples16.astype(np.float32, copy=True)
     if arr.size == 0:
         return arr
     arr = arr - float(np.mean(arr))
     if arr.size > 32:
-        arr = scipy_signal.sosfilt(_HIGHPASS_80HZ_SOS, arr).astype(np.float32)
+        arr = scipy_signal.sosfilt(_HIGHPASS_60HZ_SOS, arr).astype(np.float32)
 
     frame_len = 320
     n_frames = arr.size // frame_len
@@ -2179,12 +2181,58 @@ def estimate_voiced_duration_s(samples16: np.ndarray, sample_rate: int = 16000) 
     return float((voiced_frames * frame_len) / float(sample_rate))
 
 
+def estimate_leading_silence_s(samples16: np.ndarray, sample_rate: int = 16000) -> float:
+    """Estimate leading silence duration before the first active voiced 20ms frame."""
+    arr = np.asarray(samples16, dtype=np.float32)
+    if arr.size < 320:
+        return 0.0
+    frame_len = 320
+    n_frames = arr.size // frame_len
+    if n_frames == 0:
+        return 0.0
+    frames = arr[: n_frames * frame_len].reshape(n_frames, frame_len)
+    frame_rms = np.sqrt(np.mean(frames * frames, axis=1))
+    max_rms = float(np.max(frame_rms))
+    if max_rms < 0.002:
+        return float(arr.size / float(sample_rate))
+    thresh = max(0.004, max_rms * 0.15)
+    active = np.flatnonzero(frame_rms >= thresh)
+    if active.size == 0:
+        return float(arr.size / float(sample_rate))
+    return float((int(active[0]) * frame_len) / float(sample_rate))
+
+
+def estimate_trailing_silence_s(samples16: np.ndarray, sample_rate: int = 16000) -> float:
+    """Estimate trailing silence duration after the last active voiced 20ms frame."""
+    arr = np.asarray(samples16, dtype=np.float32)
+    if arr.size < 320:
+        return 0.0
+    frame_len = 320
+    n_frames = arr.size // frame_len
+    if n_frames == 0:
+        return 0.0
+    frames = arr[: n_frames * frame_len].reshape(n_frames, frame_len)
+    frame_rms = np.sqrt(np.mean(frames * frames, axis=1))
+    max_rms = float(np.max(frame_rms))
+    if max_rms < 0.002:
+        return float(arr.size / float(sample_rate))
+    thresh = max(0.004, max_rms * 0.15)
+    active = np.flatnonzero(frame_rms >= thresh)
+    if active.size == 0:
+        return float(arr.size / float(sample_rate))
+    trailing_frames = max(0, n_frames - 1 - int(active[-1]))
+    return float((trailing_frames * frame_len) / float(sample_rate))
+
+
 def decode_stt_window_sync(
     samples16: np.ndarray,
     *,
-    lead_pad_s: float = 0.20,
-    trail_pad_s: float = 0.24,
+    lead_pad_s: float = 0.18,
+    trail_pad_s: float = 0.35,
+    short_trail_cap_s: float = 0.20,
     voiced_duration_ms: float | None = None,
+    cap_lead_silence: bool = True,
+    cap_trail_silence: bool = True,
 ) -> tuple[str, list[dict[str, Any]], float]:
     """Decode one 16kHz float32 audio window using Sherpa-ONNX Zipformer."""
     assert runtime.stt_recognizer is not None
@@ -2202,11 +2250,43 @@ def decode_stt_window_sync(
         if voiced_duration_ms is not None and voiced_duration_ms > 0
         else estimate_voiced_duration_s(arr, sample_rate=16000)
     )
-    effective_trail_pad = trail_pad_s if voiced_s >= 1.2 else 0.0
+    if voiced_s <= 0.0:
+        return "", [], (time.perf_counter() - t_d0) * 1000.0
+    target_lead_s = max(0.0, float(lead_pad_s))
+    trimmed_lead_s = 0.0
+    arr_for_decode = arr
+    if cap_lead_silence:
+        # Avoid double-stacking leading silence (e.g. 0.45s pre-roll + 0.18s pad -> 0.63s),
+        # which causes leading collocation hallucinations like "tất cả" on isolated "cả".
+        existing_lead_s = estimate_leading_silence_s(arr, sample_rate=16000)
+        if voiced_s < 1.2 and target_lead_s > 0.0 and existing_lead_s > target_lead_s:
+            trim_samples = int((existing_lead_s - target_lead_s) * 16000)
+            if 0 < trim_samples < arr_for_decode.size:
+                arr_for_decode = arr_for_decode[trim_samples:]
+                trimmed_lead_s = trim_samples / 16000.0
+            effective_lead_s = 0.0
+        else:
+            effective_lead_s = max(0.0, target_lead_s - existing_lead_s)
+    else:
+        effective_lead_s = target_lead_s
+
+    if voiced_s >= 1.2:
+        effective_trail_pad = trail_pad_s
+    else:
+        effective_trail_pad = 0.0
+        target_short_tail_s = max(0.0, float(short_trail_cap_s))
+        if cap_trail_silence and target_short_tail_s > 0.0:
+            # Cap excess trailing silence on isolated short words (e.g. 0.40-0.55s VAD hangover)
+            # down to 0.20s so Zipformer does not hallucinate trailing stop codas ("nhà"->"nhạc").
+            existing_tail_s = estimate_trailing_silence_s(arr_for_decode, sample_rate=16000)
+            if existing_tail_s > target_short_tail_s:
+                trim_tail_samples = int((existing_tail_s - target_short_tail_s) * 16000)
+                if 0 < trim_tail_samples < arr_for_decode.size:
+                    arr_for_decode = arr_for_decode[:-trim_tail_samples]
     padded = np.concatenate(
         [
-            np.zeros(int(16000 * lead_pad_s), dtype=np.float32),
-            arr,
+            np.zeros(int(16000 * effective_lead_s), dtype=np.float32),
+            arr_for_decode,
             np.zeros(int(16000 * effective_trail_pad), dtype=np.float32),
         ]
     )
@@ -2216,7 +2296,7 @@ def decode_stt_window_sync(
     res = stream.result
     txt = unicodedata.normalize("NFC", res.text.strip().lower())
     adjusted_timestamps = [
-        max(0.0, float(t) - lead_pad_s) for t in list(res.timestamps)
+        max(0.0, float(t) + trimmed_lead_s - effective_lead_s) for t in list(res.timestamps)
     ]
     words = build_stt_words_from_sherpa(
         list(res.tokens),
@@ -2339,9 +2419,10 @@ async def post_stt(
         text_out, words_out, decode_ms = await asyncio.to_thread(
             decode_stt_window_sync,
             samples16,
-            lead_pad_s=0.25,
+            lead_pad_s=0.18,
             trail_pad_s=0.35,
             voiced_duration_ms=voiced_duration_ms,
+            cap_lead_silence=True,
         )
         total_ms = (time.perf_counter() - t_req_start) * 1000.0
         response.headers["X-STT-Queue-Ms"] = f"{queue_ms:.2f}"
@@ -2860,6 +2941,7 @@ async def stt_stream(websocket: WebSocket) -> None:
                                     if step_offset == 0 and is_last_slice
                                     else None
                                 ),
+                                cap_lead_silence=True,
                             )
                         finally:
                             runtime.active_stt_jobs -= 1

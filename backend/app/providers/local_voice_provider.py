@@ -54,6 +54,18 @@ def resolve_local_stt_mode() -> str:
     return raw if raw in ("ws", "http") else DEFAULT_LOCAL_STT_MODE
 
 
+def resolve_timed_tts_timeout_seconds(word_count: int) -> float:
+    """Compute adaptive read timeout for `/tts/timed` so ultra-long catalog pages (>180 words) do not time out at 45s."""
+    raw = (os.getenv("VIREAD_LOCAL_TTS_TIMED_TIMEOUT_SECONDS") or "").strip()
+    if raw:
+        try:
+            return max(15.0, min(300.0, float(raw)))
+        except ValueError:
+            pass
+    safe_words = max(0, int(word_count))
+    return round(max(45.0, min(180.0, 30.0 + safe_words * 0.35)), 2)
+
+
 def build_local_tts_model_version(precision: str | None = None) -> str:
     prec = (precision or resolve_local_tts_precision()).strip().lower()
     if prec not in ("hybrid", "fp32", "int8"):
@@ -1019,10 +1031,11 @@ class LocalVoiceProvider:
         if audio_format:
             body["audio_format"] = audio_format
         extra_headers = {"Accept": accept} if accept else None
+        timed_timeout = resolve_timed_tts_timeout_seconds(len(words))
         try:
             resp = await self._post_with_retry(
                 "/tts/timed",
-                timeout=45.0,
+                timeout=timed_timeout,
                 json=body,
                 extra_headers=extra_headers,
             )

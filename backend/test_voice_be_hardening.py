@@ -615,9 +615,16 @@ class TestVoiceWorkerHardeningAndClientVad(unittest.IsolatedAsyncioTestCase):
         fake_rec.create_stream.side_effect = _FakeStream
         with patch.object(vw.runtime, "stt_recognizer", fake_rec):
             vw.decode_stt_window_sync(clip, lead_pad_s=0.20, trail_pad_s=0.35)
-        # No trailing pad applied for 0.60s voiced word despite 1.25s total length!
-        expected_no_trail = int(sr * 0.20) + clip.size
-        self.assertEqual(captured_lengths[-1], expected_no_trail)
+        # Smart framing trims 0.45s pre-roll down to 0.20s lead and appends ZERO 0.35s trailing pad!
+        self.assertLess(captured_lengths[-1], clip.size)
+        self.assertGreaterEqual(captured_lengths[-1], int(sr * 0.95))
+        self.assertLessEqual(captured_lengths[-1], int(sr * 1.05))
+
+        # Short word with 0.50s excess trailing silence trims tail down to <= 0.20s
+        long_tail_clip = np.concatenate([np.zeros(int(sr * 0.18), dtype=np.float32), speech, np.zeros(int(sr * 0.50), dtype=np.float32)])
+        with patch.object(vw.runtime, "stt_recognizer", fake_rec):
+            vw.decode_stt_window_sync(long_tail_clip, lead_pad_s=0.18, trail_pad_s=0.35)
+        self.assertLess(captured_lengths[-1], long_tail_clip.size - int(sr * 0.20))
 
         # Single-sample plosive pop (2 samples at 0.999) must NOT flag CLIPPING!
         sess = vw._WsSttSession()
@@ -904,6 +911,105 @@ class TestSessionVoiceLockAndBackendSttParity(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(res_wasm.assessment_status, "CORRECT")
         self.assertEqual(res_wasm.recognition_source, "BROWSER_SPEECH")
+
+    async def test_adaptive_timed_tts_timeout_precompute_all_voices_and_lead_silence_cap(self) -> None:
+        import base64
+        from types import SimpleNamespace
+        from app.providers.local_voice_provider import (
+            STATIC_LOCAL_VOICES,
+            resolve_timed_tts_timeout_seconds,
+        )
+        from scripts.precompute_book_tts_cache import resolve_precompute_voice_ids
+
+        # Short passages preserve exact 45s default; ultra-long 365-400 word pages scale safely
+        with patch.dict(os.environ, {"VIREAD_LOCAL_TTS_TIMED_TIMEOUT_SECONDS": ""}, clear=False):
+            self.assertEqual(resolve_timed_tts_timeout_seconds(0), 45.0)
+            self.assertEqual(resolve_timed_tts_timeout_seconds(20), 45.0)
+            self.assertGreater(resolve_timed_tts_timeout_seconds(365), 150.0)
+            self.assertLessEqual(resolve_timed_tts_timeout_seconds(800), 180.0)
+
+        with patch.dict(os.environ, {"VIREAD_LOCAL_TTS_TIMED_TIMEOUT_SECONDS": "120"}, clear=False):
+            self.assertEqual(resolve_timed_tts_timeout_seconds(10), 120.0)
+
+        # Verify synthesize_timed actually passes scaled timeout for a 365-word page
+        provider = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+        captured_timeouts: list[float] = []
+
+        async def _fake_post_with_retry(_path, *, timeout, **_kwargs):
+            captured_timeouts.append(timeout)
+            resp = MagicMock()
+            resp.status_code = 200
+            resp.json.return_value = {
+                "audio_base64": base64.b64encode(_make_fake_wav()).decode("ascii"),
+                "media_type": "audio/wav",
+                "duration_seconds": 10.0,
+                "words": [{"index": i, "start": i * 0.02, "end": (i + 1) * 0.02} for i in range(365)],
+                "voice_id": "local_north_thien_minh",
+                "region": "north",
+            }
+            return resp
+
+        with (
+            patch.dict(os.environ, {"VIREAD_LOCAL_TTS_TIMED_TIMEOUT_SECONDS": ""}, clear=False),
+            patch.object(provider, "_post_with_retry", side_effect=_fake_post_with_retry),
+        ):
+            await provider.synthesize_timed(
+                words=["từ"] * 365,
+                voice_id="local_north_thien_minh",
+                speed=0.9,
+            )
+        self.assertEqual(len(captured_timeouts), 1)
+        self.assertGreaterEqual(captured_timeouts[0], 150.0)
+
+        # --voices all expands to all 8 regional local voices; comma-list deduplicates cleanly
+        all_ids = resolve_precompute_voice_ids("local_north_truc_ly", "all")
+        self.assertEqual(len(all_ids), len(STATIC_LOCAL_VOICES))
+        self.assertIn("local_central_quang_son", all_ids)
+        self.assertIn("local_south_thai_son", all_ids)
+        self.assertEqual(
+            resolve_precompute_voice_ids("local_north_truc_ly", "local_north_thien_minh, local_north_thien_minh, local_south_thai_son"),
+            ["local_north_thien_minh", "local_south_thai_son"],
+        )
+
+        # Smart leading-silence cap in voice_worker.py prevents stacking 0.45s pre-roll + 0.18s pad
+        vw = _load_voice_worker_module()
+        sr = 16000
+        # 0.50s silence + 0.40s speech (short isolated word < 1.2s)
+        t = np.arange(int(0.40 * sr), dtype=np.float32) / sr
+        tone = (0.15 * np.sin(2 * np.pi * 240.0 * t)).astype(np.float32)
+        clip_with_preroll = np.concatenate([np.zeros(int(0.50 * sr), dtype=np.float32), tone])
+        self.assertGreaterEqual(vw.estimate_leading_silence_s(clip_with_preroll, sr), 0.48)
+
+        captured_waveforms: list[np.ndarray] = []
+
+        class _FakeStream:
+            def __init__(self) -> None:
+                self.result = SimpleNamespace(text="cả", tokens=["cả"], timestamps=[0.18])
+
+            def accept_waveform(self, _sr: int, samples: np.ndarray) -> None:
+                captured_waveforms.append(np.array(samples, copy=True))
+
+        class _FakeRec:
+            def create_stream(self) -> _FakeStream:
+                return _FakeStream()
+
+            def decode_stream(self, _stream: _FakeStream) -> None:
+                pass
+
+        with patch.object(vw.runtime, "stt_recognizer", _FakeRec()):
+            txt, words, _ = vw.decode_stt_window_sync(
+                clip_with_preroll,
+                lead_pad_s=0.18,
+                trail_pad_s=0.35,
+                cap_lead_silence=True,
+            )
+        self.assertEqual(txt, "cả")
+        self.assertEqual(len(captured_waveforms), 1)
+        # Total decoded waveform must be trimmed to ~0.18s lead + 0.40s speech = ~0.58s (NOT 0.50+0.18+0.40=1.08s!)
+        self.assertLess(captured_waveforms[0].size / sr, 0.70)
+        # Timestamp must be restored back into original clip timeline (~0.50s)
+        self.assertEqual(len(words), 1)
+        self.assertGreaterEqual(words[0]["start"], 0.45)
 
 
 if __name__ == "__main__":

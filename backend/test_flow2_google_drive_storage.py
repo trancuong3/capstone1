@@ -930,6 +930,27 @@ class GoogleDriveStoreResilienceTests(unittest.TestCase):
                     chunks.append(part)
                 self.assertEqual(b"".join(chunks), payload)
 
+                # Default stream token TTL is extended to 2 hours (7200s) for large Colab downloads
+                import time as _time
+                from app.services.training_storage.router import DEFAULT_WORKER_STREAM_TOKEN_TTL
+
+                self.assertEqual(DEFAULT_WORKER_STREAM_TOKEN_TTL, 7200)
+                before_sign = int(_time.time())
+                default_tok = sign_worker_artifact_token(
+                    job_id=str(job_id),
+                    worker_id=worker_id,
+                    reference=ref,
+                    expected_sha256=sha,
+                )
+                claims = verify_worker_artifact_token(
+                    default_tok,
+                    expected_job_id=str(job_id),
+                    expected_worker_id=worker_id,
+                    now_ts=before_sign,
+                )
+                self.assertGreaterEqual(claims.expires_at - before_sign, 7190)
+                self.assertLessEqual(claims.expires_at - before_sign, 7210)
+
         asyncio.run(_run())
 
     def test_non_admin_is_blocked_from_drive_routes(self):

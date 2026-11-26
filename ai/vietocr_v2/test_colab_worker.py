@@ -396,6 +396,79 @@ class ColabWorkerTests(unittest.TestCase):
             self.assertEqual(sleep_bad.call_count, 2)
             worker.session.close()
 
+    def test_materialize_dataset_refreshes_expired_urls_on_403_and_preserves_order(self):
+        import threading as _threading
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = ColabWorker("https://viread.example", "t" * 48, temp_dir)
+            worker.artifact_download_workers = 4
+            run_dir = Path(temp_dir) / "run"
+            run_dir.mkdir()
+
+            receipt_bytes = b'{"version_sha256":"' + (b"r" * 44) + b'"}'
+            receipt_sha = hashlib.sha256(receipt_bytes).hexdigest()
+            dataset = {
+                "version_sha256": receipt_sha,
+                "manifest_url": "/books/admin/viread-training/worker/jobs/j/artifact-stream?token=receipt",
+            }
+            payloads = {}
+            initial_items = []
+            fresh_items = []
+            for idx in range(1, 5):
+                sid = f"s{idx}"
+                raw = f"image-payload-{idx}".encode("utf-8")
+                sha = hashlib.sha256(raw).hexdigest()
+                payloads[sid] = raw
+                base_item = {
+                    "sample_id": sid,
+                    "group_id": f"g{(idx - 1) // 2 + 1}",
+                    "label": f"Nhãn {idx}",
+                    "source_flow": "FLOW1_VERIFIED",
+                    "split": "train",
+                    "image_sha256": sha,
+                }
+                initial_items.append({**base_item, "image_url": f"/books/admin/viread-training/worker/jobs/j/artifact-stream?token=expired-{sid}"})
+                fresh_items.append({**base_item, "image_url": f"/books/admin/viread-training/worker/jobs/j/artifact-stream?token=fresh-{sid}"})
+
+            fetch_lock = _threading.Lock()
+            dataset_calls = [0]
+
+            def fake_dataset(job_id_arg, *, locked_test=False):
+                with fetch_lock:
+                    dataset_calls[0] += 1
+                return dataset, fresh_items
+
+            def fake_fetch(url, destination, expected_sha256=None, *, local_drive_candidates=None):
+                if url == dataset["manifest_url"]:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination.write_bytes(receipt_bytes)
+                    return
+                if "token=expired-" in url:
+                    resp = Mock()
+                    resp.status_code = 403
+                    err = requests.HTTPError("403 Client Error: Forbidden")
+                    err.response = resp
+                    raise err
+                sid = url.split("token=fresh-", 1)[1]
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(payloads[sid])
+
+            with (
+                patch.object(worker, "dataset", side_effect=fake_dataset),
+                patch.object(worker, "_fetch_artifact", side_effect=fake_fetch),
+            ):
+                manifest_path, out_receipt, _ = worker.materialize_dataset("j-1", dataset, initial_items, run_dir)
+
+            self.assertEqual(dataset_calls[0], 1)
+            self.assertEqual(out_receipt.read_bytes(), receipt_bytes)
+            written_lines = [json.loads(line) for line in manifest_path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual([row["annotation_id"] for row in written_lines], ["s1", "s2", "s3", "s4"])
+            for item in initial_items:
+                img_file = run_dir / "training-images" / item["image_sha256"]
+                self.assertTrue(img_file.is_file())
+                self.assertEqual(hashlib.sha256(img_file.read_bytes()).hexdigest(), item["image_sha256"])
+            worker.session.close()
+
 
 if __name__ == "__main__":
     unittest.main()
