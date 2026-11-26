@@ -41,9 +41,11 @@ from app.providers.local_voice_provider import (  # noqa: E402
 )
 from app.repositories.tts_audio_cache_repository import TtsAudioCacheRepository  # noqa: E402
 from app.services.tts_audio_cache_service import (  # noqa: E402
+    ALLOWED_COACHING_PHRASES_ALL_RAW,
     ALLOWED_COACHING_PHRASES_RAW,
     ResolvedCacheTarget,
     TtsAudioCacheService,
+    canonical_phonics_key,
     canonical_tts_sha256,
     canonical_tts_text,
     get_tts_cache_max_bytes,
@@ -55,7 +57,42 @@ from app.services.voice_orchestrator import VoiceOrchestrator, VoicePolicyContex
 logger = logging.getLogger("viread.precompute_tts_cache")
 
 DEFAULT_PRECOMPUTE_SPEED = 0.9
-COACHING_PHRASES: tuple[str, ...] = ALLOWED_COACHING_PHRASES_RAW
+COACHING_PHRASES: tuple[str, ...] = ALLOWED_COACHING_PHRASES_ALL_RAW
+
+_PHONICS_ONSETS: tuple[str, ...] = (
+    "ngh", "ng", "nh", "ch", "gh", "gi", "kh", "ph", "qu", "th", "tr",
+    "b", "c", "d", "đ", "g", "h", "k", "l", "m", "n", "p", "q", "r", "s", "t", "v", "x",
+)
+_PHONICS_ONSET_SPOKEN: dict[str, str] = {
+    "b": "bờ", "c": "cờ", "ch": "chờ", "d": "dờ", "đ": "đờ", "g": "gờ",
+    "gh": "gờ", "gi": "giờ", "h": "hờ", "k": "ca", "kh": "khờ", "l": "lờ",
+    "m": "mờ", "n": "nờ", "ng": "ngờ", "ngh": "ngờ", "nh": "nhờ", "p": "pờ",
+    "ph": "phờ", "qu": "quờ", "r": "rờ", "s": "sờ", "t": "tờ", "th": "thờ",
+    "tr": "trờ", "v": "vờ", "x": "xờ",
+}
+
+
+def build_vietnamese_phonics_steps(word: str) -> list[dict[str, Any]]:
+    """Build deterministic child-friendly Vietnamese phonics steps for a verified word."""
+    cleaned = normalize_vietnamese_word(word)
+    if not cleaned or not any(ch.isalpha() for ch in cleaned):
+        return []
+    onset = ""
+    for cand in _PHONICS_ONSETS:
+        if cleaned.startswith(cand) and len(cleaned) > len(cand):
+            onset = cand
+            break
+    if onset:
+        rime = cleaned[len(onset) :]
+        onset_spoken = _PHONICS_ONSET_SPOKEN.get(onset, onset)
+        return [
+            {"id": "onset", "spoken_text": onset_spoken, "pause_after_ms": 380},
+            {"id": "rime", "spoken_text": rime, "pause_after_ms": 420},
+            {"id": "blend", "spoken_text": cleaned, "pause_after_ms": 480},
+        ]
+    return [
+        {"id": "blend", "spoken_text": cleaned, "pause_after_ms": 480},
+    ]
 
 _TIMED_MAX_CHARACTERS = 5_000
 _TIMED_MAX_WORDS = 800
@@ -247,6 +284,7 @@ async def run_precompute(
     limit: int | None = None,
     include_words: bool = True,
     include_coaching: bool = True,
+    include_phonics: bool = False,
     worker_url: str | None = None,
 ) -> dict[str, int]:
     if worker_url:
@@ -263,11 +301,15 @@ async def run_precompute(
     )
 
     stats = {"planned": 0, "cached_hit": 0, "synthesized": 0, "skipped_quota": 0, "errors": 0}
-    items: list[tuple[ResolvedCacheTarget, str, list[str] | None, bool]] = []
+    # (target, text_or_phonics_key, timed_tokens, is_word_sample, phonics_steps)
+    items: list[
+        tuple[ResolvedCacheTarget, str, list[str] | None, bool, list[dict[str, Any]] | None]
+    ] = []
 
     if scope != "coaching":
         pages = await _collect_page_targets(scope=scope, book_id=book_id, limit=limit)
         seen_words: set[tuple[str, str | None, str]] = set()
+        seen_phonics: set[tuple[str, str | None, str]] = set()
         for page in pages:
             target = ResolvedCacheTarget(
                 scope=page["scope"],
@@ -284,35 +326,34 @@ async def run_precompute(
             for page_tokens in timed_chunks:
                 timed_key_text = canonical_tts_text(" ".join(page_tokens))
                 if timed_key_text:
-                    items.append((target, timed_key_text, page_tokens, False))
-            if include_words:
+                    items.append((target, timed_key_text, page_tokens, False, None))
+            if include_words or include_phonics:
                 for raw_token in page.get("tokens") or []:
                     token = normalize_vietnamese_word(raw_token)
                     if not token:
                         continue
+                    word_target = ResolvedCacheTarget(
+                        scope=page["scope"],
+                        owner_parent_id=page["owner_parent_id"],
+                        book_id=page["book_id"],
+                        page_id=None,
+                        page_revision_id=None,
+                        can_store_on_miss=True,
+                    )
                     dedup = (
                         page["scope"],
                         str(page["owner_parent_id"]) if page["owner_parent_id"] else None,
                         token,
                     )
-                    if dedup in seen_words:
-                        continue
-                    seen_words.add(dedup)
-                    items.append(
-                        (
-                            ResolvedCacheTarget(
-                                scope=page["scope"],
-                                owner_parent_id=page["owner_parent_id"],
-                                book_id=page["book_id"],
-                                page_id=None,
-                                page_revision_id=None,
-                                can_store_on_miss=True,
-                            ),
-                            token,
-                            None,
-                            True,
-                        )
-                    )
+                    if include_words and dedup not in seen_words:
+                        seen_words.add(dedup)
+                        items.append((word_target, token, None, True, None))
+                    if include_phonics and dedup not in seen_phonics:
+                        steps = build_vietnamese_phonics_steps(token)
+                        if steps:
+                            seen_phonics.add(dedup)
+                            phonics_key, _ = canonical_phonics_key(steps)
+                            items.append((word_target, phonics_key, None, False, steps))
 
     if include_coaching and book_id is None and scope in {"all", "catalog", "coaching"}:
         coaching_target = ResolvedCacheTarget(
@@ -324,7 +365,7 @@ async def run_precompute(
             can_store_on_miss=True,
         )
         for phrase in COACHING_PHRASES:
-            items.append((coaching_target, canonical_tts_text(phrase), None, False))
+            items.append((coaching_target, canonical_tts_text(phrase), None, False, None))
 
     existing_keys = await _load_existing_cache_keys(voice_id=voice_id, speed=speed)
 
@@ -341,14 +382,14 @@ async def run_precompute(
         else:
             existing_keys.add(key)
 
-    for target, text, tokens, is_word_sample in items:
+    for target, text, tokens, is_word_sample, phonics_steps in items:
         stats["planned"] += 1
         cache_key = (
             target.scope,
             str(target.owner_parent_id) if target.owner_parent_id is not None else None,
             canonical_tts_sha256(text),
         )
-        if _is_key_satisfied(cache_key, needs_timings=bool(tokens)):
+        if _is_key_satisfied(cache_key, needs_timings=bool(tokens or phonics_steps)):
             stats["cached_hit"] += 1
             continue
 
@@ -361,7 +402,27 @@ async def run_precompute(
             continue
 
         try:
-            if tokens:
+            if phonics_steps:
+                phonics_speech = await orchestrator.local.synthesize_phonics(
+                    steps=phonics_steps,
+                    voice_id=voice_id,
+                    speed=speed,
+                    accept="audio/mpeg",
+                    audio_format="mp3",
+                )
+                raw_bytes, raw_ct = phonics_speech.audio, phonics_speech.content_type
+                model_ver = phonics_speech.model_version or LOCAL_TTS_MODEL_VERSION
+                dur = phonics_speech.duration_seconds
+                word_timings = [
+                    {
+                        "id": s.id,
+                        "index": s.index,
+                        "start": s.start,
+                        "end": s.end,
+                    }
+                    for s in phonics_speech.step_timings
+                ]
+            elif tokens:
                 speech = await orchestrator.local.synthesize_timed(
                     words=tokens,
                     voice_id=voice_id,
@@ -444,6 +505,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--worker-url", type=str, default=None)
     parser.add_argument("--no-words", action="store_true")
     parser.add_argument("--no-coaching", action="store_true")
+    parser.add_argument("--no-phonics", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -462,6 +524,7 @@ async def _async_main() -> int:
             limit=args.limit,
             include_words=not args.no_words,
             include_coaching=not args.no_coaching,
+            include_phonics=not args.no_phonics,
             worker_url=args.worker_url,
         )
         print(

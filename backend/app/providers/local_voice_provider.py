@@ -9,7 +9,9 @@ import logging
 import math
 import os
 import re
+import struct
 import time
+import unicodedata
 import weakref
 from dataclasses import dataclass
 from typing import Any
@@ -28,7 +30,6 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_LOCAL_VOICE_WORKER_URL = "http://127.0.0.1:8010"
 DEFAULT_LOCAL_VOICE_ID = "local_north_truc_ly"
-LOCAL_TTS_MODEL_VERSION = "vieneu-v3-turbo-onnx-fp32-3.8.5"
 DEFAULT_LOCAL_TTS_PRECISION = "hybrid"
 DEFAULT_LOCAL_STT_MODE = "ws"
 LOCAL_STT_MODEL_VERSION = "sherpa-onnx-zipformer-vi-30m-int8-2026-02-09"
@@ -59,15 +60,7 @@ def build_local_tts_model_version(precision: str | None = None) -> str:
     return f"vieneu-v3-turbo-onnx-{prec}-3.8.5"
 
 
-LOCAL_STT_MODEL_VERSION = "sherpa-onnx-zipformer-vi-30m-int8-2026-02-09"
-CONNECT_TIMEOUT_SECONDS = 5.0
-_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
-
-# Shared per-(event_loop, base_url) AsyncClient pool so persistent TLS connections
-# to the Cloudflare tunnel are reused across requests without leaking closed test loops.
-_LOOP_CLIENTS: weakref.WeakKeyDictionary[
-    asyncio.AbstractEventLoop, dict[str, httpx.AsyncClient]
-] = weakref.WeakKeyDictionary()
+LOCAL_TTS_MODEL_VERSION = build_local_tts_model_version()
 
 # Static non-secret metadata catalog of the 8 curated regional presets so UI can
 # display Bắc · Trung · Nam options deterministically even before worker warmup.
@@ -209,6 +202,7 @@ class LocalSynthesizedAudio:
     cache_hit: bool = False
     cache_scope: str | None = None
     cached_speed: float | None = None
+    fallback_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,6 +226,7 @@ class LocalTimedSpeech:
     cache_hit: bool = False
     cache_scope: str | None = None
     cached_speed: float | None = None
+    fallback_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,6 +250,7 @@ class LocalPhonicsSpeech:
     cache_hit: bool = False
     cache_scope: str | None = None
     cached_speed: float | None = None
+    fallback_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,6 +263,28 @@ class LocalTranscription:
     model_version: str = LOCAL_STT_MODEL_VERSION
     fallback_used: bool = False
     fallback_reason: str | None = None
+    superseded: bool = False
+
+
+def fix_wav_header_sizes(content: bytes) -> bytes:
+    """Rewrite streaming/placeholder RIFF & data chunk sizes to exact byte counts."""
+    if (
+        len(content) < 44
+        or content[:4] != b"RIFF"
+        or content[8:12] != b"WAVE"
+        or content[36:40] != b"data"
+    ):
+        return content
+    actual_riff = len(content) - 8
+    actual_data = len(content) - 44
+    cur_riff = struct.unpack_from("<I", content, 4)[0]
+    cur_data = struct.unpack_from("<I", content, 40)[0]
+    if cur_riff == actual_riff and cur_data == actual_data:
+        return content
+    patched = bytearray(content)
+    struct.pack_into("<I", patched, 4, actual_riff)
+    struct.pack_into("<I", patched, 40, actual_data)
+    return bytes(patched)
 
 
 class LocalVoiceTechnicalError(VoiceProviderError):
@@ -541,6 +559,7 @@ class LocalVoiceProvider:
         data: dict[str, Any] | None = None,
         files: dict[str, Any] | None = None,
         extra_headers: dict[str, str] | None = None,
+        max_retries: int = 1,
     ) -> httpx.Response:
         if not self.base_url:
             raise LocalVoiceTechnicalError(
@@ -551,9 +570,13 @@ class LocalVoiceProvider:
         if extra_headers:
             headers.update(extra_headers)
         http_timeout = self._make_timeout(timeout)
+        retry_limit = max(0, int(max_retries))
+        retries_used = 0
+        protocol_resets_used = 0
         backoffs = (0.25, 0.6)
         last_exc: Exception | None = None
-        for attempt in range(3):
+        for attempt in range(retry_limit + 3):
+            backoff_s = backoffs[min(retries_used, len(backoffs) - 1)]
             client = self._get_client()
             try:
                 resp = await client.post(
@@ -564,10 +587,11 @@ class LocalVoiceProvider:
                     data=data,
                     files=files,
                 )
-                if resp.status_code == 503 and attempt < 2:
+                if resp.status_code == 503 and retries_used < retry_limit:
                     worker_code = _extract_worker_error_code(resp)
                     if worker_code not in {"LOCAL_TTS_UNAVAILABLE", "LOCAL_STT_UNAVAILABLE"}:
-                        await asyncio.sleep(backoffs[attempt])
+                        retries_used += 1
+                        await asyncio.sleep(backoff_s)
                         continue
                 if (
                     resp.status_code in (400, 401, 403)
@@ -590,26 +614,33 @@ class LocalVoiceProvider:
             except httpx.ConnectError as exc:
                 last_exc = exc
                 await self._reset_client()
-                if not self.is_loopback or attempt >= 2:
+                if not self.is_loopback or retries_used >= retry_limit:
                     raise
+                retries_used += 1
                 if is_local_voice_worker_autostart_armed():
                     recovered = await ensure_local_voice_worker_running(
                         base_url=self.base_url
                     )
                     if recovered:
                         continue
-                await asyncio.sleep(backoffs[attempt])
+                await asyncio.sleep(backoff_s)
             except (httpx.RemoteProtocolError, httpx.ReadError) as exc:
                 last_exc = exc
                 await self._reset_client()
-                if attempt < 2:
-                    await asyncio.sleep(backoffs[attempt])
+                # Allow 1 instant keepalive-socket reconnect without consuming the timeout/busy retry budget.
+                if protocol_resets_used < 1:
+                    protocol_resets_used += 1
+                    continue
+                if retries_used < retry_limit:
+                    retries_used += 1
+                    await asyncio.sleep(backoff_s)
                     continue
                 raise
             except httpx.TimeoutException as exc:
                 last_exc = exc
-                if attempt < 2:
-                    await asyncio.sleep(backoffs[attempt])
+                if retries_used < retry_limit:
+                    retries_used += 1
+                    await asyncio.sleep(backoff_s)
                     continue
                 raise
         assert last_exc is not None
@@ -874,9 +905,11 @@ class LocalVoiceProvider:
                 status_code=503, code="LOCAL_TTS_UNAVAILABLE"
             )
 
+        content_type = resp.headers.get("content-type", "audio/wav").split(";")[0]
+        audio_bytes = fix_wav_header_sizes(resp.content) if "wav" in content_type.lower() else resp.content
         return LocalSynthesizedAudio(
-            content=resp.content,
-            content_type=resp.headers.get("content-type", "audio/wav").split(";")[0],
+            content=audio_bytes,
+            content_type=content_type,
             resolved_voice_id=resp.headers.get("x-resolved-voice-id", target_voice),
             region=resp.headers.get("x-voice-region", "north"),
             model_version=resp.headers.get(
@@ -940,7 +973,9 @@ class LocalVoiceProvider:
             )
 
         payload = resp.json()
-        audio = base64.b64decode(payload.get("audio_base64") or "")
+        media_type = str(payload.get("media_type") or "audio/wav")
+        raw_audio = base64.b64decode(payload.get("audio_base64") or "")
+        audio = fix_wav_header_sizes(raw_audio) if "wav" in media_type.lower() else raw_audio
         duration = float(payload.get("duration_seconds") or 0.0)
         raw_words = payload.get("words") or []
         if not audio or duration <= 0 or len(raw_words) != len(words):
@@ -1033,7 +1068,9 @@ class LocalVoiceProvider:
             )
 
         payload = resp.json()
-        audio = base64.b64decode(payload.get("audio_base64") or "")
+        media_type = str(payload.get("media_type") or "audio/wav")
+        raw_audio = base64.b64decode(payload.get("audio_base64") or "")
+        audio = fix_wav_header_sizes(raw_audio) if "wav" in media_type.lower() else raw_audio
         duration = float(payload.get("duration_seconds") or 0.0)
         raw_timings = payload.get("step_timings") or []
         if not audio or duration <= 0 or len(raw_timings) != len(steps):
@@ -1091,7 +1128,8 @@ class LocalVoiceProvider:
         try:
             resp = await self._post_with_retry(
                 "/stt",
-                timeout=18.0,
+                timeout=9.0,
+                max_retries=1,
                 data=form_data,
                 files={"audio_file": (filename, audio, content_type)},
             )
@@ -1128,7 +1166,7 @@ class LocalVoiceProvider:
         for item in raw_words:
             if not isinstance(item, dict):
                 continue
-            txt = str(item.get("text") or "").strip()
+            txt = unicodedata.normalize("NFC", str(item.get("text") or "")).strip()
             start = item.get("start")
             end = item.get("end")
             if (
@@ -1148,7 +1186,7 @@ class LocalVoiceProvider:
                 )
 
         return LocalTranscription(
-            text=str(payload.get("text") or "").strip(),
+            text=unicodedata.normalize("NFC", str(payload.get("text") or "")).strip(),
             language_code=str(payload.get("language_code") or "vi"),
             language_probability=None,
             words=safe_words or None,
@@ -1157,4 +1195,5 @@ class LocalVoiceProvider:
                 payload.get("model_version") or LOCAL_STT_MODEL_VERSION
             ),
             fallback_used=False,
+            superseded=bool(payload.get("superseded")),
         )

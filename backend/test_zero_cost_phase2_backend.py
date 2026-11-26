@@ -541,7 +541,7 @@ class ZeroCostPhase2BackendTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(r1.status_code, 200, r1.text)
                     self.assertEqual(r1.headers.get("X-TTS-Cache"), "HIT")
                     self.assertEqual(r1.headers.get("X-TTS-Provider"), "precomputed_cache")
-                    self.assertEqual(r1.headers.get("Cache-Control"), "private, max-age=86400")
+                    self.assertEqual(r1.headers.get("Cache-Control"), "no-store")
                     self.assertEqual(r1.content, cat_mp3)
 
                     # 2. CATALOG timed hit when local worker offline

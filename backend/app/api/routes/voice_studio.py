@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import time
 from typing import Any
 from uuid import UUID
 
@@ -19,13 +18,11 @@ from app.api.routes.voice import (
     get_voice_orchestrator,
     provider_http_exception,
 )
-from app.database.session import AsyncSessionLocal
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
 from app.providers.local_voice_provider import (
     DEFAULT_LOCAL_VOICE_ID,
     STATIC_LOCAL_VOICES,
 )
-from app.repositories.tts_audio_cache_repository import TtsAudioCacheRepository
 from app.schemas.voice_studio import (
     TimedSpeechRead,
     TimedSpeechRequest,
@@ -35,65 +32,25 @@ from app.schemas.voice_studio import (
     VoiceProviderMode,
 )
 from app.services.rate_limiter import rate_limit
-from app.services.tts_audio_cache_service import is_tts_cache_enabled
+from app.services.tts_audio_cache_service import TtsAudioCacheService
 from app.services.voice_orchestrator import VoicePolicyContext
 
 router = APIRouter()
 
-_CACHED_PUBLIC_VOICE_IDS_TTL_SECONDS = 300.0
-_cached_public_voice_ids: tuple[float, list[str]] | None = None
-_cached_public_voice_ids_task: asyncio.Task[list[str]] | None = None
-
 
 def clear_cached_public_voice_ids_cache() -> None:
     """Clear the in-memory cache of precomputed public TTS voice IDs."""
-    global _cached_public_voice_ids, _cached_public_voice_ids_task
-    _cached_public_voice_ids = None
-    if _cached_public_voice_ids_task is not None and not _cached_public_voice_ids_task.done():
-        _cached_public_voice_ids_task.cancel()
-    _cached_public_voice_ids_task = None
+    TtsAudioCacheService.clear_cached_public_voice_ids_cache()
 
 
 async def refresh_cached_public_voice_ids(*, timeout: float = 6.0) -> list[str]:
-    """Query active CATALOG/COACHING voice IDs in `tts_audio_cache_entries` and update memory cache."""
-    global _cached_public_voice_ids
-    if not is_tts_cache_enabled():
-        return []
-
-    async def _query() -> list[str]:
-        async with AsyncSessionLocal() as session:
-            return await TtsAudioCacheRepository(session).list_active_public_voice_ids()
-
-    try:
-        voice_ids = await asyncio.wait_for(_query(), timeout=timeout)
-    except Exception:
-        return list(_cached_public_voice_ids[1]) if _cached_public_voice_ids is not None else []
-
-    _cached_public_voice_ids = (time.monotonic(), list(voice_ids))
-    return voice_ids
+    """Query active CATALOG/COACHING voice IDs via TtsAudioCacheService."""
+    return await TtsAudioCacheService.refresh_cached_public_voice_ids(timeout=timeout)
 
 
 async def _get_cached_public_voice_ids() -> list[str]:
-    """Return cached public TTS voice IDs without blocking `/voice/voices` on slow NullPool handshakes."""
-    global _cached_public_voice_ids_task
-    if not is_tts_cache_enabled():
-        return []
-
-    now = time.monotonic()
-    if (
-        _cached_public_voice_ids is not None
-        and (now - _cached_public_voice_ids[0]) < _CACHED_PUBLIC_VOICE_IDS_TTL_SECONDS
-    ):
-        return list(_cached_public_voice_ids[1])
-
-    if _cached_public_voice_ids_task is None or _cached_public_voice_ids_task.done():
-        _cached_public_voice_ids_task = asyncio.create_task(refresh_cached_public_voice_ids())
-
-    # Allow fast local DBs to resolve inline (<100ms), while slow NullPool handshakes warm in background.
-    try:
-        return list(await asyncio.wait_for(asyncio.shield(_cached_public_voice_ids_task), timeout=0.1))
-    except Exception:
-        return list(_cached_public_voice_ids[1]) if _cached_public_voice_ids is not None else []
+    """Return cached public TTS voice IDs via TtsAudioCacheService."""
+    return await TtsAudioCacheService.get_cached_public_voice_ids()
 
 
 @router.get("/voices", response_model=VoiceListRead)
