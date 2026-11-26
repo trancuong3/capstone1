@@ -2693,13 +2693,14 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         name: "Bé đọc với nhận diện giọng nói",
       }),
     );
-    // Navigating while recording stops capture and waits for pending first-page STT;
-    // its response must stay scoped to page 4 and never paint page 5.
-    await user.click(screen.getByRole("button", { name: "Trang tiếp theo" }));
+    // A word sample stops capture; page navigation can overlap its pending STT.
+    await user.click(screen.getByRole("button", { name: "Bé" }));
     await waitFor(() =>
       expect(speechServiceMock.transcribe).toHaveBeenCalledOnce(),
     );
+    await user.click(screen.getByRole("button", { name: "Trang tiếp theo" }));
     expect(speechRecorderMock.stop).toHaveBeenCalledOnce();
+    expect(speechServiceMock.transcribe).toHaveBeenCalledOnce();
     expect(screen.getByLabelText("Trang sách 4")).toBeInTheDocument();
     await act(async () =>
       resolveTranscript({ text: "Bé mèo nhỏ đang", words: [] }),

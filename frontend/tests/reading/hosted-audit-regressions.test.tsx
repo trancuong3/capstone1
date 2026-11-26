@@ -301,9 +301,9 @@ describe("Hosted Audit Regressions (DEF-H01..DEF-H10)", () => {
     await waitFor(() => {
       expect(screen.getByTestId("ocr-worker-offline-banner")).toBeTruthy();
     });
-    expect(screen.getByTestId("ocr-worker-offline-banner").textContent).toMatch(
-      /ngoại tuyến|đang tạm tắt/i,
-    );
+    expect(
+      screen.getByTestId("ocr-worker-offline-banner").textContent,
+    ).toContain("ngoại tuyến");
   });
 
   it("DEF-H07: real ServiceError from LOCAL_VOICE_UNCONFIGURED is detected and immediately switches to WASM", () => {
