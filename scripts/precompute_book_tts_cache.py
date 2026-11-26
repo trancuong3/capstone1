@@ -44,6 +44,7 @@ from app.repositories.tts_audio_cache_repository import TtsAudioCacheRepository 
 from app.services.tts_audio_cache_service import (  # noqa: E402
     ALLOWED_COACHING_PHRASES_ALL_RAW,
     ALLOWED_COACHING_PHRASES_RAW,
+    TIMED_COACHING_PHRASES,
     ResolvedCacheTarget,
     TtsAudioCacheService,
     canonical_phonics_key,
@@ -53,6 +54,10 @@ from app.services.tts_audio_cache_service import (  # noqa: E402
     preferred_cache_formats,
     transcode_to_mp3_64k,
 )
+from app.services.vietnamese_phonics import (  # noqa: E402
+    build_vietnamese_phonics_steps,
+    normalize_vietnamese_word,
+)
 from app.services.voice_orchestrator import VoiceOrchestrator, VoicePolicyContext  # noqa: E402
 
 logger = logging.getLogger("viread.precompute_tts_cache")
@@ -60,58 +65,11 @@ logger = logging.getLogger("viread.precompute_tts_cache")
 DEFAULT_PRECOMPUTE_SPEED = 0.9
 COACHING_PHRASES: tuple[str, ...] = ALLOWED_COACHING_PHRASES_ALL_RAW
 
-_PHONICS_ONSETS: tuple[str, ...] = (
-    "ngh", "ng", "nh", "ch", "gh", "gi", "kh", "ph", "qu", "th", "tr",
-    "b", "c", "d", "đ", "g", "h", "k", "l", "m", "n", "p", "q", "r", "s", "t", "v", "x",
-)
-_PHONICS_ONSET_SPOKEN: dict[str, str] = {
-    "b": "bờ", "c": "cờ", "ch": "chờ", "d": "dờ", "đ": "đờ", "g": "gờ",
-    "gh": "gờ", "gi": "giờ", "h": "hờ", "k": "ca", "kh": "khờ", "l": "lờ",
-    "m": "mờ", "n": "nờ", "ng": "ngờ", "ngh": "ngờ", "nh": "nhờ", "p": "pờ",
-    "ph": "phờ", "qu": "quờ", "r": "rờ", "s": "sờ", "t": "tờ", "th": "thờ",
-    "tr": "trờ", "v": "vờ", "x": "xờ",
-}
-
-
-def build_vietnamese_phonics_steps(word: str) -> list[dict[str, Any]]:
-    """Build deterministic child-friendly Vietnamese phonics steps for a verified word."""
-    cleaned = normalize_vietnamese_word(word)
-    if not cleaned or not any(ch.isalpha() for ch in cleaned):
-        return []
-    onset = ""
-    for cand in _PHONICS_ONSETS:
-        if cleaned.startswith(cand) and len(cleaned) > len(cand):
-            onset = cand
-            break
-    if onset:
-        rime = cleaned[len(onset) :]
-        onset_spoken = _PHONICS_ONSET_SPOKEN.get(onset, onset)
-        return [
-            {"id": "onset", "spoken_text": onset_spoken, "pause_after_ms": 380},
-            {"id": "rime", "spoken_text": rime, "pause_after_ms": 420},
-            {"id": "blend", "spoken_text": cleaned, "pause_after_ms": 480},
-        ]
-    return [
-        {"id": "blend", "spoken_text": cleaned, "pause_after_ms": 480},
-    ]
-
 _TIMED_MAX_CHARACTERS = 5_000
 _TIMED_MAX_WORDS = 800
 _TOKEN_WITH_WS_RE = re.compile(r"\S+\s*")
 _SENTENCE_END_RE = re.compile(r'[.!?…]["”’\')\]]*\s*$')
 _PARA_BREAK_RE = re.compile(r"\n\s*\n")
-
-
-def normalize_vietnamese_word(value: str) -> str:
-    """Mirror frontend `normalizeVietnameseWord` (NFC, lowercase, strip leading/trailing P/S)."""
-    text = unicodedata.normalize("NFC", str(value or "")).lower().strip()
-    start = 0
-    end = len(text)
-    while start < end and unicodedata.category(text[start])[0] in {"P", "S"}:
-        start += 1
-    while end > start and unicodedata.category(text[end - 1])[0] in {"P", "S"}:
-        end -= 1
-    return unicodedata.normalize("NFC", text[start:end].strip())
 
 
 def split_speech_text_chunks(
@@ -349,12 +307,31 @@ async def run_precompute(
                     if include_words and dedup not in seen_words:
                         seen_words.add(dedup)
                         items.append((word_target, token, None, True, None))
-                    if include_phonics and dedup not in seen_phonics:
-                        steps = build_vietnamese_phonics_steps(token)
-                        if steps:
-                            seen_phonics.add(dedup)
-                            phonics_key, _ = canonical_phonics_key(steps)
-                            items.append((word_target, phonics_key, None, False, steps))
+                    if include_phonics:
+                        # Public catalog phonics are stored in shared COACHING scope (matching live
+                        # frontend `tts-playback.ts` & `difficult-word-practice-panel.tsx`); PRIVATE
+                        # books stay strictly isolated in PRIVATE scope (Invariant #48).
+                        phonics_scope = "PRIVATE" if page["scope"] == "PRIVATE" else "COACHING"
+                        phonics_owner = page["owner_parent_id"] if phonics_scope == "PRIVATE" else None
+                        phonics_dedup = (
+                            phonics_scope,
+                            str(phonics_owner) if phonics_owner else None,
+                            token,
+                        )
+                        if phonics_dedup not in seen_phonics:
+                            steps = build_vietnamese_phonics_steps(token)
+                            if steps:
+                                seen_phonics.add(phonics_dedup)
+                                phonics_key, _ = canonical_phonics_key(steps)
+                                phonics_target = ResolvedCacheTarget(
+                                    scope=phonics_scope,
+                                    owner_parent_id=phonics_owner,
+                                    book_id=page["book_id"] if phonics_scope == "PRIVATE" else None,
+                                    page_id=None,
+                                    page_revision_id=None,
+                                    can_store_on_miss=True,
+                                )
+                                items.append((phonics_target, phonics_key, None, False, steps))
 
     if include_coaching and book_id is None and scope in {"all", "catalog", "coaching"}:
         coaching_target = ResolvedCacheTarget(
@@ -366,7 +343,13 @@ async def run_precompute(
             can_store_on_miss=True,
         )
         for phrase in COACHING_PHRASES:
-            items.append((coaching_target, canonical_tts_text(phrase), None, False, None))
+            canonical_phrase = canonical_tts_text(phrase)
+            if canonical_phrase in TIMED_COACHING_PHRASES:
+                # Precompute via `/tts/timed` so `word_timings_json` is populated for
+                # `ReadingVoiceSettings` preview (`/voice/text-to-speech/timed`) AND untimed `/tts`.
+                items.append((coaching_target, canonical_phrase, canonical_phrase.split(), False, None))
+            else:
+                items.append((coaching_target, canonical_phrase, None, False, None))
 
     existing_keys = await _load_existing_cache_keys(voice_id=voice_id, speed=speed)
 

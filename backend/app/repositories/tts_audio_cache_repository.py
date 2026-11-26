@@ -42,6 +42,13 @@ class TtsAudioCacheRepository:
         dialect_name = getattr(getattr(bind, "dialect", None), "name", "") if bind is not None else ""
         return dialect_name if isinstance(dialect_name, str) else ""
 
+    def _require_word_timings_filters(self) -> list[Any]:
+        """Exclude both SQL NULL and legacy JSONB literal `'null'::jsonb` when timings are required."""
+        filters: list[Any] = [TtsAudioCacheEntry.WordTimingsJson.is_not(None)]
+        if self._get_dialect_name() == "postgresql":
+            filters.append(func.jsonb_typeof(TtsAudioCacheEntry.WordTimingsJson) != "null")
+        return filters
+
     @staticmethod
     def _format_priority_expr(audio_formats: Sequence[str]):
         order_map = {fmt: idx for idx, fmt in enumerate(audio_formats)}
@@ -244,7 +251,7 @@ class TtsAudioCacheRepository:
         if model_version:
             filters.append(TtsAudioCacheEntry.ModelVersion == model_version)
         if require_word_timings:
-            filters.append(TtsAudioCacheEntry.WordTimingsJson.is_not(None))
+            filters.extend(self._require_word_timings_filters())
 
         stmt = (
             select(TtsAudioCacheEntry)
@@ -298,7 +305,7 @@ class TtsAudioCacheRepository:
         if model_version:
             filters.append(TtsAudioCacheEntry.ModelVersion == model_version)
         if require_word_timings:
-            filters.append(TtsAudioCacheEntry.WordTimingsJson.is_not(None))
+            filters.extend(self._require_word_timings_filters())
 
         stmt = (
             select(TtsAudioCacheEntry)
@@ -334,7 +341,7 @@ class TtsAudioCacheRepository:
             TtsAudioCacheEntry.PageId == page_id,
             TtsAudioCacheEntry.VoiceId == voice_id,
             TtsAudioCacheEntry.AudioFormat.in_(list(audio_formats)),
-            TtsAudioCacheEntry.WordTimingsJson.is_not(None),
+            *self._require_word_timings_filters(),
         ]
         if not allow_speed_fallback:
             filters.append(TtsAudioCacheEntry.Speed == q_speed)
@@ -492,8 +499,14 @@ class TtsAudioCacheRepository:
                         TtsAudioCacheEntry.DurationSeconds,
                     ),
                     "word_timings_json": func.coalesce(
-                        pg_stmt.excluded.word_timings_json,
-                        TtsAudioCacheEntry.WordTimingsJson,
+                        func.nullif(
+                            pg_stmt.excluded.word_timings_json,
+                            literal_column("'null'::jsonb"),
+                        ),
+                        func.nullif(
+                            TtsAudioCacheEntry.WordTimingsJson,
+                            literal_column("'null'::jsonb"),
+                        ),
                     ),
                     "last_accessed_at": ts,
                     "updated_at": ts,

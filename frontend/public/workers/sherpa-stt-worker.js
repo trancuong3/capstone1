@@ -619,12 +619,9 @@ self.onmessage = async (event) => {
         leadingSilenceSeconds: existingLeadSeconds,
         trailingSilenceSeconds: existingTailSeconds,
       } = analyzeSpeechWindowSeconds(preprocessed, sr);
-      if (
-        estimatedVoicedSeconds <= 0 &&
-        (msg.voicedDurationMs === undefined ||
-          msg.voicedDurationMs === null ||
-          msg.voicedDurationMs <= 0)
-      ) {
+      // Never decode filtered silence (e.g. 20-50Hz desk rumble removed by 60Hz HPF)
+      // even if unfiltered client VAD reported a non-zero voicedDurationMs.
+      if (estimatedVoicedSeconds <= 0) {
         self.postMessage({ type: "result", id, text: "", decodeMs: 0 });
         return;
       }

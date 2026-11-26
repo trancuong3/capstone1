@@ -10,9 +10,9 @@ import threading
 import time
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import IllegalStateChangeError
+from sqlalchemy.exc import DisconnectionError, IllegalStateChangeError, InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool
@@ -274,6 +274,26 @@ else:
         connect_args=asyncpg_connect_args,
     )
 
+def _evict_closed_asyncpg_connection(
+    dbapi_connection: Any,
+    _connection_record: Any,
+    _connection_proxy: Any,
+) -> None:
+    """0-RTT checkout guard: evict already-closed asyncpg sockets before query execution.
+
+    When `DATABASE_POOL_PRE_PING=False` (default on Supavisor transaction pooler),
+    this avoids a cross-region SELECT 1 round-trip on healthy connections while
+    still forcing transparent reconnect if Supavisor closed an idle socket.
+    """
+    raw_conn = getattr(dbapi_connection, "_connection", None)
+    is_closed = getattr(raw_conn, "is_closed", None)
+    if callable(is_closed) and is_closed():
+        raise DisconnectionError("asyncpg connection already closed before checkout")
+
+
+if not _use_null_pool:
+    event.listen(engine.sync_engine, "checkout", _evict_closed_asyncpg_connection)
+
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
     class_=ConcurrencyLimitedAsyncSession,
@@ -337,7 +357,15 @@ async def probe_database_connection(*, timeout: float | None = None) -> dict[str
                     )
                 return (await session.scalar(text("SELECT 1"))) == 1
 
-        ok = await asyncio.wait_for(_select_one(), timeout=effective_timeout)
+        async def _select_one_with_stale_retry() -> bool:
+            try:
+                return await _select_one()
+            except (DisconnectionError, InterfaceError, OperationalError, ConnectionError, OSError):
+                # Recover seamlessly if a pooled idle connection was dropped mid-flight
+                # when DATABASE_POOL_PRE_PING=False.
+                return await _select_one()
+
+        ok = await asyncio.wait_for(_select_one_with_stale_retry(), timeout=effective_timeout)
         return {
             "ok": bool(ok),
             "dns_resolved": dns_resolved,

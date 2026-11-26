@@ -1,4 +1,5 @@
 import "@fontsource-variable/nunito/wght.css";
+import "@/lib/zod-config";
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 

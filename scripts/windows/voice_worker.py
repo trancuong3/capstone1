@@ -2158,70 +2158,49 @@ def preprocess_audio_for_stt(samples16: np.ndarray) -> np.ndarray:
     return arr
 
 
-def estimate_voiced_duration_s(samples16: np.ndarray, sample_rate: int = 16000) -> float:
-    """Estimate active voiced speech duration excluding quiet lead/pre-roll and trailing silence."""
+def analyze_speech_window_s(
+    samples16: np.ndarray, sample_rate: int = 16000
+) -> tuple[float, float, float]:
+    """Compute (voiced_s, leading_silence_s, trailing_silence_s) in one 20ms-frame RMS pass."""
     arr = np.asarray(samples16, dtype=np.float32)
-    if arr.size < 320:
-        return 0.0
-    frame_len = 320  # 20ms at 16 kHz
+    sr = float(sample_rate) if sample_rate and sample_rate > 0 else 16000.0
+    frame_len = max(1, int(round(sr * 0.02)))
+    if arr.size < frame_len:
+        return 0.0, 0.0, 0.0
     n_frames = arr.size // frame_len
     if n_frames == 0:
-        return 0.0
+        return 0.0, 0.0, 0.0
     frames = arr[: n_frames * frame_len].reshape(n_frames, frame_len)
     frame_rms = np.sqrt(np.mean(frames * frames, axis=1))
     max_rms = float(np.max(frame_rms))
+    full_dur = float(arr.size / sr)
     if max_rms < 0.002:
-        return 0.0
+        return 0.0, full_dur, full_dur
     thresh = max(0.004, max_rms * 0.15)
     active = np.flatnonzero(frame_rms >= thresh)
     if active.size == 0:
-        return 0.0
-    # Span from first to last active voiced frame (handles intra-word stop closures cleanly)
-    voiced_frames = int(active[-1] - active[0] + 1)
-    return float((voiced_frames * frame_len) / float(sample_rate))
+        return 0.0, full_dur, full_dur
+    first_idx = int(active[0])
+    last_idx = int(active[-1])
+    voiced_s = float(((last_idx - first_idx + 1) * frame_len) / sr)
+    lead_s = float((first_idx * frame_len) / sr)
+    tail_s = float((max(0, n_frames - 1 - last_idx) * frame_len) / sr)
+    return voiced_s, lead_s, tail_s
+
+
+def estimate_voiced_duration_s(samples16: np.ndarray, sample_rate: int = 16000) -> float:
+    """Estimate active voiced speech duration excluding quiet lead/pre-roll and trailing silence."""
+    return analyze_speech_window_s(samples16, sample_rate=sample_rate)[0]
 
 
 def estimate_leading_silence_s(samples16: np.ndarray, sample_rate: int = 16000) -> float:
     """Estimate leading silence duration before the first active voiced 20ms frame."""
-    arr = np.asarray(samples16, dtype=np.float32)
-    if arr.size < 320:
-        return 0.0
-    frame_len = 320
-    n_frames = arr.size // frame_len
-    if n_frames == 0:
-        return 0.0
-    frames = arr[: n_frames * frame_len].reshape(n_frames, frame_len)
-    frame_rms = np.sqrt(np.mean(frames * frames, axis=1))
-    max_rms = float(np.max(frame_rms))
-    if max_rms < 0.002:
-        return float(arr.size / float(sample_rate))
-    thresh = max(0.004, max_rms * 0.15)
-    active = np.flatnonzero(frame_rms >= thresh)
-    if active.size == 0:
-        return float(arr.size / float(sample_rate))
-    return float((int(active[0]) * frame_len) / float(sample_rate))
+    return analyze_speech_window_s(samples16, sample_rate=sample_rate)[1]
 
 
 def estimate_trailing_silence_s(samples16: np.ndarray, sample_rate: int = 16000) -> float:
     """Estimate trailing silence duration after the last active voiced 20ms frame."""
-    arr = np.asarray(samples16, dtype=np.float32)
-    if arr.size < 320:
-        return 0.0
-    frame_len = 320
-    n_frames = arr.size // frame_len
-    if n_frames == 0:
-        return 0.0
-    frames = arr[: n_frames * frame_len].reshape(n_frames, frame_len)
-    frame_rms = np.sqrt(np.mean(frames * frames, axis=1))
-    max_rms = float(np.max(frame_rms))
-    if max_rms < 0.002:
-        return float(arr.size / float(sample_rate))
-    thresh = max(0.004, max_rms * 0.15)
-    active = np.flatnonzero(frame_rms >= thresh)
-    if active.size == 0:
-        return float(arr.size / float(sample_rate))
-    trailing_frames = max(0, n_frames - 1 - int(active[-1]))
-    return float((trailing_frames * frame_len) / float(sample_rate))
+    return analyze_speech_window_s(samples16, sample_rate=sample_rate)[2]
 
 
 def decode_stt_window_sync(
@@ -2243,22 +2222,26 @@ def decode_stt_window_sync(
         return "", [], (time.perf_counter() - t_d0) * 1000.0
     duration_s = float(samples16.size / 16000.0)
     arr = preprocess_audio_for_stt(samples16)
+    estimated_voiced_s, existing_lead_s, existing_tail_s = analyze_speech_window_s(
+        arr, sample_rate=16000
+    )
+    # Never decode filtered silence (e.g. 20-50Hz desk rumble removed by 60Hz HPF)
+    # even if unfiltered client VAD reported a non-zero voiced_duration_ms.
+    if estimated_voiced_s <= 0.0:
+        return "", [], (time.perf_counter() - t_d0) * 1000.0
     # Gate trailing silence padding on VOICED speech duration (excluding pre-roll/tail),
     # so short isolated words (~0.6s speech + 0.45s pre-roll) never trigger collocation hallucinations.
     voiced_s = (
         float(voiced_duration_ms) / 1000.0
         if voiced_duration_ms is not None and voiced_duration_ms > 0
-        else estimate_voiced_duration_s(arr, sample_rate=16000)
+        else estimated_voiced_s
     )
-    if voiced_s <= 0.0:
-        return "", [], (time.perf_counter() - t_d0) * 1000.0
     target_lead_s = max(0.0, float(lead_pad_s))
     trimmed_lead_s = 0.0
     arr_for_decode = arr
     if cap_lead_silence:
         # Avoid double-stacking leading silence (e.g. 0.45s pre-roll + 0.18s pad -> 0.63s),
         # which causes leading collocation hallucinations like "tất cả" on isolated "cả".
-        existing_lead_s = estimate_leading_silence_s(arr, sample_rate=16000)
         if voiced_s < 1.2 and target_lead_s > 0.0 and existing_lead_s > target_lead_s:
             trim_samples = int((existing_lead_s - target_lead_s) * 16000)
             if 0 < trim_samples < arr_for_decode.size:
@@ -2275,14 +2258,12 @@ def decode_stt_window_sync(
     else:
         effective_trail_pad = 0.0
         target_short_tail_s = max(0.0, float(short_trail_cap_s))
-        if cap_trail_silence and target_short_tail_s > 0.0:
+        if cap_trail_silence and target_short_tail_s > 0.0 and existing_tail_s > target_short_tail_s:
             # Cap excess trailing silence on isolated short words (e.g. 0.40-0.55s VAD hangover)
             # down to 0.20s so Zipformer does not hallucinate trailing stop codas ("nhà"->"nhạc").
-            existing_tail_s = estimate_trailing_silence_s(arr_for_decode, sample_rate=16000)
-            if existing_tail_s > target_short_tail_s:
-                trim_tail_samples = int((existing_tail_s - target_short_tail_s) * 16000)
-                if 0 < trim_tail_samples < arr_for_decode.size:
-                    arr_for_decode = arr_for_decode[:-trim_tail_samples]
+            trim_tail_samples = int((existing_tail_s - target_short_tail_s) * 16000)
+            if 0 < trim_tail_samples < arr_for_decode.size:
+                arr_for_decode = arr_for_decode[:-trim_tail_samples]
     padded = np.concatenate(
         [
             np.zeros(int(16000 * effective_lead_s), dtype=np.float32),

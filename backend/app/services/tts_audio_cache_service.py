@@ -168,6 +168,44 @@ ALLOWED_COACHING_PHRASES_RAW: tuple[str, ...] = (
     "Gần đúng rồi, con nghe kỹ và thử chọn lại nhé.",
     "Chưa chính xác lắm, bé nghĩ thêm chút rồi chọn lại nha.",
     "Suýt đúng rồi! Con thử đáp án khác xem sao nhé.",
+    # Additional fixed cues from interactive-prompts.ts, word-practice-engine.ts,
+    # difficult-word-practice-panel.tsx, difficult_words_service.py, and reading-voice-settings.tsx
+    "Chào con, hôm nay cô trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.",
+    "Mình ghép vào cả cụm cho dễ đọc nhé.",
+    "Con nghe cô đọc cả cụm này nhé.",
+    "Đọc liền cả cụm sẽ dễ hơn đó con.",
+    "Hay lắm, con đánh vần đúng cách rồi đó!",
+    "Hoan hô, con đánh vần và đọc trơn mượt quá!",
+    "Con đọc đều và trôi chảy quá!",
+    "Nhịp đọc của con rất tự tin!",
+    "Giỏi quá, con đọc rõ từng chữ một luôn!",
+    "Con đọc xong bài rồi! Con có muốn cùng cô đọc lại vài từ khó không? Nói có hoặc không nhé!",
+    "Chúc mừng con hoàn thành bài! Con muốn ôn lại vài từ khó hay qua phần câu hỏi nhé?",
+    "Hoan hô con đã đọc hết bài! Con có muốn đọc lại mấy từ vừa vấp không?",
+    "Tuyệt vời, con xong cả bài rồi! Con có muốn luyện lại các từ khó một chút không?",
+    "Tuyệt vời! Mình cùng đọc lại từng từ khó cho chuẩn nhé!",
+    "Cô khen con chăm chỉ! Mình ôn lại từng từ một nào!",
+    "Hay lắm! Mình cùng chinh phục lại các từ khó nhé!",
+    "Được luôn con ơi! Giờ mình sang phần câu hỏi vui nhé!",
+    "Nhất trí nha! Mình chuyển sang trả lời câu hỏi cùng cô nào!",
+    "Không sao đâu con! Giờ mình trả lời câu hỏi thú vị nhé!",
+    "Theo con, đáp án nào đúng nào?",
+    "Bé nói A, B, C hoặc bấm vào đáp án bé chọn nhé.",
+    "Con có thể đọc tên đáp án hoặc chạm trực tiếp trên màn hình nhé.",
+    "Chính xác rồi! Con giỏi lắm!",
+    "Máy đang bận một chút, con thử lại nhé!",
+    "Con đọc từ trên màn hình nhé.",
+    "Con thử đọc lại nhé.",
+    "Cô đang nghe. Con thử đọc nhé.",
+    "Cô chưa nghe rõ. Con đọc lại nhé.",
+    "Con thử nghe lại phát âm mẫu và đọc chậm rãi một lần nữa nhé!",
+    "Máy chưa nghe rõ giọng của con. Con lại gần micro và thử lại nhé!",
+    "Phần nhận diện giọng nói đang bận một chút. Con không bị tính sai đâu, mình thử lại sau nhé!",
+    "Máy chưa nghe thật chắc chắn. Con không bị tính sai đâu, mình thử đọc lại nhé!",
+)
+TIMED_COACHING_PHRASES_RAW: tuple[str, ...] = (
+    # Spoken via `/voice/text-to-speech/timed` with `cache_scope="COACHING"` (ReadingVoiceSettings "Nghe thử")
+    "Chào con, hôm nay cô trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.",
 )
 _CO_GIAO_UPPER_RE = re.compile(r"(?<![^\W\d_])Cô giáo(?![^\W\d_])", re.UNICODE)
 _CO_GIAO_LOWER_RE = re.compile(r"(?<![^\W\d_])cô giáo(?![^\W\d_])", re.UNICODE)
@@ -203,6 +241,17 @@ ALLOWED_COACHING_PHRASES_ALL_RAW: tuple[str, ...] = (
 ALLOWED_COACHING_PHRASES: frozenset[str] = frozenset(
     canonical_tts_text(phrase) for phrase in ALLOWED_COACHING_PHRASES_ALL_RAW
 )
+TIMED_COACHING_PHRASES_ALL_RAW: tuple[str, ...] = tuple(
+    dict.fromkeys(
+        adapted
+        for phrase in TIMED_COACHING_PHRASES_RAW
+        for adapted in (phrase, adapt_coaching_phrase_for_male_persona(phrase))
+        if adapted
+    )
+)
+TIMED_COACHING_PHRASES: frozenset[str] = frozenset(
+    canonical_tts_text(phrase) for phrase in TIMED_COACHING_PHRASES_ALL_RAW
+)
 
 
 def extract_phonics_step_texts(normalized_text: str) -> list[str] | None:
@@ -221,7 +270,7 @@ def extract_phonics_step_texts(normalized_text: str) -> list[str] | None:
         if not isinstance(item, dict):
             return None
         spoken = canonical_tts_text(str(item.get("spoken_text") or ""))
-        if not spoken or len(spoken) > 40:
+        if not spoken or len(spoken) > 48:
             return None
         lowered = spoken.lower()
         if "http://" in lowered or "https://" in lowered or "<" in spoken or ">" in spoken:
@@ -243,8 +292,9 @@ def is_coaching_text_allowlisted(normalized_text: str | None) -> bool:
         return True
     phonics_texts = extract_phonics_step_texts(canonical)
     if phonics_texts is not None:
+        # Accommodates Vietnamese compound rhymes (e.g. "u, y, ê, tờ, uyết." = 5 tokens, 18 chars).
         return len(phonics_texts) <= 8 and all(
-            len(step) <= 24 and len(step.split()) <= 3 for step in phonics_texts
+            len(step) <= 36 and len(step.split()) <= 6 for step in phonics_texts
         )
     return False
 
@@ -903,7 +953,11 @@ class TtsAudioCacheService:
             folded: str | None = None
             folded_sha256: str | None = None
             page_fallback_entry = None
-            if entry is None and target.scope == "CATALOG":
+            if (
+                entry is None
+                and target.scope == "CATALOG"
+                and not normalized_text.startswith("phonics:")
+            ):
                 folded = folded_catalog_tts_text(normalized_text)
                 if folded and folded != canonical_tts_text(normalized_text):
                     folded_sha256 = canonical_tts_sha256(folded)
@@ -965,6 +1019,24 @@ class TtsAudioCacheService:
                         )
                 if entry is None and page_fallback_entry is not None:
                     entry = page_fallback_entry
+            if (
+                entry is None
+                and target.scope == "CATALOG"
+                and normalized_text.startswith("phonics:")
+            ):
+                # Shared public phonics clips are deduplicated in COACHING scope
+                # (used by ReadingScreen and DifficultWordPracticePanel); allow
+                # CATALOG-scoped phonics requests to read them too (never PRIVATE).
+                coaching_phonics_kwargs = {
+                    **lookup_kwargs,
+                    "scope": "COACHING",
+                    "owner_parent_id": None,
+                }
+                entry = await self.repo.get_active_entry(**coaching_phonics_kwargs)
+                if entry is None and allow_speed_fallback:
+                    nearest_fn = getattr(self.repo, "get_nearest_active_entry", None)
+                    if callable(nearest_fn):
+                        entry = await nearest_fn(**coaching_phonics_kwargs)
             if entry is None:
                 await self.repo.record_miss()
                 await self.db.commit()
