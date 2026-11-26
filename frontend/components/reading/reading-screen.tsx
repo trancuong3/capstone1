@@ -25,6 +25,7 @@ import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import {
   detectBrowserWasmSttSupport,
   getBrowserWasmSttClient,
+  getWasmModelCacheStatus,
 } from "@/lib/reading/browser-wasm-stt";
 import {
   isInjectedTestSpeechRecognition,
@@ -45,6 +46,7 @@ import {
 import {
   getActiveSessionVoiceLock,
   getEffectiveTeacherPersona,
+  getSessionVoiceAudit,
   getVoicePolicyPreferences,
   lockSessionVoice,
   setActiveVoiceSession,
@@ -54,6 +56,7 @@ import {
   fetchVoiceEngineHealth,
   getFreshVoiceEngineHealth,
   getVoiceEngineStatus,
+  isHostedLocalVoiceUnconfigured,
   mapLocalVoiceToGoogleBackup,
   recordSttEngineUsage,
   recordTtsEngineUsage,
@@ -95,6 +98,7 @@ import {
 import {
   hasUsableTranscript,
   hasUsableBrowserConfidence,
+  hasUsableChildWindowBrowserConfidence,
   hasUsablePhonicsBrowserConfidence,
   isConfidentExactBrowserRead,
   isConfidentPhonicsBrowserRead,
@@ -684,6 +688,10 @@ function ReadingSessionScreen({
   );
 
   async function handleWordClick(word: ReadingPageWordDTO): Promise<void> {
+    if (uiStateRef.current === "tts-error") {
+      setUiState("reading");
+    }
+    setPreviewSnapshot(null);
     setCurrentWordId(word.word_id);
 
     if (speechPlayer.isPlaying) {
@@ -757,9 +765,6 @@ function ReadingSessionScreen({
     if (isAndroidNativeSpeechAvailable()) {
       void getAndroidSpeechCapabilities().catch(() => null);
     }
-    if (!getFreshVoiceEngineHealth()) {
-      void fetchVoiceEngineHealth().catch(() => null);
-    }
     const cleanupMicrophoneOnLeave = () => {
       listeningGenerationRef.current += 1;
       isListeningActiveRef.current = false;
@@ -811,6 +816,7 @@ function ReadingSessionScreen({
   useEffect(() => {
     let cancelled = false;
     let controller: AbortController | null = null;
+    let hostedLocalUnconfigured = false;
 
     const probeVoiceStatus = () => {
       controller?.abort();
@@ -818,6 +824,7 @@ function ReadingSessionScreen({
       const signal = controller.signal;
       void fetchVoiceEngineHealth(signal).then((health) => {
         if (cancelled || signal.aborted || !health) return;
+        hostedLocalUnconfigured = isHostedLocalVoiceUnconfigured(health);
         const policy = getVoicePolicyPreferences();
         const sttAllowsFallback =
           policy.providerMode === "local_with_google_fallback" &&
@@ -828,7 +835,9 @@ function ReadingSessionScreen({
         const localSttDown = !health.local.available || !health.local.stt_ready;
         const localTtsDown = !health.local.available || !health.local.tts_ready;
 
-        const currentSttTier = getVoiceEngineStatus().stt.tier;
+        const currentStatus = getVoiceEngineStatus();
+        const currentSttTier = currentStatus.stt.tier;
+        const currentTtsSnap = currentStatus.tts;
         const wasmSupported = detectBrowserWasmSttSupport().supported;
         if (localSttDown) {
           if (currentSttTier === "browser_wasm" && wasmSupported) {
@@ -836,15 +845,38 @@ function ReadingSessionScreen({
           } else if (sttAllowsFallback) {
             const useGoogleStt =
               health.google.stt_configured && !health.google.stt_cooldown;
+            const hasNativeWebSpeech =
+              typeof window !== "undefined" &&
+              Boolean(
+                (window as unknown as { SpeechRecognition?: unknown })
+                  .SpeechRecognition ||
+                  (window as unknown as { webkitSpeechRecognition?: unknown })
+                    .webkitSpeechRecognition,
+              );
             recordSttEngineUsage({
               provider: useGoogleStt
                 ? "google"
-                : wasmSupported
-                  ? "wasm"
-                  : "browser",
+                : hasNativeWebSpeech
+                  ? "browser"
+                  : wasmSupported
+                    ? "wasm"
+                    : "browser",
               fallbackUsed: true,
               fallbackReason: "LOCAL_STT_UNAVAILABLE",
             });
+          }
+          // When hosted deployment has no local voice worker configured, quietly
+          // pre-warm Browser WASM ONLY if model files are already cached in IndexedDB.
+          if (hostedLocalUnconfigured && wasmSupported && !sttAllowsFallback) {
+            void getWasmModelCacheStatus()
+              .then((cacheStatus) => {
+                if (!cancelled && cacheStatus.cached) {
+                  void getBrowserWasmSttClient()
+                    .ensureReady()
+                    .catch(() => undefined);
+                }
+              })
+              .catch(() => undefined);
           }
           // Under `local_only` when STT has not started yet, keep the idle mount
           // badge honestly at `"idle"`; Tier-1 `browser_wasm` activates lazily
@@ -857,6 +889,10 @@ function ReadingSessionScreen({
           });
         }
 
+        const ttsUsingCachedAudio =
+          currentTtsSnap.tier === "catalog_cache" ||
+          currentTtsSnap.provider === "precomputed_cache";
+
         if (ttsAllowsFallback && localTtsDown) {
           const useGoogleTts =
             health.google.tts_configured && !health.google.tts_cooldown;
@@ -866,25 +902,42 @@ function ReadingSessionScreen({
               activeLock?.voiceId ?? null,
               activeLock?.region ?? policy.region,
             );
-            recordTtsEngineUsage({
-              provider: "google",
-              fallbackUsed: true,
-              fallbackReason: "LOCAL_TTS_UNAVAILABLE",
-              voiceId: googleVoiceId,
-              voiceGender: resolveVoiceGender(googleVoiceId),
-            });
-          } else {
+            // Before any utterance is spoken in this session, align the session
+            // lock directly to the configured Google voice so every turn stays
+            // consistent ("Một buổi, một giọng") without hitting 503 on local_*.
+            if (
+              activeLock &&
+              activeLock.provider === "local" &&
+              getSessionVoiceAudit(sessionId).length === 0
+            ) {
+              lockSessionVoice(sessionId, {
+                voiceId: googleVoiceId,
+                forceUpdate: true,
+              });
+            }
+            if (!ttsUsingCachedAudio) {
+              recordTtsEngineUsage({
+                provider: "google",
+                fallbackUsed: true,
+                fallbackReason: "LOCAL_TTS_UNAVAILABLE",
+                voiceId: googleVoiceId,
+                voiceGender: resolveVoiceGender(googleVoiceId),
+              });
+            }
+          } else if (!activeLock && !ttsUsingCachedAudio) {
+            // Only advertise browser TTS fallback when no SessionVoiceLock forbids it.
             recordTtsEngineUsage({
               provider: "browser",
               fallbackUsed: true,
               fallbackReason: "LOCAL_TTS_UNAVAILABLE",
-              voiceId: activeLock?.voiceId ?? null,
-              voiceGender: resolveVoiceGender(activeLock?.voiceId),
+              voiceId: null,
+              voiceGender: resolveVoiceGender(null),
             });
           }
         } else if (
-          !localTtsDown ||
-          (!ttsAllowsFallback && getVoiceEngineStatus().tts.fallbackUsed)
+          !ttsUsingCachedAudio &&
+          (!localTtsDown ||
+            (!ttsAllowsFallback && currentTtsSnap.fallbackUsed))
         ) {
           const activeLock = getActiveSessionVoiceLock();
           recordTtsEngineUsage({
@@ -905,6 +958,11 @@ function ReadingSessionScreen({
     const recoveryTimer =
       typeof window !== "undefined"
         ? window.setInterval(() => {
+            if (hostedLocalUnconfigured) {
+              // On hosted Vercel (`LOCAL_VOICE_UNCONFIGURED`), local worker will
+              // never spontaneously appear — never poll/clobber badges every 45s.
+              return;
+            }
             const status = getVoiceEngineStatus();
             if (status.stt.fallbackUsed || status.tts.fallbackUsed) {
               probeVoiceStatus();
@@ -2039,6 +2097,8 @@ function ReadingSessionScreen({
       | (ReadingPageDTO & {
           readonly tts_audio_url?: string | null;
           readonly tts_word_timings?: readonly WordTiming[] | null;
+          readonly tts_voice_id?: string | null;
+          readonly tts_cached_speed?: number | null;
         })
       | null;
     const isPrivateBook = Boolean(
@@ -2054,6 +2114,16 @@ function ReadingSessionScreen({
       : (options.precomputedWordTimings ??
         pageAudioMeta?.tts_word_timings ??
         undefined);
+    const precomputedVoiceId = isPrivateBook
+      ? undefined
+      : (options.precomputedVoiceId ??
+        pageAudioMeta?.tts_voice_id ??
+        undefined);
+    const precomputedCachedSpeed = isPrivateBook
+      ? undefined
+      : (options.precomputedCachedSpeed ??
+        pageAudioMeta?.tts_cached_speed ??
+        undefined);
     const resolvedFallbackScope = isPrivateBook
       ? "PRIVATE"
       : (options.cacheScope ?? "CATALOG");
@@ -2065,19 +2135,56 @@ function ReadingSessionScreen({
       ...(precomputedTimings
         ? { precomputedWordTimings: precomputedTimings }
         : {}),
+      ...(precomputedVoiceId ? { precomputedVoiceId } : {}),
+      ...(precomputedCachedSpeed !== undefined &&
+      precomputedCachedSpeed !== null
+        ? { precomputedCachedSpeed }
+        : {}),
     };
     const id = `assistant-${(assistantPlaybackSeqRef.current += 1)}`;
     echoGuard.playbackStarted(id, sampleText, performance.now());
+    let fallbackLastWordIndex = -1;
     return speechPlayer
       .playWithWordTimings(words, mergedOptions, () =>
         speechPlayer.play(sampleText, {
           ...(precomputedUrl ? { precomputedAudioUrl: precomputedUrl } : {}),
+          ...(precomputedVoiceId ? { precomputedVoiceId } : {}),
+          ...(precomputedCachedSpeed !== undefined &&
+          precomputedCachedSpeed !== null
+            ? { precomputedCachedSpeed }
+            : {}),
           bookId: options.bookId,
           pageId: options.pageId,
           pageRevisionId: options.pageRevisionId,
           isPrivateBook,
           cacheScope: resolvedFallbackScope,
-          onPlay: () => options.onPlay?.(),
+          onPlay: () => {
+            fallbackLastWordIndex = 0;
+            options.onPlay?.();
+          },
+          onTimeUpdate: options.onWordChange
+            ? (currentTime, duration) => {
+                if (
+                  !words.length ||
+                  !Number.isFinite(duration) ||
+                  duration <= 0
+                ) {
+                  return;
+                }
+                const ratio = Math.max(
+                  0,
+                  Math.min(0.9999, currentTime / duration),
+                );
+                const idx = Math.min(
+                  words.length - 1,
+                  Math.floor(ratio * words.length),
+                );
+                if (idx !== fallbackLastWordIndex) {
+                  fallbackLastWordIndex = idx;
+                  options.onWordChange?.(idx);
+                }
+              }
+            : undefined,
           onEnded: options.onEnded,
         }),
       )
@@ -2676,7 +2783,26 @@ function ReadingSessionScreen({
                 ) {
                   return false;
                 }
-                if (!usable && !isPhonicsCueUsable(part, confidence)) {
+                if (
+                  !usable &&
+                  !isPhonicsCueUsable(part, confidence) &&
+                  !hasUsableChildWindowBrowserConfidence(
+                    part,
+                    (() => {
+                      const activePage = pageRef.current ?? capturePage;
+                      if (!activePage) return [];
+                      const curId = engine.getSnapshot().currentWordId;
+                      const curIdx = activePage.words.findIndex(
+                        (w) => w.word_id === curId,
+                      );
+                      const startIdx = Math.max(0, curIdx >= 0 ? curIdx - 1 : 0);
+                      return activePage.words
+                        .slice(startIdx, startIdx + 6)
+                        .map((w) => w.text);
+                    })(),
+                    confidence,
+                  )
+                ) {
                   markCaptureUncertain(engine, capturePage);
                   rt.dispatch({ type: "UNSURE_POSITION", runId: activeRunId });
                   return false;
@@ -2713,6 +2839,7 @@ function ReadingSessionScreen({
                     text: part,
                     receivedAt: performance.now(),
                     onsetAt: meta?.onsetAt ?? null,
+                    audioEndedAt: meta?.audioEndedAt ?? null,
                   }).accept
                 ) {
                   return false;
@@ -3096,6 +3223,7 @@ function ReadingSessionScreen({
                   text: rawInterim,
                   receivedAt: performance.now(),
                   onsetAt: result.onsetAt ?? null,
+                  audioEndedAt: result.audioEndedAt ?? null,
                 }).accept
               ) {
                 continue;
@@ -3104,7 +3232,23 @@ function ReadingSessionScreen({
               const part =
                 rawInterim &&
                 (hasUsableBrowserConfidence(conf) ||
-                  isPhonicsCueUsable(rawInterim, conf))
+                  isPhonicsCueUsable(rawInterim, conf) ||
+                  hasUsableChildWindowBrowserConfidence(
+                    rawInterim,
+                    (() => {
+                      const activePage = pageRef.current ?? capturePage;
+                      if (!activePage) return [];
+                      const curId = engine.getSnapshot().currentWordId;
+                      const curIdx = activePage.words.findIndex(
+                        (w) => w.word_id === curId,
+                      );
+                      const startIdx = Math.max(0, curIdx >= 0 ? curIdx - 1 : 0);
+                      return activePage.words
+                        .slice(startIdx, startIdx + 6)
+                        .map((w) => w.text);
+                    })(),
+                    conf,
+                  ))
                   ? rawInterim
                   : "";
 
@@ -3120,6 +3264,9 @@ function ReadingSessionScreen({
               applyPreviewSnapshot(preview);
             } else {
               setPreviewSnapshot(null);
+              if (alignmentEngineRef.current === engine) {
+                setCurrentWordId(engine.getSnapshot().currentWordId);
+              }
             }
 
             // 3b. Giao cho ReadingAutomationRuntime theo dõi lỗi chưa tự sửa (G27):
@@ -3467,6 +3614,7 @@ function ReadingSessionScreen({
       finishAlignment?: boolean;
       preserveAlignment?: boolean;
       forPassageHelp?: boolean;
+      skipBlockingUpload?: boolean;
     } = {},
   ): Promise<string> {
     if (listeningStopRef.current) return listeningStopRef.current;
@@ -3483,11 +3631,26 @@ function ReadingSessionScreen({
     finishAlignment?: boolean;
     preserveAlignment?: boolean;
     forPassageHelp?: boolean;
+    skipBlockingUpload?: boolean;
   }): Promise<string> {
     // Snapshot the page before waiting for asynchronous recorder/provider work.
     const targetPage = pageRef.current ?? page;
     const targetEngine = alignmentEngineRef.current;
     isListeningActiveRef.current = false;
+    setPreviewSnapshot(null);
+
+    if (options.skipBlockingUpload) {
+      // Interactive TTS handoff (tap word / read sample / preview): stop mic &
+      // release tracks immediately without waiting 4-10s for an STT HTTP upload.
+      if (isUsingRecorderRef.current || speechRecorder.isRecording) {
+        speechRecorder.cancel({ retainStream: false });
+        isUsingRecorderRef.current = false;
+      }
+      await stopBrowserRecognition();
+      recordingStartedAtRef.current = null;
+      return browserTranscriptCollectorRef.current.getTranscript().trim();
+    }
+
     await stopBrowserRecognition();
 
     let recording: Blob | null = null;
@@ -3659,6 +3822,7 @@ function ReadingSessionScreen({
     listeningGenerationRef.current += 1;
     const generation = ++assistantAudioGenerationRef.current;
     setCountdown(null);
+    setPreviewSnapshot(null);
     let playbackFailed = false;
     let playAborted = false;
     try {
@@ -3686,6 +3850,7 @@ function ReadingSessionScreen({
             finishAlignment: false,
             preserveAlignment: !alignBeforePassageHelp,
             forPassageHelp: alignBeforePassageHelp,
+            skipBlockingUpload: !alignBeforePassageHelp,
           });
         } catch {
           speechRecorder.cancel({ retainStream: false });
@@ -3809,6 +3974,7 @@ function ReadingSessionScreen({
           pageRevisionId: null,
           isPrivateBook: false,
           cacheScope: "COACHING",
+          bypassSessionLock: true,
         });
       } finally {
         echoGuard.playbackEnded(id, performance.now());
@@ -3902,6 +4068,10 @@ function ReadingSessionScreen({
     const words = page.words;
     if (!words.length) return;
 
+    if (uiStateRef.current === "tts-error") {
+      setUiState("reading");
+    }
+    setPreviewSnapshot(null);
     setIsBusy(true);
     setIsReadingWord(false);
     setIsPlayingPageSample(true);
@@ -5912,8 +6082,12 @@ function ReadingSessionScreen({
         const text = result[0]?.transcript?.trim() ?? "";
         const conf = result[0]?.confidence;
         const usableNormal = hasUsableBrowserConfidence(conf);
+        const usableChildWord =
+          !usableNormal &&
+          hasUsableChildWindowBrowserConfidence(text, [candidate.text], conf);
         const usablePhonics =
           !usableNormal &&
+          !usableChildWord &&
           hasUsablePhonicsBrowserConfidence(conf) &&
           isLikelyPhonicsCueForWord(
             text,
@@ -5921,19 +6095,29 @@ function ReadingSessionScreen({
             retryBrowserCollectorRef.current,
           );
 
-        if (!text || (!usableNormal && !usablePhonics)) continue;
+        if (!text || (!usableNormal && !usableChildWord && !usablePhonics)) {
+          continue;
+        }
 
         const rawOnsetAt = (result as { readonly onsetAt?: number | null })
           .onsetAt;
+        const rawAudioEndedAt = (
+          result as { readonly audioEndedAt?: number | null }
+        ).audioEndedAt;
         const normalizedOnsetAt =
           typeof rawOnsetAt === "number" && Number.isFinite(rawOnsetAt)
             ? rawOnsetAt
+            : null;
+        const normalizedAudioEndedAt =
+          typeof rawAudioEndedAt === "number" && Number.isFinite(rawAudioEndedAt)
+            ? rawAudioEndedAt
             : null;
         if (result.isFinal) {
           const echoVerdict = echoGuard.evaluate({
             text,
             receivedAt: performance.now(),
             onsetAt: normalizedOnsetAt,
+            audioEndedAt: normalizedAudioEndedAt,
           });
           // Always reject transcripts captured during active TTS or whose
           // acoustic onset began before playback + settle ended. When the
@@ -6795,6 +6979,7 @@ function ReadingSessionScreen({
                 text: spoken,
                 receivedAt: performance.now(),
                 onsetAt: meta?.onsetAt ?? null,
+                audioEndedAt: meta?.audioEndedAt ?? null,
               }).accept
             ) {
               continue;
@@ -6968,7 +7153,7 @@ function ReadingSessionScreen({
   );
 
   const readingTopBar = hasTopBarContent ? (
-    <div className="flex flex-col gap-1 border-b border-border/80 pb-1.5">
+    <div className="relative flex flex-col gap-1 border-b border-border/80 pb-1.5">
       {pageProgress ? (
         <div className="flex flex-wrap items-center gap-1 sm:gap-2.5">
           <div className="flex min-w-0 flex-nowrap items-center gap-1 sm:gap-1.5">
@@ -6977,7 +7162,7 @@ function ReadingSessionScreen({
               className="h-11! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! sm:gap-2! sm:px-2.5! sm:text-sm!"
               disabled={
                 (isBusy && !speechPlayer.isPlaying) ||
-                uiState !== "reading" ||
+                (uiState !== "reading" && uiState !== "tts-error") ||
                 pageProgress.current_index <= 0
               }
               onClick={() =>
@@ -6999,7 +7184,7 @@ function ReadingSessionScreen({
               className="h-11! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! sm:gap-2! sm:px-2.5! sm:text-sm!"
               disabled={
                 (isBusy && !speechPlayer.isPlaying) ||
-                uiState !== "reading" ||
+                (uiState !== "reading" && uiState !== "tts-error") ||
                 pageProgress.current_index >= pageProgress.total_pages - 1
               }
               onClick={() =>
@@ -7078,25 +7263,35 @@ function ReadingSessionScreen({
           </div>
         </div>
       ) : null}
-      {pageNavigationError && pickerIndex === null ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <StatusMessage tone="info">{pageNavigationError}</StatusMessage>
-          {retryMode ? (
-            <Button
-              className="h-11! w-auto! px-3! py-1! text-sm!"
-              disabled={isBusy}
-              onClick={() => void beginRetryWord(retryPositionRef.current)}
-              variant="secondary"
-            >
-              {t("session.retryOpenPage")}
-            </Button>
+      {(pageNavigationError && pickerIndex === null) ||
+      speechPlayer.fallbackNotice ? (
+        <div
+          data-topbar-notice-overlay="true"
+          className="pointer-events-none absolute inset-x-0 top-full z-20 mt-1 flex flex-col gap-1"
+        >
+          {pageNavigationError && pickerIndex === null ? (
+            <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-control bg-white/95 shadow-sm backdrop-blur-xs">
+              <StatusMessage tone="info">{pageNavigationError}</StatusMessage>
+              {retryMode ? (
+                <Button
+                  className="h-11! w-auto! px-3! py-1! text-sm!"
+                  disabled={isBusy}
+                  onClick={() => void beginRetryWord(retryPositionRef.current)}
+                  variant="secondary"
+                >
+                  {t("session.retryOpenPage")}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+          {speechPlayer.fallbackNotice ? (
+            <div className="pointer-events-auto rounded-control bg-white/95 shadow-sm backdrop-blur-xs">
+              <StatusMessage tone="warning">
+                {speechPlayer.fallbackNotice}
+              </StatusMessage>
+            </div>
           ) : null}
         </div>
-      ) : null}
-      {speechPlayer.fallbackNotice ? (
-        <StatusMessage tone="warning">
-          {speechPlayer.fallbackNotice}
-        </StatusMessage>
       ) : null}
       {pageProgress &&
       pageProgress.current_index === pageProgress.total_pages - 1 ? (
@@ -7129,7 +7324,7 @@ function ReadingSessionScreen({
         bookTitle={book.title}
         previewSnapshot={previewSnapshot}
         controlsDisabled={
-          uiState !== "reading" ||
+          (uiState !== "reading" && uiState !== "tts-error") ||
           (isBusy && !speechPlayer.isPlaying) ||
           (retryMode && pageNavigationError !== null) ||
           (retryMode &&
@@ -7577,5 +7772,4 @@ function ReadingSessionScreen({
 
 function getDurationMinutes(durationMs: number | null): number | null {
   if (durationMs === null) return null;
-  return Math.ceil(Math.max(0, durationMs) / 60000);
-}
+  return Math.ceil(Math.ma

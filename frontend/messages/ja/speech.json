@@ -79,7 +79,9 @@
       "american": "アメリカ英語アクセント",
       "british": "イギリス英語アクセント"
     },
-    "googleProviderLabel": "Googleフォールバック"
+    "googleProviderLabel": "Googleフォールバック",
+    "sessionLockedBadge": "この読書セッションで固定中",
+    "offlineBrowserBadge": "ブラウザはオフラインです"
   },
   "engineBadge": {
     "ariaLabel": "音声ソース: STT {stt}, TTS {tts}",
@@ -96,8 +98,10 @@
       "catalog_cache": "標準キャッシュ",
       "android_native": "Android (vi-VN)",
       "google_cloud": "オンライン (Google API)",
-      "browser_default": "オンライン (Google/ブラウザ)"
-    }
+      "browser_default": "オンライン (Google/ブラウザ)",
+      "idle": "確認中…"
+    },
+    "idleDetail": "{base} (音声エンジンの状態を確認中)"
   },
   "playback": {
     "unavailable": "デバイス上の音声が準備できていません。画面のテキストを確認し、「再試行」をタップしてください。",

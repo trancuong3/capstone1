@@ -99,6 +99,10 @@ export interface SpeechPlayOptions {
   utteranceKind?: string;
   /** Verified public-catalog precomputed MP3 URL (never used for private books). */
   precomputedAudioUrl?: string | null;
+  precomputedVoiceId?: string | null;
+  precomputedCachedSpeed?: number | null;
+  /** Preview mode: omit active session lock so voice preview never triggers 409. */
+  bypassSessionLock?: boolean;
   bookId?: string | null;
   pageId?: string | null;
   pageRevisionId?: string | null;
@@ -117,6 +121,10 @@ export interface WordTimedPlayOptions {
   precomputedAudioUrl?: string | null;
   /** Optional word timings sidecar for precomputed verified-catalog audio. */
   precomputedWordTimings?: readonly WordTiming[] | null;
+  precomputedVoiceId?: string | null;
+  precomputedCachedSpeed?: number | null;
+  /** Preview mode: omit active session lock so voice preview never triggers 409. */
+  bypassSessionLock?: boolean;
   bookId?: string | null;
   pageId?: string | null;
   pageRevisionId?: string | null;
@@ -130,6 +138,7 @@ export interface WordTimedPlayOptions {
 
 export interface PhonicsPlayOptions {
   speedScale?: number;
+  bypassSessionLock?: boolean;
   bookId?: string | null;
   pageId?: string | null;
   pageRevisionId?: string | null;
@@ -150,6 +159,7 @@ export interface TtsPlaybackCacheContext {
 
 interface ResolvedOperationVoice {
   readonly sessionId: string | null;
+  readonly bypassSessionLock?: boolean;
   readonly provider: VoiceProviderKind;
   readonly requestedVoiceId: string | null;
   readonly cacheVoiceId: string;
@@ -260,11 +270,10 @@ function canUseAllowedDeviceFallbackTts(
 ): boolean {
   // Enforce SessionVoiceLock ("Một buổi, một giọng"):
   // never silently jump to OS/Android/browser voice mid-session.
-  const sessionId =
-    voiceOrOp && "voice" in voiceOrOp
-      ? voiceOrOp.voice.sessionId
-      : voiceOrOp?.sessionId;
-  const isSessionLocked = Boolean(sessionId ?? getActiveSessionVoiceLock());
+  const voice = voiceOrOp && "voice" in voiceOrOp ? voiceOrOp.voice : voiceOrOp;
+  const isSessionLocked = voice?.bypassSessionLock
+    ? false
+    : Boolean(voice?.sessionId ?? getActiveSessionVoiceLock());
   if (isSessionLocked) {
     return false;
   }
@@ -525,8 +534,9 @@ function findWordIndexForCharOffset(
 function resolveOperationVoice(
   speedLimit = Infinity,
   speedScale = 1,
+  bypassSessionLock = false,
 ): ResolvedOperationVoice {
-  const activeLock = getActiveSessionVoiceLock();
+  const activeLock = bypassSessionLock ? null : getActiveSessionVoiceLock();
   const prefs = getSpeechPreferences();
   const policy = getVoicePolicyPreferences();
 
@@ -538,6 +548,7 @@ function resolveOperationVoice(
   if (activeLock) {
     return {
       sessionId: activeLock.sessionId,
+      bypassSessionLock: false,
       provider: activeLock.provider,
       requestedVoiceId: activeLock.voiceId,
       cacheVoiceId: activeLock.voiceId,
@@ -561,6 +572,7 @@ function resolveOperationVoice(
 
   return {
     sessionId: null,
+    bypassSessionLock,
     provider,
     requestedVoiceId,
     cacheVoiceId,
@@ -864,11 +876,12 @@ export class TtsPlayback {
     action: (operation: Operation) => Promise<void>,
     speedLimit = Infinity,
     speedScale = 1,
+    bypassSessionLock = false,
   ): Promise<void> {
     this.stop();
     const operation: Operation = {
       controller: new AbortController(),
-      voice: resolveOperationVoice(speedLimit, speedScale),
+      voice: resolveOperationVoice(speedLimit, speedScale, bypassSessionLock),
       paused: false,
       started: false,
     };
@@ -1373,6 +1386,7 @@ export class TtsPlayback {
     operation: Operation,
     options: {
       readonly precomputedAudioUrl?: string | null;
+      readonly precomputedVoiceId?: string | null;
       readonly isPrivateBook?: boolean;
     },
     requireWordTimings = false,
@@ -1381,9 +1395,10 @@ export class TtsPlayback {
     if (options.isPrivateBook || this.defaultCacheContext?.isPrivateBook) {
       return false;
     }
+    const expectedVoiceId = options.precomputedVoiceId?.trim() || DEFAULT_LOCAL_VOICE_ID;
     if (
       operation.voice.provider !== "local" ||
-      operation.voice.cacheVoiceId !== DEFAULT_LOCAL_VOICE_ID
+      operation.voice.cacheVoiceId !== expectedVoiceId
     ) {
       return false;
     }
@@ -1608,7 +1623,8 @@ export class TtsPlayback {
             try {
               const precomputedPlaybackRate = computeEffectivePlaybackRate(
                 operation.voice.speed,
-                inferPrecomputedCatalogUrlSpeed(options.precomputedAudioUrl),
+                options.precomputedCachedSpeed ??
+                  inferPrecomputedCatalogUrlSpeed(options.precomputedAudioUrl),
               );
               await this.playAudio(
                 operation,
@@ -1725,6 +1741,9 @@ export class TtsPlayback {
                 speed: operation.voice.speed,
                 wordSample: Boolean(options.wordSample),
                 ...(audioFormat ? { audioFormat } : {}),
+                ...(operation.voice.bypassSessionLock
+                  ? { bypassSessionLock: true }
+                  : {}),
                 ...cacheMeta,
                 signal: operation.controller.signal,
               }),
@@ -1744,6 +1763,9 @@ export class TtsPlayback {
                   speed: operation.voice.speed,
                   wordSample: Boolean(options.wordSample),
                   ...(audioFormat ? { audioFormat } : {}),
+                  ...(operation.voice.bypassSessionLock
+                    ? { bypassSessionLock: true }
+                    : {}),
                   ...cacheMeta,
                   signal: operation.controller.signal,
                 }),
@@ -1965,6 +1987,7 @@ export class TtsPlayback {
       },
       Infinity,
       options.speedScale,
+      Boolean(options.bypassSessionLock),
     );
 
   playPhonicsLesson = (
@@ -2141,15 +2164,18 @@ export class TtsPlayback {
               }
             };
 
-            const fetchedBlobs: {
-              readonly audio: Blob;
-              readonly cachedSpeed: number | null;
-              readonly key: string;
-            }[] = [];
-            for (const word of wordList) {
-              const item = await fetchSingleWord(word);
-              if (item) fetchedBlobs.push(item);
-            }
+            const parallelResults = await Promise.all(
+              wordList.map((word) => fetchSingleWord(word)),
+            );
+            const fetchedBlobs = parallelResults.filter(
+              (
+                item,
+              ): item is {
+                readonly audio: Blob;
+                readonly cachedSpeed: number | null;
+                readonly key: string;
+              } => item !== null,
+            );
             if (!fetchedBlobs.length && focusWord && wordList.length > 1) {
               const focusItem = await fetchSingleWord(focusWord);
               if (focusItem) fetchedBlobs.push(focusItem);
@@ -2521,6 +2547,7 @@ export class TtsPlayback {
       },
       Infinity,
       options.speedScale,
+      Boolean(options.bypassSessionLock),
     );
 
   playWithWordTimings = (
@@ -2575,7 +2602,8 @@ export class TtsPlayback {
           try {
             const precomputedPlaybackRate = computeEffectivePlaybackRate(
               operation.voice.speed,
-              inferPrecomputedCatalogUrlSpeed(options.precomputedAudioUrl),
+              options.precomputedCachedSpeed ??
+                inferPrecomputedCatalogUrlSpeed(options.precomputedAudioUrl),
             );
             await this.playAudio(
               operation,
@@ -2634,7 +2662,76 @@ export class TtsPlayback {
         operation,
         hasTimedCacheTarget,
       );
-      for (const chunk of splitSpeechText(text)) {
+      const chunks = splitSpeechText(text);
+      const timedCacheMeta = this.resolveCacheMeta(options, "CATALOG", true);
+      const makeTimedKeyForWords = (chunkWords: readonly string[]) =>
+        JSON.stringify([
+          operation.voice.provider,
+          operation.voice.cacheVoiceId,
+          operation.voice.modelVersion,
+          operation.voice.speed,
+          chunkWords,
+        ]);
+      const fetchTimedChunk = async (
+        chunkWords: readonly string[],
+        audioFormat?: TtsAudioFormat,
+      ): Promise<TimedSpeech> => {
+        const key = makeTimedKeyForWords(chunkWords);
+        if (audioFormat === undefined) {
+          const cached = this.cache.get(key);
+          if (cached) return cached;
+        }
+        let timed: TimedSpeech;
+        try {
+          timed = await this.wait(
+            operation,
+            this.studio.synthesizeTimed(chunkWords, {
+              voiceId: operation.voice.requestedVoiceId,
+              speed: operation.voice.speed,
+              ...(audioFormat ? { audioFormat } : {}),
+              ...(operation.voice.bypassSessionLock
+                ? { bypassSessionLock: true }
+                : {}),
+              ...timedCacheMeta,
+              signal: operation.controller.signal,
+            }),
+          );
+        } catch (synthError) {
+          this.ensure(operation);
+          if (isAbort(synthError)) throw synthError;
+          if (shouldRetryBackendWithGoogleTts(operation)) {
+            const googleVoiceId = mapLocalVoiceToGoogleBackup(
+              operation.voice.requestedVoiceId,
+              operation.voice.region,
+            );
+            timed = await this.wait(
+              operation,
+              this.studio.synthesizeTimed(chunkWords, {
+                voiceId: googleVoiceId,
+                speed: operation.voice.speed,
+                ...(audioFormat ? { audioFormat } : {}),
+                ...(operation.voice.bypassSessionLock
+                  ? { bypassSessionLock: true }
+                  : {}),
+                ...timedCacheMeta,
+                signal: operation.controller.signal,
+              }),
+            );
+            this.ensure(operation);
+            this.promoteOperationToGoogleVoice(operation, googleVoiceId);
+          } else {
+            throw synthError;
+          }
+        }
+        this.ensure(operation);
+        this.timedCooldownUntil = 0;
+        this.cacheTimed(makeTimedKeyForWords(chunkWords), timed);
+        return timed;
+      };
+
+      let nextTimedPrefetch: Promise<TimedSpeech> | null = null;
+      for (let idx = 0; idx < chunks.length; idx += 1) {
+        const chunk = chunks[idx];
         await this.waitIfPaused(operation);
         this.ensure(operation);
         const onStart = () =>
@@ -2658,20 +2755,13 @@ export class TtsPlayback {
           completedChunks += 1;
           continue;
         }
-        const makeTimedKey = () =>
-          JSON.stringify([
-            operation.voice.provider,
-            operation.voice.cacheVoiceId,
-            operation.voice.modelVersion,
-            operation.voice.speed,
-            chunk.words,
-          ]);
-        const key = makeTimedKey();
+        const key = makeTimedKeyForWords(chunk.words);
         let synthesizedTimedOk = false;
         try {
           let timed = this.cache.get(key);
           if (!timed) {
             if (
+              !nextTimedPrefetch &&
               fallback &&
               !canUseGoogleTtsFallback() &&
               Date.now() < this.timedCooldownUntil
@@ -2679,47 +2769,10 @@ export class TtsPlayback {
               await fallback();
               return;
             }
-            const timedCacheMeta = this.resolveCacheMeta(
-              options,
-              "CATALOG",
-              false,
-            );
-            try {
-              timed = await this.wait(
-                operation,
-                this.studio.synthesizeTimed(chunk.words, {
-                  voiceId: operation.voice.requestedVoiceId,
-                  speed: operation.voice.speed,
-                  ...timedCacheMeta,
-                  signal: operation.controller.signal,
-                }),
-              );
-            } catch (synthError) {
-              this.ensure(operation);
-              if (isAbort(synthError)) throw synthError;
-              if (shouldRetryBackendWithGoogleTts(operation)) {
-                const googleVoiceId = mapLocalVoiceToGoogleBackup(
-                  operation.voice.requestedVoiceId,
-                  operation.voice.region,
-                );
-                timed = await this.wait(
-                  operation,
-                  this.studio.synthesizeTimed(chunk.words, {
-                    voiceId: googleVoiceId,
-                    speed: operation.voice.speed,
-                    ...timedCacheMeta,
-                    signal: operation.controller.signal,
-                  }),
-                );
-                this.ensure(operation);
-                this.promoteOperationToGoogleVoice(operation, googleVoiceId);
-              } else {
-                throw synthError;
-              }
-            }
-            this.ensure(operation);
-            this.timedCooldownUntil = 0;
-            this.cacheTimed(makeTimedKey(), timed);
+            timed = await (nextTimedPrefetch ?? fetchTimedChunk(chunk.words));
+            nextTimedPrefetch = null;
+          } else {
+            nextTimedPrefetch = null;
           }
           synthesizedTimedOk = true;
           const timedMeta = getSynthesizedAudioMeta(timed.audio);
@@ -2733,6 +2786,14 @@ export class TtsPlayback {
             modelVersion:
               timedMeta?.modelVersion ?? operation.voice.modelVersion,
           });
+          // Prefetch next timed chunk while current chunk plays to eliminate inter-chunk stalls!
+          if (idx + 1 < chunks.length) {
+            const upcomingWords = chunks[idx + 1].words;
+            if (!this.cache.has(makeTimedKeyForWords(upcomingWords))) {
+              nextTimedPrefetch = fetchTimedChunk(upcomingWords);
+              nextTimedPrefetch.catch(() => undefined);
+            }
+          }
           this.setFallbackNotice(
             timed.usedFallbackVoice ? getServerFallbackVoiceNotice() : null,
           );
@@ -2766,21 +2827,7 @@ export class TtsPlayback {
                 );
                 this.cache.delete(key);
               }
-              const wavTimedCacheMeta = this.resolveCacheMeta(
-                options,
-                "CATALOG",
-                false,
-              );
-              const wavTimed = await this.wait(
-                operation,
-                this.studio.synthesizeTimed(chunk.words, {
-                  voiceId: operation.voice.requestedVoiceId,
-                  speed: operation.voice.speed,
-                  audioFormat: "wav",
-                  ...wavTimedCacheMeta,
-                  signal: operation.controller.signal,
-                }),
-              );
+              const wavTimed = await fetchTimedChunk(chunk.words, "wav");
               this.ensure(operation);
               if (
                 wavTimed.audio.type.trim().length > 0 &&
@@ -2788,7 +2835,6 @@ export class TtsPlayback {
               ) {
                 throw unavailable();
               }
-              this.cacheTimed(makeTimedKey(), wavTimed);
               const wavTimedPlaybackRate = computeEffectivePlaybackRate(
                 operation.voice.speed,
                 wavTimed.cachedSpeed,
@@ -2808,6 +2854,7 @@ export class TtsPlayback {
             }
           }
         } catch (error) {
+          nextTimedPrefetch = null;
           this.ensure(operation);
           if (isAbort(error) || error instanceof PartialPlaybackError)
             throw error;
@@ -2821,9 +2868,23 @@ export class TtsPlayback {
             this.cacheBytes = Math.max(0, this.cacheBytes - invalid.audio.size);
             this.cache.delete(key);
           }
+          const isUnconfiguredLocalErr =
+            typeof error === "object" &&
+            error !== null &&
+            "providerCode" in error &&
+            (error as { providerCode?: string }).providerCode ===
+              "LOCAL_VOICE_UNCONFIGURED";
           // Prefer the same locked voice via the short endpoint before
-          // switching providers, and never replay already completed chunks.
-          if (!completedChunks && fallback) {
+          // switching providers, unless local worker is unconfigured with no cache/precomputed target.
+          if (
+            !completedChunks &&
+            fallback &&
+            !(
+              isUnconfiguredLocalErr &&
+              !options.precomputedAudioUrl &&
+              !hasTimedCacheTarget
+            )
+          ) {
             this.timedCooldownUntil = Date.now() + 15_000;
             await fallback();
             return;
@@ -2853,7 +2914,7 @@ export class TtsPlayback {
       }
       this.ensure(operation);
       options.onEnded?.();
-    });
+    }, Infinity, 1, Boolean(options.bypassSessionLock));
 
   private cacheShort(
     key: string,
@@ -3032,6 +3093,7 @@ export class TtsPlayback {
         );
       };
       const validate = () => {
+        if (validated) return;
         if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
         if (timeline && absolute && timeline.length > 0) {
           const maxEnd = timeline.reduce(
