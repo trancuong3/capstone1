@@ -22,7 +22,7 @@ export function BookPageThumbnail({
       aria-label={`Chọn trang ${page.page_number}`}
       aria-pressed={isSelected}
       className={cn(
-        "flex h-[200px] w-48 shrink-0 flex-col gap-3 rounded-card border bg-white p-4 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+        "flex h-[156px] w-36 shrink-0 flex-col gap-2 rounded-card border bg-white p-2.5 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary md:h-[200px] md:w-48 md:gap-3 md:p-4",
         isSelected
           ? "border-primary ring-2 ring-primary/20"
           : "border-border hover:border-primary",
@@ -30,7 +30,7 @@ export function BookPageThumbnail({
       onClick={() => onSelect(page)}
       type="button"
     >
-      <span className="relative h-[107px] w-40 overflow-hidden rounded-lg bg-cream shadow-sm">
+      <span className="relative h-[92px] w-full overflow-hidden rounded-lg bg-cream shadow-sm md:h-[107px] md:w-40">
         {isPrivateMedia ? (
           <AuthenticatedImage
             alt={`Ảnh xem trước trang ${page.page_number}`}
@@ -51,7 +51,7 @@ export function BookPageThumbnail({
           Trang sách đã được xác minh
         </span>
       </span>
-      <span className="text-body font-semibold text-ink">
+      <span className="text-sm font-semibold text-ink md:text-body">
         Trang {page.page_number}
       </span>
     </button>

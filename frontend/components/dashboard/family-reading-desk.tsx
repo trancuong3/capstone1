@@ -94,7 +94,7 @@ export function FamilyReadingDesk({
 
   return (
     <section
-      className="family-reading-desk order-2 md:order-1"
+      className="family-reading-desk order-2 min-[640px]:grid-cols-[minmax(0,1.25fr)_minmax(0,0.75fr)]! md:order-1 md:grid-cols-[minmax(0,1fr)_minmax(0,0.94fr)]!"
       aria-labelledby="desk-title"
     >
       <div className="desk-copy max-md:p-3.5!">
@@ -118,19 +118,28 @@ export function FamilyReadingDesk({
         </p>
         <div className="desk-actions max-md:mt-3!">
           {recent?.resumable ? (
-            <ButtonLink href={recent.href} className="desk-primary min-h-11">
+            <ButtonLink
+              href={recent.href}
+              className="desk-primary min-h-11!"
+              fullWidth={false}
+            >
               Đọc tiếp <ArrowRight aria-hidden="true" size={18} />
             </ButtonLink>
           ) : hasProfiles || isLoadingProfiles ? (
             <Button
               onClick={onChooseBook}
-              className="desk-primary min-h-11"
+              className="desk-primary min-h-11!"
+              fullWidth={false}
               disabled={isLoadingProfiles && !child}
             >
               Chọn sách <ArrowRight aria-hidden="true" size={18} />
             </Button>
           ) : (
-            <ButtonLink href="/children/new" className="desk-primary min-h-11">
+            <ButtonLink
+              href="/children/new"
+              className="desk-primary min-h-11!"
+              fullWidth={false}
+            >
               Tạo hồ sơ đầu tiên <ArrowRight aria-hidden="true" size={18} />
             </ButtonLink>
           )}
@@ -146,14 +155,14 @@ export function FamilyReadingDesk({
         </div>
         {recent && !recent.resumable ? (
           <Link
-            className="desk-recent inline-flex! min-h-11 items-center max-md:mt-1.5!"
+            className="desk-recent inline-flex! min-h-11 max-w-full items-center break-words max-md:mt-1.5!"
             href={recent.href}
           >
             Lần đọc gần nhất · {recent.title}
           </Link>
         ) : null}
       </div>
-      <div className="desk-illustration max-md:min-h-[84px]! max-md:max-h-[92px]!">
+      <div className="desk-illustration max-[640px]:min-h-[84px]! max-[640px]:max-h-[92px]! min-[640px]:max-md:row-auto! min-[640px]:max-md:min-h-[200px]! min-[640px]:max-md:max-h-none!">
         <Image
           alt=""
           src="/images/reading-studio.webp"

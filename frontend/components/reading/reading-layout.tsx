@@ -47,6 +47,8 @@ interface ReadingLayoutProps {
   onMarkPageCompleted?: () => void;
   canMarkPageCompleted?: boolean;
   mobileFallbackNotice?: string | null;
+  canInstallVietnameseTtsVoice?: boolean;
+  onOpenTtsInstallSettings?: () => Promise<boolean> | void;
   hasMobileTopBarAlert?: boolean;
   voiceEngineBadge?: ReactNode;
   audioLevel?: number;
@@ -137,6 +139,8 @@ export function ReadingLayout({
   onMarkPageCompleted,
   canMarkPageCompleted = false,
   mobileFallbackNotice,
+  canInstallVietnameseTtsVoice = false,
+  onOpenTtsInstallSettings,
   hasMobileTopBarAlert = false,
   voiceEngineBadge,
   bookTitle,
@@ -226,13 +230,13 @@ export function ReadingLayout({
   return (
     <section
       ref={rootSectionRef}
-      className="relative mx-auto flex min-h-0 w-full max-w-[1200px] flex-1 flex-col gap-1 px-1.5 pt-1 sm:gap-3 sm:px-6 sm:pt-3"
+      className="relative mx-auto flex min-h-0 w-full max-w-[1200px] flex-1 flex-col gap-1 px-1.5 pt-1 md:gap-3 md:px-6 md:pt-3"
     >
-      <header className="flex h-12 shrink-0 flex-nowrap items-center gap-1 sm:h-auto sm:gap-3">
+      <header className="flex h-12 shrink-0 flex-nowrap items-center gap-1 md:h-auto md:gap-3">
         <div className="flex shrink-0 items-center">
           <Link
             aria-label="Thoát khỏi buổi đọc"
-            className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-control px-2 text-xs font-semibold text-ink focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary hover:bg-sky sm:h-11 sm:min-h-11 sm:gap-2 sm:px-3 sm:text-label"
+            className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-control px-2 text-xs font-semibold text-ink focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary hover:bg-sky md:h-11 md:min-h-11 md:gap-2 md:px-3 md:text-label"
             href={exitHref}
             onClick={
               onExit
@@ -245,9 +249,9 @@ export function ReadingLayout({
           >
             <ArrowLeft
               aria-hidden="true"
-              className="size-5 shrink-0 sm:size-5"
+              className="size-5 shrink-0 md:size-5"
             />
-            <span className="hidden sm:inline">Quay lại</span>
+            <span className="hidden md:inline">Quay lại</span>
           </Link>
         </div>
 
@@ -258,38 +262,39 @@ export function ReadingLayout({
             aria-label="Mở danh sách trang"
             disabled={controlsDisabled}
             onClick={onChoosePage}
-            className="min-h-11 min-w-0 flex-1 truncate rounded-control px-1.5 text-left text-sm font-bold text-ink hover:bg-sky disabled:opacity-55 sm:hidden"
+            className="min-h-11 min-w-0 flex-1 truncate rounded-control px-1.5 text-left text-sm font-bold text-ink hover:bg-sky disabled:opacity-55 md:hidden"
           >
             {mobilePageHeading}
           </button>
         ) : (
-          <p className="min-w-0 flex-1 truncate px-1.5 text-sm font-bold text-ink sm:hidden">
+          <p className="min-w-0 flex-1 truncate px-1.5 text-sm font-bold text-ink md:hidden">
             {mobilePageHeading}
           </p>
         )}
 
         {/* Desktop child + progress summary */}
-        <div className="mr-auto hidden min-w-0 sm:block">
+        <div className="mr-auto hidden min-w-0 md:block">
           {child && (
-            <p className="truncate text-xs font-bold text-primary sm:text-sm">
+            <p className="truncate text-xs font-bold text-primary md:text-sm">
               {child.alias} · Lớp {child.grade}
             </p>
           )}
           {!topBar && progressLabel && (
-            <p className="truncate text-xs tabular-nums text-muted sm:text-sm">
+            <p className="truncate text-xs tabular-nums text-muted md:text-sm">
               {progressLabel}
             </p>
           )}
         </div>
 
         {/* Mobile & compact-landscape page image trigger + mobile options menu */}
-        {page.image_url ? (
+        {page.image_url ||
+        (page.illustration_url && page.illustration_text_free) ? (
           <button
             type="button"
             aria-label="Mở ảnh trang sách"
             data-landscape-image-btn="true"
             onClick={() => setMobileImageSheetOpen(true)}
-            className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-control text-ink hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:hidden"
+            className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-control text-ink hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary md:hidden"
           >
             <ImageIcon aria-hidden="true" className="size-5 shrink-0" />
           </button>
@@ -299,9 +304,15 @@ export function ReadingLayout({
           aria-label="Tùy chọn buổi đọc"
           data-testid="mobile-reading-menu-btn"
           onClick={() => setMobileMenuOpen(true)}
-          className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-control text-ink hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:hidden"
+          className="relative inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-control text-ink hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary md:hidden"
         >
           <MoreVertical aria-hidden="true" className="size-5 shrink-0" />
+          {mobileFallbackNotice || canInstallVietnameseTtsVoice ? (
+            <span
+              aria-hidden="true"
+              className="absolute top-2 right-2 size-2 rounded-full bg-amber-500"
+            />
+          ) : null}
         </button>
 
         {/* Desktop right actions (unchanged on >= 768px) */}
@@ -311,7 +322,7 @@ export function ReadingLayout({
             aria-label="Nghe đánh vần"
             onClick={onSpellWord}
             disabled={controlsDisabled}
-            className="hidden min-h-11 shrink-0 items-center gap-2 rounded-control border border-primary/30 bg-sky/60 px-3 text-sm font-semibold text-primary hover:bg-sky disabled:opacity-55 sm:inline-flex"
+            className="hidden min-h-11 shrink-0 items-center gap-2 rounded-control border border-primary/30 bg-sky/60 px-3 text-sm font-semibold text-primary hover:bg-sky disabled:opacity-55 md:inline-flex"
           >
             <Volume2 aria-hidden="true" className="size-4 shrink-0" />
             <span>Nghe đánh vần</span>
@@ -322,7 +333,7 @@ export function ReadingLayout({
           aria-label="Nhờ gia sư giúp đọc"
           onClick={onHelp}
           disabled={controlsDisabled || retryMode}
-          className="hidden min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-control px-3 text-sm font-semibold text-ink hover:bg-sky disabled:opacity-55 sm:inline-flex"
+          className="hidden min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-control px-3 text-sm font-semibold text-ink hover:bg-sky disabled:opacity-55 md:inline-flex"
         >
           <CircleHelp aria-hidden="true" className="size-5 shrink-0" />
           <span>Gia sư</span>
@@ -334,7 +345,7 @@ export function ReadingLayout({
           data-reading-topbar="true"
           data-mobile-alert={hasMobileTopBarAlert ? "true" : undefined}
           className={
-            hasMobileTopBarAlert ? "shrink-0" : "hidden shrink-0 sm:block"
+            hasMobileTopBarAlert ? "shrink-0" : "hidden shrink-0 md:block"
           }
         >
           {topBar}
@@ -389,12 +400,12 @@ export function ReadingLayout({
 
       <div
         data-reading-dock="true"
-        className="reading-dock -mx-1.5 px-1.5 pt-1 pb-[max(0.35rem,env(safe-area-inset-bottom))] sm:-mx-6 sm:px-6 sm:pt-2.5 sm:pb-2"
+        className="reading-dock -mx-1.5 px-1.5 pt-1 pb-[max(0.35rem,env(safe-area-inset-bottom))] md:-mx-6 md:px-6 md:pt-2.5 md:pb-2"
       >
         {hasFeedbackPanel ? (
           <div
             data-reading-feedback="true"
-            className="mx-auto mb-1.5 max-h-[20dvh] w-full max-w-[1104px] space-y-2 overflow-y-auto overscroll-contain max-sm:pointer-events-none max-sm:absolute max-sm:inset-x-2 max-sm:bottom-[calc(100%+4px)] max-sm:z-20 max-sm:mb-0 max-sm:max-h-[32dvh] max-sm:[&>*]:pointer-events-auto max-sm:[&>*]:shadow-md sm:mb-2 sm:max-h-[26dvh]"
+            className="mx-auto mb-1 max-h-[24dvh] w-full max-w-[1104px] space-y-1.5 overflow-y-auto overscroll-contain md:mb-2 md:max-h-[26dvh] md:space-y-2"
           >
             {retryMode ? (
               <div
@@ -442,7 +453,7 @@ export function ReadingLayout({
                   </p>
 
                   {retryContextPhrase ? (
-                    <p className="mt-1.5 break-words text-base font-bold text-ink sm:text-lg">
+                    <p className="mt-1.5 break-words text-base font-bold text-ink md:text-lg">
                       {retryContextPhrase}
                     </p>
                   ) : null}
@@ -512,16 +523,16 @@ export function ReadingLayout({
                 </span>
               </div>
             ) : isPlayingSample ? (
-              <div className="mx-auto flex w-full max-w-[1008px] flex-wrap items-center justify-between gap-2 rounded-card border border-border bg-white/95 px-3 py-1.5 sm:gap-2.5 sm:bg-white sm:px-4 sm:py-2.5">
+              <div className="mx-auto flex w-full max-w-[1008px] flex-wrap items-center justify-between gap-2 rounded-card border border-border bg-white/95 px-2.5 py-1 md:gap-2.5 md:bg-white md:px-4 md:py-2.5">
                 <div className="flex min-w-0 flex-1 items-center gap-2">
                   <Volume2
                     aria-hidden="true"
                     className="size-4 shrink-0 text-primary"
                   />
-                  <span className="shrink-0 text-xs font-semibold text-ink sm:text-sm">
+                  <span className="shrink-0 text-xs font-semibold text-ink md:text-sm">
                     Đọc mẫu
                   </span>
-                  <span className="min-w-0 truncate text-xs text-muted sm:text-sm">
+                  <span className="hidden min-w-0 truncate text-xs text-muted md:inline md:text-sm">
                     {isSamplePaused
                       ? "Đã tạm dừng đọc mẫu."
                       : "Đang phát âm toàn bộ trang sách theo giọng mẫu..."}
@@ -532,7 +543,7 @@ export function ReadingLayout({
                     <button
                       type="button"
                       onClick={onToggleSamplePause}
-                      className="min-h-11 shrink-0 rounded-control border border-border bg-white px-2.5 py-1 text-xs font-semibold text-ink hover:bg-canvas sm:px-3 sm:text-sm"
+                      className="min-h-11 shrink-0 rounded-control border border-border bg-white px-2.5 py-1 text-xs font-semibold text-ink hover:bg-canvas md:px-3 md:text-sm"
                     >
                       {isSamplePaused ? "Tiếp tục mẫu" : "Tạm dừng mẫu"}
                     </button>
@@ -541,7 +552,7 @@ export function ReadingLayout({
                     <button
                       type="button"
                       onClick={onReadSample}
-                      className="hidden min-h-11 shrink-0 rounded-control border border-border bg-white px-3 py-1 text-sm font-semibold text-ink hover:bg-canvas sm:inline-flex sm:items-center"
+                      className="hidden min-h-11 shrink-0 rounded-control border border-border bg-white px-3 py-1 text-sm font-semibold text-ink hover:bg-canvas md:inline-flex md:items-center"
                     >
                       Dừng mẫu
                     </button>
@@ -550,22 +561,22 @@ export function ReadingLayout({
               </div>
             ) : isReadingWord ? (
               <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple/50 bg-purple px-4 py-2">
-                <span className="shrink-0 text-xs font-semibold text-purple-ink sm:text-sm">
+                <span className="shrink-0 text-xs font-semibold text-purple-ink md:text-sm">
                   Đọc mẫu từ
                 </span>
-                <p className="min-w-0 flex-1 truncate text-base font-semibold text-purple-900 sm:text-lg">
+                <p className="min-w-0 flex-1 truncate text-base font-semibold text-purple-900 md:text-lg">
                   &ldquo;{currentWordText || latestTranscript}&rdquo;
                 </p>
               </div>
             ) : isMicRecording ? (
               isCurrentWordMispronounced ? (
-                <div className="mx-auto flex w-full max-w-[1008px] items-center justify-between gap-2 rounded-card border border-danger/30 bg-danger-surface px-3 py-2 sm:gap-3 sm:px-4 sm:py-2.5">
-                  <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+                <div className="mx-auto flex w-full max-w-[1008px] items-center justify-between gap-2 rounded-card border border-danger/30 bg-danger-surface px-3 py-2 md:gap-3 md:px-4 md:py-2.5">
+                  <div className="flex min-w-0 flex-1 items-center gap-2 md:gap-3">
                     <span className="size-2.5 shrink-0 rounded-full bg-danger" />
-                    <span className="shrink-0 text-xs font-semibold text-danger sm:text-sm">
+                    <span className="shrink-0 text-xs font-semibold text-danger md:text-sm">
                       Chưa chính xác
                     </span>
-                    <p className="min-w-0 flex-1 truncate text-sm font-semibold text-rose-950 sm:text-base">
+                    <p className="min-w-0 flex-1 truncate text-sm font-semibold text-rose-950 md:text-base">
                       Hãy đọc lại từ &ldquo;
                       <span className="underline decoration-2 underline-offset-2">
                         {currentWordText}
@@ -577,7 +588,7 @@ export function ReadingLayout({
                     <button
                       type="button"
                       onClick={onReadWord}
-                      className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-control border border-danger/30 bg-white px-3 py-1.5 text-xs font-semibold text-danger hover:bg-danger-surface sm:text-sm"
+                      className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-control border border-danger/30 bg-white px-3 py-1.5 text-xs font-semibold text-danger hover:bg-danger-surface md:text-sm"
                       title="Bấm để nghe đọc mẫu từ này"
                     >
                       <>
@@ -588,16 +599,16 @@ export function ReadingLayout({
                   ) : null}
                 </div>
               ) : latestTranscript ? (
-                <p className="mx-auto line-clamp-1 w-full max-w-[1008px] rounded-full border border-border/70 bg-white/95 px-3 py-1.5 text-xs text-muted sm:line-clamp-2 sm:rounded-none sm:border-0 sm:bg-transparent sm:px-1 sm:py-0 sm:text-body">
+                <p className="mx-auto line-clamp-1 w-full max-w-[1008px] rounded-full border border-border/70 bg-white/95 px-3 py-1.5 text-xs text-muted md:line-clamp-2 md:rounded-none md:border-0 md:bg-transparent md:px-1 md:py-0 md:text-body">
                   Bé vừa đọc: <span>“{latestTranscript}”</span>
                 </p>
               ) : null
             ) : latestTranscript ? (
-              <div className="mx-auto flex w-full max-w-[1008px] items-center gap-2 rounded-card border border-purple/50 bg-white/95 px-3 py-1.5 sm:gap-3 sm:bg-purple/40 sm:px-4 sm:py-2">
-                <span className="shrink-0 text-xs font-semibold text-purple-ink sm:text-sm">
+              <div className="mx-auto flex w-full max-w-[1008px] items-center gap-2 rounded-card border border-purple/50 bg-white/95 px-3 py-1.5 md:gap-3 md:bg-purple/40 md:px-4 md:py-2">
+                <span className="shrink-0 text-xs font-semibold text-purple-ink md:text-sm">
                   Bản ghi mới nhất
                 </span>
-                <p className="min-w-0 flex-1 truncate text-xs font-semibold italic text-ink sm:text-sm">
+                <p className="min-w-0 flex-1 truncate text-xs font-semibold italic text-ink md:text-sm">
                   &ldquo;{latestTranscript}&rdquo;
                 </p>
               </div>
@@ -644,7 +655,7 @@ export function ReadingLayout({
           onChoosePage={onChoosePage}
         />
 
-        <div data-reading-progress-wrap="true" className="mt-1 sm:mt-1">
+        <div data-reading-progress-wrap="true" className="mt-1">
           <ReadingProgress
             isListening={isListening}
             pageNumber={page.page_number}
@@ -794,6 +805,19 @@ export function ReadingLayout({
               <StatusMessage tone="warning">
                 {mobileFallbackNotice}
               </StatusMessage>
+            ) : null}
+
+            {canInstallVietnameseTtsVoice && onOpenTtsInstallSettings ? (
+              <Button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  void onOpenTtsInstallSettings();
+                }}
+                size="compact"
+                variant="primary"
+              >
+                Mở Cài đặt TTS
+              </Button>
             ) : null}
           </div>
         </Modal>

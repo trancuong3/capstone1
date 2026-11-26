@@ -371,7 +371,7 @@ function ParentMyBooksContent({
           <p className="hidden text-xs font-bold uppercase tracking-wider text-primary md:block">
             Không gian riêng của gia đình
           </p>
-          <h1 className="book-title truncate text-xl text-ink md:mt-1 md:whitespace-normal md:text-4xl">
+          <h1 className="book-title line-clamp-2 break-words text-xl text-ink md:mt-1 md:line-clamp-none md:whitespace-normal md:text-4xl">
             Sách của tôi
           </h1>
           <p className="mt-2 hidden max-w-2xl text-body text-muted md:block">
@@ -384,17 +384,17 @@ function ParentMyBooksContent({
         <div className="flex shrink-0 flex-wrap items-center gap-1.5 md:gap-2">
           <Button
             aria-label="Tải lại danh sách sách của tôi"
-            className="min-h-11 w-auto px-2.5 text-xs md:px-4 md:text-sm"
+            className="min-h-11! w-auto px-2.5! text-xs md:px-4! md:text-sm"
             fullWidth={false}
             onClick={() => void loadBooks()}
             variant="secondary"
             disabled={loading || fetching}
           >
             <RefreshCw aria-hidden="true" className="size-4" />
-            <span className="hidden sm:inline">Tải lại</span>
+            <span className="hidden min-[640px]:inline">Tải lại</span>
           </Button>
           <Button
-            className="min-h-11 w-auto px-3 text-xs md:px-4 md:text-sm"
+            className="min-h-11! w-auto px-3! text-xs md:px-4! md:text-sm"
             fullWidth={false}
             onClick={() => setShowCreateForm((open) => !open)}
           >
@@ -415,7 +415,7 @@ function ParentMyBooksContent({
               className="size-4 shrink-0 text-emerald-700 md:mt-0.5 md:size-5"
             />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-bold md:whitespace-normal md:text-sm">
+              <p className="line-clamp-2 text-xs font-bold md:line-clamp-none md:whitespace-normal md:text-sm">
                 Riêng tư tuyệt đối cho gia đình bạn
               </p>
               <p
@@ -465,13 +465,13 @@ function ParentMyBooksContent({
       {showCreateForm ? (
         <form
           aria-label="Tạo sách riêng mới"
-          className="flex flex-col gap-4 rounded-card border border-border bg-white p-5 shadow-sm"
+          className="flex flex-col gap-4 rounded-card border border-border bg-white p-4 shadow-sm min-[640px]:p-5"
           onSubmit={(event) => void handleCreateBook(event)}
         >
           <h2 className="text-xl font-extrabold text-ink">
             Thông tin sách riêng mới
           </h2>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 min-[640px]:grid-cols-2">
             <TextField
               label="Tên sách *"
               onChange={(event) => setTitle(event.target.value)}
@@ -487,12 +487,12 @@ function ParentMyBooksContent({
             />
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 min-[640px]:grid-cols-2">
             <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
               Phù hợp từ lớp
               <select
                 aria-label="Phù hợp từ lớp"
-                className="min-h-12 rounded-control border border-border bg-white px-3 text-body text-ink focus-visible:outline-3 focus-visible:outline-primary"
+                className="min-h-12 w-full min-w-0 rounded-control border border-border bg-white px-3 text-body text-ink focus-visible:outline-3 focus-visible:outline-primary"
                 onChange={(event) => setMinGrade(Number(event.target.value))}
                 value={minGrade}
               >
@@ -508,7 +508,7 @@ function ParentMyBooksContent({
               Đến lớp
               <select
                 aria-label="Đến lớp"
-                className="min-h-12 rounded-control border border-border bg-white px-3 text-body text-ink focus-visible:outline-3 focus-visible:outline-primary"
+                className="min-h-12 w-full min-w-0 rounded-control border border-border bg-white px-3 text-body text-ink focus-visible:outline-3 focus-visible:outline-primary"
                 onChange={(event) => setMaxGrade(Number(event.target.value))}
                 value={maxGrade}
               >
@@ -521,12 +521,12 @@ function ParentMyBooksContent({
             </label>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 min-[640px]:grid-cols-2">
             <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
               Nguồn nội dung sách
               <select
                 aria-label="Nguồn nội dung sách"
-                className="min-h-12 rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
+                className="min-h-12 w-full min-w-0 rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
                 onChange={(event) =>
                   setSourceType(event.target.value as SourceUsageType)
                 }
@@ -549,11 +549,15 @@ function ParentMyBooksContent({
           </div>
 
           <div className="flex flex-wrap gap-3 pt-2">
-            <Button className="sm:w-auto" isLoading={creating} type="submit">
+            <Button
+              className="min-[640px]:w-auto"
+              isLoading={creating}
+              type="submit"
+            >
               {creating ? "Đang tạo sách…" : "Lưu và thêm trang"}
             </Button>
             <Button
-              className="sm:w-auto"
+              className="min-[640px]:w-auto"
               onClick={() => setShowCreateForm(false)}
               type="button"
               variant="secondary"
@@ -568,7 +572,7 @@ function ParentMyBooksContent({
         <div
           aria-busy="true"
           aria-label="Đang tải danh sách Sách của tôi"
-          className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+          className="grid gap-4 min-[640px]:grid-cols-2 lg:grid-cols-3"
         >
           {[0, 1, 2].map((index) => (
             <Skeleton key={index} className="h-56 w-full rounded-card" />
@@ -580,7 +584,7 @@ function ParentMyBooksContent({
             {loadError}
           </StatusMessage>
           <Button
-            className="sm:w-auto sm:self-start"
+            className="min-[640px]:w-auto min-[640px]:self-start"
             onClick={() => void loadBooks()}
             variant="secondary"
           >
@@ -621,7 +625,7 @@ function ParentMyBooksContent({
           ) : null}
           <div
             aria-busy={fetching || undefined}
-            className={`grid gap-5 sm:grid-cols-2 lg:grid-cols-3 ${fetching ? "opacity-75 transition-opacity" : ""}`}
+            className={`grid gap-4 min-[640px]:grid-cols-2 min-[640px]:gap-5 lg:grid-cols-3 ${fetching ? "opacity-75 transition-opacity" : ""}`}
           >
             {books.map((book) => {
               const isSuspended = book.moderation_status === "SUSPENDED";
@@ -637,7 +641,7 @@ function ParentMyBooksContent({
                 <article
                   key={book.id}
                   data-private-book-id={book.id}
-                  className="flex min-w-0 flex-col gap-3 rounded-card border border-border bg-white p-5 shadow-sm"
+                  className="flex min-w-0 flex-col gap-3 rounded-card border border-border bg-white p-4 shadow-sm min-[640px]:p-5"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
@@ -720,7 +724,7 @@ function ParentMyBooksContent({
                   </dl>
 
                   <div className="mt-auto flex flex-col gap-2 pt-2">
-                    <ButtonLink href={detailHref} className="min-h-11">
+                    <ButtonLink href={detailHref} className="min-h-11!">
                       Quản lý & thêm trang
                     </ButtonLink>
 
@@ -783,7 +787,7 @@ function ParentMyBooksContent({
                   {editingBookId === book.id ? (
                     <form
                       aria-label={`Chỉnh sửa sách ${book.title}`}
-                      className="flex flex-col gap-3 rounded-control border border-amber-300 bg-amber-50/60 p-3.5 text-xs"
+                      className="flex flex-col gap-3 rounded-control border border-amber-300 bg-amber-50/60 p-3 text-xs min-[640px]:p-3.5"
                       onSubmit={(event) => void handleSaveBookEdit(event, book)}
                     >
                       <p className="font-bold text-amber-950">
@@ -795,7 +799,7 @@ function ParentMyBooksContent({
                         Tên sách *
                         <input
                           aria-label="Tên sách chỉnh sửa"
-                          className="min-h-11 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
+                          className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
                           onChange={(event) => setEditTitle(event.target.value)}
                           required
                           type="text"
@@ -806,7 +810,7 @@ function ParentMyBooksContent({
                         Tác giả
                         <input
                           aria-label="Tác giả chỉnh sửa"
-                          className="min-h-11 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
+                          className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
                           onChange={(event) =>
                             setEditAuthor(event.target.value)
                           }
@@ -815,11 +819,11 @@ function ParentMyBooksContent({
                         />
                       </label>
                       <div className="grid grid-cols-2 gap-2">
-                        <label className="flex flex-col gap-1 font-semibold text-ink">
+                        <label className="flex min-w-0 flex-col gap-1 font-semibold text-ink">
                           Từ lớp
                           <select
                             aria-label="Từ lớp chỉnh sửa"
-                            className="min-h-11 rounded-control border border-border bg-white px-2 text-xs text-ink"
+                            className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-2 text-xs text-ink"
                             onChange={(event) =>
                               setEditMinGrade(Number(event.target.value))
                             }
@@ -832,11 +836,11 @@ function ParentMyBooksContent({
                             ))}
                           </select>
                         </label>
-                        <label className="flex flex-col gap-1 font-semibold text-ink">
+                        <label className="flex min-w-0 flex-col gap-1 font-semibold text-ink">
                           Đến lớp
                           <select
                             aria-label="Đến lớp chỉnh sửa"
-                            className="min-h-11 rounded-control border border-border bg-white px-2 text-xs text-ink"
+                            className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-2 text-xs text-ink"
                             onChange={(event) =>
                               setEditMaxGrade(Number(event.target.value))
                             }
@@ -854,7 +858,7 @@ function ParentMyBooksContent({
                         Nguồn nội dung
                         <select
                           aria-label="Nguồn nội dung chỉnh sửa"
-                          className="min-h-11 rounded-control border border-border bg-white px-2 text-xs text-ink"
+                          className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-2 text-xs text-ink"
                           onChange={(event) =>
                             setEditSourceType(
                               event.target.value as SourceUsageType,
@@ -873,7 +877,7 @@ function ParentMyBooksContent({
                         Ghi chú nguồn
                         <input
                           aria-label="Ghi chú nguồn chỉnh sửa"
-                          className="min-h-11 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
+                          className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
                           onChange={(event) =>
                             setEditSourceNote(event.target.value)
                           }
@@ -883,7 +887,7 @@ function ParentMyBooksContent({
                       </label>
                       <div className="flex flex-wrap gap-2 pt-1">
                         <Button
-                          className="min-h-11 w-auto px-3 text-xs"
+                          className="min-h-11! w-auto px-3! text-xs"
                           fullWidth={false}
                           isLoading={savingBookId === book.id}
                           type="submit"
@@ -891,7 +895,7 @@ function ParentMyBooksContent({
                           Lưu & kiểm tra lại toàn bộ
                         </Button>
                         <Button
-                          className="min-h-11 w-auto px-3 text-xs"
+                          className="min-h-11! w-auto px-3! text-xs"
                           fullWidth={false}
                           onClick={() => setEditingBookId(null)}
                           type="button"
@@ -918,7 +922,7 @@ function ParentMyBooksContent({
                       </p>
                       <div className="flex flex-wrap gap-2">
                         <Button
-                          className="min-h-11 w-auto bg-rose-700 px-3 text-xs text-white hover:bg-rose-800"
+                          className="min-h-11! w-auto bg-rose-700 px-3! text-xs text-white hover:bg-rose-800"
                           fullWidth={false}
                           isLoading={deletingBookId === book.id}
                           onClick={() => void handleDeleteBook(book)}
@@ -927,7 +931,7 @@ function ParentMyBooksContent({
                           Xác nhận xóa
                         </Button>
                         <Button
-                          className="min-h-11 w-auto px-3 text-xs"
+                          className="min-h-11! w-auto px-3! text-xs"
                           fullWidth={false}
                           onClick={() => setConfirmDeleteBookId(null)}
                           type="button"

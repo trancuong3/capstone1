@@ -96,7 +96,7 @@ export function BookContentReportDialog({
       footer={
         created ? (
           <div className="flex flex-wrap gap-3">
-            <Button fullWidth={false} onClick={onClose}>
+            <Button fullWidth={false} onClick={onClose} size="compact">
               Hoàn tất
             </Button>
             <Link
@@ -112,6 +112,7 @@ export function BookContentReportDialog({
               disabled={submitting}
               fullWidth={false}
               onClick={onClose}
+              size="compact"
               type="button"
               variant="secondary"
             >
@@ -121,6 +122,7 @@ export function BookContentReportDialog({
               disabled={submitting || !description.trim()}
               form="book-content-report-form"
               fullWidth={false}
+              size="compact"
               type="submit"
             >
               {submitting ? "Đang gửi báo cáo…" : "Gửi báo cáo"}
@@ -157,7 +159,7 @@ export function BookContentReportDialog({
               xem báo cáo và kết quả kiểm tra trước khi quyết định chỉnh sửa.
             </p>
           </div>
-          <dl className="grid gap-2 rounded-control border border-border p-4 text-sm sm:grid-cols-2">
+          <dl className="grid gap-2 rounded-control border border-border p-4 text-sm min-[640px]:grid-cols-2">
             <div>
               <dt className="text-muted">Mã báo cáo</dt>
               <dd className="break-all font-mono font-semibold text-ink">
@@ -168,7 +170,7 @@ export function BookContentReportDialog({
               <dt className="text-muted">Trạng thái</dt>
               <dd className="font-semibold text-ink">{created.status}</dd>
             </div>
-            <div className="sm:col-span-2">
+            <div className="min-[640px]:col-span-2">
               <dt className="text-muted">Yêu cầu kiểm tra</dt>
               <dd className="break-all font-mono text-ink">
                 {created.scan_run_id ??
@@ -179,19 +181,19 @@ export function BookContentReportDialog({
         </div>
       ) : (
         <form
-          className="space-y-4"
+          className="space-y-3 min-[640px]:space-y-4"
           id="book-content-report-form"
           onSubmit={handleSubmit}
         >
           <div>
             <label
-              className="mb-2 block text-sm font-semibold text-ink"
+              className="mb-1.5 block text-sm font-semibold text-ink min-[640px]:mb-2"
               htmlFor="book-report-issue"
             >
               Loại vấn đề
             </label>
             <select
-              className="min-h-12 w-full rounded-control border border-border bg-white px-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
+              className="min-h-12 w-full min-w-0 rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary md:text-base"
               id="book-report-issue"
               onChange={(event) =>
                 setIssueType(event.target.value as BookContentIssueType)
@@ -208,13 +210,13 @@ export function BookContentReportDialog({
 
           <div>
             <label
-              className="mb-2 block text-sm font-semibold text-ink"
+              className="mb-1.5 block text-sm font-semibold text-ink min-[640px]:mb-2"
               htmlFor="book-report-description"
             >
               Mô tả vấn đề <span className="text-danger">*</span>
             </label>
             <textarea
-              className="min-h-28 w-full rounded-control border border-border bg-white p-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
+              className="min-h-24 w-full rounded-control border border-border bg-white p-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary min-[640px]:min-h-28 md:text-base"
               id="book-report-description"
               maxLength={4000}
               onChange={(event) => setDescription(event.target.value)}
@@ -229,13 +231,13 @@ export function BookContentReportDialog({
 
           <div>
             <label
-              className="mb-2 block text-sm font-semibold text-ink"
+              className="mb-1.5 block text-sm font-semibold text-ink min-[640px]:mb-2"
               htmlFor="book-report-text"
             >
               Đoạn nội dung nghi ngờ (không bắt buộc)
             </label>
             <textarea
-              className="min-h-20 w-full rounded-control border border-border bg-white p-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
+              className="min-h-16 w-full rounded-control border border-border bg-white p-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary min-[640px]:min-h-20 md:text-base"
               id="book-report-text"
               maxLength={1200}
               onChange={(event) => setReportedText(event.target.value)}
@@ -246,13 +248,13 @@ export function BookContentReportDialog({
 
           <div>
             <label
-              className="mb-2 block text-sm font-semibold text-ink"
+              className="mb-1.5 block text-sm font-semibold text-ink min-[640px]:mb-2"
               htmlFor="book-report-correction"
             >
               Nội dung đề xuất sửa (không bắt buộc)
             </label>
             <textarea
-              className="min-h-20 w-full rounded-control border border-border bg-white p-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
+              className="min-h-16 w-full rounded-control border border-border bg-white p-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary min-[640px]:min-h-20 md:text-base"
               id="book-report-correction"
               maxLength={1200}
               onChange={(event) => setSuggestedCorrection(event.target.value)}

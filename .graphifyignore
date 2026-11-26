@@ -27,8 +27,8 @@ env/
 **/.next/
 out/
 coverage/
-playwright-report/
-test-results/
+playwright-report*/
+test-results*/
 artifacts/
 *.tsbuildinfo
 *.log

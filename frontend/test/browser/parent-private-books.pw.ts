@@ -130,6 +130,21 @@ async function loginAdmin(page: Page, email: string, password: string) {
   );
 }
 
+async function navigateToMyBooks(page: Page) {
+  const bottomNav = page.getByTestId("mobile-bottom-nav");
+  if (await bottomNav.isVisible()) {
+    await bottomNav.getByRole("button", { name: /Thêm/ }).click();
+    const moreSheet = page.getByRole("dialog", { name: "Tính năng khác" });
+    await expect(moreSheet).toBeVisible();
+    await moreSheet
+      .getByRole("link", { name: /^Sách của tôi(?=\s|$)/ })
+      .click();
+  } else {
+    await page.getByRole("link", { name: "Sách của tôi" }).first().click();
+  }
+  await page.waitForURL(/\/my-books$/);
+}
+
 async function saveShot(page: Page, name: string) {
   fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
   await page.screenshot({
@@ -179,11 +194,21 @@ test.describe.serial("Parent Private Books Real Full-Stack E2E", () => {
       info.users.parent_a.password,
       info.users.parent_a.child_alias,
     );
-    await page.getByRole("link", { name: "Sách của tôi" }).first().click();
-    await page.waitForURL(/\/my-books$/);
+    await navigateToMyBooks(page);
     await expect(
       page.getByRole("heading", { name: "Sách của tôi" }),
     ).toBeVisible();
+    const isMobileViewport = (page.viewportSize()?.width ?? 1440) < 768;
+    const privacyToggle = page.getByRole("button", { name: "Tìm hiểu thêm" });
+    if (isMobileViewport) {
+      await expect(privacyToggle).toHaveAttribute("aria-expanded", "false");
+      await privacyToggle.click();
+      await expect(
+        page.getByRole("button", { name: "Thu gọn" }),
+      ).toHaveAttribute("aria-expanded", "true");
+    } else {
+      await expect(privacyToggle).toBeHidden();
+    }
     await expect(page.getByText(/Chỉ bạn và các hồ sơ trẻ/)).toBeVisible();
 
     // 2. Create private book
@@ -239,7 +264,11 @@ test.describe.serial("Parent Private Books Real Full-Stack E2E", () => {
     await readLink.click();
     await page.waitForURL(new RegExp(`/books/${bookId}$`));
     await expect(page.getByRole("heading", { name: bookTitle })).toBeVisible();
-    await expect(page.getByText("Sách riêng của gia đình")).toBeVisible();
+    if ((page.viewportSize()?.width ?? 1440) < 768) {
+      await expect(page.getByText("Sách riêng", { exact: true })).toBeVisible();
+    } else {
+      await expect(page.getByText("Sách riêng của gia đình")).toBeVisible();
+    }
     await expect(
       page.getByRole("button", { name: "Chuẩn bị đọc" }),
     ).toBeEnabled();
@@ -355,8 +384,7 @@ test.describe.serial("Parent Private Books Real Full-Stack E2E", () => {
       info.users.parent_a.password,
       info.users.parent_a.child_alias,
     );
-    await page.getByRole("link", { name: "Sách của tôi" }).first().click();
-    await page.waitForURL(/\/my-books$/);
+    await navigateToMyBooks(page);
     await page.getByRole("button", { name: /Tạo sách riêng/ }).click();
     await page.getByLabel(/Tên sách/).fill(bookTitle);
     await page.getByRole("button", { name: "Lưu và thêm trang" }).click();
@@ -553,8 +581,7 @@ test.describe.serial("Parent Private Books Real Full-Stack E2E", () => {
       info.users.parent_a.password,
       info.users.parent_a.child_alias,
     );
-    await page.getByRole("link", { name: "Sách của tôi" }).first().click();
-    await page.waitForURL(/\/my-books$/);
+    await navigateToMyBooks(page);
     await page.getByRole("button", { name: /Tạo sách riêng/ }).click();
     await page.getByLabel(/Tên sách/).fill(bookTitle);
     await page.getByRole("button", { name: "Lưu và thêm trang" }).click();

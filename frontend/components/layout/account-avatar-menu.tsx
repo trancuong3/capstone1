@@ -133,7 +133,7 @@ export function AccountAvatarMenu({
       {open ? (
         <div
           aria-label="Menu tài khoản ViRead"
-          className="absolute right-0 top-full mt-2 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-card border border-border bg-white shadow-xl"
+          className="absolute right-0 top-full mt-2 max-h-[min(75dvh,32rem)] w-[min(20rem,calc(100vw-2rem))] overflow-x-hidden overflow-y-auto overscroll-contain rounded-card border border-border bg-white shadow-xl"
           id={menuId}
           onKeyDown={handleMenuKeyDown}
           ref={menuRef}

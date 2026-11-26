@@ -433,12 +433,12 @@ export function CameraPreview({
     return (
       <section
         aria-label="Bản xem trước camera mô phỏng"
-        className="relative flex min-h-0 w-full items-center justify-center rounded-card bg-desk p-4 sm:flex-1 sm:p-8"
+        className="relative flex min-h-0 w-full items-center justify-center rounded-card bg-desk p-4 min-[640px]:flex-1 min-[640px]:p-8"
       >
-        <div className="absolute right-3 top-3 z-20 inline-flex items-center gap-2 rounded-control bg-white/90 px-3 py-2 text-[13px] font-semibold text-muted sm:right-5 sm:top-5">
+        <div className="absolute right-3 top-3 z-20 inline-flex items-center gap-2 rounded-control bg-white/90 px-3 py-2 text-[13px] font-semibold text-muted min-[640px]:right-5 min-[640px]:top-5">
           <VideoOff aria-hidden="true" className="size-4" />
-          <span className="hidden sm:inline">Mô phỏng · không ghi hình</span>
-          <span className="sr-only sm:hidden">Mô phỏng, không ghi hình</span>
+          <span className="hidden md:inline">Mô phỏng · không ghi hình</span>
+          <span className="sr-only md:hidden">Mô phỏng, không ghi hình</span>
         </div>
         {children}
       </section>
@@ -451,11 +451,11 @@ export function CameraPreview({
   return (
     <section
       aria-label="Khung camera nhận diện trang sách ViRead"
-      className="relative flex w-full flex-col gap-4 rounded-card bg-desk p-3 sm:p-6"
+      className="relative flex w-full flex-col gap-3 rounded-card bg-desk p-3 min-[640px]:gap-4 min-[640px]:p-5 md:p-6"
     >
       {/* Thanh trạng thái hướng dẫn bé đặt sách */}
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-cream px-3.5 py-2.5 sm:px-4 sm:py-3">
-        <p className="text-sm font-semibold text-ink sm:text-body">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-cream px-3.5 py-2.5 min-[640px]:px-4 min-[640px]:py-3">
+        <p className="text-sm font-semibold text-ink md:text-body">
           {cameraSuspended
             ? "Camera đang tạm nghỉ khi bạn rời màn hình. Bấm Bật lại camera để tiếp tục quét."
             : (scanResult?.message ??
@@ -465,7 +465,7 @@ export function CameraPreview({
         {scanResult && !cameraSuspended ? (
           <span
             className={cn(
-              "rounded-control px-3 py-1 text-xs font-semibold sm:text-[14px]",
+              "rounded-control px-3 py-1 text-xs font-semibold md:text-[14px]",
               isMatched
                 ? "bg-white text-success-ink"
                 : isFrameValid
@@ -490,7 +490,7 @@ export function CameraPreview({
         >
           <p className="font-semibold">{ocrUnavailableBanner}</p>
           <Button
-            className="min-h-10 sm:w-auto"
+            className="min-[640px]:w-auto"
             disabled={!cameraReady || isScanning}
             onClick={() => {
               consecutiveErrorCountRef.current = 0;
@@ -508,23 +508,23 @@ export function CameraPreview({
         </div>
       ) : null}
 
-      {/* Portrait-first trên điện thoại (aspect-[3/4]), ngang trên màn hình rộng (sm:aspect-[16/10]) */}
+      {/* Portrait-first trên điện thoại (aspect-[3/4], giới hạn chiều cao < 640px), ngang từ 640px trở lên */}
       <div
         data-testid="scanner-camera-viewport"
-        className="relative aspect-[3/4] w-full overflow-hidden rounded-card bg-ink sm:aspect-[16/10]"
+        className="relative aspect-[3/4] max-[640px]:max-h-[min(54dvh,400px)] w-full overflow-hidden rounded-card bg-ink min-[640px]:aspect-[16/10] min-[640px]:max-h-none"
       >
         {cameraSuspended ? (
           <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center text-white">
             <Camera aria-hidden="true" className="size-11 text-sky" />
-            <p className="text-lg font-extrabold sm:text-[20px]">
+            <p className="text-lg font-extrabold md:text-[20px]">
               Camera đã tạm dừng để tiết kiệm pin & bảo mật
             </p>
-            <p className="max-w-md text-sm text-white/85 sm:text-body">
+            <p className="max-w-md text-sm text-white/85 md:text-body">
               Bấm nút bên dưới để mở lại camera sau ngay lập tức hoặc chọn ảnh
               trang sách từ máy.
             </p>
             <Button
-              className="min-h-12 w-full max-w-[260px]"
+              className="min-h-12! w-full max-w-[260px]"
               onClick={resumeCamera}
             >
               <Play aria-hidden="true" className="size-4" />
@@ -534,15 +534,15 @@ export function CameraPreview({
         ) : cameraDenied ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-white">
             <VideoOff aria-hidden="true" className="size-10 text-muted" />
-            <p className="text-lg font-semibold sm:text-[20px]">
+            <p className="text-lg font-semibold md:text-[20px]">
               Chưa bật được Camera trên thiết bị
             </p>
-            <p className="max-w-md text-sm text-white/80 sm:text-body">
+            <p className="max-w-md text-sm text-white/80 md:text-body">
               Ba mẹ vui lòng cấp quyền sử dụng Camera cho ViRead hoặc dùng nút
               Chọn ảnh trang sách ở bên dưới nhé.
             </p>
             <Button
-              className="mt-1 min-h-12 w-full max-w-[260px]"
+              className="mt-1 min-h-12! w-full max-w-[260px]"
               onClick={resumeCamera}
               variant="secondary"
             >
@@ -560,10 +560,10 @@ export function CameraPreview({
             />
 
             {/* Khung căn chỉnh sách 4 góc (Portrait-friendly Framing Guide Overlay) */}
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4 sm:p-8">
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4 min-[640px]:p-8">
               <div
                 className={cn(
-                  "relative flex h-[86%] w-[86%] flex-col justify-between rounded-card border-2 border-dashed p-3 transition-colors sm:h-[80%] sm:w-[78%] sm:p-4",
+                  "relative flex h-[86%] w-[86%] flex-col justify-between rounded-card border-2 border-dashed p-3 transition-colors min-[640px]:h-[80%] min-[640px]:w-[78%] min-[640px]:p-4",
                   isMatched
                     ? "border-success-ink bg-white/10"
                     : isFrameValid
@@ -592,7 +592,7 @@ export function CameraPreview({
                   ) : null}
                 </div>
 
-                <div className="mx-auto rounded-control bg-black/65 px-3 py-1.5 text-center text-xs font-semibold text-white sm:text-[14px]">
+                <div className="mx-auto rounded-control bg-black/65 px-3 py-1.5 text-center text-xs font-semibold text-white md:text-[14px]">
                   {isMatched
                     ? `Đã khớp — Trang ${scanResult?.matched_page?.page_number}`
                     : isFrameValid
@@ -607,9 +607,9 @@ export function CameraPreview({
       </div>
 
       {/* Thanh nút điều khiển Camera chuẩn thao tác ngón cái trên điện thoại */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-2.5 min-[640px]:grid-cols-2 min-[640px]:gap-3">
         <Button
-          className="min-h-14 w-full"
+          className="min-h-12! w-full min-[640px]:min-h-14!"
           disabled={!cameraReady || cameraSuspended || isScanning}
           isLoading={isScanning}
           onClick={() => void captureAndScan()}
@@ -619,7 +619,7 @@ export function CameraPreview({
         </Button>
 
         <Button
-          className="min-h-14 w-full"
+          className="min-h-12! w-full min-[640px]:min-h-14!"
           disabled={!cameraReady || cameraSuspended}
           onClick={() => setAutoScan((prev) => !prev)}
           variant="secondary"
@@ -629,7 +629,7 @@ export function CameraPreview({
 
         {onPickDeviceImage ? (
           <Button
-            className="min-h-12 w-full sm:col-span-2"
+            className="min-h-12! w-full min-[640px]:col-span-2"
             onClick={onPickDeviceImage}
             variant="secondary"
           >

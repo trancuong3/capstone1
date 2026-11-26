@@ -370,14 +370,14 @@ export function DifficultWordsScreen({
           liệu mẫu thay thế.
         </StatusMessage>
         <Button
-          className="sm:w-auto sm:self-start sm:px-8"
+          className="min-[640px]:w-auto min-[640px]:self-start min-[640px]:px-8"
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
           <RefreshCw aria-hidden="true" className="size-5" /> Thử lại
         </Button>
         <ButtonLink
-          className="sm:w-auto sm:self-start"
+          className="min-[640px]:w-auto min-[640px]:self-start"
           href="/children"
           variant="secondary"
         >
@@ -398,7 +398,7 @@ export function DifficultWordsScreen({
           Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
         </StatusMessage>
         <Button
-          className="sm:w-auto sm:self-start sm:px-8"
+          className="min-[640px]:w-auto min-[640px]:self-start min-[640px]:px-8"
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
@@ -410,7 +410,7 @@ export function DifficultWordsScreen({
 
   return (
     <section className="mx-auto flex w-full max-w-[1160px] flex-col gap-3 md:gap-5">
-      <div className={selectedPracticeWord ? "hidden sm:block" : undefined}>
+      <div className={selectedPracticeWord ? "hidden md:block" : undefined}>
         <ReportPageHeader
           action={
             <ButtonLink
@@ -539,8 +539,8 @@ export function DifficultWordsScreen({
           </div>
 
           {state.words.length > 0 ? (
-            <div className="flex flex-col justify-between gap-2.5 rounded-[20px] border border-[#DDF3F5] bg-gradient-to-r from-[#F6FAF8] to-[#ECF8F9] p-3.5 sm:flex-row sm:items-center md:gap-4 md:rounded-[24px] md:p-5">
-              <div className="flex flex-col gap-0.5 md:gap-1">
+            <div className="flex flex-col justify-between gap-2.5 rounded-[20px] border border-[#DDF3F5] bg-gradient-to-r from-[#F6FAF8] to-[#ECF8F9] p-3.5 min-[640px]:flex-row min-[640px]:items-center md:gap-4 md:rounded-[24px] md:p-5">
+              <div className="flex min-w-0 flex-col gap-0.5 md:gap-1">
                 <div className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[#0E6D76] md:gap-2 md:text-sm">
                   <Sparkles aria-hidden="true" className="size-4" />
                   Tiến độ luyện từ của {state.child.alias}
@@ -556,7 +556,7 @@ export function DifficultWordsScreen({
               </div>
               {firstPendingGlobalWord ? (
                 <Button
-                  className="min-h-11 shrink-0 rounded-2xl px-4 text-sm font-extrabold sm:w-auto md:min-h-12 md:px-6 md:text-base"
+                  className="min-h-11 shrink-0 rounded-2xl px-4 text-sm font-extrabold min-[640px]:w-auto md:min-h-12 md:px-6 md:text-base"
                   onClick={() =>
                     openPracticeSession(
                       firstPendingGlobalWord.normalized_word,
@@ -593,7 +593,7 @@ export function DifficultWordsScreen({
             <EmptyState
               action={
                 <Button
-                  className="sm:w-auto sm:px-6"
+                  className="min-[640px]:w-auto min-[640px]:px-6"
                   onClick={() => setStatusFilter("ALL")}
                   variant="secondary"
                 >
@@ -608,7 +608,7 @@ export function DifficultWordsScreen({
             />
           ) : (
             <>
-              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3.5 md:gap-5 lg:grid-cols-2">
                 {bookGroups
                   .slice(
                     (bookGroupPage - 1) * BOOK_GROUPS_PAGE_SIZE,

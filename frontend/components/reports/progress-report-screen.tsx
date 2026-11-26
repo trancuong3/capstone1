@@ -348,7 +348,7 @@ function ProgressReportContent({
 
   const retryButton = (
     <Button
-      className="sm:w-auto sm:self-start"
+      className="min-[640px]:w-auto min-[640px]:self-start"
       variant="secondary"
       onClick={() => setRetry((value) => value + 1)}
     >
@@ -365,7 +365,7 @@ function ProgressReportContent({
           bắt đầu.
         </StatusMessage>
         <ButtonLink
-          className="sm:w-auto sm:self-start"
+          className="min-[640px]:w-auto min-[640px]:self-start"
           href={requestedChildId ? progressHref(requestedChildId) : "/reports"}
         >
           Xem báo cáo mới nhất
@@ -382,7 +382,7 @@ function ProgressReportContent({
       >
         <Skeleton className="h-24 rounded-card" />
         <Skeleton className="h-20 rounded-card" />
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Skeleton className="h-28 rounded-card" />
           <Skeleton className="h-28 rounded-card" />
           <Skeleton className="h-28 rounded-card" />
@@ -557,15 +557,15 @@ function ProgressReportContent({
             ))}
           </div>
 
-          <div className="grid items-stretch gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+          <div className="grid items-stretch gap-3.5 md:gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
             <ProgressChart report={report} />
 
             <section
               aria-labelledby="comparison-title"
-              className="rounded-card border border-border bg-white p-5 sm:p-6"
+              className="rounded-card border border-border bg-white p-4 md:p-6"
             >
               <h2
-                className="text-xl font-extrabold text-ink"
+                className="text-lg font-extrabold text-ink md:text-xl"
                 id="comparison-title"
               >
                 So sánh với kỳ trước
@@ -598,13 +598,13 @@ function ProgressReportContent({
                       ],
                     ].map(([label, value, suffix]) => (
                       <div
-                        className="flex items-baseline justify-between gap-4 py-3 first:pt-0 last:pb-0"
+                        className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3 first:pt-0 last:pb-0"
                         key={String(label)}
                       >
                         <dt className="text-sm font-semibold text-muted">
                           {label}
                         </dt>
-                        <dd className="text-base font-extrabold tabular-nums text-ink">
+                        <dd className="min-w-0 text-right text-base font-extrabold tabular-nums text-ink">
                           {typeof value !== "number"
                             ? "Chưa đủ dữ liệu"
                             : `${value > 0 ? "+" : ""}${Number(value.toFixed(2))}${suffix}`}
@@ -626,10 +626,10 @@ function ProgressReportContent({
             scopeLabel={`${report.period_start} → ${report.period_end}`}
           />
 
-          <section className="rounded-card border border-border bg-white p-5 sm:p-6">
-            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+          <section className="rounded-card border border-border bg-white p-4 md:p-6">
+            <div className="flex flex-col justify-between gap-3 min-[640px]:flex-row min-[640px]:items-end">
               <div>
-                <h2 className="text-xl font-extrabold text-ink">
+                <h2 className="text-lg font-extrabold text-ink md:text-xl">
                   Từ cần luyện nổi bật
                 </h2>
                 <p className="mt-0.5 text-sm text-muted">
@@ -637,7 +637,7 @@ function ProgressReportContent({
                 </p>
               </div>
               <ButtonLink
-                className="sm:w-auto"
+                className="min-[640px]:w-auto"
                 href={`/reports/difficult-words?childId=${encodeURIComponent(child.id)}`}
                 variant="secondary"
               >
@@ -680,11 +680,11 @@ function ProgressReportContent({
 
                     return (
                       <li
-                        className="flex flex-wrap items-center justify-between gap-2 px-4 py-3"
+                        className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 md:px-4 md:py-3"
                         key={`${word.normalized_word}-${index}`}
                       >
                         <div className="min-w-0">
-                          <span className="text-base font-extrabold text-ink">
+                          <span className="break-words text-base font-extrabold text-ink">
                             {word.display_text}
                           </span>
                           {noteParts.length > 0 ? (
@@ -693,7 +693,7 @@ function ProgressReportContent({
                             </span>
                           ) : null}
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="text-xs font-bold tabular-nums text-muted">
                             Điểm {word.difficulty_score}
                           </span>
@@ -738,7 +738,7 @@ function ProgressReportContent({
           </section>
 
           {report.legacy ? (
-            <section className="rounded-card border border-border bg-cream/60 p-5 sm:p-6">
+            <section className="rounded-card border border-border bg-cream/60 p-4 md:p-6">
               <h2 className="text-lg font-extrabold text-ink">
                 Chỉ số định dạng cũ
               </h2>
@@ -746,7 +746,7 @@ function ProgressReportContent({
                 Giữ nguyên tên trường đã lưu; chưa quy đổi sang số buổi đọc hoặc
                 phần trăm chính xác.
               </p>
-              <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+              <dl className="mt-3 grid gap-3 min-[640px]:grid-cols-2">
                 {report.legacy.total_books !== null ? (
                   <div>
                     <dt className="text-xs font-semibold text-muted">

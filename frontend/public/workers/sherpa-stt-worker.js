@@ -45,6 +45,8 @@ const MODEL_FILES = [
   },
 ];
 
+const MODEL_FETCH_TIMEOUT_MS = 45000;
+
 let wasmModulePromise = null;
 let recognizerPromise = null;
 let recognizerInstance = null;
@@ -145,8 +147,10 @@ function ensureWasmModule() {
       self.Module = {
         locateFile: (file) => `/wasm/sherpa/${file}`,
         onRuntimeInitialized: () => resolve(self.Module),
-        onAbort: (reason) =>
-          reject(new Error(String(reason || "WASM aborted"))),
+        onAbort: (reason) => {
+          wasmModulePromise = null;
+          reject(new Error(String(reason || "WASM aborted")));
+        },
       };
       importScripts(
         "/wasm/sherpa/sherpa-onnx-asr.js",
@@ -156,6 +160,9 @@ function ensureWasmModule() {
       wasmModulePromise = null;
       reject(err);
     }
+  }).catch((err) => {
+    wasmModulePromise = null;
+    throw err;
   });
   return wasmModulePromise;
 }
@@ -171,14 +178,35 @@ async function fetchAndVerifyModelFile(db, spec) {
     await deleteCachedFile(db, cacheKey);
   }
 
-  const resp = await fetch(`${HF_BASE_URL}/${spec.name}`, {
-    mode: "cors",
-    credentials: "omit",
-  });
-  if (!resp.ok) {
-    throw new Error(`Model fetch failed (${spec.name}): HTTP ${resp.status}`);
+  const canAbort =
+    typeof AbortController === "function" &&
+    typeof setTimeout === "function" &&
+    typeof clearTimeout === "function";
+  const controller = canAbort ? new AbortController() : null;
+  const timer = controller
+    ? setTimeout(() => controller.abort(), MODEL_FETCH_TIMEOUT_MS)
+    : null;
+  let buffer;
+  try {
+    const resp = await fetch(`${HF_BASE_URL}/${spec.name}`, {
+      mode: "cors",
+      credentials: "omit",
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+    if (!resp.ok) {
+      throw new Error(`Model fetch failed (${spec.name}): HTTP ${resp.status}`);
+    }
+    buffer = await resp.arrayBuffer();
+  } catch (err) {
+    if (err && err.name === "AbortError") {
+      throw new Error(`Model fetch timed out (${spec.name})`);
+    }
+    throw err;
+  } finally {
+    if (timer !== null) {
+      clearTimeout(timer);
+    }
   }
-  const buffer = await resp.arrayBuffer();
   if (buffer.byteLength !== spec.expectedBytes) {
     throw new Error(
       `Model size mismatch (${spec.name}): got ${buffer.byteLength}, expected ${spec.expectedBytes}`,

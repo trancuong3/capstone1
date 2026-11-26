@@ -80,7 +80,7 @@ function ParentProfileLoadingState() {
     <section
       aria-busy="true"
       aria-label="Đang tải hồ sơ ba mẹ"
-      className="mx-auto flex w-full max-w-[1120px] flex-col gap-6"
+      className="mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 md:gap-6"
     >
       <span className="sr-only" role="status">
         Đang tải…
@@ -137,7 +137,7 @@ export function ParentProfileScreen() {
           Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
         </StatusMessage>
         <Button
-          className="sm:w-auto sm:self-start sm:px-8"
+          className="w-full min-[640px]:w-auto min-[640px]:self-start min-[640px]:px-8"
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
@@ -172,10 +172,10 @@ export function ParentProfileScreen() {
 
   if (isEditing)
     return (
-      <section className="mx-auto flex w-full max-w-[744px] flex-col gap-4">
+      <section className="mx-auto flex w-full max-w-[744px] flex-col gap-3.5 md:gap-4">
         <PageHeader eyebrow="HỒ SƠ TÀI KHOẢN" title="Chỉnh sửa hồ sơ" />
-        <Card className="sm:px-8 sm:py-8">
-          <h2 className="text-2xl font-extrabold text-ink">
+        <Card className="p-4 min-[640px]:px-6 min-[640px]:py-6 md:px-8 md:py-8">
+          <h2 className="text-lg font-extrabold text-ink md:text-2xl">
             Thông tin cá nhân
           </h2>
           <ParentProfileForm
@@ -201,17 +201,18 @@ export function ParentProfileScreen() {
           {saveNotice}
         </StatusMessage>
       ) : null}
-      <Card className="p-4 sm:px-8 sm:py-6">
-        <div className="flex flex-row items-center gap-3.5 sm:items-start sm:gap-6">
+      <Card className="p-4 min-[640px]:px-6 min-[640px]:py-5 md:px-8 md:py-6">
+        <div className="flex flex-row items-center gap-3.5 min-[640px]:items-start min-[640px]:gap-6">
           <div className="shrink-0">
             <ProfileAvatar
               ariaLabel={`Ảnh đại diện của ${displayName ?? "ba mẹ"}`}
+              className="max-[640px]:size-16 max-[640px]:text-2xl"
               displayName={displayName}
               imageUrl={profile.avatar_url}
               size="lg"
             />
           </div>
-          <div className="flex min-w-0 flex-1 flex-col items-start gap-1.5 sm:gap-3">
+          <div className="flex min-w-0 flex-1 flex-col items-start gap-1.5 min-[640px]:gap-3">
             <h2 className="max-w-full break-words text-lg font-extrabold text-ink md:text-2xl">
               {displayName || "Chưa cập nhật tên hiển thị"}
             </h2>
@@ -220,7 +221,7 @@ export function ParentProfileScreen() {
               {getRoleLabel(profile.role)}
             </p>
             <p
-              className={`rounded-control px-2.5 py-1 text-xs font-bold md:px-3 md:py-2 md:text-sm ${profile.email_verified === true ? "bg-success-surface text-success-ink" : "bg-sky text-primary"}`}
+              className={`max-w-full break-words rounded-control px-2.5 py-1 text-xs font-bold md:px-3 md:py-2 md:text-sm ${profile.email_verified === true ? "bg-success-surface text-success-ink" : "bg-sky text-primary"}`}
             >
               {emailVerificationLabel(
                 profile.email,
@@ -231,7 +232,7 @@ export function ParentProfileScreen() {
           </div>
         </div>
         <Button
-          className="sm:max-w-80"
+          className="min-[640px]:max-w-80"
           onClick={() => {
             setSaveNotice(null);
             setIsEditing(true);
@@ -240,13 +241,13 @@ export function ParentProfileScreen() {
         >
           Chỉnh sửa hồ sơ
         </Button>
-        <dl className="grid gap-3 sm:grid-cols-2 sm:gap-4">
+        <dl className="grid gap-3 min-[640px]:grid-cols-2 min-[640px]:gap-4">
           <InformationField label="Email">
             {contactValue(profile.email, profile.contact_info_status)}
             {profile.pending_email ? (
-              <p className="mt-2 text-sm text-warning">
+              <p className="mt-2 break-all text-sm text-warning">
                 Đang chờ xác minh email mới:{" "}
-                <strong>{profile.pending_email}</strong>
+                <strong className="break-all">{profile.pending_email}</strong>
               </p>
             ) : null}
           </InformationField>
@@ -280,7 +281,7 @@ export function ParentProfileScreen() {
           </Link>
         </div>
         {profile.children.length > 0 ? (
-          <div className="grid gap-3 sm:grid-cols-2 md:gap-6">
+          <div className="grid gap-3 min-[640px]:grid-cols-2 min-[640px]:gap-4 md:gap-6">
             {profile.children.map((child) => (
               <ChildProfileCard
                 key={child.id}

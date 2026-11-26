@@ -35,7 +35,7 @@ const baseClassName =
   "inline-flex items-center justify-center gap-2 rounded-control px-4 py-2 text-center text-button font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-55";
 
 const explicitWidthClassPattern =
-  /(?:^|\s)(?:w-(?:auto|fit|min|max|\d+|\[.+?\])|(?:sm|md|lg|xl):w-auto|size-\S+)/;
+  /(?:^|\s)(?:(?:sm|md|lg|xl|2xl|max-(?:sm|md|lg|xl|2xl)|min-\[[^\]]+\]|max-\[[^\]]+\]):(?:w-full|w-(?:auto|fit|min|max|px|screen|dvw|svw|lvw|prose|3xs|2xs|xs|\d+(?:\/\d+|\.\d+)?|\[[^\]]+\])|size-\S+)|w-(?:auto|fit|min|max|px|screen|dvw|svw|lvw|prose|3xs|2xs|xs|\d+(?:\/\d+|\.\d+)?|\[[^\]]+\])|size-\S+)!?(?=\s|$)/;
 
 function resolveWidthClassName(
   fullWidth: boolean | undefined,

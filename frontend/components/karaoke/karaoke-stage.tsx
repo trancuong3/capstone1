@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import {
+  Check,
   Maximize2,
   Mic,
   MicOff,
@@ -406,7 +407,7 @@ export function KaraokeStage({
       tabIndex={0}
       aria-label={label}
       onKeyDown={keyboard}
-      className={`${styles.stage} ${expanded ? styles.expanded : ""} grid gap-5 focus-visible:outline-3 focus-visible:outline-primary`}
+      className={`${styles.stage} ${expanded ? styles.expanded : ""} grid gap-3.5 focus-visible:outline-3 focus-visible:outline-primary md:gap-5`}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -417,16 +418,16 @@ export function KaraokeStage({
             <p className="text-label font-bold text-primary">
               HÁT VUI CÙNG {childAlias}
             </p>
-            <h1 className="break-words text-heading font-extrabold">
+            <h1 className="break-words text-xl font-extrabold min-[640px]:text-2xl md:text-heading">
               {source.title}
             </h1>
           </div>
         </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+        <div className="flex w-full flex-col gap-2 min-[640px]:w-auto min-[640px]:flex-row">
           <button
             ref={expandButton}
             type="button"
-            className="inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-control bg-sky px-4 py-3 font-bold text-primary focus-visible:outline-3 focus-visible:outline-primary sm:w-auto"
+            className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-control bg-sky px-4 py-3 font-bold text-primary focus-visible:outline-3 focus-visible:outline-primary min-[640px]:min-h-14 min-[640px]:w-auto"
             aria-pressed={expanded}
             onClick={() => void toggleExpanded()}
           >
@@ -445,7 +446,7 @@ export function KaraokeStage({
         className="flex flex-wrap gap-2"
       >
         <Button
-          className="sm:w-auto"
+          className="min-h-12 min-w-[min(100%,9rem)] flex-1 min-[640px]:w-auto min-[640px]:flex-none md:min-h-14"
           variant={scoredMode ? "secondary" : "primary"}
           aria-pressed={!scoredMode}
           onClick={() => selectMode(false)}
@@ -454,7 +455,7 @@ export function KaraokeStage({
           Hát tự do
         </Button>
         <Button
-          className="sm:w-auto"
+          className="min-h-12 min-w-[min(100%,9rem)] flex-1 min-[640px]:w-auto min-[640px]:flex-none md:min-h-14"
           variant={scoredMode ? "primary" : "secondary"}
           aria-pressed={scoredMode}
           disabled={!scoring.supported}
@@ -465,19 +466,32 @@ export function KaraokeStage({
         </Button>
       </div>
       {scoredMode && (
-        <label className="flex min-h-12 items-center gap-3 rounded-control bg-sky p-3">
+        <label className="relative flex min-h-14 cursor-pointer items-center gap-3 rounded-control border border-border bg-sky/70 p-3 transition-colors has-[:checked]:border-primary has-[:checked]:bg-sky has-[:focus-visible]:outline-3 has-[:focus-visible]:outline-primary">
           <input
             type="checkbox"
             checked={headphones}
+            className="peer absolute inset-0 size-full cursor-pointer opacity-0"
             onChange={(event) => {
               const checked = event.currentTarget.checked;
               player.setMuted(!checked);
               setHeadphones(checked);
             }}
           />
-          <span>
+          <span
+            aria-hidden="true"
+            className="pointer-events-none grid size-6 shrink-0 place-items-center rounded-md border-2 border-primary/50 bg-white text-white peer-checked:border-primary peer-checked:bg-primary"
+          >
+            <Check
+              className={
+                headphones
+                  ? "size-4 opacity-100 transition-opacity"
+                  : "size-4 opacity-0 transition-opacity"
+              }
+            />
+          </span>
+          <span className="min-w-0 text-sm font-bold text-ink">
             Mình đang đeo tai nghe · Bật nhạc đệm
-            <small className="block">
+            <small className="block font-normal text-muted">
               Khi dùng loa, bé hát theo lời chạy để micro chỉ nghe tiếng của bé.
             </small>
           </span>
@@ -524,7 +538,7 @@ export function KaraokeStage({
           )}
           <div className="flex flex-wrap justify-center gap-3 px-4">
             <Button
-              className={`${styles.action} sm:w-auto`}
+              className={`${styles.action} w-full min-[640px]:w-auto`}
               onClick={restartSong}
             >
               <RotateCcw aria-hidden className="size-5" />
@@ -532,7 +546,7 @@ export function KaraokeStage({
             </Button>
             <ButtonLink
               variant="secondary"
-              className={`${styles.action} sm:w-auto`}
+              className={`${styles.action} w-full min-[640px]:w-auto`}
               href="/karaoke"
             >
               Chọn bài khác
@@ -596,7 +610,7 @@ export function KaraokeStage({
                 {scoredMode && (
                   <div
                     data-testid="karaoke-live-feedback"
-                    className="mx-auto flex flex-wrap items-center justify-center gap-2 text-xs font-bold sm:text-sm"
+                    className="mx-auto flex flex-wrap items-center justify-center gap-2 text-xs font-bold min-[640px]:text-sm"
                   >
                     <span className="rounded-full border border-green-500 bg-green-100 px-3 py-1 text-green-900">
                       Đúng: {liveMatched}
@@ -659,7 +673,7 @@ export function KaraokeStage({
           )}
           <div className="flex flex-wrap justify-center gap-3">
             <Button
-              className={`${styles.action} sm:min-w-56 sm:w-auto`}
+              className={`${styles.action} w-full min-[640px]:min-w-56 min-[640px]:w-auto`}
               disabled={!player.ready}
               onClick={togglePlay}
             >
@@ -680,7 +694,7 @@ export function KaraokeStage({
             </Button>
             <Button
               variant="secondary"
-              className={`${styles.action} sm:w-auto`}
+              className={`${styles.action} w-full min-[640px]:w-auto`}
               disabled={!player.ready || !targetLine}
               onClick={() => practice()}
             >
@@ -690,7 +704,7 @@ export function KaraokeStage({
             {scoredMode && started && !practiceLine && countdown === null && (
               <Button
                 variant="secondary"
-                className={`${styles.action} sm:w-auto`}
+                className={`${styles.action} w-full min-[640px]:w-auto`}
                 onClick={finishAndScoreSong}
               >
                 <Star aria-hidden className="size-5" />
@@ -700,7 +714,7 @@ export function KaraokeStage({
             {practiceLine && (
               <Button
                 variant="secondary"
-                className={`${styles.action} sm:w-auto`}
+                className={`${styles.action} w-full min-[640px]:w-auto`}
                 aria-pressed={repeat}
                 disabled={
                   scoredMode &&
@@ -783,7 +797,7 @@ export function KaraokeStage({
           </select>
         </label>
       </div>
-      <details className="min-w-0 rounded-control border border-border bg-white/70 p-4">
+      <details className="min-w-0 rounded-control border border-border bg-white/70 p-3.5 md:p-4">
         <summary className="min-h-11 cursor-pointer content-center font-bold text-primary">
           Chọn câu để luyện
         </summary>
@@ -806,14 +820,14 @@ export function KaraokeStage({
         {practiceLine && (
           <Button
             variant="secondary"
-            className="mt-3 sm:w-auto"
+            className="mt-3 w-full min-[640px]:w-auto"
             onClick={leavePractice}
           >
             Trở về hát cả bài
           </Button>
         )}
       </details>
-      <details className="min-w-0 rounded-control border border-border bg-white/70 p-4">
+      <details className="min-w-0 rounded-control border border-border bg-white/70 p-3.5 md:p-4">
         <summary className="min-h-11 cursor-pointer content-center font-bold text-primary">
           Âm lượng và thông tin bài hát
         </summary>
@@ -842,7 +856,7 @@ export function KaraokeStage({
           <div className="flex flex-wrap gap-3">
             <Button
               variant="secondary"
-              className="sm:w-auto"
+              className="w-full min-[640px]:w-auto"
               disabled={!player.ready}
               onClick={restartSong}
             >
@@ -851,7 +865,7 @@ export function KaraokeStage({
             {onReload && (
               <Button
                 variant="quiet"
-                className="sm:w-auto"
+                className="w-full min-[640px]:w-auto"
                 onClick={() => {
                   cancelPreparation();
                   player.pause();
@@ -872,7 +886,7 @@ export function KaraokeStage({
       {player.error && onReload && (
         <Button
           variant="secondary"
-          className="sm:w-auto"
+          className="w-full min-[640px]:w-auto"
           onClick={() => {
             cancelPreparation();
             player.pause();

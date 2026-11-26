@@ -1,5 +1,9 @@
 import { getBrowserAccessToken } from "@/lib/api/browser-auth";
 import {
+  detectBrowserWasmSttSupport,
+  prewarmBrowserWasmStt,
+} from "@/lib/reading/browser-wasm-stt";
+import {
   inferRegionFromVoiceId,
   type VoiceRegion,
 } from "@/lib/reading/session-voice-lock";
@@ -17,6 +21,14 @@ export type VoiceEngineTier =
   | "google_cloud"
   | "browser_default"
   | "idle";
+
+export type WasmSttLifecycleState = "idle" | "warming" | "ready" | "error";
+
+export type TtsUnavailableReason =
+  | "android_vi_voice_missing"
+  | "worker_offline_locked"
+  | "browser_vi_voice_missing"
+  | "autoplay_blocked";
 
 export interface VoiceEngineHealthSnapshot {
   readonly default_mode: string;
@@ -46,11 +58,17 @@ export interface EngineSourceSnapshot {
   voiceId: string | null;
   voiceGender: VoiceGender | null;
   updatedAt: number;
+  detail?: string | null;
+  wasmState?: WasmSttLifecycleState;
+  androidOnDevice?: boolean | null;
 }
 
 export interface VoiceEngineStatusState {
   stt: EngineSourceSnapshot;
   tts: EngineSourceSnapshot;
+  ttsUnavailableReason: TtsUnavailableReason | null;
+  canInstallVietnameseTtsVoice: boolean;
+  voiceNotice: string | null;
 }
 
 function createIdleSnapshot(kind: "stt" | "tts"): EngineSourceSnapshot {
@@ -70,9 +88,20 @@ function createIdleSnapshot(kind: "stt" | "tts"): EngineSourceSnapshot {
 
 export const VOICE_HEALTH_FRESHNESS_MS = 45_000;
 
+const SERVER_SNAPSHOT_STATE: VoiceEngineStatusState = {
+  stt: createIdleSnapshot("stt"),
+  tts: createIdleSnapshot("tts"),
+  ttsUnavailableReason: null,
+  canInstallVietnameseTtsVoice: false,
+  voiceNotice: null,
+};
+
 let state: VoiceEngineStatusState = {
   stt: createIdleSnapshot("stt"),
   tts: createIdleSnapshot("tts"),
+  ttsUnavailableReason: null,
+  canInstallVietnameseTtsVoice: false,
+  voiceNotice: null,
 };
 
 let cachedHealth: VoiceEngineHealthSnapshot | null = null;
@@ -93,6 +122,9 @@ export function mapProviderToEngineSnapshot(input: {
   fallbackReason?: string | null;
   voiceId?: string | null;
   voiceGender?: VoiceGender | null;
+  detail?: string | null;
+  wasmState?: WasmSttLifecycleState;
+  androidOnDevice?: boolean | null;
 }): EngineSourceSnapshot {
   const normalized = (input.provider ?? "").trim().toLowerCase();
   const isStt = input.kind === "stt";
@@ -149,6 +181,11 @@ export function mapProviderToEngineSnapshot(input: {
     voiceId: input.voiceId ?? null,
     voiceGender: input.voiceGender ?? null,
     updatedAt: Date.now(),
+    ...(input.detail !== undefined ? { detail: input.detail } : {}),
+    ...(input.wasmState !== undefined ? { wasmState: input.wasmState } : {}),
+    ...(input.androidOnDevice !== undefined
+      ? { androidOnDevice: input.androidOnDevice }
+      : {}),
   };
 }
 
@@ -158,6 +195,7 @@ export function recordTtsEngineUsage(input: {
   fallbackReason?: string | null;
   voiceId?: string | null;
   voiceGender?: VoiceGender | null;
+  detail?: string | null;
 }): void {
   state = {
     ...state,
@@ -165,6 +203,9 @@ export function recordTtsEngineUsage(input: {
       kind: "tts",
       ...input,
     }),
+    ttsUnavailableReason: null,
+    canInstallVietnameseTtsVoice: false,
+    voiceNotice: null,
   };
   emit();
 }
@@ -173,6 +214,9 @@ export function recordSttEngineUsage(input: {
   provider?: string | null;
   fallbackUsed?: boolean;
   fallbackReason?: string | null;
+  detail?: string | null;
+  wasmState?: WasmSttLifecycleState;
+  androidOnDevice?: boolean | null;
 }): void {
   state = {
     ...state,
@@ -184,8 +228,66 @@ export function recordSttEngineUsage(input: {
   emit();
 }
 
+const ANDROID_VI_TTS_MISSING_NOTICE =
+  "Thiết bị Android chưa cài giọng đọc tiếng Việt offline. Ba mẹ mở Cài đặt TTS để tải giọng hoặc xem chữ trên màn hình nhé.";
+
+export function recordAndroidTtsCapabilities(
+  caps: {
+    readonly ttsAvailable: boolean;
+    readonly viVoicesCount: number;
+  } | null,
+): void {
+  if (!caps) return;
+  if (!caps.ttsAvailable || caps.viVoicesCount <= 0) {
+    state = {
+      ...state,
+      ttsUnavailableReason: "android_vi_voice_missing",
+      canInstallVietnameseTtsVoice: true,
+      voiceNotice: ANDROID_VI_TTS_MISSING_NOTICE,
+    };
+    emit();
+    return;
+  }
+  if (state.ttsUnavailableReason === "android_vi_voice_missing") {
+    state = {
+      ...state,
+      ttsUnavailableReason: null,
+      canInstallVietnameseTtsVoice: false,
+      voiceNotice: null,
+    };
+    emit();
+  }
+}
+
+export function recordTtsUnavailability(input: {
+  reason: TtsUnavailableReason | null;
+  canInstallVietnameseTtsVoice?: boolean;
+  voiceNotice?: string | null;
+}): void {
+  const nextNotice = input.voiceNotice ?? null;
+  const nextCanInstall = Boolean(input.canInstallVietnameseTtsVoice);
+  if (
+    state.ttsUnavailableReason === input.reason &&
+    state.canInstallVietnameseTtsVoice === nextCanInstall &&
+    state.voiceNotice === nextNotice
+  ) {
+    return;
+  }
+  state = {
+    ...state,
+    ttsUnavailableReason: input.reason,
+    canInstallVietnameseTtsVoice: nextCanInstall,
+    voiceNotice: nextNotice,
+  };
+  emit();
+}
+
 export function getVoiceEngineStatus(): VoiceEngineStatusState {
   return state;
+}
+
+export function getServerVoiceEngineStatus(): VoiceEngineStatusState {
+  return SERVER_SNAPSHOT_STATE;
 }
 
 export function subscribeVoiceEngineStatus(listener: () => void): () => void {
@@ -221,6 +323,9 @@ export function resetVoiceEngineStatus(): void {
   state = {
     stt: createIdleSnapshot("stt"),
     tts: createIdleSnapshot("tts"),
+    ttsUnavailableReason: null,
+    canInstallVietnameseTtsVoice: false,
+    voiceNotice: null,
   };
   emit();
 }
@@ -311,6 +416,14 @@ export async function fetchVoiceEngineHealth(
       },
     };
     setCachedVoiceEngineHealth(snapshot);
+    if (
+      (!snapshot.local.available || !snapshot.local.stt_ready) &&
+      typeof window !== "undefined" &&
+      typeof Worker === "function" &&
+      detectBrowserWasmSttSupport().supported
+    ) {
+      void prewarmBrowserWasmStt().catch(() => false);
+    }
     return snapshot;
   } catch {
     return null;

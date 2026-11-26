@@ -241,7 +241,7 @@ export function ParentProfileForm({
         selectedFile={selectedAvatarFile}
       />
       {errors.avatar ? (
-        <p className="-mt-4 text-sm text-danger" role="alert">
+        <p className="-mt-2 text-sm text-danger" role="alert">
           {errors.avatar}
         </p>
       ) : null}
@@ -268,9 +268,9 @@ export function ParentProfileForm({
           value={email}
         />
         {profile.pending_email ? (
-          <p className="text-sm text-warning">
+          <p className="break-all text-sm text-warning">
             Đang chờ xác minh email mới:{" "}
-            <strong>{profile.pending_email}</strong>
+            <strong className="break-all">{profile.pending_email}</strong>
           </p>
         ) : null}
         {profile.email_verified === false ? (
@@ -304,17 +304,17 @@ export function ParentProfileForm({
         </p>
       </div>
       <details>
-        <summary className="cursor-pointer text-sm font-semibold text-primary">
+        <summary className="min-h-11 cursor-pointer rounded-control py-2.5 text-sm font-semibold leading-6 text-primary outline-none hover:underline focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary">
           Thông tin tài khoản
         </summary>
-        <dl className="mt-3 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-control bg-canvas p-4">
+        <dl className="mt-3 grid gap-3 min-[640px]:grid-cols-2">
+          <div className="min-w-0 rounded-control bg-canvas p-4">
             <dt className="text-sm font-semibold text-muted">Vai trò</dt>
             <dd className="mt-1 text-label font-semibold text-ink">
               {getRoleLabel(profile.role)}
             </dd>
           </div>
-          <div className="rounded-control bg-canvas p-4">
+          <div className="min-w-0 rounded-control bg-canvas p-4">
             <dt className="text-sm font-semibold text-muted">
               Ngày tạo tài khoản
             </dt>
@@ -325,9 +325,9 @@ export function ParentProfileForm({
         </dl>
       </details>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-3 min-[640px]:grid-cols-2 min-[640px]:gap-4">
         <Button
-          className="order-last sm:px-6"
+          className="order-last min-[640px]:px-6"
           disabled={isSaving}
           onClick={onCancel}
           type="button"
@@ -336,7 +336,7 @@ export function ParentProfileForm({
           Hủy
         </Button>
         <Button
-          className="sm:px-6"
+          className="min-[640px]:px-6"
           disabled={!isHydrated || isSaving}
           isLoading={isSaving}
           type="submit"

@@ -53,3 +53,36 @@ it.each(["ABORTED", "FINISHED"])(
     expect(screen.queryByRole("link", { name: "Đọc tiếp" })).toBeNull();
   },
 );
+
+it("uses 640px side-by-side desk overrides, non-fullWidth desk-primary, and word-wrapping recent link", async () => {
+  sessionService.list.mockResolvedValue({
+    sessions: [{ ...session, state: "FINISHED" }],
+  });
+  const { container } = openDesk();
+  const recentLink = await screen.findByRole("link", {
+    name: /Lần đọc gần nhất/,
+  });
+  expect(recentLink.className).toContain("max-w-full");
+  expect(recentLink.className).toContain("break-words");
+
+  const deskSection = container.querySelector(".family-reading-desk");
+  expect(deskSection?.className).toContain(
+    "min-[640px]:grid-cols-[minmax(0,1.25fr)_minmax(0,0.75fr)]!",
+  );
+
+  const chooseBtn = screen.getByRole("button", { name: "Chọn sách" });
+  expect(chooseBtn.className).toContain("w-auto");
+  expect(chooseBtn.className).not.toContain("w-full");
+  expect(chooseBtn.className).toContain("min-h-11!");
+
+  const illustration = container.querySelector(".desk-illustration");
+  expect(illustration?.className).toContain("max-[640px]:max-h-[92px]!");
+  expect(illustration?.className).toContain("min-[640px]:max-md:row-auto!");
+  expect(illustration?.className).toContain(
+    "min-[640px]:max-md:min-h-[200px]!",
+  );
+  expect(illustration?.className).toContain("min-[640px]:max-md:max-h-none!");
+  expect(illustration?.className).not.toContain("md:min-h-[264px]!");
+  expect(illustration?.className).not.toContain("min-[921px]:min-h-[324px]!");
+  expect(container.innerHTML).not.toMatch(/\b(?:max-)?sm:/);
+});

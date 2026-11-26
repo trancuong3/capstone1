@@ -930,14 +930,32 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     expect(onEnded).toHaveBeenCalledOnce();
   });
 
-  it("handles Android WebView local_only /phonics 503: prefers cached word audio first, falls back to Android native TTS on cache miss", async () => {
+  it("handles Android WebView local_only /phonics 503: prefers cached word audio first, falls back to Android native TTS on cache miss (even when locked) and reports missing Vietnamese voice", async () => {
     const sent: Array<Record<string, unknown>> = [];
+    let capabilitiesToReport = {
+      ttsAvailable: true,
+      viVoicesCount: 2,
+      sttAvailable: true,
+      onDeviceSttAvailable: true,
+    };
     const port: ViReadNativeSpeechPort = {
       onmessage: null,
       postMessage: vi.fn((raw: string) => {
         const msg = JSON.parse(raw) as Record<string, unknown>;
         sent.push(msg);
-        if (msg.action === "speak") {
+        if (msg.action === "getCapabilities") {
+          const reqId = String(msg.requestId);
+          queueMicrotask(() => {
+            port.onmessage?.({
+              data: JSON.stringify({
+                type: "capabilities",
+                requestId: reqId,
+                ...capabilitiesToReport,
+                platform: "android-webview",
+              }),
+            });
+          });
+        } else if (msg.action === "speak") {
           const reqId = String(msg.requestId);
           queueMicrotask(() => {
             port.onmessage?.({
@@ -988,8 +1006,9 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       await firstPlay;
       expect(sent.filter((m) => m.action === "speak")).toHaveLength(0);
 
-      // Case 2: Under local_only with an active SessionVoiceLock, Android native TTS fallback is blocked
-      // (One-Session-One-Voice); once unlocked, on-device Android native TTS works under local_only.
+      // Case 2: Under local_only with an active SessionVoiceLock, 100% on-device Android native TTS
+      // IS ALLOWED when viVoicesCount > 0; when viVoicesCount === 0, rejects cleanly and surfaces
+      // canInstallVietnameseTtsVoice + android_vi_voice_missing instead of LOCKED_VOICE_UNAVAILABLE_NOTICE.
       const planMiss = buildPhonicsLesson("bàn");
       expect(planMiss.supported).toBe(true);
       if (!planMiss.supported) return;
@@ -1009,14 +1028,30 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
           code: "TTS_UNAVAILABLE",
         }),
       );
-      await expect(
-        result.current.playPhonicsLesson(planMiss, {
-          cacheScope: "COACHING",
-        }),
-      ).rejects.toThrow();
-      expect(sent.filter((m) => m.action === "speak")).toHaveLength(0);
-      releaseSessionVoiceLock("android-lock-test");
+      const onEnded = vi.fn();
+      await result.current.playPhonicsLesson(planMiss, {
+        cacheScope: "COACHING",
+        onEnded,
+      });
+      const speakMsgs = sent.filter((m) => m.action === "speak");
+      expect(speakMsgs.length).toBe(planMiss.steps.length);
+      expect(onEnded).toHaveBeenCalledOnce();
+      expect(result.current.canInstallVietnameseTtsVoice).toBe(false);
 
+      // Missing Vietnamese TTS voice on Android (viVoicesCount === 0)
+      capabilitiesToReport = {
+        ttsAvailable: false,
+        viVoicesCount: 0,
+        sttAvailable: true,
+        onDeviceSttAvailable: true,
+      };
+      const { getAndroidSpeechCapabilities } =
+        await import("@/lib/reading/native-speech-bridge");
+      await getAndroidSpeechCapabilities({ forceRefresh: true });
+
+      const speakCountBeforeMissing = sent.filter(
+        (m) => m.action === "speak",
+      ).length;
       speech.synthesizePhonics.mockRejectedValueOnce(
         Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
           status: 503,
@@ -1029,15 +1064,20 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
           code: "TTS_UNAVAILABLE",
         }),
       );
-
-      const onEnded = vi.fn();
-      await result.current.playPhonicsLesson(planMiss, {
-        cacheScope: "COACHING",
-        onEnded,
-      });
-      const speakMsgs = sent.filter((m) => m.action === "speak");
-      expect(speakMsgs.length).toBe(planMiss.steps.length);
-      expect(onEnded).toHaveBeenCalledOnce();
+      await expect(
+        result.current.playPhonicsLesson(planMiss, {
+          cacheScope: "COACHING",
+        }),
+      ).rejects.toThrow();
+      expect(sent.filter((m) => m.action === "speak").length).toBe(
+        speakCountBeforeMissing,
+      );
+      expect(result.current.ttsUnavailableReason).toBe(
+        "android_vi_voice_missing",
+      );
+      expect(result.current.canInstallVietnameseTtsVoice).toBe(true);
+      expect(result.current.voiceNotice).toMatch(/Cài đặt TTS/i);
+      releaseSessionVoiceLock("android-lock-test");
     } finally {
       resetAndroidNativeSpeechBridgeForTests();
       delete win.ViReadNativeSpeech;
@@ -1218,5 +1258,150 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     expect(customAudio.playbackRate).toBe(1);
     act(() => customAudio.finish());
     await customPromise;
+  });
+
+  it("keeps Android native TTS word index strictly monotonic when late tts_range(0) arrives after approxTimer", async () => {
+    vi.useFakeTimers();
+    let activeReqId = "";
+    const port: ViReadNativeSpeechPort = {
+      onmessage: null,
+      postMessage: vi.fn((raw: string) => {
+        const msg = JSON.parse(raw) as { action?: string; requestId?: string };
+        if (msg.action === "get_capabilities") {
+          queueMicrotask(() => {
+            port.onmessage?.({
+              data: JSON.stringify({
+                type: "capabilities",
+                requestId: msg.requestId,
+                sttAvailable: true,
+                ttsAvailable: true,
+                viVoicesCount: 2,
+              }),
+            });
+          });
+        } else if (msg.action === "speak") {
+          activeReqId = msg.requestId ?? "";
+        }
+      }),
+    };
+    const win = window as unknown as {
+      ViReadNativeSpeech?: ViReadNativeSpeechPort;
+    };
+    win.ViReadNativeSpeech = port;
+    resetAndroidNativeSpeechBridgeForTests();
+    studio.synthesizeTimed.mockRejectedValue(
+      Object.assign(new Error("Offline"), { status: 503 }),
+    );
+    speech.synthesize.mockRejectedValue(
+      Object.assign(new Error("Offline"), { status: 503 }),
+    );
+
+    try {
+      const { result } = renderHook(() => useSpeechPlayer());
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      const emitted: number[] = [];
+      const playPromise = result.current.playWithWordTimings(
+        ["Bé", "mèo", "nhỏ", "đọc"],
+        {
+          text: "Bé mèo nhỏ đọc",
+          onWordChange: (index) => emitted.push(index),
+        },
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20);
+      });
+      expect(activeReqId).not.toBe("");
+
+      act(() => {
+        port.onmessage?.({
+          data: JSON.stringify({ type: "tts_start", requestId: activeReqId }),
+        });
+      });
+
+      // Advance approxTimer past word 0 to word 1+ before late tts_range(0) arrives
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(450);
+      });
+      expect(emitted.some((idx) => idx >= 1)).toBe(true);
+
+      act(() => {
+        port.onmessage?.({
+          data: JSON.stringify({
+            type: "tts_range",
+            requestId: activeReqId,
+            start: 0,
+            end: 2,
+          }),
+        });
+        port.onmessage?.({
+          data: JSON.stringify({
+            type: "tts_range",
+            requestId: activeReqId,
+            start: 7,
+            end: 10,
+          }),
+        });
+        port.onmessage?.({
+          data: JSON.stringify({ type: "tts_done", requestId: activeReqId }),
+        });
+      });
+      await playPromise;
+
+      for (let i = 1; i < emitted.length; i += 1) {
+        expect(emitted[i]).toBeGreaterThan(emitted[i - 1]);
+      }
+    } finally {
+      vi.useRealTimers();
+      resetAndroidNativeSpeechBridgeForTests();
+      delete win.ViReadNativeSpeech;
+    }
+  });
+
+  it("plays Tier 1 precomputedAudioUrl without word timings on mappable pages using monotonic proportional highlights", async () => {
+    setSpeechPreferences({ voiceId: "local_north_truc_ly", speed: 1.0 });
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(new Uint8Array([1, 2, 3, 4]), {
+          status: 200,
+          headers: { "content-type": "audio/mpeg" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useSpeechPlayer());
+    const catalogUrl =
+      "https://cdn.example.test/storage/v1/object/public/viread-catalog-tts/local_north_truc_ly/1.0/page1.mp3";
+    const emitted: number[] = [];
+
+    const playback = result.current.playWithWordTimings(
+      ["Bé", "mèo", "nhỏ", "đọc"],
+      {
+        text: "Bé mèo nhỏ đọc",
+        precomputedAudioUrl: catalogUrl,
+        precomputedWordTimings: null,
+        onWordChange: (index) => emitted.push(index),
+      },
+    );
+
+    const audio = await audioAt(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(studio.synthesizeTimed).not.toHaveBeenCalled();
+
+    audio.currentTime = 0.6;
+    act(() => frame());
+    audio.currentTime = 1.6;
+    act(() => frame());
+    act(() => audio.finish());
+    await playback;
+
+    expect(emitted).not.toContain(-1);
+    expect(emitted.length).toBeGreaterThanOrEqual(3);
+    for (let i = 1; i < emitted.length; i += 1) {
+      expect(emitted[i]).toBeGreaterThan(emitted[i - 1]);
+    }
   });
 });

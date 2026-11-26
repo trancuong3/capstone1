@@ -67,8 +67,8 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
     public static final long STT_TO_TTS_SETTLE_MS = 150L;
     public static final long TTS_INIT_TIMEOUT_MS = 2_500L;
     public static final long STT_STOP_FALLBACK_TIMEOUT_MS = 2_000L;
-    public static final long COMPLETE_SILENCE_LENGTH_MS = 1_500L;
-    public static final long POSSIBLY_COMPLETE_SILENCE_LENGTH_MS = 1_000L;
+    public static final long COMPLETE_SILENCE_LENGTH_MS = 2_200L;
+    public static final long POSSIBLY_COMPLETE_SILENCE_LENGTH_MS = 1_500L;
     public static final int DEFAULT_MAX_RESULTS = 3;
     public static final int MIN_MAX_RESULTS = 1;
     public static final int MAX_MAX_RESULTS = 5;
@@ -530,7 +530,7 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         boolean ttsAvailable = ttsInitSucceeded
                 && ttsEngine.isReady()
                 && (viVoicesCount > 0 || ttsEngine.isVietnameseAvailable());
-        boolean onDeviceSttAvailable = sttEngineFactory.isOnDeviceSttAvailable();
+        boolean onDeviceSttAvailable = !onDeviceViUnsupported && sttEngineFactory.isOnDeviceSttAvailable();
         boolean sttAvailable = sttEngineFactory.isSttAvailable() || onDeviceSttAvailable;
 
         JSONObject evt = new JSONObject();
@@ -631,6 +631,14 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
                     request.requestId,
                     "tts_unavailable",
                     "Android TextToSpeech engine is unavailable");
+            return;
+        }
+        if (ttsEngine.getVietnameseVoicesCount() <= 0 && !ttsEngine.isVietnameseAvailable()) {
+            sendTtsError(
+                    request.reply,
+                    request.requestId,
+                    "voice_not_installed",
+                    "Vietnamese TextToSpeech voice is not installed");
             return;
         }
 
@@ -906,9 +914,11 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
             public void onReadyForSpeech() {
                 scheduler.post(() -> {
                     if (!isCurrentStt(request)) return;
+                    boolean sessionOnDevice = activeSttSession != null && activeSttSession.isOnDevice();
                     JSONObject evt = new JSONObject();
                     putSafe(evt, "type", "stt_ready");
                     putSafe(evt, "requestId", request.requestId);
+                    putSafe(evt, "onDevice", sessionOnDevice);
                     sendJson(request.reply, evt);
                 });
             }
@@ -1012,8 +1022,12 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
                             && !activeSttUsedCloudFallback
                             && isOnDeviceLanguageFallbackError(errorCode)
                             && sttEngineFactory.isSttAvailable()) {
-                        // On-device model missing vi-VN pack -> seamlessly fall back to standard SpeechRecognizer
-                        onDeviceViUnsupported = true;
+                        // Only permanently latch onDeviceViUnsupported on genuine missing-language
+                        // errors; transient ERROR_CANNOT_CHECK_SUPPORT falls back for this utterance
+                        // without disabling future on-device retries.
+                        if (isPermanentOnDeviceLanguageUnsupportedError(errorCode)) {
+                            onDeviceViUnsupported = true;
+                        }
                         destroyActiveSttSessionOnly();
                         beginSttSessionOnMain(request, true);
                         return;
@@ -1329,9 +1343,14 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
     }
 
     @SuppressLint("InlinedApi")
-    static boolean isOnDeviceLanguageFallbackError(int errorCode) {
+    static boolean isPermanentOnDeviceLanguageUnsupportedError(int errorCode) {
         return errorCode == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED
-                || errorCode == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
+                || errorCode == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE;
+    }
+
+    @SuppressLint("InlinedApi")
+    static boolean isOnDeviceLanguageFallbackError(int errorCode) {
+        return isPermanentOnDeviceLanguageUnsupportedError(errorCode)
                 || errorCode == SpeechRecognizer.ERROR_CANNOT_CHECK_SUPPORT;
     }
 

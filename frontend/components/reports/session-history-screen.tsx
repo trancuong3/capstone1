@@ -182,14 +182,14 @@ export function SessionHistoryScreen({
           liệu mẫu thay thế.
         </StatusMessage>
         <Button
-          className="sm:w-auto sm:self-start sm:px-8"
+          className="min-[640px]:w-auto min-[640px]:self-start min-[640px]:px-8"
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
           <RefreshCw aria-hidden="true" className="size-4" /> Thử lại
         </Button>
         <ButtonLink
-          className="sm:w-auto sm:self-start"
+          className="min-[640px]:w-auto min-[640px]:self-start"
           href="/children"
           variant="secondary"
         >
@@ -213,7 +213,7 @@ export function SessionHistoryScreen({
           Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
         </StatusMessage>
         <Button
-          className="sm:w-auto sm:self-start sm:px-8"
+          className="min-[640px]:w-auto min-[640px]:self-start min-[640px]:px-8"
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
@@ -319,18 +319,18 @@ export function SessionHistoryScreen({
       {currentPage > 1 || nextPage !== null ? (
         <nav
           aria-label="Phân trang lịch sử"
-          className="flex flex-col-reverse items-center gap-3 pt-1 sm:flex-row sm:justify-between"
+          className="flex flex-col-reverse items-center gap-3 pt-1 min-[640px]:flex-row min-[640px]:justify-between"
         >
           {currentPage > 1 ? (
             <ButtonLink
-              className="sm:w-auto sm:min-w-36"
+              className="min-[640px]:w-auto min-[640px]:min-w-36"
               href={`/sessions?${childQuery}&page=${currentPage - 1}`}
               variant="secondary"
             >
               Trang trước
             </ButtonLink>
           ) : (
-            <span className="hidden sm:block sm:min-w-36" />
+            <span className="hidden min-[640px]:block min-[640px]:min-w-36" />
           )}
           <span
             aria-current="page"
@@ -340,13 +340,13 @@ export function SessionHistoryScreen({
           </span>
           {nextPage !== null ? (
             <ButtonLink
-              className="sm:w-auto sm:min-w-36"
+              className="min-[640px]:w-auto min-[640px]:min-w-36"
               href={`/sessions?${childQuery}&page=${nextPage}`}
             >
               Trang sau
             </ButtonLink>
           ) : (
-            <span className="hidden sm:block sm:min-w-36" />
+            <span className="hidden min-[640px]:block min-[640px]:min-w-36" />
           )}
         </nav>
       ) : null}

@@ -437,9 +437,33 @@ export class RealtimeAlignmentEngine {
     return this.isOffTopic(tokenizeRealtimeText(text));
   }
 
+  private isIgnoredHesitationFillerAt(token: string, cursor: number): boolean {
+    if (
+      token !== "ờ" &&
+      token !== "ừm" &&
+      token !== "ầm" &&
+      token !== "hừm" &&
+      token !== "à"
+    ) {
+      return false;
+    }
+    if (cursor >= this.bookWords.length) return false;
+    const start = Math.max(0, cursor - 1);
+    const end = Math.min(this.bookWords.length, cursor + 4);
+    for (let i = start; i < end; i += 1) {
+      if (this.bookWords[i].normalizedText === token) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   private isOffTopic(tokens: readonly string[]): boolean {
-    if (tokens.length < 3) return false;
-    return this.alignedTokenCount(tokens) / tokens.length < 0.5;
+    const { matched, effectiveCount } = this.evaluateTokenAlignment(tokens);
+    if (effectiveCount === 0) return false;
+    if (effectiveCount === 2) return matched === 0;
+    if (effectiveCount < 3) return false;
+    return matched / effectiveCount < 0.5;
   }
 
   private getPhonicsWindowTargets(cursor: number): string[] {
@@ -521,15 +545,23 @@ export class RealtimeAlignmentEngine {
     );
   }
 
-  private alignedTokenCount(tokens: readonly string[]): number {
+  private evaluateTokenAlignment(tokens: readonly string[]): {
+    matched: number;
+    effectiveCount: number;
+  } {
     let cursor = this.currentBookIndex;
     let matched = 0;
+    let ignoredCount = 0;
     const buffered =
       this.spellingBuffer?.bookIndex === this.currentBookIndex
         ? this.spellingBuffer.tokens
         : [];
     for (let index = 0; index < tokens.length; index += 1) {
       const token = tokens[index];
+      if (this.isIgnoredHesitationFillerAt(token, cursor)) {
+        ignoredCount += 1;
+        continue;
+      }
       if (cursor < this.bookWords.length) {
         const remaining = tokens.slice(index);
         if (index === 0 && buffered.length > 0) {
@@ -627,7 +659,10 @@ export class RealtimeAlignmentEngine {
         }
       }
     }
-    return matched;
+    return {
+      matched,
+      effectiveCount: Math.max(0, tokens.length - ignoredCount),
+    };
   }
 
   private findBehindFrom(cursor: number, token: string): number {
@@ -657,7 +692,10 @@ export class RealtimeAlignmentEngine {
     return -1;
   }
 
-  previewAlignment(text: string): RealtimeAlignmentSnapshot {
+  previewAlignment(
+    text: string,
+    options?: { readonly allowLookahead?: boolean },
+  ): RealtimeAlignmentSnapshot {
     const tokens = tokenizeRealtimeText(text);
 
     // Lấy snapshot hiện tại nhưng không thay đổi trạng thái chính thức.
@@ -700,6 +738,9 @@ export class RealtimeAlignmentEngine {
 
     for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex += 1) {
       const token = tokens[tokenIndex];
+      if (this.isIgnoredHesitationFillerAt(token, cursor)) {
+        continue;
+      }
       if (cursor >= this.bookWords.length) {
         const previousIndex = cursor - 1;
 
@@ -708,7 +749,6 @@ export class RealtimeAlignmentEngine {
           this.bookWords[previousIndex].normalizedText === token
         ) {
           setPreviewStatus(previousIndex, "REPEATED");
-          targetIndex = previousIndex;
         }
 
         continue;
@@ -789,7 +829,7 @@ export class RealtimeAlignmentEngine {
         break;
       }
 
-      // 2. Phát hiện đọc lặp từ ngay trước đó.
+      // 2. Phát hiện đọc lặp từ ngay trước đó (giữ nguyên con trỏ, không lùi về previousIndex).
       const previousIndex = cursor - 1;
 
       if (
@@ -797,30 +837,30 @@ export class RealtimeAlignmentEngine {
         this.bookWords[previousIndex].normalizedText === token
       ) {
         setPreviewStatus(previousIndex, "REPEATED");
-
-        targetIndex = previousIndex;
         continue;
       }
 
       // 3. Tìm từ ở phía trước: yêu cầu 2 từ liên tiếp khớp để tránh nhảy cóc con trỏ preview.
-      const matchedIndex = this.findAheadFrom(cursor, token);
+      if (options?.allowLookahead !== false) {
+        const matchedIndex = this.findAheadFrom(cursor, token);
 
-      if (
-        matchedIndex !== -1 &&
-        tokenIndex + 1 < tokens.length &&
-        matchedIndex + 1 < this.bookWords.length &&
-        this.bookWords[matchedIndex + 1].normalizedText ===
-          tokens[tokenIndex + 1]
-      ) {
-        setPreviewStatus(matchedIndex, "MATCH");
-        setPreviewStatus(matchedIndex + 1, "MATCH");
-        previewSpelling = false;
+        if (
+          matchedIndex !== -1 &&
+          tokenIndex + 1 < tokens.length &&
+          matchedIndex + 1 < this.bookWords.length &&
+          this.bookWords[matchedIndex + 1].normalizedText ===
+            tokens[tokenIndex + 1]
+        ) {
+          setPreviewStatus(matchedIndex, "MATCH");
+          setPreviewStatus(matchedIndex + 1, "MATCH");
+          previewSpelling = false;
 
-        cursor = matchedIndex + 2;
-        targetIndex =
-          cursor < this.bookWords.length ? cursor : matchedIndex + 1;
-        tokenIndex += 1;
-        continue;
+          cursor = matchedIndex + 2;
+          targetIndex =
+            cursor < this.bookWords.length ? cursor : matchedIndex + 1;
+          tokenIndex += 1;
+          continue;
+        }
       }
 
       // 4. Từ không khớp trong interim: giữ con trỏ tại vị trí hiện tại, không nháy đỏ sớm.
@@ -829,7 +869,11 @@ export class RealtimeAlignmentEngine {
       targetIndex = cursor;
     }
 
-    const activeIndex = targetIndex ?? this.currentBookIndex;
+    const rawActiveIndex = targetIndex ?? this.currentBookIndex;
+    const activeIndex =
+      this.currentBookIndex < this.bookWords.length
+        ? Math.max(this.currentBookIndex, rawActiveIndex)
+        : rawActiveIndex;
     const targetWord = this.bookWords[activeIndex] ?? null;
 
     return {
@@ -861,22 +905,10 @@ export class RealtimeAlignmentEngine {
   private processToken(token: string): void {
     if (!token) return;
 
-    // Ignore pure breath/hesitation fillers ("ờ", "ừm", "ầm", "hừm") when they do NOT
+    // Ignore pure breath/hesitation fillers ("ờ", "ừm", "ầm", "hừm", "à") when they do NOT
     // appear in the nearby book words so post-pause inhales never mark the next word RED.
-    if (
-      (token === "ờ" || token === "ừm" || token === "ầm" || token === "hừm") &&
-      this.currentBookIndex < this.bookWords.length
-    ) {
-      const start = Math.max(0, this.currentBookIndex - 1);
-      const end = Math.min(this.bookWords.length, this.currentBookIndex + 4);
-      let inBook = false;
-      for (let i = start; i < end; i += 1) {
-        if (this.bookWords[i].normalizedText === token) {
-          inBook = true;
-          break;
-        }
-      }
-      if (!inBook) return;
+    if (this.isIgnoredHesitationFillerAt(token, this.currentBookIndex)) {
+      return;
     }
 
     const spokenIndex = this.spokenWords.length;

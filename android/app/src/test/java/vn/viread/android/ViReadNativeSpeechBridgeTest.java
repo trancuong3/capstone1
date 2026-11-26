@@ -544,11 +544,11 @@ public final class ViReadNativeSpeechBridgeTest {
         assertTrue(session.startedIntent.getBooleanExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false));
         assertEquals(3, session.startedIntent.getIntExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 0));
         assertEquals(
-                1500L,
+                2200L,
                 session.startedIntent.getLongExtra(
                         RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 0L));
         assertEquals(
-                1000L,
+                1500L,
                 session.startedIntent.getLongExtra(
                         RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 0L));
 
@@ -563,6 +563,7 @@ public final class ViReadNativeSpeechBridgeTest {
 
         assertEquals(6, h.events.size());
         assertEquals("stt_ready", h.events.get(0).getString("type"));
+        assertTrue(h.events.get(0).getBoolean("onDevice"));
         assertEquals("stt_onset", h.events.get(1).getString("type"));
         assertEquals(expectedOnset, h.events.get(1).getLong("onsetAt"));
         assertEquals("stt_rms", h.events.get(2).getString("type"));
@@ -610,6 +611,39 @@ public final class ViReadNativeSpeechBridgeTest {
         assertEquals("stt_final", h.events.get(0).getString("type"));
         assertEquals("con mèo", h.events.get(0).getString("transcript"));
         assertEquals("stt_end", h.events.get(1).getString("type"));
+    }
+
+    @Test
+    public void transientErrorCannotCheckSupportDoesNotPermanentlyDisableOnDeviceSttAndMissingViTtsEmitsVoiceNotInstalled()
+            throws Exception {
+        BridgeHarness h = new BridgeHarness();
+        h.tts.viVoicesCount = 0;
+        h.tts.viAvailable = false;
+
+        // Speak without Vietnamese TTS voice -> emits voice_not_installed immediately
+        h.sendTrusted("{\"action\":\"speak\",\"requestId\":\"tts-missing-vi\",\"text\":\"Xin chào\"}");
+        assertEquals("tts_error", h.events.get(0).getString("type"));
+        assertEquals("voice_not_installed", h.events.get(0).getString("code"));
+        assertEquals(0, h.tts.speakCount);
+
+        // Transient ERROR_CANNOT_CHECK_SUPPORT (14) falls back for this utterance without latching onDeviceViUnsupported
+        h.events.clear();
+        h.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-check-1\"}");
+        FakeSttSession s1 = h.sttFactory.createdSessions.get(0);
+        assertTrue(s1.onDevice);
+        s1.callback.onError(SpeechRecognizer.ERROR_CANNOT_CHECK_SUPPORT);
+        assertEquals(2, h.sttFactory.createdSessions.size());
+        assertFalse(h.sttFactory.createdSessions.get(1).onDevice);
+        h.sttFactory.createdSessions.get(1).callback.onFinalResults(Collections.singletonList("bé đọc"), null);
+
+        // Capabilities & next STT session must still report and attempt on-device STT
+        h.events.clear();
+        h.sendTrusted("{\"action\":\"getCapabilities\",\"requestId\":\"cap-retry\"}");
+        assertTrue(h.events.get(0).getBoolean("onDeviceSttAvailable"));
+
+        h.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-check-2\"}");
+        assertTrue("Transient ERROR_CANNOT_CHECK_SUPPORT must not latch onDeviceViUnsupported",
+                h.sttFactory.latest().onDevice);
     }
 
     @Test

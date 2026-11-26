@@ -15,7 +15,7 @@ export default function ParentAppLoading() {
         <Skeleton className="h-9 w-28 rounded-control" />
       </div>
       <Skeleton className="h-44 w-full rounded-card" />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 min-[640px]:grid-cols-2 lg:grid-cols-3">
         <Skeleton className="h-24 w-full rounded-card" />
         <Skeleton className="h-24 w-full rounded-card" />
         <Skeleton className="h-24 w-full rounded-card" />

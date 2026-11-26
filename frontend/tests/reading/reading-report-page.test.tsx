@@ -222,4 +222,104 @@ describe("per-session reading report page", () => {
       screen.queryByTestId("saved-report-rep-p1-v1"),
     ).not.toBeInTheDocument();
   });
+
+  it("enforces M3.1 4-band breakpoints, >= 44px touch targets, and zero legacy sm: classes across loaded, empty, and error states", async () => {
+    const page1FirstPass = {
+      ...savedReport("rep-p1-v1", "Trang 1 lượt đầu"),
+      page_id: "11111111-1111-4111-8111-111111111111",
+      page_revision_id: "11111111-1111-4111-8111-111111111112",
+      created_at: "2026-11-02T10:00:00Z",
+      summary: {
+        ...savedReport("rep-p1-v1", "").summary,
+        assessment_version: 1,
+      },
+    };
+    const page1Retry = {
+      ...savedReport("rep-p1-retry", "Trang 1 đối chiếu bổ sung"),
+      page_id: "11111111-1111-4111-8111-111111111111",
+      page_revision_id: "11111111-1111-4111-8111-111111111112",
+      created_at: "2026-11-02T10:01:00Z",
+    };
+    const page2Report = {
+      ...savedReport("rep-p2-v1", "Trang 2 lượt đầu"),
+      page_id: "22222222-2222-4222-8222-222222222221",
+      page_revision_id: "22222222-2222-4222-8222-222222222222",
+      created_at: "2026-11-02T10:03:00Z",
+      summary: {
+        ...savedReport("rep-p2-v1", "").summary,
+        assessment_version: 1,
+      },
+    };
+
+    api.getSessionReports.mockResolvedValueOnce(
+      reportsResponse([page1Retry, page1FirstPass, page2Report]),
+    );
+    const { container, unmount } = render(<ReadingReportPage />);
+    await screen.findByTestId("saved-report-rep-p1-v1");
+
+    const header = container.querySelector("header")!;
+    expect(header.className).toContain("min-[640px]:flex-row");
+    expect(header.className).toContain("min-[640px]:items-end");
+    expect(
+      screen.getByRole("heading", { name: "Báo cáo đọc" }).className,
+    ).toContain("min-[640px]:text-3xl");
+    expect(
+      screen.getByRole("link", { name: /Chi tiết buổi đọc/ }).className,
+    ).toContain("min-h-11");
+    expect(
+      screen.getByRole("link", { name: "Lịch sử đọc" }).className,
+    ).toContain("min-h-11");
+
+    const nav = screen.getByRole("navigation", {
+      name: "Chọn trang có báo cáo",
+    });
+    expect(nav.className).toContain("md:px-5");
+    for (const btn of [
+      screen.getByRole("button", { name: "Trang trước" }),
+      screen.getByRole("button", { name: "Trang 1" }),
+      screen.getByRole("button", { name: "Trang 2" }),
+      screen.getByRole("button", { name: "Trang sau" }),
+    ]) {
+      expect(btn.className).toContain("min-h-11");
+      expect(btn.className).toContain("min-w-11");
+      expect(btn.className).toContain("min-[640px]:px-3");
+    }
+    expect(
+      screen.getByRole("button", { name: "Trang 1" }).querySelector("span")!
+        .className,
+    ).toContain("min-[640px]:inline");
+
+    const details = container.querySelector("details")!;
+    expect(details.className).toContain("md:p-5");
+    expect(details.querySelector("summary")!.className).toContain("min-h-11");
+    expect(container.innerHTML).not.toMatch(
+      /(?:^|[\s"'])(?:sm|max-sm|max-\[639px\]|max-\[767px\]):/,
+    );
+    unmount();
+
+    api.getSessionReports.mockResolvedValueOnce(reportsResponse([]));
+    const emptyRender = render(<ReadingReportPage />);
+    const emptyRetryBtn = await screen.findByRole("button", {
+      name: "Kiểm tra lại",
+    });
+    expect(emptyRetryBtn.className).toContain("w-full");
+    expect(emptyRetryBtn.className).toContain("min-[640px]:w-auto");
+    expect(emptyRetryBtn.className).toContain("min-[640px]:self-start");
+    expect(emptyRender.container.innerHTML).not.toMatch(
+      /(?:^|[\s"'])(?:sm|max-sm|max-\[639px\]|max-\[767px\]):/,
+    );
+    emptyRender.unmount();
+
+    api.getSessionReports.mockRejectedValueOnce(new Error("Lỗi mạng"));
+    const errorRender = render(<ReadingReportPage />);
+    const errorRetryBtn = await screen.findByRole("button", {
+      name: "Thử tải lại",
+    });
+    expect(errorRetryBtn.className).toContain("w-full");
+    expect(errorRetryBtn.className).toContain("min-[640px]:w-auto");
+    expect(errorRetryBtn.className).toContain("min-[640px]:self-start");
+    expect(errorRender.container.innerHTML).not.toMatch(
+      /(?:^|[\s"'])(?:sm|max-sm|max-\[639px\]|max-\[767px\]):/,
+    );
+  });
 });

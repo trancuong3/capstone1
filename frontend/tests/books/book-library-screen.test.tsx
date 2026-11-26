@@ -178,4 +178,65 @@ describe("BookLibraryScreen with real API adapters", () => {
     expect(alert).not.toHaveTextContent("Private catalog details");
     expect(screen.getByRole("button", { name: "Thử lại" })).toBeInTheDocument();
   });
+
+  it("renders responsive 640px grid/labels, multi-line h1, tap-safe buttons, and multi-page PaginationBar", async () => {
+    const books = Array.from({ length: 13 }, (_, index) => ({
+      ...bookFixture,
+      id: `22000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      title: `Cuốn sách thiếu nhi tập ${index + 1}`,
+    }));
+    apiFetchFixture.mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === `/profiles/children/${TEST_CHILD_ID}`)
+        return Response.json(childFixture);
+      if (url.pathname === "/reading-management/collections")
+        return Response.json([]);
+      if (url.pathname === "/books/catalog") return Response.json(books);
+      throw new Error("Unexpected isolated catalog route");
+    });
+
+    const user = userEvent.setup();
+    const { container } = renderLibrary();
+
+    const heading = await screen.findByRole("heading", {
+      level: 1,
+      name: `Tủ sách của ${childFixture.alias}`,
+    });
+    expect(heading.className).toContain("line-clamp-2");
+    expect(heading.className).toContain("break-words");
+    expect(heading.className).not.toContain("truncate");
+
+    const filterGroup = screen.getByRole("group", {
+      name: "Lọc sách theo lớp",
+    });
+    expect(filterGroup.querySelector("div")?.className).toContain(
+      "min-[640px]:flex-wrap",
+    );
+
+    const viewBookLink = await screen.findByRole("link", {
+      name: "Đọc sách Cuốn sách thiếu nhi tập 1",
+    });
+    expect(viewBookLink.className).toContain("min-h-11!");
+    expect(viewBookLink.className).toContain("px-2.5!");
+
+    const pagination = screen.getByRole("navigation", {
+      name: "Phân trang thư viện sách",
+    });
+    expect(pagination).toHaveTextContent("Trang 1 / 2");
+    await user.click(within(pagination).getByRole("button", { name: "Tiếp" }));
+    expect(
+      await screen.findByRole("heading", {
+        level: 2,
+        name: "Cuốn sách thiếu nhi tập 13",
+      }),
+    ).toBeInTheDocument();
+
+    expect(heading.closest("div.border-b")?.outerHTML).not.toMatch(
+      /\b(?:max-)?sm:/,
+    );
+    expect(filterGroup.outerHTML).not.toMatch(/\b(?:max-)?sm:/);
+    expect(container.querySelector(".grid")?.outerHTML).not.toMatch(
+      /\b(?:max-)?sm:/,
+    );
+  });
 });

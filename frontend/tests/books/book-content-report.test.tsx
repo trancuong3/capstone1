@@ -91,6 +91,14 @@ describe("Parent book content reports", () => {
     expect(
       await screen.findByText("Báo cáo đã được lưu thành công."),
     ).toBeInTheDocument();
+
+    const dl = document.querySelector("dl");
+    expect(dl?.className).toContain("min-[640px]:grid-cols-2");
+    expect(dl?.innerHTML).toContain("min-[640px]:col-span-2");
+    expect(dl?.outerHTML).not.toMatch(/\b(?:max-)?sm:/);
+    const doneBtn = screen.getByRole("button", { name: "Hoàn tất" });
+    expect(doneBtn.className).toContain("min-h-12");
+    expect(doneBtn.parentElement?.outerHTML).not.toMatch(/\b(?:max-)?sm:/);
   });
 
   it("renders new safety and copyright issue labels in ParentBookReportsScreen", async () => {

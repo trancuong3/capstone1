@@ -87,7 +87,7 @@ export function DifficultWordBookCard({
                  safest option until cover URLs are served from a known CDN. */
               <img
                 alt={`Bìa sách ${group.bookTitle}`}
-                className="h-24 w-20 shrink-0 rounded-2xl border border-[#DCE8E4] object-cover sm:h-28 sm:w-24"
+                className="h-24 w-20 shrink-0 rounded-2xl border border-[#DCE8E4] object-cover md:h-28 md:w-24"
                 loading="lazy"
                 onError={handleCoverError}
                 src={group.bookCoverUrl}
@@ -102,12 +102,12 @@ export function DifficultWordBookCard({
                   max_grade: group.maxGrade ?? group.minGrade ?? 1,
                   lifecycle_status: "ACTIVE",
                 }}
-                className="h-24! w-20! shrink-0 rounded-2xl! border border-[#DCE8E4] p-2 sm:h-28! sm:w-24!"
+                className="h-24! w-20! shrink-0 rounded-2xl! border border-[#DCE8E4] p-2 md:h-28! md:w-24!"
                 hero
               />
             )
           ) : (
-            <div className="flex h-24 w-20 shrink-0 items-center justify-center rounded-2xl border border-[#DCE8E4] bg-[#F6FAF8] text-[#147D87] sm:h-28 sm:w-24">
+            <div className="flex h-24 w-20 shrink-0 items-center justify-center rounded-2xl border border-[#DCE8E4] bg-[#F6FAF8] text-[#147D87] md:h-28 md:w-24">
               <BookOpen aria-hidden="true" className="size-8" />
             </div>
           )}
@@ -127,7 +127,7 @@ export function DifficultWordBookCard({
               ) : null}
             </div>
 
-            <h2 className="mt-1.5 text-xl font-extrabold leading-snug text-[#213C42]">
+            <h2 className="mt-1.5 break-words text-lg font-extrabold leading-snug text-[#213C42] md:text-xl">
               {group.bookTitle}
             </h2>
 
@@ -171,7 +171,7 @@ export function DifficultWordBookCard({
             return (
               <button
                 aria-label={`Luyện từ ${word.display_text} (${style.label})`}
-                className={`inline-flex min-h-12 items-center gap-2 rounded-full border px-4 py-2 text-base font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 ${style.className}`}
+                className={`inline-flex min-h-12 max-w-full items-center gap-2 rounded-full border px-3.5 py-2 text-left text-[15px] font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 md:px-4 md:text-base ${style.className}`}
                 key={word.normalized_word}
                 onClick={() => onSelectWord(word)}
                 type="button"
@@ -179,15 +179,17 @@ export function DifficultWordBookCard({
                 {status === "COMPLETED" ? (
                   <Check
                     aria-hidden="true"
-                    className="size-4 text-emerald-700"
+                    className="size-4 shrink-0 text-emerald-700"
                   />
                 ) : (
                   <span
                     aria-hidden="true"
-                    className={`size-2 rounded-full ${style.dotClass}`}
+                    className={`size-2 shrink-0 rounded-full ${style.dotClass}`}
                   />
                 )}
-                <span>{word.display_text}</span>
+                <span className="min-w-0 break-words [overflow-wrap:anywhere]">
+                  {word.display_text}
+                </span>
               </button>
             );
           })}
@@ -206,10 +208,10 @@ export function DifficultWordBookCard({
               const source = word.sources?.[0];
               return (
                 <li
-                  className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col gap-0.5 min-[640px]:flex-row min-[640px]:items-center min-[640px]:justify-between min-[640px]:gap-2"
                   key={`detail-${word.normalized_word}`}
                 >
-                  <div>
+                  <div className="min-w-0 break-words">
                     <span className="font-bold text-[#213C42]">
                       {word.display_text}
                     </span>
@@ -223,7 +225,7 @@ export function DifficultWordBookCard({
                       </span>
                     ) : null}
                   </div>
-                  <span className="tabular-nums">
+                  <span className="shrink-0 tabular-nums">
                     Điểm {word.difficulty_score} · nhầm{" "}
                     {word.mispronunciation_count ?? 0} · bỏ{" "}
                     {word.omission_count} · lặp {word.repetition_count}

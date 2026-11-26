@@ -25,32 +25,32 @@ export function BookCard({
   collectionBusy = false,
 }: BookCardProps) {
   return (
-    <article className="catalog-volume group flex h-full min-w-0 flex-col items-start gap-2 rounded-card border border-border/70 bg-white p-2.5 shadow-xs sm:gap-3 sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0 sm:shadow-none">
+    <article className="catalog-volume group flex h-full min-w-0 flex-col items-start gap-2 rounded-card border border-border/70 bg-white p-2.5 shadow-xs min-[640px]:gap-3 md:rounded-none md:border-0 md:bg-transparent md:p-0 md:shadow-none">
       <BookCover
         book={book}
         hero
-        className="catalog-jacket h-36! sm:h-[205px]!"
+        className="catalog-jacket h-36! min-[640px]:h-44! md:h-[205px]!"
       />
       {book.visibility_scope === "PARENT_PRIVATE" ? (
-        <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-800 sm:px-2.5 sm:text-xs">
+        <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-800 min-[640px]:px-2.5 min-[640px]:text-xs">
           Sách riêng của gia đình
         </span>
       ) : null}
-      <h2 className="book-title line-clamp-2 w-full text-sm leading-snug text-ink sm:line-clamp-none sm:text-2xl">
+      <h2 className="book-title line-clamp-2 w-full text-sm leading-snug text-ink min-[640px]:text-lg md:line-clamp-none md:text-2xl">
         {book.title}
       </h2>
-      <p className="line-clamp-1 w-full text-xs text-muted sm:line-clamp-none sm:text-sm">
+      <p className="line-clamp-1 w-full text-xs text-muted md:line-clamp-none md:text-sm">
         {book.author ?? "Tác giả đang cập nhật"} · {formatGradeRange(book)}
       </p>
       <ButtonLink
         aria-label={`Đọc sách ${book.title}`}
-        className="order-last mt-auto min-h-11 px-2.5 text-xs sm:min-h-12 sm:px-5 sm:text-label"
+        className="order-last mt-auto min-h-11! px-2.5! text-xs md:min-h-12! md:px-5! md:text-label"
         href={`/books/${encodeURIComponent(book.id)}`}
       >
         Xem sách
       </ButtonLink>
       {onToggleCollection ? (
-        <div className="grid w-full grid-cols-2 gap-1.5 sm:flex sm:flex-row sm:flex-wrap sm:gap-2">
+        <div className="grid w-full grid-cols-2 gap-1.5 min-[640px]:flex min-[640px]:flex-row min-[640px]:flex-wrap min-[640px]:gap-2">
           {(["FAVORITE", "WANT_TO_READ"] as const).map((type) => {
             const saved = savedTypes.includes(type);
             const label = type === "FAVORITE" ? "Yêu thích" : "Muốn đọc";
@@ -79,10 +79,11 @@ export function BookCard({
                 <Icon
                   aria-hidden="true"
                   className={
-                    "size-4 shrink-0 sm:hidden" + (saved ? " fill-current" : "")
+                    "size-4 shrink-0 min-[640px]:hidden" +
+                    (saved ? " fill-current" : "")
                   }
                 />
-                <span className="sr-only sm:not-sr-only">
+                <span className="sr-only min-[640px]:not-sr-only">
                   {saved ? "✓ " : ""}
                   {label}
                 </span>

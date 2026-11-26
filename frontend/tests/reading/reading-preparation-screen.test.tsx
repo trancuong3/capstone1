@@ -294,4 +294,39 @@ describe("Shared reading preparation", () => {
       delete win.ViReadNativeSpeech;
     }
   });
+
+  it("uses 640px responsive footer classes, valid >=44px button overrides, and zero double px-4 or sm: classes", async () => {
+    // 1. Ready state footer & microphone button
+    apiFetchFixture.mockImplementation(async (input) => dataResponse(input));
+    const readyRender = renderPreparation();
+    const startBtn = await screen.findByRole("button", { name: "Bắt đầu đọc" });
+    const backLink = screen.getByRole("link", {
+      name: "Quay lại chi tiết sách",
+    });
+    const verifyBtn = screen.getByRole("button", {
+      name: "Kiểm tra và cấp quyền microphone",
+    });
+
+    expect(startBtn.className).toContain("min-h-12!");
+    expect(startBtn.className).toContain("min-[640px]:w-auto");
+    expect(backLink.className).toContain("min-h-12!");
+    expect(backLink.className).toContain("min-[640px]:order-first");
+    expect(verifyBtn.className).toContain("min-h-11!");
+    expect(startBtn.parentElement?.className).toContain("min-[640px]:flex-row");
+    expect(startBtn.parentElement?.className).toContain(
+      "min-[640px]:justify-end",
+    );
+    expect(readyRender.container.innerHTML).not.toMatch(/\b(?:max-)?sm:/);
+    readyRender.unmount();
+
+    // 2. Loading state has no redundant px-4
+    apiFetchFixture.mockImplementation(
+      () => new Promise<Response>(() => undefined),
+    );
+    const loadingRender = renderPreparation();
+    const loadingSection = loadingRender.container.querySelector("section");
+    expect(loadingSection?.className).not.toContain("px-4");
+    expect(loadingRender.container.innerHTML).not.toMatch(/\b(?:max-)?sm:/);
+    loadingRender.unmount();
+  });
 });

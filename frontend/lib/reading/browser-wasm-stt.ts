@@ -46,6 +46,8 @@ export interface WasmModelCacheStatus {
   readonly totalBytes: number;
 }
 
+export type BrowserWasmInitState = "idle" | "initializing" | "ready" | "error";
+
 export interface BrowserWasmDecodeResult {
   readonly text: string;
   readonly decodeMs: number;
@@ -406,11 +408,65 @@ interface PendingJob {
 export class BrowserWasmSttClient {
   private worker: Worker | null = null;
   private readyPromise: Promise<void> | null = null;
+  private initState: BrowserWasmInitState = "idle";
+  private lastInitError: string | null = null;
+  private cachedModelReady: boolean | null = null;
   private reqCounter = 0;
   private readonly pending = new Map<string, PendingJob>();
   private readonly progressListeners = new Set<
     (event: WasmSttProgressEvent) => void
   >();
+
+  isReady(): boolean {
+    return this.initState === "ready";
+  }
+
+  isInitializing(): boolean {
+    return this.initState === "initializing";
+  }
+
+  getInitState(): BrowserWasmInitState {
+    return this.initState;
+  }
+
+  getLastInitError(): string | null {
+    return this.lastInitError;
+  }
+
+  getCachedModelReady(): boolean | null {
+    return this.cachedModelReady;
+  }
+
+  async probeCachedModelReady(): Promise<boolean> {
+    if (this.initState === "ready") {
+      this.cachedModelReady = true;
+      return true;
+    }
+    const status = await getWasmModelCacheStatus();
+    this.cachedModelReady = status.ready;
+    return status.ready;
+  }
+
+  async prewarm(signal?: AbortSignal): Promise<boolean> {
+    if (!detectBrowserWasmSttSupport().supported) {
+      return false;
+    }
+    if (this.initState === "ready") {
+      return true;
+    }
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      const cached = await this.probeCachedModelReady();
+      if (!cached) {
+        return false;
+      }
+    }
+    try {
+      await this.init(signal, { timeoutMs: 90_000 });
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   subscribeProgress(
     listener: (event: WasmSttProgressEvent) => void,
@@ -483,6 +539,8 @@ export class BrowserWasmSttClient {
       }
       this.worker = null;
       this.readyPromise = null;
+      this.initState = "error";
+      this.lastInitError = failure.message;
       this.failAllPending(failure);
     };
     this.worker = worker;
@@ -555,16 +613,23 @@ export class BrowserWasmSttClient {
       : null;
     try {
       if (!this.readyPromise) {
+        this.initState = "initializing";
+        this.lastInitError = null;
         // Keep shared init independent of individual caller aborts so a TTS pause
         // never cancels an in-flight 34MB model download for the next utterance.
-        this.readyPromise = this.postRequest<void>(
-          { type: "init" },
-          [],
-          90_000,
-        ).catch((err) => {
-          this.readyPromise = null;
-          throw err;
-        });
+        this.readyPromise = this.postRequest<void>({ type: "init" }, [], 90_000)
+          .then(() => {
+            this.initState = "ready";
+            this.lastInitError = null;
+            this.cachedModelReady = true;
+          })
+          .catch((err) => {
+            this.readyPromise = null;
+            this.initState = "error";
+            this.lastInitError =
+              err instanceof Error ? err.message : String(err);
+            throw err;
+          });
       }
       await raceWithSignalAndTimeout(this.readyPromise, {
         signal,
@@ -580,18 +645,18 @@ export class BrowserWasmSttClient {
     options: {
       signal?: AbortSignal;
       timeoutMs?: number;
+      initTimeoutMs?: number;
       sampleRate?: number;
       voicedDurationMs?: number;
       onProgress?: (event: WasmSttProgressEvent) => void;
     } = {},
   ): Promise<BrowserWasmDecodeResult> {
-    const totalTimeoutMs = options.timeoutMs ?? 15_000;
-    const deadline = Date.now() + totalTimeoutMs;
+    const initTimeoutMs = options.initTimeoutMs ?? 90_000;
+    const decodeTimeoutMs = options.timeoutMs ?? 15_000;
     await this.init(options.signal, {
-      timeoutMs: totalTimeoutMs,
+      timeoutMs: initTimeoutMs,
       onProgress: options.onProgress,
     });
-    const remainingMs = Math.max(100, deadline - Date.now());
     const copy = new Float32Array(samples16k);
     return this.postRequest<BrowserWasmDecodeResult>(
       {
@@ -604,7 +669,7 @@ export class BrowserWasmSttClient {
           : {}),
       },
       [copy.buffer],
-      remainingMs,
+      decodeTimeoutMs,
       options.signal,
     );
   }
@@ -614,6 +679,7 @@ export class BrowserWasmSttClient {
     options: {
       signal?: AbortSignal;
       timeoutMs?: number;
+      initTimeoutMs?: number;
       voicedDurationMs?: number;
       onProgress?: (event: WasmSttProgressEvent) => void;
     } = {},
@@ -628,6 +694,7 @@ export class BrowserWasmSttClient {
     return this.transcribeSamples(samples16k, {
       signal: options.signal,
       timeoutMs: options.timeoutMs,
+      initTimeoutMs: options.initTimeoutMs,
       sampleRate: 16_000,
       voicedDurationMs: options.voicedDurationMs,
       onProgress: options.onProgress,
@@ -638,6 +705,9 @@ export class BrowserWasmSttClient {
     const worker = this.worker;
     this.worker = null;
     this.readyPromise = null;
+    this.initState = "idle";
+    this.lastInitError = null;
+    this.cachedModelReady = null;
     this.failAllPending(new DOMException("Disposed", "AbortError"));
     if (worker) {
       try {
@@ -657,6 +727,15 @@ export function getBrowserWasmSttClient(): BrowserWasmSttClient {
     sharedClient = new BrowserWasmSttClient();
   }
   return sharedClient;
+}
+
+export async function prewarmBrowserWasmStt(
+  signal?: AbortSignal,
+): Promise<boolean> {
+  if (!detectBrowserWasmSttSupport().supported) {
+    return false;
+  }
+  return getBrowserWasmSttClient().prewarm(signal);
 }
 
 export function resetBrowserWasmSttForTests(): void {

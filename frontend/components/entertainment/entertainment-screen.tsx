@@ -12,11 +12,11 @@ export function EntertainmentScreen() {
           Giải trí
         </h1>
       </header>
-      <div className="grid items-stretch gap-3 md:grid-cols-2 md:gap-4">
-        <article className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 sm:gap-4 sm:p-8">
+      <div className="grid items-stretch gap-3 min-[640px]:grid-cols-2 md:gap-4">
+        <article className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 min-[640px]:gap-3.5 min-[640px]:p-5 md:gap-4 md:p-8">
           <div
             aria-hidden="true"
-            className="flex min-h-28 flex-col items-center justify-center gap-3 rounded-card bg-sky p-3.5 md:min-h-52 md:gap-5 md:p-6"
+            className="flex min-h-28 flex-col items-center justify-center gap-3 rounded-card bg-sky p-3.5 min-[640px]:min-h-36 md:min-h-52 md:gap-5 md:p-6"
           >
             <div className="flex flex-wrap justify-center gap-1.5 md:gap-2">
               {["Bé", "đang", "đọc", "sách."].map((word) => (
@@ -39,13 +39,13 @@ export function EntertainmentScreen() {
           <ButtonLink
             href="/entertainment/sentence-shooter"
             size="compact"
-            className="mt-auto min-h-11"
+            className="mt-auto"
           >
             Bắt đầu chơi <ArrowRight aria-hidden="true" className="size-4" />
           </ButtonLink>
         </article>
-        <article className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 sm:gap-4 sm:p-8">
-          <div className="relative min-h-28 overflow-hidden rounded-card bg-cream md:min-h-52">
+        <article className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 min-[640px]:gap-3.5 min-[640px]:p-5 md:gap-4 md:p-8">
+          <div className="relative min-h-28 overflow-hidden rounded-card bg-cream min-[640px]:min-h-36 md:min-h-52">
             <Image
               alt="Khu vườn đầy nắng để bé quan sát và kể chuyện"
               className="object-cover"
@@ -64,13 +64,13 @@ export function EntertainmentScreen() {
           <ButtonLink
             href="/entertainment/picture-description"
             size="compact"
-            className="mt-auto min-h-11"
+            className="mt-auto"
           >
             Chọn tranh <ArrowRight aria-hidden="true" className="size-4" />
           </ButtonLink>
         </article>
       </div>
-      <article className="flex flex-col items-start gap-3 rounded-card border border-border bg-cream p-4 sm:flex-row sm:items-center sm:gap-4 sm:p-8">
+      <article className="flex flex-col items-start gap-3 rounded-card border border-border bg-cream p-4 min-[640px]:flex-row min-[640px]:items-center min-[640px]:gap-4 min-[640px]:p-6 md:p-8">
         <div
           aria-hidden="true"
           className="grid size-12 shrink-0 place-items-center rounded-control bg-white text-primary md:size-16"
@@ -89,7 +89,7 @@ export function EntertainmentScreen() {
         <ButtonLink
           href="/karaoke"
           size="compact"
-          className="min-h-11 w-full sm:w-auto"
+          className="w-full min-[640px]:w-auto"
         >
           Mở thư viện bài hát{" "}
           <ArrowRight aria-hidden="true" className="size-4" />

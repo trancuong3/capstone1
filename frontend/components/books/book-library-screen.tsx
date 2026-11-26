@@ -240,7 +240,11 @@ export function BookLibraryScreen() {
           Chưa thể xác nhận hồ sơ thuộc tài khoản hiện tại. Ba mẹ vui lòng thử
           lại.
         </StatusMessage>
-        <Button className="sm:w-auto" onClick={retryChild} variant="secondary">
+        <Button
+          className="min-[640px]:w-auto"
+          onClick={retryChild}
+          variant="secondary"
+        >
           <RefreshCw aria-hidden="true" className="size-5" />
           Thử lại
         </Button>
@@ -249,7 +253,7 @@ export function BookLibraryScreen() {
   }
 
   return (
-    <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-3 px-3 py-3 sm:gap-6 sm:px-8 sm:py-8">
+    <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-3 px-4 py-3 min-[640px]:gap-5 min-[640px]:px-6 min-[640px]:py-5 md:gap-6 md:px-8 md:py-8">
       <BookChildHeader
         child={child}
         fullBleedDesktop
@@ -270,24 +274,25 @@ export function BookLibraryScreen() {
         </StatusMessage>
       ) : null}
 
-      <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-3.5 sm:gap-6">
-        <div className="flex flex-col gap-2.5 border-b border-border pb-3 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:gap-4 sm:pb-6">
-          <div className="flex items-center justify-between gap-2 sm:flex-col sm:items-start sm:gap-2">
-            <h1 className="book-title min-w-0 truncate text-xl text-ink sm:whitespace-normal sm:text-4xl lg:text-5xl">
+      <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-3.5 min-[640px]:gap-5 md:gap-6">
+        <div className="flex flex-col gap-2.5 border-b border-border pb-3 min-[640px]:flex-row min-[640px]:flex-wrap min-[640px]:items-end min-[640px]:justify-between min-[640px]:gap-4 min-[640px]:pb-5 md:pb-6">
+          <div className="flex items-center justify-between gap-2 min-[640px]:min-w-0 min-[640px]:flex-1 min-[640px]:flex-col min-[640px]:items-start min-[640px]:gap-2">
+            <h1 className="book-title min-w-0 line-clamp-2 break-words text-xl text-ink min-[640px]:text-2xl md:line-clamp-none md:whitespace-normal md:text-4xl lg:text-5xl">
               Tủ sách{child ? ` của ${child.alias}` : " của bé"}
             </h1>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               <ButtonLink
                 href="/my-books"
                 variant="secondary"
-                className="min-h-11 w-auto px-3 text-xs sm:min-h-12 sm:px-4 sm:text-sm"
+                fullWidth={false}
+                className="min-h-11! px-3! text-xs md:min-h-12! md:px-4! md:text-sm"
               >
                 <BookMarked aria-hidden="true" className="size-4" />
                 Sách của tôi
               </ButtonLink>
             </div>
           </div>
-          <div className="w-full sm:max-w-sm">
+          <div className="w-full min-[640px]:max-w-xs md:max-w-sm">
             <TextField
               aria-label="Tìm theo tên sách hoặc tác giả"
               label="Tìm cuốn sách bé thích…"
@@ -301,7 +306,7 @@ export function BookLibraryScreen() {
 
         <fieldset className="min-w-0">
           <legend className="sr-only">Lọc sách theo lớp</legend>
-          <div className="flex flex-nowrap gap-1.5 overflow-x-auto pb-1 sm:flex-wrap sm:gap-2 sm:overflow-visible sm:pb-0">
+          <div className="flex flex-nowrap gap-1.5 overflow-x-auto pb-1 min-[640px]:flex-wrap min-[640px]:gap-2 min-[640px]:overflow-visible min-[640px]:pb-0">
             {[null, ...CHILD_GRADES].map((grade) => {
               const isSelected = selectedGrade === grade;
 
@@ -309,10 +314,10 @@ export function BookLibraryScreen() {
                 <button
                   aria-pressed={isSelected}
                   className={cn(
-                    "flex min-h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3.5 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-12 sm:rounded-control sm:px-4 sm:text-label",
+                    "flex min-h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3.5 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary min-[640px]:min-h-12 min-[640px]:rounded-control min-[640px]:px-4 min-[640px]:text-label",
                     isSelected
-                      ? "bg-sky text-primary-hover ring-1 ring-inset ring-primary/30 sm:ring-0"
-                      : "border border-border bg-white text-ink hover:bg-sky sm:border-transparent",
+                      ? "bg-sky text-primary-hover ring-1 ring-inset ring-primary/30 min-[640px]:ring-0"
+                      : "border border-border bg-white text-ink hover:bg-sky min-[640px]:border-transparent",
                   )}
                   key={grade ?? "all"}
                   onClick={() => {
@@ -333,14 +338,14 @@ export function BookLibraryScreen() {
           <div
             aria-busy="true"
             aria-label="Đang tải thư viện sách"
-            className="grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3"
+            className="grid grid-cols-2 gap-3 min-[640px]:gap-4 md:gap-6 lg:grid-cols-3"
           >
             <span className="sr-only" role="status">
               Đang tải sách…
             </span>
             {[0, 1, 2, 3].map((item) => (
               <Skeleton
-                className="h-64 w-full rounded-card sm:h-[432px] sm:w-64"
+                className="h-64 w-full rounded-card min-[640px]:h-80 md:h-[432px] md:w-64"
                 key={item}
               />
             ))}
@@ -353,7 +358,7 @@ export function BookLibraryScreen() {
               Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
             </StatusMessage>
             <Button
-              className="sm:w-auto sm:self-start sm:px-8"
+              className="min-[640px]:w-auto min-[640px]:self-start min-[640px]:px-8"
               onClick={() => setRequestKey((key) => key + 1)}
               variant="secondary"
             >
@@ -407,7 +412,7 @@ export function BookLibraryScreen() {
 
         {catalogState.status === "ready" && catalogState.books.length > 0 ? (
           <>
-            <div className="grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3">
+            <div className="grid grid-cols-2 gap-3 min-[640px]:gap-4 md:gap-6 lg:grid-cols-3">
               {catalogState.books
                 .slice((page - 1) * BOOKS_PAGE_SIZE, page * BOOKS_PAGE_SIZE)
                 .map((book) => (

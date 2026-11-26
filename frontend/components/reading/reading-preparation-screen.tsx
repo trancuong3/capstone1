@@ -423,10 +423,7 @@ export function ReadingPreparationScreen({
 
   if (childState.status === "loading" || childState.status === "redirecting") {
     return (
-      <section
-        aria-busy="true"
-        className="mx-auto w-full max-w-[980px] px-4 py-8"
-      >
+      <section aria-busy="true" className="mx-auto w-full max-w-[980px] py-8">
         <span className="sr-only" role="status">
           Đang xác minh hồ sơ trẻ…
         </span>
@@ -437,12 +434,16 @@ export function ReadingPreparationScreen({
 
   if (childState.status === "error") {
     return (
-      <section className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-4 py-8">
+      <section className="mx-auto flex w-full max-w-[720px] flex-col gap-4 py-8">
         <StatusMessage title="Không thể xác minh hồ sơ trẻ" tone="error">
           Chưa thể xác nhận hồ sơ thuộc tài khoản hiện tại. Ba mẹ vui lòng thử
           lại.
         </StatusMessage>
-        <Button className="sm:w-auto" onClick={retryChild} variant="secondary">
+        <Button
+          className="min-[640px]:w-auto"
+          onClick={retryChild}
+          variant="secondary"
+        >
           <RefreshCw aria-hidden="true" className="size-5" />
           Thử lại
         </Button>
@@ -452,10 +453,7 @@ export function ReadingPreparationScreen({
 
   if (state.status === "loading") {
     return (
-      <section
-        aria-busy="true"
-        className="mx-auto w-full max-w-[980px] px-4 py-8"
-      >
+      <section aria-busy="true" className="mx-auto w-full max-w-[980px] py-8">
         <span className="sr-only" role="status">
           Đang tải thông tin sách…
         </span>
@@ -468,7 +466,7 @@ export function ReadingPreparationScreen({
   if (state.status === "not-found" || state.status === "unavailable") {
     const unavailable = state.status === "unavailable";
     return (
-      <section className="mx-auto flex w-full max-w-[720px] flex-col gap-5 px-4 py-8">
+      <section className="mx-auto flex w-full max-w-[720px] flex-col gap-5 py-8">
         <StatusMessage
           title={
             unavailable ? "Sách hiện chưa sẵn sàng" : "Không tìm thấy sách"
@@ -479,7 +477,11 @@ export function ReadingPreparationScreen({
             ? "Cuốn sách này chưa có nội dung ACTIVE và VERIFIED để bé đọc."
             : "Cuốn sách không tồn tại hoặc không có trong thư viện hiện tại."}
         </StatusMessage>
-        <ButtonLink className="sm:max-w-72" href="/books" variant="secondary">
+        <ButtonLink
+          className="min-[640px]:w-auto min-[640px]:max-w-72"
+          href="/books"
+          variant="secondary"
+        >
           <ArrowLeft aria-hidden="true" className="size-5" />
           Về thư viện sách
         </ButtonLink>
@@ -489,12 +491,12 @@ export function ReadingPreparationScreen({
 
   if (state.status === "error") {
     return (
-      <section className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-4 py-8">
+      <section className="mx-auto flex w-full max-w-[720px] flex-col gap-4 py-8">
         <StatusMessage title="Chưa tải được thông tin đọc sách" tone="error">
           Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
         </StatusMessage>
         <Button
-          className="sm:w-auto"
+          className="min-[640px]:w-auto"
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
@@ -520,17 +522,17 @@ export function ReadingPreparationScreen({
     !data.explicitPageInvalid;
 
   return (
-    <section className="mx-auto flex w-full max-w-[800px] flex-col gap-3 sm:gap-4">
-      <header className="flex flex-col gap-1 sm:gap-2">
-        <h1 className="text-xl font-extrabold leading-tight text-ink sm:text-heading">
+    <section className="mx-auto flex w-full max-w-[800px] flex-col gap-3 min-[640px]:gap-4">
+      <header className="flex flex-col gap-1 min-[640px]:gap-2">
+        <h1 className="text-xl font-extrabold leading-tight text-ink md:text-heading">
           Chuẩn bị đọc sách
         </h1>
-        <p className="max-w-[760px] text-sm leading-6 text-muted sm:text-body sm:leading-7">
+        <p className="max-w-[760px] text-sm leading-6 text-muted md:text-body md:leading-7">
           Kiểm tra mic, rồi bé có thể bắt đầu đọc.
         </p>
       </header>
 
-      <article className="flex items-start gap-3 rounded-card border border-border bg-white p-3.5 sm:items-center sm:gap-4 sm:p-4">
+      <article className="flex items-start gap-3 rounded-card border border-border bg-white p-3.5 min-[640px]:items-center min-[640px]:gap-4 min-[640px]:p-4">
         <BookCover book={data.book} size="small" showTitle={false} />
         <div className="flex min-w-0 flex-col gap-1.5">
           <div>
@@ -575,32 +577,32 @@ export function ReadingPreparationScreen({
 
       <section
         aria-labelledby="microphone-check-title"
-        className="rounded-card border border-border bg-white p-3.5 sm:p-5"
+        className="rounded-card border border-border bg-white p-3.5 min-[640px]:p-5"
       >
         <h2
-          className="flex items-center gap-2 text-base font-extrabold text-ink sm:text-lg"
+          className="flex items-center gap-2 text-base font-extrabold text-ink md:text-lg"
           id="microphone-check-title"
         >
           <Mic aria-hidden="true" className="size-5 text-primary" /> Kiểm tra
           microphone
         </h2>
-        <p className="mt-1.5 text-sm text-muted sm:mt-3 sm:text-body">
+        <p className="mt-1.5 text-sm text-muted min-[640px]:mt-3 md:text-body">
           ViRead chỉ ghi âm sau khi buổi đọc bắt đầu.
         </p>
         <div
           role="status"
-          className={`mt-2.5 rounded-control p-3 sm:mt-3 ${microphoneVerified ? "bg-sky" : "bg-cream"}`}
+          className={`mt-2.5 rounded-control p-3 min-[640px]:mt-3 ${microphoneVerified ? "bg-sky" : "bg-cream"}`}
         >
           <p className="font-bold text-ink">
             {isVerifying ? "Đang kiểm tra" : statusText}
           </p>
-          <p className="mt-1 text-sm text-muted sm:mt-2 sm:text-body">
+          <p className="mt-1 text-sm text-muted min-[640px]:mt-2 md:text-body">
             {permissionMessage ??
               microphoneDescription(permissionState, microphoneVerified)}
           </p>
         </div>
         <Button
-          className="mt-3 min-h-11 sm:w-auto"
+          className="mt-3 min-h-11! w-full min-[640px]:w-auto"
           disabled={isVerifying || isStarting}
           isLoading={isVerifying}
           onClick={() => void handleVerifyMicrophone()}
@@ -618,9 +620,9 @@ export function ReadingPreparationScreen({
         </StatusMessage>
       ) : null}
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+      <div className="flex flex-col gap-2 min-[640px]:flex-row min-[640px]:justify-end">
         <Button
-          className="min-h-12 sm:w-auto"
+          className="min-h-12! min-[640px]:w-auto"
           disabled={!canStart}
           isLoading={isStarting}
           onClick={() => void handleStartReading()}
@@ -628,7 +630,7 @@ export function ReadingPreparationScreen({
           {isStarting ? "Đang tạo buổi đọc…" : "Bắt đầu đọc"}
         </Button>
         <ButtonLink
-          className="min-h-12 sm:order-first sm:w-auto"
+          className="min-h-12! min-[640px]:order-first min-[640px]:w-auto"
           href={detailHref}
           variant="quiet"
         >

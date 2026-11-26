@@ -4,8 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { Button, ButtonLink } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
+import { PageHeader } from "@/components/common/page-header";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { ResponsiveTable } from "@/components/common/responsive-table";
+import { SelectField } from "@/components/common/select-field";
 
 describe("Button & ButtonLink width resolution", () => {
   it("defaults to w-full when neither fullWidth nor explicit width class is passed", () => {
@@ -29,13 +31,17 @@ describe("Button & ButtonLink width resolution", () => {
         <Button fullWidth={false}>Chỉnh sửa</Button>
         <Button className="w-auto px-3">Xóa</Button>
         <Button className="sm:w-auto">Tải lại</Button>
+        <Button className="min-[640px]:w-auto">Hợp lệ</Button>
         <Button className="w-fit">Nhỏ</Button>
         <ButtonLink fullWidth={false} href="/books">
           Mở sách
         </ButtonLink>
+        <ButtonLink className="min-[640px]:w-auto" href="/reports">
+          Báo cáo
+        </ButtonLink>
       </>,
     );
-    for (const name of ["Chỉnh sửa", "Xóa", "Tải lại", "Nhỏ"]) {
+    for (const name of ["Chỉnh sửa", "Xóa", "Tải lại", "Hợp lệ", "Nhỏ"]) {
       expect(screen.getByRole("button", { name }).className).not.toContain(
         "w-full",
       );
@@ -46,6 +52,59 @@ describe("Button & ButtonLink width resolution", () => {
     expect(
       screen.getByRole("link", { name: "Mở sách" }).className,
     ).not.toContain("w-full");
+    expect(
+      screen.getByRole("link", { name: "Báo cáo" }).className,
+    ).not.toContain("w-full");
+  });
+
+  it("handles responsive, max-*, arbitrary, and size-* width utilities with token boundaries", () => {
+    render(
+      <>
+        <Button className="min-[640px]:w-fit">A</Button>
+        <Button className="min-[640px]:w-[200px]">B</Button>
+        <Button className="min-[640px]:w-full">C</Button>
+        <Button className="md:w-fit">D</Button>
+        <Button className="md:w-40">E</Button>
+        <Button className="max-md:w-auto">F</Button>
+        <Button className="max-sm:w-auto">G</Button>
+        <Button className="min-[640px]:size-11">H</Button>
+        <Button className="w-px">I</Button>
+        <Button className="w-screen">J</Button>
+        <Button className="w-auto!">L</Button>
+        <Button className="md:w-auto!">M</Button>
+        <Button className="w-[180px]!">N</Button>
+        <Button className="w-prose">O</Button>
+        <Button className="w-3xs">P</Button>
+        <Button className="w-auto-something">K</Button>
+      </>,
+    );
+
+    for (const name of [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+      "F",
+      "G",
+      "H",
+      "I",
+      "J",
+      "L",
+      "M",
+      "N",
+      "O",
+      "P",
+    ]) {
+      const tokens = screen
+        .getByRole("button", { name })
+        .className.split(/\s+/);
+      expect(tokens).not.toContain("w-full");
+    }
+
+    expect(
+      screen.getByRole("button", { name: "K" }).className.split(/\s+/),
+    ).toContain("w-full");
   });
 });
 
@@ -154,6 +213,102 @@ describe("PaginationBar", () => {
       />,
     );
     expect(screen.getByText("Trang 12 / 12")).toBeInTheDocument();
+  });
+
+  it("keeps >=44px (min-h-11) touch targets on Prev and Next buttons when compact is true", () => {
+    render(
+      <PaginationBar
+        compact
+        itemLabel="sách"
+        onPageChange={vi.fn()}
+        page={2}
+        pageSize={9}
+        total={27}
+      />,
+    );
+    const prevBtn = screen.getByRole("button", { name: /Trước/ });
+    const nextBtn = screen.getByRole("button", { name: /Tiếp/ });
+    expect(prevBtn.className).toContain("min-h-11");
+    expect(prevBtn.className).not.toContain("min-h-10");
+    expect(nextBtn.className).toContain("min-h-11");
+    expect(nextBtn.className).not.toContain("min-h-10");
+  });
+});
+
+describe("PageHeader", () => {
+  it("renders compact mobile wrapping and clamping while preserving desktop eyebrow, description, and action rules", () => {
+    render(
+      <PageHeader
+        action={<ButtonLink href="/reports">Báo cáo</ButtonLink>}
+        description="Theo dõi tiến độ đọc của bé theo từng tuần."
+        eyebrow="Báo cáo gia đình"
+        title="Từ cần luyện của Bé An trong học kỳ này"
+      />,
+    );
+
+    const header = screen.getByRole("banner");
+    expect(header.className).toContain("flex-wrap");
+    expect(header.className).toContain("md:flex-nowrap");
+
+    const heading = screen.getByRole("heading", {
+      level: 1,
+      name: "Từ cần luyện của Bé An trong học kỳ này",
+    });
+    expect(heading.className).toContain("line-clamp-2");
+    expect(heading.className).toContain("break-words");
+    expect(heading.className).toContain("md:line-clamp-none");
+    expect(heading.parentElement?.className).toContain(
+      "min-w-[min(100%,11rem)]",
+    );
+    expect(heading.parentElement?.className).toContain("md:min-w-0");
+
+    const eyebrow = screen.getByText("Báo cáo gia đình");
+    expect(eyebrow.className).toContain("hidden");
+    expect(eyebrow.className).toContain("md:block");
+
+    const description = screen.getByText(
+      "Theo dõi tiến độ đọc của bé theo từng tuần.",
+    );
+    expect(description.className).toContain("hidden");
+    expect(description.className).toContain("md:block");
+
+    const actionLink = screen.getByRole("link", { name: "Báo cáo" });
+    const actionWrapper = actionLink.parentElement;
+    expect(actionWrapper?.className).toContain("max-w-full");
+    expect(actionWrapper?.className).toContain("md:w-full");
+    expect(actionWrapper?.className).toContain("[&>a]:min-h-11");
+    expect(actionWrapper?.className).toContain("[&>button]:min-h-11");
+  });
+
+  it("omits md:w-full from the action wrapper when actionClassName specifies md:w-*", () => {
+    render(
+      <PageHeader
+        action={<ButtonLink href="/reports">Xuất CSV</ButtonLink>}
+        actionClassName="w-auto md:w-auto"
+        title="Báo cáo sách"
+      />,
+    );
+
+    const actionWrapper = screen.getByRole("link", {
+      name: "Xuất CSV",
+    }).parentElement;
+    const tokens = actionWrapper?.className.split(/\s+/) ?? [];
+    expect(tokens).toContain("w-auto");
+    expect(tokens).toContain("md:w-auto");
+    expect(tokens).not.toContain("md:w-full");
+  });
+});
+
+describe("SelectField", () => {
+  it("truncates long labels within the field padding", () => {
+    render(
+      <SelectField label="Chọn lớp học hiện tại của bé">
+        <option value="1">Lớp 1</option>
+      </SelectField>,
+    );
+    const label = screen.getByText("Chọn lớp học hiện tại của bé");
+    expect(label.className).toContain("max-w-[calc(100%-2rem)]");
+    expect(label.className).toContain("truncate");
   });
 });
 

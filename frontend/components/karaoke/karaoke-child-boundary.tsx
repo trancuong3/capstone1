@@ -31,7 +31,7 @@ export function KaraokeChildBoundary({
     return (
       <StatusMessage tone="warning">
         Ba mẹ vui lòng đăng nhập lại để mở Hát vui.
-        <ButtonLink className="mt-3 sm:w-auto" href="/login">
+        <ButtonLink className="mt-3 w-full min-[640px]:w-auto" href="/login">
           Đăng nhập lại
         </ButtonLink>
       </StatusMessage>
@@ -53,7 +53,11 @@ function ValidatedChild({
     return (
       <StatusMessage tone="error">
         Chưa tải được hồ sơ bé.
-        <Button className="mt-3 sm:w-auto" variant="secondary" onClick={retry}>
+        <Button
+          className="mt-3 w-full min-[640px]:w-auto"
+          variant="secondary"
+          onClick={retry}
+        >
           Thử lại hồ sơ
         </Button>
       </StatusMessage>

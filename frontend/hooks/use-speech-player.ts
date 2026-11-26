@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { createSpeechService } from "@/lib/api/speech-service";
 import { createVoiceStudioService } from "@/lib/api/voice-studio-service";
+import {
+  getAndroidSpeechCapabilities,
+  isAndroidNativeSpeechAvailable,
+  openAndroidTtsInstallSettings,
+} from "@/lib/reading/native-speech-bridge";
 import type { SupportedPhonicsLessonPlan } from "@/lib/reading/phonics-lesson";
 import { subscribeVoicePolicy } from "@/lib/reading/session-voice-lock";
 import { subscribeSpeechPreferences } from "@/lib/reading/speech-preferences";
@@ -15,12 +20,19 @@ import {
   type TtsPlaybackCacheContext,
   type WordTimedPlayOptions,
 } from "@/lib/reading/tts-playback";
+import {
+  getServerVoiceEngineStatus,
+  getVoiceEngineStatus,
+  subscribeVoiceEngineStatus,
+  type TtsUnavailableReason,
+} from "@/lib/reading/voice-engine-status";
 
 export type {
   ActiveAudioKind,
   PhonicsPlayOptions,
   SpeechPlayOptions,
   TtsPlaybackCacheContext,
+  TtsUnavailableReason,
   WordTimedPlayOptions,
 };
 
@@ -32,6 +44,10 @@ export interface SpeechPlayer {
   readonly state: PlaybackState;
   readonly activeAudioKind?: ActiveAudioKind;
   readonly fallbackNotice: string | null;
+  readonly voiceNotice?: string | null;
+  readonly ttsUnavailableReason?: TtsUnavailableReason | null;
+  readonly canInstallVietnameseTtsVoice?: boolean;
+  openTtsInstallSettings?: () => Promise<boolean>;
   setCacheContext?: (context: TtsPlaybackCacheContext | null) => void;
   play(text: string, options?: SpeechPlayOptions): Promise<void>;
   playPhonicsLesson(
@@ -69,6 +85,11 @@ export function useSpeechPlayer(): SpeechPlayer {
     player.getFallbackNotice,
     () => null,
   );
+  const engineStatus = useSyncExternalStore(
+    subscribeVoiceEngineStatus,
+    getVoiceEngineStatus,
+    getServerVoiceEngineStatus,
+  );
   const actions = useMemo(
     () => ({
       play: (text: string, options?: SpeechPlayOptions) =>
@@ -97,11 +118,23 @@ export function useSpeechPlayer(): SpeechPlayer {
               new DOMException("Audio player is not ready", "AbortError"),
             ),
       setCacheContext: player.setCacheContext,
+      openTtsInstallSettings: async () => {
+        const opened = await openAndroidTtsInstallSettings();
+        if (opened) {
+          void getAndroidSpeechCapabilities({ forceRefresh: true }).catch(
+            () => null,
+          );
+        }
+        return opened;
+      },
     }),
     [player],
   );
   useEffect(() => {
     mounted.current = true;
+    if (isAndroidNativeSpeechAvailable()) {
+      void getAndroidSpeechCapabilities().catch(() => null);
+    }
     const unsubSpeech = subscribeSpeechPreferences(
       player.handlePreferencesChange,
     );
@@ -126,6 +159,9 @@ export function useSpeechPlayer(): SpeechPlayer {
     state,
     activeAudioKind,
     fallbackNotice,
+    voiceNotice: engineStatus.voiceNotice,
+    ttsUnavailableReason: engineStatus.ttsUnavailableReason,
+    canInstallVietnameseTtsVoice: engineStatus.canInstallVietnameseTtsVoice,
     isPlaying: ["loading", "playing", "paused", "fallback"].includes(state),
     isLoading: state === "loading",
     isActuallyPlaying: state === "playing",

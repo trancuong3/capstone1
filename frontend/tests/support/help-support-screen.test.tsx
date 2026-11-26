@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -113,5 +116,57 @@ describe("HelpSupportScreen", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("điền tiêu đề");
     expect(submitFeedbackMock).not.toHaveBeenCalled();
+  });
+
+  it("toggles FAQ group accordions, keeps >=44px tap targets, and uses 640px feedback form layout", async () => {
+    const user = userEvent.setup();
+    render(withAuthFixture(<HelpSupportScreen />, createAuthServiceFixture()));
+
+    const groupToggle = screen.getByRole("button", { name: "Tài khoản" });
+    expect(groupToggle).toHaveAttribute("aria-expanded", "false");
+    expect(groupToggle).toHaveClass(
+      "min-h-11",
+      "md:pointer-events-none",
+      "md:min-h-0",
+    );
+
+    const faqItemsBox = groupToggle.closest("h3")?.nextElementSibling;
+    expect(faqItemsBox).toHaveClass("hidden", "md:flex");
+
+    await user.click(groupToggle);
+    expect(groupToggle).toHaveAttribute("aria-expanded", "true");
+    expect(faqItemsBox).not.toHaveClass("hidden");
+
+    const questionSummary = screen
+      .getByText("Làm thế nào để đổi mật khẩu?")
+      .closest("summary");
+    expect(questionSummary).toHaveClass("min-h-11");
+
+    const mailLink = screen.getByRole("link", {
+      name: "vireadforyou@gmail.com",
+    });
+    expect(mailLink).toHaveClass("min-h-11");
+
+    await user.click(screen.getByRole("button", { name: "Gửi phản hồi" }));
+    const messageBox = screen
+      .getByRole("textbox", { name: "Nội dung" })
+      .closest("div");
+    expect(messageBox).toHaveClass("min-w-0", "min-[640px]:col-span-2");
+    expect(messageBox?.closest("form")).toHaveClass("min-[640px]:grid-cols-2");
+
+    const submitBtn = screen.getByRole("button", { name: "Gửi phản hồi" });
+    expect(submitBtn).toHaveClass(
+      "w-full",
+      "min-[640px]:col-span-2",
+      "min-[640px]:w-auto",
+    );
+
+    const supportSource = fs.readFileSync(
+      path.resolve(process.cwd(), "components/support/help-support-screen.tsx"),
+      "utf8",
+    );
+    expect(supportSource).not.toMatch(
+      /(?<![\w-])(sm:|max-sm:|max-\[639px\]:|max-\[767px\]:)/,
+    );
   });
 });

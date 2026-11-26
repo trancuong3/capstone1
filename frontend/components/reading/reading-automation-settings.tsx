@@ -58,7 +58,7 @@ function Switch({
 }) {
   const id = useId();
   return (
-    <div className="flex items-start gap-3">
+    <div className="flex min-h-11 items-start gap-3 py-1">
       <input
         aria-checked={checked}
         aria-describedby={`${id}-description`}
@@ -70,7 +70,7 @@ function Switch({
         role="switch"
         type="checkbox"
       />
-      <label className="min-w-0 flex-1" htmlFor={id}>
+      <label className="min-w-0 flex-1 cursor-pointer" htmlFor={id}>
         <span className="block text-sm font-bold text-ink">{label}</span>
         <span
           className={cn("block text-sm text-muted")}
@@ -145,13 +145,13 @@ export function ReadingAutomationSettings() {
       />
       <div
         aria-label="Mức độ tương tác của thầy cô giáo"
-        className="ml-8 space-y-1.5"
+        className="ml-4 space-y-1.5 min-[640px]:ml-8"
         role="group"
       >
         <span className="block text-xs font-semibold text-muted">
           Phong cách thầy cô giáo hướng dẫn
         </span>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-2 min-[640px]:grid-cols-2">
           {COACHING_STYLE_OPTIONS.map((option) => {
             const selected = coachingStyle === option.value;
             return (

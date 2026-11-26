@@ -116,7 +116,7 @@ function Playback({
       <StatusMessage tone="error" title="Chưa mở được bài hát">
         {state.message}
         <Button
-          className="mt-3 sm:w-auto"
+          className="mt-3 w-full min-[640px]:w-auto"
           variant="secondary"
           onClick={() =>
             onRefresh(state.conflict ? undefined : expectedVersionId)

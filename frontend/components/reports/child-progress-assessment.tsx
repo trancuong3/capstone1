@@ -120,7 +120,7 @@ function WeeklyChart({
   return (
     <section
       aria-labelledby="progress-weekly-title"
-      className="space-y-3 rounded-card border border-border bg-cream/60 p-4 sm:p-5"
+      className="space-y-3 rounded-card border border-border bg-cream/60 p-3.5 md:p-5"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3
@@ -133,42 +133,47 @@ function WeeklyChart({
           Chiều cao: phút đọc · Nhãn trên cột: tỷ lệ đọc đúng
         </span>
       </div>
-      <div
-        aria-hidden="true"
-        className="flex h-40 items-end gap-2 border-b border-border pt-2 sm:gap-4"
-      >
-        {weekly.map((week) => {
-          const barHeight =
-            week.minutes > 0
-              ? Math.max(10, Math.round((week.minutes / maxMinutes) * 92))
-              : 3;
-          return (
-            <div
-              className="flex h-full min-w-0 flex-1 flex-col justify-end text-center"
-              key={week.week_start}
-            >
-              <span className="mb-1 text-xs font-bold tabular-nums text-primary">
-                {week.accuracy_pct === null
-                  ? "–"
-                  : `${Math.round(week.accuracy_pct)}%`}
-              </span>
+      <div className="overflow-x-auto pb-0.5">
+        <div
+          aria-hidden="true"
+          className="flex h-40 items-end gap-1.5 border-b border-border pt-2 min-[640px]:gap-4"
+        >
+          {weekly.map((week) => {
+            const barHeight =
+              week.minutes > 0
+                ? Math.max(10, Math.round((week.minutes / maxMinutes) * 92))
+                : 3;
+            return (
               <div
                 className={cn(
-                  "mx-auto w-full max-w-12 rounded-t-control",
-                  week.minutes > 0 ? "bg-primary/85" : "bg-border",
+                  "flex h-full flex-1 flex-col justify-end text-center",
+                  weekly.length > 6 ? "min-w-[2.5rem]" : "min-w-0",
                 )}
-                style={{ height: `${barHeight}px` }}
-                title={`${week.minutes} phút (${week.sessions} buổi)`}
-              />
-              <span className="mt-1.5 text-[11px] font-bold tabular-nums text-ink">
-                {week.minutes}p
-              </span>
-              <span className="pb-1.5 text-[11px] font-semibold tabular-nums text-muted">
-                {shortDate(week.week_start)}
-              </span>
-            </div>
-          );
-        })}
+                key={week.week_start}
+              >
+                <span className="mb-1 text-xs font-bold tabular-nums text-primary">
+                  {week.accuracy_pct === null
+                    ? "–"
+                    : `${Math.round(week.accuracy_pct)}%`}
+                </span>
+                <div
+                  className={cn(
+                    "mx-auto w-full max-w-12 rounded-t-control",
+                    week.minutes > 0 ? "bg-primary/85" : "bg-border",
+                  )}
+                  style={{ height: `${barHeight}px` }}
+                  title={`${week.minutes} phút (${week.sessions} buổi)`}
+                />
+                <span className="mt-1.5 text-[11px] font-bold tabular-nums text-ink">
+                  {week.minutes}p
+                </span>
+                <span className="pb-1.5 text-[11px] font-semibold tabular-nums text-muted">
+                  {shortDate(week.week_start)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
       </div>
       <ul className="sr-only">
         {weekly.map((week) => (
@@ -288,15 +293,15 @@ export function ChildProgressAssessmentCard({
   return (
     <section
       aria-labelledby="ai-progress-title"
-      className="rounded-card border border-border bg-white p-5 sm:p-6"
+      className="rounded-card border border-border bg-white p-4 md:p-6"
     >
-      <div className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="space-y-1">
+      <div className="flex flex-col gap-3 border-b border-border pb-4 min-[640px]:flex-row min-[640px]:items-end min-[640px]:justify-between">
+        <div className="min-w-0 space-y-1">
           <p className="text-xs font-bold text-primary">
             Đánh giá động theo khoảng ngày gần đây
           </p>
           <h2
-            className="text-xl font-extrabold text-ink sm:text-2xl"
+            className="text-xl font-extrabold text-ink md:text-2xl"
             id="ai-progress-title"
           >
             {childName} đang đọc thế nào?
@@ -309,14 +314,14 @@ export function ChildProgressAssessmentCard({
 
         <div
           aria-label="Khoảng thời gian đánh giá"
-          className="inline-flex shrink-0 self-start rounded-control border border-border bg-canvas p-1 sm:self-auto"
+          className="inline-flex max-w-full shrink-0 self-start rounded-control border border-border bg-canvas p-1 min-[640px]:self-auto"
           role="radiogroup"
         >
           {PERIODS.map((option) => (
             <button
               aria-checked={days === option}
               className={cn(
-                "min-h-10 rounded-control px-3.5 text-sm font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
+                "min-h-11 rounded-control px-3 text-sm font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary min-[640px]:px-3.5",
                 days === option
                   ? "bg-primary text-white"
                   : "text-ink hover:bg-white",
@@ -352,7 +357,7 @@ export function ChildProgressAssessmentCard({
             không bị ảnh hưởng.
           </StatusMessage>
           <Button
-            className="sm:w-auto"
+            className="min-[640px]:w-auto min-[640px]:self-start"
             onClick={() => {
               setView({ status: "loading" });
               setReloadKey((key) => key + 1);
@@ -405,7 +410,7 @@ function AssessmentBody({
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(220px,0.75fr)_minmax(0,1.25fr)] lg:items-start">
-        <div className="flex flex-col gap-3 rounded-control border border-border bg-cream/70 p-4 sm:p-5">
+        <div className="flex flex-col gap-3 rounded-control border border-border bg-cream/70 p-4 md:p-5">
           <p className="text-xs font-bold text-muted">Điểm tổng hợp</p>
           <div className="flex flex-wrap items-baseline gap-2">
             <span className="text-4xl font-extrabold tracking-tight tabular-nums text-ink">
@@ -495,11 +500,11 @@ function AssessmentBody({
           </StatusMessage>
         ) : null}
 
-        <div className="max-w-3xl space-y-1.5">
-          <h3 className="text-lg font-extrabold text-ink">
+        <div className="min-w-0 max-w-3xl space-y-1.5">
+          <h3 className="break-words text-lg font-extrabold text-ink">
             {assessment.headline}
           </h3>
-          <p className="text-body leading-relaxed text-ink">
+          <p className="break-words text-body leading-relaxed text-ink">
             {assessment.summary}
           </p>
         </div>
@@ -513,7 +518,9 @@ function AssessmentBody({
               >
                 <ul className="list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-ink">
                   {assessment.strengths.map((item) => (
-                    <li key={item}>{item}</li>
+                    <li className="break-words" key={item}>
+                      {item}
+                    </li>
                   ))}
                 </ul>
               </InsightColumn>
@@ -525,12 +532,12 @@ function AssessmentBody({
               >
                 <ul className="space-y-2.5 text-sm">
                   {assessment.weaknesses.map((item) => (
-                    <li className="flex gap-2" key={item.area}>
+                    <li className="flex min-w-0 gap-2" key={item.area}>
                       <TriangleAlert
                         aria-hidden="true"
                         className="mt-0.5 size-4 shrink-0 text-warning"
                       />
-                      <span>
+                      <span className="min-w-0 break-words">
                         <strong className="block font-bold text-ink">
                           {item.area}
                         </strong>
@@ -559,7 +566,7 @@ function AssessmentBody({
               ).map(([audience, title]) =>
                 actionsFor(audience).length > 0 ? (
                   <div
-                    className="space-y-2 rounded-control border border-border bg-cream/70 p-4"
+                    className="min-w-0 space-y-2 rounded-control border border-border bg-cream/70 p-4"
                     key={audience}
                   >
                     <h4 className="text-sm font-extrabold text-primary">
@@ -567,7 +574,7 @@ function AssessmentBody({
                     </h4>
                     <ul className="space-y-2.5 text-sm">
                       {actionsFor(audience).map((action) => (
-                        <li key={action.title}>
+                        <li className="min-w-0 break-words" key={action.title}>
                           <strong className="block font-bold text-ink">
                             {action.title}
                           </strong>
@@ -583,18 +590,18 @@ function AssessmentBody({
         ) : null}
 
         {assessment.practice_words.length > 0 ? (
-          <section className="space-y-2">
+          <section className="min-w-0 space-y-2">
             <h3 className="text-sm font-extrabold text-ink">
               Từ gợi ý luyện thêm ({data.days} ngày)
             </h3>
-            <ul className="flex flex-wrap gap-2">
+            <ul className="flex min-w-0 flex-wrap gap-2">
               {assessment.practice_words.map((word) => {
                 const detail = data.difficult_words.find(
                   (item) => item.word === word,
                 );
                 return (
                   <li
-                    className="rounded-control border border-border bg-canvas px-3 py-1.5 text-sm font-bold text-ink"
+                    className="max-w-full min-w-0 break-words rounded-control border border-border bg-canvas px-3 py-1.5 text-sm font-bold text-ink [overflow-wrap:anywhere]"
                     key={word}
                     title={
                       detail?.heard_as
@@ -618,7 +625,7 @@ function AssessmentBody({
         ) : null}
 
         {assessment.encouragement ? (
-          <p className="border-l-2 border-primary pl-3.5 text-sm font-semibold text-muted">
+          <p className="break-words border-l-2 border-primary pl-3.5 text-sm font-semibold text-muted">
             {assessment.encouragement}
           </p>
         ) : null}

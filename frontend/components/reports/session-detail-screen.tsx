@@ -107,14 +107,14 @@ export function SessionDetailScreen({
           liệu mẫu thay thế.
         </StatusMessage>
         <Button
-          className="sm:w-auto sm:self-start sm:px-8"
+          className="min-[640px]:w-auto min-[640px]:self-start min-[640px]:px-8"
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
           <RefreshCw aria-hidden="true" className="size-4" /> Thử lại
         </Button>
         <ButtonLink
-          className="sm:w-auto sm:self-start"
+          className="min-[640px]:w-auto min-[640px]:self-start"
           href="/children"
           variant="secondary"
         >
@@ -133,7 +133,7 @@ export function SessionDetailScreen({
           Buổi đọc không tồn tại hoặc không thuộc tài khoản hiện tại.
         </StatusMessage>
         <ButtonLink
-          className="sm:w-auto sm:self-start"
+          className="min-[640px]:w-auto min-[640px]:self-start"
           href="/sessions"
           variant="secondary"
         >
@@ -150,7 +150,7 @@ export function SessionDetailScreen({
           Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
         </StatusMessage>
         <Button
-          className="sm:w-auto sm:self-start sm:px-8"
+          className="min-[640px]:w-auto min-[640px]:self-start min-[640px]:px-8"
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
@@ -227,7 +227,7 @@ export function SessionDetailScreen({
   const comprehensionSection = (
     <section
       aria-labelledby="session-comprehension-heading"
-      className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 sm:p-6"
+      className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 md:p-6"
     >
       <h2
         className="text-xl font-extrabold text-ink"
@@ -396,7 +396,7 @@ export function SessionDetailScreen({
         aria-labelledby="session-overview-heading"
         className="rounded-card border border-border bg-white"
       >
-        <div className="border-b border-border px-4 py-3.5 sm:px-6">
+        <div className="border-b border-border px-4 py-3.5 md:px-6">
           <h2
             className="text-lg font-extrabold text-ink"
             id="session-overview-heading"
@@ -407,7 +407,7 @@ export function SessionDetailScreen({
 
         {availability.fluency === "unsupported" ||
         availability.fluency === "partial" ? (
-          <div className="px-4 pt-4 sm:px-6">
+          <div className="px-4 pt-4 md:px-6">
             <StatusMessage tone="info">
               Có dữ liệu đánh giá đã lưu nhưng định dạng chưa được hỗ trợ đầy
               đủ. Chỉ hiển thị điểm và chỉ số đọc được, không tự quy đổi dữ liệu
@@ -416,16 +416,15 @@ export function SessionDetailScreen({
           </div>
         ) : null}
 
-        <dl className="grid grid-cols-2 sm:grid-cols-3">
+        <dl className="grid grid-cols-2 min-[640px]:grid-cols-3">
           {summaryItems.map(([label, value], index) => {
             const isMissing = value.startsWith("Chưa");
             const cellBorders = [
-              "border-border p-3 sm:px-6 sm:py-4",
-              index % 2 === 0 ? "border-r sm:border-r-0" : "",
-              index >= 2 ? "border-t" : "",
-              index === 2 ? "sm:border-t-0" : "",
-              index >= 3 ? "sm:border-t" : "",
-              index % 3 !== 2 ? "sm:border-r" : "sm:border-r-0",
+              "min-w-0 border-border p-3 md:px-6 md:py-4",
+              index % 2 === 0 ? "max-[640px]:border-r" : "",
+              index >= 2 ? "max-[640px]:border-t" : "",
+              index % 3 !== 2 ? "min-[640px]:border-r" : "",
+              index >= 3 ? "min-[640px]:border-t" : "",
             ]
               .filter(Boolean)
               .join(" ");
@@ -451,7 +450,7 @@ export function SessionDetailScreen({
 
       {showComprehensionSectionDirectly ? comprehensionSection : null}
 
-      <details className="group rounded-card border border-border bg-white p-4 sm:p-6">
+      <details className="group rounded-card border border-border bg-white p-4 md:p-6">
         <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 font-extrabold text-primary">
           <span>Thông tin khác của buổi đọc</span>
           <ChevronDown

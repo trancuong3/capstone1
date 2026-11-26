@@ -35,18 +35,18 @@ export function ProgressChart({ report }: ProgressChartProps) {
   return (
     <section
       aria-labelledby="reading-evidence-title"
-      className="rounded-card border border-border bg-white p-5 sm:p-6"
+      className="rounded-card border border-border bg-white p-4 md:p-6"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2
-          className="text-xl font-extrabold text-ink"
+          className="text-lg font-extrabold text-ink md:text-xl"
           id="reading-evidence-title"
         >
           Các dấu hiệu khi đọc
         </h2>
         <span className="text-xs font-semibold text-muted">Đơn vị: lần</span>
       </div>
-      <p className="mt-1 text-sm text-muted">
+      <p className="mt-1 text-xs text-muted md:text-sm">
         Số lần ghi nhận trong kỳ đang xem. Chỉ số chưa có dữ liệu không được quy
         thành 0.
       </p>
@@ -56,7 +56,10 @@ export function ProgressChart({ report }: ProgressChartProps) {
           Chưa có số liệu chi tiết về bỏ sót, lặp từ hoặc dừng lâu trong kỳ này.
         </p>
       ) : (
-        <ul aria-hidden="true" className="mt-5 space-y-4">
+        <ul
+          aria-hidden="true"
+          className="mt-4 space-y-3.5 md:mt-5 md:space-y-4"
+        >
           {rows.map((row) => {
             const hasValue = row.value !== null;
             const widthPercent =
@@ -65,15 +68,15 @@ export function ProgressChart({ report }: ProgressChartProps) {
                 : 0;
             return (
               <li className="space-y-1.5" key={row.label}>
-                <div className="flex items-baseline justify-between gap-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
                   <span className="text-sm font-bold text-ink">
                     {row.label}
                   </span>
                   <span
                     className={
                       hasValue
-                        ? "text-sm font-extrabold tabular-nums text-ink"
-                        : "text-xs font-semibold text-muted"
+                        ? "text-right text-sm font-extrabold tabular-nums text-ink"
+                        : "text-right text-xs font-semibold text-muted"
                     }
                   >
                     {hasValue ? `${row.value} lần` : "Chưa có dữ liệu"}

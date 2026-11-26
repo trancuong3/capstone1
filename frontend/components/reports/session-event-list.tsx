@@ -1,3 +1,5 @@
+import { ChevronDown } from "lucide-react";
+
 import type { HistoryEventDTO } from "@/types/reading";
 
 const eventLabels: Record<HistoryEventDTO["type"], string> = {
@@ -61,9 +63,9 @@ export function SessionEventList({ events }: SessionEventListProps) {
               const recognizedText = metadata.recognized_text;
               const targetWord = metadata.target_word;
               return (
-                <li className="space-y-1.5 p-3.5 sm:p-4" key={event.id}>
+                <li className="space-y-1.5 p-3.5 md:p-4" key={event.id}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm font-bold text-ink">
+                    <p className="min-w-0 break-words text-sm font-bold text-ink">
                       {event.status === "CONFIRMED"
                         ? "Đã đọc đúng ở lượt đọc lại"
                         : event.status === "FAILED"
@@ -78,7 +80,7 @@ export function SessionEventList({ events }: SessionEventListProps) {
                         : statusLabels[event.status]}
                     </span>
                   </div>
-                  <p className="text-sm text-muted">
+                  <p className="break-words text-sm text-muted">
                     Từ cần luyện:{" "}
                     <strong className="font-bold text-ink">
                       {typeof targetWord === "string"
@@ -90,14 +92,35 @@ export function SessionEventList({ events }: SessionEventListProps) {
                       : ""}
                   </p>
                   {typeof recognizedText === "string" && recognizedText ? (
-                    <p className="text-sm text-muted">
+                    <p className="break-words text-sm text-muted">
                       ViRead nhận diện: “{recognizedText}”
                     </p>
                   ) : null}
-                  <p className="text-xs text-muted">
+                  <p className="hidden text-xs text-muted md:block">
                     Mã trang {event.page_id} · phiên bản{" "}
                     <code className="break-all">{event.page_revision_id}</code>
                   </p>
+                  <details className="group/meta md:hidden">
+                    <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-1.5 text-xs font-semibold text-muted hover:text-ink [&::-webkit-details-marker]:hidden">
+                      <span>Mã đối chiếu kỹ thuật</span>
+                      <ChevronDown
+                        aria-hidden="true"
+                        className="size-3.5 shrink-0 transition-transform group-open/meta:rotate-180"
+                      />
+                    </summary>
+                    <div className="mt-1 space-y-0.5 rounded-control bg-canvas px-2.5 py-2 text-xs text-muted">
+                      <p>
+                        Mã trang:{" "}
+                        <code className="break-all">{event.page_id}</code>
+                      </p>
+                      <p>
+                        Phiên bản:{" "}
+                        <code className="break-all">
+                          {event.page_revision_id}
+                        </code>
+                      </p>
+                    </div>
+                  </details>
                 </li>
               );
             })}
@@ -127,9 +150,9 @@ export function SessionEventList({ events }: SessionEventListProps) {
                 ].includes(event.type);
 
               return (
-                <li className="space-y-1.5 p-3.5 sm:p-4" key={event.id}>
+                <li className="space-y-1.5 p-3.5 md:p-4" key={event.id}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm font-bold text-ink">
+                    <p className="min-w-0 break-words text-sm font-bold text-ink">
                       {eventLabels[event.type]}
                     </p>
                     <span
@@ -142,15 +165,35 @@ export function SessionEventList({ events }: SessionEventListProps) {
                     Mốc{" "}
                     <span className="font-bold tabular-nums text-ink">
                       {Math.round(event.start_ms / 1000)} giây
-                    </span>{" "}
-                    · phiên bản{" "}
-                    <code className="break-all">{event.page_revision_id}</code>
+                    </span>
+                    <span className="hidden md:inline">
+                      {" "}
+                      · phiên bản{" "}
+                      <code className="break-all">
+                        {event.page_revision_id}
+                      </code>
+                    </span>
                   </p>
                   <p className="text-xs font-semibold text-muted">
                     {countsAsError
                       ? "Bằng chứng lỗi đã xác nhận."
                       : "Sự kiện hỗ trợ hoặc chưa chắc chắn, không tính là lỗi của bé."}
                   </p>
+                  <details className="group/meta md:hidden">
+                    <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-1.5 text-xs font-semibold text-muted hover:text-ink [&::-webkit-details-marker]:hidden">
+                      <span>Mã đối chiếu kỹ thuật</span>
+                      <ChevronDown
+                        aria-hidden="true"
+                        className="size-3.5 shrink-0 transition-transform group-open/meta:rotate-180"
+                      />
+                    </summary>
+                    <p className="mt-1 rounded-control bg-canvas px-2.5 py-2 text-xs text-muted">
+                      Phiên bản:{" "}
+                      <code className="break-all">
+                        {event.page_revision_id}
+                      </code>
+                    </p>
+                  </details>
                 </li>
               );
             })}

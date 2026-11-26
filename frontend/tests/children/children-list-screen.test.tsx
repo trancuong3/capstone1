@@ -100,4 +100,29 @@ describe("ChildrenListScreen with real API responses", () => {
       await screen.findByRole("heading", { name: "Chưa có hồ sơ bé" }),
     ).toBeInTheDocument();
   });
+
+  it("uses 640px responsive grid, wrapping aliases, and w-full min-[640px]:w-auto retry button", async () => {
+    const longChild = {
+      ...childFixture,
+      alias: "BéNguyễnHoàngMinhKhuêSiêuDàiKhôngKhoảngTrắng",
+    };
+    apiFetchFixture.mockResolvedValueOnce(Response.json([longChild]));
+    const { unmount } = renderChildren();
+
+    const aliasEl = await screen.findByText(longChild.alias);
+    expect(aliasEl).toHaveClass("break-words");
+    const grid = aliasEl.closest("div.grid");
+    expect(grid).toHaveClass("min-[640px]:grid-cols-2");
+    expect(grid?.className).not.toMatch(/(?:^|\s)sm:/);
+    unmount();
+
+    apiFetchFixture.mockRejectedValueOnce(new Error("Temporary error"));
+    renderChildren();
+    const retryBtn = await screen.findByRole("button", { name: "Thử lại" });
+    expect(retryBtn).toHaveClass(
+      "w-full",
+      "min-[640px]:w-auto",
+      "min-[640px]:self-start",
+    );
+  });
 });

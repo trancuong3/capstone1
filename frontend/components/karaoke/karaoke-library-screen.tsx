@@ -30,7 +30,7 @@ function Library({ child }: { child: ChildProfileDTO }) {
     <section className="mx-auto grid w-full max-w-[1280px] gap-3.5 md:gap-6">
       <div className="flex items-center justify-between gap-2 md:flex-wrap md:items-start md:gap-4">
         <div className="min-w-0">
-          <h1 className="truncate text-xl font-extrabold md:mt-2 md:whitespace-normal md:text-heading">
+          <h1 className="line-clamp-2 break-words text-xl font-extrabold md:mt-2 md:line-clamp-none md:whitespace-normal md:text-heading">
             Hát vui cùng {child.alias}
           </h1>
           <p className="mt-3 hidden text-body text-muted md:block">
@@ -67,7 +67,7 @@ function Library({ child }: { child: ChildProfileDTO }) {
           />
         </label>
         <Button
-          className="min-h-11 sm:w-auto"
+          className="w-full min-[640px]:w-auto"
           type="submit"
           variant="secondary"
         >
@@ -132,7 +132,7 @@ function Catalog({
       <StatusMessage tone="error" title="Chưa tải được thư viện">
         {state.message}
         <Button
-          className="mt-3 sm:w-auto"
+          className="mt-3 w-full min-[640px]:w-auto"
           variant="secondary"
           onClick={onRetry}
         >
@@ -144,7 +144,7 @@ function Catalog({
   return (
     <>
       {data.items.length ? (
-        <div className="grid gap-3.5 sm:grid-cols-2 md:gap-5 lg:grid-cols-3">
+        <div className="grid gap-3.5 min-[640px]:grid-cols-2 md:gap-5 lg:grid-cols-3">
           {data.items.map((song) => (
             <SongCard key={`${song.song_id}:${song.version_id}`} song={song} />
           ))}

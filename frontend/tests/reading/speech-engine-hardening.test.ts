@@ -7,6 +7,15 @@ import {
 } from "@/lib/api/speech-service";
 import type { VoiceStudioService } from "@/lib/api/voice-studio-service";
 import {
+  acquireUnlockedAudioElement,
+  resetAndroidAudioUnlockForTest,
+  unlockAudioNow,
+} from "@/lib/reading/android-audio-unlock";
+import {
+  getBrowserWasmSttClient,
+  resetBrowserWasmSttForTests,
+} from "@/lib/reading/browser-wasm-stt";
+import {
   LocalSegmentSpeechRecognition,
   resetLocalSttEmergencyStateForTests,
   shouldPreferAndroidNativeStt,
@@ -24,6 +33,7 @@ import {
 import { resetSpeechPreferencesCache } from "@/lib/reading/speech-preferences";
 import { TtsPlayback, type ActiveAudioKind } from "@/lib/reading/tts-playback";
 import {
+  getVoiceEngineStatus,
   resetVoiceEngineStatus,
   setCachedVoiceEngineHealth,
 } from "@/lib/reading/voice-engine-status";
@@ -127,6 +137,8 @@ beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
   resetAndroidNativeSpeechBridgeForTests();
+  resetBrowserWasmSttForTests();
+  resetAndroidAudioUnlockForTest();
   resetVoiceLockAndPolicyForTests();
   resetSpeechPreferencesCache();
   resetVoiceEngineStatus();
@@ -136,6 +148,8 @@ beforeEach(() => {
 
 afterEach(() => {
   resetAndroidNativeSpeechBridgeForTests();
+  resetBrowserWasmSttForTests();
+  resetAndroidAudioUnlockForTest();
   installAndroidPort(undefined);
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -205,52 +219,124 @@ describe("speech-service timeout vs user-abort classification", () => {
   });
 });
 
-describe("LocalSegmentSpeechRecognition Android Native priority & debounce", () => {
-  it("activates Android Native STT BEFORE browser WASM even when Worker & crypto.subtle exist in local_only mode", async () => {
-    const port = new FakeAndroidSpeechPort();
-    installAndroidPort(port);
-    vi.stubGlobal("Worker", class FakeWorker {});
-    Object.defineProperty(globalThis, "crypto", {
-      configurable: true,
-      value: { subtle: {} },
-    });
+describe("LocalSegmentSpeechRecognition WASM-first priority, Android Native fallback & debounce", () => {
+  it("prioritizes Browser WASM STT ahead of Android Native when Worker & crypto.subtle exist, and skips rolling interim while init() is warming", async () => {
+    vi.useFakeTimers();
+    try {
+      const port = new FakeAndroidSpeechPort();
+      installAndroidPort(port);
 
-    setVoicePolicyPreferences({ providerMode: "local_only" });
-    expect(getVoicePolicyPreferences().providerMode).toBe("local_only");
-    setCachedVoiceEngineHealth(makeHealth(false));
+      class SlowInitWasmWorker {
+        onmessage: ((e: MessageEvent) => void) | null = null;
+        onerror: ((e: ErrorEvent) => void) | null = null;
+        postMessage(msg: { type: string; id: string }) {
+          if (msg.type === "init") {
+            setTimeout(() => {
+              this.onmessage?.({
+                data: { type: "ready", id: msg.id },
+              } as MessageEvent);
+            }, 6_000);
+          } else if (msg.type === "transcribe") {
+            setTimeout(() => {
+              this.onmessage?.({
+                data: {
+                  type: "result",
+                  id: msg.id,
+                  text: "mèo nhỏ",
+                  decodeMs: 30,
+                },
+              } as MessageEvent);
+            }, 20);
+          }
+        }
+        terminate() {}
+      }
 
-    expect(shouldPreferAndroidNativeStt()).toBe(true);
+      vi.stubGlobal("Worker", SlowInitWasmWorker);
+      Object.defineProperty(globalThis, "crypto", {
+        configurable: true,
+        value: { subtle: { digest: vi.fn() } },
+      });
 
-    const transcribe = vi.fn();
-    const rec = new LocalSegmentSpeechRecognition(
-      { transcribe } as unknown as SpeechService,
-      () => ({ sessionId: "sess-1", pageId: "page-1" }),
-    );
-    const transcripts: string[] = [];
-    rec.onresult = (ev) => {
-      transcripts.push(ev.results[0]?.[0]?.transcript ?? "");
-    };
+      setVoicePolicyPreferences({ providerMode: "local_only" });
+      expect(getVoicePolicyPreferences().providerMode).toBe("local_only");
+      setCachedVoiceEngineHealth(makeHealth(false));
 
-    rec.start();
+      // Must keep speechRecorder active for WASM instead of skipping to Android
+      expect(shouldPreferAndroidNativeStt()).toBe(false);
 
-    expect(port.sent.some((m) => m.action === "startStt")).toBe(true);
-    const startMsg = port.sent.find((m) => m.action === "startStt");
-    port.emit({
-      type: "stt_final",
-      requestId: startMsg?.requestId,
-      transcript: "mèo nhỏ",
-    });
-    expect(transcripts).toContain("mèo nhỏ");
-    rec.stop();
+      const transcribe = vi.fn();
+      const rec = new LocalSegmentSpeechRecognition(
+        { transcribe } as unknown as SpeechService,
+        () => ({ sessionId: "sess-1", pageId: "page-1" }),
+      );
+      const transcripts: string[] = [];
+      rec.onresult = (ev) => {
+        const item = ev.results[ev.resultIndex];
+        if (item?.isFinal) transcripts.push(item[0]?.transcript ?? "");
+      };
+
+      rec.start();
+      expect(getVoiceEngineStatus().stt.tier).toBe("browser_wasm");
+      expect(port.sent.some((m) => m.action === "startStt")).toBe(false);
+
+      // Simulate speech during cold-start > 4_000ms while init() is still warming
+      const internal = rec as unknown as {
+        active: boolean;
+        consumeSamples16k: (chunk: Float32Array) => void;
+      };
+      internal.active = true;
+      for (let i = 0; i < 10; i += 1) {
+        internal.consumeSamples16k(new Float32Array(640).fill(0.05));
+      }
+      await vi.advanceTimersByTimeAsync(4_500);
+      // Must NOT flip to Android on 4s rolling-interim window while init() warms!
+      expect(port.sent.some((m) => m.action === "startStt")).toBe(false);
+      expect(getVoiceEngineStatus().stt.tier).toBe("browser_wasm");
+
+      // Complete 6_000ms cold init() -> flush segment -> decodes via WASM!
+      await vi.advanceTimersByTimeAsync(1_600);
+      for (let i = 0; i < 20; i += 1) {
+        internal.consumeSamples16k(new Float32Array(640).fill(0));
+      }
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(transcripts).toContain("mèo nhỏ");
+      expect(port.sent.some((m) => m.action === "startStt")).toBe(false);
+      rec.stop();
+      await vi.advanceTimersByTimeAsync(10);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("falls back to Android Native STT BEFORE browser WASM on 503 worker outage even with Worker present", async () => {
+  it("activates Browser WASM STT on 503 outage and falls back to Android Native with WASM_INIT_FAILED when WASM init rejects", async () => {
     const port = new FakeAndroidSpeechPort();
     installAndroidPort(port);
-    vi.stubGlobal("Worker", class FakeWorker {});
+
+    class FailingInitWorker {
+      onmessage: ((e: MessageEvent) => void) | null = null;
+      onerror: ((e: ErrorEvent) => void) | null = null;
+      postMessage(msg: { type: string; id: string }) {
+        if (msg.type === "init") {
+          setTimeout(() => {
+            this.onmessage?.({
+              data: {
+                type: "error",
+                id: msg.id,
+                message: "Model fetch failed (encoder.int8.onnx): HTTP 502",
+              },
+            } as MessageEvent);
+          }, 15);
+        }
+      }
+      terminate() {}
+    }
+
+    vi.stubGlobal("Worker", FailingInitWorker);
     Object.defineProperty(globalThis, "crypto", {
       configurable: true,
-      value: { subtle: {} },
+      value: { subtle: { digest: vi.fn() } },
     });
     setVoicePolicyPreferences({ providerMode: "local_only" });
     setCachedVoiceEngineHealth(makeHealth(true));
@@ -279,15 +365,87 @@ describe("LocalSegmentSpeechRecognition Android Native priority & debounce", () 
     };
     internal.active = true;
     internal.abortController = new AbortController();
-    internal.speechChunks = [new Float32Array(3200)];
+    internal.speechChunks = [new Float32Array(3200).fill(0.05)];
     internal.speechSamples = 3200;
     internal.inSpeech = true;
 
     internal.flushCurrentSegment(false);
-    await new Promise((r) => setTimeout(r, 350));
+    await vi.waitFor(() => {
+      expect(port.sent.some((m) => m.action === "startStt")).toBe(true);
+    });
 
-    expect(port.sent.some((m) => m.action === "startStt")).toBe(true);
+    const sttStatus = getVoiceEngineStatus().stt;
+    expect(sttStatus.tier).toBe("android_native");
+    expect(sttStatus.fallbackReason).toBe("WASM_INIT_FAILED");
+
+    const startMsg = port.sent.find((m) => m.action === "startStt");
+    port.emit({
+      type: "stt_ready",
+      requestId: startMsg?.requestId,
+      onDevice: true,
+    });
+    expect(getVoiceEngineStatus().stt.androidOnDevice).toBe(true);
+    expect(getVoiceEngineStatus().stt.fallbackReason).toBe("WASM_INIT_FAILED");
+
     rec.stop();
+  });
+
+  it("handles too-many-requests debounce, 50ms clean stt_final restart, and up to 2 transient network glitches on Android STT", async () => {
+    vi.useFakeTimers();
+    try {
+      const port = new FakeAndroidSpeechPort();
+      installAndroidPort(port);
+      setCachedVoiceEngineHealth(makeHealth(false));
+
+      const rec = new LocalSegmentSpeechRecognition(
+        { transcribe: vi.fn() } as unknown as SpeechService,
+        () => ({ sessionId: "sess-resilient", pageId: "page-resilient" }),
+      );
+      rec.continuous = true;
+      const errors: string[] = [];
+      rec.onerror = (ev) => errors.push(String(ev.error ?? ""));
+      rec.start();
+
+      // 1. Clean stt_final + stt_end restarts in 50ms (not 120ms)
+      const firstId = String(
+        port.sent.find((m) => m.action === "startStt")?.requestId,
+      );
+      port.emit({
+        type: "stt_final",
+        requestId: firstId,
+        transcript: "mèo con",
+      });
+      port.emit({ type: "stt_end", requestId: firstId });
+      await vi.advanceTimersByTimeAsync(55);
+      expect(port.sent.filter((m) => m.action === "startStt")).toHaveLength(2);
+
+      // 2. too-many-requests maps to aborted (350ms backoff, non-fatal)
+      const secondId = String(
+        port.sent.filter((m) => m.action === "startStt")[1]?.requestId,
+      );
+      port.emit({
+        type: "stt_error",
+        requestId: secondId,
+        code: "too-many-requests",
+      });
+      await vi.advanceTimersByTimeAsync(200);
+      expect(port.sent.filter((m) => m.action === "startStt")).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(160);
+      expect(port.sent.filter((m) => m.action === "startStt")).toHaveLength(3);
+
+      // 3. Up to 2 transient network glitches retry after 500ms without fatal stt-unavailable
+      const thirdId = String(
+        port.sent.filter((m) => m.action === "startStt")[2]?.requestId,
+      );
+      port.emit({ type: "stt_error", requestId: thirdId, code: "network" });
+      await vi.advanceTimersByTimeAsync(510);
+      expect(port.sent.filter((m) => m.action === "startStt")).toHaveLength(4);
+      expect(errors).not.toContain("network");
+
+      rec.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("debounces Android Native STT restart after aborted/busy error instead of 0ms spin loop", async () => {
@@ -821,5 +979,128 @@ describe("TtsPlayback audioKind tracking, chunk pipelining, and Android fast-pat
       expect.any(String),
       expect.objectContaining({ timeoutMs: 4_500 }),
     );
+  });
+
+  it("does not wipe leased sharedAudioElement when unlockAudioNow probe settles during first-tap playback", async () => {
+    let resolveProbePlay!: () => void;
+    const probeEl = {
+      src: "",
+      muted: false,
+      volume: 1,
+      play: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveProbePlay = resolve;
+          }),
+      ),
+      pause: vi.fn(),
+    };
+    const origCreateElement = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation(((tag: string) =>
+      tag === "audio"
+        ? (probeEl as unknown as HTMLAudioElement)
+        : origCreateElement(tag)) as typeof document.createElement);
+
+    unlockAudioNow({ force: true });
+    const leased = acquireUnlockedAudioElement();
+    expect(leased).not.toBeNull();
+    leased!.audio.src = "blob:active-sample-tts";
+
+    resolveProbePlay();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(leased!.audio.src).toBe("blob:active-sample-tts");
+    expect(probeEl.pause).not.toHaveBeenCalled();
+    leased!.release();
+  });
+
+  it("falls back immediately with WASM_OFFLINE_UNCACHED when navigator.onLine is false and IndexedDB model cache is empty", async () => {
+    const port = new FakeAndroidSpeechPort();
+    installAndroidPort(port);
+
+    class HangingInitWorker {
+      onmessage: ((e: MessageEvent) => void) | null = null;
+      onerror: ((e: ErrorEvent) => void) | null = null;
+      postMessage() {}
+      terminate() {}
+    }
+    vi.stubGlobal("Worker", HangingInitWorker);
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: { subtle: { digest: vi.fn() } },
+    });
+    const prevMediaDevices = Object.getOwnPropertyDescriptor(
+      navigator,
+      "mediaDevices",
+    );
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn(() => new Promise(() => {})),
+      },
+    });
+    setCachedVoiceEngineHealth(makeHealth(false));
+
+    const rec = new LocalSegmentSpeechRecognition(
+      { transcribe: vi.fn() } as unknown as SpeechService,
+      () => ({ sessionId: "sess-offline-uncached", pageId: "page-1" }),
+    );
+    try {
+      rec.start();
+
+      await vi.waitFor(() => {
+        expect(port.sent.some((m) => m.action === "startStt")).toBe(true);
+      });
+      expect(getVoiceEngineStatus().stt.tier).toBe("android_native");
+      expect(getVoiceEngineStatus().stt.fallbackReason).toBe(
+        "WASM_OFFLINE_UNCACHED",
+      );
+      rec.abort();
+    } finally {
+      if (prevMediaDevices) {
+        Object.defineProperty(navigator, "mediaDevices", prevMediaDevices);
+      } else {
+        Reflect.deleteProperty(navigator, "mediaDevices");
+      }
+    }
+  });
+
+  it("reports WASM_OFFLINE_UNCACHED when prewarm() already probed uncached IndexedDB offline prior to rec.start()", async () => {
+    const port = new FakeAndroidSpeechPort();
+    installAndroidPort(port);
+
+    class NeverCalledWorker {
+      onmessage: ((e: MessageEvent) => void) | null = null;
+      onerror: ((e: ErrorEvent) => void) | null = null;
+      postMessage() {}
+      terminate() {}
+    }
+    vi.stubGlobal("Worker", NeverCalledWorker);
+    vi.stubGlobal("indexedDB", undefined);
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: { subtle: { digest: vi.fn() } },
+    });
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    setCachedVoiceEngineHealth(makeHealth(false));
+
+    const prewarmOk = await getBrowserWasmSttClient().prewarm();
+    expect(prewarmOk).toBe(false);
+    expect(getBrowserWasmSttClient().getCachedModelReady()).toBe(false);
+
+    const rec = new LocalSegmentSpeechRecognition(
+      { transcribe: vi.fn() } as unknown as SpeechService,
+      () => ({ sessionId: "sess-prewarm-offline", pageId: "page-1" }),
+    );
+    rec.start();
+
+    expect(port.sent.some((m) => m.action === "startStt")).toBe(true);
+    expect(getVoiceEngineStatus().stt.tier).toBe("android_native");
+    expect(getVoiceEngineStatus().stt.fallbackReason).toBe(
+      "WASM_OFFLINE_UNCACHED",
+    );
+    rec.abort();
   });
 });

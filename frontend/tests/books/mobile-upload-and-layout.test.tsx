@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -6,7 +6,9 @@ import {
   AuthRuntimeContext,
   type AuthRuntimeState,
 } from "@/components/auth/auth-service-provider";
+import { BookCoverStudio } from "@/components/books/book-cover-studio";
 import { ParentMyBooksScreen } from "@/components/books/parent-my-books-screen";
+import { ParentOcrContributionCard } from "@/components/books/parent-ocr-contribution-card";
 import { ParentPrivateBookManager } from "@/components/books/parent-private-book-manager";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
 import { resolvePrivateApiMediaUrl } from "@/lib/api/api-client";
@@ -366,5 +368,161 @@ describe("Mobile My Books Multi-Format Upload (Image/PDF/DOCX) & Responsive Cont
     );
     await waitFor(() => expect(uploadedFiles).toHaveLength(2));
     expect(uploadedFiles[1].name).toBe("bai-tho.docx");
+  });
+
+  it("enforces >=44px tap targets, 640px grids, collapsible 30-page quick-jump, and zero sm: across F9.3 components", async () => {
+    const user = userEvent.setup();
+    const summary = makeBookSummary();
+    const thirtySubs = Array.from({ length: 30 }, (_, index) =>
+      makeSubmission({
+        id: `bb000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+        source_page_number: index + 1,
+      }),
+    );
+
+    apiFetchFixture.mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      if (
+        url.pathname === "/books/my-books/paged" &&
+        (!init?.method || init.method === "GET")
+      ) {
+        return Response.json({
+          items: [summary],
+          total: 1,
+          limit: 9,
+          offset: 0,
+        });
+      }
+      if (url.pathname === `/books/my-books/${BOOK_ID}`) {
+        return Response.json({
+          book: summary,
+          pages: [
+            {
+              page_id: "dd111111-1111-4111-8111-111111111111",
+              page_number: 1,
+              current_verified_revision_id:
+                "dd222222-2222-4222-8222-222222222222",
+              image_url: `http://127.0.0.1:8000/books/my-books/${BOOK_ID}/pages/p1/image`,
+              verified_text_preview: "Trang 1",
+              created_at: NOW,
+            },
+          ],
+          submissions: thirtySubs,
+        });
+      }
+      if (url.pathname.endsWith("/image")) {
+        return new Response(new Blob(["img"], { type: "image/png" }), {
+          status: 200,
+        });
+      }
+      throw new Error(`Unexpected request: ${url.pathname}`);
+    });
+
+    // 1. ParentMyBooksScreen
+    const myBooksRender = render(
+      <AuthRuntimeContext.Provider value={makeAuthRuntime()}>
+        <AppServicesProvider>
+          <ParentMyBooksScreen />
+        </AppServicesProvider>
+      </AuthRuntimeContext.Provider>,
+    );
+    expect(await screen.findByText("Sách Đồng Dao Cho Bé")).toBeInTheDocument();
+    const privacyToggle = screen.getByRole("button", {
+      name: /Tìm hiểu thêm/i,
+    });
+    expect(privacyToggle.className).toContain("min-h-11");
+    await user.click(privacyToggle);
+    expect(screen.getByRole("button", { name: /Thu gọn/i })).toBeVisible();
+    const createBtn = screen.getByRole("button", { name: /Tạo sách riêng/i });
+    expect(createBtn.className).toContain("min-h-11!");
+    expect(myBooksRender.container.innerHTML).toContain(
+      "min-[640px]:grid-cols-2",
+    );
+    expect(myBooksRender.container.innerHTML).not.toMatch(/\b(?:max-)?sm:/);
+    myBooksRender.unmount();
+
+    // 2. ParentPrivateBookManager (30-page quick-jump + 3-stage strip + uniform header buttons)
+    const managerRender = render(
+      <AuthRuntimeContext.Provider value={makeAuthRuntime()}>
+        <AppServicesProvider>
+          <ParentPrivateBookManager bookId={BOOK_ID} />
+        </AppServicesProvider>
+      </AuthRuntimeContext.Provider>,
+    );
+    expect(await screen.findByText("Sách Đồng Dao Cho Bé")).toBeInTheDocument();
+    const jumpToggle = screen.getByRole("button", {
+      name: /Chuyển nhanh theo trang \(30 trang\)/i,
+    });
+    expect(jumpToggle.className).toContain("min-h-11");
+    await user.click(jumpToggle);
+    const jumpChip1 = screen.getByTitle(/Trang nguồn 1:/i);
+    expect(jumpChip1.className).toContain("min-h-11");
+    expect(managerRender.container.innerHTML).toContain(
+      "min-[640px]:grid-cols-3",
+    );
+    expect(managerRender.container.innerHTML).not.toMatch(/\b(?:max-)?sm:/);
+    managerRender.unmount();
+
+    // 3. ParentOcrContributionCard
+    const ocrRender = render(
+      <ParentOcrContributionCard
+        bookTitle="Sách Đồng Dao Cho Bé"
+        onUpdate={vi.fn()}
+        state={{
+          book_id: BOOK_ID,
+          enabled: false,
+          status: "OPTED_OUT",
+          purpose: "FLOW2_ADMIN_VERIFIED_OCR",
+          consent_version: 0,
+          consented_at: null,
+          revoked_at: null,
+          revoke_reason: null,
+          notice_version: "v1",
+          rights_confirmed: false,
+          rights_basis: "SELF_AUTHORED",
+          rights_eligible_for_training: true,
+          rights_ineligible_reason: null,
+          status_notice: "Đang tắt.",
+          pending_verification_count: 0,
+          sync_queued_count: 0,
+          synced_count: 0,
+          rejected_count: 0,
+          revoked_count: 0,
+        }}
+      />,
+    );
+    const enableBtn = screen.getByRole("button", {
+      name: /Bật đóng góp mẫu OCR/i,
+    });
+    expect(enableBtn.className).toContain("min-h-11!");
+    expect(ocrRender.container.innerHTML).not.toMatch(/\b(?:max-)?sm:/);
+    ocrRender.unmount();
+
+    // 4. BookCoverStudio (44px crop presets + AI input + range sliders)
+    const studioRender = render(
+      <BookCoverStudio
+        actorRole="parent"
+        autoLoad={false}
+        bookId={BOOK_ID}
+        bookTitle="Sách Đồng Dao Cho Bé"
+        maxGrade={2}
+        minGrade={1}
+        onCoverUpdated={vi.fn()}
+      />,
+    );
+    const galleryInput = screen.getByTestId("cover-gallery-input");
+    fireEvent.change(galleryInput, {
+      target: {
+        files: [new File(["img"], "cover.png", { type: "image/png" })],
+      },
+    });
+    const presetBtn = await screen.findByRole("button", {
+      name: "Toàn khung 3:4",
+    });
+    expect(presetBtn.className).toContain("min-h-11");
+    expect(screen.getByLabelText("Gợi ý cảnh cho bìa AI").className).toContain(
+      "min-h-11",
+    );
+    expect(studioRender.container.innerHTML).not.toMatch(/\b(?:max-)?sm:/);
   });
 });

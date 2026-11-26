@@ -116,10 +116,10 @@ export function ReadingReport({ result, sessionId }: Props) {
   const hesitationSeconds = result.summary.hesitation_seconds;
 
   return (
-    <div className="space-y-5 rounded-card border border-border bg-white p-4 sm:p-6">
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,1fr)]">
-        <div className="space-y-3">
-          <div className="rounded-card border border-border bg-cream p-3 sm:p-5">
+    <div className="space-y-5 rounded-card border border-border bg-white p-3.5 md:p-6">
+      <div className="grid grid-cols-1 items-start gap-4 md:gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,1fr)]">
+        <div className="min-w-0 space-y-3">
+          <div className="rounded-card border border-border bg-cream p-2.5 md:p-5">
             {pageError ? (
               <p className="rounded-control bg-white/80 p-4 text-sm text-danger">
                 {pageError}
@@ -135,11 +135,11 @@ export function ReadingReport({ result, sessionId }: Props) {
               </div>
             ) : (
               <article
-                className="relative flex min-h-[200px] w-full flex-col rounded-control bg-[#fffdfa] p-3.5 sm:min-h-[260px] sm:p-5"
+                className="relative flex min-h-[200px] w-full flex-col rounded-control bg-[#fffdfa] p-3 md:min-h-[260px] md:p-5"
                 data-page-id={page.page_id}
                 data-page-revision-id={page.page_revision_id}
               >
-                <header className="mb-2 flex items-center justify-between gap-2">
+                <header className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <span className="inline-flex items-center gap-1.5 rounded-control bg-success-surface px-2.5 py-1 text-xs font-bold text-success-ink">
                     <span className="size-1.5 rounded-full bg-success-ink" />
                     Nội dung trang đã xác minh
@@ -176,7 +176,7 @@ export function ReadingReport({ result, sessionId }: Props) {
           </ul>
         </div>
 
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           <dl className="grid grid-cols-2 gap-2.5">
             {metrics.map((metric) => (
               <div
@@ -198,7 +198,7 @@ export function ReadingReport({ result, sessionId }: Props) {
               <p className="text-xs font-bold text-muted">
                 Lời đọc đã ghi nhận
               </p>
-              <p className="mt-1 text-sm leading-relaxed text-ink">
+              <p className="mt-1 break-words text-sm leading-relaxed text-ink">
                 {result.transcript.trim() || "Chưa ghi nhận"}
               </p>
             </div>
@@ -207,8 +207,8 @@ export function ReadingReport({ result, sessionId }: Props) {
       </div>
 
       {repeatedWords.length > 0 || hesitations.length > 0 ? (
-        <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
-          <div className="space-y-1.5 text-sm">
+        <div className="grid grid-cols-1 gap-4 border-t border-border pt-4 min-[640px]:grid-cols-2">
+          <div className="min-w-0 space-y-1.5 break-words text-sm">
             <h3 className="font-extrabold text-ink">
               Tình trạng lặp từ ({repeatedCount})
             </h3>
@@ -226,7 +226,7 @@ export function ReadingReport({ result, sessionId }: Props) {
             )}
           </div>
 
-          <div className="space-y-1.5 text-sm">
+          <div className="min-w-0 space-y-1.5 break-words text-sm">
             <h3 className="font-extrabold text-ink">
               Tình trạng ngập ngừng ({hesitations.length})
             </h3>

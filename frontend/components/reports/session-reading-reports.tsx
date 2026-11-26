@@ -103,10 +103,10 @@ function ReportCard({
       data-active-report-id={activeReport.report_id}
       data-report-group={group.key}
     >
-      <div className="flex flex-col justify-between gap-3 border-b border-border pb-3.5 sm:flex-row sm:items-center">
-        <div>
+      <div className="flex flex-col justify-between gap-3 border-b border-border pb-3.5 min-[640px]:flex-row min-[640px]:items-center">
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-lg font-extrabold text-ink sm:text-xl">
+            <h3 className="text-lg font-extrabold text-ink md:text-xl">
               {resolvedPage
                 ? `Trang ${resolvedPage.page_number}`
                 : `Trang đã đọc ${pageNumber}`}
@@ -132,7 +132,7 @@ function ReportCard({
           >
             <button
               aria-label="Báo cáo trang trước"
-              className="inline-flex min-h-11 items-center justify-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40 sm:px-3 sm:text-sm"
+              className="inline-flex min-h-11 items-center justify-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40 min-[640px]:px-3 min-[640px]:text-sm"
               disabled={pageNumber <= 1}
               onClick={onPrevious}
               type="button"
@@ -168,7 +168,7 @@ function ReportCard({
             </div>
             <button
               aria-label="Báo cáo trang tiếp theo"
-              className="inline-flex min-h-11 items-center justify-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40 sm:px-3 sm:text-sm"
+              className="inline-flex min-h-11 items-center justify-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40 min-[640px]:px-3 min-[640px]:text-sm"
               disabled={pageNumber >= pageCount}
               onClick={onNext}
               type="button"
@@ -179,9 +179,9 @@ function ReportCard({
         ) : null}
       </div>
 
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(290px,1fr)]">
-        <div className="flex flex-col gap-3">
-          <div className="rounded-card border border-border bg-cream p-3 sm:p-5">
+      <div className="grid grid-cols-1 items-start gap-4 md:gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(290px,1fr)]">
+        <div className="flex min-w-0 flex-col gap-3">
+          <div className="rounded-card border border-border bg-cream p-2.5 md:p-5">
             {pageEntry.status === "loading" ? (
               <div
                 aria-busy="true"
@@ -193,11 +193,11 @@ function ReportCard({
               </div>
             ) : resolvedPage ? (
               <article
-                className="relative mx-auto flex min-h-[220px] w-full flex-col rounded-control bg-[#fffdfa] p-3.5 sm:min-h-[280px] sm:p-6"
+                className="relative mx-auto flex min-h-[220px] w-full flex-col rounded-control bg-[#fffdfa] p-3 md:min-h-[280px] md:p-6"
                 data-page-id={resolvedPage.page_id}
                 data-page-revision-id={resolvedPage.page_revision_id}
               >
-                <header className="mb-2 flex items-center justify-between gap-2">
+                <header className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <span className="inline-flex items-center gap-1.5 rounded-control bg-success-surface px-2.5 py-1 text-xs font-bold text-success-ink">
                     <span className="size-1.5 rounded-full bg-success-ink" />
                     Nội dung trang đã xác minh
@@ -245,7 +245,7 @@ function ReportCard({
           </ul>
         </div>
 
-        <div className="flex flex-col gap-4">
+        <div className="flex min-w-0 flex-col gap-4">
           <div className="space-y-2">
             <p className="text-xs font-bold text-muted">
               Phân loại từ trên trang (chạm vào mục để xem chi tiết)
@@ -294,7 +294,7 @@ function ReportCard({
                 <ul className="mt-2.5 flex flex-wrap gap-1.5">
                   {activeMetric.words.map((word, index) => (
                     <li
-                      className="rounded-control border border-border bg-white px-2.5 py-1 text-sm font-bold text-ink"
+                      className="max-w-full break-words rounded-control border border-border bg-white px-2.5 py-1 text-sm font-bold text-ink"
                       key={`${word}-${index}`}
                     >
                       {word}
@@ -311,7 +311,7 @@ function ReportCard({
 
           <div className="rounded-control border border-border bg-canvas/70 p-3.5">
             <p className="text-xs font-bold text-muted">Lời đọc đã ghi nhận</p>
-            <p className="mt-1 text-sm leading-relaxed text-ink">
+            <p className="mt-1 break-words text-sm leading-relaxed text-ink">
               {activeReport.transcript.trim() || "Chưa ghi nhận"}
             </p>
           </div>
@@ -341,7 +341,7 @@ function ReportCard({
               const entryImmutable = isImmutableFirstPassReport(entry);
               return (
                 <li
-                  className="flex flex-col justify-between gap-2.5 px-3.5 py-3 sm:flex-row sm:items-center"
+                  className="flex flex-col justify-between gap-2.5 px-3.5 py-3 min-[640px]:flex-row min-[640px]:items-center"
                   key={entry.report_id}
                 >
                   <div className="min-w-0">
@@ -589,7 +589,7 @@ export function SessionReadingReports({
   return (
     <section
       aria-labelledby="session-reading-reports-title"
-      className="flex flex-col gap-3.5 rounded-card border border-border bg-white p-3.5 sm:gap-5 sm:p-6"
+      className="flex flex-col gap-3.5 rounded-card border border-border bg-white p-3.5 md:gap-5 md:p-6"
       data-testid="session-primary-reading-report"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">

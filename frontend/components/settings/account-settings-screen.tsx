@@ -213,7 +213,7 @@ export function AccountSettingsScreen() {
       <section
         aria-busy="true"
         aria-label="Đang tải cài đặt tài khoản"
-        className="mx-auto flex w-full max-w-[960px] flex-col gap-6"
+        className="mx-auto flex w-full max-w-[960px] flex-col gap-3.5 md:gap-6"
       >
         <span className="sr-only" role="status">
           Đang tải…
@@ -237,7 +237,7 @@ export function AccountSettingsScreen() {
           trang hoặc đăng nhập lại.
         </StatusMessage>
         <Button
-          className="sm:w-auto sm:self-start"
+          className="w-full min-[640px]:w-auto min-[640px]:self-start"
           onClick={() => setRetryKey((key) => key + 1)}
           variant="secondary"
         >
@@ -305,7 +305,7 @@ export function AccountSettingsScreen() {
               Mật khẩu mới cần có ít nhất 8 ký tự.
             </p>
             <Button
-              className="sm:w-auto sm:self-start sm:px-8"
+              className="w-full min-[640px]:w-auto min-[640px]:self-start min-[640px]:px-8"
               disabled={isChangingPassword}
               isLoading={isChangingPassword}
               type="submit"
@@ -320,12 +320,12 @@ export function AccountSettingsScreen() {
               có thể yêu cầu liên kết đặt mật khẩu qua email.
             </p>
             <Button
-              className="sm:w-auto sm:self-start sm:px-8"
+              className="h-auto w-full py-3 text-left leading-snug min-[640px]:w-auto min-[640px]:self-start min-[640px]:px-8 min-[640px]:text-center"
               disabled={isRequestingRecovery || !email}
               isLoading={isRequestingRecovery}
               onClick={() => void handlePasswordRecovery()}
             >
-              <Mail aria-hidden="true" className="size-5" />
+              <Mail aria-hidden="true" className="size-5 shrink-0" />
               Chưa có mật khẩu? Gửi liên kết đặt mật khẩu qua email
             </Button>
           </div>
@@ -341,7 +341,7 @@ export function AccountSettingsScreen() {
         title="Cài đặt tài khoản"
       />
 
-      <Card className="p-4 sm:p-6">
+      <Card className="p-4 min-[640px]:p-6">
         <div className="flex items-center gap-3">
           <div>
             <h2 className="text-lg font-extrabold text-ink md:text-2xl">
@@ -350,8 +350,8 @@ export function AccountSettingsScreen() {
           </div>
         </div>
 
-        <dl className="grid gap-3 sm:grid-cols-2 sm:gap-4">
-          <div className="rounded-control border border-border bg-white px-4 py-3">
+        <dl className="grid gap-3 min-[640px]:grid-cols-2 min-[640px]:gap-4">
+          <div className="min-w-0 rounded-control border border-border bg-white px-4 py-3">
             <dt className="text-label font-semibold text-muted">
               Tên hiển thị
             </dt>
@@ -359,7 +359,7 @@ export function AccountSettingsScreen() {
               {displayName}
             </dd>
           </div>
-          <div className="rounded-control border border-border bg-white px-4 py-3">
+          <div className="min-w-0 rounded-control border border-border bg-white px-4 py-3">
             <dt className="text-label font-semibold text-muted">
               Email tài khoản
             </dt>
@@ -369,11 +369,11 @@ export function AccountSettingsScreen() {
             {profile.pending_email ? (
               <p className="mt-2 break-all text-sm text-warning">
                 Email mới đang chờ xác nhận:{" "}
-                <strong>{profile.pending_email}</strong>
+                <strong className="break-all">{profile.pending_email}</strong>
               </p>
             ) : null}
           </div>
-          <div className="rounded-control border border-border bg-white px-4 py-3">
+          <div className="min-w-0 rounded-control border border-border bg-white px-4 py-3">
             <dt className="text-label font-semibold text-muted">
               Vai trò tài khoản
             </dt>
@@ -381,7 +381,7 @@ export function AccountSettingsScreen() {
               {profile.role === "admin" ? "Quản trị viên" : "Phụ huynh"}
             </dd>
           </div>
-          <div className="rounded-control border border-border bg-white px-4 py-3">
+          <div className="min-w-0 rounded-control border border-border bg-white px-4 py-3">
             <dt className="text-label font-semibold text-muted">
               Trạng thái email
             </dt>
@@ -391,7 +391,7 @@ export function AccountSettingsScreen() {
           </div>
         </dl>
         <ButtonLink
-          className="sm:w-auto sm:self-start"
+          className="w-full min-[640px]:w-auto min-[640px]:self-start"
           href="/profile"
           variant="secondary"
         >
@@ -400,14 +400,14 @@ export function AccountSettingsScreen() {
       </Card>
 
       <Button
-        className="sm:max-w-72"
+        className="min-[640px]:max-w-72"
         variant="secondary"
         onClick={() => setShowPasswordEditor(true)}
       >
         Đổi mật khẩu
       </Button>
 
-      <Card className="p-4 sm:p-6">
+      <Card className="p-4 min-[640px]:p-6">
         <div className="flex items-center gap-3">
           <div>
             <h2 className="text-lg font-extrabold text-ink md:text-2xl">
@@ -428,7 +428,7 @@ export function AccountSettingsScreen() {
         </Link>
       </Card>
 
-      <Card className="p-4 sm:p-6">
+      <Card className="p-4 min-[640px]:p-6">
         <div className="flex items-center gap-3">
           <div>
             <h2 className="text-lg font-extrabold text-ink md:text-2xl">
@@ -440,7 +440,7 @@ export function AccountSettingsScreen() {
           </div>
         </div>
         <ButtonLink
-          className="sm:w-auto sm:self-start"
+          className="w-full min-[640px]:w-auto min-[640px]:self-start"
           href="/reading-management"
           variant="secondary"
         >

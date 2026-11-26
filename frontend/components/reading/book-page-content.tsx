@@ -95,7 +95,7 @@ const MemoWordToken = memo(function WordToken({
       <span
         ref={handleRef}
         className={cn(
-          "mr-0.5 inline-block scroll-mt-4 scroll-mb-6 rounded-control px-1 py-1 transition-[background-color,color,box-shadow] duration-200 ease-out motion-reduce:transition-none sm:mr-1.5 sm:px-2 sm:py-0.5",
+          "mr-0.5 inline-block scroll-mt-4 scroll-mb-6 rounded-control px-1 py-1 transition-[background-color,color,box-shadow] duration-200 ease-out motion-reduce:transition-none md:mr-1.5 md:px-2 md:py-0.5",
           !readOnly &&
             "min-h-11 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
           !readOnly && "cursor-pointer select-none",
@@ -227,7 +227,7 @@ export function BookPageContent(props: BookPageContentProps) {
       className="min-h-0 flex-1 py-2"
     >
       {hasWords ? (
-        <p className="w-full max-w-[58ch] text-[21px] font-semibold leading-[1.72] tracking-[0.005em] text-ink sm:text-[30px] sm:font-bold sm:leading-[1.9] sm:tracking-[0.01em]">
+        <p className="w-full max-w-[58ch] text-[21px] font-semibold leading-[1.72] tracking-[0.005em] text-ink md:text-[30px] md:leading-[1.9] md:tracking-[0.01em]">
           {layout.map((entry) => (
             <MemoWordToken
               key={entry.word.word_id}
@@ -246,7 +246,7 @@ export function BookPageContent(props: BookPageContentProps) {
           ))}
         </p>
       ) : page.text ? (
-        <p className="whitespace-pre-wrap text-[22px] font-semibold leading-[1.8] text-ink sm:text-[26px]">
+        <p className="whitespace-pre-wrap text-[22px] font-semibold leading-[1.8] text-ink md:text-[26px]">
           {page.text}
         </p>
       ) : (

@@ -48,20 +48,17 @@ interface BookPageViewerProps extends PageWordEvidence {
 
 const OVERLAY_COLORS: Record<WordPresentationState, string> = {
   unread: "",
-  current: "bg-yellow-300/25 ring-2 ring-amber-600 border-b-2 border-primary",
-  "preview-correct":
-    "bg-emerald-300/15 ring-1 ring-emerald-600/70 border-b-2 border-dashed border-emerald-600",
-  correct:
-    "bg-green-300/25 ring-1 ring-green-600 border-b-2 border-solid border-emerald-700",
-  incorrect: "bg-red-300/25 ring-1 ring-red-600",
-  repeated: "bg-purple-300/25 ring-1 ring-purple-600",
-  hesitation: "bg-purple-300/25 ring-1 ring-purple-600",
-  omission: "bg-red-300/25 ring-1 ring-red-600",
-  "self-corrected": "bg-green-300/25 ring-2 ring-green-700 ring-offset-1",
-  unresolved: "bg-red-300/25 ring-2 ring-red-700",
-  assisted:
-    "bg-sky-300/25 ring-2 ring-sky-600 border-b-2 border-dotted border-sky-700",
-  uncertain: "bg-slate-300/20 ring-1 ring-slate-500",
+  current: "bg-amber-100/60 shadow-[inset_0_-2px_0_0_#d97706]",
+  "preview-correct": "bg-emerald-100/45",
+  correct: "bg-green-100/45",
+  incorrect: "bg-red-100/45 shadow-[inset_0_-2px_0_0_#dc2626]",
+  repeated: "bg-purple-100/45",
+  hesitation: "bg-purple-100/45",
+  omission: "bg-red-100/45 shadow-[inset_0_-2px_0_0_#dc2626]",
+  "self-corrected": "bg-green-100/45",
+  unresolved: "bg-red-100/45 shadow-[inset_0_-2px_0_0_#dc2626]",
+  assisted: "bg-sky-100/50 shadow-[inset_0_-2px_0_0_#0284c7]",
+  uncertain: "bg-slate-100/40",
 };
 
 interface OverlayWordButtonProps {
@@ -120,32 +117,6 @@ const MemoOverlayWordButton = memo(function OverlayWordButton({
       <span hidden id={`image-word-state-${pageRevisionId}-${word.word_id}`}>
         {getWordPresentationLabel(state)}
       </span>
-      {[
-        "preview-correct",
-        "self-corrected",
-        "unresolved",
-        "uncertain",
-        "incorrect",
-        "omission",
-        "assisted",
-      ].includes(state) ? (
-        <span
-          aria-hidden="true"
-          className="absolute -right-1 -top-3 rounded-full bg-white px-1 text-xs font-semibold text-ink"
-        >
-          {state === "preview-correct"
-            ? "·"
-            : state === "self-corrected"
-              ? "↺"
-              : state === "uncertain"
-                ? "?"
-                : state === "unresolved"
-                  ? "◇"
-                  : state === "assisted"
-                    ? "♪"
-                    : "!"}
-        </span>
-      ) : null}
     </button>
   );
 });
@@ -532,12 +503,12 @@ function PageSurface(
       }
     >
       <header
-        className={cn("reader-bookplate", !isV2ModeEnabled && "hidden sm:flex")}
+        className="reader-bookplate hidden md:flex"
         data-v2-mode={isV2ModeEnabled ? "true" : undefined}
       >
         <div className="min-w-0">
           <p className="reader-folio">Trang {page.page_number}</p>
-          <h1 className="book-title line-clamp-1 break-words text-lg sm:line-clamp-none sm:text-3xl">
+          <h1 className="book-title line-clamp-1 break-words text-lg md:line-clamp-none md:text-3xl">
             {props.title ?? "Trang sách của bé"}
           </h1>
           {isV2ModeEnabled ? (
@@ -635,13 +606,13 @@ function PageSurface(
           <div className="flex flex-col gap-4" data-reading-panel="illustrated">
             {resolvedIllustrationSrc ? (
               <figure
-                className="overflow-hidden rounded-card border border-border/80 bg-cream/70 p-2 shadow-xs"
+                className="hidden overflow-hidden rounded-card border border-border/80 bg-cream/70 p-2 shadow-xs md:block"
                 data-testid="storybook-illustration-card"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   alt={`Tranh minh họa trang ${page.page_number}`}
-                  className="mx-auto h-auto max-h-[28dvh] w-auto max-w-full rounded-control object-contain sm:max-h-[38dvh]"
+                  className="mx-auto h-auto max-h-[28dvh] w-auto max-w-full rounded-control object-contain md:max-h-[38dvh]"
                   onError={() => {
                     if (illustrationNeedsAuth && safeIllustrationUrl) {
                       setIllustrationAuthState({
@@ -659,7 +630,7 @@ function PageSurface(
             ) : (
               <div
                 aria-busy="true"
-                className="h-44 w-full animate-pulse rounded-card bg-cream"
+                className="hidden h-44 w-full animate-pulse rounded-card bg-cream md:block"
                 data-testid="storybook-illustration-loading"
               />
             )}
@@ -720,7 +691,7 @@ function PageSurface(
             {source && image !== "failed" ? (
               isV2ModeEnabled && effectiveReadingMode === "ORIGINAL" ? (
                 <div
-                  className="mb-3 rounded-control border border-border bg-white/80 p-2"
+                  className="mb-3 hidden rounded-control border border-border bg-white/80 p-2 md:block"
                   data-testid="original-page-reference-panel"
                 >
                   <p className="mb-1.5 text-xs font-semibold text-muted">
@@ -742,7 +713,7 @@ function PageSurface(
                   onToggle={(event) =>
                     setReferenceOpen(event.currentTarget.open)
                   }
-                  className="mb-2 hidden rounded-control border border-border bg-white/70 p-1.5 sm:block"
+                  className="mb-2 hidden rounded-control border border-border bg-white/70 p-1.5 md:block"
                 >
                   <summary className="min-h-11 cursor-pointer px-2 py-2.5 text-sm font-semibold text-primary">
                     Xem ảnh trang sách
@@ -795,23 +766,45 @@ function PageSurface(
           title={`Ảnh trang ${page.page_number}`}
           tone="paper"
         >
-          {source && image !== "failed" ? (
-            <Image
-              src={source}
-              alt={`Ảnh trang sách ${page.page_number}`}
-              width={Math.max(1, page.width)}
-              height={Math.max(1, page.height)}
-              unoptimized
-              className="mx-auto h-auto max-h-[68dvh] w-auto max-w-full rounded-control object-contain"
-              onError={handleImageLoadError}
-            />
-          ) : (
-            <p className="py-6 text-center text-sm text-muted">
-              {image === "failed"
-                ? "Không thể tải ảnh trang sách lúc này."
-                : "Đang tải ảnh trang sách…"}
-            </p>
-          )}
+          <div className="space-y-4">
+            {canShowIllustratedMode && resolvedIllustrationSrc ? (
+              <figure className="space-y-1.5">
+                <figcaption className="text-xs font-semibold text-muted">
+                  Tranh minh họa
+                </figcaption>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  alt={`Tranh minh họa trang ${page.page_number}`}
+                  className="mx-auto h-auto max-h-[55dvh] w-auto max-w-full rounded-control object-contain"
+                  src={resolvedIllustrationSrc}
+                />
+              </figure>
+            ) : null}
+            {source && image !== "failed" ? (
+              <figure className="space-y-1.5">
+                {canShowIllustratedMode && resolvedIllustrationSrc ? (
+                  <figcaption className="text-xs font-semibold text-muted">
+                    Ảnh trang sách gốc
+                  </figcaption>
+                ) : null}
+                <Image
+                  src={source}
+                  alt={`Ảnh trang sách ${page.page_number}`}
+                  width={Math.max(1, page.width)}
+                  height={Math.max(1, page.height)}
+                  unoptimized
+                  className="mx-auto h-auto max-h-[68dvh] w-auto max-w-full rounded-control object-contain"
+                  onError={handleImageLoadError}
+                />
+              </figure>
+            ) : !(canShowIllustratedMode && resolvedIllustrationSrc) ? (
+              <p className="py-6 text-center text-sm text-muted">
+                {image === "failed"
+                  ? "Không thể tải ảnh trang sách lúc này."
+                  : "Đang tải ảnh trang sách…"}
+              </p>
+            ) : null}
+          </div>
         </Modal>
       ) : null}
     </article>

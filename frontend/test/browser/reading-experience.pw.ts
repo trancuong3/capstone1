@@ -53,8 +53,24 @@ test("Image overlay fits the source and large controls at every required viewpor
     path: testInfo.outputPath("reading-image.png"),
     fullPage: true,
   });
-  await page.getByRole("button", { name: "Giọng đọc", exact: true }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
+  const inlineVoiceButton = page.getByRole("button", {
+    name: "Giọng đọc",
+    exact: true,
+  });
+  if (viewport.width >= 768) {
+    await inlineVoiceButton.click();
+  } else {
+    await expect(inlineVoiceButton).toBeHidden();
+    await page.getByTestId("mobile-reading-menu-btn").click();
+    const menuDialog = page.getByRole("dialog", {
+      name: "Tùy chọn buổi đọc",
+    });
+    await expect(menuDialog).toBeVisible();
+    await menuDialog.getByRole("button", { name: "Cài đặt giọng đọc" }).click();
+  }
+  await expect(
+    page.getByRole("dialog", { name: "Giọng đọc mẫu" }),
+  ).toBeVisible();
   await page.screenshot({
     path: testInfo.outputPath("voice-and-speed.png"),
     fullPage: true,

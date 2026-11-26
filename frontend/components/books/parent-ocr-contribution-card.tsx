@@ -87,7 +87,7 @@ export function ParentOcrContributionCard({
   return (
     <section
       aria-label={`Đóng góp mẫu để cải thiện OCR ViRead cho ${bookTitle}`}
-      className="flex flex-col gap-3 rounded-card border border-border bg-white p-5 shadow-sm"
+      className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 shadow-sm min-[640px]:p-5"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-2.5">
@@ -145,7 +145,7 @@ export function ParentOcrContributionCard({
       ) : null}
 
       {state.enabled ? (
-        <div className="flex flex-col gap-3 rounded-control border border-emerald-200 bg-emerald-50/60 p-4 text-xs text-emerald-950">
+        <div className="flex flex-col gap-3 rounded-control border border-emerald-200 bg-emerald-50/60 p-3 text-xs text-emerald-950 min-[640px]:p-4">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <span>
               <strong>Phiên bản thông báo:</strong> {state.notice_version}
@@ -163,15 +163,15 @@ export function ParentOcrContributionCard({
               </span>
             ) : null}
           </div>
-          <div className="flex flex-wrap gap-3 font-semibold">
+          <div className="grid grid-cols-2 gap-1.5 font-semibold min-[640px]:flex min-[640px]:flex-wrap min-[640px]:gap-3">
             <span>Chờ Admin xác minh: {state.pending_verification_count}</span>
-            <span>·</span>
+            <span className="max-[640px]:hidden">·</span>
             <span>Chờ đồng bộ Drive: {state.sync_queued_count}</span>
-            <span>·</span>
+            <span className="max-[640px]:hidden">·</span>
             <span>Đã đồng bộ Flow 2: {state.synced_count}</span>
             {state.rejected_count > 0 ? (
               <>
-                <span>·</span>
+                <span className="max-[640px]:hidden">·</span>
                 <span>Đã loại: {state.rejected_count}</span>
               </>
             ) : null}
@@ -185,8 +185,9 @@ export function ParentOcrContributionCard({
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button
-              className="min-h-10 w-auto px-4 text-xs"
+              className="min-h-11! w-auto px-4! text-xs"
               disabled={disabled || busy}
+              fullWidth={false}
               onClick={() => void handleDisable()}
               type="button"
               variant="secondary"
@@ -196,7 +197,7 @@ export function ParentOcrContributionCard({
           </div>
         </div>
       ) : (
-        <div className="flex flex-col gap-3 rounded-control border border-border bg-surface-subtle p-4 text-xs text-ink">
+        <div className="flex flex-col gap-3 rounded-control border border-border bg-surface-subtle p-3 text-xs text-ink min-[640px]:p-4">
           <p>
             Khi bạn bật tùy chọn này, ViRead có thể sử dụng{" "}
             <strong>ảnh cắt từng dòng chữ và nhãn tương ứng</strong> từ các
@@ -205,10 +206,10 @@ export function ParentOcrContributionCard({
             chép toàn bộ PDF/cuốn sách sang kho huấn luyện và không chia sẻ sách
             của bạn cho gia đình khác.
           </p>
-          <label className="flex cursor-pointer items-start gap-2.5 font-semibold text-ink">
+          <label className="flex min-h-11 cursor-pointer items-start gap-2.5 py-1 font-semibold text-ink">
             <input
               checked={rightsChecked}
-              className="mt-0.5 size-4 rounded border-border accent-primary"
+              className="mt-0.5 size-5 shrink-0 rounded border-border accent-primary"
               disabled={disabled || busy}
               onChange={(event) => setRightsChecked(event.target.checked)}
               type="checkbox"
@@ -221,8 +222,9 @@ export function ParentOcrContributionCard({
           </label>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Button
-              className="min-h-10 w-auto px-4 text-xs"
+              className="min-h-11! w-auto px-4! text-xs"
               disabled={disabled || busy || !rightsChecked}
+              fullWidth={false}
               onClick={() => void handleEnable()}
               type="button"
             >

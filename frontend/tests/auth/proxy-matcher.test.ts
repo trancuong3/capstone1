@@ -13,10 +13,15 @@ describe("auth proxy matcher", () => {
     },
   );
 
-  it.each(["/_next/static/app.js", "/_next/image", "/cover.png"])(
-    "skips static asset %s",
-    (url) => {
-      expect(unstable_doesMiddlewareMatch({ config, url })).toBe(false);
-    },
-  );
+  it.each([
+    "/_next/static/app.js",
+    "/_next/image",
+    "/cover.png",
+    "/workers/sherpa-stt-worker.js",
+    "/wasm/sherpa/sherpa-onnx-asr.js",
+    "/wasm/sherpa/sherpa-onnx-wasm-main-vad-asr-clean.js",
+    "/wasm/sherpa/sherpa-onnx-wasm-main-vad-asr.wasm",
+  ])("skips static asset %s", (url) => {
+    expect(unstable_doesMiddlewareMatch({ config, url })).toBe(false);
+  });
 });

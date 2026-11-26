@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BookDetailScreen } from "@/components/books/book-detail-screen";
@@ -185,5 +185,56 @@ describe("BookDetailScreen with real API adapters", () => {
     );
     expect(alert).not.toHaveTextContent("Private database details");
     expect(screen.getByRole("button", { name: "Thử lại" })).toBeInTheDocument();
+  });
+
+  it("renders w-full min-w-0 end-page select, compact mobile thumbnails, PaginationBar (>24 pages), and zero sm: classes", async () => {
+    const manyPages = Array.from({ length: 26 }, (_, index) => ({
+      ...pagePreviewFixture,
+      page_id: `15000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      page_number: index + 1,
+    }));
+    apiFetchFixture.mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === `/profiles/children/${TEST_CHILD_ID}`)
+        return Response.json(childFixture);
+      if (path === `/books/catalog/${TEST_BOOK_ID}`)
+        return Response.json(bookFixture);
+      if (path === `/books/catalog/${TEST_BOOK_ID}/preview`)
+        return Response.json(manyPages);
+      throw new Error("Unexpected isolated book detail route");
+    });
+
+    const user = userEvent.setup();
+    const { container } = renderDetail();
+
+    expect(
+      await screen.findByRole("heading", { name: bookFixture.title }),
+    ).toBeInTheDocument();
+
+    const endPageSelect = screen.getByLabelText("Trang kết thúc");
+    expect(endPageSelect.className).toContain("w-full");
+    expect(endPageSelect.className).toContain("min-w-0");
+
+    const firstThumb = screen.getByRole("button", { name: "Chọn trang 1" });
+    expect(firstThumb.className).toContain("h-[156px]");
+    expect(firstThumb.className).toContain("w-36");
+    expect(firstThumb.className).toContain("md:h-[200px]");
+
+    const reportBtn = screen.getByRole("button", { name: "Báo lỗi sách" });
+    expect(reportBtn.className).toContain("min-h-11!");
+    expect(reportBtn.className).toContain("w-auto");
+
+    const thumbPagination = screen.getByRole("navigation", {
+      name: "Phân trang danh sách trang xem trước",
+    });
+    expect(thumbPagination).toHaveTextContent("Trang 1 / 2");
+    await user.click(
+      within(thumbPagination).getByRole("button", { name: "Tiếp" }),
+    );
+    expect(
+      await screen.findByRole("button", { name: "Chọn trang 25" }),
+    ).toBeInTheDocument();
+
+    expect(container.innerHTML).not.toMatch(/\b(?:max-)?sm:/);
   });
 });

@@ -418,4 +418,37 @@ describe("Deterministic 0-VND TTS & STT Routing", () => {
 
     rec.abort();
   });
+
+  it("preserves voice_not_installed error code and syncs missing Vietnamese TTS status on capabilities", async () => {
+    const port = new FakeAndroidSpeechPort();
+    installAndroidPort(port);
+
+    const capPromise = getAndroidSpeechCapabilities({ forceRefresh: true });
+    const capReqId = String(port.sent[0].requestId);
+    port.emit({
+      type: "capabilities",
+      requestId: capReqId,
+      ttsAvailable: false,
+      viVoicesCount: 0,
+      sttAvailable: true,
+      onDeviceSttAvailable: true,
+    });
+    await capPromise;
+
+    const status = getVoiceEngineStatus();
+    expect(status.ttsUnavailableReason).toBe("android_vi_voice_missing");
+    expect(status.canInstallVietnameseTtsVoice).toBe(true);
+
+    const speakPromise = speakWithAndroidNativeTts("Xin chào");
+    const speakReqId = String(port.sent[1].requestId);
+    port.emit({
+      type: "tts_error",
+      requestId: speakReqId,
+      code: "voice_not_installed",
+      message: "Vietnamese TTS voice is missing",
+    });
+    await expect(speakPromise).rejects.toMatchObject({
+      code: "voice_not_installed",
+    });
+  });
 });

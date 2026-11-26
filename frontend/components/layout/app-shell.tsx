@@ -448,7 +448,7 @@ export function AppShell({ children }: AppShellProps) {
         </a>
         <header
           className={cn(
-            "parent-topbar sticky top-0 z-30 shrink-0 border-b border-border bg-white/95 px-3 backdrop-blur-sm max-xl:py-1! sm:px-6 xl:static xl:bg-white xl:px-8",
+            "parent-topbar sticky top-0 max-xl:z-[45] xl:z-30 shrink-0 border-b border-border bg-white/95 px-3 backdrop-blur-sm max-xl:py-1! sm:px-6 xl:static xl:bg-white xl:px-8",
             isBookRoute && "xl:hidden",
             isMobileImmersive && "hidden xl:block",
           )}
@@ -484,7 +484,7 @@ export function AppShell({ children }: AppShellProps) {
                               ? `Bé đang chọn: ${selectedChild.alias}, bấm để đổi`
                               : "Đổi nhanh bé"
                           }
-                          className="inline-flex min-h-12 max-w-[164px] items-center gap-1.5 rounded-full border border-border bg-sky/70 px-3 text-xs font-bold text-primary-hover transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                          className="inline-flex min-h-12 min-w-0 max-w-[min(100%,164px)] items-center gap-1.5 rounded-full border border-border bg-sky/70 px-3 text-xs font-bold text-primary-hover transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
                           onClick={() =>
                             setChildSwitcherOpenForPath((current) =>
                               current === pathname ? null : pathname,
@@ -506,7 +506,7 @@ export function AppShell({ children }: AppShellProps) {
                         {isChildSwitcherVisible ? (
                           <div
                             aria-label="Chuyển nhanh hồ sơ bé"
-                            className="absolute right-0 top-full z-50 mt-2 w-60 rounded-card border border-border bg-white p-2 shadow-lg"
+                            className="z-50 max-h-[min(70dvh,22rem)] max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain rounded-card border border-border bg-white p-2 shadow-lg max-[640px]:fixed max-[640px]:inset-x-4 max-[640px]:top-16 max-[640px]:w-auto min-[640px]:absolute min-[640px]:right-0 min-[640px]:top-full min-[640px]:mt-2 min-[640px]:w-60"
                             role="listbox"
                           >
                             {availableChildren.map((child) => {
@@ -571,7 +571,7 @@ export function AppShell({ children }: AppShellProps) {
                       </>
                     ) : (
                       <Link
-                        className="inline-flex min-h-12 max-w-[164px] items-center gap-1.5 rounded-full border border-border bg-sky/70 px-3 text-xs font-bold text-primary-hover transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                        className="inline-flex min-h-12 min-w-0 max-w-[min(100%,164px)] items-center gap-1.5 rounded-full border border-border bg-sky/70 px-3 text-xs font-bold text-primary-hover transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
                         href="/dashboard?focus=child-selection"
                       >
                         <span className="truncate">
@@ -679,7 +679,7 @@ export function AppShell({ children }: AppShellProps) {
 
                 <div
                   aria-label="Menu tài khoản"
-                  className="absolute right-0 top-full z-50 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-card border border-border bg-white p-3 shadow-lg"
+                  className="absolute right-0 top-full z-50 mt-2 max-h-[min(75dvh,32rem)] w-[min(20rem,calc(100vw-2rem))] overflow-x-hidden overflow-y-auto overscroll-contain rounded-card border border-border bg-white p-3 shadow-lg"
                   hidden={!isAccountMenuVisible}
                   id="parent-account-menu"
                   onKeyDown={handleMenuKeyDown}
@@ -836,14 +836,14 @@ export function AppShell({ children }: AppShellProps) {
           tabIndex={-1}
           className={cn(
             isBookRoute
-              ? "w-full min-w-0 flex-1 pb-24 xl:pb-0"
-              : "mx-auto w-full min-w-0 max-w-[1184px] flex-1 px-4 sm:px-8",
+              ? "w-full min-w-0 flex-1 pb-[calc(6rem+env(safe-area-inset-bottom))] xl:pb-0"
+              : "mx-auto w-full min-w-0 max-w-[1184px] flex-1 px-4 min-[640px]:px-6 md:px-8",
             !isBookRoute &&
               (isChildOnboarding
                 ? "pb-8 pt-4 sm:pb-10"
                 : isMobileImmersive
                   ? "py-4 sm:py-6 xl:py-10"
-                  : "pb-24 pt-3 sm:pt-5 xl:py-10"),
+                  : "pb-[calc(6rem+env(safe-area-inset-bottom))] pt-3 min-[640px]:pt-4 md:pt-5 xl:py-10"),
           )}
         >
           {isBookRoute ? (
@@ -856,7 +856,10 @@ export function AppShell({ children }: AppShellProps) {
         </main>
 
         {!isBookRoute ? (
-          <SiteFooter className="hidden lg:block" variant="parent" />
+          <SiteFooter
+            className="hidden pb-[calc(6rem+env(safe-area-inset-bottom))] lg:block xl:pb-0"
+            variant="parent"
+          />
         ) : null}
 
         {!isChildOnboarding && !isMobileImmersive ? (

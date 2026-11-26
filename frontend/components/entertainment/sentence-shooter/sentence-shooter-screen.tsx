@@ -27,6 +27,7 @@ import { BookCover } from "@/components/books/book-cover";
 import { Button } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Modal } from "@/components/common/modal";
+import { PageHeader } from "@/components/common/page-header";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
@@ -166,13 +167,13 @@ function SentenceShooterResultView({
   }
 
   return (
-    <section className="mx-auto flex w-full max-w-[900px] flex-col gap-6 px-4 py-6 sm:px-8 sm:py-10">
+    <section className="mx-auto flex w-full max-w-[900px] flex-col gap-4 py-2 min-[640px]:gap-5 md:gap-6 md:py-6">
       <BookChildHeader
         backHref={backHref}
         child={child}
         mobileLabel={readingSessionId ? "Kết quả đọc" : "Khu vui học"}
       />
-      <div className="relative overflow-hidden rounded-card border border-border bg-cream p-6 text-center shadow-sm sm:p-10">
+      <div className="relative overflow-hidden rounded-card border border-border bg-cream p-4 text-center shadow-sm min-[640px]:p-6 md:p-10">
         <div
           aria-hidden="true"
           className="mb-3 flex justify-center gap-3 text-warning"
@@ -182,13 +183,13 @@ function SentenceShooterResultView({
           <span className="text-3xl">✦</span>
         </div>
         <p className="font-extrabold text-primary">Lượt chơi đã lưu</p>
-        <h1 className="mt-2 text-heading font-extrabold text-ink">
+        <h1 className="mt-2 text-2xl font-extrabold text-ink md:text-heading">
           {result && result.status !== "COMPLETED"
             ? "Kết quả lượt chơi"
             : "Giỏi quá, bé đã hoàn thành!"}
         </h1>
         <p className="mt-2 text-body text-muted">{summaryBookTitle}</p>
-        <div className="mx-auto mt-7 grid max-w-2xl grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="mx-auto mt-6 grid max-w-2xl grid-cols-2 gap-2.5 min-[640px]:mt-7 min-[640px]:grid-cols-4 min-[640px]:gap-3">
           {[
             [
               "Câu hoàn thành",
@@ -198,7 +199,10 @@ function SentenceShooterResultView({
             ["Lần thử lại", result ? String(result.mistakes_total) : "—"],
             ["Gợi ý", result ? String(result.hint_count) : "—"],
           ].map(([label, value]) => (
-            <div className="rounded-control bg-white/90 p-4" key={label}>
+            <div
+              className="rounded-control bg-white/90 p-3 min-[640px]:p-4"
+              key={label}
+            >
               <p className="text-sm font-bold text-muted">{label}</p>
               <p className="mt-1 text-2xl font-extrabold text-ink">{value}</p>
             </div>
@@ -221,31 +225,40 @@ function SentenceShooterResultView({
             <p className="text-sm font-semibold text-danger">
               Chưa tải được chi tiết bảng tổng kết.
             </p>
-            <Button onClick={onReloadResult} size="compact" variant="secondary">
+            <Button
+              fullWidth={false}
+              onClick={onReloadResult}
+              size="compact"
+              variant="secondary"
+            >
               <RefreshCw aria-hidden="true" className="size-4" /> Tải lại bảng
               tổng kết
             </Button>
           </div>
         ) : null}
-        <div className="mx-auto mt-7 flex max-w-md flex-col gap-3 sm:flex-row">
+        <div className="mx-auto mt-6 flex max-w-md flex-col gap-3 min-[640px]:mt-7 min-[640px]:flex-row">
           <Button
-            className="sm:flex-1"
+            className="w-full min-[640px]:w-auto min-[640px]:flex-1"
             onClick={onRestartLobby}
             variant="secondary"
           >
             <RotateCcw aria-hidden="true" className="size-5" /> Chơi lượt mới
           </Button>
-          <Button className="sm:flex-1" onClick={readSentence} variant="quiet">
+          <Button
+            className="w-full min-[640px]:w-auto min-[640px]:flex-1"
+            onClick={readSentence}
+            variant="quiet"
+          >
             Đọc câu mẫu
           </Button>
         </div>
-        <p className="mt-4 text-sm text-muted">
+        <p className="mt-4 break-words text-sm text-muted">
           Câu cuối:{" "}
           {finalSentence || "Bé đã cùng khám phá những câu trong cuốn sách!"}
         </p>
       </div>
       <Link
-        className="self-center rounded-control px-4 py-3 font-bold text-primary hover:bg-sky"
+        className="inline-flex min-h-11 items-center self-center rounded-control px-4 py-2.5 font-bold text-primary hover:bg-sky"
         href={backHref}
       >
         <ArrowLeft aria-hidden="true" className="mr-2 inline size-4" />
@@ -769,7 +782,7 @@ export function SentenceShooterScreen({
     return (
       <section
         aria-busy="true"
-        className="mx-auto w-full max-w-[1130px] px-4 py-8"
+        className="mx-auto w-full max-w-[1130px] py-4 md:py-8"
       >
         <span className="sr-only" role="status">
           Đang xác minh hồ sơ của bé…
@@ -781,11 +794,15 @@ export function SentenceShooterScreen({
 
   if (childState.status === "error") {
     return (
-      <section className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-4 py-8">
+      <section className="mx-auto flex w-full max-w-[720px] flex-col gap-4 py-4 md:py-8">
         <StatusMessage title="Chưa xác minh được hồ sơ của bé" tone="error">
           Ba mẹ vui lòng thử lại trước khi bắt đầu trò chơi.
         </StatusMessage>
-        <Button className="sm:w-auto" onClick={retryChild} variant="secondary">
+        <Button
+          className="w-full min-[640px]:w-auto min-[640px]:self-start"
+          onClick={retryChild}
+          variant="secondary"
+        >
           <RefreshCw aria-hidden="true" className="size-5" /> Thử lại
         </Button>
       </section>
@@ -821,15 +838,15 @@ export function SentenceShooterScreen({
       : undefined;
 
     return (
-      <section className="mx-auto flex w-full max-w-[1130px] flex-col gap-3 px-4 py-4 sm:px-6 sm:py-5">
+      <section className="mx-auto flex w-full max-w-[1130px] flex-col gap-3 py-1 min-[640px]:py-2 md:py-4">
         <BookChildHeader
           backHref="/entertainment"
           child={child}
           mobileLabel="Khu vui học"
         />
-        <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-card border border-border bg-white px-4 py-2">
+        <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-card border border-border bg-white px-3 py-2 min-[640px]:px-4">
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-lg font-extrabold text-ink">
+            <h1 className="truncate text-base font-extrabold text-ink min-[640px]:text-lg">
               {session.book.title}
             </h1>
             <p className="mt-1 text-sm font-bold text-muted">
@@ -841,7 +858,7 @@ export function SentenceShooterScreen({
             role="group"
             aria-label={`Đã ghép ${placedTokens.length} trên ${round.token_count} từ`}
           >
-            <div className="h-3 w-24 overflow-hidden rounded-full bg-sky sm:w-36">
+            <div className="h-3 w-20 overflow-hidden rounded-full bg-sky min-[640px]:w-28 md:w-36">
               <div
                 className="h-full rounded-full bg-primary transition-[width]"
                 style={{
@@ -878,7 +895,7 @@ export function SentenceShooterScreen({
               type="button"
             >
               <Pause aria-hidden="true" className="size-5" />
-              <span className="hidden sm:inline">Tạm dừng</span>
+              <span className="hidden min-[640px]:inline">Tạm dừng</span>
             </button>
             <button
               className="flex min-h-11 items-center justify-center rounded-control px-3 font-bold text-danger hover:bg-danger-surface disabled:opacity-55"
@@ -893,10 +910,10 @@ export function SentenceShooterScreen({
         {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}
         <div
           ref={arenaRef}
-          className="relative isolate rounded-card border border-border bg-white p-4 sm:p-5"
+          className="relative isolate rounded-card border border-border bg-white p-3 min-[640px]:p-4 md:p-5"
         >
           <div className="flex flex-col gap-3">
-            <div className="space-y-2 rounded-control bg-cream px-3 py-3 sm:px-4">
+            <div className="space-y-2 rounded-control bg-cream px-2.5 py-2.5 min-[640px]:px-4 min-[640px]:py-3">
               <p className="font-bold text-ink">Câu của bé</p>
               <div
                 role="list"
@@ -911,7 +928,7 @@ export function SentenceShooterScreen({
                         : `Ô ${index + 1} còn trống`
                     }
                     className={[
-                      "flex min-h-12 min-w-[54px] max-w-full items-center justify-center rounded-control border-2 px-3 py-2 text-center text-base font-extrabold sm:min-h-14 sm:min-w-[70px] sm:px-4 sm:text-lg",
+                      "flex min-h-11 min-w-[46px] max-w-full items-center justify-center rounded-control border-2 px-2.5 py-1.5 text-center text-base font-extrabold min-[640px]:min-h-12 min-[640px]:min-w-[54px] md:min-h-14 md:min-w-[70px] md:px-4 md:text-lg",
                       placedTokens[index]
                         ? "sentence-success-pulse border-[#98D4A2] bg-success-surface text-success-ink"
                         : "border-dashed border-[#B8CECA] bg-white/80 text-muted/60",
@@ -935,7 +952,7 @@ export function SentenceShooterScreen({
                 ))}
               </div>
             </div>
-            <div className="space-y-2 rounded-control bg-sky/45 px-3 py-3 sm:px-4">
+            <div className="space-y-2 rounded-control bg-sky/45 px-2.5 py-2.5 min-[640px]:px-4 min-[640px]:py-3">
               <p className="font-bold text-ink">Chọn từ tiếp theo</p>
               <div
                 role="group"
@@ -954,7 +971,7 @@ export function SentenceShooterScreen({
                       }
                       aria-busy={firingTokenId === token.id || undefined}
                       className={[
-                        "min-h-12 rounded-control border px-4 py-2 text-lg font-extrabold text-ink transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-14 sm:px-5",
+                        "min-h-12 max-w-full break-words rounded-control border px-3.5 py-2 text-base font-extrabold text-ink transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary min-[640px]:text-lg md:min-h-14 md:px-5",
                         placed
                           ? "invisible pointer-events-none"
                           : "border-border bg-white",
@@ -987,16 +1004,19 @@ export function SentenceShooterScreen({
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
+            <div className="flex flex-wrap items-center gap-2.5 border-t border-border pt-3 min-[640px]:gap-3">
               <div
                 ref={cannonRef}
                 aria-hidden="true"
                 className="shrink-0 motion-safe:transition-transform"
               >
-                <ToyCannon angle={cannonAngle} className="size-14" />
+                <ToyCannon
+                  angle={cannonAngle}
+                  className="size-12 min-[640px]:size-14"
+                />
               </div>
               <p
-                className="min-h-10 min-w-40 flex-1 content-center break-words text-sm font-bold text-primary"
+                className="min-h-10 min-w-[min(100%,9rem)] flex-1 content-center break-words text-sm font-bold text-primary"
                 role="status"
                 aria-live="polite"
               >
@@ -1005,7 +1025,7 @@ export function SentenceShooterScreen({
                   : feedback || "Bấm vào một từ để ghép câu."}
               </p>
               <button
-                className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-control bg-warning-surface px-3 font-bold text-warning hover:bg-book-orange disabled:opacity-55"
+                className="inline-flex min-h-11 max-[640px]:w-full shrink-0 items-center justify-center gap-2 rounded-control bg-warning-surface px-3 font-bold text-warning hover:bg-book-orange disabled:opacity-55"
                 disabled={isBusy || isPaused || roundComplete}
                 onClick={() => void requestHint()}
                 type="button"
@@ -1014,7 +1034,7 @@ export function SentenceShooterScreen({
               </button>
             </div>
             {roundComplete ? (
-              <div className="w-full rounded-card border border-[#B6DDBB] bg-success-surface p-5 text-center">
+              <div className="w-full rounded-card border border-[#B6DDBB] bg-success-surface p-4 text-center min-[640px]:p-5">
                 <p className="text-xl font-extrabold text-success-ink">
                   {placedTokens.map((token) => token.text).join(" ")}
                 </p>
@@ -1060,16 +1080,16 @@ export function SentenceShooterScreen({
         <Modal
           closeOnBackdropClick
           footer={
-            <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="flex flex-col gap-3 min-[640px]:flex-row">
               <Button
-                className="sm:flex-1"
+                className="w-full min-[640px]:w-auto min-[640px]:flex-1"
                 onClick={() => setIsPaused(false)}
                 variant="secondary"
               >
                 <Play aria-hidden="true" className="size-5" /> Chơi tiếp
               </Button>
               <Button
-                className="sm:flex-1"
+                className="w-full min-[640px]:w-auto min-[640px]:flex-1"
                 onClick={() => void exitGame()}
                 variant="quiet"
               >
@@ -1095,21 +1115,17 @@ export function SentenceShooterScreen({
   }
 
   return (
-    <section className="mx-auto flex w-full max-w-[1130px] flex-col gap-6 px-4 py-4 sm:px-8 sm:py-7">
+    <section className="mx-auto flex w-full max-w-[1130px] flex-col gap-4 py-1 min-[640px]:gap-5 min-[640px]:py-2 md:gap-6 md:py-4">
       <BookChildHeader
         backHref={readingCompletionHref}
         child={child}
         mobileLabel={readingSessionId ? "Kết quả đọc" : "Khu vui học"}
       />
-      <header className="flex flex-col gap-2 border-b border-border pb-5">
-        <p className="font-extrabold text-primary">Xạ thủ ghép câu</p>
-        <h1 className="text-heading font-extrabold text-ink">
-          Chọn sách và bắt đầu chơi
-        </h1>
-        <p className="text-body text-muted">
-          Chọn một cuốn sách rồi ghép các từ thành câu trong sách.
-        </p>
-      </header>
+      <PageHeader
+        description="Chọn một cuốn sách rồi ghép các từ thành câu trong sách."
+        eyebrow="Xạ thủ ghép câu"
+        title="Chọn sách và bắt đầu chơi"
+      />
 
       {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}
 
@@ -1124,15 +1140,15 @@ export function SentenceShooterScreen({
       ) : null}
 
       <fieldset>
-        <legend className="mb-3 text-lg font-extrabold text-ink">
+        <legend className="mb-2.5 text-base font-extrabold text-ink min-[640px]:mb-3 min-[640px]:text-lg">
           Chọn độ khó
         </legend>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-2.5 min-[640px]:grid-cols-3 min-[640px]:gap-3">
           {difficulties.map((option) => (
             <button
               aria-pressed={difficulty === option.value}
               className={[
-                "min-h-24 rounded-card border-2 p-4 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                "min-h-14 rounded-card border-2 p-3 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary min-[640px]:min-h-24 min-[640px]:p-4",
                 difficulty === option.value
                   ? "border-primary bg-sky"
                   : "border-border bg-white hover:bg-sky/50",
@@ -1156,7 +1172,7 @@ export function SentenceShooterScreen({
       </fieldset>
 
       <fieldset>
-        <legend className="mb-3 text-lg font-extrabold text-ink">
+        <legend className="mb-2.5 text-base font-extrabold text-ink min-[640px]:mb-3 min-[640px]:text-lg">
           Số câu trong lượt chơi
         </legend>
         <div className="flex gap-3">
@@ -1197,7 +1213,7 @@ export function SentenceShooterScreen({
         {bookState.status === "loading" ? (
           <div
             aria-busy="true"
-            className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+            className="grid gap-3 min-[640px]:grid-cols-2 min-[640px]:gap-4 lg:grid-cols-3"
           >
             <span className="sr-only" role="status">
               Đang tìm sách có câu phù hợp…
@@ -1213,7 +1229,7 @@ export function SentenceShooterScreen({
               {gameError}
             </StatusMessage>
             <Button
-              className="sm:w-auto"
+              className="w-full min-[640px]:w-auto min-[640px]:self-start"
               onClick={() => setReloadKey((key) => key + 1)}
               variant="secondary"
             >
@@ -1234,7 +1250,7 @@ export function SentenceShooterScreen({
         ) : null}
         {bookState.status === "ready" && bookState.books.length > 0 ? (
           <>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-3 min-[640px]:grid-cols-2 min-[640px]:gap-4 lg:grid-cols-3">
               {bookState.books
                 .slice(
                   (booksPage - 1) * SHOOTER_BOOKS_PAGE_SIZE,
@@ -1246,7 +1262,7 @@ export function SentenceShooterScreen({
                     <button
                       aria-pressed={selected}
                       className={[
-                        "flex min-h-28 items-center gap-4 rounded-control border bg-white p-4 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                        "flex min-h-24 items-center gap-3 rounded-control border bg-white p-3 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary min-[640px]:min-h-28 min-[640px]:gap-4 min-[640px]:p-4",
                         selected
                           ? "border-primary ring-2 ring-primary/20"
                           : "border-border hover:border-primary/60",
@@ -1278,6 +1294,7 @@ export function SentenceShooterScreen({
             </div>
             <PaginationBar
               ariaLabel="Phân trang sách Xạ thủ ghép câu"
+              className="mt-3 md:mt-4"
               compact
               itemLabel="cuốn sách"
               onPageChange={setBooksPage}
@@ -1289,15 +1306,15 @@ export function SentenceShooterScreen({
         ) : null}
       </div>
 
-      <div className="flex flex-col-reverse gap-3 border-t border-border pt-5 sm:flex-row sm:justify-between">
+      <div className="flex flex-col-reverse gap-3 border-t border-border pt-4 min-[640px]:flex-row min-[640px]:justify-between md:pt-5">
         <Link
-          className="flex min-h-14 items-center justify-center gap-2 rounded-control px-5 font-bold text-primary hover:bg-sky"
+          className="flex min-h-12 items-center justify-center gap-2 rounded-control px-5 font-bold text-primary hover:bg-sky min-[640px]:min-h-14"
           href="/entertainment"
         >
           <ArrowLeft aria-hidden="true" className="size-5" /> Về khu Giải trí
         </Link>
         <Button
-          className="sm:max-w-sm"
+          className="w-full min-[640px]:max-w-sm"
           disabled={!selectedBook || isBusy || bookState.status !== "ready"}
           isLoading={isBusy}
           onClick={() => void startGame()}

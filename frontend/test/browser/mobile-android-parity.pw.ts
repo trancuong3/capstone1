@@ -110,11 +110,34 @@ async function assertMobileScreenHealth(
 }
 
 async function tapTopNav(page: Page, label: RegExp, expectedUrl: RegExp) {
-  const navLink = page
-    .getByRole("navigation", { name: /Điều hướng dành cho ba mẹ/i })
-    .getByRole("link", { name: label });
-  await navLink.scrollIntoViewIfNeeded();
-  await navLink.click();
+  const bottomNav = page.getByTestId("mobile-bottom-nav");
+  if (await bottomNav.isVisible()) {
+    const primaryLink = bottomNav.getByRole("link", { name: label });
+    if ((await primaryLink.count()) > 0) {
+      await primaryLink.first().click();
+    } else {
+      await bottomNav.getByRole("button", { name: /Thêm/ }).click();
+      const moreSheet = page.getByRole("dialog", {
+        name: "Tính năng khác",
+      });
+      await expect(moreSheet).toBeVisible();
+      const sheetNamePattern = new RegExp(
+        label.source.replace(/\$$/, "(?=\\s|$)"),
+        label.flags,
+      );
+      const sheetLink = moreSheet
+        .getByRole("link", { name: sheetNamePattern })
+        .first();
+      await sheetLink.scrollIntoViewIfNeeded();
+      await sheetLink.click();
+    }
+  } else {
+    const navLink = page
+      .getByRole("navigation", { name: /Điều hướng dành cho ba mẹ/i })
+      .getByRole("link", { name: label });
+    await navLink.scrollIntoViewIfNeeded();
+    await navLink.click();
+  }
   await page.waitForURL(expectedUrl, { timeout: 25_000 });
 }
 
@@ -324,10 +347,34 @@ test.describe("Mobile & Android WebView Full UI + OCR Parity E2E", () => {
     const ttsModelBtn = page.getByRole("button", {
       name: /Nghe đọc mẫu cả trang/i,
     });
-    await assertMobileScreenHealth(page, projectName, "07_reading_session", [
-      pauseSessionBtn,
-      ttsModelBtn,
-    ]);
+    const isCompactPortraitReader = (page.viewportSize()?.width ?? 0) < 768;
+    if (isCompactPortraitReader) {
+      await expect(pauseSessionBtn).toBeHidden();
+      const mobileMenuBtn = page.getByTestId("mobile-reading-menu-btn");
+      await assertMobileScreenHealth(page, projectName, "07_reading_session", [
+        ttsModelBtn,
+        mobileMenuBtn,
+      ]);
+      await mobileMenuBtn.click();
+      const readingMenuDialog = page.getByRole("dialog", {
+        name: "Tùy chọn buổi đọc",
+      });
+      await expect(readingMenuDialog).toBeVisible();
+      const sheetPauseBtn = readingMenuDialog.getByRole("button", {
+        name: /Tạm dừng buổi đọc/i,
+      });
+      await expect(sheetPauseBtn).toBeVisible();
+      const sheetPauseBox = await sheetPauseBtn.boundingBox();
+      expect(sheetPauseBox).not.toBeNull();
+      expect(Math.round(sheetPauseBox!.height)).toBeGreaterThanOrEqual(44);
+      await page.keyboard.press("Escape");
+      await expect(readingMenuDialog).toBeHidden();
+    } else {
+      await assertMobileScreenHealth(page, projectName, "07_reading_session", [
+        pauseSessionBtn,
+        ttsModelBtn,
+      ]);
+    }
 
     // Return to Dashboard and re-select Bé An for Book Scanner & Parent navigation
     await page.goto("/dashboard");

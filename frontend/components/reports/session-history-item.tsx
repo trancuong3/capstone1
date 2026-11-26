@@ -24,10 +24,10 @@ export function SessionHistoryItem({
 
   return (
     <article className="history-entry group relative transition-colors hover:bg-cream/80 focus-within:bg-cream/80">
-      <div className="flex items-center justify-between gap-3 sm:gap-5">
+      <div className="flex items-center justify-between gap-3 min-[640px]:gap-5">
         <div className="min-w-0 flex-1 space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="break-words text-base font-extrabold leading-snug text-ink sm:text-lg">
+            <h3 className="break-words text-base font-extrabold leading-snug text-ink md:text-lg">
               {item.book.title}
             </h3>
             <span
@@ -39,7 +39,7 @@ export function SessionHistoryItem({
             </span>
           </div>
 
-          <dl className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-semibold text-muted sm:text-sm">
+          <dl className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-semibold text-muted md:text-sm">
             {showChildAlias ? (
               <div>
                 <dt className="sr-only">Hồ sơ bé</dt>
@@ -67,10 +67,10 @@ export function SessionHistoryItem({
         </div>
 
         <Link
-          className="inline-flex min-h-12 shrink-0 items-center gap-1 rounded-control px-3 text-sm font-bold text-primary transition-colors group-hover:text-primary-hover focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary after:absolute after:inset-0"
+          className="inline-flex min-h-12 min-w-11 shrink-0 items-center justify-center gap-1 rounded-control px-3 text-sm font-bold text-primary transition-colors group-hover:text-primary-hover focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary after:absolute after:inset-0"
           href={href}
         >
-          <span className="sr-only sm:not-sr-only">Xem chi tiết</span>
+          <span className="sr-only min-[640px]:not-sr-only">Xem chi tiết</span>
           <ChevronRight
             aria-hidden="true"
             className="size-5 shrink-0 transition-transform group-hover:translate-x-0.5"

@@ -54,14 +54,16 @@ export function KaraokeScoreCard({
   return (
     <section
       aria-label="Kết quả đúng lời"
-      className="mx-auto grid w-full max-w-lg gap-3 rounded-card bg-white p-5 text-center shadow-sm"
+      className="mx-auto grid w-full max-w-lg gap-3 rounded-card bg-white p-4 text-center shadow-sm min-[640px]:p-5"
     >
       {points !== null && (
         <div className="grid gap-1">
           <p className="font-bold">
             {score.kind === "whole" ? "Điểm đúng lời" : "Điểm phần đã nghe"}
           </p>
-          <p className="text-5xl font-extrabold text-primary">{points}/100</p>
+          <p className="text-4xl font-extrabold text-primary min-[640px]:text-5xl">
+            {points}/100
+          </p>
           <p className="text-sm font-semibold text-primary">
             {encouragementText(points)}
           </p>
@@ -98,7 +100,7 @@ export function KaraokeScoreCard({
           </p>
           <div
             data-testid="karaoke-score-breakdown"
-            className="grid grid-cols-3 gap-2 text-xs font-bold sm:text-sm"
+            className="grid grid-cols-3 gap-2 text-xs font-bold min-[640px]:text-sm"
           >
             <div className="rounded-control border border-green-400 bg-green-50 p-2 text-green-900">
               <span className="block">Hát đúng</span>
@@ -142,7 +144,7 @@ export function KaraokeScoreCard({
       )}
       {onPractice && score.lineScores.length > 1 && (
         <details className="text-left">
-          <summary className="cursor-pointer py-2 font-bold">
+          <summary className="min-h-11 cursor-pointer content-center py-2 font-bold">
             Xem từng câu
           </summary>
           <ol className="grid max-h-72 gap-2 overflow-y-auto">

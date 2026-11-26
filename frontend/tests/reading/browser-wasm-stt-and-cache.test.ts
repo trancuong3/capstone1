@@ -12,6 +12,7 @@ import {
   BrowserWasmSttClient,
   detectBrowserWasmSttSupport,
   getBrowserWasmSttClient,
+  prewarmBrowserWasmStt,
   resetBrowserWasmSttForTests,
 } from "@/lib/reading/browser-wasm-stt";
 import { LocalSegmentSpeechRecognition } from "@/lib/reading/local-segment-speech-recognition";
@@ -624,5 +625,132 @@ describe("Browser WASM STT worker, client & 50MB TTS IndexedDB cache", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(await second.text()).toBe("cached-1p00-word");
     expect(getSynthesizedAudioMeta(second)?.cachedSpeed).toBe(1.0);
+  });
+
+  it("decouples initTimeoutMs (90s) from decode timeoutMs (4s), tracks initState, and supports prewarmBrowserWasmStt", async () => {
+    vi.useFakeTimers();
+    try {
+      class SlowInitWorker {
+        onmessage: ((e: MessageEvent) => void) | null = null;
+        onerror: ((e: ErrorEvent) => void) | null = null;
+        postMessage(msg: { type: string; id: string }) {
+          if (msg.type === "init") {
+            setTimeout(() => {
+              this.onmessage?.({
+                data: { type: "ready", id: msg.id },
+              } as MessageEvent);
+            }, 6_000);
+          } else if (msg.type === "transcribe") {
+            setTimeout(() => {
+              this.onmessage?.({
+                data: {
+                  type: "result",
+                  id: msg.id,
+                  text: "xin chào",
+                  decodeMs: 25,
+                },
+              } as MessageEvent);
+            }, 500);
+          }
+        }
+        terminate() {}
+      }
+      vi.stubGlobal("Worker", SlowInitWorker);
+      if (!globalThis.crypto?.subtle) {
+        vi.stubGlobal("crypto", { subtle: { digest: vi.fn() } });
+      }
+
+      const client = getBrowserWasmSttClient();
+      expect(client.getInitState()).toBe("idle");
+      expect(client.isReady()).toBe(false);
+
+      const decodePromise = client.transcribeSamples(
+        new Float32Array(1600).fill(0.05),
+        { timeoutMs: 4_000, initTimeoutMs: 90_000 },
+      );
+      expect(client.isInitializing()).toBe(true);
+
+      // Even after 4_500ms (> decode timeoutMs), init() is still warming and must NOT fail!
+      await vi.advanceTimersByTimeAsync(4_500);
+      expect(client.isInitializing()).toBe(true);
+
+      // At 6_000ms init completes; decode runs in 500ms (< 4_000ms decode timeoutMs)
+      await vi.advanceTimersByTimeAsync(2_100);
+      const res = await decodePromise;
+      expect(res.text).toBe("xin chào");
+      expect(client.isReady()).toBe(true);
+      expect(client.getInitState()).toBe("ready");
+      await expect(prewarmBrowserWasmStt()).resolves.toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("resets wasmModulePromise on async Module.onAbort in sherpa-stt-worker.js so init can retry", async () => {
+    const workerSrc = fs.readFileSync(
+      path.resolve(__dirname, "../../public/workers/sherpa-stt-worker.js"),
+      "utf8",
+    );
+    const posted: Array<{ type?: string; id?: string; message?: string }> = [];
+    let attempt = 0;
+    const fakeSelf: Record<string, unknown> = {
+      postMessage: (m: { type?: string; id?: string; message?: string }) =>
+        posted.push(m),
+      crypto: { subtle: { digest: vi.fn() } },
+      indexedDB: undefined,
+      OfflineRecognizer: class {
+        constructor() {}
+      },
+      onmessage: null,
+    };
+
+    vm.runInNewContext(workerSrc, {
+      self: fakeSelf,
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => new ArrayBuffer(0),
+      }),
+      crypto: fakeSelf.crypto,
+      indexedDB: undefined,
+      importScripts: () => {
+        attempt += 1;
+        const mod = fakeSelf.Module as Record<string, unknown>;
+        mod.FS_unlink = vi.fn();
+        mod.FS_createDataFile = vi.fn();
+        if (attempt === 1) {
+          queueMicrotask(() => {
+            (mod.onAbort as (reason: unknown) => void)("transient wasm abort");
+          });
+        } else {
+          (mod.onRuntimeInitialized as () => void)();
+        }
+      },
+      Float32Array,
+      Uint8Array,
+      ArrayBuffer,
+      Map,
+      Set,
+      Promise,
+      Error,
+      String,
+      Number,
+      Date,
+      Math,
+      Object,
+      JSON,
+    });
+
+    const onmessage = fakeSelf.onmessage as (e: {
+      data: Record<string, unknown>;
+    }) => Promise<void>;
+
+    await onmessage({ data: { type: "init", id: "init-abort-1" } });
+    expect(posted.find((m) => m.id === "init-abort-1")?.type).toBe("error");
+    expect(attempt).toBe(1);
+
+    // Retry must re-invoke importScripts (not stay stuck on rejected wasmModulePromise)
+    await onmessage({ data: { type: "init", id: "init-retry-2" } });
+    expect(attempt).toBe(2);
   });
 });

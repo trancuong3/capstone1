@@ -3,6 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import {
+  resetAndroidNativeSpeechBridgeForTests,
+  type ViReadNativeSpeechPort,
+} from "@/lib/reading/native-speech-bridge";
+import {
   resetVoiceLockAndPolicyForTests,
   setVoicePolicyPreferences,
 } from "@/lib/reading/session-voice-lock";
@@ -312,5 +316,63 @@ describe("useSpeechPlayer", () => {
       await second;
     });
     expect(revokeObjectURL).toHaveBeenCalledTimes(2);
+  });
+
+  it("exposes Android TTS unavailability fields and openTtsInstallSettings on useSpeechPlayer", async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const port: ViReadNativeSpeechPort = {
+      onmessage: null,
+      postMessage: vi.fn((raw: string) => {
+        const msg = JSON.parse(raw) as Record<string, unknown>;
+        sent.push(msg);
+        if (msg.action === "getCapabilities") {
+          queueMicrotask(() => {
+            port.onmessage?.({
+              data: JSON.stringify({
+                type: "capabilities",
+                requestId: msg.requestId,
+                ttsAvailable: false,
+                viVoicesCount: 0,
+                sttAvailable: true,
+                onDeviceSttAvailable: true,
+              }),
+            });
+          });
+        } else if (msg.action === "openTtsInstallSettings") {
+          queueMicrotask(() => {
+            port.onmessage?.({
+              data: JSON.stringify({
+                type: "tts_settings_opened",
+                requestId: msg.requestId,
+              }),
+            });
+          });
+        }
+      }),
+    };
+    const win = window as unknown as {
+      ViReadNativeSpeech?: ViReadNativeSpeechPort;
+    };
+    win.ViReadNativeSpeech = port;
+    resetAndroidNativeSpeechBridgeForTests();
+
+    try {
+      const { result } = renderHook(() => useSpeechPlayer());
+      await waitFor(() => {
+        expect(result.current.ttsUnavailableReason).toBe(
+          "android_vi_voice_missing",
+        );
+      });
+      expect(result.current.canInstallVietnameseTtsVoice).toBe(true);
+      expect(result.current.voiceNotice).toMatch(/Cài đặt TTS/i);
+      const opened = await result.current.openTtsInstallSettings?.();
+      expect(opened).toBe(true);
+      expect(sent.some((m) => m.action === "openTtsInstallSettings")).toBe(
+        true,
+      );
+    } finally {
+      resetAndroidNativeSpeechBridgeForTests();
+      delete win.ViReadNativeSpeech;
+    }
   });
 });

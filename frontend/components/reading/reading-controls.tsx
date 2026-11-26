@@ -58,19 +58,19 @@ export function ReadingControls({
         data-mobile-dock-cols={showMobileSpell ? "4" : "3"}
         data-reading-controls
         className={cn(
-          "grid grid-cols-3 gap-1.5 sm:gap-2 lg:gap-3",
+          "grid grid-cols-3 gap-1.5 md:gap-2 lg:gap-3",
           retryMode
             ? voiceSettings
-              ? "sm:grid-cols-5"
-              : "sm:grid-cols-4"
+              ? "md:grid-cols-5"
+              : "md:grid-cols-4"
             : voiceSettings
-              ? "sm:grid-cols-6"
-              : "sm:grid-cols-5",
+              ? "md:grid-cols-6"
+              : "md:grid-cols-5",
         )}
       >
         <Button
           aria-label="Tạm dừng buổi đọc"
-          className={cn(dockButtonClass, "max-sm:hidden")}
+          className={dockButtonClass}
           data-desktop-only-control="true"
           disabled={pauseDisabled ?? disabled}
           onClick={onPause}
@@ -155,7 +155,7 @@ export function ReadingControls({
         {showMobileSpell ? (
           <Button
             aria-label="Đánh vần từ này"
-            className={cn(dockButtonClass, "sm:hidden")}
+            className={cn(dockButtonClass, "md:hidden")}
             disabled={disabled}
             onClick={onSpellWord}
             size="compact"
@@ -174,7 +174,7 @@ export function ReadingControls({
         {!retryMode && (
           <Button
             aria-label="Chọn trang"
-            className={cn(dockButtonClass, "max-sm:hidden")}
+            className={dockButtonClass}
             data-desktop-only-control="true"
             disabled={disabled || !onChoosePage}
             onClick={onChoosePage}
@@ -196,7 +196,7 @@ export function ReadingControls({
           className={cn(
             dockButtonClass,
             (retryMode ? Boolean(voiceSettings) : !voiceSettings) &&
-              "col-span-2 sm:col-span-1",
+              "col-span-2 md:col-span-1",
           )}
           disabled={finishDisabled}
           onClick={onFinish}

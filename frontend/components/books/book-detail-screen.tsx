@@ -256,7 +256,11 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
           Chưa thể xác nhận hồ sơ thuộc tài khoản hiện tại. Ba mẹ vui lòng thử
           lại.
         </StatusMessage>
-        <Button className="sm:w-auto" onClick={retryChild} variant="secondary">
+        <Button
+          className="min-[640px]:w-auto"
+          onClick={retryChild}
+          variant="secondary"
+        >
           <RefreshCw aria-hidden="true" className="size-5" />
           Thử lại
         </Button>
@@ -266,7 +270,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
 
   if (state.status === "loading") {
     return (
-      <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-3 py-3 sm:gap-6 sm:px-8 sm:py-8">
+      <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-3 min-[640px]:gap-5 min-[640px]:px-6 min-[640px]:py-5 md:gap-6 md:px-8 md:py-8">
         <BookChildHeader
           child={null}
           hideOnMobile
@@ -275,16 +279,16 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
         <div
           aria-busy="true"
           aria-label="Đang tải chi tiết sách"
-          className="mx-auto flex w-full max-w-[1130px] flex-col gap-4 sm:flex-row sm:gap-12"
+          className="mx-auto flex w-full max-w-[1130px] flex-col gap-4 md:flex-row md:gap-12"
         >
           <span className="sr-only" role="status">
             Đang tải sách…
           </span>
-          <Skeleton className="h-36 w-full rounded-card sm:h-[518px] sm:w-[307px]" />
-          <div className="flex flex-1 flex-col gap-3 sm:gap-4">
-            <Skeleton className="h-10 w-3/5 sm:h-16" />
-            <Skeleton className="h-6 w-2/5 sm:h-7" />
-            <Skeleton className="h-12 w-full sm:h-16 sm:w-[360px]" />
+          <Skeleton className="h-36 w-full rounded-card md:h-[518px] md:w-[307px]" />
+          <div className="flex flex-1 flex-col gap-3 md:gap-4">
+            <Skeleton className="h-10 w-3/5 md:h-16" />
+            <Skeleton className="h-6 w-2/5 md:h-7" />
+            <Skeleton className="h-12 w-full md:h-16 md:w-[360px]" />
           </div>
         </div>
       </section>
@@ -295,7 +299,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
     const unavailable = state.status === "unavailable";
 
     return (
-      <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-3 py-3 sm:gap-6 sm:px-8 sm:py-8">
+      <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-3 min-[640px]:gap-5 min-[640px]:px-6 min-[640px]:py-5 md:gap-6 md:px-8 md:py-8">
         <BookChildHeader
           child={null}
           hideOnMobile
@@ -331,7 +335,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
 
   if (state.status === "error") {
     return (
-      <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-3 py-3 sm:gap-6 sm:px-8 sm:py-8">
+      <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-3 min-[640px]:gap-5 min-[640px]:px-6 min-[640px]:py-5 md:gap-6 md:px-8 md:py-8">
         <BookChildHeader
           child={null}
           hideOnMobile
@@ -342,7 +346,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
             Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
           </StatusMessage>
           <Button
-            className="sm:w-auto sm:self-start sm:px-8"
+            className="min-[640px]:w-auto min-[640px]:self-start min-[640px]:px-8"
             onClick={() => setRequestKey((key) => key + 1)}
             variant="secondary"
           >
@@ -382,7 +386,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
     );
 
   return (
-    <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-3 px-3 py-2.5 sm:gap-6 sm:px-8 sm:py-8">
+    <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-3 px-4 py-2.5 min-[640px]:gap-5 min-[640px]:px-6 min-[640px]:py-5 md:gap-6 md:px-8 md:py-8">
       {reportTarget ? (
         <BookContentReportDialog
           bookId={book.id}
@@ -409,14 +413,14 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
           Thư viện sách
         </Link>
         {book.visibility_scope === "PARENT_PRIVATE" ? (
-          <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 sm:hidden">
+          <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 md:hidden">
             Sách riêng
           </span>
         ) : null}
       </div>
 
-      <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-3.5 sm:flex-row sm:items-start sm:gap-12">
-        <article className="hidden w-full shrink-0 flex-col gap-3 rounded-card border border-border bg-white p-4 sm:flex sm:w-[306px]">
+      <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-3.5 md:flex-row md:items-start md:gap-12">
+        <article className="hidden w-full shrink-0 flex-col gap-3 rounded-card border border-border bg-white p-4 md:flex md:w-[306px]">
           <BookCover book={book} className="h-64 max-w-none p-4" />
           <p className="text-sm font-medium text-muted">
             {book.author ?? "Tác giả đang cập nhật"}
@@ -426,9 +430,9 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
           </p>
         </article>
 
-        <div className="flex min-w-0 flex-1 flex-col gap-3 sm:gap-4">
+        <div className="flex min-w-0 flex-1 flex-col gap-3 md:gap-4">
           {book.visibility_scope === "PARENT_PRIVATE" ? (
-            <div className="hidden flex-wrap items-center gap-2 sm:flex">
+            <div className="hidden flex-wrap items-center gap-2 md:flex">
               <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800">
                 Sách riêng của gia đình
               </span>
@@ -438,20 +442,20 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
             </div>
           ) : null}
 
-          <div className="flex items-start gap-3 rounded-card border border-border bg-white p-3 sm:block sm:rounded-none sm:border-0 sm:bg-transparent sm:p-0">
+          <div className="flex items-start gap-3 rounded-card border border-border bg-white p-3 min-[640px]:p-4 md:block md:rounded-none md:border-0 md:bg-transparent md:p-0">
             <BookCover
               book={book}
               showTitle={false}
               size="medium"
-              className="h-32! w-24! shrink-0 rounded-control! sm:hidden"
+              className="h-32! w-24! shrink-0 rounded-control! min-[640px]:h-40! min-[640px]:w-28! md:hidden"
             />
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:gap-3">
-              <h1 className="break-words text-xl font-extrabold leading-tight text-ink sm:text-4xl">
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5 min-[640px]:gap-2 md:gap-3">
+              <h1 className="break-words text-xl font-extrabold leading-tight text-ink min-[640px]:text-2xl md:text-4xl">
                 {book.title}
               </h1>
-              <p className="text-xs font-medium text-muted sm:text-body">
+              <p className="text-xs font-medium text-muted min-[640px]:text-sm md:text-body">
                 {book.author ?? "Tác giả đang cập nhật"} ·{" "}
-                <span className="font-semibold text-primary sm:font-normal sm:text-muted">
+                <span className="font-semibold text-primary md:font-normal md:text-muted">
                   {formatGradeRange(book)}
                 </span>
               </p>
@@ -459,22 +463,22 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
               targetConfidence !== null &&
               targetConfidence >= 0 &&
               targetConfidence <= 1 ? (
-                <p className="text-xs font-semibold text-primary sm:text-sm">
+                <p className="text-xs font-semibold text-primary md:text-sm">
                   Độ tin cậy {Math.round(targetConfidence * 100)}%
                 </p>
               ) : null}
-              <p className="line-clamp-2 text-xs leading-5 text-ink sm:line-clamp-none sm:text-xl sm:font-medium sm:leading-7">
+              <p className="line-clamp-2 text-xs leading-5 text-ink min-[640px]:text-sm md:line-clamp-none md:text-xl md:font-medium md:leading-7">
                 {invitationFor(book)}
               </p>
             </div>
           </div>
 
           {book.visibility_scope === "PARENT_PRIVATE" ? (
-            <div className="order-last flex flex-wrap gap-2 border-t border-border pt-3 sm:pt-4">
+            <div className="order-last flex flex-wrap gap-2 border-t border-border pt-3 md:pt-4">
               <ButtonLink
                 href={`/my-books/${encodeURIComponent(book.id)}`}
                 variant="secondary"
-                className="min-h-11 sm:w-auto"
+                className="min-h-11! min-[640px]:w-auto"
               >
                 Quản lý trang trong Sách của tôi
               </ButtonLink>
@@ -483,18 +487,20 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
             <div
               aria-label="Báo cáo nội dung sách"
               role="group"
-              className="order-last flex flex-wrap gap-2 border-t border-border pt-3 sm:pt-4"
+              className="order-last flex flex-wrap gap-2 border-t border-border pt-3 md:pt-4"
             >
               <ButtonLink
                 href="/book-reports"
                 variant="quiet"
-                className="min-h-11 w-auto px-3 text-xs sm:px-5 sm:text-label"
+                fullWidth={false}
+                className="min-h-11! px-3! text-xs md:px-5! md:text-label"
               >
                 <ClipboardList aria-hidden="true" className="size-4" /> Báo cáo
                 của tôi
               </ButtonLink>
               <Button
-                className="min-h-11 w-auto px-3 text-xs sm:px-5 sm:text-label"
+                className="min-h-11! px-3! text-xs md:px-5! md:text-label"
+                fullWidth={false}
                 onClick={() =>
                   setReportTarget({ pageId: null, pageNumber: null })
                 }
@@ -503,8 +509,9 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                 Báo lỗi sách
               </Button>
               <Button
-                className="min-h-11 w-auto px-3 text-xs sm:px-5 sm:text-label"
+                className="min-h-11! px-3! text-xs md:px-5! md:text-label"
                 disabled={!selectedPage}
+                fullWidth={false}
                 onClick={() =>
                   selectedPage
                     ? setReportTarget({
@@ -522,7 +529,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
 
           <Button
             id="start-reading-button"
-            className="min-h-12 sm:min-h-16 sm:w-[360px]"
+            className="min-h-12! min-[640px]:w-auto min-[640px]:min-w-[260px] md:min-h-16! md:w-[360px]"
             disabled={
               !selectedPage ||
               !selectedEndPageId ||
@@ -553,38 +560,38 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
           ) : null}
 
           {selectedPage && selectedEndPage ? (
-            <section className="rounded-card bg-sky px-3.5 py-2.5 sm:p-4">
-              <h2 className="text-sm font-extrabold text-ink sm:text-base">
+            <section className="rounded-card bg-sky px-3.5 py-2.5 min-[640px]:p-4">
+              <h2 className="text-sm font-extrabold text-ink md:text-base">
                 Phạm vi đọc: Trang {selectedPage.page_number}–
                 {selectedEndPage.page_number}
               </h2>
-              <p className="mt-1 text-xs text-muted sm:mt-2 sm:text-body">
+              <p className="mt-1 text-xs text-muted md:mt-2 md:text-body">
                 {selectedRangePages.length} trang hợp lệ. Chọn hình trang bên
                 dưới để thay đổi trang bắt đầu.
               </p>
             </section>
           ) : null}
 
-          <div className="grid grid-cols-2 gap-2.5 sm:gap-4">
-            <div className="flex min-h-[76px] flex-col justify-between gap-1 rounded-control border border-border bg-white p-2.5 sm:min-h-[96px] sm:p-4">
-              <span className="text-xs font-semibold text-ink sm:text-sm">
+          <div className="grid grid-cols-2 gap-2.5 min-[640px]:gap-4">
+            <div className="flex min-h-[76px] flex-col justify-between gap-1 rounded-control border border-border bg-white p-2.5 min-[640px]:min-h-[96px] min-[640px]:p-4">
+              <span className="text-xs font-semibold text-ink min-[640px]:text-sm">
                 Trang bắt đầu
               </span>
-              <span className="text-sm font-bold text-primary sm:text-body sm:font-normal">
+              <span className="text-sm font-bold text-primary md:text-body md:font-normal">
                 {selectedPage
                   ? `Trang ${selectedPage.page_number}`
                   : "Chưa chọn trang"}
               </span>
             </div>
-            <div className="flex min-h-[76px] flex-col justify-between gap-1 rounded-control border border-border bg-white p-2.5 sm:min-h-[96px] sm:p-4">
+            <div className="flex min-h-[76px] flex-col justify-between gap-1 rounded-control border border-border bg-white p-2.5 min-[640px]:min-h-[96px] min-[640px]:p-4">
               <label
-                className="text-xs font-semibold text-ink sm:text-sm"
+                className="text-xs font-semibold text-ink min-[640px]:text-sm"
                 htmlFor="reading-end-page"
               >
                 Trang kết thúc
               </label>
               <select
-                className="min-h-11 rounded-control border border-border bg-white px-2.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:px-3 sm:text-body"
+                className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-2.5 text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary min-[640px]:px-3 md:text-body"
                 disabled={
                   !selectedPage ||
                   pages.length === 0 ||
@@ -628,7 +635,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                   trên lấy từ dữ liệu hiện có.
                 </StatusMessage>
                 <Button
-                  className="sm:w-auto sm:self-start"
+                  className="min-[640px]:w-auto min-[640px]:self-start"
                   onClick={() => setRequestKey((key) => key + 1)}
                   variant="secondary"
                 >

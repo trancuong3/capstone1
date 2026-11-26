@@ -328,7 +328,7 @@ export function BookCover({
           className="h-full w-3 shrink-0"
           style={{ backgroundColor: palette.spine }}
         />
-        <div className="flex min-w-0 flex-1 flex-col justify-between p-4">
+        <div className="flex min-w-0 flex-1 flex-col justify-between p-2.5 min-[640px]:p-3.5 md:p-4">
           <div className="flex items-center justify-between gap-2">
             <span
               className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold"
@@ -351,7 +351,7 @@ export function BookCover({
           </div>
 
           <div className="my-auto py-1">
-            <p className="line-clamp-3 break-words font-extrabold leading-snug text-lg">
+            <p className="line-clamp-3 break-words text-sm font-extrabold leading-snug min-[640px]:text-base md:text-lg">
               {displayTitle}
             </p>
             {displayAuthor ? (

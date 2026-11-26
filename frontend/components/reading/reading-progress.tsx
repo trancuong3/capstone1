@@ -24,7 +24,7 @@ export function ReadingProgress({
     <div className="mx-auto w-full max-w-[1104px]">
       <div
         aria-hidden="true"
-        className="h-[3px] w-full overflow-hidden rounded-full bg-border/60 sm:hidden"
+        className="h-[3px] w-full overflow-hidden rounded-full bg-border/60 md:hidden"
       >
         <div
           className="h-full rounded-full bg-primary transition-[width] duration-300"
@@ -32,19 +32,19 @@ export function ReadingProgress({
         />
       </div>
       <div
-        className="flex items-center justify-between gap-2 px-0.5 pt-1 text-[11px] leading-tight sm:grid sm:grid-cols-[1fr_auto] sm:items-center sm:gap-2 sm:border-t sm:border-border sm:px-1 sm:pt-4 sm:text-sm"
+        className="flex items-center justify-between gap-2 px-0.5 pt-1 text-[11px] leading-tight md:grid md:grid-cols-[1fr_auto] md:items-center md:gap-2 md:border-t md:border-border md:px-1 md:pt-4 md:text-sm"
         role="status"
       >
-        <span className="inline-flex min-w-0 items-center gap-1.5 truncate font-bold text-ink sm:gap-2">
+        <span className="inline-flex min-w-0 items-center gap-1.5 truncate font-bold text-ink md:gap-2">
           <Circle
             aria-hidden="true"
-            className="size-2 shrink-0 fill-current text-primary sm:size-2.5"
+            className="size-2 shrink-0 fill-current text-primary md:size-2.5"
           />
           <span className="truncate">
             {isListening ? "Mình đang nghe bé đọc" : "Mình đang chờ bé"}
           </span>
         </span>
-        <span className="shrink-0 text-[11px] tabular-nums text-muted sm:text-sm">
+        <span className="shrink-0 text-[11px] tabular-nums text-muted md:text-sm">
           Trang {pageNumber}
           {wordCount > 0 && (
             <>
@@ -53,7 +53,7 @@ export function ReadingProgress({
             </>
           )}
           {currentWord && isListening && (
-            <span className="hidden sm:inline">
+            <span className="hidden md:inline">
               {" "}
               · Từ đang đọc: “{currentWord}”
             </span>

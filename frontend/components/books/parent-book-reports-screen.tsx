@@ -7,6 +7,7 @@ import { RefreshCw } from "lucide-react";
 import { AdminLoading } from "@/components/admin/admin-ui";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { PageHeader } from "@/components/common/page-header";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { useBookContentReportService } from "@/hooks/use-book-content-report-service";
@@ -36,6 +37,13 @@ const statusLabels: Record<BookContentReportStatus, string> = {
   UNDER_REVIEW: "Đang kiểm tra",
   RESOLVED: "Đã xử lý",
   REJECTED: "Không đủ căn cứ",
+};
+
+const statusBadgeClasses: Record<BookContentReportStatus, string> = {
+  OPEN: "border border-sky-200 bg-sky text-primary-hover",
+  UNDER_REVIEW: "border border-amber-300 bg-amber-50 text-amber-950",
+  RESOLVED: "border border-emerald-200 bg-emerald-50 text-emerald-900",
+  REJECTED: "border border-rose-200 bg-rose-50 text-rose-900",
 };
 
 export function ParentBookReportsScreen() {
@@ -111,33 +119,34 @@ export function ParentBookReportsScreen() {
 
   return (
     <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 md:gap-6">
-      <header className="flex flex-wrap items-center justify-between gap-2.5 md:items-start md:gap-4">
-        <div className="min-w-0">
-          <p className="hidden text-label font-bold text-primary md:block">
-            ViRead · Phụ huynh
-          </p>
-          <h1 className="text-xl font-extrabold text-ink md:mt-1 md:text-heading">
-            Báo cáo chất lượng sách
-          </h1>
-          <p className="mt-2 hidden max-w-2xl text-body text-muted md:block">
-            Theo dõi các vấn đề ba mẹ đã gửi và trạng thái xử lý của Admin.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            className="min-h-11 w-auto"
-            onClick={() => void load()}
-            size="compact"
-            variant="secondary"
-          >
-            <RefreshCw aria-hidden className="size-4" />
-            Tải lại
-          </Button>
-          <ButtonLink className="min-h-11 w-auto" href="/books" size="compact">
-            Thư viện sách
-          </ButtonLink>
-        </div>
-      </header>
+      <PageHeader
+        action={
+          <>
+            <Button
+              className="min-h-11! w-auto px-3! text-xs md:px-4! md:text-sm"
+              fullWidth={false}
+              onClick={() => void load()}
+              size="compact"
+              variant="secondary"
+            >
+              <RefreshCw aria-hidden className="size-4" />
+              Tải lại
+            </Button>
+            <ButtonLink
+              className="min-h-11! w-auto px-3! text-xs md:px-4! md:text-sm"
+              fullWidth={false}
+              href="/books"
+              size="compact"
+            >
+              Thư viện sách
+            </ButtonLink>
+          </>
+        }
+        actionClassName="md:w-auto"
+        description="Theo dõi các vấn đề ba mẹ đã gửi và trạng thái xử lý của Admin."
+        eyebrow="ViRead · Phụ huynh"
+        title="Báo cáo chất lượng sách"
+      />
 
       {loading ? (
         <AdminLoading label="Đang tải báo cáo của ba mẹ…" />
@@ -160,44 +169,46 @@ export function ParentBookReportsScreen() {
           description="Khi phát hiện thông tin sách hoặc nội dung trang chưa chính xác, ba mẹ có thể gửi báo cáo từ trang chi tiết sách."
         />
       ) : (
-        <div className="grid gap-4">
+        <div className="grid grid-cols-1 gap-3 min-[640px]:grid-cols-2 min-[640px]:gap-4 md:grid-cols-1 md:gap-4">
           {items.map((item) => (
             <article
-              className="rounded-card border border-border bg-white p-4 sm:p-5"
+              className="rounded-card border border-border bg-white p-3.5 min-[640px]:p-4 md:p-5"
               key={item.id}
             >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h2 className="break-words font-semibold text-ink">
+              <div className="flex flex-wrap items-start justify-between gap-2.5 md:gap-3">
+                <div className="min-w-0 flex-1">
+                  <h2 className="break-words text-base font-bold text-ink md:text-lg">
                     {item.book_title}
                   </h2>
-                  <p className="mt-1 text-sm text-muted">
+                  <p className="mt-1 text-xs text-muted md:text-sm">
                     {issueLabels[item.issue_type]}
                     {item.page_number !== null
                       ? ` · Trang ${item.page_number}`
                       : " · Toàn bộ sách"}
                   </p>
                 </div>
-                <span className="rounded-full bg-sky px-3 py-1 text-sm font-semibold text-primary-hover">
+                <span
+                  className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold md:px-3 md:py-1 md:text-sm ${statusBadgeClasses[item.status]}`}
+                >
                   {statusLabels[item.status]}
                 </span>
               </div>
-              <p className="mt-3 break-words whitespace-pre-wrap text-sm leading-6 text-ink">
+              <p className="mt-2 break-words whitespace-pre-wrap text-xs leading-5 text-ink md:mt-3 md:text-sm md:leading-6">
                 {item.description}
               </p>
               {item.reported_text ? (
-                <p className="mt-2 break-words text-sm text-muted">
+                <p className="mt-2 break-words text-xs text-muted md:text-sm">
                   Nội dung nghi ngờ:{" "}
                   <span className="font-semibold text-ink">
                     {item.reported_text}
                   </span>
                 </p>
               ) : null}
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3 text-xs text-muted">
-                <span className="break-all">
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2.5 text-xs text-muted md:mt-4 md:pt-3">
+                <span className="min-w-0 max-w-full truncate" title={item.id}>
                   Mã báo cáo: <span className="font-mono">{item.id}</span>
                 </span>
-                <time dateTime={item.created_at}>
+                <time className="shrink-0" dateTime={item.created_at}>
                   {new Intl.DateTimeFormat("vi-VN", {
                     dateStyle: "medium",
                     timeStyle: "short",
@@ -205,14 +216,17 @@ export function ParentBookReportsScreen() {
                 </time>
               </div>
               {item.scan_run_id ? (
-                <p className="mt-2 break-all text-xs text-muted">
+                <p
+                  className="mt-1.5 truncate text-xs text-muted md:mt-2"
+                  title={item.scan_run_id}
+                >
                   Mã yêu cầu kiểm tra toàn sách:{" "}
                   <span className="font-mono">{item.scan_run_id}</span>
                 </p>
               ) : null}
               <div className="mt-3">
                 <Button
-                  className="min-h-11 px-3 py-2 text-xs"
+                  className="min-h-11! px-3! text-xs"
                   disabled={loadingDetailId === item.id}
                   fullWidth={false}
                   onClick={() => void toggleDetail(item.id)}
@@ -260,6 +274,7 @@ export function ParentBookReportsScreen() {
 
       <PaginationBar
         ariaLabel="Phân trang báo cáo chất lượng sách"
+        compact
         disabled={loading}
         itemLabel="báo cáo"
         onPageChange={(nextPage) => setOffset((nextPage - 1) * limit)}

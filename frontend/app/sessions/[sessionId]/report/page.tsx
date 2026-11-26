@@ -121,8 +121,8 @@ export default function ReadingReportPage() {
   }, [reloadKey, sessionId]);
 
   const reportHeading = (
-    <header className="flex flex-col justify-between gap-2 border-b border-border pb-3 md:gap-3 md:pb-5 sm:flex-row sm:items-end">
-      <div className="space-y-1">
+    <header className="flex flex-col justify-between gap-2 border-b border-border pb-3 min-[640px]:flex-row min-[640px]:items-end md:gap-3 md:pb-5">
+      <div className="min-w-0 space-y-1">
         <div className="flex flex-wrap items-center gap-3 md:gap-4">
           <Link
             className="family-inline-link min-h-11"
@@ -137,7 +137,7 @@ export default function ReadingReportPage() {
             Lịch sử đọc
           </Link>
         </div>
-        <h1 className="book-title text-xl text-ink sm:text-3xl md:text-[38px]">
+        <h1 className="book-title text-xl text-ink min-[640px]:text-3xl md:text-[38px]">
           Báo cáo đọc
         </h1>
       </div>
@@ -171,7 +171,7 @@ export default function ReadingReportPage() {
           {error}
         </StatusMessage>
         <Button
-          className="sm:w-auto sm:self-start"
+          className="w-full min-[640px]:w-auto min-[640px]:self-start"
           onClick={() => setReloadKey((key) => key + 1)}
           variant="secondary"
         >
@@ -191,7 +191,7 @@ export default function ReadingReportPage() {
           được lời đọc của bé.
         </StatusMessage>
         <Button
-          className="sm:w-auto sm:self-start"
+          className="w-full min-[640px]:w-auto min-[640px]:self-start"
           onClick={() => setReloadKey((key) => key + 1)}
           variant="secondary"
         >
@@ -231,7 +231,7 @@ export default function ReadingReportPage() {
       {pageGroups.length > 1 ? (
         <nav
           aria-label="Chọn trang có báo cáo"
-          className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-white p-3.5 sm:px-5"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-white p-3.5 md:px-5"
         >
           <p className="text-sm font-bold text-ink tabular-nums">
             Trang {safeGroupIndex + 1} / {pageGroups.length} trang có báo cáo
@@ -239,7 +239,7 @@ export default function ReadingReportPage() {
           <div className="flex flex-wrap items-center gap-1.5">
             <button
               aria-label="Trang trước"
-              className="inline-flex min-h-11 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky disabled:cursor-not-allowed disabled:opacity-40 sm:px-3 sm:text-sm"
+              className="inline-flex min-h-11 min-w-11 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky disabled:cursor-not-allowed disabled:opacity-40 min-[640px]:px-3 min-[640px]:text-sm"
               disabled={safeGroupIndex <= 0}
               onClick={() => {
                 setSelectedGroupIndex((current) => Math.max(0, current - 1));
@@ -254,7 +254,7 @@ export default function ReadingReportPage() {
                 aria-current={idx === safeGroupIndex ? "page" : undefined}
                 aria-label={`Trang ${idx + 1}`}
                 className={cn(
-                  "min-h-11 min-w-11 rounded-control px-2.5 text-sm font-bold tabular-nums sm:px-3",
+                  "min-h-11 min-w-11 rounded-control px-2.5 text-sm font-bold tabular-nums min-[640px]:px-3",
                   idx === safeGroupIndex
                     ? "bg-primary text-white"
                     : "border border-border bg-white text-ink hover:bg-canvas",
@@ -266,13 +266,13 @@ export default function ReadingReportPage() {
                 }}
                 type="button"
               >
-                <span className="hidden sm:inline">Trang </span>
+                <span className="hidden min-[640px]:inline">Trang </span>
                 {idx + 1}
               </button>
             ))}
             <button
               aria-label="Trang sau"
-              className="inline-flex min-h-11 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky disabled:cursor-not-allowed disabled:opacity-40 sm:px-3 sm:text-sm"
+              className="inline-flex min-h-11 min-w-11 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky disabled:cursor-not-allowed disabled:opacity-40 min-[640px]:px-3 min-[640px]:text-sm"
               disabled={safeGroupIndex >= pageGroups.length - 1}
               onClick={() => {
                 setSelectedGroupIndex((current) =>
@@ -330,7 +330,7 @@ export default function ReadingReportPage() {
       </section>
 
       {additionalReports.length > 0 ? (
-        <details className="group rounded-card border border-border bg-white p-4 sm:p-5">
+        <details className="group rounded-card border border-border bg-white p-4 md:p-5">
           <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 text-sm font-extrabold text-ink">
             <span>
               Các lượt đối chiếu khác của trang này ({additionalReports.length})

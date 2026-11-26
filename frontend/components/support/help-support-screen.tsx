@@ -202,7 +202,7 @@ export function HelpSupportScreen() {
         ) : null}
 
         <form
-          className="grid gap-4 sm:grid-cols-2"
+          className="grid gap-3.5 min-[640px]:grid-cols-2 min-[640px]:gap-4"
           noValidate
           onSubmit={handleSubmit}
         >
@@ -249,7 +249,7 @@ export function HelpSupportScreen() {
             </span>
           </div>
 
-          <div className="flex flex-col gap-1 rounded-control sm:col-span-2 border border-border bg-white px-4 py-3">
+          <div className="flex min-w-0 flex-col gap-1 rounded-control border border-border bg-white px-4 py-3 min-[640px]:col-span-2">
             <label
               className="text-label font-semibold text-muted"
               htmlFor="support-message"
@@ -257,7 +257,7 @@ export function HelpSupportScreen() {
               Nội dung
             </label>
             <textarea
-              className="min-h-36 resize-y bg-transparent text-body leading-6 text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
+              className="min-h-36 w-full min-w-0 resize-y bg-transparent text-body leading-6 text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
               id="support-message"
               maxLength={5000}
               onChange={(event) => setMessage(event.target.value)}
@@ -271,7 +271,7 @@ export function HelpSupportScreen() {
             </span>
           </div>
 
-          <div className="flex min-h-[72px] min-w-0 flex-col gap-1 sm:col-span-2 rounded-control border border-border bg-white px-4 py-3">
+          <div className="flex min-h-[72px] min-w-0 flex-col gap-1 rounded-control border border-border bg-white px-4 py-3 min-[640px]:col-span-2">
             <label
               className="text-label font-semibold text-muted"
               htmlFor="support-contact-email"
@@ -294,7 +294,7 @@ export function HelpSupportScreen() {
           </div>
 
           <Button
-            className="sm:w-auto sm:self-start sm:px-8"
+            className="w-full min-[640px]:col-span-2 min-[640px]:w-auto min-[640px]:justify-self-start min-[640px]:px-8"
             disabled={isSubmitting}
             isLoading={isSubmitting}
             type="submit"
@@ -321,7 +321,7 @@ export function HelpSupportScreen() {
 
       <section
         aria-labelledby="support-faq-heading"
-        className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 sm:gap-4 sm:px-8 sm:py-6"
+        className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 min-[640px]:gap-4 min-[640px]:px-6 min-[640px]:py-5 md:px-8 md:py-6"
       >
         <div className="flex items-center gap-3">
           <div>
@@ -396,7 +396,7 @@ export function HelpSupportScreen() {
         aria-labelledby="support-contact-heading"
         className="flex flex-col gap-3 md:gap-4"
       >
-        <Card className="p-4 sm:p-6">
+        <Card className="p-4 min-[640px]:p-6">
           <div className="flex items-center gap-3">
             <div>
               <h2
@@ -414,7 +414,7 @@ export function HelpSupportScreen() {
             <span className="break-all">{VIREAD_SUPPORT_EMAIL}</span>
           </a>
           <Button
-            className="mt-1 sm:mt-2 sm:max-w-72"
+            className="mt-1 min-[640px]:mt-2 min-[640px]:max-w-72"
             variant="secondary"
             onClick={() => setShowFeedbackEditor(true)}
           >

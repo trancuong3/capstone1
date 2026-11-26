@@ -57,7 +57,7 @@ export function PaginationBar({
     (itemLabel ? `Điều hướng danh sách ${itemLabel}` : "Phân trang");
 
   const buttonSizeClass = compact
-    ? "min-h-10 px-3 py-1.5 text-sm"
+    ? "min-h-11 px-3 py-1.5 text-sm"
     : "min-h-11 px-3.5 py-2 text-sm";
 
   return (

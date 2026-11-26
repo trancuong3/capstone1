@@ -374,5 +374,58 @@ describe("DashboardScreen with real API adapters", () => {
         name: `${secondChild.alias}, lớp ${secondChild.grade}`,
       }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Quét sách" }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders mobile shortcuts, responsive 640px grid overrides, and zero legacy sm:/max-sm: classes", async () => {
+    apiFetchFixture.mockImplementation(async (input) => readyResponse(input));
+    const user = userEvent.setup();
+    const { container } = renderDashboard();
+
+    const firstProfile = await screen.findByRole("button", {
+      name: `${childFixture.alias}, lớp ${childFixture.grade}`,
+    });
+    await user.click(firstProfile);
+
+    const progressLinks = screen.getAllByRole("link", { name: /Xem tiến bộ/ });
+    const mobileProgressShortcut = progressLinks.find((el) =>
+      el.closest(".md\\:hidden"),
+    );
+    const difficultShortcut = screen.getByRole("link", {
+      name: "Từ cần luyện",
+    });
+
+    expect(mobileProgressShortcut).toBeDefined();
+    expect(mobileProgressShortcut).toHaveAttribute(
+      "href",
+      `/reports?childId=${encodeURIComponent(childFixture.id)}`,
+    );
+    expect(mobileProgressShortcut?.className).toContain("min-h-11");
+    expect(difficultShortcut).toHaveAttribute(
+      "href",
+      `/reports/difficult-words?childId=${encodeURIComponent(childFixture.id)}`,
+    );
+    expect(difficultShortcut.className).toContain("min-h-11");
+
+    const profileList = container.querySelector(".family-profile-list");
+    expect(profileList?.className).toContain("min-[640px]:max-md:grid!");
+    expect(profileList?.className).toContain("min-[640px]:max-md:grid-cols-2!");
+    expect(profileList?.className).not.toContain(
+      "md:grid-cols-[repeat(auto-fit,minmax(min(100%,240px),1fr))]!",
+    );
+    expect(profileList?.className).not.toContain("min-[921px]:grid-cols-1!");
+
+    const toolList = container.querySelector(".family-tool-list");
+    expect(toolList?.className).toContain("min-[640px]:grid-cols-2!");
+    expect(toolList?.className).toContain("md:grid-cols-3!");
+
+    const createChildLink = screen.getByRole("link", {
+      name: "Tạo hồ sơ bé",
+    });
+    expect(createChildLink.className).toContain("md:min-h-12!");
+
+    expect(container.innerHTML).not.toMatch(/\b(?:max-)?sm:/);
   });
 });

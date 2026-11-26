@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   BookOpen,
   CheckCircle2,
+  ChevronDown,
   Clock3,
   FileUp,
   Image as ImageIcon,
@@ -290,6 +291,7 @@ function ParentPrivateBookManagerContent({
     useState<SubmissionFilterGroup>("ALL");
   const [submissionsPage, setSubmissionsPage] = useState(1);
   const [committedPage, setCommittedPage] = useState(1);
+  const [showPageJumpMap, setShowPageJumpMap] = useState(false);
 
   // Upload form state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -945,7 +947,7 @@ function ParentPrivateBookManagerContent({
           {loadError ?? "Không thể tải dữ liệu."}
         </StatusMessage>
         <Button
-          className="sm:w-auto sm:self-start"
+          className="min-[640px]:w-auto min-[640px]:self-start"
           onClick={() => void loadDetail(false)}
           variant="secondary"
         >
@@ -1024,7 +1026,7 @@ function ParentPrivateBookManagerContent({
 
         <div className="flex flex-wrap items-center gap-2">
           <Button
-            className="min-h-11 w-auto px-3 text-xs md:px-4 md:text-sm"
+            className="min-h-11! w-auto px-3! text-xs md:px-4! md:text-sm"
             fullWidth={false}
             onClick={() => void loadDetail(false)}
             variant="secondary"
@@ -1035,7 +1037,7 @@ function ParentPrivateBookManagerContent({
           {book.readable_for_children && !isSuspended ? (
             <ButtonLink
               href={`/books/${encodeURIComponent(book.id)}`}
-              className="min-h-11 w-auto px-3 text-xs md:px-4 md:text-sm"
+              className="min-h-11! w-auto px-3! text-xs md:px-4! md:text-sm"
               fullWidth={false}
             >
               <BookOpen aria-hidden="true" className="size-4" />
@@ -1043,7 +1045,7 @@ function ParentPrivateBookManagerContent({
             </ButtonLink>
           ) : (
             <Button
-              className="min-h-11 w-auto px-3 text-xs md:px-4 md:text-sm"
+              className="min-h-11! w-auto px-3! text-xs md:px-4! md:text-sm"
               disabled
               fullWidth={false}
               type="button"
@@ -1102,13 +1104,24 @@ function ParentPrivateBookManagerContent({
               <p className="mt-1.5 hidden text-xs text-muted md:mt-2 md:block">
                 {book.privacy_notice}
               </p>
+              {book.privacy_notice ? (
+                <details className="mt-1.5 md:hidden">
+                  <summary className="inline-flex min-h-11 cursor-pointer items-center text-xs font-semibold text-primary">
+                    Thông tin quyền riêng tư
+                  </summary>
+                  <p className="mt-1 text-xs text-muted">
+                    {book.privacy_notice}
+                  </p>
+                </details>
+              ) : null}
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <Button
-              className="min-h-11 w-auto px-3 text-xs"
+              className="min-h-11! w-auto px-3! text-xs"
               disabled={isSuspended || busyKey !== null}
+              fullWidth={false}
               onClick={() => {
                 setShowEditBookForm(false);
                 setConfirmDeleteBook(false);
@@ -1121,8 +1134,9 @@ function ParentPrivateBookManagerContent({
               {showCoverStudio ? "Đóng ảnh bìa" : "Đổi ảnh bìa"}
             </Button>
             <Button
-              className="min-h-11 w-auto px-3 text-xs"
+              className="min-h-11! w-auto px-3! text-xs"
               disabled={isSuspended || busyKey !== null}
+              fullWidth={false}
               onClick={() => {
                 setShowCoverStudio(false);
                 if (showEditBookForm) {
@@ -1174,7 +1188,7 @@ function ParentPrivateBookManagerContent({
         {showEditBookForm ? (
           <form
             aria-label="Chỉnh sửa thông tin sách riêng"
-            className="flex flex-col gap-3 rounded-control border border-amber-300 bg-amber-50/60 p-4 text-xs"
+            className="flex flex-col gap-3 rounded-control border border-amber-300 bg-amber-50/60 p-3 text-xs min-[640px]:p-4"
             onSubmit={(event) => void handleSaveBookEdit(event)}
           >
             <p className="font-bold text-amber-950">
@@ -1182,35 +1196,35 @@ function ParentPrivateBookManagerContent({
               đưa về kiểm tra lại từ đầu (OCR → Rà chính tả → Tool Check an
               toàn) và tạm khóa đọc cùng bé cho đến khi hoàn tất.
             </p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex flex-col gap-1 font-semibold text-ink">
+            <div className="grid gap-3 min-[640px]:grid-cols-2">
+              <label className="flex min-w-0 flex-col gap-1 font-semibold text-ink">
                 Tên sách *
                 <input
                   aria-label="Tên sách chỉnh sửa"
-                  className="min-h-11 rounded-control border border-border bg-white px-3 text-sm text-ink"
+                  className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-3 text-sm text-ink"
                   onChange={(event) => setEditBookTitle(event.target.value)}
                   required
                   type="text"
                   value={editBookTitle}
                 />
               </label>
-              <label className="flex flex-col gap-1 font-semibold text-ink">
+              <label className="flex min-w-0 flex-col gap-1 font-semibold text-ink">
                 Tác giả
                 <input
                   aria-label="Tác giả chỉnh sửa"
-                  className="min-h-11 rounded-control border border-border bg-white px-3 text-sm text-ink"
+                  className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-3 text-sm text-ink"
                   onChange={(event) => setEditBookAuthor(event.target.value)}
                   type="text"
                   value={editBookAuthor}
                 />
               </label>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex flex-col gap-1 font-semibold text-ink">
+            <div className="grid gap-3 min-[640px]:grid-cols-2">
+              <label className="flex min-w-0 flex-col gap-1 font-semibold text-ink">
                 Từ lớp
                 <select
                   aria-label="Từ lớp chỉnh sửa"
-                  className="min-h-11 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
+                  className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
                   onChange={(event) =>
                     setEditBookMinGrade(Number(event.target.value))
                   }
@@ -1223,11 +1237,11 @@ function ParentPrivateBookManagerContent({
                   ))}
                 </select>
               </label>
-              <label className="flex flex-col gap-1 font-semibold text-ink">
+              <label className="flex min-w-0 flex-col gap-1 font-semibold text-ink">
                 Đến lớp
                 <select
                   aria-label="Đến lớp chỉnh sửa"
-                  className="min-h-11 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
+                  className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
                   onChange={(event) =>
                     setEditBookMaxGrade(Number(event.target.value))
                   }
@@ -1241,12 +1255,12 @@ function ParentPrivateBookManagerContent({
                 </select>
               </label>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex flex-col gap-1 font-semibold text-ink">
+            <div className="grid gap-3 min-[640px]:grid-cols-2">
+              <label className="flex min-w-0 flex-col gap-1 font-semibold text-ink">
                 Nguồn nội dung sách
                 <select
                   aria-label="Nguồn nội dung sách chỉnh sửa"
-                  className="min-h-11 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
+                  className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
                   onChange={(event) =>
                     setEditBookSourceType(event.target.value as SourceUsageType)
                   }
@@ -1259,11 +1273,11 @@ function ParentPrivateBookManagerContent({
                   ))}
                 </select>
               </label>
-              <label className="flex flex-col gap-1 font-semibold text-ink">
+              <label className="flex min-w-0 flex-col gap-1 font-semibold text-ink">
                 Ghi chú nguồn
                 <input
                   aria-label="Ghi chú nguồn sách chỉnh sửa"
-                  className="min-h-11 rounded-control border border-border bg-white px-3 text-xs text-ink"
+                  className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-3 text-xs text-ink"
                   onChange={(event) =>
                     setEditBookSourceNote(event.target.value)
                   }
@@ -1274,14 +1288,16 @@ function ParentPrivateBookManagerContent({
             </div>
             <div className="flex flex-wrap gap-2 pt-1">
               <Button
-                className="min-h-11 w-auto px-4 text-xs"
+                className="min-h-11! w-auto px-4! text-xs"
+                fullWidth={false}
                 isLoading={busyKey === "book:edit"}
                 type="submit"
               >
                 Lưu & kiểm tra lại toàn bộ
               </Button>
               <Button
-                className="min-h-11 w-auto px-3 text-xs"
+                className="min-h-11! w-auto px-3! text-xs"
+                fullWidth={false}
                 onClick={() => setShowEditBookForm(false)}
                 type="button"
                 variant="secondary"
@@ -1296,7 +1312,7 @@ function ParentPrivateBookManagerContent({
           <div
             role="alertdialog"
             aria-label={`Xác nhận xóa sách ${book.title}`}
-            className="flex flex-col gap-2.5 rounded-control border border-rose-300 bg-rose-50 p-4 text-xs text-rose-950"
+            className="flex flex-col gap-2.5 rounded-control border border-rose-300 bg-rose-50 p-3.5 text-xs text-rose-950 min-[640px]:p-4"
           >
             <p className="font-bold">
               Xác nhận xóa sách &ldquo;{book.title}&rdquo;?
@@ -1307,7 +1323,8 @@ function ParentPrivateBookManagerContent({
             </p>
             <div className="flex flex-wrap gap-2">
               <Button
-                className="min-h-11 w-auto bg-rose-700 px-4 text-xs text-white hover:bg-rose-800"
+                className="min-h-11! w-auto bg-rose-700 px-4! text-xs text-white hover:bg-rose-800"
+                fullWidth={false}
                 isLoading={busyKey === "book:delete"}
                 onClick={() => void handleDeleteBook()}
                 type="button"
@@ -1315,7 +1332,8 @@ function ParentPrivateBookManagerContent({
                 Xác nhận xóa sách
               </Button>
               <Button
-                className="min-h-11 w-auto px-3 text-xs"
+                className="min-h-11! w-auto px-3! text-xs"
+                fullWidth={false}
                 onClick={() => setConfirmDeleteBook(false)}
                 type="button"
                 variant="secondary"
@@ -1375,7 +1393,7 @@ function ParentPrivateBookManagerContent({
       {/* Upload Section */}
       <form
         aria-label="Tải ảnh trang hoặc tài liệu vào sách riêng"
-        className="flex flex-col gap-4 rounded-card border border-border bg-white p-5 shadow-sm"
+        className="flex flex-col gap-3.5 rounded-card border border-border bg-white p-3.5 shadow-sm min-[640px]:gap-4 min-[640px]:p-5"
         onSubmit={(event) => void handleUpload(event)}
       >
         <div>
@@ -1387,22 +1405,33 @@ function ParentPrivateBookManagerContent({
             <strong>30 trang mỗi tệp</strong> (≤ 50 MB). Mỗi trang tự động chạy:{" "}
             <strong>OCR → Rà chính tả → Tool Check an toàn</strong>.
           </p>
-          <p className="mt-1 text-xs text-muted">
+          <p className="mt-1 hidden text-xs text-muted md:block">
             Minh bạch quyền riêng tư: Sách riêng chỉ hiển thị trong tài khoản
             gia đình; văn bản trang sách tải lên được rà soát chính tả và an
             toàn trẻ em tự động (mô hình cục bộ hoặc dịch vụ AI đám mây bảo mật
             tùy cấu hình máy chủ) và mặc định không dùng để huấn luyện OCR.
           </p>
+          <details className="mt-1 md:hidden">
+            <summary className="inline-flex min-h-11 cursor-pointer items-center text-xs font-semibold text-primary">
+              Minh bạch quyền riêng tư & xử lý OCR
+            </summary>
+            <p className="mt-1 text-xs text-muted">
+              Sách riêng chỉ hiển thị trong tài khoản gia đình; văn bản trang
+              sách tải lên được rà soát chính tả và an toàn trẻ em tự động (mô
+              hình cục bộ hoặc dịch vụ AI đám mây bảo mật tùy cấu hình máy chủ)
+              và mặc định không dùng để huấn luyện OCR.
+            </p>
+          </details>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
-          <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
+          <label className="flex min-w-0 flex-col gap-1.5 text-label font-semibold text-ink">
             Chọn tệp trang sách hoặc tài liệu *
             <input
               ref={fileInputRef}
               accept={ACCEPTED_UPLOAD_EXTENSIONS}
               aria-label="Chọn tệp trang sách hoặc tài liệu"
-              className="block w-full cursor-pointer rounded-control border border-dashed border-primary/50 bg-canvas p-3 text-sm text-ink file:mr-3 file:rounded-control file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white hover:file:bg-primary-hover"
+              className="block w-full min-w-0 cursor-pointer rounded-control border border-dashed border-primary/50 bg-canvas p-3 text-sm text-ink file:mr-3 file:rounded-control file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white hover:file:bg-primary-hover"
               disabled={uploading || isSuspended}
               onChange={(event) => {
                 const file = event.target.files?.[0] ?? null;
@@ -1412,18 +1441,18 @@ function ParentPrivateBookManagerContent({
               type="file"
             />
             {selectedFile ? (
-              <span className="text-xs font-medium text-emerald-800">
+              <span className="break-all text-xs font-medium text-emerald-800">
                 Đã chọn: {selectedFile.name} (
                 {(selectedFile.size / 1024).toFixed(1)} KB)
               </span>
             ) : null}
           </label>
 
-          <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
+          <label className="flex min-w-0 flex-col gap-1.5 text-label font-semibold text-ink">
             Khai báo nguồn nội dung (phục vụ gia đình / rà soát)
             <select
               aria-label="Khai báo nguồn nội dung"
-              className="min-h-12 rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
+              className="min-h-12 w-full min-w-0 rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
               disabled={uploading || isSuspended}
               onChange={(event) =>
                 setUploadSourceType(event.target.value as SourceUsageType)
@@ -1439,11 +1468,11 @@ function ParentPrivateBookManagerContent({
           </label>
         </div>
 
-        <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
+        <label className="flex min-w-0 flex-col gap-1.5 text-label font-semibold text-ink">
           Ghi chú nguồn / bản quyền (không bắt buộc)
           <input
             aria-label="Ghi chú nguồn hoặc bản quyền"
-            className="min-h-11 rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
+            className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
             disabled={uploading || isSuspended}
             onChange={(event) => setUploadSourceNote(event.target.value)}
             placeholder="Ví dụ: Chụp từ sách giấy gia đình đã mua cho bé luyện đọc"
@@ -1454,7 +1483,7 @@ function ParentPrivateBookManagerContent({
 
         <div className="flex flex-wrap items-center gap-3">
           <Button
-            className="sm:w-auto"
+            className="min-[640px]:w-auto"
             disabled={!selectedFile || isSuspended}
             isLoading={uploading}
             type="submit"
@@ -1545,43 +1574,61 @@ function ParentPrivateBookManagerContent({
               })}
             </div>
             {activeSubmissions.length > 1 ? (
-              <div
-                aria-label="Tổng quan nhanh trạng thái các trang"
-                className="flex flex-wrap gap-1.5 border-t border-border pt-3"
-              >
-                {activeSubmissions.map((sub, index) => {
-                  const chipStyle =
-                    WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
-                    "border-border bg-canvas text-ink";
-                  return (
-                    <button
-                      key={`map-${sub.id}`}
-                      className={`inline-flex items-center gap-1 rounded-control border px-2 py-1 text-[11px] font-bold ${chipStyle}`}
-                      onClick={() => {
-                        setStatusFilter("ALL");
-                        setSubmissionsPage(
-                          Math.floor(index / SUBMISSIONS_PAGE_SIZE) + 1,
-                        );
-                        requestAnimationFrame(() => {
-                          const target = document.querySelector(
-                            `[data-submission-id="${sub.id}"]`,
+              <div className="border-t border-border pt-3">
+                <button
+                  aria-controls="submission-quick-jump-map"
+                  aria-expanded={showPageJumpMap}
+                  className="inline-flex min-h-11 w-full items-center justify-between gap-2 rounded-control border border-border bg-canvas px-3 text-xs font-bold text-ink hover:bg-sky/40 md:hidden"
+                  onClick={() => setShowPageJumpMap((open) => !open)}
+                  type="button"
+                >
+                  <span>
+                    Chuyển nhanh theo trang ({activeSubmissions.length} trang)
+                  </span>
+                  <ChevronDown
+                    aria-hidden="true"
+                    className={`size-4 shrink-0 transition-transform ${showPageJumpMap ? "rotate-180" : ""}`}
+                  />
+                </button>
+                <div
+                  id="submission-quick-jump-map"
+                  aria-label="Tổng quan nhanh trạng thái các trang"
+                  className={`flex-wrap gap-1.5 ${showPageJumpMap ? "mt-2 flex" : "hidden md:flex"}`}
+                >
+                  {activeSubmissions.map((sub, index) => {
+                    const chipStyle =
+                      WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
+                      "border-border bg-canvas text-ink";
+                    return (
+                      <button
+                        key={`map-${sub.id}`}
+                        className={`inline-flex min-h-11 items-center gap-1 rounded-control border px-3 text-xs font-bold ${chipStyle}`}
+                        onClick={() => {
+                          setStatusFilter("ALL");
+                          setSubmissionsPage(
+                            Math.floor(index / SUBMISSIONS_PAGE_SIZE) + 1,
                           );
-                          target?.scrollIntoView?.({
-                            behavior: "smooth",
-                            block: "nearest",
+                          requestAnimationFrame(() => {
+                            const target = document.querySelector(
+                              `[data-submission-id="${sub.id}"]`,
+                            );
+                            target?.scrollIntoView?.({
+                              behavior: "smooth",
+                              block: "nearest",
+                            });
                           });
-                        });
-                      }}
-                      title={`Trang nguồn ${sub.source_page_number}: ${sub.workflow_status_label}`}
-                      type="button"
-                    >
-                      <span>Tr.{sub.source_page_number}</span>
-                      <span className="font-normal">
-                        · {sub.workflow_status_label}
-                      </span>
-                    </button>
-                  );
-                })}
+                        }}
+                        title={`Trang nguồn ${sub.source_page_number}: ${sub.workflow_status_label}`}
+                        type="button"
+                      >
+                        <span>Tr.{sub.source_page_number}</span>
+                        <span className="font-normal">
+                          · {sub.workflow_status_label}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             ) : null}
 
@@ -1644,12 +1691,12 @@ function ParentPrivateBookManagerContent({
                     key={sub.id}
                     data-submission-id={sub.id}
                     data-workflow-status={sub.workflow_status}
-                    className="flex flex-col gap-4 rounded-card border border-border bg-white p-5 shadow-sm"
+                    className="flex flex-col gap-3.5 rounded-card border border-border bg-white p-3.5 shadow-sm min-[640px]:gap-4 min-[640px]:p-5"
                   >
-                    <div className="flex flex-col gap-4 lg:flex-row">
+                    <div className="flex flex-col gap-3.5 min-[640px]:gap-4 lg:flex-row">
                       {/* Private Authenticated Page Preview */}
                       <div className="w-full shrink-0 lg:w-48">
-                        <div className="relative h-56 w-full overflow-hidden rounded-control border border-border bg-cream">
+                        <div className="relative h-40 w-full overflow-hidden rounded-control border border-border bg-cream min-[640px]:h-48 lg:h-56">
                           <AuthenticatedImage
                             alt={`Ảnh trang nguồn ${sub.source_page_number} của ${sub.source_file_name}`}
                             className="h-full w-full object-contain p-2"
@@ -1710,7 +1757,7 @@ function ParentPrivateBookManagerContent({
                         {/* 3-Stage Status Strip */}
                         <div
                           aria-label="Tiến trình 3 bước kiểm tra"
-                          className="grid gap-2 sm:grid-cols-3"
+                          className="grid gap-2 min-[640px]:grid-cols-3"
                         >
                           <div className="rounded-control border border-border bg-canvas px-3 py-2 text-xs">
                             <p className="font-bold text-ink">
@@ -1780,10 +1827,19 @@ function ParentPrivateBookManagerContent({
                         </div>
 
                         {/* Tool Check Scope Disclosure */}
-                        <p className="rounded-control border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                        <p className="hidden rounded-control border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 md:block">
                           <strong>Phạm vi Tool Check:</strong>{" "}
                           {describeToolCheckScope(sub.tool_check_scope)}
                         </p>
+                        <details className="rounded-control border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 md:hidden">
+                          <summary className="flex min-h-11 cursor-pointer items-center font-bold text-ink">
+                            Phạm vi kiểm tra an toàn
+                          </summary>
+                          <p className="pb-2.5">
+                            <strong>Phạm vi Tool Check:</strong>{" "}
+                            {describeToolCheckScope(sub.tool_check_scope)}
+                          </p>
+                        </details>
 
                         {/* Parent Notice from Tool Check (non-sensitive summary) */}
                         {sub.tool_check_parent_notice ||
@@ -1839,8 +1895,9 @@ function ParentPrivateBookManagerContent({
                                 </span>
                               ) : (
                                 <Button
-                                  className="min-h-11 w-auto px-3 text-xs"
+                                  className="min-h-11! w-auto px-3! text-xs"
                                   disabled={isSubBusy}
+                                  fullWidth={false}
                                   onClick={() => void handleAcceptSpelling(sub)}
                                   type="button"
                                   variant="secondary"
@@ -1916,10 +1973,10 @@ function ParentPrivateBookManagerContent({
                               }
                               value={editText}
                             />
-                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                            <div className="mt-2 grid gap-2 min-[640px]:grid-cols-2">
                               <select
                                 aria-label="Nguồn nội dung khi chỉnh sửa"
-                                className="min-h-11 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
+                                className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
                                 onChange={(event) =>
                                   setEditSourceType(
                                     event.target.value as SourceUsageType,
@@ -1935,7 +1992,7 @@ function ParentPrivateBookManagerContent({
                               </select>
                               <input
                                 aria-label="Ghi chú nguồn khi chỉnh sửa"
-                                className="min-h-11 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
+                                className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
                                 onChange={(event) =>
                                   setEditSourceNote(event.target.value)
                                 }
@@ -1945,7 +2002,8 @@ function ParentPrivateBookManagerContent({
                             </div>
                             <div className="mt-3 flex flex-wrap gap-2">
                               <Button
-                                className="min-h-11 w-auto px-4 text-xs"
+                                className="min-h-11! w-auto px-4! text-xs"
+                                fullWidth={false}
                                 isLoading={busyKey === `edit:${sub.id}`}
                                 onClick={() => void handleSaveEdit(sub)}
                                 type="button"
@@ -1953,7 +2011,8 @@ function ParentPrivateBookManagerContent({
                                 Lưu phiên bản mới & kiểm tra lại
                               </Button>
                               <Button
-                                className="min-h-11 w-auto px-3 text-xs"
+                                className="min-h-11! w-auto px-3! text-xs"
+                                fullWidth={false}
                                 onClick={() => setEditingSubId(null)}
                                 type="button"
                                 variant="secondary"
@@ -1971,12 +2030,12 @@ function ParentPrivateBookManagerContent({
                               Gửi phiên bản v{sub.submission_version} sang Admin
                               xem xét
                             </p>
-                            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                              <label className="flex flex-col gap-1 text-xs font-semibold text-ink">
+                            <div className="mt-2 grid gap-2 min-[640px]:grid-cols-2">
+                              <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-ink">
                                 Nguồn nội dung
                                 <select
                                   aria-label="Nguồn nội dung gửi Admin"
-                                  className="min-h-11 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
+                                  className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
                                   onChange={(event) =>
                                     setReviewSourceType(
                                       event.target.value as SourceUsageType,
@@ -1991,11 +2050,11 @@ function ParentPrivateBookManagerContent({
                                   ))}
                                 </select>
                               </label>
-                              <label className="flex flex-col gap-1 text-xs font-semibold text-ink">
+                              <label className="flex min-w-0 flex-col gap-1 text-xs font-semibold text-ink">
                                 Ghi chú nguồn
                                 <input
                                   aria-label="Ghi chú nguồn gửi Admin"
-                                  className="min-h-11 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
+                                  className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
                                   onChange={(event) =>
                                     setReviewSourceNote(event.target.value)
                                   }
@@ -2008,7 +2067,7 @@ function ParentPrivateBookManagerContent({
                               Lời nhắn cho Admin (giải thích ngữ cảnh)
                               <textarea
                                 aria-label="Lời nhắn cho Admin"
-                                className="min-h-20 rounded-control border border-border bg-white p-2 text-xs text-ink"
+                                className="min-h-20 w-full rounded-control border border-border bg-white p-2 text-xs text-ink"
                                 onChange={(event) =>
                                   setReviewRequestNote(event.target.value)
                                 }
@@ -2018,7 +2077,8 @@ function ParentPrivateBookManagerContent({
                             </label>
                             <div className="mt-3 flex flex-wrap gap-2">
                               <Button
-                                className="min-h-11 w-auto px-4 text-xs"
+                                className="min-h-11! w-auto px-4! text-xs"
+                                fullWidth={false}
                                 isLoading={busyKey === `review:${sub.id}`}
                                 onClick={() =>
                                   void handleRequestAdminReview(sub)
@@ -2029,7 +2089,8 @@ function ParentPrivateBookManagerContent({
                                 Xác nhận gửi Admin
                               </Button>
                               <Button
-                                className="min-h-11 w-auto px-3 text-xs"
+                                className="min-h-11! w-auto px-3! text-xs"
+                                fullWidth={false}
                                 onClick={() => setReviewFormSubId(null)}
                                 type="button"
                                 variant="secondary"
@@ -2045,10 +2106,11 @@ function ParentPrivateBookManagerContent({
                           {/* Add Page to Book — STRICTLY LOCKED unless can_add_to_book */}
                           {sub.workflow_status !== "ADDED_TO_BOOK" ? (
                             <Button
-                              className="min-h-11 w-auto px-4 text-sm"
+                              className="min-h-11! max-[640px]:w-full min-[640px]:w-auto px-4! text-sm"
                               disabled={
                                 !sub.can_add_to_book || isSubBusy || isSuspended
                               }
+                              fullWidth={false}
                               isLoading={busyKey === `add:${sub.id}`}
                               onClick={() => void handleAddPage(sub)}
                               type="button"
@@ -2072,8 +2134,9 @@ function ParentPrivateBookManagerContent({
                           {/* Escalate to Admin */}
                           {sub.can_request_admin_review && !isReviewFormOpen ? (
                             <Button
-                              className="min-h-11 w-auto px-4 text-sm"
+                              className="min-h-11! w-auto px-4! text-sm"
                               disabled={isSubBusy || isSuspended}
+                              fullWidth={false}
                               onClick={() => {
                                 setReviewFormSubId(sub.id);
                                 setReviewSourceType(sub.source_type);
@@ -2091,8 +2154,9 @@ function ParentPrivateBookManagerContent({
                           {/* Stage-preserving Retry */}
                           {sub.can_retry ? (
                             <Button
-                              className="min-h-11 w-auto px-4 text-sm"
+                              className="min-h-11! w-auto px-4! text-sm"
                               disabled={isSubBusy || isSuspended}
+                              fullWidth={false}
                               isLoading={busyKey === `retry:${sub.id}`}
                               onClick={() => void handleRetry(sub)}
                               type="button"
@@ -2111,8 +2175,9 @@ function ParentPrivateBookManagerContent({
                           !isSuspended ? (
                             <>
                               <Button
-                                className="min-h-11 w-auto px-3 text-xs"
+                                className="min-h-11! w-auto px-3! text-xs"
                                 disabled={isSubBusy}
+                                fullWidth={false}
                                 onClick={() => {
                                   setEditingSubId(sub.id);
                                   setEditText(sub.candidate_text ?? "");
@@ -2201,7 +2266,7 @@ function ParentPrivateBookManagerContent({
           </p>
         ) : (
           <>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-4 min-[640px]:grid-cols-2 lg:grid-cols-3">
               {visibleCommittedPages.map((page) => {
                 const isEditingPage = editingPageId === page.page_id;
                 const isConfirmingDelete = confirmDeletePageId === page.page_id;
@@ -2326,7 +2391,7 @@ function ParentPrivateBookManagerContent({
                         </label>
                         <select
                           aria-label={`Nguồn nội dung trang ${page.page_number}`}
-                          className="min-h-11 rounded-control border border-border bg-white px-2 text-xs text-ink"
+                          className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-2 text-xs text-ink"
                           onChange={(event) =>
                             setEditPageSourceType(
                               event.target.value as SourceUsageType,
@@ -2342,7 +2407,7 @@ function ParentPrivateBookManagerContent({
                         </select>
                         <input
                           aria-label={`Ghi chú nguồn trang ${page.page_number}`}
-                          className="min-h-11 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
+                          className="min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
                           onChange={(event) =>
                             setEditPageSourceNote(event.target.value)
                           }
@@ -2352,7 +2417,8 @@ function ParentPrivateBookManagerContent({
                         />
                         <div className="flex flex-wrap gap-2">
                           <Button
-                            className="min-h-11 w-auto px-3 text-xs"
+                            className="min-h-11! w-auto px-3! text-xs"
+                            fullWidth={false}
                             isLoading={busyKey === `page-edit:${page.page_id}`}
                             onClick={() =>
                               void handleSaveCommittedPageEdit(page)
@@ -2362,7 +2428,8 @@ function ParentPrivateBookManagerContent({
                             Lưu & kiểm tra lại
                           </Button>
                           <Button
-                            className="min-h-11 w-auto px-3 text-xs"
+                            className="min-h-11! w-auto px-3! text-xs"
+                            fullWidth={false}
                             onClick={() => setEditingPageId(null)}
                             type="button"
                             variant="secondary"
@@ -2388,7 +2455,8 @@ function ParentPrivateBookManagerContent({
                         </p>
                         <div className="flex flex-wrap gap-2">
                           <Button
-                            className="min-h-11 w-auto bg-rose-700 px-3 text-xs text-white hover:bg-rose-800"
+                            className="min-h-11! w-auto bg-rose-700 px-3! text-xs text-white hover:bg-rose-800"
+                            fullWidth={false}
                             isLoading={
                               busyKey === `page-delete:${page.page_id}`
                             }
@@ -2398,7 +2466,8 @@ function ParentPrivateBookManagerContent({
                             Xác nhận xóa
                           </Button>
                           <Button
-                            className="min-h-11 w-auto px-3 text-xs"
+                            className="min-h-11! w-auto px-3! text-xs"
+                            fullWidth={false}
                             onClick={() => setConfirmDeletePageId(null)}
                             type="button"
                             variant="secondary"

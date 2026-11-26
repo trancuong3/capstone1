@@ -1313,6 +1313,12 @@ function ReadingSessionScreen({
     setHesitationWordIds(nextHesitationIds);
 
     setCurrentWordId(snapshot.currentWordId);
+    if (snapshot.currentWordIndex >= 0) {
+      lastPreviewWordIndexRef.current = Math.max(
+        lastPreviewWordIndexRef.current,
+        snapshot.currentWordIndex,
+      );
+    }
 
     const nextSpokenWords = new Set(spokenWordsSetRef.current);
 
@@ -1327,6 +1333,25 @@ function ReadingSessionScreen({
   function applyPreviewSnapshot(snapshot: RealtimeAlignmentSnapshot) {
     // Không ghi preview vào các ref thống kê chính thức và không ghi đè
     // currentWordId đã chốt để tránh nhấp nháy con trỏ khi interim thay đổi.
+    if (
+      snapshot.currentWordIndex >= 0 &&
+      snapshot.currentWordIndex < lastPreviewWordIndexRef.current
+    ) {
+      const clampedWord = page?.words.find(
+        (word) => word.word_index === lastPreviewWordIndexRef.current,
+      );
+      if (clampedWord) {
+        setPreviewSnapshot({
+          ...snapshot,
+          currentWordId: clampedWord.word_id,
+          currentWordIndex: clampedWord.word_index,
+        });
+        return;
+      }
+    }
+    if (snapshot.currentWordIndex > lastPreviewWordIndexRef.current) {
+      lastPreviewWordIndexRef.current = snapshot.currentWordIndex;
+    }
     setPreviewSnapshot(snapshot);
   }
 
@@ -1349,7 +1374,10 @@ function ReadingSessionScreen({
       setUncertainWordIds((previous) =>
         previous.has(cursor) ? previous : new Set([...previous, cursor]),
       );
-    if (engine === alignmentEngineRef.current) setPreviewSnapshot(null);
+    if (engine === alignmentEngineRef.current) {
+      setPreviewSnapshot(null);
+      lastPreviewWordIndexRef.current = engine.getSnapshot().currentWordIndex;
+    }
   }
 
   function resetPagePresentation() {
@@ -2892,8 +2920,16 @@ function ReadingSessionScreen({
             let interimText = "";
             const latestFinalText = newFinals.join(" ");
 
-            // 2. Lấy toàn bộ INTERIM hiện tại (kiểm tra fence trước khi preview).
-            for (let index = 0; index < event.results.length; index += 1) {
+            // 2. Lấy toàn bộ INTERIM hiện tại từ resultIndex (kiểm tra fence trước khi preview).
+            const interimStartIndex = Math.max(
+              0,
+              Number.isSafeInteger(event.resultIndex) ? event.resultIndex : 0,
+            );
+            for (
+              let index = interimStartIndex;
+              index < event.results.length;
+              index += 1
+            ) {
               const result = event.results[
                 index
               ] as BrowserSpeechEvent["results"][number] & SegmentResultMeta;
@@ -2916,12 +2952,17 @@ function ReadingSessionScreen({
             }
 
             if (interimText.trim()) {
-              const preview = engine.previewAlignment(interimText);
+              const preview = engine.previewAlignment(interimText, {
+                allowLookahead: false,
+              });
 
               applyPreviewSnapshot(preview);
             } else {
+              const confirmedSnapshot = engine.getSnapshot();
               setPreviewSnapshot(null);
-              setCurrentWordId(engine.getSnapshot().currentWordId);
+              lastPreviewWordIndexRef.current =
+                confirmedSnapshot.currentWordIndex;
+              setCurrentWordId(confirmedSnapshot.currentWordId);
             }
 
             // 3b. Giao cho ReadingAutomationRuntime theo dõi lỗi chưa tự sửa (G27):
@@ -3693,6 +3734,8 @@ function ReadingSessionScreen({
     if (!words.length) return;
 
     setPreviewSnapshot(null);
+    lastPreviewWordIndexRef.current =
+      alignmentEngineRef.current?.getSnapshot().currentWordIndex ?? -1;
     const sampleRunId = ++pageSampleRunIdRef.current;
     setIsBusy(true);
     setIsReadingWord(false);
@@ -3742,6 +3785,12 @@ function ReadingSessionScreen({
       );
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") return;
+      const unavailableReason =
+        getVoiceEngineStatus().ttsUnavailableReason ??
+        speechPlayer.ttsUnavailableReason;
+      if (unavailableReason === "android_vi_voice_missing") {
+        return;
+      }
       if (isCurrentSample()) {
         updateUiState("tts-error");
       }
@@ -6724,20 +6773,23 @@ function ReadingSessionScreen({
     );
   }
 
+  const activeVoiceNotice =
+    speechPlayer.voiceNotice ?? speechPlayer.fallbackNotice;
+
   const hasTopBarContent = Boolean(
     pageProgress ||
     (pageNavigationError && pickerIndex === null) ||
-    speechPlayer.fallbackNotice,
+    activeVoiceNotice,
   );
 
   const readingTopBar = hasTopBarContent ? (
-    <div className="flex flex-col gap-1 sm:border-b sm:border-border/80 sm:pb-1.5">
+    <div className="flex flex-col gap-1 md:border-b md:border-border/80 md:pb-1.5">
       {pageProgress ? (
-        <div className="hidden flex-wrap items-center gap-1 sm:flex sm:gap-2.5">
-          <div className="flex min-w-0 flex-nowrap items-center gap-1 sm:gap-1.5">
+        <div className="hidden flex-wrap items-center gap-1 md:flex md:gap-2.5">
+          <div className="flex min-w-0 flex-nowrap items-center gap-1 md:gap-1.5">
             <Button
               aria-label="Trang trước"
-              className="h-11! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! sm:gap-2! sm:px-2.5! sm:text-sm!"
+              className="h-11! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! md:gap-2! md:px-2.5! md:text-sm!"
               disabled={
                 (isBusy && !speechPlayer.isPlaying) ||
                 uiState !== "reading" ||
@@ -6750,14 +6802,14 @@ function ReadingSessionScreen({
             >
               <ChevronLeft
                 aria-hidden="true"
-                className="size-4 shrink-0 sm:size-5"
+                className="size-4 shrink-0 md:size-5"
               />
-              <span className="hidden sm:inline">Trang trước</span>
-              <span className="sm:hidden">Trước</span>
+              <span className="hidden md:inline">Trang trước</span>
+              <span className="md:hidden">Trước</span>
             </Button>
             <Button
               aria-label="Trang tiếp theo"
-              className="h-11! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! sm:gap-2! sm:px-2.5! sm:text-sm!"
+              className="h-11! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! md:gap-2! md:px-2.5! md:text-sm!"
               disabled={
                 (isBusy && !speechPlayer.isPlaying) ||
                 uiState !== "reading" ||
@@ -6768,11 +6820,11 @@ function ReadingSessionScreen({
               }
               variant="secondary"
             >
-              <span className="hidden sm:inline">Trang tiếp theo</span>
-              <span className="sm:hidden">Tiếp</span>
+              <span className="hidden md:inline">Trang tiếp theo</span>
+              <span className="md:hidden">Tiếp</span>
               <ChevronRight
                 aria-hidden="true"
-                className="size-4 shrink-0 sm:size-5"
+                className="size-4 shrink-0 md:size-5"
               />
             </Button>
             {pageProgress.persisted &&
@@ -6780,15 +6832,15 @@ function ReadingSessionScreen({
               "COMPLETED" ? (
               <Button
                 aria-label="Đánh dấu trang đã đọc xong"
-                className="h-11! w-auto! min-w-0 px-2! py-1! text-xs! sm:px-2.5! sm:text-sm!"
+                className="h-11! w-auto! min-w-0 px-2! py-1! text-xs! md:px-2.5! md:text-sm!"
                 disabled={isBusy || uiState !== "reading"}
                 onClick={() => void confirmCurrentPageCompleted()}
                 variant="quiet"
               >
-                <span className="hidden sm:inline">
+                <span className="hidden md:inline">
                   Đánh dấu trang đã đọc xong
                 </span>
-                <span className="sm:hidden">Xong trang</span>
+                <span className="md:hidden">Xong trang</span>
               </Button>
             ) : null}
           </div>
@@ -6799,7 +6851,7 @@ function ReadingSessionScreen({
             aria-expanded={pageOptionsOpen}
             aria-controls="reading-page-options"
             onClick={() => setPageOptionsOpen((open) => !open)}
-            className="ml-auto inline-flex min-h-11 shrink-0 items-center gap-1 rounded-control border border-border bg-white px-2 text-xs font-semibold text-ink hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:hidden"
+            className="ml-auto inline-flex min-h-11 shrink-0 items-center gap-1 rounded-control border border-border bg-white px-2 text-xs font-semibold text-ink hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary md:hidden"
           >
             <span>Tùy chọn</span>
             <ChevronDown
@@ -6810,7 +6862,7 @@ function ReadingSessionScreen({
 
           <div
             id="reading-page-options"
-            className={`${pageOptionsOpen ? "flex" : "hidden"} w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-xs sm:ml-auto sm:flex sm:w-auto sm:pt-0 sm:text-sm`}
+            className={`${pageOptionsOpen ? "flex" : "hidden"} w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-xs md:ml-auto md:flex md:w-auto md:pt-0 md:text-sm`}
           >
             <p
               data-reading-range-label="true"
@@ -6848,10 +6900,21 @@ function ReadingSessionScreen({
           ) : null}
         </div>
       ) : null}
-      {speechPlayer.fallbackNotice ? (
-        <div className="hidden sm:block">
+      {activeVoiceNotice ? (
+        <div className="hidden md:block">
           <StatusMessage tone="warning">
-            {speechPlayer.fallbackNotice}
+            <span>{activeVoiceNotice}</span>
+            {speechPlayer.canInstallVietnameseTtsVoice &&
+            speechPlayer.openTtsInstallSettings ? (
+              <Button
+                className="ml-3 inline-flex! h-11! min-h-11! w-auto! px-3! py-1! text-xs!"
+                onClick={() => void speechPlayer.openTtsInstallSettings?.()}
+                size="compact"
+                variant="secondary"
+              >
+                Mở Cài đặt TTS
+              </Button>
+            ) : null}
           </StatusMessage>
         </div>
       ) : null}
@@ -6859,7 +6922,7 @@ function ReadingSessionScreen({
       pageProgress.current_index === pageProgress.total_pages - 1 ? (
         <p
           data-reading-end-hint="true"
-          className="hidden text-xs font-semibold text-primary sm:block sm:text-sm"
+          className="hidden text-xs font-semibold text-primary md:block md:text-sm"
           role="status"
         >
           Bé đã đến trang cuối của phạm vi. Có thể kết thúc buổi đọc khi sẵn
@@ -6921,7 +6984,11 @@ function ReadingSessionScreen({
           !isBusy &&
           uiState === "reading",
         )}
-        mobileFallbackNotice={speechPlayer.fallbackNotice}
+        mobileFallbackNotice={activeVoiceNotice}
+        canInstallVietnameseTtsVoice={Boolean(
+          speechPlayer.canInstallVietnameseTtsVoice,
+        )}
+        onOpenTtsInstallSettings={speechPlayer.openTtsInstallSettings}
         hasMobileTopBarAlert={Boolean(
           pageNavigationError && pickerIndex === null,
         )}
@@ -6969,7 +7036,7 @@ function ReadingSessionScreen({
         voiceSettings={
           <ReadingVoiceSettings
             disabled={isMicRecording}
-            fallbackNotice={speechPlayer.fallbackNotice}
+            fallbackNotice={activeVoiceNotice}
             isPreviewing={speechPlayer.isPlaying}
             onPreview={handleVoicePreview}
             onStopPreview={stopAssistantAudio}
@@ -7108,7 +7175,7 @@ function ReadingSessionScreen({
                 </span>
                 <p
                   aria-hidden="true"
-                  className="flex flex-wrap items-center gap-1.5 text-base font-bold text-ink sm:text-lg"
+                  className="flex flex-wrap items-center gap-1.5 text-base font-bold text-ink md:text-lg"
                 >
                   {activeSentenceReinforcement.span.words.map((w, idx) => {
                     const matched =
@@ -7160,7 +7227,7 @@ function ReadingSessionScreen({
           closeOnEscape={!isBusy}
           onClose={closePagePicker}
         >
-          <div className="grid max-h-[45vh] grid-cols-2 gap-3 overflow-y-auto p-1 sm:grid-cols-3">
+          <div className="grid max-h-[45vh] grid-cols-2 gap-3 overflow-y-auto p-1 md:grid-cols-3">
             {pageProgress.pages.map((item, index) => (
               <button
                 key={item.page_id}

@@ -52,6 +52,7 @@ export function ChildrenListScreen() {
         action={
           <ButtonLink
             className="min-h-11 w-auto px-3 py-2 text-xs md:min-w-60 md:px-5 md:text-label"
+            fullWidth={false}
             href="/children/new"
           >
             <Plus aria-hidden="true" className="size-4 md:size-5" />
@@ -67,7 +68,7 @@ export function ChildrenListScreen() {
         <div
           aria-busy="true"
           aria-label="Đang tải hồ sơ bé"
-          className="grid gap-3 sm:grid-cols-2 md:gap-6"
+          className="grid gap-3 min-[640px]:grid-cols-2 min-[640px]:gap-4 md:gap-6"
         >
           <span className="sr-only" role="status">
             Đang tải…
@@ -84,7 +85,7 @@ export function ChildrenListScreen() {
             Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
           </StatusMessage>
           <Button
-            className="sm:w-auto sm:self-start sm:px-8"
+            className="w-full min-[640px]:w-auto min-[640px]:self-start min-[640px]:px-8"
             onClick={() => setRequestKey((key) => key + 1)}
             variant="secondary"
           >
@@ -111,7 +112,7 @@ export function ChildrenListScreen() {
       ) : null}
 
       {state.status === "ready" && state.children.length > 0 ? (
-        <div className="grid gap-3 sm:grid-cols-2 md:gap-6">
+        <div className="grid gap-3 min-[640px]:grid-cols-2 min-[640px]:gap-4 md:gap-6">
           {state.children.map((child) => (
             <ChildProfileCard
               child={child}

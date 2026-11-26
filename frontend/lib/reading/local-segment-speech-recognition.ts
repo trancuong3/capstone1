@@ -117,8 +117,10 @@ const MIN_NEW_VOICED_INTERIM_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.08);
 const WS_PCM_CHUNK_SAMPLES = 1024; // 64ms @ 16kHz mono Int16 LE (2048 bytes)
 const WS_FLUSH_FALLBACK_TIMEOUT_MS = 5_500;
 const INTERIM_HTTP_TIMEOUT_MS = 6_500;
+const ANDROID_STT_CLEAN_RESTART_DELAY_MS = 50;
 const ANDROID_STT_RESTART_DELAY_MS = 120;
 const ANDROID_STT_BUSY_RESTART_DELAY_MS = 350;
+const ANDROID_STT_NETWORK_RETRY_DELAY_MS = 500;
 const PRE_ROLL_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.45);
 const QUIET_TAIL_CARRY_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.35);
 const MAX_FLUSH_TRAILING_SILENCE_SAMPLES = Math.floor(
@@ -133,11 +135,14 @@ const INTERIM_STEP_SAMPLES = Math.floor(
 );
 export const EMERGENCY_FAILURE_THRESHOLD = 2;
 export const LOCAL_OUTAGE_RETRY_MS = 45_000;
+export const WASM_FAILURE_RETRY_MS = 60_000;
 
 let lastLocalSttOutageAt = 0;
+let lastWasmSttFailureAt = 0;
 
 export function resetLocalSttEmergencyStateForTests(): void {
   lastLocalSttOutageAt = 0;
+  lastWasmSttFailureAt = 0;
 }
 
 function downsampleTo16k(input: Float32Array, inputRate: number): Float32Array {
@@ -480,10 +485,38 @@ function isAndroidNativeSttReady(): boolean {
   return caps ? caps.sttAvailable : true;
 }
 
+function isWasmOfflineUncached(): boolean {
+  const wasmClient = getBrowserWasmSttClient();
+  return (
+    typeof navigator !== "undefined" &&
+    navigator.onLine === false &&
+    wasmClient.getCachedModelReady() === false &&
+    !wasmClient.isReady()
+  );
+}
+
+export function isBrowserWasmSttViable(): boolean {
+  if (!detectBrowserWasmSttSupport().supported) return false;
+  const now = Date.now();
+  if (
+    lastWasmSttFailureAt > 0 &&
+    now - lastWasmSttFailureAt < WASM_FAILURE_RETRY_MS
+  ) {
+    return false;
+  }
+  if (isWasmOfflineUncached()) {
+    return false;
+  }
+  return true;
+}
+
 /**
  * Returns `true` when Android native `SpeechRecognizer` should handle STT
  * exclusively (skipping parallel WebView `getUserMedia`/`MediaRecorder` to
  * avoid Android audio HAL microphone contention).
+ *
+ * Browser WASM STT (`sherpa-onnx-zipformer-vi-30M-int8`) takes priority whenever
+ * supported and viable so `speechRecorder` stays active for WASM PCM capture.
  */
 export function shouldPreferAndroidNativeStt(): boolean {
   if (!isAndroidNativeSttReady()) return false;
@@ -491,6 +524,12 @@ export function shouldPreferAndroidNativeStt(): boolean {
   const freshHealth = getFreshVoiceEngineHealth();
   if (freshHealth) {
     if (freshHealth.local.available && freshHealth.local.stt_ready) {
+      return false;
+    }
+    if (
+      isBrowserWasmSttViable() &&
+      getVoiceEngineStatus().stt.tier !== "android_native"
+    ) {
       return false;
     }
     if (
@@ -504,10 +543,19 @@ export function shouldPreferAndroidNativeStt(): boolean {
   }
   const now = Date.now();
   const status = getVoiceEngineStatus().stt;
+  if (
+    status.tier === "android_native" &&
+    ((lastLocalSttOutageAt > 0 &&
+      now - lastLocalSttOutageAt < LOCAL_OUTAGE_RETRY_MS) ||
+      (lastWasmSttFailureAt > 0 &&
+        now - lastWasmSttFailureAt < WASM_FAILURE_RETRY_MS))
+  ) {
+    return true;
+  }
   return (
     lastLocalSttOutageAt > 0 &&
     now - lastLocalSttOutageAt < LOCAL_OUTAGE_RETRY_MS &&
-    (status.tier === "android_native" || status.tier === "browser_default")
+    status.tier === "browser_default"
   );
 }
 
@@ -764,6 +812,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         (!freshHealth.local.available || !freshHealth.local.stt_ready);
       const now = Date.now();
       const androidSttReady = isAndroidNativeSttReady();
+      const wasmViable = isBrowserWasmSttViable();
       const confirmedLocalDownNoGoogle =
         confirmedLocalDown &&
         (policy.providerMode === "local_only" ||
@@ -782,39 +831,28 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           getVoiceEngineStatus().stt.tier === "browser_default" ||
           getVoiceEngineStatus().stt.tier === "android_native");
 
-      if (
+      if ((confirmedLocalDown || withinWasmCooldown) && wasmViable) {
+        this.activateWasmStt(
+          confirmedLocalDown ? "LOCAL_STT_UNAVAILABLE" : null,
+          confirmedLocalDown,
+        );
+      } else if (
         androidSttReady &&
         (confirmedLocalDownNoGoogle || withinEmergencyCooldown)
       ) {
         if (confirmedLocalDownNoGoogle) {
           lastLocalSttOutageAt = now;
         }
-        if (this.tryActivateBrowserFallback()) {
+        const reason = !detectBrowserWasmSttSupport().supported
+          ? "LOCAL_STT_UNAVAILABLE"
+          : isWasmOfflineUncached()
+            ? "WASM_OFFLINE_UNCACHED"
+            : lastWasmSttFailureAt > 0
+              ? "WASM_INIT_FAILED"
+              : "ANDROID_NATIVE_STT";
+        if (this.tryActivateBrowserFallback(reason)) {
           return;
         }
-      }
-
-      if (
-        !androidSttReady &&
-        (confirmedLocalDown || withinWasmCooldown) &&
-        detectBrowserWasmSttSupport().supported
-      ) {
-        if (confirmedLocalDown) {
-          lastLocalSttOutageAt = now;
-        }
-        this.usingWasmStt = true;
-        this.wsDisabledForRun = true;
-        this.wasmFallbackReason = confirmedLocalDown
-          ? "LOCAL_STT_UNAVAILABLE"
-          : null;
-        recordSttEngineUsage({
-          provider: "wasm",
-          fallbackUsed: true,
-          fallbackReason: this.wasmFallbackReason,
-        });
-        void getBrowserWasmSttClient()
-          .init(this.abortController.signal)
-          .catch(() => undefined);
       } else if (
         policy.providerMode === "local_with_google_fallback" &&
         policy.allowGoogleSttFallback
@@ -842,6 +880,85 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     }
 
     void this.openAudioGraph(audioTrack);
+  }
+
+  private activateWasmStt(reason: string | null, markOutage: boolean): void {
+    if (markOutage) {
+      lastLocalSttOutageAt = Date.now();
+    }
+    this.usingWasmStt = true;
+    this.wsDisabledForRun = true;
+    this.wasmFallbackReason = reason;
+    const wasmClient = getBrowserWasmSttClient();
+    const capturedEpoch = this.epoch;
+    recordSttEngineUsage({
+      provider: "wasm",
+      fallbackUsed: true,
+      fallbackReason: this.wasmFallbackReason,
+      wasmState: wasmClient.isReady() ? "ready" : "warming",
+    });
+
+    if (
+      typeof navigator !== "undefined" &&
+      navigator.onLine === false &&
+      !wasmClient.isReady()
+    ) {
+      void wasmClient.probeCachedModelReady().then((cachedReady) => {
+        if (
+          cachedReady ||
+          !this.active ||
+          this.stopping ||
+          this.usingBrowserFallback ||
+          capturedEpoch !== this.epoch
+        ) {
+          return;
+        }
+        lastWasmSttFailureAt = Date.now();
+        this.usingWasmStt = false;
+        if (!this.tryActivateBrowserFallback("WASM_OFFLINE_UNCACHED")) {
+          this.tripServiceCircuitBreaker();
+        }
+      });
+    }
+
+    // Do not cancel shared 34MB model download if this recognizer stops mid-utterance.
+    void wasmClient
+      .init(undefined, { timeoutMs: 90_000 })
+      .then(() => {
+        if (
+          !this.active ||
+          this.stopping ||
+          this.usingBrowserFallback ||
+          !this.usingWasmStt ||
+          capturedEpoch !== this.epoch
+        ) {
+          return;
+        }
+        recordSttEngineUsage({
+          provider: "wasm",
+          fallbackUsed: true,
+          fallbackReason: this.wasmFallbackReason,
+          wasmState: "ready",
+        });
+      })
+      .catch((err) => {
+        if (err instanceof Error && err.name === "AbortError") {
+          return;
+        }
+        lastWasmSttFailureAt = Date.now();
+        if (
+          !this.active ||
+          this.stopping ||
+          this.usingBrowserFallback ||
+          capturedEpoch !== this.epoch
+        ) {
+          return;
+        }
+        this.usingWasmStt = false;
+        if (!this.tryActivateBrowserFallback("WASM_INIT_FAILED")) {
+          this.tripServiceCircuitBreaker();
+        }
+      });
   }
 
   private clearBrowserRestartTimer(): void {
@@ -993,30 +1110,24 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       this.consecutiveTechnicalFailures >= EMERGENCY_FAILURE_THRESHOLD
     ) {
       lastLocalSttOutageAt = Date.now();
-      if (isAndroidNativeSttReady() && this.tryActivateBrowserFallback()) {
-        return true;
-      }
-      if (detectBrowserWasmSttSupport().supported) {
-        this.usingWasmStt = true;
-        this.wsDisabledForRun = true;
-        this.wasmFallbackReason = "LOCAL_STT_UNAVAILABLE";
+      if (isBrowserWasmSttViable()) {
         this.closeSttWebSocket();
-        recordSttEngineUsage({
-          provider: "wasm",
-          fallbackUsed: true,
-          fallbackReason: "LOCAL_STT_UNAVAILABLE",
-        });
-        void getBrowserWasmSttClient()
-          .init(this.abortController?.signal)
-          .catch(() => undefined);
+        this.activateWasmStt("LOCAL_STT_UNAVAILABLE", false);
         return true;
       }
-      return this.tryActivateBrowserFallback();
+      const fallbackReason = !detectBrowserWasmSttSupport().supported
+        ? "LOCAL_STT_UNAVAILABLE"
+        : isWasmOfflineUncached()
+          ? "WASM_OFFLINE_UNCACHED"
+          : lastWasmSttFailureAt > 0
+            ? "WASM_INIT_FAILED"
+            : "LOCAL_STT_UNAVAILABLE";
+      return this.tryActivateBrowserFallback(fallbackReason);
     }
     return false;
   }
 
-  private tryActivateBrowserFallback(): boolean {
+  private tryActivateBrowserFallback(fallbackReason?: string): boolean {
     if (!this.active || this.stopping || this.usingBrowserFallback) {
       return false;
     }
@@ -1062,6 +1173,13 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       return false;
     }
 
+    if (
+      useAndroidNative &&
+      nativeRec instanceof AndroidNativeSpeechRecognition
+    ) {
+      nativeRec.fallbackReason = fallbackReason ?? "ANDROID_NATIVE_STT";
+    }
+
     nativeRec.lang = this.lang || "vi-VN";
     nativeRec.continuous = this.continuous;
     nativeRec.interimResults = this.interimResults;
@@ -1073,9 +1191,11 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.clearBrowserRestartTimer();
     let fatalFallbackError = false;
     let lastFallbackError: string | null = null;
+    let transientNetworkErrorCount = 0;
 
     nativeRec.onresult = (ev: SegmentSpeechEvent) => {
       if (!this.active || this.browserFallbackRec !== nativeRec) return;
+      transientNetworkErrorCount = 0;
       const ctx = this.getContext?.() ?? {};
       const base = this.browserBaseOffset;
       const totalLength = base + ev.results.length;
@@ -1101,7 +1221,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         const item: SegmentSpeechResultItem = {
           ...rawItem,
           0: normalizedAlt,
-          epoch: rawItem?.epoch ?? this.epoch,
+          epoch: this.epoch,
           sessionId: rawItem?.sessionId ?? ctx.sessionId ?? null,
           pageId: rawItem?.pageId ?? ctx.pageId ?? null,
           turnId: fallbackTurnId,
@@ -1131,13 +1251,20 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         return;
       }
       lastFallbackError = ev.error ?? null;
-      if (
+      if (ev.error === "network") {
+        const isOnline =
+          typeof navigator === "undefined" || navigator.onLine !== false;
+        if (isOnline && transientNetworkErrorCount < 2) {
+          transientNetworkErrorCount += 1;
+          return;
+        }
+        fatalFallbackError = true;
+      } else if (
         ev.error === "not-allowed" ||
         ev.error === "service-not-allowed" ||
         ev.error === "language-not-supported" ||
         ev.error === "audio-capture" ||
-        ev.error === "stt-unavailable" ||
-        ev.error === "network"
+        ev.error === "stt-unavailable"
       ) {
         fatalFallbackError = true;
       }
@@ -1156,7 +1283,11 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           const restartDelayMs =
             lastFallbackError === "aborted"
               ? ANDROID_STT_BUSY_RESTART_DELAY_MS
-              : ANDROID_STT_RESTART_DELAY_MS;
+              : lastFallbackError === "network"
+                ? ANDROID_STT_NETWORK_RETRY_DELAY_MS
+                : lastFallbackError === "no-speech"
+                  ? ANDROID_STT_RESTART_DELAY_MS
+                  : ANDROID_STT_CLEAN_RESTART_DELAY_MS;
           lastFallbackError = null;
           this.clearBrowserRestartTimer();
           this.browserRestartTimer = setTimeout(() => {
@@ -1203,8 +1334,8 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       provider: useAndroidNative ? "android_native" : "browser",
       fallbackUsed: true,
       fallbackReason: useAndroidNative
-        ? "ANDROID_NATIVE_STT"
-        : "LOCAL_STT_UNAVAILABLE",
+        ? (fallbackReason ?? "ANDROID_NATIVE_STT")
+        : (fallbackReason ?? "LOCAL_STT_UNAVAILABLE"),
     });
 
     try {
@@ -1290,6 +1421,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         pending.audioToEncode,
         {
           signal,
+          initTimeoutMs: 90_000,
           timeoutMs: 20_000,
           voicedDurationMs: pending.voicedDurationMs,
         },
@@ -1768,13 +1900,24 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         if (!navigator.mediaDevices?.getUserMedia) {
           throw new Error("not-allowed");
         }
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        });
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          });
+        } catch (mediaErr) {
+          if (
+            mediaErr instanceof Error &&
+            mediaErr.name === "OverconstrainedError"
+          ) {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          } else {
+            throw mediaErr;
+          }
+        }
         if (!this.active || this.stopping) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -2069,6 +2212,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     ) {
       return;
     }
+    if (this.usingWasmStt && !getBrowserWasmSttClient().isReady()) {
+      return;
+    }
     const interimCtrl = new AbortController();
     this.interimAbortController = interimCtrl;
     const parentSignal = this.abortController?.signal;
@@ -2112,6 +2258,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     const interimPromise: Promise<{ text: string }> = usedWasm
       ? getBrowserWasmSttClient().transcribeSamples(combined, {
           signal: interimCtrl.signal,
+          initTimeoutMs: 90_000,
           timeoutMs: 4_000,
           voicedDurationMs,
         })
@@ -2195,8 +2342,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       .catch((err) => {
         if (interimCtrl.signal.aborted) return;
         if (usedWasm && this.usingWasmStt) {
+          lastWasmSttFailureAt = Date.now();
           this.usingWasmStt = false;
-          this.tryActivateBrowserFallback();
+          this.tryActivateBrowserFallback("WASM_RUNTIME_ERROR");
           return;
         }
         if (isTechnicalSttUnavailabilityError(err)) {
@@ -2392,6 +2540,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
                 audioToEncode,
                 {
                   signal,
+                  initTimeoutMs: 90_000,
                   timeoutMs: 20_000,
                   voicedDurationMs,
                 },
@@ -2401,6 +2550,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
                 fallbackUsed: true,
                 fallbackReason:
                   this.wasmFallbackReason ?? "LOCAL_STT_UNAVAILABLE",
+                wasmState: "ready",
               });
               return {
                 text: wasmRes.text,
@@ -2447,8 +2597,12 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
                 }
                 if (this.usingWasmStt) {
                   // Tier 1 WASM failed -> fall back immediately to Tier 3 (Android Native / Web Speech).
+                  lastWasmSttFailureAt = Date.now();
                   this.usingWasmStt = false;
-                  if (this.tryActivateBrowserFallback()) {
+                  const reason = getBrowserWasmSttClient().isReady()
+                    ? "WASM_RUNTIME_ERROR"
+                    : "WASM_INIT_FAILED";
+                  if (this.tryActivateBrowserFallback(reason)) {
                     return {
                       text: "",
                       words: null as readonly WordTimestamp[] | null,
@@ -2465,8 +2619,12 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
                     try {
                       return await transcribeWithWasm();
                     } catch (wasmErr) {
+                      lastWasmSttFailureAt = Date.now();
                       this.usingWasmStt = false;
-                      if (this.tryActivateBrowserFallback()) {
+                      const reason = getBrowserWasmSttClient().isReady()
+                        ? "WASM_RUNTIME_ERROR"
+                        : "WASM_INIT_FAILED";
+                      if (this.tryActivateBrowserFallback(reason)) {
                         return {
                           text: "",
                           words: null as readonly WordTimestamp[] | null,
@@ -2526,8 +2684,12 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           (this.usingWasmStt || attemptedWasm) &&
           !(err instanceof Error && err.name === "AbortError");
         if (isWasmFailure) {
+          lastWasmSttFailureAt = Date.now();
           this.usingWasmStt = false;
-          if (this.tryActivateBrowserFallback()) {
+          const reason = getBrowserWasmSttClient().isReady()
+            ? "WASM_RUNTIME_ERROR"
+            : "WASM_INIT_FAILED";
+          if (this.tryActivateBrowserFallback(reason)) {
             return;
           }
           this.tripServiceCircuitBreaker();

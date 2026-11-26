@@ -14,6 +14,7 @@ import {
   installAndroidAudioUnlock,
 } from "@/lib/reading/android-audio-unlock";
 import {
+  getCachedAndroidSpeechCapabilities,
   isAndroidNativeSpeechAvailable,
   speakWithAndroidNativeTts,
   stopAndroidNativeTts,
@@ -57,8 +58,12 @@ import {
 import { normalizeVietnameseWord } from "@/lib/reading/vietnamese-text";
 import {
   getFreshVoiceEngineHealth,
+  getVoiceEngineStatus,
   mapLocalVoiceToGoogleBackup,
   recordTtsEngineUsage,
+  recordTtsUnavailability,
+  type TtsUnavailableReason,
+  type VoiceEngineHealthSnapshot,
 } from "@/lib/reading/voice-engine-status";
 import { resolveVoiceGender } from "@/lib/reading/voice-persona";
 import {
@@ -214,6 +219,8 @@ const SERVER_FALLBACK_VOICE_NOTICE =
   "Giọng đã chọn hiện chưa khả dụng, hệ thống đang đọc bằng giọng dự phòng.";
 const ANDROID_NATIVE_FALLBACK_VOICE_NOTICE =
   "Giọng đọc trên máy chủ chưa bật — ViRead đang dùng giọng tiếng Việt trên thiết bị Android.";
+const ANDROID_VI_VOICE_MISSING_NOTICE =
+  "Thiết bị Android chưa cài giọng đọc tiếng Việt offline. Ba mẹ mở Cài đặt TTS để tải giọng hoặc xem chữ trên màn hình nhé.";
 const BROWSER_FALLBACK_VOICE_NOTICE =
   "Giọng đọc trên máy chưa bật — ViRead đang dùng giọng Online của trình duyệt.";
 const CATALOG_TTS_CACHE_NAME = "viread-catalog-tts-v1";
@@ -235,20 +242,44 @@ function canUseBrowserSpeechSynthesis(): boolean {
   );
 }
 
+function hasUsableAndroidVietnameseTts(): boolean {
+  if (!isAndroidNativeSpeechAvailable()) return false;
+  const caps = getCachedAndroidSpeechCapabilities();
+  if (caps !== null && (!caps.ttsAvailable || caps.viVoicesCount <= 0)) {
+    return false;
+  }
+  return true;
+}
+
+function isAndroidMissingVietnameseVoiceError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = (error as { code?: unknown }).code;
+  return code === "voice_not_installed" || code === "tts_unavailable";
+}
+
+function resolveAndroidTtsProbeTimeoutMs(
+  health: VoiceEngineHealthSnapshot | null,
+): number | undefined {
+  if (!isAndroidNativeSpeechAvailable()) return undefined;
+  if (health === null) return 6_000;
+  if (!health.local.available || !health.local.tts_ready) return 4_500;
+  return undefined;
+}
+
 function canUseAllowedDeviceFallbackTts(operation?: Operation): boolean {
-  // Enforce SessionVoiceLock ("Một buổi, một giọng"):
-  // never silently jump to OS/Android/browser voice mid-session.
+  // Android Native TTS (`android_native`) is 100% on-device/offline (NOT Google
+  // cloud), so it remains allowed even during an active SessionVoiceLock as
+  // long as Vietnamese voice data is available on the device.
+  if (isAndroidNativeSpeechAvailable()) {
+    return hasUsableAndroidVietnameseTts();
+  }
+  // Enforce SessionVoiceLock ("Một buổi, một giọng") on non-Android Web:
+  // never silently jump to browser SpeechSynthesis mid-session.
   const isSessionLocked = Boolean(
     operation?.voice.sessionId ?? getActiveSessionVoiceLock(),
   );
   if (isSessionLocked) {
     return false;
-  }
-  // Android Native TTS (`android_native`) is 100% on-device/offline (NOT Google
-  // cloud), so it remains allowed under `local_only` when no session voice lock
-  // is active (Tier 3 Android APK fallback).
-  if (isAndroidNativeSpeechAvailable()) {
-    return true;
   }
   const policy = getVoicePolicyPreferences();
   if (policy.providerMode === "local_only") {
@@ -588,6 +619,11 @@ export class TtsPlayback {
   getState = (): PlaybackState => this.state;
   getActiveAudioKind = (): ActiveAudioKind => this.activeAudioKind;
   getFallbackNotice = (): string | null => this.fallbackNotice;
+  getVoiceNotice = (): string | null => getVoiceEngineStatus().voiceNotice;
+  getTtsUnavailableReason = (): TtsUnavailableReason | null =>
+    getVoiceEngineStatus().ttsUnavailableReason;
+  canInstallVietnameseTtsVoice = (): boolean =>
+    getVoiceEngineStatus().canInstallVietnameseTtsVoice;
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -597,10 +633,38 @@ export class TtsPlayback {
   };
 
   private setFallbackNotice = (notice: string | null): void => {
+    if (
+      notice === null &&
+      getVoiceEngineStatus().ttsUnavailableReason !== null
+    ) {
+      recordTtsUnavailability({ reason: null });
+    }
     if (notice === this.fallbackNotice) return;
     this.fallbackNotice = notice;
     this.listeners.forEach((listener) => listener());
   };
+
+  private recordMissingAndroidViVoiceNotice(): void {
+    this.setFallbackNotice(ANDROID_VI_VOICE_MISSING_NOTICE);
+    recordTtsUnavailability({
+      reason: "android_vi_voice_missing",
+      canInstallVietnameseTtsVoice: true,
+      voiceNotice: ANDROID_VI_VOICE_MISSING_NOTICE,
+    });
+  }
+
+  private recordLockedOrUnavailableNotice(): void {
+    if (isAndroidNativeSpeechAvailable() && !hasUsableAndroidVietnameseTts()) {
+      this.recordMissingAndroidViVoiceNotice();
+      return;
+    }
+    this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+    recordTtsUnavailability({
+      reason: "worker_offline_locked",
+      canInstallVietnameseTtsVoice: false,
+      voiceNotice: LOCKED_VOICE_UNAVAILABLE_NOTICE,
+    });
+  }
 
   private setActiveAudioKind = (kind: ActiveAudioKind): void => {
     if (kind === this.activeAudioKind) return;
@@ -739,6 +803,7 @@ export class TtsPlayback {
 
   handlePreferencesChange = (): void => {
     this.timedCooldownUntil = 0;
+    recordTtsUnavailability({ reason: null });
     this.setFallbackNotice(null);
     this.stop();
   };
@@ -898,6 +963,10 @@ export class TtsPlayback {
   ): Promise<number> {
     this.ensure(operation);
     if (!isAndroidNativeSpeechAvailable()) throw unavailable();
+    if (!hasUsableAndroidVietnameseTts()) {
+      this.recordMissingAndroidViVoiceNotice();
+      throw unavailable();
+    }
     await this.waitIfPaused(operation);
     this.ensure(operation);
 
@@ -948,7 +1017,7 @@ export class TtsPlayback {
         return;
       }
       const clamped = Math.max(0, Math.min(options.words.length - 1, idx));
-      if (clamped !== lastWordIdx) {
+      if (clamped > lastWordIdx) {
         lastWordIdx = clamped;
         options.onWord(clamped);
       }
@@ -1009,6 +1078,11 @@ export class TtsPlayback {
         },
       });
       return elapsedSec;
+    } catch (error) {
+      if (isAndroidMissingVietnameseVoiceError(error)) {
+        this.recordMissingAndroidViVoiceNotice();
+      }
+      throw error;
     } finally {
       clearTimers();
       if (this.media === media) this.media = null;
@@ -1032,12 +1106,19 @@ export class TtsPlayback {
         this.ensure(operation);
         if (isAbort(error)) throw error;
         if (!canUseGoogleTtsFallback() || !canUseBrowserSpeechSynthesis()) {
+          if (
+            !isAndroidMissingVietnameseVoiceError(error) &&
+            getVoiceEngineStatus().ttsUnavailableReason !==
+              "android_vi_voice_missing"
+          ) {
+            this.recordLockedOrUnavailableNotice();
+          }
           throw unavailable();
         }
       }
     }
     if (!canUseGoogleTtsFallback()) {
-      this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+      this.recordLockedOrUnavailableNotice();
       throw unavailable();
     }
     return this.playBrowserSpeech(operation, text, options);
@@ -1136,7 +1217,7 @@ export class TtsPlayback {
       const emitWord = (idx: number) => {
         if (!active() || !options.onWord || !options.words?.length) return;
         const clamped = Math.max(0, Math.min(options.words.length - 1, idx));
-        if (clamped !== lastWordIdx) {
+        if (clamped > lastWordIdx) {
           lastWordIdx = clamped;
           options.onWord(clamped);
         }
@@ -1432,14 +1513,9 @@ export class TtsPlayback {
           shouldSentencePipeline ? 95 : SHORT_TTS_MAX_CHARACTERS,
         );
 
-        const freshHealthForPlay = getFreshVoiceEngineHealth();
-        const androidLocalDownProbeTimeoutMs =
-          isAndroidNativeSpeechAvailable() &&
-          freshHealthForPlay !== null &&
-          (!freshHealthForPlay.local.available ||
-            !freshHealthForPlay.local.tts_ready)
-            ? 4_500
-            : undefined;
+        const androidLocalDownProbeTimeoutMs = resolveAndroidTtsProbeTimeoutMs(
+          getFreshVoiceEngineHealth(),
+        );
 
         const fetchChunk = async (
           chunkText: string,
@@ -1620,7 +1696,7 @@ export class TtsPlayback {
               );
               continue;
             }
-            this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+            this.recordLockedOrUnavailableNotice();
             throw unavailable();
           }
 
@@ -1683,7 +1759,7 @@ export class TtsPlayback {
                   wavRetry.audio.type.trim().length > 0 &&
                   !isWavAudioBlob(wavRetry.audio)
                 ) {
-                  this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+                  this.recordLockedOrUnavailableNotice();
                   throw unavailable();
                 }
                 this.setFallbackNotice(
@@ -1718,11 +1794,11 @@ export class TtsPlayback {
                   }
                   throw wavError;
                 }
-                this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+                this.recordLockedOrUnavailableNotice();
                 throw unavailable();
               }
             }
-            this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+            this.recordLockedOrUnavailableNotice();
             throw error;
           }
         }
@@ -1825,14 +1901,9 @@ export class TtsPlayback {
           return;
         }
 
-        const freshPhonicsHealth = getFreshVoiceEngineHealth();
-        const androidPhonicsProbeTimeoutMs =
-          isAndroidNativeSpeechAvailable() &&
-          freshPhonicsHealth !== null &&
-          (!freshPhonicsHealth.local.available ||
-            !freshPhonicsHealth.local.tts_ready)
-            ? 4_500
-            : undefined;
+        const androidPhonicsProbeTimeoutMs = resolveAndroidTtsProbeTimeoutMs(
+          getFreshVoiceEngineHealth(),
+        );
 
         const phonicsKey = JSON.stringify([
           operation.voice.provider,
@@ -2085,7 +2156,7 @@ export class TtsPlayback {
                   await playPhonicsViaBrowser();
                   return;
                 }
-                this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+                this.recordLockedOrUnavailableNotice();
                 throw unavailable();
               }
             }
@@ -2278,7 +2349,7 @@ export class TtsPlayback {
                 );
                 continue;
               }
-              this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+              this.recordLockedOrUnavailableNotice();
               throw unavailable();
             }
           }
@@ -2340,10 +2411,12 @@ export class TtsPlayback {
         if (!canMap) options.onWordChange?.(-1);
         const requireWordTimings =
           Boolean(options.onWordChange) &&
+          !canMap &&
           !options.precomputedWordTimings?.length;
 
         // Tier 1: Precomputed verified-catalog MP3 URL — strictly gated on
-        // exact DEFAULT_LOCAL_VOICE_ID, public catalog book, and !requireWordTimings.
+        // exact DEFAULT_LOCAL_VOICE_ID and public catalog book; when word
+        // timings are absent on a mappable page, drive proportional timings.
         if (
           this.canUsePrecomputedCatalogUrl(
             operation,
@@ -2374,6 +2447,12 @@ export class TtsPlayback {
                 operation.voice.speed,
                 inferPrecomputedCatalogUrlSpeed(options.precomputedAudioUrl),
               );
+              const fallbackWordCount =
+                canMap &&
+                !options.precomputedWordTimings?.length &&
+                options.onWordChange
+                  ? words.length
+                  : undefined;
               await this.playAudio(
                 operation,
                 precomputedBlob,
@@ -2382,10 +2461,7 @@ export class TtsPlayback {
                 () =>
                   this.started(operation, () => {
                     options.onPlay?.();
-                    if (
-                      (!canMap || !options.precomputedWordTimings?.length) &&
-                      options.onPlay
-                    ) {
+                    if (!canMap && options.onPlay) {
                       options.onWordChange?.(-1);
                     }
                   }),
@@ -2394,6 +2470,7 @@ export class TtsPlayback {
                 },
                 undefined,
                 precomputedPlaybackRate,
+                fallbackWordCount,
               );
               this.ensure(operation);
               options.onEnded?.();
@@ -2439,13 +2516,9 @@ export class TtsPlayback {
           operation,
           hasTimedCacheTarget,
         );
-        const freshHealth = getFreshVoiceEngineHealth();
-        const androidLocalDownProbeTimeoutMs =
-          isAndroidNativeSpeechAvailable() &&
-          freshHealth !== null &&
-          (!freshHealth.local.available || !freshHealth.local.tts_ready)
-            ? 4_500
-            : undefined;
+        const androidLocalDownProbeTimeoutMs = resolveAndroidTtsProbeTimeoutMs(
+          getFreshVoiceEngineHealth(),
+        );
         const shouldTimedSentencePipeline =
           operation.voice.provider === "local" &&
           text.length > 120 &&
@@ -2732,7 +2805,12 @@ export class TtsPlayback {
                   await fallback();
                   return;
                 }
-                this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+                if (
+                  getVoiceEngineStatus().ttsUnavailableReason !==
+                  "android_vi_voice_missing"
+                ) {
+                  this.recordLockedOrUnavailableNotice();
+                }
                 throw unavailable();
               }
             }
@@ -2769,7 +2847,7 @@ export class TtsPlayback {
               continue;
             }
             this.timedCooldownUntil = Date.now() + 15_000;
-            this.setFallbackNotice(LOCKED_VOICE_UNAVAILABLE_NOTICE);
+            this.recordLockedOrUnavailableNotice();
             throw unavailable();
           }
           completedChunks += 1;
@@ -2871,6 +2949,7 @@ export class TtsPlayback {
     onWord?: (index: number) => void,
     onTime?: (time: number, duration: number) => void,
     playbackRate = 1,
+    fallbackWordCount?: number,
   ): Promise<number> {
     this.ensure(operation);
     if (
@@ -2916,17 +2995,44 @@ export class TtsPlayback {
       let settled = false;
       let lastIndex = -1;
       let validated = !timeline;
-      const absolute = timeline?.map((word) => ({
+      let absolute = timeline?.map((word) => ({
         ...word,
         start: word.start + offset,
         end: word.end + offset,
       }));
+      let fallbackTimer: number | null = null;
+      const clearFallbackTimer = () => {
+        if (fallbackTimer !== null) {
+          window.clearInterval(fallbackTimer);
+          fallbackTimer = null;
+        }
+      };
+      const buildProportionalTimeline = (durationSec: number) => {
+        if (
+          absolute ||
+          !fallbackWordCount ||
+          fallbackWordCount <= 0 ||
+          !Number.isFinite(durationSec) ||
+          durationSec <= 0
+        ) {
+          return;
+        }
+        const step = durationSec / fallbackWordCount;
+        absolute = Array.from({ length: fallbackWordCount }, (_, index) => ({
+          index,
+          start: offset + index * step,
+          end: offset + (index + 1) * step,
+        }));
+        validated = true;
+        clearFallbackTimer();
+      };
       const signal = operation.controller.signal;
       const active = () =>
         !settled && this.current === operation && !signal.aborted;
       const finish = (error?: unknown) => {
         if (settled) return;
         settled = true;
+        clearFallbackTimer();
         const duration = Number.isFinite(audio.duration)
           ? audio.duration
           : (timeline?.at(-1)?.end ?? 0);
@@ -2960,6 +3066,7 @@ export class TtsPlayback {
       };
       const validate = () => {
         if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
+        buildProportionalTimeline(audio.duration);
         if (timeline && absolute && timeline.length > 0) {
           const maxEnd = timeline.reduce(
             (max, word) =>
@@ -3015,7 +3122,7 @@ export class TtsPlayback {
             absolute,
             audio.currentTime + offset + HIGHLIGHT_LEAD_SECONDS,
           );
-          if (position >= 0 && position !== lastIndex) {
+          if (position >= 0 && position > lastIndex) {
             lastIndex = position;
             onWord?.(absolute[position].index);
           }
@@ -3041,6 +3148,39 @@ export class TtsPlayback {
           }
           this.onState("playing");
           onStart(audio.duration);
+          if (fallbackWordCount && fallbackWordCount > 0 && onWord) {
+            if (0 > lastIndex) {
+              lastIndex = 0;
+              onWord(0);
+            }
+            if (!absolute && fallbackTimer === null) {
+              const msPerWord = Math.max(
+                140,
+                Math.round(340 / Math.max(0.5, playbackRate)),
+              );
+              fallbackTimer = window.setInterval(() => {
+                if (
+                  !active() ||
+                  operation.paused ||
+                  audio.paused ||
+                  audio.ended
+                ) {
+                  return;
+                }
+                if (Number.isFinite(audio.duration) && audio.duration > 0) {
+                  buildProportionalTimeline(audio.duration);
+                  return;
+                }
+                const next = Math.min(fallbackWordCount - 1, lastIndex + 1);
+                if (next > lastIndex) {
+                  lastIndex = next;
+                  onWord(next);
+                } else {
+                  clearFallbackTimer();
+                }
+              }, msPerWord);
+            }
+          }
           this.cancelFrame();
           this.frame = requestAnimationFrame(tick);
         } catch (error) {

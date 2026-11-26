@@ -212,7 +212,7 @@ export function DashboardScreen() {
           Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
         </StatusMessage>
         <Button
-          className="sm:w-auto sm:self-start sm:px-8"
+          className="min-[640px]:w-auto min-[640px]:self-start min-[640px]:px-8"
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
@@ -280,7 +280,7 @@ export function DashboardScreen() {
           ) : null}
           {isLoading ? (
             <div
-              className="family-profile-list"
+              className="family-profile-list min-[640px]:max-md:grid! min-[640px]:max-md:grid-cols-2! min-[640px]:max-md:overflow-visible! min-[640px]:max-md:[&>*]:min-w-0! min-[640px]:max-md:[&>*]:max-w-none!"
               aria-label="Đang tải hồ sơ trẻ"
             >
               <span className="sr-only" role="status">
@@ -291,7 +291,7 @@ export function DashboardScreen() {
             </div>
           ) : children.length ? (
             <>
-              <div className="family-profile-list">
+              <div className="family-profile-list min-[640px]:max-md:grid! min-[640px]:max-md:grid-cols-2! min-[640px]:max-md:overflow-visible! min-[640px]:max-md:[&>*]:min-w-0! min-[640px]:max-md:[&>*]:max-w-none!">
                 {children.map((child) => (
                   <ChildProfileCard
                     key={child.id}
@@ -308,7 +308,7 @@ export function DashboardScreen() {
               </div>
               <Link
                 href="/children/new"
-                className="family-inline-link min-h-11 md:min-h-12"
+                className="family-inline-link min-h-11 md:min-h-12!"
               >
                 <Plus aria-hidden="true" size={17} /> Tạo hồ sơ bé
               </Link>
@@ -374,15 +374,15 @@ export function DashboardScreen() {
                 <History aria-hidden="true" size={16} /> Lịch sử đọc
               </Link>
             </div>
-            <div className="family-tool-list">
+            <div className="family-tool-list min-[640px]:grid-cols-2! min-[640px]:gap-x-4! min-[640px]:[&>*]:px-2! md:grid-cols-3! md:gap-x-0! md:[&>*]:px-[18px]! md:[&>*:first-child]:pl-0! md:[&>*:last-child]:pr-0!">
               <button
                 type="button"
                 aria-label="Quét sách"
                 className="max-md:min-h-12! max-md:py-2.5!"
                 onClick={() => handleReadingAction("/book-scanner")}
               >
-                <Camera aria-hidden="true" />
-                <span>
+                <Camera aria-hidden="true" className="shrink-0" />
+                <span className="min-w-0 flex-1">
                   <strong className="max-md:text-base!">Quét sách</strong>
                   <small className="max-md:text-xs!">
                     Mở một trang sách giấy bằng camera.
@@ -396,8 +396,8 @@ export function DashboardScreen() {
                 className="max-md:min-h-12! max-md:py-2.5!"
                 onClick={() => handleReadingAction("/entertainment")}
               >
-                <Music2 aria-hidden="true" />
-                <span>
+                <Music2 aria-hidden="true" className="shrink-0" />
+                <span className="min-w-0 flex-1">
                   <strong className="max-md:text-base!">
                     Trò chơi và âm nhạc
                   </strong>
@@ -415,8 +415,8 @@ export function DashboardScreen() {
                     : "/reports"
                 }
               >
-                <BarChart3 aria-hidden="true" />
-                <span>
+                <BarChart3 aria-hidden="true" className="shrink-0" />
+                <span className="min-w-0 flex-1">
                   <strong className="max-md:text-base!">Xem tiến bộ</strong>
                   <small className="max-md:text-xs!">
                     Theo dõi kết quả qua từng buổi đọc.

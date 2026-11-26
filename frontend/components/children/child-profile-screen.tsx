@@ -315,7 +315,7 @@ export function ChildProfileScreen({
         </StatusMessage>
 
         <Button
-          className="sm:w-auto sm:self-start sm:px-8"
+          className="w-full min-[640px]:w-auto min-[640px]:self-start min-[640px]:px-8"
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
@@ -355,7 +355,7 @@ export function ChildProfileScreen({
           </div>
         ) : null}
         <div>
-          <h1 className="text-xl font-extrabold text-ink md:text-heading">
+          <h1 className="break-words text-xl font-extrabold text-ink md:text-heading">
             {title}
           </h1>
 
@@ -363,7 +363,7 @@ export function ChildProfileScreen({
             {description}
           </p>
         </div>
-        <Card className="gap-3.5 p-4 sm:gap-4 sm:px-8 sm:py-8">
+        <Card className="max-[640px]:gap-3.5 p-4 min-[640px]:px-6 min-[640px]:py-6 md:px-8 md:py-8">
           <h2 className="text-lg font-extrabold text-ink md:text-2xl">
             Thông tin của bé
           </h2>
@@ -432,11 +432,14 @@ export function ChildProfileScreen({
           {mode === "edit" && child ? (
             <>
               <ButtonLink
+                className="break-words"
                 href={`/books?childId=${encodeURIComponent(child.id)}`}
                 variant="secondary"
               >
-                <BookOpenText aria-hidden="true" className="size-5" />
-                Chọn sách cho {child.alias}
+                <BookOpenText aria-hidden="true" className="size-5 shrink-0" />
+                <span className="min-w-0 break-words">
+                  Chọn sách cho {child.alias}
+                </span>
               </ButtonLink>
 
               <Button
@@ -465,7 +468,7 @@ export function ChildProfileScreen({
           title="Xóa hồ sơ bé?"
         >
           <div className="flex flex-col gap-6">
-            <p className="text-body text-ink">
+            <p className="break-words text-body text-ink">
               Bạn có chắc muốn xóa hồ sơ của <strong>{child.alias}</strong>?
               <br />
               Thao tác này không thể hoàn tác.
@@ -477,7 +480,7 @@ export function ChildProfileScreen({
               </StatusMessage>
             ) : null}
 
-            <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="flex flex-col gap-3 min-[640px]:flex-row">
               <Button
                 disabled={isDeleting}
                 onClick={() => setIsDeleteModalOpen(false)}

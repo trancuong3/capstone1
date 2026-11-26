@@ -44,7 +44,7 @@ export function ProgressReportFilters({
 
   return (
     <div
-      className={`grid grid-cols-1 items-end gap-2.5 rounded-card border border-border bg-white p-2.5 md:gap-3 md:p-4 ${hasMore ? "md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" : "md:grid-cols-2"}`}
+      className={`grid grid-cols-1 items-end gap-2.5 rounded-card border border-border bg-white p-2.5 md:gap-3 md:p-4 ${hasMore ? "min-[640px]:grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" : "md:grid-cols-2"}`}
     >
       <div className="hidden min-w-0 md:block">
         <label
@@ -115,7 +115,7 @@ export function ProgressReportFilters({
 
       {hasMore ? (
         <Button
-          className="min-h-11 whitespace-nowrap md:min-h-12 md:w-auto"
+          className="min-h-11 whitespace-nowrap min-[640px]:w-auto md:min-h-12"
           disabled={loadingMore}
           onClick={onLoadMore}
           variant="secondary"

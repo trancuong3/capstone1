@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -173,5 +173,128 @@ describe("Parent book content reports dialog & inbox", () => {
     expect(await screen.findByTestId("parent-report-detail")).toHaveTextContent(
       /Admin đã kiểm tra và gỡ nội dung không phù hợp/i,
     );
+  });
+
+  it("renders PageHeader, semantic status badges, 640px 2-col grid, compact PaginationBar (>20 items), and zero sm: classes", async () => {
+    const listMineMock = vi.mocked(mockReportService.listMine);
+    listMineMock.mockReset();
+    listMineMock.mockResolvedValue({
+      items: [
+        {
+          id: REPORT_ID,
+          book_id: BOOK_ID,
+          book_title: "Sách A",
+          reporter_name: "Phụ huynh A",
+          page_id: null,
+          page_number: null,
+          page_revision_id: null,
+          issue_type: "SPELLING_ERROR",
+          description: "Mô tả A",
+          reported_text: null,
+          suggested_correction: null,
+          status: "OPEN",
+          scan_run_id: null,
+          created_at: CREATED_AT,
+          updated_at: CREATED_AT,
+        },
+        {
+          id: "77000000-0000-4000-8000-000000000002",
+          book_id: BOOK_ID,
+          book_title: "Sách B",
+          reporter_name: "Phụ huynh A",
+          page_id: null,
+          page_number: null,
+          page_revision_id: null,
+          issue_type: "SPELLING_ERROR",
+          description: "Mô tả B",
+          reported_text: null,
+          suggested_correction: null,
+          status: "UNDER_REVIEW",
+          scan_run_id: null,
+          created_at: CREATED_AT,
+          updated_at: CREATED_AT,
+        },
+        {
+          id: "77000000-0000-4000-8000-000000000003",
+          book_id: BOOK_ID,
+          book_title: "Sách C",
+          reporter_name: "Phụ huynh A",
+          page_id: null,
+          page_number: null,
+          page_revision_id: null,
+          issue_type: "SPELLING_ERROR",
+          description: "Mô tả C",
+          reported_text: null,
+          suggested_correction: null,
+          status: "RESOLVED",
+          scan_run_id: null,
+          created_at: CREATED_AT,
+          updated_at: CREATED_AT,
+        },
+        {
+          id: "77000000-0000-4000-8000-000000000004",
+          book_id: BOOK_ID,
+          book_title: "Sách D",
+          reporter_name: "Phụ huynh A",
+          page_id: null,
+          page_number: null,
+          page_revision_id: null,
+          issue_type: "SPELLING_ERROR",
+          description: "Mô tả D",
+          reported_text: null,
+          suggested_correction: null,
+          status: "REJECTED",
+          scan_run_id: null,
+          created_at: CREATED_AT,
+          updated_at: CREATED_AT,
+        },
+      ],
+      total: 22,
+      limit: 20,
+      offset: 0,
+    });
+
+    const user = userEvent.setup();
+    const { container } = render(<ParentBookReportsScreen />);
+
+    const heading = await screen.findByRole("heading", {
+      level: 1,
+      name: "Báo cáo chất lượng sách",
+    });
+    expect(heading.closest("header")?.className).toContain("border-b");
+
+    expect((await screen.findByText("Đã tiếp nhận")).className).toContain(
+      "bg-sky",
+    );
+    expect(screen.getByText("Đang kiểm tra").className).toContain(
+      "bg-amber-50",
+    );
+    expect(screen.getByText("Đã xử lý").className).toContain("bg-emerald-50");
+    expect(screen.getByText("Không đủ căn cứ").className).toContain(
+      "bg-rose-50",
+    );
+
+    const grid = container.querySelector(".grid.grid-cols-1");
+    expect(grid?.className).toContain("min-[640px]:grid-cols-2");
+    expect(grid?.className).toContain("md:grid-cols-1");
+
+    const detailButtons = screen.getAllByRole("button", {
+      name: /Xem chi tiết & phản hồi Admin/i,
+    });
+    expect(detailButtons[0]?.className).toContain("min-h-11!");
+    expect(detailButtons[0]?.className).toContain("px-3!");
+
+    const pagination = screen.getByRole("navigation", {
+      name: "Phân trang báo cáo chất lượng sách",
+    });
+    expect(pagination).toHaveTextContent("Trang 1 / 2");
+    const nextBtn = within(pagination).getByRole("button", { name: "Tiếp" });
+    expect(nextBtn.className).toContain("min-h-11");
+    await user.click(nextBtn);
+    await waitFor(() => {
+      expect(listMineMock).toHaveBeenCalledWith({ limit: 20, offset: 20 });
+    });
+
+    expect(container.innerHTML).not.toMatch(/\b(?:max-)?sm:/);
   });
 });

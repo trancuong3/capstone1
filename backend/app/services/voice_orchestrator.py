@@ -641,6 +641,93 @@ class VoiceOrchestrator:
                 aligned.append(LocalTimedWord(index=idx, start=zero, end=zero))
         return aligned
 
+    @staticmethod
+    def _parse_cached_phonics_timings(
+        *,
+        steps: list[dict[str, Any]],
+        raw_timings: Any,
+        duration_seconds: float | None = None,
+    ) -> tuple[float, list[LocalPhonicsStepTiming]] | None:
+        if not steps or not isinstance(raw_timings, list) or len(raw_timings) != len(steps):
+            return None
+
+        parsed_items: list[tuple[str, int, float, float]] = []
+        max_step_end = 0.0
+        for idx, item in enumerate(raw_timings):
+            if not isinstance(item, dict):
+                return None
+            raw_start = item.get("start")
+            raw_end = item.get("end")
+            if (
+                isinstance(raw_start, bool)
+                or isinstance(raw_end, bool)
+                or raw_start is None
+                or raw_end is None
+            ):
+                return None
+            try:
+                s_val = float(raw_start)
+                e_val = float(raw_end)
+            except (TypeError, ValueError):
+                return None
+            if not (math.isfinite(s_val) and math.isfinite(e_val)) or s_val < 0.0 or e_val < 0.0:
+                return None
+
+            raw_index = item.get("index", idx)
+            if isinstance(raw_index, bool) or raw_index is None:
+                return None
+            try:
+                step_index = int(raw_index)
+            except (TypeError, ValueError):
+                return None
+            if step_index < 0:
+                return None
+
+            raw_id = item.get("id")
+            if raw_id is None:
+                step_id = str(steps[idx]["id"])
+            elif isinstance(raw_id, str):
+                step_id = raw_id or str(steps[idx]["id"])
+            else:
+                return None
+
+            max_step_end = max(max_step_end, s_val, e_val)
+            parsed_items.append((step_id, step_index, s_val, max(s_val, e_val)))
+
+        if duration_seconds is not None:
+            if isinstance(duration_seconds, bool):
+                return None
+            try:
+                dur_val = float(duration_seconds)
+            except (TypeError, ValueError):
+                return None
+            if not math.isfinite(dur_val) or dur_val <= 0.0:
+                safe_dur = round(max_step_end, 3)
+            else:
+                safe_dur = round(dur_val, 3)
+        else:
+            safe_dur = round(max_step_end, 3)
+
+        if not math.isfinite(safe_dur) or safe_dur <= 0.0:
+            return None
+
+        timings: list[LocalPhonicsStepTiming] = []
+        prev_end = 0.0
+        for step_id, step_index, s_val, e_val in parsed_items:
+            start = round(max(prev_end, min(safe_dur, s_val)), 3)
+            end = round(max(start, min(safe_dur, e_val)), 3)
+            timings.append(
+                LocalPhonicsStepTiming(
+                    id=step_id,
+                    index=step_index,
+                    start=start,
+                    end=end,
+                )
+            )
+            prev_end = end
+
+        return safe_dur, timings
+
     async def synthesize_timed(
         self,
         *,
@@ -824,46 +911,14 @@ class VoiceOrchestrator:
             speed=speed,
             require_word_timings=True,
         )
-        if (
-            hit is not None
-            and isinstance(hit.word_timings_json, list)
-            and len(hit.word_timings_json) == len(steps)
-        ):
-            raw_dur = hit.duration_seconds
-            max_step_end = max(
-                (
-                    float(item.get("end", 0.0))
-                    for item in hit.word_timings_json
-                    if isinstance(item, dict)
-                ),
-                default=0.0,
+        if hit is not None:
+            parsed = self._parse_cached_phonics_timings(
+                steps=steps,
+                raw_timings=hit.word_timings_json,
+                duration_seconds=hit.duration_seconds,
             )
-            safe_dur = (
-                round(float(raw_dur), 3)
-                if raw_dur is not None and math.isfinite(float(raw_dur)) and float(raw_dur) > 0.0
-                else round(max_step_end, 3)
-            )
-            if safe_dur > 0.0:
-                timings: list[LocalPhonicsStepTiming] = []
-                prev_end = 0.0
-                for idx, item in enumerate(hit.word_timings_json):
-                    start = round(
-                        max(prev_end, min(safe_dur, float(item.get("start", 0.0)))),
-                        3,
-                    )
-                    end = round(
-                        max(start, min(safe_dur, float(item.get("end", start)))),
-                        3,
-                    )
-                    timings.append(
-                        LocalPhonicsStepTiming(
-                            id=str(item.get("id") or steps[idx]["id"]),
-                            index=int(item.get("index", idx)),
-                            start=start,
-                            end=end,
-                        )
-                    )
-                    prev_end = end
+            if parsed is not None:
+                safe_dur, timings = parsed
                 logger.info(
                     "tts_phonics_ok provider=precomputed_cache scope=%s voice=%s steps=%d ms=%.1f session=%s request_id=%s",
                     hit.scope,

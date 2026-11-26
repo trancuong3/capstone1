@@ -295,4 +295,56 @@ describe("AI progress assessment card", () => {
 
     expect(await screen.findByText("AI: bé đang tiến bộ")).toBeInTheDocument();
   });
+
+  it("enforces >= 44px touch targets on period radios, wraps long word pills, and scrolls 13-week charts", async () => {
+    const longWeekly = Array.from({ length: 13 }, (_, index) => ({
+      week_start: `2026-08-${String(index + 1).padStart(2, "0")}`,
+      sessions: index + 1,
+      minutes: 15 + index * 5,
+      accuracy_pct: 80,
+    }));
+    const longWord = "nghiêngngảchôngchênhdài";
+    const longHeard = "nghiêngngảchôngchênhkhác";
+
+    setup({
+      get: vi.fn().mockResolvedValue(
+        assessment({
+          days: 90,
+          weekly: longWeekly,
+          difficult_words: [{ word: longWord, times: 4, heard_as: longHeard }],
+          assessment: {
+            ...aiVersion(90).assessment,
+            practice_words: [longWord],
+          },
+        }),
+      ),
+      generate: vi.fn(),
+    });
+
+    expect(await screen.findByText("AI: bé đang tiến bộ")).toBeInTheDocument();
+
+    for (const label of ["7 ngày", "30 ngày", "90 ngày"]) {
+      const radio = screen.getByRole("radio", { name: label });
+      expect(radio.className).toContain("min-h-11");
+      expect(radio.className).not.toContain("min-h-10");
+    }
+
+    const pill = screen.getByText(longWord).closest("li");
+    expect(pill).not.toBeNull();
+    expect(pill!.className).toContain("max-w-full");
+    expect(pill!.className).toContain("min-w-0");
+    expect(pill!.className).toContain("break-words");
+    expect(pill!.className).toContain("[overflow-wrap:anywhere]");
+
+    const chartHeading = screen.getByRole("heading", {
+      name: "Thời gian đọc theo tuần",
+    });
+    const chartSection = chartHeading.closest("section");
+    expect(chartSection).not.toBeNull();
+    const scrollContainer = chartSection!.querySelector(".overflow-x-auto");
+    expect(scrollContainer).not.toBeNull();
+    expect(
+      scrollContainer!.querySelectorAll(".min-w-\\[2\\.5rem\\]").length,
+    ).toBe(13);
+  });
 });

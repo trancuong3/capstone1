@@ -621,10 +621,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
 
   if (childState.status === "loading" || childState.status === "redirecting") {
     return (
-      <section
-        aria-busy="true"
-        className="mx-auto w-full max-w-[960px] px-4 py-8"
-      >
+      <section aria-busy="true" className="mx-auto w-full max-w-[960px] py-8">
         <span className="sr-only" role="status">
           Đang xác minh hồ sơ trẻ…
         </span>
@@ -634,12 +631,16 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
 
   if (childState.status === "error") {
     return (
-      <section className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-4 py-8">
+      <section className="mx-auto flex w-full max-w-[720px] flex-col gap-4 py-8">
         <StatusMessage title="Không thể xác minh hồ sơ trẻ" tone="error">
           Chưa thể xác nhận hồ sơ thuộc tài khoản hiện tại. Ba mẹ vui lòng thử
           lại.
         </StatusMessage>
-        <Button className="sm:w-auto" onClick={retryChild} variant="secondary">
+        <Button
+          className="min-[640px]:w-auto"
+          onClick={retryChild}
+          variant="secondary"
+        >
           <RefreshCw aria-hidden="true" className="size-5" />
           Thử lại
         </Button>
@@ -762,7 +763,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             </StatusMessage>
             <div className="flex flex-wrap gap-2">
               <Button
-                className="min-h-11 sm:w-auto"
+                className="min-h-11! min-[640px]:w-auto"
                 onClick={() => {
                   setOcrWorkerStatus("checking");
                   setOcrCheckNonce((n) => n + 1);
@@ -781,7 +782,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
       {ocrState.status === "processing" ? (
         <div
           aria-live="polite"
-          className="flex flex-col gap-4 rounded-card border border-border bg-white p-4 sm:p-6"
+          className="flex flex-col gap-4 rounded-card border border-border bg-white p-4 min-[640px]:p-6"
           role="status"
         >
           <div className="flex items-start gap-3">
@@ -804,7 +805,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             </div>
           </div>
           <Button
-            className="min-h-12 sm:w-auto sm:self-start"
+            className="min-h-12! min-[640px]:w-auto min-[640px]:self-start"
             onClick={handleCancelOcr}
             variant="secondary"
           >
@@ -818,7 +819,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
         <div
           aria-live="polite"
           className={cn(
-            "flex flex-col gap-4 rounded-card border bg-white p-4 sm:p-6",
+            "flex flex-col gap-4 rounded-card border bg-white p-4 min-[640px]:p-6",
             ocrState.workerOnline
               ? "border-primary/30"
               : "border-amber-300 bg-amber-50/40",
@@ -891,7 +892,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             </div>
           </div>
           <Button
-            className="min-h-12 sm:w-auto sm:self-start"
+            className="min-h-12! min-[640px]:w-auto min-[640px]:self-start"
             onClick={handleCancelOcr}
             variant="secondary"
           >
@@ -908,7 +909,10 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           </StatusMessage>
           <div className="flex flex-wrap gap-3">
             {ocrState.authExpired ? (
-              <ButtonLink className="min-h-12 sm:w-auto" href="/login">
+              <ButtonLink
+                className="min-h-12! min-[640px]:w-auto"
+                href="/login"
+              >
                 Đăng nhập lại
               </ButtonLink>
             ) : null}
@@ -917,7 +921,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             ocrState.file &&
             ocrState.idempotencyKey ? (
               <Button
-                className="min-h-12 sm:w-auto"
+                className="min-h-12! min-[640px]:w-auto"
                 onClick={() =>
                   void runLocalOcrUpload(
                     ocrState.file!,
@@ -931,7 +935,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               </Button>
             ) : null}
             <Button
-              className="min-h-12 sm:w-auto"
+              className="min-h-12! min-[640px]:w-auto"
               onClick={handleCancelOcr}
               variant="secondary"
             >
@@ -944,7 +948,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
       {ocrState.status === "succeeded" ? (
         <section
           aria-label="Kết quả nhận diện OCR tiếng Việt"
-          className="flex flex-col gap-4 rounded-card border border-emerald-200 bg-white p-4 shadow-sm sm:p-6"
+          className="flex flex-col gap-4 rounded-card border border-emerald-200 bg-white p-4 shadow-sm min-[640px]:p-6"
           data-testid="local-ocr-result"
         >
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1009,7 +1013,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             ocrState.result.matched_book_id &&
             ocrState.result.matched_page ? (
               <Button
-                className="min-h-14 w-full sm:w-auto"
+                className="min-h-14 w-full min-[640px]:w-auto"
                 onClick={() =>
                   handleBookPageDetected(
                     ocrState.result.matched_book_id!,
@@ -1022,12 +1026,15 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
                 đọc
               </Button>
             ) : (
-              <ButtonLink className="min-h-14 w-full sm:w-auto" href="/books">
+              <ButtonLink
+                className="min-h-14 w-full min-[640px]:w-auto"
+                href="/books"
+              >
                 Mở thư viện để bắt đầu buổi đọc
               </ButtonLink>
             )}
             <Button
-              className="min-h-14 w-full sm:w-auto"
+              className="min-h-14 w-full min-[640px]:w-auto"
               onClick={() => fileInputRef.current?.click()}
               variant="secondary"
             >
@@ -1055,24 +1062,24 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           onPickDeviceImage={() => fileInputRef.current?.click()}
         />
       ) : (
-        <div className="flex min-h-0 flex-col items-center justify-center gap-3 rounded-card bg-desk p-4 text-center sm:min-h-[380px] sm:gap-4 sm:p-6">
+        <div className="flex min-h-0 flex-col items-center justify-center gap-3 rounded-card bg-desk p-4 text-center min-[640px]:min-h-[340px] min-[640px]:gap-4 min-[640px]:p-6 md:min-h-[380px]">
           <Camera
             aria-hidden="true"
-            className="size-9 text-primary sm:size-14"
+            className="size-9 text-primary md:size-14"
           />
           <div>
-            <h2 className="text-lg font-extrabold text-ink sm:text-2xl">
+            <h2 className="text-lg font-extrabold text-ink md:text-2xl">
               Camera đang tắt
             </h2>
-            <p className="mt-1 max-w-[620px] text-xs leading-5 text-muted sm:mt-4 sm:text-body sm:leading-normal">
+            <p className="mt-1 max-w-[620px] text-xs leading-5 text-muted md:mt-4 md:text-body md:leading-normal">
               Bật khung quét trực tiếp hoặc chụp nét bằng Camera gốc của điện
               thoại — ảnh tự động chuẩn hóa xoay dọc và giữ sắc nét dấu tiếng
               Việt.
             </p>
           </div>
-          <div className="grid w-full max-w-[680px] grid-cols-1 gap-2.5 sm:grid-cols-3 sm:gap-3">
+          <div className="grid w-full max-w-[680px] grid-cols-1 gap-2.5 min-[640px]:grid-cols-3 min-[640px]:gap-3">
             <Button
-              className="min-h-12 w-full sm:min-h-14"
+              className="min-h-12! w-full md:min-h-14!"
               onClick={() => {
                 setCameraUnavailable(false);
                 setCameraStarted(true);
@@ -1082,7 +1089,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               Bật camera để quét
             </Button>
             <Button
-              className="min-h-12 w-full sm:min-h-14"
+              className="min-h-12! w-full md:min-h-14!"
               disabled={
                 ocrState.status === "processing" || ocrState.status === "queued"
               }
@@ -1093,7 +1100,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               Chụp bằng Camera máy
             </Button>
             <Button
-              className="min-h-12 w-full sm:min-h-14"
+              className="min-h-12! w-full md:min-h-14!"
               disabled={
                 ocrState.status === "processing" || ocrState.status === "queued"
               }
@@ -1108,9 +1115,9 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
       )}
 
       {!cameraUnavailable ? (
-        <div className="hidden rounded-card bg-sky p-4 sm:block">
+        <div className="hidden rounded-card bg-sky p-4 md:block">
           <h2 className="font-extrabold text-ink">Sau khi nhận diện</h2>
-          <p className="mt-2 text-sm text-muted sm:text-body">
+          <p className="mt-2 text-sm text-muted md:text-body">
             ViRead mở chi tiết sách để ba mẹ chọn phạm vi trang. Microphone được
             kiểm tra ở bước chuẩn bị đọc.
           </p>
@@ -1119,7 +1126,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
 
       {!cameraStarted || cameraUnavailable ? (
         <ButtonLink
-          className="min-h-12 sm:min-h-14 sm:max-w-[400px]"
+          className="min-h-12! min-[640px]:max-w-[400px] md:min-h-14!"
           href="/books"
           variant="secondary"
         >

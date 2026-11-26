@@ -19,7 +19,7 @@ export const SelectField = forwardRef<HTMLSelectElement, SelectFieldProps>(
     return (
       <div className={cn("relative w-full", className)}>
         <label
-          className="absolute left-4 top-3 z-10 text-sm font-bold text-muted"
+          className="absolute left-4 top-3 z-10 max-w-[calc(100%-2rem)] truncate text-sm font-bold text-muted"
           htmlFor={selectId}
         >
           {label}

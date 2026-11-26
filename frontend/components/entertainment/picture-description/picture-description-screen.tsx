@@ -881,7 +881,7 @@ export function PictureDescriptionScreen() {
     : 0;
 
   return (
-    <section className="mx-auto flex w-full max-w-[1130px] flex-col gap-6 pb-8">
+    <section className="mx-auto flex w-full max-w-[1130px] flex-col gap-4 pb-2 md:gap-6 md:pb-8">
       <BookChildHeader
         child={selectedChild}
         mobileLabel="Góc kể chuyện"
@@ -891,16 +891,16 @@ export function PictureDescriptionScreen() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <Link
-            className="inline-flex items-center gap-2 text-sm font-extrabold text-primary hover:underline"
+            className="inline-flex min-h-11 items-center gap-2 rounded-control text-sm font-extrabold text-primary hover:underline"
             href="/entertainment"
           >
             <ArrowLeft aria-hidden="true" className="size-4" />
             Quay lại góc Giải trí
           </Link>
-          <h1 className="mt-1 flex items-center gap-2 text-heading font-extrabold text-ink">
+          <h1 className="mt-1 flex items-center gap-2 text-xl font-extrabold text-ink md:text-heading">
             Kể chuyện qua tranh
           </h1>
-          <p className="text-body text-muted">
+          <p className="hidden text-body text-muted md:block">
             Chọn một bức tranh. Bé có thể kể bằng giọng nói hoặc viết một câu về
             điều mình nhìn thấy.
           </p>
@@ -908,6 +908,7 @@ export function PictureDescriptionScreen() {
 
         {session ? (
           <Button
+            fullWidth={false}
             onClick={() => {
               stopSpeechPlayback();
               isRecordingVoiceRef.current = false;
@@ -941,7 +942,7 @@ export function PictureDescriptionScreen() {
       {isAnalyzing ? (
         <div
           aria-live="polite"
-          className="flex flex-col items-center justify-center gap-4 rounded-card border border-border bg-white p-10 text-center shadow-sm"
+          className="flex flex-col items-center justify-center gap-4 rounded-card border border-border bg-white p-6 text-center shadow-sm min-[640px]:p-10"
         >
           <LoaderCircle
             aria-hidden="true"
@@ -959,7 +960,7 @@ export function PictureDescriptionScreen() {
 
       {!session && !isAnalyzing ? (
         <>
-          <div className="rounded-card border border-border bg-white p-5 shadow-sm sm:p-7">
+          <div className="rounded-card border border-border bg-white p-3.5 shadow-sm min-[640px]:p-5 md:p-7">
             <div
               aria-label="Chọn nguồn tranh"
               className="flex flex-wrap gap-2 border-b border-border pb-4"
@@ -1007,7 +1008,7 @@ export function PictureDescriptionScreen() {
             </div>
 
             {catalogState.status === "loading" ? (
-              <div className="mt-6 grid gap-5 md:grid-cols-3">
+              <div className="mt-6 grid gap-3.5 min-[640px]:grid-cols-2 md:grid-cols-3 md:gap-5">
                 {[1, 2, 3].map((item) => (
                   <Skeleton className="h-72 rounded-card" key={item} />
                 ))}
@@ -1036,7 +1037,7 @@ export function PictureDescriptionScreen() {
               <div className="mt-6">
                 {activeTab === "SAMPLE" ? (
                   <>
-                    <div className="grid gap-5 md:grid-cols-3">
+                    <div className="grid gap-3.5 min-[640px]:grid-cols-2 md:grid-cols-3 md:gap-5">
                       {catalogState.catalog.samples
                         .slice(
                           (samplesPage - 1) * PICTURE_GRID_PAGE_SIZE,
@@ -1154,6 +1155,7 @@ export function PictureDescriptionScreen() {
 
                       <div className="flex flex-wrap gap-3">
                         <Button
+                          className="w-full min-[640px]:w-auto"
                           onClick={() => fileInputRef.current?.click()}
                           type="button"
                           variant="secondary"
@@ -1163,6 +1165,7 @@ export function PictureDescriptionScreen() {
                         </Button>
                         {uploadFile ? (
                           <Button
+                            className="w-full min-[640px]:w-auto"
                             onClick={() => void handleStartUpload()}
                             type="button"
                           >
@@ -1204,7 +1207,7 @@ export function PictureDescriptionScreen() {
                 {activeTab === "BOOK_PAGE" ? (
                   catalogState.catalog.book_pages.length > 0 ? (
                     <>
-                      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                      <div className="grid gap-3.5 min-[640px]:grid-cols-2 md:gap-5 lg:grid-cols-3">
                         {catalogState.catalog.book_pages
                           .slice(
                             (bookPagesPage - 1) * PICTURE_GRID_PAGE_SIZE,
@@ -1300,12 +1303,12 @@ export function PictureDescriptionScreen() {
 
           {catalogState.status === "ready" &&
           catalogState.sessions.length > 0 ? (
-            <section className="rounded-card border border-border bg-white p-5 shadow-sm sm:p-7">
+            <section className="rounded-card border border-border bg-white p-3.5 shadow-sm min-[640px]:p-5 md:p-7">
               <h2 className="flex items-center gap-2 text-lg font-extrabold text-ink">
                 <History aria-hidden="true" className="size-5 text-primary" />
                 Những bức tranh bé đã kể gần đây
               </h2>
-              <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="mt-3 grid gap-3 min-[640px]:grid-cols-2 md:mt-4 md:gap-4 lg:grid-cols-3">
                 {catalogState.sessions
                   .slice(
                     (sessionsPage - 1) * PICTURE_GRID_PAGE_SIZE,
@@ -1366,9 +1369,9 @@ export function PictureDescriptionScreen() {
       ) : null}
 
       {session && !isAnalyzing ? (
-        <div className="grid items-start gap-6 lg:grid-cols-[1fr_1.15fr]">
+        <div className="grid items-start gap-4 md:gap-6 lg:grid-cols-[1fr_1.15fr]">
           {/* Picture Frame */}
-          <div className="flex flex-col gap-4 rounded-card border border-border bg-white p-4 shadow-sm sm:p-5">
+          <div className="flex flex-col gap-4 rounded-card border border-border bg-white p-3.5 shadow-sm min-[640px]:p-4 md:p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <span className="rounded-full bg-sky px-3 py-1 text-xs font-extrabold text-primary">
@@ -1397,11 +1400,11 @@ export function PictureDescriptionScreen() {
               />
             </div>
 
-            <div className="rounded-control bg-sky/25 p-3.5">
+            <div className="rounded-control bg-sky/25 p-2.5 md:p-3.5">
               <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
                 Bố cục 3 bước kể chuyện hay
               </p>
-              <ol className="mt-2 grid gap-2 sm:grid-cols-3">
+              <ol className="mt-2 grid gap-2 min-[640px]:grid-cols-3">
                 {STORYTELLING_STEPS.map((item) => (
                   <li
                     className="rounded-control bg-white/90 p-2.5 text-xs shadow-2xs"
@@ -1428,7 +1431,7 @@ export function PictureDescriptionScreen() {
               <button
                 aria-selected={practiceTab === "PRACTICE"}
                 className={
-                  "inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-control px-4 py-2 text-sm font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary " +
+                  "inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-control px-4 py-2 text-sm font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary " +
                   (practiceTab === "PRACTICE"
                     ? "bg-primary text-white shadow-sm"
                     : "bg-sky/40 text-ink hover:bg-sky")
@@ -1444,7 +1447,7 @@ export function PictureDescriptionScreen() {
               <button
                 aria-selected={practiceTab === "RESULT"}
                 className={
-                  "inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-control px-4 py-2 text-sm font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50 " +
+                  "inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-control px-4 py-2 text-sm font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50 " +
                   (practiceTab === "RESULT"
                     ? "bg-primary text-white shadow-sm"
                     : "bg-sky/40 text-ink hover:bg-sky")
@@ -1513,7 +1516,7 @@ export function PictureDescriptionScreen() {
                 ) : null}
 
                 {/* Child Input Area (Mic + Realtime Text + ElevenLabs TTS + Textarea) */}
-                <section className="rounded-card border border-border bg-white p-5 shadow-sm">
+                <section className="rounded-card border border-border bg-white p-3.5 shadow-sm md:p-5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h2 className="text-lg font-extrabold text-ink">
                       {latestAttempt
@@ -1527,6 +1530,7 @@ export function PictureDescriptionScreen() {
                             disabled={
                               isRecordingVoice || isTranscribing || isEvaluating
                             }
+                            fullWidth={false}
                             onClick={handleClearDraft}
                             size="compact"
                             type="button"
@@ -1537,6 +1541,7 @@ export function PictureDescriptionScreen() {
                           </Button>
                           <Button
                             disabled={isRecordingVoice || isTranscribing}
+                            fullWidth={false}
                             onClick={() =>
                               void speakVietnamese(
                                 descriptionText,
@@ -1571,6 +1576,7 @@ export function PictureDescriptionScreen() {
                       {!isRecordingVoice ? (
                         <Button
                           disabled={isTranscribing || isEvaluating}
+                          fullWidth={false}
                           onClick={() => void startVoiceRecording()}
                           size="compact"
                           type="button"
@@ -1581,6 +1587,7 @@ export function PictureDescriptionScreen() {
                         </Button>
                       ) : (
                         <Button
+                          fullWidth={false}
                           onClick={() => void stopVoiceRecording()}
                           size="compact"
                           type="button"
@@ -1596,7 +1603,7 @@ export function PictureDescriptionScreen() {
                   {isRecordingVoice ? (
                     <div
                       aria-live="polite"
-                      className="mt-3 flex items-center gap-3 rounded-control border border-primary/35 bg-sky/25 px-4 py-3 shadow-sm"
+                      className="mt-3 flex flex-wrap items-center gap-3 rounded-control border border-primary/35 bg-sky/25 px-4 py-3 shadow-sm"
                     >
                       <div className="flex shrink-0 items-center gap-2">
                         {recorder.isSpeaking ? (
@@ -1688,6 +1695,7 @@ export function PictureDescriptionScreen() {
                           <span>{evaluateError}</span>
                           <Button
                             disabled={isEvaluating || !descriptionText.trim()}
+                            fullWidth={false}
                             onClick={() => void handleEvaluate()}
                             size="compact"
                             type="button"
@@ -1718,6 +1726,7 @@ export function PictureDescriptionScreen() {
                       </p>
                     </div>
                     <Button
+                      className="w-full min-[640px]:w-auto"
                       disabled={
                         isEvaluating ||
                         isRecordingVoice ||
@@ -1736,7 +1745,7 @@ export function PictureDescriptionScreen() {
                 </section>
 
                 {/* Optional Guiding Questions & Vocabulary (Collapsed by default so child thinks independently) */}
-                <section className="rounded-card border border-border bg-white p-5 shadow-sm">
+                <section className="rounded-card border border-border bg-white p-3.5 shadow-sm md:p-5">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <h2 className="flex items-center gap-2 text-base font-extrabold text-ink">
@@ -1755,6 +1764,7 @@ export function PictureDescriptionScreen() {
                     </div>
                     <Button
                       aria-expanded={showHints}
+                      fullWidth={false}
                       onClick={() => setShowHints((value) => !value)}
                       size="compact"
                       type="button"
@@ -1781,6 +1791,7 @@ export function PictureDescriptionScreen() {
                           Câu hỏi gợi mở quan sát
                         </p>
                         <Button
+                          fullWidth={false}
                           onClick={() =>
                             void speakVietnamese(
                               session.guide.guiding_questions.join(" "),
@@ -1835,7 +1846,7 @@ export function PictureDescriptionScreen() {
                             return (
                               <button
                                 className={
-                                  "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary " +
+                                  "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3.5 py-2 text-sm font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary " +
                                   (active
                                     ? "border-primary bg-primary text-white"
                                     : used
@@ -1883,6 +1894,7 @@ export function PictureDescriptionScreen() {
                               selectedVocabWord,
                             ) ? (
                               <Button
+                                fullWidth={false}
                                 onClick={() =>
                                   handleInsertVocabWord(selectedVocabWord)
                                 }
@@ -1907,7 +1919,7 @@ export function PictureDescriptionScreen() {
                         ) : (
                           <>
                             <button
-                              className="inline-flex items-center gap-2 text-sm font-extrabold text-primary hover:underline"
+                              className="inline-flex min-h-11 items-center gap-2 rounded-control text-sm font-extrabold text-primary hover:underline"
                               onClick={() =>
                                 setShowSampleSentences((value) => !value)
                               }
@@ -1936,8 +1948,12 @@ export function PictureDescriptionScreen() {
                                       className="flex items-center justify-between gap-2 rounded-control bg-success-surface/50 px-3 py-2 text-sm font-semibold text-success-ink"
                                       key={sentence}
                                     >
-                                      <span>“{sentence}”</span>
+                                      <span className="min-w-0 flex-1 break-words">
+                                        “{sentence}”
+                                      </span>
                                       <Button
+                                        className="shrink-0"
+                                        fullWidth={false}
                                         onClick={() =>
                                           void speakVietnamese(
                                             sentence,
@@ -1976,7 +1992,7 @@ export function PictureDescriptionScreen() {
               <section
                 aria-labelledby="tab-picture-result"
                 aria-live="polite"
-                className="rounded-card border-2 border-primary/25 bg-white p-5 shadow-sm"
+                className="rounded-card border-2 border-primary/25 bg-white p-3.5 shadow-sm md:p-5"
                 role="tabpanel"
               >
                 {session.attempts.length > 1 ? (
@@ -1991,7 +2007,7 @@ export function PictureDescriptionScreen() {
                         <button
                           aria-pressed={isSelected}
                           className={
-                            "rounded-full px-3 py-1 text-xs font-extrabold transition-colors " +
+                            "inline-flex min-h-11 items-center rounded-full px-3.5 py-2 text-xs font-extrabold transition-colors " +
                             (isSelected
                               ? "bg-primary text-white shadow-2xs"
                               : "bg-sky/40 text-ink hover:bg-sky")
@@ -2028,6 +2044,7 @@ export function PictureDescriptionScreen() {
                     ) : null}
                   </div>
                   <Button
+                    fullWidth={false}
                     onClick={() =>
                       void speakVietnamese(
                         `${activeAttempt.feedback.praise_message} ${activeAttempt.feedback.improvement_tip}`,
@@ -2063,6 +2080,7 @@ export function PictureDescriptionScreen() {
                         </span>
                         <Button
                           disabled={isEvaluating}
+                          fullWidth={false}
                           onClick={() =>
                             void handleEvaluate(
                               activeAttempt.transcript_text,
@@ -2107,7 +2125,7 @@ export function PictureDescriptionScreen() {
                   {activeAttempt.feedback.praise_message}
                 </p>
 
-                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <div className="mt-4 grid gap-3 min-[640px]:grid-cols-2 md:gap-4">
                   <div className="rounded-control bg-success-surface/40 p-3.5">
                     <h3 className="flex items-center gap-1.5 text-sm font-extrabold text-success-ink">
                       <CheckCircle2 aria-hidden="true" className="size-4" />
@@ -2165,8 +2183,12 @@ export function PictureDescriptionScreen() {
                               className="flex items-center justify-between gap-2 rounded-control bg-sky/25 px-3 py-2 text-sm font-bold text-ink"
                               key={sentence}
                             >
-                              <span>“{sentence}”</span>
+                              <span className="min-w-0 flex-1 break-words">
+                                “{sentence}”
+                              </span>
                               <Button
+                                className="shrink-0"
+                                fullWidth={false}
                                 onClick={() =>
                                   void speakVietnamese(
                                     sentence,
@@ -2202,7 +2224,7 @@ export function PictureDescriptionScreen() {
                         {activeAttempt.feedback.vocabulary_highlights.map(
                           (word) => (
                             <button
-                              className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-sky/25 px-3 py-1 text-xs font-extrabold text-primary transition-colors hover:bg-sky/50"
+                              className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-primary/30 bg-sky/25 px-3.5 py-2 text-xs font-extrabold text-primary transition-colors hover:bg-sky/50"
                               key={word}
                               onClick={() =>
                                 void speakVietnamese(
@@ -2227,6 +2249,7 @@ export function PictureDescriptionScreen() {
 
                 <div className="mt-4 flex flex-wrap justify-end gap-2.5">
                   <Button
+                    fullWidth={false}
                     onClick={() => {
                       stopSpeechPlayback();
                       setDescriptionText(activeAttempt.transcript_text);
@@ -2242,6 +2265,7 @@ export function PictureDescriptionScreen() {
                     Sửa & bổ sung bài vừa kể
                   </Button>
                   <Button
+                    fullWidth={false}
                     onClick={() => {
                       stopSpeechPlayback();
                       setDescriptionText("");

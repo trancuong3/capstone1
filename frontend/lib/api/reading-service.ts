@@ -134,6 +134,17 @@ export const readingPageDtoSchema = z.object({
   image_overlay_safe: z.boolean().optional(),
   illustration_url: z.string().nullable().optional(),
   illustration_text_free: z.boolean().optional(),
+  tts_audio_url: z.string().nullable().optional(),
+  tts_word_timings: z
+    .array(
+      z.object({
+        index: z.number().int().nonnegative(),
+        start: z.number().nonnegative(),
+        end: z.number().nonnegative(),
+      }),
+    )
+    .nullable()
+    .optional(),
   text: z.string().optional(),
   words: z.array(wordDtoSchema),
   paragraph_start_line_indices: z

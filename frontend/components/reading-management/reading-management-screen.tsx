@@ -656,7 +656,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 {error}
               </StatusMessage>
             ) : null}
-            <form className="grid gap-4 sm:grid-cols-2" onSubmit={submitPlan}>
+            <form
+              className="grid grid-cols-1 gap-4 min-[640px]:grid-cols-2"
+              onSubmit={submitPlan}
+            >
               <label className={labelClass}>
                 Tên kế hoạch
                 <input
@@ -706,7 +709,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(event) => setPlanTimezone(event.target.value)}
                 />
               </label>
-              <fieldset className="min-w-0 sm:col-span-2">
+              <fieldset className="min-w-0 min-[640px]:col-span-2">
                 <legend className="mb-2 text-label font-semibold text-ink">
                   Ngày đọc mỗi tuần
                 </legend>
@@ -759,12 +762,13 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(event) => setPlanEnd(event.target.value)}
                 />
               </label>
-              <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
+              <div className="flex flex-wrap items-end gap-2 min-[640px]:col-span-2">
                 <Button type="submit" disabled={Boolean(busyKey)}>
                   {editingPlanId ? "Lưu kế hoạch" : "Tạo kế hoạch tuần"}
                 </Button>
                 {editingPlanId ? (
                   <Button
+                    className="min-[640px]:w-auto"
                     type="button"
                     variant="secondary"
                     onClick={() => setEditingPlanId("")}
@@ -782,7 +786,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 {error}
               </StatusMessage>
             ) : null}
-            <form className="grid gap-4 sm:grid-cols-2" onSubmit={submitGoal}>
+            <form
+              className="grid grid-cols-1 gap-4 min-[640px]:grid-cols-2"
+              onSubmit={submitGoal}
+            >
               <label className={labelClass}>
                 Đo lường
                 <select
@@ -857,7 +864,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               </StatusMessage>
             ) : null}
             <form
-              className="grid gap-4 sm:grid-cols-2"
+              className="grid grid-cols-1 gap-4 min-[640px]:grid-cols-2"
               onSubmit={submitReminder}
             >
               <label className={labelClass}>
@@ -887,7 +894,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   <option value="America/Los_Angeles" />
                 </datalist>
               </label>
-              <fieldset className="min-w-0 sm:col-span-2">
+              <fieldset className="min-w-0 min-[640px]:col-span-2">
                 <legend className="mb-2 text-label font-semibold text-ink">
                   Lặp vào ngày
                 </legend>
@@ -919,7 +926,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   ))}
                 </div>
               </fieldset>
-              <fieldset className="min-w-0 rounded-control border border-border bg-canvas p-3 sm:col-span-2">
+              <fieldset className="min-w-0 rounded-control border border-border bg-canvas p-3 min-[640px]:col-span-2">
                 <legend className="px-1 text-label font-semibold text-ink">
                   Email nhắc đọc
                 </legend>
@@ -944,12 +951,13 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   </span>
                 </label>
               </fieldset>
-              <div className="flex min-w-0 flex-wrap items-end gap-2 sm:col-span-2">
+              <div className="flex min-w-0 flex-wrap items-end gap-2 min-[640px]:col-span-2">
                 <Button type="submit" disabled={Boolean(busyKey)}>
                   {editingReminderId ? "Lưu chỉnh sửa" : "Tạo lịch nhắc"}
                 </Button>
                 {editingReminderId ? (
                   <Button
+                    className="min-[640px]:w-auto"
                     type="button"
                     variant="secondary"
                     onClick={() => setEditingReminderId("")}
@@ -990,7 +998,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         <Button
           onClick={() => setReloadKey((value) => value + 1)}
           size="compact"
-          className="min-h-11! shrink-0 px-3! py-2! text-xs! md:px-4! md:text-sm! sm:w-auto"
+          className="min-h-11! shrink-0 px-3! py-2! text-xs! md:px-4! md:text-sm!"
           fullWidth={false}
           variant="secondary"
           disabled={isReadingDataLoading || !childId}
@@ -1186,7 +1194,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               <section
                 aria-label="Kế hoạch đọc trong tuần"
                 className={cn(
-                  "min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5",
+                  "min-w-0 rounded-card border border-border bg-white p-4 shadow-xs md:px-5 md:py-5",
                   mobileTab !== "plans" && "hidden md:block",
                 )}
               >
@@ -1200,7 +1208,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <h2 className="min-w-0 text-lg font-extrabold leading-snug text-ink sm:text-xl">
+                        <h2 className="min-w-0 text-lg font-extrabold leading-snug text-ink md:text-xl">
                           Kế hoạch đọc trong tuần
                         </h2>
                         <span className="shrink-0 rounded-full bg-canvas px-2 py-0.5 text-xs font-bold tabular-nums text-muted">
@@ -1386,7 +1394,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               <section
                 aria-label="Sách yêu thích và danh sách muốn đọc"
                 className={cn(
-                  "min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5",
+                  "min-w-0 rounded-card border border-border bg-white p-4 shadow-xs md:px-5 md:py-5",
                   mobileTab !== "collections" && "hidden md:block",
                 )}
               >
@@ -1400,7 +1408,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <h2 className="min-w-0 text-lg font-extrabold leading-snug text-ink sm:text-xl">
+                        <h2 className="min-w-0 text-lg font-extrabold leading-snug text-ink md:text-xl">
                           Sách yêu thích và danh sách muốn đọc
                         </h2>
                         <span className="shrink-0 rounded-full bg-canvas px-2 py-0.5 text-xs font-bold tabular-nums text-muted">
@@ -1555,7 +1563,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               <section
                 aria-label="Mục tiêu đọc"
                 className={cn(
-                  "min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5",
+                  "min-w-0 rounded-card border border-border bg-white p-4 shadow-xs md:px-5 md:py-5",
                   mobileTab !== "goals" && "hidden md:block",
                 )}
               >
@@ -1569,7 +1577,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <h2 className="min-w-0 text-lg font-extrabold leading-snug text-ink sm:text-xl">
+                        <h2 className="min-w-0 text-lg font-extrabold leading-snug text-ink md:text-xl">
                           Mục tiêu đọc
                         </h2>
                         <span className="shrink-0 rounded-full bg-canvas px-2 py-0.5 text-xs font-bold tabular-nums text-muted">
@@ -1656,7 +1664,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               <Button
                                 fullWidth={false}
                                 size="compact"
-                                className="min-h-11! w-auto! px-3! py-1.5! text-xs!"
+                                className="min-h-11! min-w-11 w-auto! px-3! py-1.5! text-xs!"
                                 onClick={() => void saveEditedGoal(goal)}
                                 disabled={Boolean(busyKey)}
                               >
@@ -1665,7 +1673,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               <Button
                                 fullWidth={false}
                                 size="compact"
-                                className="min-h-11! w-auto! px-3! py-1.5! text-xs!"
+                                className="min-h-11! min-w-11 w-auto! px-3! py-1.5! text-xs!"
                                 variant="secondary"
                                 onClick={() => setEditingGoalId("")}
                               >
@@ -1763,7 +1771,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               <section
                 aria-label="Lịch nhắc đọc"
                 className={cn(
-                  "min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5",
+                  "min-w-0 rounded-card border border-border bg-white p-4 shadow-xs md:px-5 md:py-5",
                   mobileTab !== "reminders" && "hidden md:block",
                 )}
               >
@@ -1777,7 +1785,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <h2 className="min-w-0 text-lg font-extrabold leading-snug text-ink sm:text-xl">
+                        <h2 className="min-w-0 text-lg font-extrabold leading-snug text-ink md:text-xl">
                           Lịch nhắc đọc
                         </h2>
                         <span className="shrink-0 rounded-full bg-canvas px-2 py-0.5 text-xs font-bold tabular-nums text-muted">

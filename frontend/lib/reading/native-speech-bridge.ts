@@ -16,7 +16,10 @@ import type {
   SegmentSpeechRecognitionLike,
   SegmentSpeechResultItem,
 } from "@/lib/reading/local-segment-speech-recognition";
-import { recordSttEngineUsage } from "@/lib/reading/voice-engine-status";
+import {
+  recordAndroidTtsCapabilities,
+  recordSttEngineUsage,
+} from "@/lib/reading/voice-engine-status";
 
 export interface ViReadNativeSpeechPort {
   postMessage(message: string): void;
@@ -57,6 +60,7 @@ export interface NativeSpeechIncomingEvent {
   readonly sttAvailable?: boolean;
   readonly onDeviceSttAvailable?: boolean;
   readonly platform?: string;
+  readonly onDevice?: boolean;
   readonly start?: number;
   readonly end?: number;
   readonly onsetAt?: number;
@@ -264,6 +268,8 @@ function mapAndroidSttErrorCode(rawCode: string | undefined): string {
       return "no-speech";
     case "recognizer_busy":
     case "busy":
+    case "too-many-requests":
+    case "too_many_requests":
     case "cancelled":
     case "aborted":
       return "aborted";
@@ -330,6 +336,7 @@ export async function getAndroidSpeechCapabilities(options?: {
       if (caps && getNativeSpeechPort() === port) {
         cachedCapabilities = caps;
         cachedCapabilitiesPort = port;
+        recordAndroidTtsCapabilities(caps);
       }
       resolve(caps);
     };
@@ -480,15 +487,18 @@ export async function speakWithAndroidNativeTts(
         case "tts_stopped":
           finish(new DOMException("Audio playback was stopped.", "AbortError"));
           break;
-        case "tts_error":
-          finish(
-            new Error(
-              event.message ||
-                event.code ||
-                "Android native TTS playback failed.",
-            ),
-          );
+        case "tts_error": {
+          const error = new Error(
+            event.message ||
+              event.code ||
+              "Android native TTS playback failed.",
+          ) as Error & { code?: string };
+          if (event.code) {
+            error.code = event.code;
+          }
+          finish(error);
           break;
+        }
         default:
           break;
       }
@@ -533,6 +543,7 @@ export class AndroidNativeSpeechRecognition implements SegmentSpeechRecognitionL
 
   onsetAt: number | null = null;
   rmsDb: number | null = null;
+  fallbackReason: string | null = null;
 
   private active = false;
   private stopping = false;
@@ -571,6 +582,14 @@ export class AndroidNativeSpeechRecognition implements SegmentSpeechRecognitionL
       switch (event.type) {
         case "stt_ready":
           this.currentCycleOnsetAt = null;
+          if (typeof event.onDevice === "boolean") {
+            recordSttEngineUsage({
+              provider: "android_native",
+              fallbackUsed: true,
+              fallbackReason: this.fallbackReason ?? "ANDROID_NATIVE_STT",
+              androidOnDevice: event.onDevice,
+            });
+          }
           break;
         case "stt_onset": {
           const normalized =
@@ -701,7 +720,7 @@ export class AndroidNativeSpeechRecognition implements SegmentSpeechRecognitionL
     recordSttEngineUsage({
       provider: "android_native",
       fallbackUsed: true,
-      fallbackReason: "ANDROID_NATIVE_STT",
+      fallbackReason: this.fallbackReason ?? "ANDROID_NATIVE_STT",
     });
 
     const sent = sendBridgeCommand({

@@ -294,7 +294,10 @@ describe("Mobile Book Scanner & EXIF/Resolution OCR Pre-processing", () => {
 
     const viewport = await screen.findByTestId("scanner-camera-viewport");
     expect(viewport.className).toContain("aspect-[3/4]");
-    expect(viewport.className).toContain("sm:aspect-[16/10]");
+    expect(viewport.className).toContain("min-[640px]:aspect-[16/10]");
+    expect(viewport.className).toContain(
+      "max-[640px]:max-h-[min(54dvh,400px)]",
+    );
 
     await waitFor(() => {
       expect(

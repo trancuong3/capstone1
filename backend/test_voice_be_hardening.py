@@ -905,6 +905,95 @@ class TestSessionVoiceLockAndBackendSttParity(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res_wasm.assessment_status, "CORRECT")
         self.assertEqual(res_wasm.recognition_source, "BROWSER_SPEECH")
 
+    async def test_synthesize_phonics_rejects_malformed_cached_timings_and_falls_through(self) -> None:
+        from types import SimpleNamespace
+
+        from app.services.voice_orchestrator import VoiceOrchestrator, VoicePolicyContext
+
+        steps = [{"id": "step_1", "spokenText": "mèo", "pauseAfterMs": 200}]
+        malformed_rows = [
+            ["bad"],
+            [{"start": None, "end": 0.4}],
+            [{"start": float("nan"), "end": 0.4}],
+            [{"end": 0.4}],
+        ]
+
+        for bad_timings in malformed_rows:
+            self.assertIsNone(
+                VoiceOrchestrator._parse_cached_phonics_timings(
+                    steps=steps,
+                    raw_timings=bad_timings,
+                    duration_seconds=1.0,
+                )
+            )
+            fake_hit = SimpleNamespace(
+                scope="COACHING",
+                resolved_voice_id=DEFAULT_LOCAL_VOICE_ID,
+                model_version=LOCAL_TTS_MODEL_VERSION,
+                content=b"cached-audio",
+                content_type="audio/mpeg",
+                duration_seconds=1.0,
+                word_timings_json=bad_timings,
+                cached_speed=1.0,
+            )
+            local = MagicMock()
+            local.synthesize_phonics = AsyncMock(
+                return_value=LocalPhonicsSpeech(
+                    audio=b"fresh-wav",
+                    content_type="audio/wav",
+                    duration_seconds=0.8,
+                    step_timings=[LocalPhonicsStepTiming(id="step_1", index=0, start=0.0, end=0.8)],
+                    resolved_voice_id=DEFAULT_LOCAL_VOICE_ID,
+                    region="north",
+                    model_version=LOCAL_TTS_MODEL_VERSION,
+                    provider="local",
+                )
+            )
+            orch = VoiceOrchestrator(local_provider=local)
+            orch._resolve_and_lookup_cache = AsyncMock(return_value=(None, None, fake_hit))  # type: ignore[method-assign]
+            res = await orch.synthesize_phonics(
+                db=MagicMock(),
+                steps=steps,
+                requested_voice_id=DEFAULT_LOCAL_VOICE_ID,
+                speed=1.0,
+                policy=VoicePolicyContext(provider_mode="local_only"),
+            )
+            self.assertEqual(res.provider, "local")
+            local.synthesize_phonics.assert_awaited_once()
+
+    def test_align_cached_word_timings_handles_punctuation_mismatch(self) -> None:
+        from app.services.voice_orchestrator import VoiceOrchestrator
+
+        trailing_punct = VoiceOrchestrator._align_cached_word_timings(
+            words=["Xin", "chào", "!"],
+            raw_timings=[{"start": 0.0, "end": 0.4}, {"start": 0.4, "end": 0.9}],
+            cached_text="Xin chào",
+            duration_seconds=1.0,
+        )
+        self.assertEqual(
+            trailing_punct,
+            [
+                LocalTimedWord(index=0, start=0.0, end=0.4),
+                LocalTimedWord(index=1, start=0.4, end=0.9),
+                LocalTimedWord(index=2, start=0.9, end=0.9),
+            ],
+        )
+
+        medial_punct = VoiceOrchestrator._align_cached_word_timings(
+            words=["mèo", ",", "chó"],
+            raw_timings=[{"start": 0.1, "end": 0.4}, {"start": 0.5, "end": 0.8}],
+            cached_text="mèo chó",
+            duration_seconds=1.0,
+        )
+        self.assertEqual(
+            medial_punct,
+            [
+                LocalTimedWord(index=0, start=0.1, end=0.4),
+                LocalTimedWord(index=1, start=0.4, end=0.4),
+                LocalTimedWord(index=2, start=0.5, end=0.8),
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

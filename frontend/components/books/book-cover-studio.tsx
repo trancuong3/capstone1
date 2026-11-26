@@ -357,7 +357,7 @@ export function BookCoverStudio({
     <section
       aria-label="Studio ảnh bìa sách"
       className={cn(
-        "flex flex-col gap-4 rounded-card border border-border bg-white p-4 sm:p-5",
+        "flex flex-col gap-4 rounded-card border border-border bg-white p-4 min-[640px]:p-5",
         className,
       )}
       data-testid="book-cover-studio"
@@ -389,7 +389,7 @@ export function BookCoverStudio({
 
       <div className="grid gap-5 md:grid-cols-[200px_1fr]">
         {/* 3:4 Cover Preview Column */}
-        <div className="flex flex-col items-center gap-2">
+        <div className="flex min-w-0 flex-col items-center gap-2">
           <div className="relative aspect-[3/4] w-[180px] overflow-hidden rounded-card border border-border bg-cream shadow-xs">
             {stagedPreviewUrl ? (
               <div
@@ -428,12 +428,16 @@ export function BookCoverStudio({
               />
             )}
           </div>
-          <p className="text-center text-[11px] font-medium text-muted">
-            {isInitialLoading
-              ? "Đang tải trạng thái ảnh bìa…"
-              : stagedFile
-                ? `Đã chọn: ${stagedFile.name} · Xoay ${rotation}°`
-                : "Tỷ lệ chuẩn 3:4 (≤ 300 KB WebP)"}
+          <p className="max-w-full text-center text-[11px] font-medium text-muted">
+            {isInitialLoading ? (
+              "Đang tải trạng thái ảnh bìa…"
+            ) : stagedFile ? (
+              <span className="inline-block max-w-full break-all">
+                {`Đã chọn: ${stagedFile.name} · Xoay ${rotation}°`}
+              </span>
+            ) : (
+              "Tỷ lệ chuẩn 3:4 (≤ 300 KB WebP)"
+            )}
           </p>
         </div>
 
@@ -462,7 +466,7 @@ export function BookCoverStudio({
 
           <div className="flex flex-wrap gap-2">
             <Button
-              className="min-h-11 w-auto px-3.5 text-xs"
+              className="min-h-11! w-auto px-3.5! text-xs"
               disabled={busyAction !== null}
               fullWidth={false}
               onClick={() => cameraInputRef.current?.click()}
@@ -473,7 +477,7 @@ export function BookCoverStudio({
               Chụp ảnh bìa
             </Button>
             <Button
-              className="min-h-11 w-auto px-3.5 text-xs"
+              className="min-h-11! w-auto px-3.5! text-xs"
               disabled={busyAction !== null}
               fullWidth={false}
               onClick={() => galleryInputRef.current?.click()}
@@ -485,7 +489,7 @@ export function BookCoverStudio({
             </Button>
             {hasRealCover && !stagedFile ? (
               <Button
-                className="min-h-11 w-auto px-3.5 text-xs"
+                className="min-h-11! w-auto px-3.5! text-xs"
                 disabled={busyAction !== null}
                 fullWidth={false}
                 isLoading={busyAction === "delete"}
@@ -511,7 +515,7 @@ export function BookCoverStudio({
                   Chỉnh khung cắt 3:4 & xoay ảnh
                 </p>
                 <Button
-                  className="min-h-10 w-auto px-3 text-xs"
+                  className="min-h-11! w-auto px-3! text-xs"
                   disabled={busyAction !== null}
                   fullWidth={false}
                   onClick={() =>
@@ -544,7 +548,7 @@ export function BookCoverStudio({
                     key={key}
                     aria-pressed={cropPreset === key}
                     className={cn(
-                      "min-h-9 rounded-full border px-3 text-xs font-semibold transition-colors",
+                      "min-h-11 rounded-full border px-3 text-xs font-semibold transition-colors",
                       cropPreset === key
                         ? "border-primary bg-primary text-white"
                         : "border-border bg-white text-ink hover:bg-canvas",
@@ -558,11 +562,12 @@ export function BookCoverStudio({
               </div>
 
               {cropPreset === "CUSTOM" ? (
-                <div className="grid gap-2 sm:grid-cols-3">
+                <div className="grid gap-2 min-[640px]:grid-cols-3">
                   <label className="flex flex-col gap-1 text-[11px] font-semibold text-ink">
                     Dịch ngang ({Math.round(customCrop.crop_x * 100)}%)
                     <input
                       aria-label="Vị trí cắt ngang"
+                      className="min-h-11 w-full cursor-pointer accent-primary"
                       max={Math.round((1 - customCrop.crop_w) * 100)}
                       min={0}
                       onChange={(event) => {
@@ -577,6 +582,7 @@ export function BookCoverStudio({
                     Dịch dọc ({Math.round(customCrop.crop_y * 100)}%)
                     <input
                       aria-label="Vị trí cắt dọc"
+                      className="min-h-11 w-full cursor-pointer accent-primary"
                       max={Math.round((1 - customCrop.crop_h) * 100)}
                       min={0}
                       onChange={(event) => {
@@ -591,6 +597,7 @@ export function BookCoverStudio({
                     Kích thước khung ({Math.round(customCrop.crop_w * 100)}%)
                     <input
                       aria-label="Kích thước khung cắt"
+                      className="min-h-11 w-full cursor-pointer accent-primary"
                       max={100}
                       min={30}
                       onChange={(event) => {
@@ -611,7 +618,7 @@ export function BookCoverStudio({
 
               <div className="flex flex-wrap gap-2">
                 <Button
-                  className="min-h-11 w-auto px-4 text-xs"
+                  className="min-h-11! w-auto px-4! text-xs"
                   disabled={busyAction !== null}
                   fullWidth={false}
                   isLoading={busyAction === "upload"}
@@ -622,7 +629,7 @@ export function BookCoverStudio({
                   Lưu ảnh bìa
                 </Button>
                 <Button
-                  className="min-h-11 w-auto px-3 text-xs"
+                  className="min-h-11! w-auto px-3! text-xs"
                   disabled={busyAction !== null}
                   fullWidth={false}
                   onClick={clearStagedFile}
@@ -654,17 +661,17 @@ export function BookCoverStudio({
                 </span>
               ) : null}
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="flex flex-col gap-2 min-[640px]:flex-row">
               <input
                 aria-label="Gợi ý cảnh cho bìa AI"
-                className="min-h-10 flex-1 rounded-control border border-border bg-white px-3 text-xs text-ink placeholder:text-muted"
+                className="min-h-11 w-full min-w-0 flex-1 rounded-control border border-border bg-white px-3 text-xs text-ink placeholder:text-muted"
                 onChange={(event) => setAiPromptHint(event.target.value)}
                 placeholder="Gợi ý cảnh tùy chọn (ví dụ: mèo con bên cửa sổ nắng sớm)…"
                 type="text"
                 value={aiPromptHint}
               />
               <Button
-                className="min-h-10 w-auto shrink-0 px-3.5 text-xs"
+                className="min-h-11! w-auto shrink-0 px-3.5! text-xs"
                 disabled={busyAction !== null}
                 fullWidth={false}
                 isLoading={busyAction === "ai"}

@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -392,5 +395,55 @@ describe("ParentProfileScreen", () => {
     expect(
       await screen.findByRole("heading", { name: profile.display_name ?? "" }),
     ).toBeInTheDocument();
+  });
+
+  it("applies M3.4 mobile compaction, min-h-11 account summary toggle, and 640px grids", async () => {
+    const user = userEvent.setup();
+    apiFetchFixture.mockResolvedValueOnce(
+      Response.json({
+        ...profile,
+        pending_email: "very-long-pending-address@example.com",
+      }),
+    );
+
+    renderProfile();
+    await screen.findByRole("heading", { name: profile.display_name ?? "" });
+
+    const avatar = screen.getByRole("img", {
+      name: `Ảnh đại diện của ${profile.display_name}`,
+    });
+    expect(avatar).toHaveClass("max-[640px]:size-16", "max-[640px]:text-2xl");
+
+    expect(
+      screen.getByText("very-long-pending-address@example.com"),
+    ).toHaveClass("break-all");
+
+    const dl = screen.getByText("Ngày tạo tài khoản").closest("dl");
+    expect(dl).toHaveClass("min-[640px]:grid-cols-2");
+
+    const childrenGrid = screen
+      .getByRole("link", { name: "Bé An, lớp 2" })
+      .closest("div.grid");
+    expect(childrenGrid).toHaveClass("min-[640px]:grid-cols-2");
+
+    await user.click(screen.getByRole("button", { name: "Chỉnh sửa hồ sơ" }));
+    const summary = screen.getByText("Thông tin tài khoản");
+    expect(summary).toHaveClass("min-h-11");
+    await user.click(summary);
+    expect(summary.closest("details")).toHaveAttribute("open");
+
+    const cancelBtn = screen.getByRole("button", { name: "Hủy" });
+    expect(cancelBtn).toHaveClass("order-last");
+    expect(cancelBtn.parentElement).toHaveClass("min-[640px]:grid-cols-2");
+
+    const profileDir = path.resolve(process.cwd(), "components/profile");
+    for (const file of fs
+      .readdirSync(profileDir)
+      .filter((name) => name.endsWith(".tsx"))) {
+      const content = fs.readFileSync(path.join(profileDir, file), "utf8");
+      expect(content).not.toMatch(
+        /(?<![\w-])(sm:|max-sm:|max-\[639px\]:|max-\[767px\]:)/,
+      );
+    }
   });
 });

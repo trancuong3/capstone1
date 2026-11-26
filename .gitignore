@@ -14,8 +14,8 @@ scripts/windows/viread-host.config.json
 
 # Test and coverage output
 coverage/
-playwright-report/
-test-results/
+playwright-report*/
+test-results*/
 artifacts/
 
 # TypeScript generated state

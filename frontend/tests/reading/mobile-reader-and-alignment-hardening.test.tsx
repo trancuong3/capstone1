@@ -13,6 +13,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BookPageContent } from "@/components/reading/book-page-content";
+import { BookPageViewer } from "@/components/reading/book-page-viewer";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingScreen } from "@/components/reading/reading-screen";
 import type { ReadingServices } from "@/hooks/use-reading-services";
@@ -20,12 +21,17 @@ import type {
   ActiveAudioKind,
   WordTimedPlayOptions,
 } from "@/hooks/use-speech-player";
+import { readingPageDtoSchema } from "@/lib/api/reading-service";
 import {
   resetAutomationPreferencesCache,
   setAutomationPreferences,
 } from "@/lib/reading/automation-preferences";
 import { RealtimeAlignmentEngine } from "@/lib/reading/realtime-alignment";
 import { useReadingAutoScroll } from "@/lib/reading/use-reading-auto-scroll";
+import {
+  recordTtsUnavailability,
+  resetVoiceEngineStatus,
+} from "@/lib/reading/voice-engine-status";
 import { wordPresentationClasses } from "@/lib/reading/word-presentation";
 import {
   bookFixture,
@@ -66,6 +72,11 @@ const {
     isActuallyPlaying: false,
     isPaused: false,
     activeAudioKind: "idle" as ActiveAudioKind,
+    fallbackNotice: null as string | null,
+    voiceNotice: null as string | null,
+    ttsUnavailableReason: null as string | null,
+    canInstallVietnameseTtsVoice: false,
+    openTtsInstallSettings: vi.fn(async () => true),
     play: vi.fn(),
     playWithWordTimings: vi.fn(),
     stop: vi.fn(),
@@ -256,6 +267,7 @@ function setupReadingServices() {
 beforeEach(() => {
   window.localStorage.clear();
   resetAutomationPreferencesCache();
+  resetVoiceEngineStatus();
   recorderCallbacks.current = null;
   previousSpeechRecognition = Object.getOwnPropertyDescriptor(
     window,
@@ -288,6 +300,11 @@ beforeEach(() => {
   speechPlayerMock.isActuallyPlaying = false;
   speechPlayerMock.isPaused = false;
   speechPlayerMock.activeAudioKind = "idle";
+  speechPlayerMock.fallbackNotice = null;
+  speechPlayerMock.voiceNotice = null;
+  speechPlayerMock.ttsUnavailableReason = null;
+  speechPlayerMock.canInstallVietnameseTtsVoice = false;
+  speechPlayerMock.openTtsInstallSettings.mockReset().mockResolvedValue(true);
   speechPlayerMock.play.mockReset().mockResolvedValue(undefined);
   speechPlayerMock.playWithWordTimings.mockReset().mockResolvedValue(undefined);
   speechPlayerMock.stop.mockReset().mockImplementation(() => {
@@ -415,6 +432,53 @@ describe("RealtimeAlignmentEngine anti-jump hardening", () => {
     const preview2 = engine.previewAlignment("nhỏ đang");
     expect(preview2.currentWordIndex).toBe(4);
     expect(preview2.statusByWordId.get(page.words[1].word_id)).toBeUndefined();
+  });
+
+  it("excludes ignored hesitation fillers from off-topic denominator (M1 edge-case #2) and rejects 2-token zero-match noise without false red skips (T2.2)", () => {
+    const page = makePage(["Sáng", "sớm", "bé", "Lan", "ngồi", "đọc", "sách"]);
+    const engine = new RealtimeAlignmentEngine(page.words);
+
+    engine.addFinalTranscript("Sáng sớm"); // cursor at 2 ("bé")
+    expect(engine.isOffTopicText("ờ ừm bé")).toBe(false);
+    expect(engine.isOffTopicText("ờ hôm nay bé Lan")).toBe(false);
+
+    // T2.2 sequence: "à", "ừm", "con ơi" -> 0 red skips, cursor remains on "bé" (index 2)
+    for (const noise of ["à", "ừm", "con ơi"]) {
+      engine.addFinalTranscript(noise);
+    }
+    const snap = engine.getSnapshot();
+    expect(snap.currentWordIndex).toBe(2);
+    expect(snap.statusByWordId.get(page.words[2].word_id)).toBeUndefined();
+    expect(snap.statusByWordId.get(page.words[3].word_id)).toBeUndefined();
+  });
+
+  it("keeps previewAlignment monotonic on repeated cursor-1 tokens and suppresses lookahead when allowLookahead is false", () => {
+    const page = makePage(["Sáng", "sớm", "bé", "Lan", "đọc", "sách"]);
+    const engine = new RealtimeAlignmentEngine(page.words);
+    engine.addFinalTranscript("Sáng sớm"); // cursor at 2 ("bé")
+
+    // Repeating cursor - 1 ("sớm") marks REPEATED status without rewinding active cursor
+    const repeatPreview = engine.previewAlignment("sớm", {
+      allowLookahead: false,
+    });
+    expect(repeatPreview.currentWordIndex).toBe(2);
+    expect(repeatPreview.currentWordId).toBe(page.words[2].word_id);
+    expect(repeatPreview.repeatedWordIds.has(page.words[1].word_id)).toBe(true);
+
+    // Dropping leading word ("Lan" while at "bé") with allowLookahead: false does NOT jump ahead
+    const droppedLeading = engine.previewAlignment("Lan", {
+      allowLookahead: false,
+    });
+    expect(droppedLeading.currentWordIndex).toBe(2);
+    expect(droppedLeading.currentWordId).toBe(page.words[2].word_id);
+
+    // At end of page, repeating last word does NOT rewind finished null cursor back to last word
+    engine.addFinalTranscript("bé Lan đọc sách");
+    expect(engine.getSnapshot().currentWordId).toBeNull();
+    const endRepeat = engine.previewAlignment("sách", {
+      allowLookahead: false,
+    });
+    expect(endRepeat.currentWordId).toBeNull();
   });
 });
 
@@ -622,7 +686,7 @@ describe("ReadingLayout mobile shell & options sheet", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders Tạm dừng mẫu with >=44px touch height (min-h-11) and scopes mobile dock hiding to max-width: 639px without static dock at <=319px", () => {
+  it("renders Tạm dừng mẫu with >=44px touch height (min-h-11), in-flow feedback, and 4-band @media (max-width: 767px) + compact landscape contract", () => {
     render(
       <ReadingLayout
         bookTitle="Chú Mèo Nhỏ"
@@ -646,6 +710,11 @@ describe("ReadingLayout mobile shell & options sheet", () => {
     expect(samplePauseBtn.className).toContain("min-h-11");
     expect(samplePauseBtn.className).not.toContain("min-h-10");
 
+    const feedbackSlot = document.querySelector(
+      '[data-reading-feedback="true"]',
+    );
+    expect(feedbackSlot?.className).not.toContain("max-sm:absolute");
+
     const globalsCss = fs.readFileSync(
       path.resolve(__dirname, "../../app/globals.css"),
       "utf8",
@@ -656,30 +725,64 @@ describe("ReadingLayout mobile shell & options sheet", () => {
     );
     expect(max767Blocks.length).toBeGreaterThanOrEqual(1);
     expect(
-      max767Blocks.some((block) =>
-        block.includes('.reader-bookplate:not([data-v2-mode="true"])'),
+      max767Blocks.some(
+        (block) =>
+          block.includes(".reader-bookplate") &&
+          block.includes("data-desktop-only-control") &&
+          block.includes("data-voice-settings-wrap"),
       ),
     ).toBe(true);
-    for (const block of max767Blocks) {
-      expect(block).not.toContain("data-desktop-only-control");
-      expect(block).not.toContain("data-voice-settings-wrap");
-    }
+    expect(globalsCss).not.toMatch(/@media \(max-width: 639px\)/);
 
-    const max639Blocks = Array.from(
-      globalsCss.matchAll(/@media \(max-width: 639px\) \{([\s\S]*?)\n\}/g),
+    const compactLandscapeBlocks = Array.from(
+      globalsCss.matchAll(
+        /@media \(max-height: 520px\) and \(min-width: 640px\) \{([\s\S]*?)\n\}/g,
+      ),
       (m) => m[1],
     );
     expect(
-      max639Blocks.some(
+      compactLandscapeBlocks.some(
         (block) =>
           block.includes("data-desktop-only-control") &&
-          block.includes("data-voice-settings-wrap"),
+          block.includes("data-voice-settings-wrap") &&
+          block.includes("display: inline-flex"),
       ),
     ).toBe(true);
 
     expect(globalsCss).not.toMatch(
       /@media \(max-height: 520px\) and \(max-width: 319px\)[\s\S]*?position:\s*static/,
     );
+  });
+
+  it("hides V2 storybook bookplate, mode switcher, and illustration inline on < md and softens overlay word styling", () => {
+    const v2Page: ReadingPageDTO = {
+      ...samplePage,
+      image_url: "https://example.test/scan.png",
+      illustration_url: "https://example.test/illus.png",
+      illustration_text_free: true,
+    };
+
+    const { container } = render(
+      <BookPageViewer
+        title="Truyện Tranh"
+        illustrationUrl={v2Page.illustration_url}
+        illustrationTextFree={v2Page.illustration_text_free}
+        page={v2Page}
+        currentWordId={v2Page.words[0].word_id}
+        mispronouncedWordIds={new Set([v2Page.words[1].word_id])}
+        selfCorrectedWordIds={new Set([v2Page.words[2].word_id])}
+      />,
+    );
+
+    const bookplate = container.querySelector(".reader-bookplate");
+    expect(bookplate?.className).toContain("hidden");
+    expect(bookplate?.className).toContain("md:flex");
+
+    const illustrationCard = screen.getByTestId("storybook-illustration-card");
+    expect(illustrationCard.className).toContain("hidden");
+    expect(illustrationCard.className).toContain("md:block");
+
+    expect(container.textContent).not.toMatch(/[•↺◇?♪]/);
   });
 });
 
@@ -1101,5 +1204,112 @@ describe("ReadingScreen regressions: preemption, silent interrupt, stt-unavailab
     });
 
     expect(speechPlayerMock.play).toHaveBeenCalled();
+  });
+
+  it("does not block reading on android_vi_voice_missing and exposes Mở Cài đặt TTS in the ⋮ sheet", async () => {
+    setupReadingServices();
+    speechPlayerMock.playWithWordTimings.mockImplementationOnce(async () => {
+      recordTtsUnavailability({
+        reason: "android_vi_voice_missing",
+        canInstallVietnameseTtsVoice: true,
+        voiceNotice:
+          "Thiết bị chưa cài giọng đọc tiếng Việt cho TTS ngoại tuyến.",
+      });
+      speechPlayerMock.ttsUnavailableReason = "android_vi_voice_missing";
+      speechPlayerMock.canInstallVietnameseTtsVoice = true;
+      speechPlayerMock.voiceNotice =
+        "Thiết bị chưa cài giọng đọc tiếng Việt cho TTS ngoại tuyến.";
+      throw new Error("TTS unavailable");
+    });
+
+    const user = userEvent.setup();
+    render(
+      <ReadingScreen
+        initialUiState="reading"
+        reconnectMode="recover"
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Nghe đọc mẫu cả trang" }),
+    );
+
+    await waitFor(() => {
+      expect(speechPlayerMock.playWithWordTimings).toHaveBeenCalledOnce();
+    });
+
+    // Must NOT open blocking "Đọc tiếp" tts-error modal
+    expect(
+      screen.queryByRole("button", { name: "Đọc tiếp" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Bé đọc với nhận diện giọng nói" }),
+    ).toBeEnabled();
+
+    await user.click(screen.getByTestId("mobile-reading-menu-btn"));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Tùy chọn buổi đọc",
+    });
+    const installBtn = within(dialog).getByRole("button", {
+      name: "Mở Cài đặt TTS",
+    });
+    await user.click(installBtn);
+    expect(speechPlayerMock.openTtsInstallSettings).toHaveBeenCalledOnce();
+  });
+
+  it("keeps readingPageDtoSchema tts_audio_url/tts_word_timings for catalog books while discarding poisoned URLs on PARENT_PRIVATE", () => {
+    const parsed = readingPageDtoSchema.parse({
+      ...samplePage,
+      tts_audio_url: "https://cdn.example.test/viread-catalog-tts/p1.mp3",
+      tts_word_timings: [{ index: 0, start: 0, end: 0.4 }],
+    });
+    expect(parsed.tts_audio_url).toBe(
+      "https://cdn.example.test/viread-catalog-tts/p1.mp3",
+    );
+    expect(parsed.tts_word_timings).toEqual([{ index: 0, start: 0, end: 0.4 }]);
+  });
+
+  it("never rewinds active reading cursor on fluctuating or confidence-0 interim transcripts", async () => {
+    setupReadingServices();
+    const user = userEvent.setup();
+    render(
+      <ReadingScreen
+        initialUiState="reading"
+        reconnectMode="recover"
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Bé đọc với nhận diện giọng nói",
+      }),
+    );
+    const rec = FakeSpeechRecognition.instances[0];
+    expect(rec).toBeDefined();
+
+    // Advance interim preview to word[2] ("nhỏ")
+    act(() => {
+      rec.say("Bé mèo", false);
+    });
+    expect(screen.getByRole("button", { name: "nhỏ" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+
+    // Fluctuating shorter interim or confidence: 0 cursor-1 repeat must NOT rewind to "mèo" or "Bé"
+    act(() => {
+      rec.onresult?.({
+        resultIndex: 0,
+        results: [
+          { isFinal: false, length: 1, 0: { transcript: "Bé", confidence: 0 } },
+        ],
+      });
+    });
+    expect(screen.getByRole("button", { name: "nhỏ" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
   });
 });

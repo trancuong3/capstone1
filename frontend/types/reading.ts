@@ -103,6 +103,14 @@ export interface ReadingPageDTO {
   readonly image_overlay_safe?: boolean;
   readonly illustration_url?: string | null;
   readonly illustration_text_free?: boolean;
+  readonly tts_audio_url?: string | null;
+  readonly tts_word_timings?:
+    | readonly {
+        readonly index: number;
+        readonly start: number;
+        readonly end: number;
+      }[]
+    | null;
   readonly text?: string;
   readonly words: readonly ReadingPageWordDTO[];
   /** Zero-based line indices that begin a new paragraph. */

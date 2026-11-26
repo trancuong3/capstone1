@@ -13,7 +13,7 @@ export function KaraokeControls({
     <div className="grid gap-4">
       <div className="flex flex-wrap gap-3">
         <Button
-          className="sm:w-auto"
+          className="w-full min-[640px]:w-auto"
           disabled={!player.ready}
           onClick={() => (player.playing ? player.pause() : void player.play())}
         >
@@ -24,7 +24,7 @@ export function KaraokeControls({
               : "Phát"}
         </Button>
         <Button
-          className="sm:w-auto"
+          className="w-full min-[640px]:w-auto"
           variant="secondary"
           disabled={!player.ready}
           onClick={() => {
@@ -53,7 +53,7 @@ export function KaraokeControls({
           className="min-h-11 w-full accent-primary"
         />
       </label>
-      <label className="grid gap-2 font-bold sm:max-w-xs">
+      <label className="grid gap-2 font-bold min-[640px]:max-w-xs">
         Âm lượng
         <input
           aria-label="Âm lượng"

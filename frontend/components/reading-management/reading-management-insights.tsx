@@ -173,7 +173,7 @@ export function TodaySummary({ childName, plans, goals }: TodaySummaryProps) {
   return (
     <section
       aria-label="Hôm nay"
-      className="rounded-card border border-border bg-white p-5 shadow-sm sm:p-6"
+      className="mt-2 rounded-card border border-border bg-white p-3.5 shadow-sm md:mt-0 md:p-6"
     >
       <h2 className="text-xl font-semibold text-ink">
         Hôm nay {childName} cần đọc gì?
@@ -185,7 +185,7 @@ export function TodaySummary({ childName, plans, goals }: TodaySummaryProps) {
             : "Chưa có kế hoạch hoặc mục tiêu hằng ngày đang chạy. Hãy tạo kế hoạch bên dưới để bé có việc cần làm."}
         </p>
       ) : (
-        <ul className="mt-4 grid gap-3 md:grid-cols-2">
+        <ul className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
           {todayPlans.map((plan) => {
             const minutes = plan.minutes_today ?? 0;
             const percent = Math.min(
@@ -193,7 +193,10 @@ export function TodaySummary({ childName, plans, goals }: TodaySummaryProps) {
               Math.round((minutes * 100) / plan.target_minutes),
             );
             return (
-              <li key={plan.id} className="rounded-control bg-canvas p-3">
+              <li
+                key={plan.id}
+                className="min-w-0 break-words rounded-control bg-canvas p-3"
+              >
                 <p className="font-semibold text-ink">{plan.title}</p>
                 {plan.book_title ? (
                   <p className="text-sm text-muted">Sách: {plan.book_title}</p>
@@ -219,7 +222,10 @@ export function TodaySummary({ childName, plans, goals }: TodaySummaryProps) {
             );
           })}
           {dailyGoals.map((goal) => (
-            <li key={goal.id} className="rounded-control bg-canvas p-3">
+            <li
+              key={goal.id}
+              className="min-w-0 break-words rounded-control bg-canvas p-3"
+            >
               <p className="font-semibold text-ink">
                 Mục tiêu {goal.target_value}{" "}
                 {goal.metric === "MINUTES" ? "phút" : "buổi"} mỗi ngày

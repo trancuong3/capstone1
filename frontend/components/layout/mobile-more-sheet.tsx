@@ -71,15 +71,15 @@ export function MobileMoreSheet({
       <section
         aria-labelledby={`${id}-title`}
         aria-modal="true"
-        className="relative z-10 w-full rounded-t-2xl border-t border-border bg-white px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 shadow-2xl"
+        className="relative z-10 mx-auto flex max-h-[85dvh] w-full max-w-[640px] flex-col rounded-t-2xl border-t border-border bg-white px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 shadow-2xl"
         id={id}
         role="dialog"
       >
         <div
           aria-hidden="true"
-          className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-border"
+          className="mx-auto mb-3 h-1.5 w-10 shrink-0 rounded-full bg-border"
         />
-        <div className="mb-3 flex items-center justify-between gap-2 px-1">
+        <div className="mb-3 flex shrink-0 items-center justify-between gap-2 px-1">
           <h2 className="text-lg font-extrabold text-ink" id={`${id}-title`}>
             {title}
           </h2>
@@ -93,7 +93,10 @@ export function MobileMoreSheet({
             <X aria-hidden="true" className="size-5" />
           </button>
         </div>
-        <nav aria-label={title} className="grid gap-1.5">
+        <nav
+          aria-label={title}
+          className="grid min-h-0 flex-1 gap-1.5 overflow-y-auto overscroll-contain"
+        >
           {items.map(({ href, label, description, icon: Icon, isActive }) => {
             const active = isActive
               ? isActive(pathname)

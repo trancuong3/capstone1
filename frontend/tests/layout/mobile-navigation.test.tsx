@@ -119,6 +119,12 @@ describe("MobileBottomNav, AppShell and AdminLayout mobile UX", () => {
     await user.click(moreButton);
 
     const dialog = screen.getByRole("dialog", { name: "Tính năng khác" });
+    expect(dialog.className).toContain("max-h-[85dvh]");
+    expect(dialog.className).toContain("max-w-[640px]");
+    expect(
+      within(dialog).getByRole("navigation", { name: "Tính năng khác" })
+        .className,
+    ).toContain("overflow-y-auto");
     expect(
       within(dialog).getByRole("link", { name: /Sách của tôi/ }),
     ).toHaveAttribute("href", "/my-books");
@@ -332,6 +338,70 @@ describe("MobileBottomNav, AppShell and AdminLayout mobile UX", () => {
     ).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("banner").className).toContain("xl:hidden");
     expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
+  });
+
+  it("applies 360px child-switcher shrink, safe-area main padding, and tablet footer clearance in AppShell", async () => {
+    const authService = createAuthServiceFixture();
+    const user = userEvent.setup();
+
+    render(
+      withAuthFixture(
+        <AppStoreProvider>
+          <AppShell>
+            <div>Nội dung</div>
+          </AppShell>
+        </AppStoreProvider>,
+        authService,
+        { session: authSessionFixture },
+      ),
+    );
+
+    const banner = screen.getByRole("banner");
+    expect(banner.className).toContain("max-xl:z-[45]");
+    expect(banner.className).toContain("xl:z-30");
+
+    const switcherBtn = await screen.findByRole("button", {
+      name: "Bé đang chọn: Bé An, bấm để đổi",
+    });
+    expect(switcherBtn.className).toContain("min-w-0");
+    expect(switcherBtn.className).toContain("max-w-[min(100%,164px)]");
+    expect(switcherBtn.className).not.toContain("max-w-full");
+
+    await user.click(switcherBtn);
+    const listbox = screen.getByRole("listbox", {
+      name: "Chuyển nhanh hồ sơ bé",
+    });
+    expect(listbox.className).toContain("max-[640px]:fixed");
+    expect(listbox.className).toContain("max-[640px]:inset-x-4");
+    expect(listbox.className).toContain("max-[640px]:top-16");
+    expect(listbox.className).toContain("max-[640px]:w-auto");
+    expect(listbox.className).not.toContain("max-[639px]:");
+    expect(listbox.className).toContain("min-[640px]:right-0");
+    expect(listbox.className).toContain("min-[640px]:w-60");
+    expect(listbox.className).toContain("max-w-[calc(100vw-2rem)]");
+    expect(listbox.className).toContain("overflow-y-auto");
+
+    await user.click(screen.getByRole("button", { name: "Mở menu tài khoản" }));
+    const accountMenu = screen.getByRole("menu", { name: "Menu tài khoản" });
+    expect(accountMenu.className).toContain("max-h-[min(75dvh,32rem)]");
+    expect(accountMenu.className).toContain("overflow-y-auto");
+    expect(accountMenu.className).toContain("overflow-x-hidden");
+    expect(accountMenu.className).toContain("overscroll-contain");
+
+    const main = screen.getByRole("main");
+    expect(main.className).toContain(
+      "pb-[calc(6rem+env(safe-area-inset-bottom))]",
+    );
+    expect(main.className).toContain("min-[640px]:px-6");
+    expect(main.className).toContain("md:px-8");
+
+    const footer = screen.getByRole("contentinfo");
+    expect(footer.className).toContain("hidden");
+    expect(footer.className).toContain("lg:block");
+    expect(footer.className).toContain(
+      "pb-[calc(6rem+env(safe-area-inset-bottom))]",
+    );
+    expect(footer.className).toContain("xl:pb-0");
   });
 
   it("renders AdminLayout compact mobile bottom nav and Admin More sheet while hiding footer below lg", async () => {

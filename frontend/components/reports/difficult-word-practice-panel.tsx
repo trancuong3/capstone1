@@ -1,10 +1,12 @@
 "use client";
 
 import {
+  Activity,
   ArrowLeft,
   ArrowRight,
   BookOpen,
   CheckCircle2,
+  ChevronDown,
   Mic,
   Pause,
   Play,
@@ -13,7 +15,14 @@ import {
   Square,
   Volume2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
@@ -283,6 +292,8 @@ export function DifficultWordPracticePanel({
   const [isPlayingPhonics, setIsPlayingPhonics] = useState(false);
   const [masteryOutcome, setMasteryOutcome] =
     useState<ReadingWordMasteryOutcome | null>(null);
+  const [showVoiceEngine, setShowVoiceEngine] = useState(false);
+  const voiceEngineRegionId = useId();
 
   const mountedRef = useRef(true);
   const flowGenerationRef = useRef(0);
@@ -1711,11 +1722,11 @@ export function DifficultWordPracticePanel({
   return (
     <section
       aria-labelledby="practice-word-heading"
-      className="mx-auto flex w-full max-w-[780px] flex-col gap-4 rounded-[24px] border border-[#DCE8E4] bg-white p-4 shadow-sm sm:gap-5 sm:p-8"
+      className="mx-auto flex w-full max-w-[780px] flex-col gap-4 rounded-[24px] border border-[#DCE8E4] bg-white p-4 shadow-sm min-[640px]:p-6 md:gap-5 md:p-8"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-[#DCE8E4] pb-3 sm:gap-3 sm:pb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-[#DCE8E4] pb-3 md:gap-3 md:pb-4">
         <Button
-          className="min-h-12 sm:w-auto"
+          className="min-h-11 w-auto px-3 text-sm md:min-h-12 md:px-4 md:text-button"
           onClick={() => {
             flowGenerationRef.current += 1;
             cleanupRef.current();
@@ -1727,8 +1738,28 @@ export function DifficultWordPracticePanel({
           Quay về danh sách
         </Button>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <VoiceEngineBadge compact />
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button
+            aria-controls={voiceEngineRegionId}
+            aria-expanded={showVoiceEngine}
+            aria-label="Xem nguồn giọng đọc"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-[#DCE8E4] bg-[#F6FAF8] px-3 py-1.5 text-xs font-bold text-[#526970] transition-colors hover:bg-[#ECF8F9] focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary md:hidden"
+            onClick={() => setShowVoiceEngine((open) => !open)}
+            type="button"
+          >
+            <Activity aria-hidden="true" className="size-3.5 text-[#147D87]" />
+            <span>Nguồn giọng</span>
+          </button>
+          <div
+            className={
+              showVoiceEngine
+                ? "order-last flex w-full justify-end pt-1 md:order-first md:inline-flex md:w-auto md:pt-0"
+                : "hidden md:order-first md:inline-flex md:w-auto"
+            }
+            id={voiceEngineRegionId}
+          >
+            <VoiceEngineBadge compact />
+          </div>
           {wordIndexInQueue >= 0 ? (
             <span className="rounded-full bg-[#F6FAF8] px-3 py-1 text-xs font-bold text-[#526970]">
               Từ {wordIndexInQueue + 1}/{words.length}
@@ -1744,15 +1775,18 @@ export function DifficultWordPracticePanel({
 
       {primarySource?.book_title ? (
         <div className="flex flex-wrap items-center gap-2 text-sm text-[#526970]">
-          <BookOpen aria-hidden="true" className="size-4 text-[#147D87]" />
-          <span className="font-bold text-[#213C42]">
+          <BookOpen
+            aria-hidden="true"
+            className="size-4 shrink-0 text-[#147D87]"
+          />
+          <span className="min-w-0 break-words font-bold text-[#213C42]">
             {primarySource.book_title}
           </span>
           {primarySource.page_number ? (
             <span>· Trang {primarySource.page_number}</span>
           ) : null}
           {primarySource.context_phrase ? (
-            <span className="rounded-lg bg-[#F6FAF8] px-2.5 py-0.5 text-xs italic text-[#526970]">
+            <span className="max-w-full break-words rounded-lg bg-[#F6FAF8] px-2.5 py-0.5 text-xs italic text-[#526970]">
               “{primarySource.context_phrase}”
             </span>
           ) : null}
@@ -1762,7 +1796,7 @@ export function DifficultWordPracticePanel({
       <div
         data-capture-ms={latestResult?.audio_duration_ms ?? undefined}
         data-evaluation-ms={evaluationDurationMs ?? undefined}
-        className={`flex flex-col items-center gap-4 rounded-card border px-5 py-5 text-center transition-colors sm:py-7 ${stageThemeClass}`}
+        className={`flex flex-col items-center gap-4 rounded-card border px-4 py-4 text-center transition-colors md:px-5 md:py-7 ${stageThemeClass}`}
       >
         <p className="text-sm font-extrabold text-primary" aria-live="polite">
           {stageLabel}
@@ -1774,13 +1808,13 @@ export function DifficultWordPracticePanel({
           </span>
         ) : null}
         {phraseTurn && contextPhrase && flowState !== "SUCCESS" ? (
-          <p className="rounded-control bg-white px-4 py-2 text-xl font-bold text-ink">
+          <p className="max-w-full break-words rounded-control bg-white px-4 py-2 text-lg font-bold text-ink md:text-xl">
             {contextPhrase}
           </p>
         ) : null}
 
         <h2
-          className="text-5xl font-black tracking-tight text-[#213C42] sm:text-6xl"
+          className="max-w-full break-words text-3xl font-black leading-tight tracking-tight text-[#213C42] [overflow-wrap:anywhere] min-[640px]:text-4xl md:text-6xl"
           id="practice-word-heading"
         >
           {word.display_text}
@@ -1819,11 +1853,11 @@ export function DifficultWordPracticePanel({
         </p>
 
         {latestResult?.spoken_transcript ? (
-          <p className="rounded-full bg-white/85 px-4 py-1 text-sm font-semibold text-[#526970]">
+          <p className="max-w-full break-words rounded-2xl bg-white/85 px-3.5 py-1.5 text-sm font-semibold text-[#526970] md:rounded-full md:px-4 md:py-1">
             Máy nghe được: “{latestResult.spoken_transcript}”
           </p>
         ) : liveTranscript ? (
-          <p className="rounded-full bg-white/85 px-4 py-1 text-sm font-semibold text-[#526970]">
+          <p className="max-w-full break-words rounded-2xl bg-white/85 px-3.5 py-1.5 text-sm font-semibold text-[#526970] md:rounded-full md:px-4 md:py-1">
             Đang nghe: “{liveTranscript}”
           </p>
         ) : null}
@@ -1873,7 +1907,7 @@ export function DifficultWordPracticePanel({
             <span>{submitError}</span>
             {pendingSavePayload ? (
               <Button
-                className="sm:w-auto sm:self-start"
+                className="min-[640px]:w-auto min-[640px]:self-start"
                 onClick={() => {
                   const gen = flowGenerationRef.current;
                   void submitEvaluation(pendingSavePayload, gen);
@@ -1888,7 +1922,7 @@ export function DifficultWordPracticePanel({
         </StatusMessage>
       ) : null}
 
-      <div className="flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:flex-wrap">
+      <div className="flex flex-col items-stretch justify-center gap-3 min-[640px]:flex-row min-[640px]:flex-wrap">
         {flowState === "LISTENING" ? (
           <>
             <Button
@@ -1902,7 +1936,7 @@ export function DifficultWordPracticePanel({
               Dừng ghi âm
             </Button>
             <Button
-              className="min-h-14 rounded-2xl sm:w-auto"
+              className="min-h-14 rounded-2xl min-[640px]:w-auto"
               onClick={handlePauseSession}
               variant="secondary"
             >
@@ -1915,7 +1949,7 @@ export function DifficultWordPracticePanel({
           flowState === "EVALUATING" ||
           flowState === "SAVING" ? (
           <Button
-            className="min-h-14 rounded-2xl sm:w-auto"
+            className="min-h-14 rounded-2xl min-[640px]:w-auto"
             onClick={handlePauseSession}
             variant="secondary"
           >
@@ -1950,7 +1984,7 @@ export function DifficultWordPracticePanel({
               </Button>
             )}
             <Button
-              className="min-h-14 rounded-2xl sm:w-auto"
+              className="min-h-14 rounded-2xl min-[640px]:w-auto"
               onClick={() => void startHandsFreePractice()}
               variant="secondary"
             >
@@ -1970,7 +2004,7 @@ export function DifficultWordPracticePanel({
             {nextWordTarget &&
             nextWordTarget.normalized_word !== word.normalized_word ? (
               <Button
-                className="min-h-14 rounded-2xl sm:w-auto"
+                className="min-h-14 rounded-2xl min-[640px]:w-auto"
                 onClick={() => {
                   handlePauseSession();
                   onSelectWord(nextWordTarget.normalized_word);
@@ -1981,7 +2015,7 @@ export function DifficultWordPracticePanel({
               </Button>
             ) : null}
             <Button
-              className="min-h-14 rounded-2xl sm:w-auto"
+              className="min-h-14 rounded-2xl min-[640px]:w-auto"
               onClick={() => {
                 handlePauseSession();
                 void handlePlaySample();
@@ -2006,7 +2040,7 @@ export function DifficultWordPracticePanel({
         )}
 
         <Button
-          className="min-h-14 rounded-2xl sm:w-auto"
+          className="min-h-14 rounded-2xl min-[640px]:w-auto"
           disabled={isBusyActive}
           onClick={() => void handlePlaySample()}
           variant="secondary"
@@ -2017,7 +2051,7 @@ export function DifficultWordPracticePanel({
 
         {recordedBlob ? (
           <Button
-            className="min-h-14 rounded-2xl sm:w-auto"
+            className="min-h-14 rounded-2xl min-[640px]:w-auto"
             disabled={isBusyActive}
             onClick={() => void handlePlaySelfRecording()}
             variant="quiet"
@@ -2028,9 +2062,13 @@ export function DifficultWordPracticePanel({
         ) : null}
       </div>
 
-      <details className="rounded-2xl border border-[#DCE8E4] bg-[#F6FAF8] px-4 py-3 text-sm">
-        <summary className="cursor-pointer font-bold text-[#213C42]">
-          Lịch sử luyện từ này ({historyItems.length} lượt)
+      <details className="group rounded-2xl border border-[#DCE8E4] bg-[#F6FAF8] px-4 py-1.5 text-sm md:py-2">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 font-bold text-[#213C42]">
+          <span>Lịch sử luyện từ này ({historyItems.length} lượt)</span>
+          <ChevronDown
+            aria-hidden="true"
+            className="size-4 shrink-0 text-[#526970] transition-transform group-open:rotate-180"
+          />
         </summary>
         <div className="mt-3 border-t border-[#DCE8E4] pt-3">
           {historyLoading ? (
@@ -2056,7 +2094,7 @@ export function DifficultWordPracticePanel({
                       ? ASSESSMENT_LABELS[item.assessment_status]
                       : "Đang luyện"}
                   </span>
-                  <span>
+                  <span className="min-w-0 break-words">
                     {item.spoken_transcript
                       ? `“${item.spoken_transcript}” · `
                       : ""}

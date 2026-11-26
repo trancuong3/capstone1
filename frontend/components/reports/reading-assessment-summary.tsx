@@ -50,9 +50,9 @@ export function ReadingAssessmentSummary({
         embedded ? "rounded-control bg-canvas/55" : "rounded-card bg-white",
       )}
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border px-4 py-3.5 sm:px-6">
-        <div>
-          <h3 className="text-lg font-extrabold text-ink">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border px-4 py-3.5 md:px-6">
+        <div className="min-w-0">
+          <h3 className="text-base font-extrabold text-ink md:text-lg">
             Lượt đọc đầu và phần luyện thêm
           </h3>
           <p className="mt-0.5 text-sm text-muted">
@@ -66,20 +66,20 @@ export function ReadingAssessmentSummary({
         ) : null}
       </div>
 
-      <div className="grid divide-y divide-border lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:divide-x lg:divide-y-0">
-        <div className="flex flex-col justify-between gap-4 p-4 sm:p-5">
+      <div className="grid grid-cols-1 divide-y divide-border lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:divide-x lg:divide-y-0">
+        <div className="flex min-w-0 flex-col justify-between gap-4 p-4 md:p-5">
           <div>
             <h4 className="text-xs font-extrabold tracking-wide text-primary">
               Đánh giá lượt đầu
             </h4>
-            <dl className="mt-3 grid grid-cols-2 gap-4">
-              <div>
+            <dl className="mt-3 grid grid-cols-2 gap-3 md:gap-4">
+              <div className="min-w-0">
                 <dt className="text-sm text-muted">Đúng lượt đầu</dt>
                 <dd className="mt-1 text-2xl font-extrabold tabular-nums text-success-ink">
                   {assessment.first_pass_correct}
                 </dd>
               </div>
-              <div>
+              <div className="min-w-0">
                 <dt className="text-sm text-muted">Cần luyện ở lượt đầu</dt>
                 <dd className="mt-1 text-2xl font-extrabold tabular-nums text-ink">
                   {assessment.first_pass_incorrect}
@@ -109,14 +109,14 @@ export function ReadingAssessmentSummary({
           ) : null}
         </div>
 
-        <div className="flex flex-col justify-between gap-4 p-4 sm:p-5">
+        <div className="flex min-w-0 flex-col justify-between gap-4 p-4 md:p-5">
           <div>
             <h4 className="text-xs font-extrabold tracking-wide text-primary">
               Luyện thêm
             </h4>
-            <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+            <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 min-[640px]:grid-cols-4">
               {retryMetrics.map(({ label, value, valueClass }) => (
-                <div key={label}>
+                <div className="min-w-0" key={label}>
                   <dt className="text-xs leading-snug text-muted">{label}</dt>
                   <dd
                     className={`mt-1 text-xl font-extrabold tabular-nums ${valueClass}`}
@@ -128,7 +128,7 @@ export function ReadingAssessmentSummary({
             </dl>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-canvas px-3.5 py-2.5 text-sm ring-1 ring-inset ring-border/80">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-canvas px-3 py-2.5 text-sm ring-1 ring-inset ring-border/80 md:px-3.5">
             <div className="flex items-baseline gap-2">
               <span className="font-semibold text-muted">Chưa nghe rõ</span>
               <span className="text-base font-extrabold tabular-nums text-ink">
