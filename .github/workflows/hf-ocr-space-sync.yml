@@ -50,7 +50,7 @@ jobs:
 
           for i in $(seq 1 90); do
             if curl -fsS "http://127.0.0.1:7860/health" > /tmp/hf-health.json 2>/dev/null; then
-              if python3 -c "import json,sys; d=json.load(open('/tmp/hf-health.json')); sys.exit(0 if d.get('ready') else 1)"; then
+              if python3 -c "import json,sys; d=json.load(open('/tmp/hf-health.json')); eng=d.get('engines') or {}; ok=bool(d.get('ready') and eng.get('paddleocr',{}).get('inference_verified') and eng.get('vietocr',{}).get('inference_verified')); sys.exit(0 if ok else 1)"; then
                 break
               fi
             fi
@@ -61,9 +61,11 @@ jobs:
           import json
           health = json.load(open("/tmp/hf-health.json", encoding="utf-8"))
           assert health["ready"] is True, f"Worker not ready: {health}"
+          assert health["standby_mode"] in ("quiet_standby", "burst_awake"), health
           assert health["engines"]["paddleocr"]["inference_verified"] is True, health
           assert health["engines"]["vietocr"]["inference_verified"] is True, health
           assert health["engines"]["tesseract_vie"]["installed"] is True, health
+          assert health["engines"]["tesseract_vie"]["inference_verified"] is True, health
           print("Verified 3-engine OCR container health:", health["worker_id"], health["standby_mode"])
           PY
 
