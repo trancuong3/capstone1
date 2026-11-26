@@ -615,9 +615,16 @@ class TestVoiceWorkerHardeningAndClientVad(unittest.IsolatedAsyncioTestCase):
         fake_rec.create_stream.side_effect = _FakeStream
         with patch.object(vw.runtime, "stt_recognizer", fake_rec):
             vw.decode_stt_window_sync(clip, lead_pad_s=0.20, trail_pad_s=0.35)
-        # No trailing pad applied for 0.60s voiced word despite 1.25s total length!
-        expected_no_trail = int(sr * 0.20) + clip.size
-        self.assertEqual(captured_lengths[-1], expected_no_trail)
+        # Smart framing trims 0.45s pre-roll down to 0.20s lead and appends ZERO 0.35s trailing pad!
+        self.assertLess(captured_lengths[-1], clip.size)
+        self.assertGreaterEqual(captured_lengths[-1], int(sr * 0.95))
+        self.assertLessEqual(captured_lengths[-1], int(sr * 1.05))
+
+        # Short word with 0.50s excess trailing silence trims tail down to <= 0.20s
+        long_tail_clip = np.concatenate([np.zeros(int(sr * 0.18), dtype=np.float32), speech, np.zeros(int(sr * 0.50), dtype=np.float32)])
+        with patch.object(vw.runtime, "stt_recognizer", fake_rec):
+            vw.decode_stt_window_sync(long_tail_clip, lead_pad_s=0.18, trail_pad_s=0.35)
+        self.assertLess(captured_lengths[-1], long_tail_clip.size - int(sr * 0.20))
 
         # Single-sample plosive pop (2 samples at 0.999) must NOT flag CLIPPING!
         sess = vw._WsSttSession()

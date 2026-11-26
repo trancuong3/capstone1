@@ -312,6 +312,23 @@ describe("Hosted Voice FE Hardening (STT-01..STT-10 & TTS-03..TTS-09)", () => {
       // Trimmed to ~0.18s lead + 0.40s speech = ~9,280 samples (< 11,200), NOT 14,400 + 2,880 = 17,280!
       expect(acceptedLengths[0]).toBeLessThan(Math.round(0.7 * sr));
       expect(acceptedLengths[0]).toBeGreaterThan(Math.round(0.5 * sr));
+
+      // 0.18s lead + 0.40s speech + 0.50s excess trailing silence => tail trimmed to <= 0.20s (~0.78s total)
+      const tailSamples = new Float32Array(Math.round(1.08 * sr));
+      for (let i = Math.round(0.18 * sr); i < Math.round(0.58 * sr); i += 1) {
+        tailSamples[i] = 0.15 * Math.sin((2 * Math.PI * 240 * i) / sr);
+      }
+      await onmessage({
+        data: {
+          type: "transcribe",
+          id: "cap-tail-1",
+          samples: tailSamples,
+          sampleRate: sr,
+        },
+      });
+      expect(acceptedLengths).toHaveLength(2);
+      expect(acceptedLengths[1]).toBeLessThan(Math.round(0.85 * sr));
+      expect(acceptedLengths[1]).toBeGreaterThan(Math.round(0.65 * sr));
     });
 
     it("falls back from failing Tier-1 WASM to Tier-3 Web Speech when allowed, and falls back in evaluateRecordedShortWord on 503", async () => {
