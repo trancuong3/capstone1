@@ -3,6 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useId } from "react";
 
+import { useTranslations } from "@/hooks/use-i18n";
 import type { ChildProfileDTO } from "@/types/child";
 
 interface ChildSelectorProps {
@@ -17,6 +18,7 @@ export function ChildSelector({
   selectedChildId,
   clearQueryKeys,
 }: ChildSelectorProps) {
+  const tc = useTranslations("child");
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -28,10 +30,10 @@ export function ChildSelector({
         className="mb-1.5 block text-xs font-bold text-muted"
         htmlFor={selectId}
       >
-        Hồ sơ của bé
+        {tc("selector.label")}
       </label>
       <select
-        aria-label="Chọn hồ sơ bé để xem dữ liệu"
+        aria-label={tc("selector.selectAria")}
         className="min-h-12 w-full cursor-pointer rounded-control border border-border bg-white px-3.5 text-sm font-bold text-ink outline-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
         id={selectId}
         onChange={(event) => {
@@ -49,7 +51,10 @@ export function ChildSelector({
       >
         {childrenProfiles.map((child) => (
           <option key={child.id} value={child.id}>
-            {child.alias} · Lớp {child.grade}
+            {tc("selector.optionLabel", {
+              alias: child.alias,
+              grade: child.grade,
+            })}
           </option>
         ))}
       </select>

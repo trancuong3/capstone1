@@ -1,0 +1,15 @@
+{
+  "reminders": {
+    "saved": "Recordatorio de lectura guardado.",
+    "deleted": "Recordatorio de lectura eliminado.",
+    "emailSent": "Se ha enviado el correo electrónico de recordatorio de lectura."
+  },
+  "presence": {
+    "childStarted": "{alias} acaba de comenzar una nueva sesión de lectura.",
+    "childCompleted": "{alias} ha completado una sesión de lectura."
+  },
+  "updates": {
+    "saved": "Cambios guardados.",
+    "localeChanged": "Idioma de la interfaz actualizado a {language}."
+  }
+}

@@ -9,6 +9,7 @@ import { ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
+import { useTranslations } from "@/hooks/use-i18n";
 import type { AuthMockScenario } from "@/types/auth";
 
 interface ResetPasswordScreenProps {
@@ -16,6 +17,7 @@ interface ResetPasswordScreenProps {
 }
 
 export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
+  const tAuth = useTranslations("auth");
   const authRuntime = useAuthRuntime();
   const [isSuccessful, setIsSuccessful] = useState(scenario === "success");
   const [recoveryFailure, setRecoveryFailure] = useState<
@@ -53,19 +55,18 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
         <Card className="border border-border" tone="success">
           <div>
             <p className="text-sm font-semibold text-success-ink">
-              Tài khoản ViRead
+              {tAuth("accountEyebrow")}
             </p>
             <h1 className="mt-2 text-heading font-extrabold text-success-ink">
-              Đã đổi mật khẩu
+              {tAuth("resetPassword.successTitle")}
             </h1>
             <p className="mt-3 text-body leading-relaxed text-muted">
-              Mật khẩu mới đã được lưu. Ba mẹ đăng nhập để tiếp tục cùng bé đọc
-              sách.
+              {tAuth("resetPassword.successBody")}
             </p>
           </div>
           <ButtonLink href="/login">
-            Đăng nhập
-            <ArrowRight aria-hidden="true" className="size-5" />
+            {tAuth("login.submit")}
+            <ArrowRight aria-hidden="true" className="size-5 viread-rtl-flip" />
           </ButtonLink>
         </Card>
       </AuthShell>
@@ -80,26 +81,28 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
         <Card className="border border-border bg-white">
           <div>
             <p className="text-sm font-semibold text-primary">
-              Bảo mật tài khoản ViRead
+              {tAuth("securityEyebrow")}
             </p>
             <h1 className="mt-2 text-heading font-extrabold text-ink">
-              {isExpired ? "Liên kết đã hết hạn" : "Liên kết không hợp lệ"}
+              {isExpired
+                ? tAuth("resetPassword.expiredTitle")
+                : tAuth("resetPassword.invalidTitle")}
             </h1>
             <p className="mt-3 text-body leading-relaxed text-muted">
               {isExpired
-                ? "Ba mẹ hãy yêu cầu một hướng dẫn đặt lại mật khẩu mới."
-                : "Ba mẹ vui lòng kiểm tra lại email hoặc yêu cầu một liên kết mới."}
+                ? tAuth("resetPassword.expiredBody")
+                : tAuth("resetPassword.invalidBody")}
             </p>
           </div>
           <StatusMessage tone="warning">
-            Liên kết khôi phục không thể được sử dụng để đổi mật khẩu.
+            {tAuth("resetPassword.unusableWarning")}
           </StatusMessage>
           <ButtonLink href="/forgot-password" variant="secondary">
-            Yêu cầu hướng dẫn mới
-            <ArrowRight aria-hidden="true" className="size-5" />
+            {tAuth("resetPassword.requestNewLink")}
+            <ArrowRight aria-hidden="true" className="size-5 viread-rtl-flip" />
           </ButtonLink>
           <ButtonLink href="/login" variant="quiet">
-            Về đăng nhập
+            {tAuth("forgotPassword.backToLogin")}
           </ButtonLink>
         </Card>
       </AuthShell>
@@ -111,13 +114,13 @@ export function ResetPasswordScreen({ scenario }: ResetPasswordScreenProps) {
       <Card className="border border-border bg-white">
         <div>
           <p className="text-sm font-semibold text-primary">
-            Bảo mật tài khoản ViRead
+            {tAuth("securityEyebrow")}
           </p>
           <h1 className="mt-2 text-heading font-extrabold text-ink">
-            Đặt mật khẩu mới
+            {tAuth("resetPassword.heading")}
           </h1>
           <p className="mt-3 text-body leading-relaxed text-muted">
-            Dùng ít nhất 8 ký tự. Nhập lại mật khẩu mới để xác nhận.
+            {tAuth("resetPassword.instructions")}
           </p>
         </div>
         <ResetPasswordForm

@@ -16,6 +16,7 @@ import { Modal } from "@/components/common/modal";
 import { StatusMessage } from "@/components/common/status-message";
 import { useSkippedAiPageIds } from "@/hooks/use-admin-ai-batch-skipped-pages";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { AdminPageUploader } from "@/components/admin/admin-page-uploader";
 import { AdminPageImagePreview } from "@/components/admin/admin-page-image-preview";
 import { AdminBookAiBatchReview } from "@/components/admin/admin-book-ai-batch-review";
@@ -25,6 +26,8 @@ import type { AdminBookDTO, AdminPageListItemUI } from "@/types/admin";
 
 export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
   const { books, pages } = useAdminServices();
+  const t = useTranslations("admin");
+  const { formatNumber } = useI18n();
   const skippedAiPageIds = useSkippedAiPageIds(bookId);
   const pageSize = 24;
   const [pageNumber, setPageNumber] = useState(1);
@@ -109,12 +112,11 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       if (requestId !== requestIdRef.current) return;
       setPageActionNotice({
         tone: "error",
-        title: "Không thể làm mới trạng thái trang",
-        message:
-          "Thao tác đã gửi tới Backend; hãy bấm Tải lại để xác nhận trạng thái cuối cùng.",
+        title: t("books.detail.refreshErrorTitle"),
+        message: t("books.detail.refreshErrorDesc"),
       });
     }
-  }, [bookId, pages]);
+  }, [bookId, pages, t]);
   async function retirePendingPage() {
     const item = pendingRetire;
     const pageId = item?.processing.page_id;
@@ -142,17 +144,18 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       setRetiringPageId(null);
       setPageActionNotice({
         tone: "info",
-        title: "Trang đã ngừng sử dụng",
-        message: `Trang ${item.page_number} đã được ẩn khỏi nội dung đọc mới. Ảnh nguồn, các revision và lịch sử phiên đọc được giữ nguyên.`,
+        title: t("books.detail.pageRetiredTitle"),
+        message: t("books.detail.pageRetiredMsg", {
+          pageNumber: item.page_number,
+        }),
       });
       await load();
     } catch {
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setPageActionNotice({
         tone: "error",
-        title: "Không thể xóa trang",
-        message:
-          "Không thể ngừng sử dụng trang lúc này. Hãy kiểm tra quyền Admin hoặc kết nối Backend rồi thử lại.",
+        title: t("books.detail.deletePageErrorTitle"),
+        message: t("books.detail.deletePageErrorMsg"),
       });
     } finally {
       if (mountedRef.current) setRetiringPageId(null);
@@ -174,23 +177,25 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       <EmptyState
         headingLevel={1}
         title={
-          error === "not-found" ? "Không tìm thấy sách" : "Không thể tải sách"
+          error === "not-found"
+            ? t("books.detail.notFoundTitle")
+            : t("books.detail.loadErrorTitle")
         }
         description={
           error === "not-found"
-            ? "ID sách không thuộc dữ liệu quản trị hiện tại."
-            : "Vui lòng thử lại sau."
+            ? t("books.detail.notFoundDesc")
+            : t("books.detail.genericErrorDesc")
         }
         action={
           <div className="flex flex-wrap items-center gap-3">
             <Button onClick={() => void load()} variant="secondary">
-              Thử lại
+              {t("common.retry")}
             </Button>
             <Link
               className="inline-flex min-h-11 items-center rounded-md px-1 font-extrabold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
               href="/admin/books"
             >
-              Quay lại kho sách
+              {t("books.detail.backToBooks")}
             </Link>
           </div>
         }
@@ -204,22 +209,28 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
   return (
     <>
       <AdminPageHeader
-        eyebrow="Chi tiết sách"
-        title={book.title.trim() ? book.title : "Chưa có tiêu đề"}
-        description={`Tên sách: ${book.name?.trim() ? book.name : "Chưa có tên sách"} · ${book.author ?? "Chưa có tác giả"} · Khối ${book.min_grade}–${book.max_grade}`}
+        eyebrow={t("books.detail.eyebrow")}
+        title={book.title.trim() ? book.title : t("books.detail.missingTitle")}
+        description={t("books.detail.description", {
+          name: book.name?.trim() ? book.name : t("books.missingName"),
+          author: book.author ?? t("books.missingAuthor"),
+          minGrade: book.min_grade,
+          maxGrade: book.max_grade,
+        })}
       />
       <div className="mb-4 grid gap-4 sm:grid-cols-2">
         <Link
           className="inline-flex min-h-12 items-center justify-center gap-2 rounded-control bg-white px-4 font-bold text-ink focus-visible:outline-3 focus-visible:outline-primary"
           href="/admin/books"
         >
-          <ArrowLeft aria-hidden className="size-5" /> Kho sách
+          <ArrowLeft aria-hidden className="size-5 rtl:rotate-180" />{" "}
+          {t("books.detail.backToBooks")}
         </Link>
         <Link
           className="inline-flex min-h-12 items-center justify-center rounded-control bg-sky px-4 font-bold text-primary focus-visible:outline-3 focus-visible:outline-primary"
           href={`/admin/books/${encodeURIComponent(book.id)}/edit`}
         >
-          Chỉnh sửa metadata / vòng đời
+          {t("books.detail.editMetadata")}
         </Link>
       </div>
       <div className="mb-4 flex flex-wrap items-center gap-4">
@@ -229,17 +240,16 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       <StatusMessage
         className="mb-6"
         tone="info"
-        title="Sách chưa tự động được mở cho trẻ"
+        title={t("books.detail.notPublishedTitle")}
       >
-        Backend chỉ cho sách vào thư viện trẻ em khi mọi trang đang hoạt động có
-        revision OCR VERIFIED, Safety đã xác nhận trên đúng Candidate và không
-        có finding HIGH hoặc suitability NOT_RECOMMENDED. Trang đang OCR, Safety
-        lỗi / stale hoặc chờ Admin đều khiến sách bị ẩn khỏi Child, Reading
-        Session và Game.
+        {t("books.detail.notPublishedDesc")}
       </StatusMessage>
       <AdminPageUploader bookId={book.id} onUploaded={refreshPages} />
       {items && items.length > 0 ? (
-        <section className="mt-6" aria-label="Rà soát OCR hàng loạt">
+        <section
+          className="mt-6"
+          aria-label={t("books.detail.batchReviewAria")}
+        >
           <AdminBookAiBatchReview
             bookId={book.id}
             items={items}
@@ -251,10 +261,12 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h2 className="text-2xl font-black" id="pages-title">
-              Trang sách
+              {t("books.detail.pagesHeading")}
             </h2>
             {items ? (
-              <p className="mt-1 text-sm text-muted">{items.length} trang</p>
+              <p className="mt-1 text-sm text-muted">
+                {t("books.pagesCount", { count: items.length })}
+              </p>
             ) : null}
           </div>
           <Button
@@ -267,7 +279,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
             type="button"
             variant="secondary"
           >
-            <RefreshCw aria-hidden className="size-5" /> Tải lại
+            <RefreshCw aria-hidden className="size-5" /> {t("common.reload")}
           </Button>
         </div>
         {pageActionNotice ? (
@@ -282,19 +294,21 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
         {!items ? (
           <AdminLoading />
         ) : pagesUnavailable ? (
-          <StatusMessage tone="info" title="Dữ liệu trang đang chờ bổ sung">
-            Metadata sách đã tải được, nhưng revision hoặc ảnh chưa đáp ứng
-            contract hiện tại.
+          <StatusMessage
+            tone="info"
+            title={t("books.detail.pageDataPendingTitle")}
+          >
+            {t("books.detail.pageDataPendingDesc")}
           </StatusMessage>
         ) : items.length === 0 ? (
           <EmptyState
-            title="Sách chưa có trang"
-            description="Database chưa có trang nào cho sách này."
+            title={t("books.detail.emptyPagesTitle")}
+            description={t("books.detail.emptyPagesDesc")}
           />
         ) : (
           <div className="grid gap-4">
             <AdminResultsPagination
-              itemLabel="trang"
+              itemLabel={t("books.detail.pageItemLabel")}
               onPageChange={setPageNumber}
               page={pageNumber}
               pageSize={pageSize}
@@ -317,15 +331,16 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                         onReplaced={() => {
                           setPageActionNotice({
                             tone: "info",
-                            title: "Ảnh mới đang chờ duyệt",
-                            message:
-                              "Bản mới cần được xác minh trước khi dùng cho lượt đọc. Ảnh và nội dung lịch sử vẫn được giữ nguyên.",
+                            title: t("books.detail.pendingImageTitle"),
+                            message: t("books.detail.pendingImageDesc"),
                           });
                           void load();
                         }}
                       />
                       <h3 className="text-2xl font-extrabold">
-                        Trang {item.page_number}
+                        {t("books.detail.pageNumber", {
+                          pageNumber: formatNumber(item.page_number),
+                        })}
                       </h3>
                       <div className="flex items-start gap-3">
                         <AdminStatusBadge
@@ -340,7 +355,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                       item.processing.ocr_preview_metadata
                         .ai_review_required === true ? (
                         <span className="inline-flex w-fit rounded-full bg-red-100 px-3 py-1 text-sm font-extrabold text-red-700">
-                          AI tự VERIFIED · Admin cần rà soát
+                          {t("books.detail.aiAutoVerifiedWarning")}
                         </span>
                       ) : null}
                       {item.processing.verification_status === "NEEDS_REVIEW" &&
@@ -349,7 +364,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                           item.processing.page_revision_id,
                         )) ? (
                         <span className="inline-flex w-fit rounded-full bg-red-100 px-3 py-1 text-sm font-extrabold text-red-700">
-                          Cần Admin xác minh để dùng train
+                          {t("books.detail.adminVerifyForTrainingWarning")}
                         </span>
                       ) : null}
                       <div>
@@ -357,9 +372,17 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                           Revision R{item.processing.revision_no}
                         </p>
                         <p className="mt-3 line-clamp-2 break-words text-sm leading-6 text-ink">
-                          {item.text_preview?.trim()
-                            ? item.text_preview
-                            : "Chưa có văn bản OCR để xem trước."}
+                          {item.text_preview?.trim() ? (
+                            <span
+                              className="viread-learning-content"
+                              dir="ltr"
+                              lang="vi"
+                            >
+                              {item.text_preview}
+                            </span>
+                          ) : (
+                            t("books.detail.noOcrPreview")
+                          )}
                         </p>
                       </div>
                       <div className="mt-auto flex flex-col items-stretch gap-3">
@@ -368,8 +391,8 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                           href={`/admin/books/${book.id}/pages/${item.processing.page_id}`}
                         >
                           {active
-                            ? "Xem / Thay ảnh / Duyệt OCR"
-                            : "Xem lịch sử OCR"}
+                            ? t("books.detail.openReviewAction")
+                            : t("books.detail.openHistoryAction")}
                         </Link>
                         {active ? (
                           <Button
@@ -380,11 +403,12 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                             }}
                             variant="quiet"
                           >
-                            <Trash2 aria-hidden className="size-4" /> Xóa trang
+                            <Trash2 aria-hidden className="size-4" />{" "}
+                            {t("books.detail.deletePage")}
                           </Button>
                         ) : (
                           <span className="text-xs font-semibold text-muted">
-                            Đã ngừng sử dụng
+                            {t("books.detail.retiredBadge")}
                           </span>
                         )}
                       </div>
@@ -394,7 +418,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
               })}
             </div>
             <AdminResultsPagination
-              itemLabel="trang"
+              itemLabel={t("books.detail.pageItemLabel")}
               onPageChange={setPageNumber}
               page={pageNumber}
               pageSize={pageSize}
@@ -415,7 +439,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
               type="button"
               variant="secondary"
             >
-              Hủy
+              {t("common.cancel")}
             </Button>
             <Button
               disabled={retiringPageId !== null}
@@ -428,7 +452,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
               type="button"
               variant="destructive"
             >
-              Xóa trang
+              {t("books.detail.deletePage")}
             </Button>
           </div>
         }
@@ -440,15 +464,15 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
         showCloseButton={retiringPageId === null}
         title={
           pendingRetire
-            ? `Xóa Trang ${pendingRetire.page_number}?`
-            : "Xóa trang"
+            ? t("books.detail.confirmDeletePageTitle", {
+                pageNumber: formatNumber(pendingRetire.page_number),
+              })
+            : t("books.detail.confirmDeletePageTitleFallback")
         }
         tone="paper"
       >
         <p className="text-sm leading-6 text-muted">
-          Trang sẽ được ngừng sử dụng và không còn xuất hiện trong các lượt đọc
-          mới. Ảnh nguồn, các revision và lịch sử đọc cũ vẫn được giữ để bảo
-          toàn dữ liệu.
+          {t("books.detail.confirmDeletePageDesc")}
         </p>
       </Modal>
     </>

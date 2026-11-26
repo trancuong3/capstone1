@@ -11,6 +11,7 @@ import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { KaraokePlayer } from "@/components/karaoke/karaoke-player";
 import { useAdminKaraoke } from "@/components/karaoke/karaoke-services-provider";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { karaokeErrorMessage } from "@/lib/api/admin-karaoke-service";
 import { isServiceError } from "@/lib/api/service-error";
 import type { TimingFocus } from "./syllable-timing-editor";
@@ -38,26 +39,6 @@ function metadataFrom(value: KaraokeMetadata): KaraokeMetadata {
     usage_note: value.usage_note,
   };
 }
-const issueLabels: Record<KaraokeValidation["issues"][number]["code"], string> =
-  {
-    TITLE_REQUIRED: "Chưa có tên bài hát",
-    SOURCE_REQUIRED: "Chưa ghi nguồn nhạc/lời",
-    USAGE_REQUIRED: "Chưa ghi quyền sử dụng",
-    AUDIO_REQUIRED: "Chưa tải nhạc",
-    LYRICS_REQUIRED: "Chưa có lời",
-    TIMING_REQUIRED: "Thiếu mốc thời gian",
-    TIMING_INVALID: "Mốc đầu/cuối chưa hợp lệ",
-    TIMING_OVERLAP: "Các dòng chồng lấn hoặc sai thứ tự",
-    TIMING_OUT_OF_RANGE: "Mốc vượt thời lượng",
-    TIMING_AUDIO_MISMATCH: "Lời chưa được căn theo bản nhạc hiện tại",
-    MEDIA_UNAVAILABLE: "Không đọc được file media",
-    CONTENT_INVALID: "Dữ liệu nội dung chưa hợp lệ",
-    SYLLABLES_REQUIRED: "Chưa tách tiếng cho câu",
-    SYLLABLE_TEXT_MISMATCH: "Nội dung tiếng chưa khớp lời câu",
-    PROCESSING_IN_PROGRESS: "Đang có kết quả karaoke cần xử lý hoặc áp dụng",
-    PROCESSING_REVIEW_REQUIRED:
-      "Cần nghe và xác nhận bản karaoke tự động trước khi xuất bản",
-  };
 
 export function KaraokeEditorScreen({
   songId,
@@ -67,6 +48,8 @@ export function KaraokeEditorScreen({
   simpleHref?: string;
 }) {
   const service = useAdminKaraoke();
+  const t = useTranslations("admin");
+  const { formatNumber } = useI18n();
   const router = useRouter();
   const [detail, setDetail] = useState<AdminKaraokeDetail | null>(null);
   const [metadata, setMetadata] =
@@ -125,8 +108,8 @@ export function KaraokeEditorScreen({
   useEffect(() => {
     if (!dirty && !busy) return;
     const message = busy
-      ? "Đang lưu/tải dữ liệu. Rời trang có thể khiến kết quả chưa được xác nhận. Tiếp tục?"
-      : "Có thay đổi chưa lưu. Bạn muốn rời trang và bỏ thay đổi?";
+      ? t("karaoke.editor.leaveBusyConfirm")
+      : t("karaoke.editor.leaveDirtyConfirm");
     function unload(event: BeforeUnloadEvent) {
       event.preventDefault();
       event.returnValue = "";
@@ -168,7 +151,7 @@ export function KaraokeEditorScreen({
       window.removeEventListener("beforeunload", unload);
       document.removeEventListener("click", navigate, true);
     };
-  }, [dirty, busy]);
+  }, [dirty, busy, t]);
 
   async function run<T>(
     label: string,
@@ -233,14 +216,12 @@ export function KaraokeEditorScreen({
         (v) => typeof v === "string" && /\p{Cc}/u.test(v),
       )
     ) {
-      setError(
-        "Kiểm tra lớp bắt đầu/kết thúc, độ dài nội dung, dòng lời không trống và thời gian nguyên (ms). Không dùng ký tự điều khiển.",
-      );
+      setError(t("karaoke.editor.invalidMetadataNotice"));
       return;
     }
     if (!songId) {
       void run(
-        "Đang tạo bản nháp…",
+        t("karaoke.editor.creatingDraft"),
         (signal) => service.create(parsed.data, signal),
         (data) => {
           adopt(data);
@@ -249,7 +230,7 @@ export function KaraokeEditorScreen({
       );
     } else if (detail && draft && !conflict) {
       void run(
-        "Đang lưu bản nháp…",
+        t("karaoke.editor.savingDraft"),
         (signal) =>
           service.save(
             songId,
@@ -263,9 +244,7 @@ export function KaraokeEditorScreen({
           ),
         (data) => {
           adopt(data);
-          setNotice(
-            "Đã lưu bản nháp. Hãy tải nghe thử và kiểm tra lại trước khi xuất bản.",
-          );
+          setNotice(t("karaoke.editor.savedDraftNotice"));
         },
       );
     }
@@ -273,13 +252,14 @@ export function KaraokeEditorScreen({
   function reload() {
     if (
       !songId ||
-      (dirty &&
-        !window.confirm(
-          "Tải lại sẽ bỏ phần đang nhập. Bạn đã sao lưu/đối chiếu thay đổi chưa?",
-        ))
+      (dirty && !window.confirm(t("karaoke.editor.reloadConfirm")))
     )
       return;
-    void run("Đang tải lại…", (signal) => service.get(songId, signal), adopt);
+    void run(
+      t("karaoke.editor.reloading"),
+      (signal) => service.get(songId, signal),
+      adopt,
+    );
   }
   function loadPreview() {
     if (!songId || !detail || !draft || dirty || conflict) return;
@@ -287,7 +267,7 @@ export function KaraokeEditorScreen({
     setPreview(null);
     setReviewed(false);
     void run(
-      "Đang tải nghe thử…",
+      t("karaoke.editor.loadingPreview"),
       (signal) => service.preview(songId, detail.revision, draft.id, signal),
       setPreview,
     );
@@ -300,16 +280,20 @@ export function KaraokeEditorScreen({
     validation.revision === detail?.revision &&
     preview?.revision === detail?.revision &&
     reviewed;
-  if (loading) return <AdminLoading label="Đang tải chi tiết bài hát…" />;
+  if (loading) return <AdminLoading label={t("karaoke.editor.loadingSong")} />;
   return (
     <div className="grid gap-6">
       <AdminPageHeader
-        eyebrow="HÁT VUI"
-        title={songId ? "Biên tập bài hát" : "Tạo bài hát"}
-        description="Chỉ tải nhạc và lời bạn có quyền sử dụng. Không ghi âm giọng trẻ."
+        eyebrow={t("karaoke.editor.eyebrow")}
+        title={
+          songId
+            ? t("karaoke.editor.editTitle")
+            : t("karaoke.editor.createTitle")
+        }
+        description={t("karaoke.editor.description")}
         actions={
           <ButtonLink href="/admin/karaoke" variant="secondary">
-            Về danh sách bài hát
+            {t("karaoke.editor.backToSongs")}
           </ButtonLink>
         }
       />
@@ -320,25 +304,24 @@ export function KaraokeEditorScreen({
           variant="quiet"
           className="sm:w-auto"
         >
-          Về chế độ tạo karaoke đơn giản
+          {t("karaoke.editor.backToWizard")}
         </ButtonLink>
       )}
       {detail?.processing_review?.required &&
         !detail.processing_review.reviewed && (
           <StatusMessage tone="info">
-            Bản nháp này có kết quả xử lý tự động. Lưu thay đổi, rồi về chế độ
-            đơn giản để nghe và xác nhận đúng nội dung trước khi xuất bản.
+            {t("karaoke.editor.pendingProcessingBanner")}
           </StatusMessage>
         )}
       {conflict && (
         <details className="rounded-control border border-border bg-white p-4">
           <summary className="cursor-pointer font-bold">
-            Sao lưu nội dung đang nhập trước khi tải lại
+            {t("karaoke.editor.backupSummary")}
           </summary>
           <label className="mt-3 grid gap-2 text-sm">
-            Chọn và sao chép nội dung này nếu cần giữ thay đổi của bạn.
+            {t("karaoke.editor.backupHint")}
             <textarea
-              aria-label="Nội dung nháp để sao lưu"
+              aria-label={t("karaoke.editor.backupAria")}
               readOnly
               value={JSON.stringify({ ...metadata, lyrics }, null, 2)}
               rows={10}
@@ -350,7 +333,8 @@ export function KaraokeEditorScreen({
       {notice && <StatusMessage tone="success">{notice}</StatusMessage>}
       {busy && (
         <p role="status" className="font-bold">
-          {busy} Không đóng trang khi đang xử lý.
+          {busy}
+          {t("karaoke.editor.busyKeepOpenSuffix")}
         </p>
       )}
       {songId && (
@@ -361,48 +345,53 @@ export function KaraokeEditorScreen({
             disabled={!!busy}
             onClick={reload}
           >
-            Tải lại từ máy chủ
+            {t("karaoke.editor.reloadFromServer")}
           </Button>
           {detail && (
             <p className="text-sm text-muted">
-              Revision {detail.revision} ·{" "}
-              {dirty ? "Có thay đổi chưa lưu" : "Đã đồng bộ"}
+              {t("karaoke.editor.revisionMeta", {
+                revision: formatNumber(detail.revision),
+                state: dirty
+                  ? t("karaoke.editor.stateDirty")
+                  : t("karaoke.editor.stateSynced"),
+              })}
             </p>
           )}
         </div>
       )}
       {songId && !detail ? (
-        <StatusMessage>
-          Chưa tải được bài hát. Bấm tải lại để thử lại.
-        </StatusMessage>
+        <StatusMessage>{t("karaoke.editor.songNotLoaded")}</StatusMessage>
       ) : detail && !draft ? (
         <Card>
-          <h2 className="text-xl font-extrabold">{detail.published?.title}</h2>
-          <p>
-            Đây là bản đã xuất bản. Tạo bản nháp để sửa; nội dung trẻ đang dùng
-            vẫn giữ nguyên cho đến khi xuất bản lại.
-          </p>
+          <h2 className="text-xl font-extrabold" dir="auto">
+            {detail.published?.title}
+          </h2>
+          <p>{t("karaoke.editor.publishedReadonlyBanner")}</p>
           <Button
             className="sm:w-auto"
             disabled={disabled}
             onClick={() =>
               void run(
-                "Đang tạo bản sửa…",
+                t("karaoke.editor.creatingRevision"),
                 (signal) =>
                   service.createDraft(detail.song_id, detail.revision, signal),
                 adopt,
               )
             }
           >
-            Tạo bản nháp từ bản xuất bản
+            {t("karaoke.editor.createDraftFromPublished")}
           </Button>
         </Card>
       ) : (
         <>
           <Card>
-            <h2 className="text-xl font-extrabold">1. Thông tin bài hát</h2>
+            <h2 className="text-xl font-extrabold">
+              {t("karaoke.editor.section1Heading")}
+            </h2>
             <fieldset disabled={disabled}>
-              <legend className="sr-only">Thông tin bài hát</legend>
+              <legend className="sr-only">
+                {t("karaoke.editor.section1Legend")}
+              </legend>
               <SongMetadataForm
                 value={metadata}
                 onChange={(value) => {
@@ -412,14 +401,16 @@ export function KaraokeEditorScreen({
               />
             </fieldset>
             <Button className="sm:w-auto" disabled={disabled} onClick={save}>
-              {songId ? "Lưu bản nháp" : "Tạo bản nháp"}
+              {songId
+                ? t("karaoke.editor.saveDraftBtn")
+                : t("karaoke.editor.createDraftBtn")}
             </Button>
           </Card>
           {draft && detail && (
             <>
               <Card>
                 <h2 className="text-xl font-extrabold">
-                  2. Nhạc nền và ảnh bìa
+                  {t("karaoke.editor.section2Heading")}
                 </h2>
                 <SongMediaUpload
                   draft={draft}
@@ -428,8 +419,8 @@ export function KaraokeEditorScreen({
                     setPreview(null);
                     void run(
                       kind === "audio"
-                        ? "Đang tải và kiểm tra nhạc…"
-                        : "Đang tải và kiểm tra ảnh…",
+                        ? t("karaoke.editor.uploadingAudio")
+                        : t("karaoke.editor.uploadingCover"),
                       (signal) =>
                         service.upload(
                           detail.song_id,
@@ -443,8 +434,8 @@ export function KaraokeEditorScreen({
                         adopt(data);
                         setNotice(
                           kind === "audio"
-                            ? "Đã tải nhạc; các mốc thời gian cũ đã được xóa. Hãy căn lại lời theo nhạc này."
-                            : "Đã tải ảnh bìa.",
+                            ? t("karaoke.editor.uploadedAudioNotice")
+                            : t("karaoke.editor.uploadedCoverNotice"),
                         );
                       },
                     );
@@ -453,12 +444,10 @@ export function KaraokeEditorScreen({
               </Card>
               <Card>
                 <h2 className="text-xl font-extrabold">
-                  3. Lời, căn thời gian và nghe thử
+                  {t("karaoke.editor.section3Heading")}
                 </h2>
                 <p className="text-sm text-muted">
-                  Lưu nháp trước khi tải bản nghe thử. Sau khi tải, bạn có thể
-                  nghe và sửa mốc ngay; bộ phát dùng lời đang nhập. Lưu lại rồi
-                  nghe thử lần cuối trước khi xuất bản.
+                  {t("karaoke.editor.section3Desc")}
                 </p>
                 <Button
                   className="sm:w-auto"
@@ -467,8 +456,8 @@ export function KaraokeEditorScreen({
                   onClick={loadPreview}
                 >
                   {preview
-                    ? "Tải lại bản nghe thử"
-                    : "Tải bản nghe thử / Căn thời gian"}
+                    ? t("karaoke.editor.reloadPreviewBtn")
+                    : t("karaoke.editor.loadPreviewBtn")}
                 </Button>
                 {preview ? (
                   <KaraokePlayer
@@ -505,25 +494,21 @@ export function KaraokeEditorScreen({
                   disabled={disabled}
                   onClick={save}
                 >
-                  Lưu lời và thời gian
+                  {t("karaoke.editor.saveLyricsTimingBtn")}
                 </Button>
               </Card>
               <Card>
                 <h2 className="text-xl font-extrabold">
-                  4. Kiểm tra và xuất bản
+                  {t("karaoke.editor.section4Heading")}
                 </h2>
-                <p>
-                  Bản nháp cần được lưu, kiểm tra hợp lệ và bấm phát nghe thử
-                  đúng revision trước khi xuất bản. Backend kiểm tra lại một lần
-                  nữa khi xuất bản.
-                </p>
+                <p>{t("karaoke.editor.section4Desc")}</p>
                 <Button
                   variant="secondary"
                   className="sm:w-auto"
                   disabled={disabled || dirty}
                   onClick={() =>
                     void run(
-                      "Đang kiểm tra nội dung và file…",
+                      t("karaoke.editor.validatingPublish"),
                       (signal) =>
                         service.validate(
                           detail.song_id,
@@ -535,17 +520,19 @@ export function KaraokeEditorScreen({
                     )
                   }
                 >
-                  Kiểm tra điều kiện xuất bản
+                  {t("karaoke.editor.validatePublishBtn")}
                 </Button>
                 {validation && (
                   <StatusMessage
                     tone={validation.valid ? "success" : "warning"}
                     title={
-                      validation.valid ? "Bản nháp hợp lệ" : "Chưa thể xuất bản"
+                      validation.valid
+                        ? t("karaoke.editor.draftValidTitle")
+                        : t("karaoke.editor.draftInvalidTitle")
                     }
                   >
                     {validation.valid ? (
-                      "Hãy nghe thử, đối chiếu lời với nhạc rồi xuất bản."
+                      t("karaoke.editor.readyToPublishDesc")
                     ) : (
                       <ul className="list-inside list-disc">
                         {validation.issues.map((issue, i) => {
@@ -557,7 +544,7 @@ export function KaraokeEditorScreen({
                               {issue.line_id ? (
                                 <button
                                   type="button"
-                                  className="min-h-11 text-left underline"
+                                  className="min-h-11 text-start underline"
                                   onClick={() =>
                                     setFocusTarget({
                                       lineId: issue.line_id!,
@@ -567,11 +554,15 @@ export function KaraokeEditorScreen({
                                     })
                                   }
                                 >
-                                  {issueLabels[issue.code]}
-                                  {index >= 0 ? ` · Dòng ${index + 1}` : ""}
+                                  {t(`karaoke.editor.reasons.${issue.code}`)}
+                                  {index >= 0
+                                    ? t("karaoke.editor.linePrefix", {
+                                        num: formatNumber(index + 1),
+                                      })
+                                    : ""}
                                 </button>
                               ) : (
-                                issueLabels[issue.code]
+                                t(`karaoke.editor.reasons.${issue.code}`)
                               )}
                             </li>
                           );
@@ -584,13 +575,9 @@ export function KaraokeEditorScreen({
                   className="sm:w-auto"
                   disabled={!canPublish}
                   onClick={() => {
-                    if (
-                      window.confirm(
-                        "Xuất bản bản nháp này cho trẻ? Bản đã xuất bản trước đó sẽ được thay thế.",
-                      )
-                    )
+                    if (window.confirm(t("karaoke.editor.publishConfirm")))
                       void run(
-                        "Đang xuất bản…",
+                        t("karaoke.editor.publishing"),
                         (signal) =>
                           service.publish(
                             detail.song_id,
@@ -600,12 +587,12 @@ export function KaraokeEditorScreen({
                           ),
                         (data) => {
                           adopt(data);
-                          setNotice("Đã xuất bản bài hát.");
+                          setNotice(t("karaoke.editor.publishedNotice"));
                         },
                       );
                   }}
                 >
-                  Xuất bản bài hát
+                  {t("karaoke.editor.publishBtn")}
                 </Button>
               </Card>
             </>

@@ -3,6 +3,12 @@
 import dynamic from "next/dynamic";
 
 import { AdminLoading } from "@/components/admin/admin-ui";
+import { useTranslations } from "@/hooks/use-i18n";
+
+function DynamicAdminLoading({ labelKey }: { labelKey: string }) {
+  const t = useTranslations("admin");
+  return <AdminLoading label={t(labelKey)} />;
+}
 
 export const DynamicAdminOcrReviewScreen = dynamic(
   () =>
@@ -11,7 +17,7 @@ export const DynamicAdminOcrReviewScreen = dynamic(
     ),
   {
     ssr: false,
-    loading: () => <AdminLoading label="Đang mở trang OCR Review…" />,
+    loading: () => <DynamicAdminLoading labelKey="dynamicLoading.ocrReview" />,
   },
 );
 
@@ -23,7 +29,7 @@ export const DynamicAdminBookContentQualityScreen = dynamic(
   {
     ssr: false,
     loading: () => (
-      <AdminLoading label="Đang tải bảng đánh giá chất lượng nội dung…" />
+      <DynamicAdminLoading labelKey="dynamicLoading.contentQuality" />
     ),
   },
 );
@@ -36,7 +42,7 @@ export const DynamicAdminVireadTrainingScreen = dynamic(
   {
     ssr: false,
     loading: () => (
-      <AdminLoading label="Đang tải bảng điều khiển VietOCR V2…" />
+      <DynamicAdminLoading labelKey="dynamicLoading.vireadTraining" />
     ),
   },
 );

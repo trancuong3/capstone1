@@ -5,6 +5,7 @@ import type { TimingFocus } from "@/components/admin/karaoke/syllable-timing-edi
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { KaraokePlayer } from "@/components/karaoke/karaoke-player";
+import { useTranslations } from "@/hooks/use-i18n";
 import type { WizardPreview } from "@/lib/karaoke/wizard-controller";
 import type {
   AdminKaraokeDetail,
@@ -12,18 +13,8 @@ import type {
   KaraokePreview,
   KaraokeValidation,
 } from "@/types/karaoke";
-import type {
-  DraftReferencePreview,
-  QualityFlag,
-} from "@/types/karaoke-processing";
-const flagLabels = {
-  LOW_ALIGNMENT_SUPPORT: "Đoạn này cần nghe kỹ vì bằng chứng căn lời còn yếu.",
-  LYRIC_MISMATCH: "Kiểm tra lời có khớp bản hát không.",
-  AMBIGUOUS_REPEAT: "Kiểm tra đúng lần lặp của câu hát.",
-  UNALIGNED_SYLLABLES: "Có tiếng chưa xác định đủ mốc thời gian.",
-  HELD_NOTE_UNCERTAIN: "Kiểm tra phần ngân và mốc kết thúc tiếng.",
-  BACKGROUND_ARTIFACT: "Nghe kiểm tra nhạc nền sau khi tách giọng.",
-} satisfies Record<QualityFlag["message_key"], string>;
+import type { DraftReferencePreview } from "@/types/karaoke-processing";
+
 type Props = {
   preview: WizardPreview;
   detail: AdminKaraokeDetail;
@@ -73,6 +64,7 @@ function ReviewBody({
   onPublish,
   canPublish,
 }: Props) {
+  const t = useTranslations("admin");
   const currentFingerprint =
     preview.kind === "staging"
       ? preview.source.input_fingerprint
@@ -139,16 +131,20 @@ function ReviewBody({
     <section
       className="grid gap-5"
       aria-label={
-        staging ? "Nghe kết quả chưa áp dụng" : "Nghe và duyệt bản nháp"
+        staging
+          ? t("karaoke.review.stagingAria")
+          : t("karaoke.review.draftAria")
       }
     >
       <h2 className="text-xl font-extrabold">
-        {staging ? "Kết quả chưa áp dụng" : "3. Nghe, kiểm tra và xuất bản"}
+        {staging
+          ? t("karaoke.review.stagingHeading")
+          : t("karaoke.review.draftHeading")}
       </h2>
       <StatusMessage tone="info">
         {staging
-          ? "Đây là kết quả xử lý riêng, chưa thay bản nháp và chưa xuất bản."
-          : "Nghe nhạc nền, đối chiếu lời và sửa các mốc còn thiếu. Bắt đầu phát không đồng nghĩa đã xác nhận duyệt."}
+          ? t("karaoke.review.stagingSubtitle")
+          : t("karaoke.review.draftSubtitle")}
       </StatusMessage>
       <div className="flex flex-wrap gap-3">
         <Button
@@ -157,7 +153,7 @@ function ReviewBody({
           disabled={busy || !useReference}
           onClick={() => setUseReference(false)}
         >
-          Nghe nhạc nền
+          {t("karaoke.review.listenInstrumental")}
         </Button>
         {referenceUrl && referenceExpiry ? (
           <Button
@@ -166,7 +162,7 @@ function ReviewBody({
             disabled={busy || useReference}
             onClick={() => setUseReference(true)}
           >
-            Nghe bản hát đối chiếu
+            {t("karaoke.review.listenReference")}
           </Button>
         ) : (
           !staging && (
@@ -176,7 +172,7 @@ function ReviewBody({
               disabled={busy || dirty}
               onClick={onReference}
             >
-              Tải bản hát đối chiếu
+              {t("karaoke.review.loadReference")}
             </Button>
           )
         )}
@@ -186,7 +182,9 @@ function ReviewBody({
           disabled={busy || dirty}
           onClick={reloadSelectedSource}
         >
-          {useReference ? "Làm mới bản hát đối chiếu" : "Làm mới bản nghe thử"}
+          {useReference
+            ? t("karaoke.review.refreshReference")
+            : t("karaoke.review.refreshPreview")}
         </Button>
       </div>
       {referenceError && (
@@ -197,10 +195,10 @@ function ReviewBody({
         source={selectedSource}
         label={
           useReference && referenceUrl
-            ? "Bản hát đối chiếu"
+            ? t("karaoke.review.playerTitleRef")
             : staging
-              ? "Nghe kết quả xử lý"
-              : "Nghe bản nháp"
+              ? t("karaoke.review.playerTitleStaging")
+              : t("karaoke.review.playerTitleDraft")
         }
         lyrics={staging ? source.lyrics : lyrics}
         onReload={reloadSelectedSource}
@@ -208,7 +206,10 @@ function ReviewBody({
         {(player) => (
           <>
             {flags.length > 0 && (
-              <div className="grid gap-3" aria-label="Các chỗ cần kiểm tra">
+              <div
+                className="grid gap-3"
+                aria-label={t("karaoke.review.flagsAria")}
+              >
                 {flags.map((flag) => {
                   const target = lyrics.lines.find(
                     (line) => line.id === flag.line_id,
@@ -221,12 +222,20 @@ function ReviewBody({
                       key={flag.id}
                       className="grid gap-2 rounded-control border border-border p-4"
                     >
-                      <p>{flagLabels[flag.message_key]}</p>
-                      <p className="text-sm text-muted">
-                        {target
-                          ? target.text
-                          : "Cảnh báo của lượt xử lý trước; câu gốc đã đổi hoặc đây là cảnh báo toàn bài. Hãy kiểm tra toàn bài."}
-                      </p>
+                      <p>{t(`karaoke.review.flags.${flag.message_key}`)}</p>
+                      {target ? (
+                        <p
+                          className="viread-learning-content text-sm text-muted"
+                          dir="ltr"
+                          lang="vi"
+                        >
+                          {target.text}
+                        </p>
+                      ) : (
+                        <p className="text-sm text-muted">
+                          {t("karaoke.review.staleWarningHint")}
+                        </p>
+                      )}
                       {!staging && target && (
                         <Button
                           variant="quiet"
@@ -243,7 +252,7 @@ function ReviewBody({
                             });
                           }}
                         >
-                          Kiểm tra câu được đánh dấu
+                          {t("karaoke.review.inspectLineBtn")}
                         </Button>
                       )}
                       {!staging && (
@@ -263,7 +272,7 @@ function ReviewBody({
                               })
                             }
                           />
-                          Tôi đã kiểm tra và xử lý cảnh báo này.
+                          {t("karaoke.review.ackFlagCheckbox")}
                         </label>
                       )}
                     </div>
@@ -277,7 +286,7 @@ function ReviewBody({
                 onToggle={(event) => setEditing(event.currentTarget.open)}
               >
                 <summary className="min-h-12 cursor-pointer py-3 font-bold text-primary-hover">
-                  Chỉnh thời gian và lời nâng cao
+                  {t("karaoke.review.advancedEditorLink")}
                 </summary>
                 <LyricTimingEditor
                   lyrics={lyrics}
@@ -295,28 +304,25 @@ function ReviewBody({
       </KaraokePlayer>
       {staging ? (
         <Button disabled={busy} onClick={onApply}>
-          Dùng kết quả này trong bản nháp
+          {t("karaoke.review.useInDraftBtn")}
         </Button>
       ) : (
         <>
           {structural.length > 0 && (
             <StatusMessage tone="warning">
-              <p>
-                Cần sửa trước khi duyệt/xuất bản; checkbox không bỏ qua các lỗi
-                này:
-              </p>
-              <ul className="list-disc pl-5">
+              <p>{t("karaoke.review.mustFixHeader")}</p>
+              <ul className="list-disc ps-5">
                 {structural.slice(0, 15).map((issue, index) => (
                   <li key={index}>
                     {issue.code === "SOURCE_REQUIRED"
-                      ? "Bổ sung nguồn nhạc và lời trong Thông tin thêm."
+                      ? t("karaoke.review.fixSource")
                       : issue.code === "USAGE_REQUIRED"
-                        ? "Bổ sung quyền sử dụng trong Thông tin thêm."
+                        ? t("karaoke.review.fixUsage")
                         : issue.code === "TITLE_REQUIRED"
-                          ? "Bổ sung tên bài hát."
+                          ? t("karaoke.review.fixTitle")
                           : issue.field === "lyrics"
-                            ? "Kiểm tra lời và mốc đầu/cuối từng câu, từng tiếng trong trình chỉnh sửa."
-                            : "Kiểm tra nội dung và file nhạc đã lưu."}
+                            ? t("karaoke.review.fixTiming")
+                            : t("karaoke.review.fixGeneric")}
                   </li>
                 ))}
               </ul>
@@ -336,8 +342,7 @@ function ReviewBody({
                 })
               }
             />
-            Tôi đã nghe nhạc nền, kiểm tra lời chạy và các chỗ được đánh dấu của
-            bản nháp này.
+            {t("karaoke.review.reviewedAckCheckbox")}
           </label>
           <Button
             variant="secondary"
@@ -352,13 +357,15 @@ function ReviewBody({
             }
             onClick={() => onConfirm(acknowledged, listened)}
           >
-            {reviewed ? "Bản nháp đã được xác nhận" : "Tôi đã nghe và duyệt"}
+            {reviewed
+              ? t("karaoke.review.draftConfirmedBtn")
+              : t("karaoke.review.confirmReviewBtn")}
           </Button>
           <Button
             disabled={busy || dirty || !canPublish || (!listened && !reviewed)}
             onClick={onPublish}
           >
-            Xuất bản bài hát
+            {t("karaoke.review.publishSongBtn")}
           </Button>
         </>
       )}

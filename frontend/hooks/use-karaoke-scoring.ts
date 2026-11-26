@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { translateRuntime } from "@/lib/i18n/runtime";
 import type { KaraokeLyrics } from "@/types/karaoke";
 import {
   browserSingingProvider,
@@ -47,17 +48,19 @@ function microphoneError(code?: string) {
     case "NotAllowedError":
     case "SecurityError":
     case "service-not-allowed":
-      return "Micro chưa được cấp quyền. Bé có thể hát tự do hoặc nhờ ba mẹ bật micro.";
+      return translateRuntime("entertainment.karaokeRuntime.micDenied");
     case "audio-capture":
     case "NotReadableError":
     case "NotFoundError":
-      return "Chưa tìm thấy micro. Ba mẹ kiểm tra thiết bị giúp bé nhé.";
+      return translateRuntime("entertainment.karaokeRuntime.micNotFound");
     case "network":
-      return "Kết nối nhận dạng bị gián đoạn. Bé vẫn có thể hát tiếp.";
+      return translateRuntime("entertainment.karaokeRuntime.micNetwork");
     case "language-not-supported":
-      return "Trình duyệt này chưa nhận dạng được tiếng Việt. Bé có thể hát tự do.";
+      return translateRuntime(
+        "entertainment.karaokeRuntime.micLanguageUnsupported",
+      );
     default:
-      return "Chưa kết nối được micro để chấm điểm. Bé có thể thử lại hoặc hát tự do.";
+      return translateRuntime("entertainment.karaokeRuntime.micFallback");
   }
 }
 
@@ -354,7 +357,7 @@ class KaraokeMicSession {
   private open(probe: boolean) {
     if (!this.provider.supported()) {
       this.fail(
-        "Trình duyệt này chưa hỗ trợ nhận dạng để chấm điểm. Bé có thể hát tự do.",
+        translateRuntime("entertainment.karaokeRuntime.micScoringUnsupported"),
       );
       return;
     }

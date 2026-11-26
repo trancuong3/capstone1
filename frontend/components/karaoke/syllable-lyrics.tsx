@@ -1,4 +1,7 @@
+"use client";
+
 import { Fragment, type CSSProperties } from "react";
+import { useTranslations } from "@/hooks/use-i18n";
 import type { KaraokeLine } from "@/types/karaoke";
 import type {
   LiveLineScore,
@@ -21,6 +24,7 @@ export function SyllableLyrics({
   evidence?: LiveLineScore;
   previewWords?: ReadonlyMap<string, LiveWordState>;
 }) {
+  const t = useTranslations("entertainment");
   // Keep original punctuation and capitalization while marking each occurrence.
   const stateById = new Map<string, LiveWordState>();
   for (const word of evidence?.words ?? []) {
@@ -47,7 +51,7 @@ export function SyllableLyrics({
             data-word-state="matched"
           >
             {part}
-            <span className="sr-only"> (đã nghe khớp)</span>
+            <span className="sr-only">{t("karaoke.lyrics.wordMatchedSr")}</span>
           </span>
         );
       }
@@ -59,7 +63,9 @@ export function SyllableLyrics({
             data-word-state="different"
           >
             {part}
-            <span className="sr-only"> (chưa đúng lời)</span>
+            <span className="sr-only">
+              {t("karaoke.lyrics.wordDifferentSr")}
+            </span>
           </span>
         );
       }
@@ -71,7 +77,7 @@ export function SyllableLyrics({
             data-word-state="omitted"
           >
             {part}
-            <span className="sr-only"> (bỏ qua)</span>
+            <span className="sr-only">{t("karaoke.lyrics.wordOmittedSr")}</span>
           </span>
         );
       }
@@ -83,7 +89,9 @@ export function SyllableLyrics({
             data-word-state="processing"
           >
             {part}
-            <span className="sr-only"> (đang xử lý)</span>
+            <span className="sr-only">
+              {t("karaoke.lyrics.wordProcessingSr")}
+            </span>
           </span>
         );
       }
@@ -108,16 +116,20 @@ export function SyllableLyrics({
 
   if (!line.syllables?.length) {
     const text = mark(line.text, line.id);
-    return highlightActive ? (
-      <span className={styles.activeLine} data-state="active">
-        {text}
+    return (
+      <span className="viread-learning-content" dir="ltr" lang="vi">
+        {highlightActive ? (
+          <span className={styles.activeLine} data-state="active">
+            {text}
+          </span>
+        ) : (
+          text
+        )}
       </span>
-    ) : (
-      <>{text}</>
     );
   }
   return (
-    <>
+    <span className="viread-learning-content" dir="ltr" lang="vi">
       {line.syllables?.map((unit, i) => {
         const active =
           unit.start_ms !== null &&
@@ -148,6 +160,6 @@ export function SyllableLyrics({
           </Fragment>
         );
       })}
-    </>
+    </span>
   );
 }

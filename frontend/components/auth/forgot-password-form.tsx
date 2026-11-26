@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowLeft, ArrowRight } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -12,15 +12,8 @@ import { TextField } from "@/components/common/text-field";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useHydrated } from "@/hooks/use-hydrated";
+import { useI18n } from "@/hooks/use-i18n";
 import type { PasswordRecoveryRequest } from "@/types/auth";
-
-const forgotPasswordSchema = z.object({
-  email: z
-    .string()
-    .trim()
-    .min(1, "Ba mẹ vui lòng nhập email.")
-    .email("Email chưa đúng định dạng."),
-});
 
 interface ForgotPasswordFormProps {
   hasInitialError: boolean;
@@ -31,10 +24,24 @@ export function ForgotPasswordForm({
   hasInitialError,
   onSubmitted,
 }: ForgotPasswordFormProps) {
+  const { t } = useI18n();
   const authService = useAuthService();
   const authRuntime = useAuthRuntime();
   const isHydrated = useHydrated();
   const [hasError, setHasError] = useState(hasInitialError);
+
+  const forgotPasswordSchema = useMemo(
+    () =>
+      z.object({
+        email: z
+          .string()
+          .trim()
+          .min(1, t("validation.parentEmailRequired"))
+          .email(t("validation.emailInvalidShort")),
+      }),
+    [t],
+  );
+
   const {
     formState: { errors, isSubmitting },
     handleSubmit,
@@ -62,14 +69,12 @@ export function ForgotPasswordForm({
       onSubmit={onSubmit}
     >
       {hasError ? (
-        <StatusMessage tone="error">
-          Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
-        </StatusMessage>
+        <StatusMessage tone="error">{t("auth.errors.generic")}</StatusMessage>
       ) : null}
       <TextField
         autoComplete="email"
         error={errors.email?.message}
-        label="Email của ba mẹ"
+        label={t("auth.fields.parentEmail")}
         type="email"
         {...register("email")}
       />
@@ -80,14 +85,16 @@ export function ForgotPasswordForm({
         isLoading={isSubmitting}
         type="submit"
       >
-        {isSubmitting ? "Đang gửi…" : "Gửi hướng dẫn"}
+        {isSubmitting
+          ? t("auth.forgotPassword.sending")
+          : t("auth.forgotPassword.sendSubmit")}
         {!isSubmitting ? (
-          <ArrowRight aria-hidden="true" className="size-5" />
+          <ArrowRight aria-hidden="true" className="size-5 viread-rtl-flip" />
         ) : null}
       </Button>
       <ButtonLink href="/login" variant="quiet">
-        <ArrowLeft aria-hidden="true" className="size-5" />
-        Về đăng nhập
+        <ArrowLeft aria-hidden="true" className="size-5 viread-rtl-flip" />
+        {t("auth.forgotPassword.backToLogin")}
       </ButtonLink>
     </form>
   );

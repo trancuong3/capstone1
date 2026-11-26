@@ -1,0 +1,47 @@
+{
+  "account": {
+    "eyebrow": "ViRead-Konto",
+    "title": "Kontoeinstellungen",
+    "description": "Kontoinformationen, Sicherheit und ViRead-Nutzungsoptionen verwalten.",
+    "infoHeading": "Kontoinformationen",
+    "displayName": "Anzeigename",
+    "email": "Konto-E-Mail",
+    "role": "Kontorolle",
+    "emailStatus": "E-Mail-Status",
+    "manageProfile": "Profil verwalten",
+    "changePassword": "Passwort ändern",
+    "emailVerificationHeading": "E-Mail und Verifizierung",
+    "readingRemindersHeading": "Leseerinnerungen verwalten",
+    "readingRemindersDescription": "Lesepläne und Erinnerungen für Ihr Kind anpassen.",
+    "loadingAria": "Kontoeinstellungen werden geladen",
+    "loadErrorBody": "ViRead konnte die Kontodaten nicht laden. Bitte laden Sie die Seite neu oder melden Sie sich erneut an.",
+    "notUpdated": "Nicht aktualisiert",
+    "pendingEmailNotice": "Neue E-Mail wartet auf Bestätigung:",
+    "emailStatusPending": "Neue E-Mail wartet auf Bestätigung",
+    "emailVerified": "Verifiziert",
+    "emailUnverified": "Unverifiziert",
+    "emailPendingBody": "Die Anfrage zur E-Mail-Änderung wartet auf Bestätigung. Die aktuelle E-Mail bleibt die zuvor bestätigte Adresse.",
+    "emailDefaultBody": "Um Ihre E-Mail zu ändern oder eine Bestätigungs-E-Mail erneut zu senden, nutzen Sie die Funktion im Elternprofil.",
+    "openParentProfile": "Elternprofil öffnen"
+  },
+  "password": {
+    "title": "Passwort ändern",
+    "description": "Verwenden Sie ein separates Passwort, um Ihr Konto zu schützen.",
+    "minLengthHint": "Das neue Passwort muss mindestens {min} Zeichen lang sein.",
+    "noPasswordDescription": "Dieses Konto hat noch keine passwortbasierte Anmeldung. Eltern können per E-Mail einen Link zum Zurücksetzen des Passworts anfordern.",
+    "requestRecoveryButton": "Kein Passwort? Link zum Zurücksetzen per E-Mail senden",
+    "changedSuccess": "Passwort aktualisiert. Ihre aktuelle Sitzung bleibt aktiv.",
+    "currentInvalid": "Das aktuelle Passwort ist falsch.",
+    "changeError": "Passwort konnte nicht geändert werden. Bitte überprüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
+    "noEmailForRecovery": "Keine E-Mail-Adresse hinterlegt, um einen Link zum Zurücksetzen des Passworts zu senden.",
+    "recoverySent": "Supabase Auth hat die Anfrage zum Zurücksetzen des Passworts erhalten. Bitte überprüfen Sie Ihren Posteingang und Spam-Ordner.",
+    "recoveryError": "Passwort-Zurücksetzen-Link konnte nicht gesendet werden. Bitte versuchen Sie es später noch einmal.",
+    "showFieldAria": "{label} anzeigen",
+    "hideFieldAria": "{label} ausblenden"
+  },
+  "language": {
+    "heading": "Anzeigesprache",
+    "description": "Wählen Sie die Sprache für Navigation und Einstellungen. Der vietnamesische Buchinhalt bleibt unverändert.",
+    "learningContentNote": "Das Ändern der Sprache betrifft nur die Navigation, Schaltflächen und Einstellungen. Vietnamesische Bücher, OCR, Spracherkennung (STT) und Vorlesestimmen (TTS) bleiben auf Vietnamesisch."
+  }
+}

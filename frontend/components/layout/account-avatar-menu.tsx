@@ -17,6 +17,9 @@ import {
   type KeyboardEvent,
 } from "react";
 
+import { LanguageSelector } from "@/components/i18n/language-selector";
+import { useI18n } from "@/hooks/use-i18n";
+
 interface AccountAvatarMenuProps {
   readonly displayName: string | null;
   readonly email: string | null;
@@ -35,14 +38,19 @@ export function AccountAvatarMenu({
   isSigningOut,
   onSignOut,
 }: AccountAvatarMenuProps) {
+  const { metadata, t } = useI18n();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const identity = displayName?.trim() || email?.trim() || "";
-  const initial = Array.from(identity)[0]?.toLocaleUpperCase("vi-VN") || "?";
-  const accountLabel = displayName?.trim() || email || "Tài khoản ViRead";
+  const initial =
+    Array.from(identity)[0]?.toLocaleUpperCase(metadata.bcp47) || "?";
+  const accountLabel =
+    displayName?.trim() ||
+    email ||
+    t("navigation.accountMenu.defaultAccountLabel");
 
   const close = useCallback((restoreFocus = false) => {
     setOpen(false);
@@ -120,7 +128,7 @@ export function AccountAvatarMenu({
         aria-controls={menuId}
         aria-expanded={open}
         aria-haspopup="menu"
-        aria-label="Mở menu tài khoản"
+        aria-label={t("navigation.accountMenu.openAria")}
         className="flex size-11 items-center justify-center rounded-full border-2 border-primary/20 bg-sky text-base font-semibold text-primary transition-colors hover:border-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-60 sm:size-12"
         disabled={isSigningOut}
         onClick={() => setOpen((value) => !value)}
@@ -132,8 +140,8 @@ export function AccountAvatarMenu({
 
       {open ? (
         <div
-          aria-label="Menu tài khoản ViRead"
-          className="absolute right-0 top-full mt-2 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-card border border-border bg-white shadow-xl"
+          aria-label={t("navigation.accountMenu.menuAria")}
+          className="absolute end-0 top-full mt-2 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-card border border-border bg-white shadow-xl"
           id={menuId}
           onKeyDown={handleMenuKeyDown}
           ref={menuRef}
@@ -163,7 +171,7 @@ export function AccountAvatarMenu({
 
           <div className="p-2">
             <p className="px-3 pb-1 pt-2 text-xs font-medium text-muted">
-              Hồ sơ
+              {t("navigation.accountMenu.profileSection")}
             </p>
             <Link
               className="flex min-h-11 items-center gap-3 rounded-control px-3 text-sm font-semibold text-ink outline-none hover:bg-sky focus-visible:ring-2 focus-visible:ring-primary"
@@ -173,7 +181,7 @@ export function AccountAvatarMenu({
               tabIndex={-1}
             >
               <UserRound aria-hidden="true" className="size-4 text-primary" />
-              Hồ sơ ba mẹ
+              {t("navigation.parent.parentProfile")}
             </Link>
             <Link
               className="flex min-h-11 items-center gap-3 rounded-control px-3 text-sm font-semibold text-ink outline-none hover:bg-sky focus-visible:ring-2 focus-visible:ring-primary"
@@ -183,7 +191,7 @@ export function AccountAvatarMenu({
               tabIndex={-1}
             >
               <UsersRound aria-hidden="true" className="size-4 text-primary" />
-              Hồ sơ bé
+              {t("navigation.parent.children")}
             </Link>
           </div>
 
@@ -195,7 +203,7 @@ export function AccountAvatarMenu({
 
           <div className="p-2">
             <p className="px-3 pb-1 pt-2 text-xs font-medium text-muted">
-              Tài khoản
+              {t("navigation.accountMenu.accountSection")}
             </p>
             <Link
               className="flex min-h-11 items-center gap-3 rounded-control px-3 text-sm font-semibold text-ink outline-none hover:bg-sky focus-visible:ring-2 focus-visible:ring-primary"
@@ -205,7 +213,7 @@ export function AccountAvatarMenu({
               tabIndex={-1}
             >
               <Settings aria-hidden="true" className="size-4 text-primary" />
-              Cài đặt
+              {t("navigation.parent.settings")}
             </Link>
           </div>
 
@@ -217,7 +225,7 @@ export function AccountAvatarMenu({
 
           <div className="p-2">
             <p className="px-3 pb-1 pt-2 text-xs font-medium text-muted">
-              Trợ giúp
+              {t("navigation.accountMenu.helpSection")}
             </p>
             <Link
               className="flex min-h-11 items-center gap-3 rounded-control px-3 text-sm font-semibold text-ink outline-none hover:bg-sky focus-visible:ring-2 focus-visible:ring-primary"
@@ -227,7 +235,7 @@ export function AccountAvatarMenu({
               tabIndex={-1}
             >
               <CircleHelp aria-hidden="true" className="size-4 text-primary" />
-              Trợ giúp & hỗ trợ
+              {t("navigation.parent.helpSupport")}
             </Link>
           </div>
 
@@ -239,10 +247,23 @@ export function AccountAvatarMenu({
 
           <div className="p-2">
             <p className="px-3 pb-1 pt-2 text-xs font-medium text-muted">
-              Phiên đăng nhập
+              {t("common.languageSelector.label")}
+            </p>
+            <LanguageSelector variant="menu" />
+          </div>
+
+          <div
+            aria-orientation="horizontal"
+            className="border-t border-border"
+            role="separator"
+          />
+
+          <div className="p-2">
+            <p className="px-3 pb-1 pt-2 text-xs font-medium text-muted">
+              {t("navigation.accountMenu.sessionSection")}
             </p>
             <button
-              className="flex min-h-11 w-full items-center gap-3 rounded-control px-3 text-left text-sm font-semibold text-danger outline-none hover:bg-danger-surface focus-visible:ring-2 focus-visible:ring-danger disabled:cursor-not-allowed disabled:opacity-60"
+              className="flex min-h-11 w-full items-center gap-3 rounded-control px-3 text-start text-sm font-semibold text-danger outline-none hover:bg-danger-surface focus-visible:ring-2 focus-visible:ring-danger disabled:cursor-not-allowed disabled:opacity-60"
               disabled={isSigningOut}
               onClick={() => {
                 close();
@@ -252,8 +273,10 @@ export function AccountAvatarMenu({
               tabIndex={-1}
               type="button"
             >
-              <LogOut aria-hidden="true" className="size-4" />
-              {isSigningOut ? "Đang đăng xuất…" : "Đăng xuất"}
+              <LogOut aria-hidden="true" className="size-4 viread-rtl-flip" />
+              {isSigningOut
+                ? t("auth.session.signingOut")
+                : t("auth.session.signOut")}
             </button>
           </div>
         </div>

@@ -34,6 +34,8 @@ import {
   resolveDisplayName,
 } from "@/components/common/profile-avatar";
 import { ViReadLogo } from "@/components/common/viread-logo";
+import { dispatchI18nAuthSync } from "@/components/i18n/i18n-provider";
+import { LanguageSelector } from "@/components/i18n/language-selector";
 import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { AppStoreContext } from "@/components/providers/app-store-provider";
@@ -41,6 +43,7 @@ import { AiTaskCenterProvider } from "@/components/tasks/ai-task-center-provider
 import { GlobalTaskCenter } from "@/components/tasks/global-task-center";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useAuthService } from "@/hooks/use-auth-service";
+import { useI18n } from "@/hooks/use-i18n";
 import { useProfileService } from "@/hooks/use-profile-service";
 import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
 import { clearGlobalTasksMemoryCache } from "@/lib/api/global-tasks-service";
@@ -61,41 +64,41 @@ interface AppShellProps {
   children: ReactNode;
 }
 
-const navigationItems = [
+const navigationItemsConfig = [
   {
     href: "/dashboard",
     icon: LayoutDashboard,
-    label: "Tổng quan",
+    labelKey: "navigation.parent.dashboard",
   },
   {
     href: "/my-books",
     icon: BookMarked,
-    label: "Sách của tôi",
+    labelKey: "navigation.parent.myBooks",
   },
   {
     href: "/reports",
     icon: BarChart3,
-    label: "Tiến bộ",
+    labelKey: "navigation.parent.reports",
   },
   {
     href: "/reading-management",
     icon: CalendarClock,
-    label: "Quản lý đọc",
+    labelKey: "navigation.parent.readingManagement",
   },
   {
     href: "/sessions",
     icon: History,
-    label: "Lịch sử",
+    labelKey: "navigation.parent.sessions",
   },
   {
     href: "/entertainment",
     icon: Gamepad2,
-    label: "Giải trí",
+    labelKey: "navigation.parent.entertainment",
   },
   {
     href: "/reports/difficult-words",
     icon: Volume2,
-    label: "Từ cần luyện",
+    labelKey: "navigation.parent.difficultWords",
   },
 ] as const;
 
@@ -130,7 +133,7 @@ export function isAppShellNavItemActive(
   }
   return (
     routeIsActive(normalized, href) &&
-    !navigationItems.some(
+    !navigationItemsConfig.some(
       (other) =>
         other.href !== href &&
         other.href.startsWith(`${href}/`) &&
@@ -139,13 +142,8 @@ export function isAppShellNavItemActive(
   );
 }
 
-function roleLabel(role: ParentProfileDTO["role"] | undefined): string | null {
-  if (role === "parent") return "Phụ huynh";
-  if (role === "admin") return "Quản trị viên";
-  return null;
-}
-
 export function AppShell({ children }: AppShellProps) {
+  const { t } = useI18n();
   const authRuntime = useAuthRuntime();
   const authService = useAuthService();
   const profileService = useProfileService();
@@ -222,6 +220,13 @@ export function AppShell({ children }: AppShellProps) {
     profile?.email ?? user?.email,
   );
   const email = profile?.email ?? user?.email ?? null;
+
+  const resolvedRoleLabel =
+    profile?.role === "parent"
+      ? t("parent.profile.roleParent")
+      : profile?.role === "admin"
+        ? t("parent.profile.roleAdmin")
+        : null;
 
   useEffect(() => {
     const activeLink = activeNavigationRef.current;
@@ -404,6 +409,7 @@ export function AppShell({ children }: AppShellProps) {
       resetApiReadCacheForActorSwitch();
       clearUserCache();
       await authService.signOut();
+      dispatchI18nAuthSync({ userId: null, preferredLocale: null });
       setAccountMenu((current) => ({ ...current, isOpen: false }));
       router.replace("/login");
       router.refresh();
@@ -486,10 +492,10 @@ export function AppShell({ children }: AppShellProps) {
     >
       <div className="parent-shell flex min-h-dvh flex-col bg-canvas">
         <a
-          className="sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:not-sr-only focus:rounded-control focus:bg-white focus:px-4 focus:py-3 focus:font-semibold focus:text-primary focus:shadow-lg"
+          className="sr-only focus:fixed focus:start-4 focus:top-4 focus:z-[100] focus:not-sr-only focus:rounded-control focus:bg-white focus:px-4 focus:py-3 focus:font-semibold focus:text-primary focus:shadow-lg"
           href="#main-content"
         >
-          Bỏ qua điều hướng, đến nội dung
+          {t("navigation.parent.skipToContent")}
         </a>
         <header
           className={cn(
@@ -498,20 +504,20 @@ export function AppShell({ children }: AppShellProps) {
           )}
         >
           <nav
-            aria-label="Điều hướng dành cho ba mẹ"
+            aria-label={t("navigation.parent.navLabel")}
             className={cn(
-              "mx-auto flex h-14 w-full min-w-0 max-w-[1312px] items-center gap-2 xl:h-auto xl:min-h-16 xl:gap-4",
+              "mx-auto flex h-14 w-full min-w-0 max-w-[1312px] items-center gap-2 xl:h-auto xl:min-h-16 xl:gap-2 2xl:gap-4",
               isChildOnboarding && "min-h-11",
             )}
           >
             <ViReadLogo
-              ariaLabel="ViRead - về tổng quan"
-              className={cn(isChildOnboarding ? "text-label" : "xl:mr-auto")}
+              ariaLabel={t("navigation.footer.logoDashboardAria")}
+              className={cn(isChildOnboarding ? "text-label" : "xl:me-auto")}
               href="/dashboard"
               size="md"
             />
 
-            <div className="flex min-w-0 flex-1 items-center justify-end gap-2 xl:w-auto xl:flex-none xl:gap-3">
+            <div className="flex min-w-0 flex-1 items-center justify-end gap-2 xl:w-auto xl:flex-none xl:gap-2 2xl:gap-3">
               {!isChildOnboarding ? (
                 <>
                   <div
@@ -525,8 +531,10 @@ export function AppShell({ children }: AppShellProps) {
                           aria-haspopup="listbox"
                           aria-label={
                             selectedChild
-                              ? `Bé đang chọn: ${selectedChild.alias}, bấm để đổi`
-                              : "Đổi nhanh bé"
+                              ? t("navigation.childSwitcher.selectedAria", {
+                                  alias: selectedChild.alias,
+                                })
+                              : t("navigation.childSwitcher.openAria")
                           }
                           className="inline-flex min-h-12 max-w-[164px] items-center gap-1.5 rounded-full border border-border bg-sky/70 px-3 text-xs font-bold text-primary-hover transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
                           onClick={() =>
@@ -538,8 +546,11 @@ export function AppShell({ children }: AppShellProps) {
                         >
                           <span className="truncate">
                             {selectedChild
-                              ? `${selectedChild.alias} · L${selectedChild.grade}`
-                              : "Chọn bé"}
+                              ? t("navigation.childSwitcher.compactLabel", {
+                                  alias: selectedChild.alias,
+                                  grade: selectedChild.grade,
+                                })
+                              : t("navigation.childSwitcher.selectChild")}
                           </span>
                           <ChevronDown
                             aria-hidden="true"
@@ -549,8 +560,8 @@ export function AppShell({ children }: AppShellProps) {
 
                         {isChildSwitcherVisible ? (
                           <div
-                            aria-label="Chuyển nhanh hồ sơ bé"
-                            className="absolute right-0 top-full z-50 mt-2 w-60 rounded-card border border-border bg-white p-2 shadow-lg"
+                            aria-label={t("navigation.childSwitcher.listAria")}
+                            className="absolute end-0 top-full z-50 mt-2 w-60 rounded-card border border-border bg-white p-2 shadow-lg"
                             role="listbox"
                           >
                             {availableChildren.map((child) => {
@@ -559,7 +570,7 @@ export function AppShell({ children }: AppShellProps) {
                                 <button
                                   aria-selected={isSelected}
                                   className={cn(
-                                    "flex min-h-12 w-full items-center justify-between gap-2 rounded-control px-3 text-left text-sm font-semibold transition-colors",
+                                    "flex min-h-12 w-full items-center justify-between gap-2 rounded-control px-3 text-start text-sm font-semibold transition-colors",
                                     isSelected
                                       ? "bg-sky text-primary-hover"
                                       : "text-ink hover:bg-canvas",
@@ -576,7 +587,12 @@ export function AppShell({ children }: AppShellProps) {
                                   <span className="truncate">
                                     {child.alias}{" "}
                                     <span className="font-normal text-muted">
-                                      · Lớp {child.grade}
+                                      {t(
+                                        "navigation.childSwitcher.gradeLabel",
+                                        {
+                                          grade: child.grade,
+                                        },
+                                      )}
                                     </span>
                                   </span>
                                   {isSelected ? (
@@ -598,7 +614,7 @@ export function AppShell({ children }: AppShellProps) {
                                 aria-hidden="true"
                                 className="size-4"
                               />
-                              Quản lý hồ sơ bé
+                              {t("navigation.childSwitcher.manageChildren")}
                             </Link>
                           </div>
                         ) : null}
@@ -610,50 +626,64 @@ export function AppShell({ children }: AppShellProps) {
                       >
                         <span className="truncate">
                           {selectedChild
-                            ? `${selectedChild.alias} · L${selectedChild.grade}`
-                            : "Chọn bé"}
+                            ? t("navigation.childSwitcher.compactLabel", {
+                                alias: selectedChild.alias,
+                                grade: selectedChild.grade,
+                              })
+                            : t("navigation.childSwitcher.selectChild")}
                         </span>
                       </Link>
                     )}
                   </div>
 
-                  <div className="parent-nav-links hidden min-w-0 items-center justify-end gap-2 py-1 xl:flex xl:flex-none xl:flex-nowrap">
-                    {navigationItems.map(({ href, icon: Icon, label }) => {
-                      const isActive = isAppShellNavItemActive(pathname, href);
+                  <div className="parent-nav-links hidden min-w-0 items-center justify-end gap-1 py-1 xl:flex xl:flex-none xl:flex-nowrap 2xl:gap-2">
+                    {navigationItemsConfig.map(
+                      ({ href, icon: Icon, labelKey }) => {
+                        const isActive = isAppShellNavItemActive(
+                          pathname,
+                          href,
+                        );
 
-                      return (
-                        <Link
-                          aria-current={isActive ? "page" : undefined}
-                          className={cn(
-                            "flex min-h-10 shrink-0 items-center justify-center gap-1 rounded-control px-1.5 text-center text-xs font-semibold text-ink transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-11 sm:px-2.5 sm:text-sm xl:h-12 xl:gap-2 xl:px-3 xl:text-label",
-                            isActive
-                              ? "bg-sky text-primary-hover xl:underline xl:decoration-2 xl:underline-offset-8"
-                              : "bg-white hover:bg-canvas",
-                          )}
-                          href={href}
-                          key={href}
-                          onClick={() =>
-                            setAccountMenu((current) => ({
-                              ...current,
-                              isOpen: false,
-                            }))
-                          }
-                          ref={isActive ? activeNavigationRef : undefined}
-                        >
-                          <Icon
-                            aria-hidden="true"
-                            className="size-4 shrink-0 sm:size-[18px]"
-                            strokeWidth={1.8}
-                          />
-                          <span className="whitespace-nowrap">{label}</span>
-                        </Link>
-                      );
-                    })}
+                        return (
+                          <Link
+                            aria-current={isActive ? "page" : undefined}
+                            className={cn(
+                              "flex min-h-10 shrink-0 items-center justify-center gap-1 rounded-control px-1.5 text-center text-xs font-semibold text-ink transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-11 sm:px-2.5 sm:text-sm xl:h-12 xl:gap-1.5 xl:px-2 xl:text-label 2xl:gap-2 2xl:px-3",
+                              isActive
+                                ? "bg-sky text-primary-hover xl:underline xl:decoration-2 xl:underline-offset-8"
+                                : "bg-white hover:bg-canvas",
+                            )}
+                            href={href}
+                            key={href}
+                            onClick={() =>
+                              setAccountMenu((current) => ({
+                                ...current,
+                                isOpen: false,
+                              }))
+                            }
+                            ref={isActive ? activeNavigationRef : undefined}
+                          >
+                            <Icon
+                              aria-hidden="true"
+                              className="size-4 shrink-0 sm:size-[18px]"
+                              strokeWidth={1.8}
+                            />
+                            <span className="whitespace-nowrap">
+                              {t(labelKey)}
+                            </span>
+                          </Link>
+                        );
+                      },
+                    )}
                   </div>
                 </>
               ) : (
                 <span className="flex-1" />
               )}
+
+              <div className="hidden shrink-0 xl:block">
+                <LanguageSelector variant="compact" />
+              </div>
 
               {!isChildOnboarding ? (
                 <GlobalTaskCenter
@@ -670,8 +700,8 @@ export function AppShell({ children }: AppShellProps) {
                   aria-haspopup="menu"
                   aria-label={
                     isAccountMenuVisible
-                      ? "Đóng menu tài khoản"
-                      : "Mở menu tài khoản"
+                      ? t("navigation.accountMenu.closeAria")
+                      : t("navigation.accountMenu.openAria")
                   }
                   className="flex size-12 items-center justify-center rounded-full border border-border bg-white p-0.5 shadow-sm transition-colors hover:border-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
                   onClick={() => {
@@ -695,16 +725,15 @@ export function AppShell({ children }: AppShellProps) {
                   type="button"
                 >
                   <ProfileAvatar
-                    ariaLabel="Ảnh đại diện tài khoản"
+                    ariaLabel={t("accessibility.accountAvatar")}
                     displayName={displayName}
                     imageUrl={profile?.avatar_url}
                     size="sm"
                   />
                 </button>
-
                 <div
-                  aria-label="Menu tài khoản"
-                  className="absolute right-0 top-full z-50 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-card border border-border bg-white p-3 shadow-lg"
+                  aria-label={t("navigation.accountMenu.shortMenuAria")}
+                  className="absolute end-0 top-full z-50 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-card border border-border bg-white p-3 shadow-lg"
                   hidden={!isAccountMenuVisible}
                   id="parent-account-menu"
                   onKeyDown={handleMenuKeyDown}
@@ -712,17 +741,18 @@ export function AppShell({ children }: AppShellProps) {
                 >
                   <div className="flex flex-col items-center gap-2 px-3 py-3 text-center">
                     <ProfileAvatar
-                      ariaLabel="Ảnh đại diện tài khoản"
+                      ariaLabel={t("accessibility.accountAvatar")}
                       displayName={displayName}
                       imageUrl={profile?.avatar_url}
                       size="lg"
                     />
                     <p className="max-w-full break-words text-label font-semibold text-ink">
-                      {displayName ?? "Tài khoản ViRead"}
+                      {displayName ??
+                        t("navigation.accountMenu.defaultAccountLabel")}
                     </p>
-                    {roleLabel(profile?.role) ? (
+                    {resolvedRoleLabel ? (
                       <p className="text-sm font-semibold text-primary">
-                        {roleLabel(profile?.role)}
+                        {resolvedRoleLabel}
                       </p>
                     ) : null}
                     {email ? (
@@ -754,7 +784,7 @@ export function AppShell({ children }: AppShellProps) {
                     tabIndex={isAccountMenuVisible ? 0 : -1}
                   >
                     <UserRound aria-hidden="true" className="size-5" />
-                    Hồ sơ ba mẹ
+                    {t("navigation.parent.parentProfile")}
                   </Link>
                   <Link
                     aria-current={
@@ -777,7 +807,7 @@ export function AppShell({ children }: AppShellProps) {
                     tabIndex={isAccountMenuVisible ? 0 : -1}
                   >
                     <UsersRound aria-hidden="true" className="size-5" />
-                    Hồ sơ bé
+                    {t("navigation.parent.children")}
                   </Link>
 
                   <div className="my-2 border-t border-border" />
@@ -802,7 +832,7 @@ export function AppShell({ children }: AppShellProps) {
                     tabIndex={isAccountMenuVisible ? 0 : -1}
                   >
                     <Settings aria-hidden="true" className="size-5" />
-                    Cài đặt
+                    {t("navigation.parent.settings")}
                   </Link>
                   <Link
                     aria-current={
@@ -827,20 +857,33 @@ export function AppShell({ children }: AppShellProps) {
                     tabIndex={isAccountMenuVisible ? 0 : -1}
                   >
                     <CircleHelp aria-hidden="true" className="size-5" />
-                    Trợ giúp &amp; hỗ trợ
+                    {t("navigation.parent.helpSupport")}
                   </Link>
 
                   <div className="my-2 border-t border-border" />
+                  <div className="px-1 py-1">
+                    <p className="px-2 pb-1 text-xs font-semibold text-muted">
+                      {t("common.languageSelector.label")}
+                    </p>
+                    <LanguageSelector variant="menu" />
+                  </div>
+
+                  <div className="my-2 border-t border-border" />
                   <button
-                    className="flex min-h-12 w-full items-center gap-3 rounded-control px-3 text-left text-label font-semibold text-ink outline-none hover:bg-sky focus-visible:ring-3 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-55"
+                    className="flex min-h-12 w-full items-center gap-3 rounded-control px-3 text-start text-label font-semibold text-ink outline-none hover:bg-sky focus-visible:ring-3 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-55"
                     disabled={isSigningOut}
                     onClick={() => void handleSignOut()}
                     role="menuitem"
                     tabIndex={isAccountMenuVisible ? 0 : -1}
                     type="button"
                   >
-                    <LogOut aria-hidden="true" className="size-5" />
-                    {isSigningOut ? "Đang đăng xuất…" : "Đăng xuất"}
+                    <LogOut
+                      aria-hidden="true"
+                      className="size-5 viread-rtl-flip"
+                    />
+                    {isSigningOut
+                      ? t("auth.session.signingOut")
+                      : t("auth.session.signOut")}
                   </button>
                 </div>
               </div>
@@ -851,7 +894,7 @@ export function AppShell({ children }: AppShellProps) {
               className="mx-auto mt-3 w-full max-w-[1376px] pb-2 text-label font-semibold text-danger"
               role="alert"
             >
-              Chưa thể đăng xuất lúc này. Ba mẹ vui lòng thử lại.
+              {t("auth.session.signOutError")}
             </p>
           ) : null}
         </header>

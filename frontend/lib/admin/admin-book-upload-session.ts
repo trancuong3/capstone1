@@ -1,5 +1,6 @@
 import type { AdminPageService } from "@/lib/api/admin-page-service";
 import { isServiceError } from "@/lib/api/service-error";
+import { translateRuntime } from "@/lib/i18n/runtime";
 import type {
   AdminPageUploadInputUI,
   AdminPageUploadProgressUI,
@@ -110,7 +111,7 @@ export async function runAdminBookUpload(
       busy: false,
       error: isServiceError(cause)
         ? cause.message
-        : "Không thể tải lại danh sách trang sau upload. Dữ liệu có thể đã được lưu; hãy tải lại để xác minh.",
+        : translateRuntime("admin.pageUploadRuntime.reloadAfterUploadFailed"),
       completedRunId: nextRunId,
     }));
   }

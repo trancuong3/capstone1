@@ -1,0 +1,36 @@
+{
+  "list": {
+    "title": "お子様のプロフィール",
+    "subtitle": "お子様ごとの情報と読書レベルを管理します。",
+    "addChild": "お子様のプロフィールを追加",
+    "empty": "プロフィールがまだありません。最初のお子様のプロフィールを作成しましょう。"
+  },
+  "switcher": {
+    "selectChild": "子を選択",
+    "quickSwitchAria": "子を素早く切り替え",
+    "selectedAria": "選択中の子：{alias}、タップで切り替え",
+    "gradeLabel": "学年 {grade}",
+    "gradeShort": "学年{grade}",
+    "manageChildren": "子プロフィールの管理"
+  },
+  "form": {
+    "createTitle": "お子様のプロフィールを作成",
+    "editTitle": "お子様のプロフィールを更新",
+    "aliasLabel": "ニックネーム",
+    "gradeLabel": "学年",
+    "ageLabel": "年齢",
+    "saveSuccess": "お子様のプロフィールを保存しました。"
+  },
+  "count": "{count, plural, =0 {プロフィールなし} other {# 人のプロフィール}}",
+  "selector": {
+    "label": "お子様のプロフィール",
+    "selectAria": "データを確認するプロフィールを選択してください",
+    "optionLabel": "{alias} · 学年 {grade}"
+  },
+  "verification": {
+    "loading": "プロフィールを確認中…",
+    "errorTitle": "プロフィールを確認できませんでした",
+    "errorBody": "現在のアカウントに属するプロフィールを確認できませんでした。もう一度お試しください。",
+    "retry": "再試行"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "list": {
+    "title": "פרופיל ילד",
+    "subtitle": "ניהול מידע ורמות קריאה עבור כל ילד.",
+    "addChild": "הוספת פרופיל ילד",
+    "empty": "עדיין אין פרופילי ילדים. צור את הפרופיל הראשון לילדך."
+  },
+  "switcher": {
+    "selectChild": "בחר ילד",
+    "quickSwitchAria": "החלפת ילד מהירה",
+    "selectedAria": "ילד נבחר: {alias}, הקש כדי להחליף",
+    "gradeLabel": "כיתה {grade}",
+    "gradeShort": "כיתה {grade}",
+    "manageChildren": "ניהול פרופילי ילדים"
+  },
+  "form": {
+    "createTitle": "יצירת פרופיל ילד",
+    "editTitle": "עדכון פרופיל ילד",
+    "aliasLabel": "כינוי",
+    "gradeLabel": "שכבת גיל",
+    "ageLabel": "גיל",
+    "saveSuccess": "פרטי פרופיל הילד נשמרו."
+  },
+  "count": "{count, plural, =0 {אין ילדים} one {ילד אחד} other {# ילדים}}",
+  "selector": {
+    "label": "פרופיל הילד",
+    "selectAria": "בחר פרופיל ילד כדי לצפות בנתונים",
+    "optionLabel": "{alias} · כיתה {grade}"
+  },
+  "verification": {
+    "loading": "מאמת את פרופיל הילד…",
+    "errorTitle": "לא ניתן לאמת את פרופיל הילד",
+    "errorBody": "לא ניתן לאשר שהפרופיל שייך לחשבון הנוכחי. נא לנסות שוב.",
+    "retry": "נסה שוב"
+  }
+}

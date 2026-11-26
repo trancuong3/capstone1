@@ -1,18 +1,21 @@
 "use client";
 
-import { ArrowRight, Eye, EyeOff, Mail } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, Globe, Mail } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Button, ButtonLink } from "@/components/common/button";
-import { FormPage } from "@/components/common/form-page";
 import { Card } from "@/components/common/card";
+import { FormPage } from "@/components/common/form-page";
 import { PageHeader } from "@/components/common/page-header";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { LanguageSelector } from "@/components/i18n/language-selector";
 import { useAuthService } from "@/hooks/use-auth-service";
+import { useI18n } from "@/hooks/use-i18n";
 import { AuthServiceError } from "@/lib/api/auth-service";
 import { createProfileService } from "@/lib/api/profile-service";
+import { getLocaleMetadata, type SupportedLocale } from "@/lib/i18n/locales";
 import type { AuthUserSnapshot } from "@/types/auth";
 import type { ParentProfileDTO } from "@/types/profile";
 
@@ -21,16 +24,21 @@ type SettingsState =
   | { status: "ready"; profile: ParentProfileDTO; user: AuthUserSnapshot }
   | { status: "error" };
 
-type Notice = { tone: "success" | "error"; message: string };
+type SettingsNoticeKind =
+  | "current_required"
+  | "new_min_length"
+  | "mismatch"
+  | "changed_success"
+  | "current_invalid"
+  | "change_error"
+  | "no_email_recovery"
+  | "recovery_sent"
+  | "recovery_error";
 
-function verificationLabel(profile: ParentProfileDTO): string {
-  if (profile.pending_email) return "Đang chờ xác nhận email mới";
-  if (profile.contact_info_status !== "available")
-    return "Không thể tải thông tin";
-  if (profile.email_verified === true) return "Đã xác minh";
-  if (profile.email_verified === false) return "Chưa xác minh";
-  return "Không thể tải thông tin";
-}
+type NoticeState = {
+  tone: "success" | "error";
+  kind: SettingsNoticeKind;
+};
 
 function PasswordField({
   id,
@@ -40,6 +48,7 @@ function PasswordField({
   visible,
   onToggle,
   autoComplete,
+  toggleAriaLabel,
 }: {
   id: string;
   label: string;
@@ -48,6 +57,7 @@ function PasswordField({
   visible: boolean;
   onToggle: () => void;
   autoComplete: string;
+  toggleAriaLabel: string;
 }) {
   return (
     <div className="flex min-h-[72px] w-full flex-col gap-1 rounded-control border border-border bg-white px-4 py-3">
@@ -57,7 +67,7 @@ function PasswordField({
       <div className="flex min-w-0 items-center gap-2">
         <input
           autoComplete={autoComplete}
-          className="min-w-0 flex-1 bg-transparent text-body text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
+          className="min-w-0 flex-1 bg-transparent text-start text-body text-ink outline-none focus-visible:outline-2 focus-visible:outline-primary"
           id={id}
           onChange={(event) => onChange(event.target.value)}
           required
@@ -65,11 +75,7 @@ function PasswordField({
           value={value}
         />
         <button
-          aria-label={
-            visible
-              ? "Ẩn " + label.toLowerCase()
-              : "Hiện " + label.toLowerCase()
-          }
+          aria-label={toggleAriaLabel}
           className="flex size-10 shrink-0 items-center justify-center rounded-control text-muted hover:bg-sky hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           onClick={onToggle}
           type="button"
@@ -86,6 +92,7 @@ function PasswordField({
 }
 
 export function AccountSettingsScreen() {
+  const { t } = useI18n();
   const authService = useAuthService();
   const profileService = useMemo(() => createProfileService(), []);
   const [state, setState] = useState<SettingsState>({ status: "loading" });
@@ -97,7 +104,9 @@ export function AccountSettingsScreen() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isRequestingRecovery, setIsRequestingRecovery] = useState(false);
-  const [notice, setNotice] = useState<Notice | null>(null);
+  const [notice, setNotice] = useState<NoticeState | null>(null);
+  const [languageChangedTo, setLanguageChangedTo] =
+    useState<SupportedLocale | null>(null);
   const [retryKey, setRetryKey] = useState(0);
   const [showPasswordEditor, setShowPasswordEditor] = useState(false);
 
@@ -128,27 +137,55 @@ export function AccountSettingsScreen() {
     };
   }, [authService, profileService, retryKey]);
 
+  function resolveVerificationLabel(profile: ParentProfileDTO): string {
+    if (profile.pending_email) return t("settings.account.emailStatusPending");
+    if (profile.contact_info_status !== "available")
+      return t("common.states.unavailable");
+    if (profile.email_verified === true)
+      return t("settings.account.emailVerified");
+    if (profile.email_verified === false)
+      return t("settings.account.emailUnverified");
+    return t("common.states.unavailable");
+  }
+
+  function resolveNoticeMessage(kind: SettingsNoticeKind): string {
+    switch (kind) {
+      case "current_required":
+        return t("validation.currentPasswordRequired");
+      case "new_min_length":
+        return t("validation.passwordMinLength", { min: 8 });
+      case "mismatch":
+        return t("validation.passwordMismatch");
+      case "changed_success":
+        return t("settings.password.changedSuccess");
+      case "current_invalid":
+        return t("settings.password.currentInvalid");
+      case "change_error":
+        return t("settings.password.changeError");
+      case "no_email_recovery":
+        return t("settings.password.noEmailForRecovery");
+      case "recovery_sent":
+        return t("settings.password.recoverySent");
+      case "recovery_error":
+        return t("settings.password.recoveryError");
+    }
+  }
+
   async function handlePasswordChange(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (isChangingPassword) return;
     setNotice(null);
 
     if (!currentPassword.trim()) {
-      setNotice({
-        tone: "error",
-        message: "Ba mẹ vui lòng nhập mật khẩu hiện tại.",
-      });
+      setNotice({ tone: "error", kind: "current_required" });
       return;
     }
     if (newPassword.length < 8) {
-      setNotice({
-        tone: "error",
-        message: "Mật khẩu mới cần có ít nhất 8 ký tự.",
-      });
+      setNotice({ tone: "error", kind: "new_min_length" });
       return;
     }
     if (newPassword !== confirmPassword) {
-      setNotice({ tone: "error", message: "Hai mật khẩu mới chưa khớp." });
+      setNotice({ tone: "error", kind: "mismatch" });
       return;
     }
 
@@ -158,19 +195,15 @@ export function AccountSettingsScreen() {
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      setNotice({
-        tone: "success",
-        message:
-          "Mật khẩu đã được cập nhật. Phiên đăng nhập hiện tại vẫn được giữ nguyên.",
-      });
+      setNotice({ tone: "success", kind: "changed_success" });
     } catch (error) {
       setNotice({
         tone: "error",
-        message:
+        kind:
           error instanceof AuthServiceError &&
           error.reason === "invalid-credentials"
-            ? "Mật khẩu hiện tại chưa chính xác."
-            : "Chưa thể đổi mật khẩu. Ba mẹ vui lòng kiểm tra kết nối và thử lại.",
+            ? "current_invalid"
+            : "change_error",
       });
     } finally {
       setIsChangingPassword(false);
@@ -181,10 +214,7 @@ export function AccountSettingsScreen() {
     if (state.status !== "ready" || isRequestingRecovery) return;
     const email = state.profile.email ?? state.user.email;
     if (!email) {
-      setNotice({
-        tone: "error",
-        message: "Tài khoản chưa có email để gửi liên kết đặt mật khẩu.",
-      });
+      setNotice({ tone: "error", kind: "no_email_recovery" });
       return;
     }
 
@@ -192,17 +222,9 @@ export function AccountSettingsScreen() {
     setIsRequestingRecovery(true);
     try {
       await authService.requestPasswordReset({ email });
-      setNotice({
-        tone: "success",
-        message:
-          "Supabase Auth đã tiếp nhận yêu cầu gửi liên kết đặt mật khẩu. Ba mẹ hãy kiểm tra hộp thư và thư rác.",
-      });
+      setNotice({ tone: "success", kind: "recovery_sent" });
     } catch {
-      setNotice({
-        tone: "error",
-        message:
-          "Chưa gửi được liên kết đặt mật khẩu. Ba mẹ vui lòng thử lại sau.",
-      });
+      setNotice({ tone: "error", kind: "recovery_error" });
     } finally {
       setIsRequestingRecovery(false);
     }
@@ -212,11 +234,11 @@ export function AccountSettingsScreen() {
     return (
       <section
         aria-busy="true"
-        aria-label="Đang tải cài đặt tài khoản"
+        aria-label={t("settings.account.loadingAria")}
         className="mx-auto flex w-full max-w-[960px] flex-col gap-6"
       >
         <span className="sr-only" role="status">
-          Đang tải…
+          {t("common.states.loading")}
         </span>
         <Skeleton className="h-12 w-2/3" />
         <Skeleton className="h-48 w-full" />
@@ -229,19 +251,18 @@ export function AccountSettingsScreen() {
     return (
       <section className="mx-auto flex w-full max-w-[960px] flex-col gap-4">
         <PageHeader
-          description="Quản lý thông tin tài khoản, bảo mật và các tùy chọn sử dụng ViRead."
-          title="Cài đặt tài khoản"
+          description={t("settings.account.description")}
+          title={t("settings.account.title")}
         />
-        <StatusMessage tone="error" title="Không thể tải thông tin">
-          ViRead chưa thể tải dữ liệu tài khoản. Ba mẹ vui lòng thử tải lại
-          trang hoặc đăng nhập lại.
+        <StatusMessage tone="error" title={t("common.states.unavailable")}>
+          {t("settings.account.loadErrorBody")}
         </StatusMessage>
         <Button
           className="sm:w-auto sm:self-start"
           onClick={() => setRetryKey((key) => key + 1)}
           variant="secondary"
         >
-          Thử tải lại
+          {t("common.states.retryReload")}
         </Button>
       </section>
     );
@@ -252,20 +273,26 @@ export function AccountSettingsScreen() {
   const displayName =
     profile.display_name?.trim() ||
     user.display_name?.trim() ||
-    "Chưa cập nhật";
+    t("settings.account.notUpdated");
   const isEmailPasswordAccount = user.providers?.includes("email") ?? false;
-  const emailStatus = verificationLabel(profile);
+  const emailStatus = resolveVerificationLabel(profile);
+
+  const currentPasswordLabel = t("auth.fields.currentPassword");
+  const newPasswordLabel = t("auth.fields.newPassword");
+  const confirmPasswordLabel = t("auth.fields.confirmPassword");
 
   if (showPasswordEditor)
     return (
       <FormPage
-        title="Đổi mật khẩu"
-        description="Dùng mật khẩu riêng biệt để bảo vệ tài khoản của bạn."
+        title={t("settings.password.title")}
+        description={t("settings.password.description")}
         width="standard"
         onBack={() => setShowPasswordEditor(false)}
       >
         {notice ? (
-          <StatusMessage tone={notice.tone}>{notice.message}</StatusMessage>
+          <StatusMessage tone={notice.tone}>
+            {resolveNoticeMessage(notice.kind)}
+          </StatusMessage>
         ) : null}
 
         {isEmailPasswordAccount ? (
@@ -277,32 +304,59 @@ export function AccountSettingsScreen() {
             <PasswordField
               autoComplete="current-password"
               id="current-password"
-              label="Mật khẩu hiện tại"
+              label={currentPasswordLabel}
               onChange={setCurrentPassword}
               onToggle={() => setShowCurrentPassword((value) => !value)}
+              toggleAriaLabel={
+                showCurrentPassword
+                  ? t("settings.password.hideFieldAria", {
+                      label: currentPasswordLabel.toLowerCase(),
+                    })
+                  : t("settings.password.showFieldAria", {
+                      label: currentPasswordLabel.toLowerCase(),
+                    })
+              }
               value={currentPassword}
               visible={showCurrentPassword}
             />
             <PasswordField
               autoComplete="new-password"
               id="new-password"
-              label="Mật khẩu mới"
+              label={newPasswordLabel}
               onChange={setNewPassword}
               onToggle={() => setShowNewPassword((value) => !value)}
+              toggleAriaLabel={
+                showNewPassword
+                  ? t("settings.password.hideFieldAria", {
+                      label: newPasswordLabel.toLowerCase(),
+                    })
+                  : t("settings.password.showFieldAria", {
+                      label: newPasswordLabel.toLowerCase(),
+                    })
+              }
               value={newPassword}
               visible={showNewPassword}
             />
             <PasswordField
               autoComplete="new-password"
               id="confirm-new-password"
-              label="Xác nhận mật khẩu mới"
+              label={confirmPasswordLabel}
               onChange={setConfirmPassword}
               onToggle={() => setShowConfirmPassword((value) => !value)}
+              toggleAriaLabel={
+                showConfirmPassword
+                  ? t("settings.password.hideFieldAria", {
+                      label: confirmPasswordLabel.toLowerCase(),
+                    })
+                  : t("settings.password.showFieldAria", {
+                      label: confirmPasswordLabel.toLowerCase(),
+                    })
+              }
               value={confirmPassword}
               visible={showConfirmPassword}
             />
             <p className="text-sm text-muted">
-              Mật khẩu mới cần có ít nhất 8 ký tự.
+              {t("settings.password.minLengthHint", { min: 8 })}
             </p>
             <Button
               className="sm:w-auto sm:self-start sm:px-8"
@@ -310,14 +364,13 @@ export function AccountSettingsScreen() {
               isLoading={isChangingPassword}
               type="submit"
             >
-              Lưu mật khẩu mới
+              {t("auth.resetPassword.submit")}
             </Button>
           </form>
         ) : (
           <div className="flex flex-col gap-3">
             <p className="text-body text-muted">
-              Tài khoản này chưa có phương thức đăng nhập bằng mật khẩu. Ba mẹ
-              có thể yêu cầu liên kết đặt mật khẩu qua email.
+              {t("settings.password.noPasswordDescription")}
             </p>
             <Button
               className="sm:w-auto sm:self-start sm:px-8"
@@ -326,7 +379,7 @@ export function AccountSettingsScreen() {
               onClick={() => void handlePasswordRecovery()}
             >
               <Mail aria-hidden="true" className="size-5" />
-              Chưa có mật khẩu? Gửi liên kết đặt mật khẩu qua email
+              {t("settings.password.requestRecoveryButton")}
             </Button>
           </div>
         )}
@@ -336,16 +389,49 @@ export function AccountSettingsScreen() {
   return (
     <section className="settings-sheet mx-auto flex w-full max-w-[960px] flex-col gap-4">
       <PageHeader
-        description="Quản lý thông tin tài khoản, bảo mật và các tùy chọn sử dụng ViRead."
-        eyebrow="Tài khoản ViRead"
-        title="Cài đặt tài khoản"
+        description={t("settings.account.description")}
+        eyebrow={t("settings.account.eyebrow")}
+        title={t("settings.account.title")}
       />
+
+      <Card>
+        <div className="flex items-start gap-3">
+          <Globe
+            aria-hidden="true"
+            className="mt-1 size-6 shrink-0 text-primary"
+          />
+          <div className="min-w-0 flex-1">
+            <h2 className="text-2xl font-extrabold text-ink">
+              {t("settings.language.heading")}
+            </h2>
+            <p className="mt-1 text-body text-muted">
+              {t("settings.language.description")}
+            </p>
+          </div>
+        </div>
+        <div className="max-w-md">
+          <LanguageSelector
+            onLocaleChange={(next) => setLanguageChangedTo(next)}
+            variant="settings"
+          />
+        </div>
+        <StatusMessage tone="info">
+          {t("settings.language.learningContentNote")}
+        </StatusMessage>
+        {languageChangedTo ? (
+          <StatusMessage role="status" tone="success">
+            {t("notifications.updates.localeChanged", {
+              language: getLocaleMetadata(languageChangedTo).nativeName,
+            })}
+          </StatusMessage>
+        ) : null}
+      </Card>
 
       <Card>
         <div className="flex items-center gap-3">
           <div>
             <h2 className="text-2xl font-extrabold text-ink">
-              Thông tin tài khoản
+              {t("settings.account.infoHeading")}
             </h2>
           </div>
         </div>
@@ -353,7 +439,7 @@ export function AccountSettingsScreen() {
         <dl className="grid gap-4 sm:grid-cols-2">
           <div className="rounded-control border border-border bg-white px-4 py-3">
             <dt className="text-label font-semibold text-muted">
-              Tên hiển thị
+              {t("settings.account.displayName")}
             </dt>
             <dd className="mt-1 break-words text-body font-semibold text-ink">
               {displayName}
@@ -361,29 +447,31 @@ export function AccountSettingsScreen() {
           </div>
           <div className="rounded-control border border-border bg-white px-4 py-3">
             <dt className="text-label font-semibold text-muted">
-              Email tài khoản
+              {t("settings.account.email")}
             </dt>
             <dd className="mt-1 break-all text-body font-semibold text-ink">
-              {email || "Không thể tải thông tin"}
+              {email || t("common.states.unavailable")}
             </dd>
             {profile.pending_email ? (
               <p className="mt-2 break-all text-sm text-warning">
-                Email mới đang chờ xác nhận:{" "}
+                {t("settings.account.pendingEmailNotice")}{" "}
                 <strong>{profile.pending_email}</strong>
               </p>
             ) : null}
           </div>
           <div className="rounded-control border border-border bg-white px-4 py-3">
             <dt className="text-label font-semibold text-muted">
-              Vai trò tài khoản
+              {t("settings.account.role")}
             </dt>
             <dd className="mt-1 text-body font-semibold text-ink">
-              {profile.role === "admin" ? "Quản trị viên" : "Phụ huynh"}
+              {profile.role === "admin"
+                ? t("parent.profile.roleAdmin")
+                : t("parent.profile.roleParent")}
             </dd>
           </div>
           <div className="rounded-control border border-border bg-white px-4 py-3">
             <dt className="text-label font-semibold text-muted">
-              Trạng thái email
+              {t("settings.account.emailStatus")}
             </dt>
             <dd className="mt-1 flex items-center gap-2 text-body font-semibold text-ink">
               {emailStatus}
@@ -395,7 +483,8 @@ export function AccountSettingsScreen() {
           href="/profile"
           variant="secondary"
         >
-          Quản lý hồ sơ <ArrowRight aria-hidden="true" className="size-5" />
+          {t("settings.account.manageProfile")}{" "}
+          <ArrowRight aria-hidden="true" className="size-5 viread-rtl-flip" />
         </ButtonLink>
       </Card>
 
@@ -404,27 +493,27 @@ export function AccountSettingsScreen() {
         variant="secondary"
         onClick={() => setShowPasswordEditor(true)}
       >
-        Đổi mật khẩu
+        {t("settings.account.changePassword")}
       </Button>
 
       <Card>
         <div className="flex items-center gap-3">
           <div>
             <h2 className="text-2xl font-extrabold text-ink">
-              Email và xác minh
+              {t("settings.account.emailVerificationHeading")}
             </h2>
           </div>
         </div>
         <p className="text-body text-muted">
           {profile.pending_email
-            ? "Yêu cầu đổi email đang chờ xác minh. Email hiện tại vẫn là địa chỉ đã được xác nhận trước đó."
-            : "Để đổi email hoặc gửi lại email xác minh, hãy sử dụng chức năng hiện có trong hồ sơ phụ huynh."}
+            ? t("settings.account.emailPendingBody")
+            : t("settings.account.emailDefaultBody")}
         </p>
         <Link
           className="font-semibold text-primary underline-offset-4 hover:underline"
           href="/profile"
         >
-          Mở hồ sơ phụ huynh
+          {t("settings.account.openParentProfile")}
         </Link>
       </Card>
 
@@ -432,10 +521,10 @@ export function AccountSettingsScreen() {
         <div className="flex items-center gap-3">
           <div>
             <h2 className="text-2xl font-extrabold text-ink">
-              Quản lý lịch nhắc đọc sách
+              {t("settings.account.readingRemindersHeading")}
             </h2>
             <p className="text-sm text-muted">
-              Điều chỉnh lịch đọc và các thông báo nhắc nhở cho bé.
+              {t("settings.account.readingRemindersDescription")}
             </p>
           </div>
         </div>
@@ -444,8 +533,8 @@ export function AccountSettingsScreen() {
           href="/reading-management"
           variant="secondary"
         >
-          Quản lý lịch nhắc đọc sách{" "}
-          <ArrowRight aria-hidden="true" className="size-5" />
+          {t("settings.account.readingRemindersHeading")}{" "}
+          <ArrowRight aria-hidden="true" className="size-5 viread-rtl-flip" />
         </ButtonLink>
       </Card>
     </section>

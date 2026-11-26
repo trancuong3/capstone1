@@ -11,6 +11,7 @@ import { RefreshCw, UploadCloud } from "lucide-react";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 import {
   emptyAdminBookUploadSession,
@@ -20,6 +21,7 @@ import {
   runAdminBookUpload,
   subscribeAdminBookUploadSession,
 } from "@/lib/admin/admin-book-upload-session";
+import type { TranslateFn } from "@/lib/i18n/types";
 import type {
   AdminPageUploadInputUI,
   AdminPageUploadProgressUI,
@@ -78,7 +80,10 @@ function fileExtension(fileName: string): string {
   return dot >= 0 ? fileName.slice(dot).toLowerCase() : "";
 }
 
-function classifyUploadFile(file: File):
+function classifyUploadFile(
+  file: File,
+  t: TranslateFn,
+):
   | {
       kind: "image";
       mime: "image/jpeg" | "image/png" | "image/webp";
@@ -97,13 +102,13 @@ function classifyUploadFile(file: File):
   if (ext === ".docm") {
     return {
       kind: "invalid",
-      error: "Không cho phép tệp Word chứa macro (.docm).",
+      error: t("books.uploader.errors.docm"),
     };
   }
   if (ext === ".doc") {
     return {
       kind: "invalid",
-      error: "Chưa hỗ trợ tệp .doc cũ; hãy lưu sang .docx hoặc .pdf.",
+      error: t("books.uploader.errors.docLegacy"),
     };
   }
 
@@ -116,7 +121,7 @@ function classifyUploadFile(file: File):
     ) {
       return {
         kind: "invalid",
-        error: "Định dạng MIME và phần mở rộng tệp không khớp.",
+        error: t("books.uploader.errors.mimeMismatch"),
       };
     }
     return { kind: "image", mime: stdMime, maxBytes: MAX_IMAGE_BYTES };
@@ -137,7 +142,7 @@ function classifyUploadFile(file: File):
     if (!GENERIC_MIMES.has(rawMime) && !allowedMimes.has(rawMime)) {
       return {
         kind: "invalid",
-        error: "Định dạng MIME và phần mở rộng tệp không khớp.",
+        error: t("books.uploader.errors.mimeMismatch"),
       };
     }
     return {
@@ -150,8 +155,7 @@ function classifyUploadFile(file: File):
 
   return {
     kind: "invalid",
-    error:
-      "Định dạng chưa hỗ trợ. Hãy chọn JPEG, PNG, WebP, BMP, TIFF, PDF hoặc DOCX.",
+    error: t("books.uploader.errors.unsupportedType"),
   };
 }
 
@@ -160,6 +164,8 @@ export function AdminPageUploader({
   onUploaded,
 }: AdminPageUploaderProps) {
   const { pages } = useAdminServices();
+  const t = useTranslations("admin");
+  const { formatNumber } = useI18n();
   const [files, setFiles] = useState<File[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
   const [workerStatus, setWorkerStatus] = useState<
@@ -230,14 +236,14 @@ export function AdminPageUploader({
     event.preventDefault();
     setFormError(null);
     if (!files.length) {
-      setFormError("Hãy chọn ít nhất một ảnh hoặc tài liệu trang sách.");
+      setFormError(t("books.uploader.errors.noFilesSelected"));
       return;
     }
     const entries: AdminPageUploadInputUI[] = [];
     const localFailures: AdminPageUploadProgressUI[] = [];
     for (const [index, file] of files.entries()) {
       const clientId = `${index}-${file.name}-${file.size}`;
-      const classified = classifyUploadFile(file);
+      const classified = classifyUploadFile(file, t);
       if (classified.kind === "invalid") {
         localFailures.push({
           client_id: clientId,
@@ -257,8 +263,8 @@ export function AdminPageUploader({
           status: "FAILED",
           error_message:
             file.size <= 0
-              ? "Tệp được chọn bị rỗng."
-              : `Tệp vượt quá giới hạn dung lượng ${limitMb} MB.`,
+              ? t("books.uploader.errors.emptyFile")
+              : t("books.uploader.errors.sizeExceeded", { limitMb }),
         });
         continue;
       }
@@ -289,7 +295,7 @@ export function AdminPageUploader({
             file_name: file.name,
             progress_percent: 0,
             status: "FAILED",
-            error_message: "Kích thước ảnh vượt quá giới hạn 6000 × 6000 px.",
+            error_message: t("books.uploader.errors.imageDimensions"),
           });
           continue;
         }
@@ -309,7 +315,7 @@ export function AdminPageUploader({
           file_name: file.name,
           progress_percent: 0,
           status: "FAILED",
-          error_message: "Không thể đọc kích thước ảnh tại trình duyệt.",
+          error_message: t("books.uploader.errors.imageUnreadable"),
         });
       }
     }
@@ -326,14 +332,12 @@ export function AdminPageUploader({
       setFormError(
         localFailures.length === 1 && localFailures[0].error_message
           ? localFailures[0].error_message
-          : "Không có file hợp lệ để upload. Kiểm tra định dạng, dung lượng và kích thước ảnh.",
+          : t("books.uploader.errors.noValidFiles"),
       );
       return;
     }
     if (localFailures.length > 0) {
-      setFormError(
-        "Một số tệp không hợp lệ nên chưa được upload. Các tệp hợp lệ vẫn đang được xử lý.",
-      );
+      setFormError(t("books.uploader.errors.someInvalidFiles"));
     }
     setFiles([]);
     const input = document.getElementById(
@@ -349,13 +353,10 @@ export function AdminPageUploader({
       className="mb-8 rounded-card bg-sky p-4 sm:p-6"
     >
       <h2 className="mb-4 text-2xl font-semibold" id="upload-title">
-        Tải ảnh trang sách hoặc tài liệu và chạy OCR
+        {t("books.uploader.heading")}
       </h2>
       <p className="mb-4 text-sm text-muted">
-        Hỗ trợ ảnh JPEG, PNG, WebP, BMP (tối đa 12 MB, chuẩn hóa tối đa 6000 ×
-        6000 px) và tài liệu scan PDF, DOCX, TIFF (tối đa 50 MB, tối đa 30 trang
-        mỗi tệp). Sau khi bấm upload, tiến trình vẫn chạy và được giữ khi bạn
-        chuyển sang màn hình khác trong cùng tab.
+        {t("books.uploader.instructions")}
       </p>
       {workerStatus === "offline" || workerStatus === "unreachable" ? (
         <div
@@ -396,19 +397,17 @@ export function AdminPageUploader({
       ) : null}
       <form className="grid gap-4" onSubmit={submit}>
         <p className="text-sm font-semibold text-ink">
-          Backend tự động tách trang, đánh số trang liên tục từ 1 theo thứ tự
-          tệp/trang và xác định số trang cuối cùng từ PostgreSQL.
+          {t("books.uploader.orderingNote")}
         </p>
         <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-control border-2 border-dashed border-border bg-white p-5 text-center">
           <UploadCloud aria-hidden className="mb-2 size-8 text-primary" />
           <span className="font-semibold">
-            Chọn một hoặc nhiều ảnh trang sách hoặc tài liệu (PDF, DOCX, TIFF,
-            BMP)
+            {t("books.uploader.selectFilesLabel")}
           </span>
           <span className="mt-1 text-sm text-muted">
             {files.length
-              ? `${files.length} file được chọn`
-              : "Tệp sẽ được tách trang và xác minh lại ở Backend"}
+              ? t("books.uploader.filesSelected", { count: files.length })
+              : t("books.uploader.noFilesHint")}
           </span>
           <input
             id="page-images"
@@ -425,7 +424,7 @@ export function AdminPageUploader({
           isLoading={session.busy}
           type="submit"
         >
-          Upload và chạy OCR
+          {t("books.uploader.submit")}
         </Button>
       </form>
       {session.progress.length ? (
@@ -451,15 +450,16 @@ export function AdminPageUploader({
                 }
               >
                 {item.status === "FAILED"
-                  ? "Thất bại"
+                  ? t("books.uploader.statusFailed")
                   : item.status === "UPLOADING"
-                    ? "Đang tải lên"
+                    ? t("books.uploader.statusUploading")
                     : item.status === "QUEUED"
-                      ? "Đang chờ"
-                      : (item.summary_message ?? "OCR đã lưu · Cần duyệt")}
+                      ? t("books.uploader.statusPending")
+                      : (item.summary_message ??
+                        t("books.uploader.statusSavedFallback"))}
               </span>
               <span className="text-sm tabular-nums">
-                {item.progress_percent}%
+                {formatNumber(item.progress_percent)}%
               </span>
             </div>
           ))}
@@ -473,7 +473,7 @@ export function AdminPageUploader({
           onClick={() => void retryAdminBookUpload(bookId, pages)}
           variant="secondary"
         >
-          Thử lại các file thất bại
+          {t("books.uploader.retryFailed")}
         </Button>
       ) : null}
     </section>

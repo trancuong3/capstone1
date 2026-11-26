@@ -1,0 +1,97 @@
+{
+  "brand": {
+    "name": "ViRead",
+    "tagline": "הפלטפורמה שמלווה הורים וילדים במסע הקריאה שלהם."
+  },
+  "actions": {
+    "save": "שמור",
+    "saving": "שומר...",
+    "cancel": "ביטול",
+    "close": "סגור",
+    "confirm": "אישור",
+    "continue": "המשך",
+    "back": "חזור",
+    "retry": "נסה שוב",
+    "reload": "טען מחדש",
+    "search": "חיפוש",
+    "clear": "נקה",
+    "filter": "סנן",
+    "edit": "ערוך",
+    "delete": "נקה",
+    "create": "צור חדש",
+    "upload": "העלה",
+    "download": "הורד",
+    "open": "פתח",
+    "viewDetails": "צפה בפרטים",
+    "select": "בחר",
+    "apply": "החל"
+  },
+  "states": {
+    "loading": "טוען...",
+    "empty": "אין נתונים זמינים.",
+    "unavailable": "לא ניתן לטעון מידע",
+    "ready": "מוכן",
+    "completed": "הושלם",
+    "inProgress": "בתהליך",
+    "pending": "ממתין",
+    "error": "אירעה שגיאה",
+    "imageLoadFailed": "נכשל בטעינת תמונת הדף",
+    "retryReload": "נסה לטעון מחדש"
+  },
+  "avatar": {
+    "defaultAlt": "תמונת פרופיל"
+  },
+  "pagination": {
+    "summary": "עמוד {page} מתוך {totalPages}",
+    "itemsCount": "{count, plural, =0 {אין פריטים} other {# פריטים}}",
+    "previous": "עמוד קודם",
+    "next": "עמוד הבא",
+    "previousShort": "קודם",
+    "nextShort": "הבא",
+    "navAria": "עימוד",
+    "navAriaWithLabel": "נווט ברשימת {itemLabel}",
+    "rangeSummary": "מציג {start}–{end} מתוך {total}",
+    "rangeSummaryWithLabel": "מציג {start}–{end} מתוך {total} {itemLabel}"
+  },
+  "languageSelector": {
+    "label": "שפת ממשק",
+    "buttonAriaLabel": "בחר שפת ממשק, נוכחית: {language}",
+    "dialogTitle": "בחר שפה",
+    "searchLabel": "חפש שפה",
+    "searchPlaceholder": "חפש לפי שם שפה או קוד...",
+    "clearSearch": "נקה מילת חיפוש",
+    "popularHeading": "שפות פופולריות",
+    "allHeading": "כל השפות",
+    "searchResultsHeading": "תוצאות חיפוש",
+    "emptySearch": "לא נמצאו שפות התואמות ל-\"{query}\".",
+    "currentBadge": "נוכחית",
+    "loadingLocale": "טוען שפה...",
+    "switchedNotice": "הממשק הועבר ל-{language}.",
+    "closeButton": "סגור רשימת שפות"
+  },
+  "footer": {
+    "copyright": "© {year} ViRead. כל הזכויות שמורות.",
+    "adminCopyright": "© {year} ViRead.",
+    "adminNotice": "אזור הניהול של ViRead.",
+    "parentDescription": "פלטפורמה התומכת בהורים בעזרה לילדים לפתח כישורי קריאה ולעקוב אחר התקדמות הלמידה.",
+    "contactHeading": "פרטי התקשרות",
+    "quickLinksHeading": "קישורים מהירים",
+    "organization": "אוניברסיטת Duy Tan",
+    "contactEmail": "vireadforyou@gmail.com",
+    "contactPhone": "0905373633"
+  },
+  "notFound": {
+    "pageTitle": "הדף לא נמצא",
+    "title": "הדף לא נמצא",
+    "description": "הדף שאתה מחפש אינו קיים או שהועבר לכתובת אחרת.",
+    "backHome": "חזרה ללוח הבקרה",
+    "backLogin": "חזרה לדף ההתחברות"
+  },
+  "errorPage": {
+    "title": "משהו השתבש",
+    "description": "ViRead נתקל בשגיאה בלתי צפויה בעת הצגת דף זה. אנא נסו שוב או חזרו ללוח הבקרה.",
+    "globalTitle": "האפליקציה חווה תקלות זמניות",
+    "globalDescription": "לא ניתן לטעון את ממשק האפליקציה כרגע. אנא נסו לרענן את הדף.",
+    "backHome": "חזרה ללוח הבקרה"
+  }
+}

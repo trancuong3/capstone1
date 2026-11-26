@@ -1,3 +1,6 @@
+"use client";
+
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import type { ProgressReportDTO } from "@/types/reports";
 
 interface ProgressChartProps {
@@ -5,21 +8,23 @@ interface ProgressChartProps {
 }
 
 export function ProgressChart({ report }: ProgressChartProps) {
+  const { formatNumber } = useI18n();
+  const t = useTranslations("reports");
   const rows = [
     {
-      label: "Bỏ sót",
+      label: t("overview.chart.omissions"),
       value: report.omission_count,
       rate: report.omission_rate,
       barClass: "bg-primary",
     },
     {
-      label: "Lặp từ",
+      label: t("overview.chart.repetitions"),
       value: report.repetition_count,
       rate: report.repetition_rate,
       barClass: "bg-primary/80",
     },
     {
-      label: "Dừng lâu",
+      label: t("overview.chart.longPauses"),
       value: report.long_pause_count,
       rate: report.long_pause_rate,
       barClass: "bg-primary/60",
@@ -42,18 +47,17 @@ export function ProgressChart({ report }: ProgressChartProps) {
           className="text-xl font-extrabold text-ink"
           id="reading-evidence-title"
         >
-          Các dấu hiệu khi đọc
+          {t("overview.chart.title")}
         </h2>
-        <span className="text-xs font-semibold text-muted">Đơn vị: lần</span>
+        <span className="text-xs font-semibold text-muted">
+          {t("overview.chart.unitLabel")}
+        </span>
       </div>
-      <p className="mt-1 text-sm text-muted">
-        Số lần ghi nhận trong kỳ đang xem. Chỉ số chưa có dữ liệu không được quy
-        thành 0.
-      </p>
+      <p className="mt-1 text-sm text-muted">{t("overview.chart.subtitle")}</p>
 
       {allMissing ? (
         <p className="mt-5 rounded-control border border-dashed border-border bg-canvas px-4 py-5 text-sm font-semibold text-muted">
-          Chưa có số liệu chi tiết về bỏ sót, lặp từ hoặc dừng lâu trong kỳ này.
+          {t("overview.chart.empty")}
         </p>
       ) : (
         <ul aria-hidden="true" className="mt-5 space-y-4">
@@ -76,9 +80,13 @@ export function ProgressChart({ report }: ProgressChartProps) {
                         : "text-xs font-semibold text-muted"
                     }
                   >
-                    {hasValue ? `${row.value} lần` : "Chưa có dữ liệu"}
+                    {hasValue
+                      ? t("overview.chart.valueTimes", {
+                          count: formatNumber(row.value),
+                        })
+                      : t("overview.chart.noData")}
                     {hasValue && row.rate !== null ? (
-                      <span className="ml-1.5 font-semibold text-muted">
+                      <span className="ms-1.5 font-semibold text-muted">
                         ({row.rate.toFixed(1)}%)
                       </span>
                     ) : null}
@@ -106,18 +114,22 @@ export function ProgressChart({ report }: ProgressChartProps) {
 
       <div className="sr-only">
         <table>
-          <caption>Tóm tắt dạng bảng của biểu đồ bằng chứng đọc</caption>
+          <caption>{t("overview.chart.tableCaption")}</caption>
           <thead>
             <tr>
-              <th scope="col">Loại</th>
-              <th scope="col">Số lần đã lưu</th>
+              <th scope="col">{t("overview.chart.colType")}</th>
+              <th scope="col">{t("overview.chart.colCount")}</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.label}>
                 <th scope="row">{row.label}</th>
-                <td>{row.value ?? "Chưa có dữ liệu"}</td>
+                <td>
+                  {row.value !== null
+                    ? formatNumber(row.value)
+                    : t("overview.chart.noData")}
+                </td>
               </tr>
             ))}
           </tbody>

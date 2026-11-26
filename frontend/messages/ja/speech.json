@@ -1,0 +1,117 @@
+{
+  "recorder": {
+    "permissionRequired": "お子様の声を録音するためにマイクの権限が必要です。",
+    "recording": "読み上げを聞いています…",
+    "processing": "発音を分析中…",
+    "playback": "録音を聞き直す"
+  },
+  "preferences": {
+    "title": "音声オプション",
+    "voiceSpeed": "再生速度",
+    "autoRead": "ページを開いた時に自動再生",
+    "slow": "遅い",
+    "normal": "普通",
+    "fast": "速い"
+  },
+  "status": {
+    "micReady": "マイク準備完了",
+    "micMuted": "マイクオフ",
+    "ttsReady": "サンプル音声準備完了"
+  },
+  "settings": {
+    "buttonLabel": "音声",
+    "modalTitle": "サンプル音声",
+    "savedVoice": "保存済み音声",
+    "defaultVoice": "デフォルト音声",
+    "localOnlyMode": "このデバイスのみ",
+    "localWithGoogleMode": "デバイス + Googleバックアップ",
+    "speedLabel": "読み上げ速度",
+    "regionAndVoiceTitle": "地域と音声を選択",
+    "regionAria": "地域を選択",
+    "filterAria": "音声を絞り込む",
+    "allVoices": "すべての音声",
+    "maleVoice": "男性の声",
+    "femaleVoice": "女性の声",
+    "youngVoice": "若々しい声",
+    "childVoice": "子供の声",
+    "loadingVoices": "音声リストを読み込み中…",
+    "loadErrorFallback": "音声リストを読み込めませんでした。デフォルト音声は使用可能です。",
+    "retry": "再試行",
+    "emptyVoices": "利用可能な音声がありません。デバイスのデフォルト音声を使用してください。",
+    "emptyFiltered": "条件に一致する音声はありません。",
+    "parentModeTitle": "音声設定（保護者モード）",
+    "localAvailable": "準備完了",
+    "localUnavailable": "無効",
+    "googleConfigured": "設定済み",
+    "googleUnconfigured": "APIキー未設定",
+    "localOnlyTitle": "このデバイスのみ",
+    "localOnlyDesc": "100%ローカル処理（サーバー+ブラウザ）、Google通信なし",
+    "localWithGoogleTitle": "デバイス + Googleバックアップ",
+    "localWithGoogleDesc": "ローカル優先、オンラインバックアップへ自動切り替え",
+    "googleSttFallback": "音声認識 (STT) のGoogleバックアップ",
+    "googleTtsFallback": "読み上げ (TTS) のGoogleバックアップ",
+    "missingGoogleKeyHint": "サーバーにGoogle Cloud APIキーが設定されていない場合、ViReadは自動的にGoogle/ブラウザオンラインをフォールバックとして使用します。",
+    "useDefaultVoice": "デフォルトの音声を使用",
+    "preview": "試聴",
+    "stopPreview": "試聴を停止",
+    "previewFailed": "音声を再生できませんでした。もう一度試すか、別の音声を選択してください。",
+    "savedVoiceResetNotice": "以前保存された音声が利用できなくなったため、保護者様が確認できるようViReadはデフォルトの音声に戻しました。",
+    "regions": {
+      "all": "すべての地域",
+      "north": "北部",
+      "central": "中部",
+      "south": "南部"
+    },
+    "genders": {
+      "female": "女性",
+      "male": "男性"
+    },
+    "ageGroups": {
+      "young": "若年",
+      "child": "子供の声",
+      "middle_aged": "中年",
+      "old": "高齢"
+    },
+    "accents": {
+      "northern": "北部アクセント",
+      "southern": "南部アクセント",
+      "central": "中部アクセント",
+      "american": "アメリカ英語アクセント",
+      "british": "イギリス英語アクセント"
+    },
+    "googleProviderLabel": "Googleフォールバック"
+  },
+  "engineBadge": {
+    "ariaLabel": "音声ソース: STT {stt}, TTS {tts}",
+    "fallbackDetail": "{base} (フォールバック: {reason})",
+    "androidDetail": "{base} (デバイス · Android vi-VN音声)",
+    "catalogCacheDetail": "{base} (標準キャッシュ · 遅延なしTTS)",
+    "googleCloudDetail": "{base} (オンライン · Google Cloud APIフォールバック使用中)",
+    "browserDefaultDetail": "{base} (オンライン · Google/ブラウザフォールバック)",
+    "wasmDetail": "{base} (オフライン · WASMによるデバイス内認識)",
+    "localDetail": "{base} (オフライン · このデバイスで直接実行)",
+    "shortLabels": {
+      "local_offline": "オフライン",
+      "browser_wasm": "オフライン (WASM)",
+      "catalog_cache": "標準キャッシュ",
+      "android_native": "Android (vi-VN)",
+      "google_cloud": "オンライン (Google API)",
+      "browser_default": "オンライン (Google/ブラウザ)"
+    }
+  },
+  "playback": {
+    "unavailable": "デバイス上の音声が準備できていません。画面のテキストを確認し、「再試行」をタップしてください。",
+    "lockedVoiceUnavailableNotice": "選択した音声は現在ビジー状態です。別の音声に切り替わらないよう、ViReadは現在のテキストガイドを維持します。「再試行」をタップしてください。",
+    "serverFallbackNotice": "選択した音声は現在利用できません。システムはフォールバック音声で読み上げています。",
+    "androidNativeFallbackNotice": "サーバー音声が無効です — Androidデバイスのベトナム語音声を使用しています。",
+    "browserFallbackNotice": "デバイス音声が無効です — ブラウザのオンライン音声を使用しています。",
+    "autoplayBlocked": "ブラウザは、音声再生を有効にするための操作を待機しています。「もう一度聞く」をタップしてください。",
+    "partialPlayback": "音声が中断されました。最初から聞き直すことができます。"
+  },
+  "wasm": {
+    "workerUnavailable": "Web Workerが利用できません",
+    "wasmUnavailable": "WebAssemblyが利用できません",
+    "cryptoUnavailable": "Web Crypto APIが利用できません",
+    "deviceUnsupported": "このデバイスではWASM STTが利用できません。"
+  }
+}

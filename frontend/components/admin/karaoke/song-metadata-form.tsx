@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
+import { useTranslations } from "@/hooks/use-i18n";
 import type { KaraokeMetadata } from "@/types/karaoke";
 
 export const karaokeInputClass =
@@ -16,6 +17,7 @@ export function SongMetadataForm({
   errors?: Partial<Record<keyof KaraokeMetadata, string>>;
 }) {
   const id = useId();
+  const t = useTranslations("admin");
   const [expanded, setExpanded] = useState(false);
   const fields = useRef<
     Partial<
@@ -64,13 +66,13 @@ export function SongMetadataForm({
   }
   const additional = (
     <>
-      {textField("author", "Tác giả / người thể hiện", 200)}
-      {textField("source_note", "Nguồn nhạc và lời", 1000)}
-      {textField("usage_note", "Quyền sử dụng nội dung", 1000)}
+      {textField("author", t("karaoke.metadata.authorLabel"), 200)}
+      {textField("source_note", t("karaoke.metadata.sourceLabel"), 1000)}
+      {textField("usage_note", t("karaoke.metadata.usageLabel"), 1000)}
       {(
         [
-          ["min_grade", "Từ lớp"],
-          ["max_grade", "Đến lớp"],
+          ["min_grade", t("karaoke.metadata.minGradeLabel")],
+          ["max_grade", t("karaoke.metadata.maxGradeLabel")],
         ] as const
       ).map(([key, label]) => (
         <label className="grid gap-2 font-bold" key={key}>
@@ -90,7 +92,7 @@ export function SongMetadataForm({
           >
             {[1, 2, 3, 4, 5].map((grade) => (
               <option value={grade} key={grade}>
-                Lớp {grade}
+                {t("karaoke.metadata.gradeOption", { grade })}
               </option>
             ))}
           </select>
@@ -108,7 +110,7 @@ export function SongMetadataForm({
   );
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      {textField("title", "Tên bài hát", 200)}
+      {textField("title", t("karaoke.metadata.titleLabel"), 200)}
       {variant === "compact" ? (
         <details
           className="md:col-span-2"
@@ -116,7 +118,7 @@ export function SongMetadataForm({
           onToggle={(e) => setExpanded(e.currentTarget.open)}
         >
           <summary className="min-h-12 cursor-pointer py-3 font-bold text-primary-hover">
-            Thông tin thêm: tác giả, lớp, nguồn và quyền sử dụng
+            {t("karaoke.metadata.moreInfoSummary")}
           </summary>
           <div className="grid gap-4 pt-3 md:grid-cols-2">{additional}</div>
         </details>
@@ -124,8 +126,7 @@ export function SongMetadataForm({
         additional
       )}
       <p className="text-sm text-muted md:col-span-2">
-        Có thể lưu bản nháp chưa hoàn chỉnh. Khi xuất bản cần tên, nguồn, quyền
-        sử dụng, nhạc và lời đã căn thời gian.
+        {t("karaoke.metadata.publishRequirementsHint")}
       </p>
     </div>
   );

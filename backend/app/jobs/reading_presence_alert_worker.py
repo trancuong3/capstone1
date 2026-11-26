@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import functools
+import inspect
 import logging
 import signal
 from datetime import datetime, timezone
@@ -17,6 +19,7 @@ from app.jobs.reading_reminder_worker import (
 )
 from app.providers.reading_presence_email_provider import send_presence_email
 from app.repositories.reading_presence_repository import ReadingPresenceRepository
+from app.services.i18n.locales import DEFAULT_LOCALE, resolve_supported_locale
 from app.services.reading_presence_service import ReadingPresenceService
 from app.services.worker_telemetry import record_worker_error, record_worker_success
 
@@ -25,7 +28,28 @@ READING_PRESENCE_ADVISORY_LOCK_KEY = 4201002
 _WORKER_KEY = "reading_presence"
 
 
-async def process_due_alerts_once(now: datetime | None = None) -> int:
+def _sender_for_locale(locale: str | None):
+    resolved = resolve_supported_locale(locale)
+    if resolved == DEFAULT_LOCALE:
+        return send_presence_email
+    try:
+        sig = inspect.signature(send_presence_email)
+        accepts_locale = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD or p.name == "locale"
+            for p in sig.parameters.values()
+        )
+    except (TypeError, ValueError):
+        accepts_locale = False
+    if not accepts_locale:
+        return send_presence_email
+    return functools.partial(send_presence_email, locale=resolved)
+
+
+async def process_due_alerts_once(
+    now: datetime | None = None,
+    *,
+    locale: str = DEFAULT_LOCALE,
+) -> int:
     now = now or datetime.now(timezone.utc)
     async with _advisory_lock_guard(READING_PRESENCE_ADVISORY_LOCK_KEY) as acquired:
         if not acquired:
@@ -36,7 +60,7 @@ async def process_due_alerts_once(now: datetime | None = None) -> int:
             delivered = await service.deliver_due(
                 now,
                 recipient_resolver=get_verified_parent_email,
-                email_sender=send_presence_email,
+                email_sender=_sender_for_locale(locale),
                 parent_email_unavailable=ParentEmailUnavailable,
                 parent_lookup_failed=ParentEmailLookupFailed,
             )

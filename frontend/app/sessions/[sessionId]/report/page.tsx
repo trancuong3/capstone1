@@ -12,13 +12,13 @@ import {
 } from "lucide-react";
 import { useParams } from "next/navigation";
 
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import {
   deleteReadingReport,
   getSessionReports,
   type SavedReadingReport,
 } from "@/lib/api/comparison-service";
 import { cn } from "@/lib/utils/cn";
-import { formatHistoryDateTime } from "@/lib/utils/report-mappers";
 import {
   groupSessionReportsByPageRevision,
   isImmutableFirstPassReport,
@@ -36,6 +36,8 @@ import type { ReadingAssessmentMetricsDTO } from "@/types/reading";
 const REPORTS_PER_PAGE = 5;
 
 export default function ReadingReportPage() {
+  const t = useTranslations("reports");
+  const { formatDateTime } = useI18n();
   const params = useParams<{ sessionId: string }>();
   const sessionId = params.sessionId;
 
@@ -86,7 +88,9 @@ export default function ReadingReportPage() {
       setPendingDeleteId(null);
     } catch (err) {
       setDeleteError(
-        err instanceof Error ? err.message : "Không thể xóa báo cáo.",
+        err instanceof Error
+          ? err.message
+          : t("sessions.readingReports.deleteFailedFallback"),
       );
       setPendingDeleteId(null);
     } finally {
@@ -114,7 +118,9 @@ export default function ReadingReportPage() {
         if (active) {
           setReports([]);
           setError(
-            err instanceof Error ? err.message : "Không thể tải báo cáo đọc.",
+            err instanceof Error
+              ? err.message
+              : t("sessions.readingReports.loadReportFailedFallback"),
           );
         }
       } finally {
@@ -131,7 +137,7 @@ export default function ReadingReportPage() {
     return () => {
       active = false;
     };
-  }, [reloadKey, sessionId]);
+  }, [reloadKey, sessionId, t]);
 
   const reportHeading = (
     <header className="flex flex-col justify-between gap-3 border-b border-border pb-5 sm:flex-row sm:items-end">
@@ -141,22 +147,29 @@ export default function ReadingReportPage() {
             className="family-inline-link min-h-0"
             href={`/sessions/${encodeURIComponent(sessionId)}`}
           >
-            <ArrowLeft aria-hidden="true" size={16} /> Chi tiết buổi đọc
+            <ArrowLeft
+              aria-hidden="true"
+              className="viread-rtl-flip"
+              size={16}
+            />{" "}
+            {t("sessions.readingReports.backToDetail")}
           </Link>
           <Link
             className="text-sm font-semibold text-muted hover:text-primary"
             href="/sessions"
           >
-            Lịch sử đọc
+            {t("sessions.title")}
           </Link>
         </div>
         <h1 className="book-title text-3xl text-ink sm:text-[38px]">
-          Báo cáo đọc
+          {t("sessions.readingReports.pageHeading")}
         </h1>
       </div>
       {!loading && !error && reports.length > 0 ? (
         <p className="text-sm font-semibold text-muted tabular-nums">
-          Có {reports.length} báo cáo trong phiên đọc này.
+          {t("sessions.readingReports.reportsCountSummary", {
+            count: reports.length,
+          })}
         </p>
       ) : null}
     </header>
@@ -166,7 +179,7 @@ export default function ReadingReportPage() {
     return (
       <section
         aria-busy="true"
-        aria-label="Đang tải báo cáo đọc"
+        aria-label={t("sessions.readingReports.loadingAria")}
         className="mx-auto flex w-full max-w-[1120px] flex-col gap-5"
       >
         {reportHeading}
@@ -180,7 +193,10 @@ export default function ReadingReportPage() {
     return (
       <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
         {reportHeading}
-        <StatusMessage title="Chưa tải được báo cáo" tone="error">
+        <StatusMessage
+          title={t("sessions.readingReports.unavailableTitle")}
+          tone="error"
+        >
           {error}
         </StatusMessage>
         <Button
@@ -189,7 +205,7 @@ export default function ReadingReportPage() {
           variant="secondary"
         >
           <RefreshCw aria-hidden="true" className="size-4" />
-          Thử tải lại
+          {t("sessions.readingReports.retryLoad")}
         </Button>
       </section>
     );
@@ -200,8 +216,7 @@ export default function ReadingReportPage() {
       <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
         {reportHeading}
         <StatusMessage tone="info">
-          Buổi đọc đã được lưu. Báo cáo đối chiếu sẽ có khi hệ thống ghi nhận
-          được lời đọc của bé.
+          {t("sessions.readingReports.emptySavedNote")}
         </StatusMessage>
         <Button
           className="sm:w-auto sm:self-start"
@@ -209,7 +224,7 @@ export default function ReadingReportPage() {
           variant="secondary"
         >
           <RefreshCw aria-hidden="true" className="size-4" />
-          Kiểm tra lại
+          {t("sessions.readingReports.checkAgain")}
         </Button>
       </section>
     );
@@ -239,7 +254,10 @@ export default function ReadingReportPage() {
       {reportHeading}
 
       {deleteError ? (
-        <StatusMessage title="Không thể xóa báo cáo" tone="error">
+        <StatusMessage
+          title={t("sessions.readingReports.deleteErrorTitle")}
+          tone="error"
+        >
           {deleteError}
         </StatusMessage>
       ) : null}
@@ -248,15 +266,18 @@ export default function ReadingReportPage() {
 
       {pageGroups.length > 1 ? (
         <nav
-          aria-label="Chọn trang có báo cáo"
+          aria-label={t("sessions.readingReports.pageNavAria")}
           className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-white p-3.5 sm:px-5"
         >
           <p className="text-sm font-bold text-ink tabular-nums">
-            Trang {safeGroupIndex + 1} / {pageGroups.length} trang có báo cáo
+            {t("sessions.readingReports.pageNavGroupSummary", {
+              current: safeGroupIndex + 1,
+              total: pageGroups.length,
+            })}
           </p>
           <div className="flex flex-wrap items-center gap-1.5">
             <button
-              aria-label="Trang trước"
+              aria-label={t("sessions.previousPage")}
               className="inline-flex min-h-11 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky disabled:cursor-not-allowed disabled:opacity-40 sm:px-3 sm:text-sm"
               disabled={safeGroupIndex <= 0}
               onClick={() => {
@@ -265,12 +286,18 @@ export default function ReadingReportPage() {
               }}
               type="button"
             >
-              <ChevronLeft aria-hidden="true" className="size-4" /> Trước
+              <ChevronLeft
+                aria-hidden="true"
+                className="viread-rtl-flip size-4"
+              />{" "}
+              {t("sessions.readingReports.prevShort")}
             </button>
             {pageGroups.map((group, idx) => (
               <button
                 aria-current={idx === safeGroupIndex ? "page" : undefined}
-                aria-label={`Trang ${idx + 1}`}
+                aria-label={t("sessions.readingReports.pageLabel", {
+                  page: idx + 1,
+                })}
                 className={cn(
                   "min-h-11 min-w-10 rounded-control px-2.5 text-sm font-bold tabular-nums sm:px-3",
                   idx === safeGroupIndex
@@ -284,12 +311,14 @@ export default function ReadingReportPage() {
                 }}
                 type="button"
               >
-                <span className="hidden sm:inline">Trang </span>
+                <span className="hidden sm:inline">
+                  {t("sessions.readingReports.standalonePagePrefix")}{" "}
+                </span>
                 {idx + 1}
               </button>
             ))}
             <button
-              aria-label="Trang sau"
+              aria-label={t("sessions.nextPage")}
               className="inline-flex min-h-11 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky disabled:cursor-not-allowed disabled:opacity-40 sm:px-3 sm:text-sm"
               disabled={safeGroupIndex >= pageGroups.length - 1}
               onClick={() => {
@@ -300,7 +329,11 @@ export default function ReadingReportPage() {
               }}
               type="button"
             >
-              Sau <ChevronRight aria-hidden="true" className="size-4" />
+              {t("sessions.readingReports.nextShort")}{" "}
+              <ChevronRight
+                aria-hidden="true"
+                className="viread-rtl-flip size-4"
+              />
             </button>
           </div>
         </nav>
@@ -311,11 +344,11 @@ export default function ReadingReportPage() {
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-base font-extrabold text-ink">
               {primaryImmutable
-                ? "Đánh giá lượt đầu đã lưu"
-                : "Đối chiếu chính đã lưu"}
+                ? t("sessions.readingReports.firstPassSavedTitle")
+                : t("sessions.readingReports.primarySavedTitle")}
             </h2>
             <span className="text-xs font-semibold text-muted tabular-nums">
-              {formatHistoryDateTime(primaryReport.created_at)}
+              {formatDateTime(primaryReport.created_at)}
             </span>
           </div>
 
@@ -334,11 +367,11 @@ export default function ReadingReportPage() {
                 variant="destructive"
               >
                 <Trash2 aria-hidden="true" className="size-4" />
-                Xóa báo cáo
+                {t("sessions.readingReports.deleteReportAction")}
               </Button>
             ) : (
               <span className="text-xs font-semibold text-muted">
-                Kết quả lượt đầu được giữ nguyên
+                {t("sessions.readingReports.retainedFirstPass")}
               </span>
             )}
           </div>
@@ -351,7 +384,9 @@ export default function ReadingReportPage() {
         <details className="group rounded-card border border-border bg-white p-4 sm:p-5">
           <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 text-sm font-extrabold text-ink">
             <span>
-              Các lượt đối chiếu khác của trang này ({additionalReports.length})
+              {t("sessions.readingReports.otherComparisonsTitle", {
+                count: additionalReports.length,
+              })}
             </span>
             <ChevronDown
               aria-hidden="true"
@@ -359,9 +394,7 @@ export default function ReadingReportPage() {
             />
           </summary>
           <p className="mt-1 text-xs text-muted">
-            Hệ thống ưu tiên hiển thị báo cáo chính ở trên để tránh lặp nội
-            dung. Ba mẹ có thể mở xem hoặc xóa từng lượt đối chiếu bổ sung bên
-            dưới.
+            {t("sessions.readingReports.standaloneOtherComparisonsDesc")}
           </p>
           <div className="mt-4 flex flex-col gap-5">
             {visibleAdditional.map((report, index) => {
@@ -375,11 +408,14 @@ export default function ReadingReportPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="text-sm font-extrabold text-ink">
                         {immutable
-                          ? "Đánh giá lượt đầu đã lưu"
-                          : `Lượt đối chiếu bổ sung #${startIdx + index + 1}`}
+                          ? t("sessions.readingReports.firstPassSavedTitle")
+                          : t(
+                              "sessions.readingReports.additionalComparisonTitle",
+                              { index: startIdx + index + 1 },
+                            )}
                       </h3>
                       <span className="text-xs font-semibold text-muted tabular-nums">
-                        {formatHistoryDateTime(report.created_at)}
+                        {formatDateTime(report.created_at)}
                       </span>
                     </div>
 
@@ -398,11 +434,11 @@ export default function ReadingReportPage() {
                           variant="destructive"
                         >
                           <Trash2 aria-hidden="true" className="size-4" />
-                          Xóa báo cáo
+                          {t("sessions.readingReports.deleteReportAction")}
                         </Button>
                       ) : (
                         <span className="text-xs font-semibold text-muted">
-                          Kết quả lượt đầu được giữ nguyên
+                          {t("sessions.readingReports.retainedFirstPass")}
                         </span>
                       )}
                     </div>
@@ -415,8 +451,8 @@ export default function ReadingReportPage() {
           </div>
 
           <PaginationBar
-            ariaLabel="Phân trang lượt đối chiếu bổ sung"
-            itemLabel="lượt đối chiếu"
+            ariaLabel={t("sessions.readingReports.additionalPaginationAria")}
+            itemLabel={t("sessions.readingReports.additionalPaginationItem")}
             onPageChange={setReportPage}
             page={safeReportPage}
             pageSize={REPORTS_PER_PAGE}
@@ -437,7 +473,7 @@ export default function ReadingReportPage() {
               type="button"
               variant="secondary"
             >
-              Hủy
+              {t("sessions.readingReports.cancel")}
             </Button>
             <Button
               disabled={deletingId !== null}
@@ -447,7 +483,7 @@ export default function ReadingReportPage() {
               type="button"
               variant="destructive"
             >
-              Xác nhận xóa
+              {t("sessions.readingReports.confirmDelete")}
             </Button>
           </div>
         }
@@ -457,12 +493,11 @@ export default function ReadingReportPage() {
         }}
         role="alertdialog"
         showCloseButton={deletingId === null}
-        title="Xóa báo cáo đọc?"
+        title={t("sessions.readingReports.deleteModalTitle")}
         tone="paper"
       >
         <p className="text-body text-ink">
-          Bạn có chắc chắn muốn xóa báo cáo đối chiếu này không? Kết quả đánh
-          giá lượt đầu vẫn được giữ nguyên.
+          {t("sessions.readingReports.deleteModalBody")}
         </p>
       </Modal>
     </section>

@@ -1,0 +1,97 @@
+{
+  "brand": {
+    "name": "ViRead",
+    "tagline": "The platform that accompanies parents and children on their reading journey."
+  },
+  "actions": {
+    "save": "Save",
+    "saving": "Saving…",
+    "cancel": "Cancel",
+    "close": "Close",
+    "confirm": "Confirm",
+    "continue": "Continue",
+    "back": "Back",
+    "retry": "Retry",
+    "reload": "Reload",
+    "search": "Search",
+    "clear": "Clear",
+    "filter": "Filter",
+    "edit": "Edit",
+    "delete": "Clear",
+    "create": "Create",
+    "upload": "Upload",
+    "download": "Download",
+    "open": "Open",
+    "viewDetails": "View details",
+    "select": "Select",
+    "apply": "Apply"
+  },
+  "states": {
+    "loading": "Loading…",
+    "empty": "No data available.",
+    "unavailable": "Unable to load information",
+    "ready": "Ready",
+    "completed": "Completed",
+    "inProgress": "In progress",
+    "pending": "Pending",
+    "error": "An error occurred",
+    "imageLoadFailed": "Failed to load page image",
+    "retryReload": "Try reloading"
+  },
+  "avatar": {
+    "defaultAlt": "Avatar"
+  },
+  "pagination": {
+    "summary": "Page {page} of {totalPages}",
+    "itemsCount": "{count, plural, =0 {No items} one {# item} other {# items}}",
+    "previous": "Previous page",
+    "next": "Next page",
+    "previousShort": "Previous",
+    "nextShort": "Next",
+    "navAria": "Pagination",
+    "navAriaWithLabel": "Navigate {itemLabel} list",
+    "rangeSummary": "Showing {start}–{end} of {total}",
+    "rangeSummaryWithLabel": "Showing {start}–{end} of {total} {itemLabel}"
+  },
+  "languageSelector": {
+    "label": "Interface language",
+    "buttonAriaLabel": "Select interface language, current: {language}",
+    "dialogTitle": "Select language",
+    "searchLabel": "Search language",
+    "searchPlaceholder": "Search by language name or code…",
+    "clearSearch": "Clear search keyword",
+    "popularHeading": "Popular languages",
+    "allHeading": "All languages",
+    "searchResultsHeading": "Search results",
+    "emptySearch": "No languages found matching \"{query}\".",
+    "currentBadge": "Current",
+    "loadingLocale": "Loading language…",
+    "switchedNotice": "Interface switched to {language}.",
+    "closeButton": "Close language list"
+  },
+  "footer": {
+    "copyright": "© {year} ViRead. All rights reserved.",
+    "adminCopyright": "© {year} ViRead.",
+    "adminNotice": "ViRead administration area.",
+    "parentDescription": "A platform supporting parents in helping children develop reading skills and track learning progress.",
+    "contactHeading": "Contact information",
+    "quickLinksHeading": "Quick links",
+    "organization": "Duy Tan University",
+    "contactEmail": "vireadforyou@gmail.com",
+    "contactPhone": "0905373633"
+  },
+  "notFound": {
+    "pageTitle": "Page not found",
+    "title": "Page not found",
+    "description": "The page you are looking for does not exist or has been moved.",
+    "backHome": "Back to dashboard",
+    "backLogin": "Back to login"
+  },
+  "errorPage": {
+    "title": "Something went wrong",
+    "description": "ViRead encountered an unexpected error while displaying this page. Please try again or return to the dashboard.",
+    "globalTitle": "The application is temporarily experiencing issues",
+    "globalDescription": "Unable to load the application interface right now. Please try reloading the page.",
+    "backHome": "Back to dashboard"
+  }
+}

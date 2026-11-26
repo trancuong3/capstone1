@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { useI18n } from "@/hooks/use-i18n";
 import { cn } from "@/lib/utils/cn";
 
 const avatarSizes = {
@@ -17,11 +18,12 @@ export type ProfileAvatarSize = keyof typeof avatarSizes;
 
 export function getAvatarInitial(
   displayName: string | null | undefined,
+  localeTag = "vi-VN",
 ): string {
   const name = displayName?.trim() ?? "";
   const firstCharacter = name.match(/^\P{M}\p{M}*/u)?.[0] ?? "?";
 
-  return firstCharacter.toLocaleUpperCase("vi-VN");
+  return firstCharacter.toLocaleUpperCase(localeTag);
 }
 
 export function resolveDisplayName(
@@ -55,11 +57,13 @@ export function ProfileAvatar({
   ariaLabel,
   onImageLoad,
 }: ProfileAvatarProps) {
+  const { metadata, t } = useI18n();
   const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);
   const [loadedImageUrl, setLoadedImageUrl] = useState<string | null>(null);
   const showImage = Boolean(imageUrl && imageUrl !== failedImageUrl);
   const isImageLoaded = Boolean(imageUrl && loadedImageUrl === imageUrl);
-  const label = ariaLabel ?? (displayName?.trim() || "Ảnh đại diện");
+  const label =
+    ariaLabel ?? (displayName?.trim() || t("common.avatar.defaultAlt"));
 
   return (
     <span
@@ -72,7 +76,9 @@ export function ProfileAvatar({
       role="img"
     >
       {!showImage || !isImageLoaded ? (
-        <span aria-hidden="true">{getAvatarInitial(displayName)}</span>
+        <span aria-hidden="true">
+          {getAvatarInitial(displayName, metadata.bcp47)}
+        </span>
       ) : null}
       {showImage ? (
         // The signed URL is issued by the backend, and unoptimized <img> avoids

@@ -578,7 +578,7 @@ test("replacement after rejection keeps pasted lyrics and uses the already-creat
   });
   await page.getByLabel("Lời bài hát", { exact: true }).fill("Bé hát, vui!");
   await page.getByRole("button", { name: "Tạo karaoke", exact: true }).click();
-  await expect(page.getByRole("alert")).toBeVisible();
+  await expect(page.getByRole("main").getByRole("alert")).toBeVisible();
   await expect(page.getByLabel("Lời bài hát", { exact: true })).toHaveValue(
     "Bé hát, vui!",
   );

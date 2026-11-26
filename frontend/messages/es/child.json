@@ -1,0 +1,36 @@
+{
+  "list": {
+    "title": "Perfiles de los niños",
+    "subtitle": "Gestione la información y los niveles de lectura de cada niño.",
+    "addChild": "Añadir perfil de niño",
+    "empty": "Aún no hay perfiles de niños. Cree el primer perfil."
+  },
+  "switcher": {
+    "selectChild": "Seleccionar niño",
+    "quickSwitchAria": "Cambio rápido de niño",
+    "selectedAria": "Niño seleccionado: {alias}, toque para cambiar",
+    "gradeLabel": "Grado {grade}",
+    "gradeShort": "G{grade}",
+    "manageChildren": "Gestionar perfiles de niño"
+  },
+  "form": {
+    "createTitle": "Crear perfil de niño",
+    "editTitle": "Actualizar perfil de niño",
+    "aliasLabel": "Apodo",
+    "gradeLabel": "Nivel de grado",
+    "ageLabel": "Edad",
+    "saveSuccess": "Perfil de niño guardado."
+  },
+  "count": "{count, plural, =0 {Sin perfiles de niños} one {# perfil de niño} other {# perfiles de niños}}",
+  "selector": {
+    "label": "Perfil del niño",
+    "selectAria": "Seleccione un perfil para ver los datos",
+    "optionLabel": "{alias} · Grado {grade}"
+  },
+  "verification": {
+    "loading": "Verificando el perfil del niño…",
+    "errorTitle": "No se pudo verificar el perfil del niño",
+    "errorBody": "No se pudo confirmar que el perfil pertenezca a esta cuenta. Por favor, inténtelo de nuevo.",
+    "retry": "Reintentar"
+  }
+}

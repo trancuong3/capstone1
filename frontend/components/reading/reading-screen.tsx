@@ -21,6 +21,7 @@ import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import {
   detectBrowserWasmSttSupport,
   getBrowserWasmSttClient,
@@ -312,6 +313,8 @@ function ReadingSessionScreen({
   reconnectMode,
   sessionId,
 }: ReadingScreenProps) {
+  const { formatNumber } = useI18n();
+  const t = useTranslations("reading");
   const services = useReadingServices();
   const speechService = useMemo(() => createSpeechService(), []);
   const speechPlayer = useSpeechPlayer();
@@ -498,10 +501,7 @@ function ReadingSessionScreen({
       setPresencePaused(true);
       void pauseReadingRef.current();
     },
-    onNotice: () =>
-      setLatestTranscript(
-        "ViRead đã tạm dừng vì một lúc không thấy người đọc trong khung hình. Bé quay lại thì bấm Tiếp tục nhé.",
-      ),
+    onNotice: () => setLatestTranscript(t("session.presencePausedNotice")),
   });
 
   useEffect(() => {
@@ -1131,9 +1131,7 @@ function ReadingSessionScreen({
             setUiState("reading");
             setRetryPrompt(candidates.length > 0);
             setConfirmFinish(candidates.length === 0);
-            setLatestTranscript(
-              "Đã khôi phục phần đọc đã lưu. Khi sẵn sàng, bé có thể luyện tiếp.",
-            );
+            setLatestTranscript(t("session.restoredSessionNotice"));
           }
         }
         if (session.state === "FINISHED" || session.state === "ABORTED") {
@@ -1145,7 +1143,7 @@ function ReadingSessionScreen({
         setPageProgress(initialProgress);
         setPageNavigationError(
           requestedPageIsOutsideRange
-            ? "Trang từ liên kết không thuộc phạm vi buổi đọc. Đã khôi phục trang hiện tại đã lưu."
+            ? t("session.outOfRangePageRestored")
             : null,
         );
         setCurrentWordId(currentPage.words[0]?.word_id ?? null);
@@ -1170,7 +1168,7 @@ function ReadingSessionScreen({
     return () => {
       active = false;
     };
-  }, [initialPageId, loadKey, services, sessionId]);
+  }, [initialPageId, loadKey, services, sessionId, t]);
 
   useEffect(() => {
     if (loadState.status !== "ready") return;
@@ -1218,9 +1216,7 @@ function ReadingSessionScreen({
       })
       .catch(() => {
         if (!active) return;
-        setPageNavigationError(
-          "Chưa chuyển được sang trang tiếp theo. Bé có thể thử lại bằng nút Trang tiếp theo.",
-        );
+        setPageNavigationError(t("session.nextPageFailed"));
         setUiState("reading");
       });
 
@@ -1234,6 +1230,7 @@ function ReadingSessionScreen({
     services.pageMatchService,
     services.readingService,
     sessionId,
+    t,
     uiState,
   ]);
 
@@ -1678,13 +1675,13 @@ function ReadingSessionScreen({
             setLatestTranscript(msg);
             setCompanionBubble({
               mood: "comforting",
-              title: adaptPersona("Cô giáo đồng hành · Mình nghỉ chút nhé"),
+              title: t("companion.pauseTitle"),
               message: msg,
             });
           } else if (message === "wait-extended") {
             setCompanionBubble({
               mood: "listening",
-              title: adaptPersona("Cô giáo đang kiên nhẫn đợi con"),
+              title: adaptPersona(t("companion.waitingTitle")),
               message: adaptPersona(
                 "Con cứ thong thả tự đọc nhé, cô vẫn nghe đây.",
               ),
@@ -1751,7 +1748,7 @@ function ReadingSessionScreen({
           if (!isCurrent()) return;
           setCompanionBubble({
             mood: "listening",
-            title: adaptPersona("Cô giáo hỏi lại một chút"),
+            title: t("companion.clarifyTitle"),
             message: clarifyText,
           });
           setLatestTranscript(clarifyText);
@@ -1794,7 +1791,7 @@ function ReadingSessionScreen({
           if (encourageMismatch && encourageWord) {
             setCompanionBubble({
               mood: "comforting",
-              title: adaptPersona("Cô giáo tự hào về sự kiên trì của bé!"),
+              title: t("companion.effortTitle"),
               message: text,
             });
           }
@@ -1817,7 +1814,7 @@ function ReadingSessionScreen({
             );
             setCompanionBubble({
               mood: "teaching",
-              title: adaptPersona("Cô giáo mời bé đọc nối cả câu"),
+              title: t("companion.reinforceTitle"),
               message: promptText,
             });
             setLatestTranscript(promptText);
@@ -1874,13 +1871,16 @@ function ReadingSessionScreen({
               const comfortText = promptSelectorRef.current.next(category, {
                 word: word.text,
               });
-              const title = adaptPersona(
+              const teacherWord =
+                getEffectiveTeacherPersona().gender === "male"
+                  ? t("companion.teacherMaleShort")
+                  : t("companion.teacherFemaleShort");
+              const title =
                 mistakeType === "TONE"
-                  ? "Cô giáo dịu dàng · Mình chú ý dấu thanh nhé"
+                  ? t("companion.toneHintTitle")
                   : mistakeType === "NEAR_SOUND"
-                    ? "Cô giáo dịu dàng · Hai âm gần giống nhau nè"
-                    : "Cô giáo dịu dàng · Không sao đâu, có cô đây!",
-              );
+                    ? t("companion.nearSoundHintTitle")
+                    : t("companion.comfortTitle", { teacher: teacherWord });
               setCompanionBubble({
                 mood: "comforting",
                 title,
@@ -1911,7 +1911,7 @@ function ReadingSessionScreen({
                   : `Mình đọc cả cụm “${phrase}” nhé.`;
               setCompanionBubble({
                 mood: "teaching",
-                title: adaptPersona("Cô giáo cổ vũ bé · Đọc nối cụm từ"),
+                title: t("companion.phraseEncourageTitle"),
                 message: step3Text,
               });
               setLatestTranscript(`${step3Text} “${phrase}”`);
@@ -1936,7 +1936,7 @@ function ReadingSessionScreen({
                   : promptSelectorRef.current.next("wordSlowIntro");
               setCompanionBubble({
                 mood: "teaching",
-                title: adaptPersona("Cô giáo đánh vần mẫu · Đọc nối cụm từ"),
+                title: t("companion.phrasePhonicsTitle"),
                 message: `${intro} ${phonicsGuide} “${phrase}”`,
               });
               setLatestTranscript(`${phonicsGuide} · “${phrase}”`);
@@ -2367,9 +2367,7 @@ function ReadingSessionScreen({
       }
     } catch {
       if (isCurrent()) {
-        setPhonicsStatusHint(
-          "Giọng đánh vần đã khóa đang tạm bận. Bé xem các bước trên màn hình và bấm Nghe đánh vần lại nhé.",
-        );
+        setPhonicsStatusHint(t("session.phonicsLockedVoiceBusy"));
       }
     }
   }
@@ -2961,9 +2959,7 @@ function ReadingSessionScreen({
                     selfCorrectedPraiseNotedRef.current.add(slipId);
                     setCompanionBubble({
                       mood: "celebrating",
-                      title: adaptPersona(
-                        "Cô giáo khen bé · Tự sửa rất nhanh!",
-                      ),
+                      title: t("companion.quickFixTitle"),
                       message: promptSelectorRef.current.next(
                         "celebrateQuickSelfFix",
                         { word: slipWord },
@@ -2982,9 +2978,7 @@ function ReadingSessionScreen({
                   if (spelledWord) {
                     setCompanionBubble({
                       mood: "celebrating",
-                      title: adaptPersona(
-                        "Cô giáo khen bé · Đánh vần giỏi quá!",
-                      ),
+                      title: t("companion.phonicsWinTitle"),
                       message: promptSelectorRef.current.next(
                         "spelledOutPraise",
                         { word: spelledWord },
@@ -3020,7 +3014,7 @@ function ReadingSessionScreen({
                     if (overcomeMessage) {
                       setCompanionBubble({
                         mood: "celebrating",
-                        title: "Hoan hô · Bé đã vượt qua chữ khó!",
+                        title: t("companion.overcameWordTitle"),
                         message: overcomeMessage,
                       });
                     }
@@ -3039,9 +3033,7 @@ function ReadingSessionScreen({
                     selfCorrectedPraiseNotedRef.current.add(resolvedWordId);
                     setCompanionBubble({
                       mood: "celebrating",
-                      title: adaptPersona(
-                        "Cô giáo khen bé · Tự sửa rất nhanh!",
-                      ),
+                      title: t("companion.quickFixTitle"),
                       message: promptSelectorRef.current.next(
                         "celebrateQuickSelfFix",
                         { word: fixedWordText },
@@ -3585,9 +3577,7 @@ function ReadingSessionScreen({
           "Bộ nhận diện giọng nói trên máy hiện chưa sẵn sàng. Ba mẹ bật Local Voice Worker (hoặc bật Dự phòng Online trong Cài đặt giọng) rồi thử lại nhé; kết quả của bé không bị tính sai.",
         );
       } else {
-        setComparisonError(
-          "Chưa nghe rõ lời đọc. Kết quả đã xác nhận được giữ lại; phần chưa rõ không được tính là đọc sai.",
-        );
+        setComparisonError(t("session.uncertainSpeechRetained"));
       }
     }
     if (
@@ -4349,9 +4339,7 @@ function ReadingSessionScreen({
       setUiState("reading");
     } catch {
       if (mountedRef.current) {
-        setPageNavigationError(
-          "Chưa tải được trang này. Tiến trình buổi đọc vẫn được giữ; vui lòng thử lại.",
-        );
+        setPageNavigationError(t("session.pageLoadFailed"));
       }
     } finally {
       if (mountedRef.current) setIsBusy(false);
@@ -4404,9 +4392,7 @@ function ReadingSessionScreen({
       }
     } catch {
       if (mountedRef.current) {
-        setPageNavigationError(
-          "Chưa lưu được xác nhận hoàn thành trang. Vui lòng thử lại.",
-        );
+        setPageNavigationError(t("session.completePageFailed"));
       }
     } finally {
       if (mountedRef.current) setIsBusy(false);
@@ -4487,9 +4473,7 @@ function ReadingSessionScreen({
       resumeCaptureAfterPageTurnRef.current = false;
       if (mountedRef.current) {
         setIsMicRecording(false);
-        setPageNavigationError(
-          "Chưa lưu được trang này. Bé có thể bấm ‘Đánh dấu trang đã đọc xong’ để thử lại.",
-        );
+        setPageNavigationError(t("session.savePageRetryHint"));
       }
     } finally {
       if (pageCompletionStartedRef.current === completedPageId) {
@@ -4875,9 +4859,7 @@ function ReadingSessionScreen({
     setIsBusy(false);
     if (retryModeRef.current) {
       setRetryFeedback("microphone-unavailable");
-      setLatestTranscript(
-        "Microphone đã bị ngắt. Nhờ ba mẹ kiểm tra thiết bị rồi thử lại; lượt này không tính là đọc sai.",
-      );
+      setLatestTranscript(t("session.micInterruptedNotice"));
     } else {
       setConnectionState("reconnecting");
       setUiState("microphone-denied");
@@ -5094,8 +5076,8 @@ function ReadingSessionScreen({
       setRetryFeedback("not-recognized");
       setLatestTranscript(
         transcript
-          ? `ViRead chưa nghe rõ từ "${candidate.text}". Mình thử thu âm lại một lần nhé.`
-          : `Chưa nghe thấy tiếng bé đọc từ "${candidate.text}". Mình thử lại một lần nhé.`,
+          ? t("session.retryUnclearAudio", { word: candidate.text })
+          : t("session.retryNoSpeechAudio", { word: candidate.text }),
       );
       const generation = retryAttemptIdRef.current;
       window.setTimeout(() => {
@@ -5116,7 +5098,7 @@ function ReadingSessionScreen({
     speechRecorder.cancel();
     setRetryFeedback("not-recognized");
     setLatestTranscript(
-      `ViRead chưa nhận diện được từ "${candidate.text}". Bé có thể thử lại hoặc nghe mẫu.`,
+      t("session.retryNotRecognized", { word: candidate.text }),
     );
   }
 
@@ -5145,7 +5127,7 @@ function ReadingSessionScreen({
     const terminal = incorrectCount >= 3 || retryPhraseRef.current !== null;
     pendingRetryEventRef.current = pending;
     setRetryFeedback("processing");
-    setLatestTranscript("Đang lưu kết quả đọc lại...");
+    setLatestTranscript(t("session.retrySavingResult"));
     setIsBusy(true);
 
     try {
@@ -5204,8 +5186,13 @@ function ReadingSessionScreen({
         setRetryFeedback("incorrect");
         setLatestTranscript(
           terminal
-            ? `Từ "${pending.candidate.text}" chưa luyện xong. Mình chuyển sang từ tiếp theo nhé.`
-            : `Đọc sai — bé vừa đọc: "${pending.transcript}". Mình thử lại từ "${pending.candidate.text}" nhé.`,
+            ? t("session.retryExhaustedMoveNext", {
+                word: pending.candidate.text,
+              })
+            : t("session.retryIncorrectHeard", {
+                transcript: pending.transcript,
+                word: pending.candidate.text,
+              }),
         );
         const generation = retryAttemptIdRef.current;
         window.setTimeout(() => {
@@ -5228,9 +5215,7 @@ function ReadingSessionScreen({
       pendingRetryEventRef.current = pending;
       retryProcessingRef.current = false;
       setRetryFeedback("save-error");
-      setLatestTranscript(
-        "Chưa lưu được kết quả. Bé thử lưu lại nhé; phần đọc vừa rồi vẫn được giữ.",
-      );
+      setLatestTranscript(t("session.retrySaveFailed"));
       return false;
     } finally {
       if (mountedRef.current) setIsBusy(false);
@@ -5728,9 +5713,7 @@ function ReadingSessionScreen({
 
         setRetryFeedback("speech-unavailable");
 
-        setLatestTranscript(
-          "Chưa kết nối được dịch vụ nhận diện. Bé thử lại sau nhé; hệ thống chưa đánh dấu từ này sai.",
-        );
+        setLatestTranscript(t("session.retrySttOffline"));
       }
     } finally {
       if (attemptId === retryAttemptIdRef.current) {
@@ -5852,10 +5835,7 @@ function ReadingSessionScreen({
         isListeningActiveRef.current = true;
 
         setIsMicRecording(true);
-        setLatestTranscript(
-          prompt ??
-            "Bé đọc từ cần luyện, ViRead sẽ kiểm tra trong vài giây nhé.",
-        );
+        setLatestTranscript(prompt ?? t("session.listeningProgressNote"));
 
         scheduleRetryCaptureStop(candidate);
 
@@ -5868,9 +5848,7 @@ function ReadingSessionScreen({
 
       setIsMicRecording(false);
       setRetryFeedback("microphone-unavailable");
-      setLatestTranscript(
-        "Chưa bật được microphone. Nhờ ba mẹ kiểm tra quyền truy cập rồi thử lại nhé.",
-      );
+      setLatestTranscript(t("session.micPermissionBlocked"));
 
       return false;
     }
@@ -6059,12 +6037,12 @@ function ReadingSessionScreen({
 
         const message =
           event.error === "not-allowed" || event.error === "service-not-allowed"
-            ? "Microphone chưa được cấp quyền. Hãy cho phép trình duyệt sử dụng microphone."
+            ? t("session.recPermissionDenied")
             : event.error === "audio-capture"
-              ? "Không tìm thấy microphone. Hãy kiểm tra thiết bị ghi âm."
+              ? t("session.recNotFound")
               : event.error === "network"
-                ? "Kết nối nhận diện bị gián đoạn. Bé thử lại nhé."
-                : "Trình duyệt không hỗ trợ nhận diện tiếng Việt.";
+                ? t("session.recNetworkInterrupted")
+                : t("session.recUnsupportedBrowser");
 
         setLatestTranscript(message);
       }
@@ -6139,9 +6117,7 @@ function ReadingSessionScreen({
         isListeningActiveRef.current = true;
 
         setIsMicRecording(true);
-        setLatestTranscript(
-          prompt ?? "ViRead đang kiểm tra âm thanh. Bé đọc từ cần luyện nhé.",
-        );
+        setLatestTranscript(prompt ?? t("session.recPreparingCue"));
 
         scheduleRetryCaptureStop(candidate);
 
@@ -6154,9 +6130,7 @@ function ReadingSessionScreen({
 
       setIsMicRecording(false);
       setRetryFeedback("microphone-unavailable");
-      setLatestTranscript(
-        "Chưa thể bật nhận diện giọng nói. Hãy kiểm tra microphone rồi thử lại nhé.",
-      );
+      setLatestTranscript(t("session.recStartFailed"));
 
       return false;
     }
@@ -6170,9 +6144,7 @@ function ReadingSessionScreen({
     if (retryHelpRoundsRef.current >= MAX_WORD_HELP_ROUNDS) {
       speechRecorder.cancel();
       setRetryFeedback("not-recognized");
-      setLatestTranscript(
-        "Mình nghỉ một chút nhé. Bé có thể nghe lại, thử lại hoặc bỏ qua từ này.",
-      );
+      setLatestTranscript(t("session.retryPausedOptions"));
       return;
     }
     retryHelpRoundsRef.current += 1;
@@ -6190,7 +6162,7 @@ function ReadingSessionScreen({
       isActiveRetryCandidate(candidate) &&
       generation === retryAttemptIdRef.current;
     setRetryFeedback("preparing-microphone");
-    setLatestTranscript("Đang chuẩn bị microphone...");
+    setLatestTranscript(t("session.preparingMicShort"));
 
     const preferAndroidNativeStt = shouldPreferAndroidNativeStt();
     if (!preferAndroidNativeStt) {
@@ -6201,9 +6173,7 @@ function ReadingSessionScreen({
         if (isCurrent()) {
           setIsMicRecording(false);
           setRetryFeedback("microphone-unavailable");
-          setLatestTranscript(
-            "Nhờ ba mẹ cho phép trình duyệt dùng microphone, rồi bé thử lại nhé.",
-          );
+          setLatestTranscript(t("session.allowMicRetryHint"));
         }
         return;
       }
@@ -6216,10 +6186,10 @@ function ReadingSessionScreen({
     try {
       await playAssistantAudio(async () => {
         setRetryFeedback("playing-instruction");
-        setLatestTranscript("ViRead đang hướng dẫn bé đọc từ cần luyện...");
+        setLatestTranscript(t("session.guidingRetryWord"));
         const phrase = retryPhraseRef.current;
         if (phrase) {
-          setLatestTranscript("Bé đọc cả cụm trên màn hình nhé.");
+          setLatestTranscript(t("session.readWholePhrasePrompt"));
           await speakGuarded(`Con hãy đọc cả cụm: ${phrase}.`, {
             coaching: true,
             preserveBookText: true,
@@ -6238,7 +6208,9 @@ function ReadingSessionScreen({
         }
 
         setRetryFeedback("playing-sample");
-        setLatestTranscript(`ViRead đang đọc mẫu từ ${candidate.text}...`);
+        setLatestTranscript(
+          t("session.playingWordSampleStatus", { word: candidate.text }),
+        );
         setIsReadingWord(true);
         try {
           await speakGuarded(candidate.text, { wordSample: true });
@@ -6264,7 +6236,7 @@ function ReadingSessionScreen({
 
       await startRetryRecognition(
         candidate,
-        retryPhraseRef.current ? "Bé đọc cả cụm trên màn hình nhé." : undefined,
+        retryPhraseRef.current ? t("session.readWholePhrasePrompt") : undefined,
       );
     } catch (error) {
       if (!isCurrent()) return;
@@ -6275,8 +6247,8 @@ function ReadingSessionScreen({
         await startRetryRecognition(
           candidate,
           retryPhraseRef.current
-            ? "Bé đọc cả cụm trên màn hình nhé."
-            : "Bé đọc từ trên màn hình nhé.",
+            ? t("session.readWholePhrasePrompt")
+            : t("session.readWordOnScreenPrompt"),
         );
       }
     }
@@ -6290,9 +6262,7 @@ function ReadingSessionScreen({
     const candidate = retryCandidatesRef.current[position];
     if (!candidate) {
       setRetryFeedback("incorrect");
-      setPageNavigationError(
-        "Danh sách từ cần luyện không còn hợp lệ. Tiến trình vẫn được giữ; vui lòng thử lại.",
-      );
+      setPageNavigationError(t("session.retryQueueInvalid"));
       return;
     }
 
@@ -6343,7 +6313,7 @@ function ReadingSessionScreen({
         if (isCurrent()) {
           setRetryFeedback("incorrect");
           setPageNavigationError(
-            `Chưa mở lại được trang ${candidate.pageNumber} để bé đọc từ này. Tiến trình vẫn được giữ; vui lòng thử lại.`,
+            t("session.reopenRetryPageFailed", { page: candidate.pageNumber }),
           );
           speechRecorder.cancel();
         }
@@ -6390,9 +6360,7 @@ function ReadingSessionScreen({
 
     if (activeCandidates.length === 0) {
       setRetryFeedback("incorrect");
-      setLatestTranscript(
-        "Danh sách từ cần luyện chưa sẵn sàng. Bé vui lòng thử lại nhé.",
-      );
+      setLatestTranscript(t("session.retryQueueUnavailable"));
       setRetryPrompt(true);
       return false;
     }
@@ -6424,9 +6392,7 @@ function ReadingSessionScreen({
       retryModeRef.current = true;
       setRetryMode(true);
       setRetryFeedback("save-error");
-      setLatestTranscript(
-        "Kết quả đọc lại vẫn chưa được lưu. Bé hãy thử lưu lại trước khi kết thúc nhé.",
-      );
+      setLatestTranscript(t("session.retryPendingBeforeFinish"));
       return;
     }
 
@@ -6553,9 +6519,7 @@ function ReadingSessionScreen({
 
     setComparisonResult(null);
     if (pageBuckets.length === 0) {
-      setComparisonError(
-        "Chưa nhận diện được lời đọc thực tế nên chưa thể tạo báo cáo đối chiếu.",
-      );
+      setComparisonError(t("session.noSpokenReportHint"));
       return true;
     }
 
@@ -6563,7 +6527,7 @@ function ReadingSessionScreen({
     let latestResult: ComparisonResult | null = null;
     let allSaved = true;
     let firstComparisonError: string | null = uncertainPageIdsRef.current.size
-      ? "Phần nhận diện chưa rõ được ghi nhận riêng; chỉ các từ có bằng chứng mới được đánh giá."
+      ? t("session.uncertainRecordedSeparately")
       : null;
 
     for (const bucket of pageBuckets) {
@@ -6592,8 +6556,7 @@ function ReadingSessionScreen({
           pageRevisionId: bucket.page_revision_id,
           error,
         });
-        firstComparisonError =
-          "Chưa lưu được bài đọc. Phần bé vừa đọc vẫn được giữ, mình thử lưu lại nhé.";
+        firstComparisonError = t("session.saveSessionReportFailed");
       }
     }
 
@@ -6879,16 +6842,16 @@ function ReadingSessionScreen({
   if (loadState.status === "error" || loadState.status === "not-found") {
     const notFound = loadState.status === "not-found";
     const title = notFound
-      ? "Không tìm thấy buổi đọc"
-      : "Chưa mở được buổi đọc";
+      ? t("session.notFoundTitle")
+      : t("session.openFailedTitle");
 
     return (
       <section className="mx-auto flex min-h-dvh w-full max-w-[720px] flex-col justify-center gap-4 p-4">
         <h1 className="text-heading font-extrabold text-ink">{title}</h1>
         <StatusMessage tone="error">
           {notFound
-            ? "Buổi đọc không tồn tại hoặc không thuộc tài khoản hiện tại."
-            : "Có lỗi xảy ra. Ba mẹ vui lòng thử lại hoặc quay về thư viện."}
+            ? t("session.notFoundDescription")
+            : t("session.openFailedDescription")}
         </StatusMessage>
         {!notFound ? (
           <Button
@@ -6899,12 +6862,12 @@ function ReadingSessionScreen({
             variant="secondary"
           >
             <RefreshCw aria-hidden="true" className="size-5" />
-            Thử lại
+            {t("session.retry")}
           </Button>
         ) : null}
         <ButtonLink href="/books" variant="quiet">
-          <ArrowLeft aria-hidden="true" className="size-5" />
-          Về thư viện
+          <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-5" />
+          {t("session.backToLibrary")}
         </ButtonLink>
       </section>
     );
@@ -6914,11 +6877,11 @@ function ReadingSessionScreen({
     return (
       <section
         aria-busy="true"
-        aria-label="Đang chuẩn bị buổi đọc"
+        aria-label={t("session.loadingAria")}
         className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 p-4"
       >
         <span className="sr-only" role="status">
-          Đang chuẩn bị buổi đọc…
+          {t("session.loadingText")}
         </span>
         <Skeleton className="h-12 w-full rounded-control" />
         <Skeleton className="min-h-[680px] w-full rounded-card" />
@@ -6989,7 +6952,7 @@ function ReadingSessionScreen({
         <div className="flex flex-wrap items-center gap-1 sm:gap-2.5">
           <div className="flex min-w-0 flex-nowrap items-center gap-1 sm:gap-1.5">
             <Button
-              aria-label="Trang trước"
+              aria-label={t("session.previousPage")}
               className="h-11! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! sm:gap-2! sm:px-2.5! sm:text-sm!"
               disabled={
                 (isBusy && !speechPlayer.isPlaying) ||
@@ -7003,13 +6966,15 @@ function ReadingSessionScreen({
             >
               <ChevronLeft
                 aria-hidden="true"
-                className="size-4 shrink-0 sm:size-5"
+                className="viread-rtl-flip size-4 shrink-0 sm:size-5"
               />
-              <span className="hidden sm:inline">Trang trước</span>
-              <span className="sm:hidden">Trước</span>
+              <span className="hidden sm:inline">
+                {t("session.previousPage")}
+              </span>
+              <span className="sm:hidden">{t("session.prevPageShort")}</span>
             </Button>
             <Button
-              aria-label="Trang tiếp theo"
+              aria-label={t("session.nextPage")}
               className="h-11! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! sm:gap-2! sm:px-2.5! sm:text-sm!"
               disabled={
                 (isBusy && !speechPlayer.isPlaying) ||
@@ -7021,40 +6986,42 @@ function ReadingSessionScreen({
               }
               variant="secondary"
             >
-              <span className="hidden sm:inline">Trang tiếp theo</span>
-              <span className="sm:hidden">Tiếp</span>
+              <span className="hidden sm:inline">{t("session.nextPage")}</span>
+              <span className="sm:hidden">{t("session.nextPageShort")}</span>
               <ChevronRight
                 aria-hidden="true"
-                className="size-4 shrink-0 sm:size-5"
+                className="viread-rtl-flip size-4 shrink-0 sm:size-5"
               />
             </Button>
             {pageProgress.persisted &&
             pageProgress.pages[pageProgress.current_index]?.status !==
               "COMPLETED" ? (
               <Button
-                aria-label="Đánh dấu trang đã đọc xong"
+                aria-label={t("session.markPageDoneAria")}
                 className="h-11! w-auto! min-w-0 px-2! py-1! text-xs! sm:px-2.5! sm:text-sm!"
                 disabled={isBusy || uiState !== "reading"}
                 onClick={() => void confirmCurrentPageCompleted()}
                 variant="quiet"
               >
                 <span className="hidden sm:inline">
-                  Đánh dấu trang đã đọc xong
+                  {t("session.markPageDone")}
                 </span>
-                <span className="sm:hidden">Xong trang</span>
+                <span className="sm:hidden">
+                  {t("session.markPageDoneShort")}
+                </span>
               </Button>
             ) : null}
           </div>
 
           <button
             type="button"
-            aria-label="Tùy chọn trang"
+            aria-label={t("session.pageOptionsAria")}
             aria-expanded={pageOptionsOpen}
             aria-controls="reading-page-options"
             onClick={() => setPageOptionsOpen((open) => !open)}
-            className="ml-auto inline-flex min-h-11 shrink-0 items-center gap-1 rounded-control border border-border bg-white px-2 text-xs font-semibold text-ink hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:hidden"
+            className="ms-auto inline-flex min-h-11 shrink-0 items-center gap-1 rounded-control border border-border bg-white px-2 text-xs font-semibold text-ink hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:hidden"
           >
-            <span>Tùy chọn</span>
+            <span>{t("session.pageOptions")}</span>
             <ChevronDown
               aria-hidden="true"
               className={`size-4 transition-transform ${pageOptionsOpen ? "rotate-180" : ""}`}
@@ -7063,24 +7030,28 @@ function ReadingSessionScreen({
 
           <div
             id="reading-page-options"
-            className={`${pageOptionsOpen ? "flex" : "hidden"} w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-xs sm:ml-auto sm:flex sm:w-auto sm:pt-0 sm:text-sm`}
+            className={`${pageOptionsOpen ? "flex" : "hidden"} w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-xs sm:ms-auto sm:flex sm:w-auto sm:pt-0 sm:text-sm`}
           >
             <p
               data-reading-range-label="true"
               className="font-semibold text-ink"
             >
-              Phạm vi đọc: Trang {pageProgress.start_page_number}–
-              {pageProgress.end_page_number}
+              {t("preparation.rangeSummary", {
+                start: formatNumber(pageProgress.start_page_number),
+                end: formatNumber(pageProgress.end_page_number),
+              })}
             </p>
             <p
               data-reading-page-summary="true"
               className="text-muted"
               aria-live="polite"
             >
-              Trang {pageProgress.current_page_number} ·{" "}
-              {pageProgress.current_index + 1}/{pageProgress.total_pages} trong
-              phạm vi · {pageProgress.completed_pages}/
-              {pageProgress.total_pages} trang đã hoàn thành
+              {t("session.pageProgressDetail", {
+                page: formatNumber(pageProgress.current_page_number),
+                index: formatNumber(pageProgress.current_index + 1),
+                total: formatNumber(pageProgress.total_pages),
+                completed: formatNumber(pageProgress.completed_pages),
+              })}
             </p>
             <VoiceEngineBadge compact />
           </div>
@@ -7096,7 +7067,7 @@ function ReadingSessionScreen({
               onClick={() => void beginRetryWord(retryPositionRef.current)}
               variant="secondary"
             >
-              Thử mở lại trang
+              {t("session.retryOpenPage")}
             </Button>
           ) : null}
         </div>
@@ -7113,8 +7084,7 @@ function ReadingSessionScreen({
           className="text-xs font-semibold text-primary sm:text-sm"
           role="status"
         >
-          Bé đã đến trang cuối của phạm vi. Có thể kết thúc buổi đọc khi sẵn
-          sàng.
+          {t("session.lastPageHint")}
         </p>
       ) : null}
     </div>
@@ -7153,7 +7123,10 @@ function ReadingSessionScreen({
         uncertainWordIds={uncertainWordIds}
         progressLabel={
           pageProgress
-            ? `${pageProgress.completed_pages}/${pageProgress.total_pages} trang đã đọc`
+            ? t("session.rangeCompletedSummary", {
+                completed: formatNumber(pageProgress.completed_pages),
+                total: formatNumber(pageProgress.total_pages),
+              })
             : undefined
         }
         correctWordIds={
@@ -7228,7 +7201,9 @@ function ReadingSessionScreen({
                 variant="quiet"
               >
                 <Volume2 aria-hidden="true" className="size-4" />
-                {retryPlayback.playing ? "Dừng phát" : "Nghe lại giọng bé"}
+                {retryPlayback.playing
+                  ? t("session.stopSelfRecording")
+                  : t("session.playSelfRecording")}
               </Button>
               {retryPlayback.error ? (
                 <StatusMessage tone="warning">
@@ -7299,14 +7274,18 @@ function ReadingSessionScreen({
             >
               <div className="min-w-0 flex-1 space-y-1.5">
                 <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
-                  Đọc lại cả câu
+                  {t("session.reinforceSentence")}
                 </p>
                 <span className="sr-only">
-                  Đọc lại cả câu: “{activeSentenceReinforcement.span.text}”
+                  {t("session.reinforceSentencePrompt", {
+                    sentence: activeSentenceReinforcement.span.text,
+                  })}
                 </span>
                 <p
                   aria-hidden="true"
-                  className="flex flex-wrap items-center gap-1.5 text-base font-bold text-ink sm:text-lg"
+                  className="viread-learning-content flex flex-wrap items-center gap-1.5 text-base font-bold text-ink sm:text-lg"
+                  dir="ltr"
+                  lang="vi"
                 >
                   {activeSentenceReinforcement.span.words.map((w, idx) => {
                     const matched =
@@ -7337,7 +7316,7 @@ function ReadingSessionScreen({
                   )
                 }
               >
-                Bỏ qua đọc lại câu
+                {t("session.skipSentenceReinforce")}
               </Button>
             </div>
           ) : null
@@ -7345,14 +7324,14 @@ function ReadingSessionScreen({
       >
         {uiState === "page-turn" ? (
           <StatusBanner className="fixed left-1/2 top-20 z-40 w-[calc(100%-32px)] max-w-[520px] -translate-x-1/2">
-            Đang chuyển trang và liên kết lại từ đang đọc…
+            {t("session.navigatingAndAligning")}
           </StatusBanner>
         ) : null}
       </ReadingLayout>
       {pickerIndex !== null && pageProgress ? (
         <Modal
           isOpen
-          title="Bé đang đọc trang nào?"
+          title={t("session.pagePickerTitle")}
           tone="paper"
           showCloseButton={false}
           closeOnEscape={!isBusy}
@@ -7369,7 +7348,9 @@ function ReadingSessionScreen({
                 className="flex min-h-24 flex-col items-start justify-center gap-3 rounded-control border border-border bg-cream p-4 text-sm font-bold text-ink aria-pressed:border-primary aria-pressed:bg-sky"
               >
                 <BookOpen aria-hidden="true" className="size-6 text-primary" />
-                Trang {item.page_number}
+                {t("progress.pageLabel", {
+                  page: formatNumber(item.page_number),
+                })}
               </button>
             ))}
           </div>
@@ -7383,7 +7364,7 @@ function ReadingSessionScreen({
             isLoading={isBusy}
             onClick={() => void navigateWithinRange(pickerIndex, true)}
           >
-            Đúng trang này
+            {t("session.confirmThisPage")}
           </Button>
           <Button
             className="mt-2"
@@ -7391,19 +7372,21 @@ function ReadingSessionScreen({
             disabled={isBusy}
             onClick={closePagePicker}
           >
-            Hủy
+            {t("session.cancel")}
           </Button>
         </Modal>
       ) : retryPrompt ? (
         <ReadingStatusDialog
           body={adaptTextToTeacherPersona(
-            `Bé còn ${retryCandidates.length} từ cần đọc lại. Con có muốn cùng cô đọc lại không? Con có thể nói “Có” hoặc “Không” nhé!`,
+            t("session.retryPromptQuestion", {
+              count: formatNumber(retryCandidates.length),
+            }),
             getEffectiveTeacherPersona().gender,
           )}
           onClose={() => undefined}
           primaryAction={{
             isLoading: isBusy,
-            label: "Đồng ý, đọc lại",
+            label: t("session.retryAcceptAction"),
             onClick: () => {
               if (startRetrySession(retryCandidatesRef.current)) {
                 setRetryPrompt(false);
@@ -7411,93 +7394,87 @@ function ReadingSessionScreen({
             },
           }}
           secondaryAction={{
-            label: "Bỏ qua",
+            label: t("session.retrySkipAction"),
             onClick: () => {
               retryModeRef.current = false;
               setRetryPrompt(false);
               void completeReadingSession();
             },
           }}
-          title="Mình đọc lại những từ này nhé?"
+          title={t("session.retryModalTitle")}
         />
       ) : confirmFinish ? (
         <ReadingStatusDialog
-          body={
-            comparisonError ??
-            "Mình sẽ lưu lại phần bé đã đọc. Khi nào thích, mình lại đọc cùng nhau."
-          }
+          body={comparisonError ?? t("session.pauseModalBody")}
           closeOnEscape
           onClose={() => setConfirmFinish(false)}
           primaryAction={{
             isLoading: isBusy,
-            label: "Lưu và dừng",
+            label: t("session.saveAndStopAction"),
             onClick: () => void finishReading(),
           }}
           secondaryAction={{
-            label: "Đọc tiếp",
+            label: t("session.continueReadingAction"),
             onClick: () => setConfirmFinish(false),
           }}
-          title="Bé muốn nghỉ hôm nay?"
+          title={t("session.exitConfirmTitle")}
         />
       ) : uiState === "paused" ? (
         <ReadingStatusDialog
-          body="Khi sẵn sàng, mình đọc tiếp nhé. Đánh giá đang tạm dừng và không tạo lỗi đọc."
+          body={t("session.exitConfirmBody")}
           closeOnEscape
           onClose={() => void resumeReading()}
           primaryAction={{
             isLoading: isBusy,
-            label: "Đọc tiếp",
+            label: t("session.continueReadingAction"),
             onClick: () => void resumeReading(),
           }}
           secondaryAction={{
-            label: "Dừng buổi đọc",
+            label: t("session.stopSessionAction"),
             onClick: () => setConfirmFinish(true),
           }}
-          title="Bé đang nghỉ một chút"
+          title={t("session.micPermissionTitle")}
         />
       ) : uiState === "microphone-denied" ? (
         <ReadingStatusDialog
-          body="Nhờ ba mẹ bật quyền micro trong trình duyệt nhé. Hệ thống đang ngừng nghe và không kết luận bé đọc sai."
+          body={t("session.micPermissionBody")}
           onClose={() => undefined}
           primaryAction={{
             isLoading: isBusy,
-            label: "Thử lại",
+            label: t("session.retry"),
             onClick: () => void retryMicrophonePermission(),
           }}
           secondaryAction={{
-            label: "Kết thúc an toàn",
+            label: t("session.safeFinishAction"),
             onClick: () => setConfirmFinish(true),
           }}
-          title="Mình chưa nghe thấy giọng bé"
+          title={t("session.noSpeechTitle")}
         />
       ) : uiState === "page-confidence-low" ? (
         <ReadingStatusDialog
           body={
             <div className="space-y-2">
-              <p>Đặt sách ngay ngắn hơn một chút nhé.</p>
-              <p>
-                Đánh giá đang tạm dừng; chưa có trang chắc chắn nên không tạo
-                lỗi đọc.
-              </p>
+              <p>{t("session.alignBookBody")}</p>
+              <p>{t("session.pausedNoPageErrorBody")}</p>
             </div>
           }
           onClose={() => undefined}
           primaryAction={{
             isLoading: isBusy,
-            label: "Thử lại",
+            label: t("session.retry"),
             onClick: () => void retryPageMatch(),
           }}
           secondaryAction={{
-            label: "Chọn trang",
+            label: t("session.choosePageAction"),
             disabled: !pageProgress || isBusy,
             onClick: () => void openPagePicker(),
           }}
           tertiaryAction={{
-            label: "Kết thúc an toàn",
+            label: t("session.safeFinishAction"),
             variant: "quiet",
             onClick: () => setConfirmFinish(true),
           }}
-          title="Mình chưa nhìn rõ trang sách"
+          title={t("session.cameraUnclearTitle")}
         />
       ) : uiState === "reconnecting" || uiState === "stt-error" ? (
         <ReadingStatusDialog
@@ -7505,13 +7482,16 @@ function ReadingSessionScreen({
             <div className="space-y-2">
               <p>
                 {uiState === "stt-error"
-                  ? "Mình chưa thể nghe hoặc nhận dạng tạm thời."
-                  : "Đang kết nối lại. Mình vẫn giữ chỗ bé vừa đọc."}
+                  ? t("session.sttErrorTitle")
+                  : t("session.reconnectingTitle")}
               </p>
-              <p>Đánh giá đã dừng; khoảng mất kết nối không tạo lỗi đọc.</p>
+              <p>{t("session.disconnectedNote")}</p>
               {connectionState === "timed-out" ? (
-                <StatusMessage title="Chưa kết nối lại được" tone="error">
-                  Ba mẹ có thể thử lại hoặc kết thúc buổi đọc an toàn.
+                <StatusMessage
+                  title={t("session.reconnectFailedTitle")}
+                  tone="error"
+                >
+                  {t("session.reconnectFailedBody")}
                 </StatusMessage>
               ) : null}
             </div>
@@ -7519,20 +7499,23 @@ function ReadingSessionScreen({
           onClose={() => undefined}
           primaryAction={{
             isLoading: isBusy,
-            label: uiState === "stt-error" ? "Thử nghe lại" : "Kết nối lại",
+            label:
+              uiState === "stt-error"
+                ? t("session.retryListenAction")
+                : t("session.reconnectAction"),
             onClick: () =>
               void reconnect(
                 uiState === "stt-error" ? "recover" : reconnectMode,
               ),
           }}
           secondaryAction={{
-            label: "Kết thúc an toàn",
+            label: t("session.safeFinishAction"),
             onClick: () => setConfirmFinish(true),
           }}
           title={
             uiState === "stt-error"
-              ? "Mình chưa nghe rõ"
-              : "Đợi mình một chút nhé…"
+              ? t("session.sttBannerFallback")
+              : t("session.reconnectingBannerFallback")
           }
         />
       ) : null}
@@ -7550,8 +7533,9 @@ function ReadingSessionScreen({
       ) : null}
 
       <span className="sr-only" aria-live="polite">
-        Trạng thái kết nối: {connectionLabel(connectionState)}. Số lỗi đọc được
-        tạo trong khoảng này: 0.
+        {t("session.connectionStatusSummary", {
+          state: t(`session.connectionStates.${connectionState}`),
+        })}
       </span>
     </div>
   );
@@ -7560,15 +7544,4 @@ function ReadingSessionScreen({
 function getDurationMinutes(durationMs: number | null): number | null {
   if (durationMs === null) return null;
   return Math.ceil(Math.max(0, durationMs) / 60000);
-}
-
-function connectionLabel(state: ReadingConnectionState): string {
-  const labels: Record<ReadingConnectionState, string> = {
-    connected: "đã kết nối",
-    reconnecting: "đang kết nối lại",
-    recovered: "đã khôi phục kết nối",
-    "timed-out": "kết nối lại quá thời gian",
-  };
-
-  return labels[state];
 }

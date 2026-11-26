@@ -4,7 +4,7 @@ import Link from "next/link";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -14,6 +14,7 @@ import { TextField } from "@/components/common/text-field";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useHydrated } from "@/hooks/use-hydrated";
+import { useI18n } from "@/hooks/use-i18n";
 import { AuthServiceError, type OAuthProvider } from "@/lib/api/auth-service";
 import {
   AUTH_NEXT_COOKIE,
@@ -21,15 +22,6 @@ import {
   sanitizeNextPath,
 } from "@/lib/auth/route-policy";
 import type { AuthMockScenario, LoginRequest } from "@/types/auth";
-
-const loginSchema = z.object({
-  email: z
-    .string()
-    .trim()
-    .min(1, "Ba mẹ vui lòng nhập email.")
-    .email("Email chưa đúng định dạng."),
-  password: z.string().min(8, "Mật khẩu cần có ít nhất 8 ký tự."),
-});
 
 interface LoginFormProps {
   isAuthCallback?: boolean;
@@ -61,7 +53,12 @@ function clearOAuthNextCookie() {
   document.cookie = `${AUTH_NEXT_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
 }
 
-type Notice = { tone: "error"; message: string } | null;
+type LoginNoticeKind =
+  | "email_required"
+  | "oauth_failed"
+  | "invalid_credentials"
+  | "safe_error"
+  | "oauth_start_failed";
 
 function GoogleMark() {
   return (
@@ -103,6 +100,7 @@ export function LoginForm({
   oauthError = null,
   scenario,
 }: LoginFormProps) {
+  const { t } = useI18n();
   const authService = useAuthService();
   const authRuntime = useAuthRuntime();
   const isHydrated = useHydrated();
@@ -110,39 +108,29 @@ export function LoginForm({
   const [socialLoading, setSocialLoading] = useState<OAuthProvider | null>(
     null,
   );
-  const [notice, setNotice] = useState<Notice>(() => {
-    if (oauthError === "email_required") {
-      return {
-        tone: "error",
-        message:
-          "Facebook không cung cấp email cho tài khoản này. Hãy cấp quyền email trong Facebook hoặc đăng nhập bằng Google/email và mật khẩu.",
-      };
-    }
-
-    if (oauthError === "oauth_failed") {
-      return {
-        tone: "error",
-        message:
-          "Không thể hoàn tất đăng nhập xã hội. Nếu dùng Facebook, hãy kiểm tra quyền email của ứng dụng Facebook rồi thử lại.",
-      };
-    }
-
-    if (scenario === "invalid-credentials") {
-      return {
-        tone: "error",
-        message: "Email hoặc mật khẩu chưa đúng. Ba mẹ thử lại nhé.",
-      };
-    }
-
-    if (scenario === "safe-error") {
-      return {
-        tone: "error",
-        message: "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
-      };
-    }
-
+  const [noticeKind, setNoticeKind] = useState<LoginNoticeKind | null>(() => {
+    if (oauthError === "email_required") return "email_required";
+    if (oauthError === "oauth_failed") return "oauth_failed";
+    if (scenario === "invalid-credentials") return "invalid_credentials";
+    if (scenario === "safe-error") return "safe_error";
     return null;
   });
+
+  const loginSchema = useMemo(
+    () =>
+      z.object({
+        email: z
+          .string()
+          .trim()
+          .min(1, t("validation.parentEmailRequired"))
+          .email(t("validation.emailInvalidShort")),
+        password: z
+          .string()
+          .min(8, t("validation.passwordMinLengthShort", { min: 8 })),
+      }),
+    [t],
+  );
+
   const {
     formState: { errors, isSubmitting },
     handleSubmit,
@@ -159,7 +147,7 @@ export function LoginForm({
     authRuntime.mode === "supabase" &&
     authRuntime.status === "ready" &&
     Boolean(authRuntime.session) &&
-    notice === null &&
+    noticeKind === null &&
     !isSubmitting;
 
   const clearSessionQuietly = useCallback(async () => {
@@ -196,10 +184,7 @@ export function LoginForm({
 
     void routeAuthenticatedUser().catch(async () => {
       if (isActive) {
-        setNotice({
-          tone: "error",
-          message: "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
-        });
+        setNoticeKind("safe_error");
       }
       await clearSessionQuietly();
     });
@@ -218,7 +203,7 @@ export function LoginForm({
   ]);
 
   const handleSocialSignIn = async (provider: OAuthProvider) => {
-    setNotice(null);
+    setNoticeKind(null);
     setSocialLoading(provider);
     setOAuthNextCookie(nextPath);
 
@@ -228,16 +213,12 @@ export function LoginForm({
     } catch {
       clearOAuthNextCookie();
       setSocialLoading(null);
-      setNotice({
-        tone: "error",
-        message:
-          "Không thể bắt đầu đăng nhập xã hội. Ba mẹ vui lòng kiểm tra cấu hình hoặc thử lại sau.",
-      });
+      setNoticeKind("oauth_start_failed");
     }
   };
 
   const onSubmit = handleSubmit(async (values) => {
-    setNotice(null);
+    setNoticeKind(null);
     let hasAuthenticated = false;
 
     try {
@@ -253,42 +234,49 @@ export function LoginForm({
         error instanceof AuthServiceError &&
         error.reason === "invalid-credentials"
       ) {
-        setNotice({
-          tone: "error",
-          message: "Email hoặc mật khẩu chưa đúng. Ba mẹ thử lại nhé.",
-        });
+        setNoticeKind("invalid_credentials");
         return;
       }
 
-      setNotice({
-        tone: "error",
-        message: "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
-      });
+      setNoticeKind("safe_error");
     }
   });
 
+  const noticeMessage =
+    noticeKind === "email_required"
+      ? t("auth.login.errors.facebookEmailRequired")
+      : noticeKind === "oauth_failed"
+        ? t("auth.login.errors.oauthFailed")
+        : noticeKind === "invalid_credentials"
+          ? t("auth.login.errors.invalidCredentials")
+          : noticeKind === "oauth_start_failed"
+            ? t("auth.login.errors.oauthStartFailed")
+            : noticeKind === "safe_error"
+              ? t("auth.errors.generic")
+              : null;
+
   return (
     <form className="flex w-full flex-col gap-4" noValidate onSubmit={onSubmit}>
-      {notice ? (
-        <StatusMessage tone={notice.tone}>{notice.message}</StatusMessage>
+      {noticeMessage ? (
+        <StatusMessage tone="error">{noticeMessage}</StatusMessage>
       ) : null}
       <TextField
         autoComplete="email"
         error={errors.email?.message}
-        label="Email của ba mẹ"
+        label={t("auth.fields.parentEmail")}
         type="email"
         {...register("email")}
       />
       <TextField
         autoComplete="current-password"
         error={errors.password?.message}
-        label="Mật khẩu"
+        label={t("auth.fields.password")}
         placeholder="••••••••••••"
         type="password"
         {...register("password")}
       />
       <Link href="/forgot-password" className="account-forgot">
-        Quên mật khẩu?
+        {t("auth.login.forgotPassword")}
       </Link>
       <Button
         disabled={
@@ -300,9 +288,11 @@ export function LoginForm({
         isLoading={isSubmitting || isCompletingCallback}
         type="submit"
       >
-        {isSubmitting || isCompletingCallback ? "Đang đăng nhập…" : "Đăng nhập"}
+        {isSubmitting || isCompletingCallback
+          ? t("auth.login.submitting")
+          : t("auth.login.submit")}
         {!isSubmitting && !isCompletingCallback ? (
-          <ArrowRight aria-hidden="true" className="size-5" />
+          <ArrowRight aria-hidden="true" className="size-5 viread-rtl-flip" />
         ) : null}
       </Button>
       <div className="account-providers grid gap-3">
@@ -315,7 +305,7 @@ export function LoginForm({
           </div>
           <div className="relative flex justify-center">
             <span className="bg-white px-3 text-sm font-semibold text-muted">
-              Hoặc tiếp tục với
+              {t("auth.login.orContinueWith")}
             </span>
           </div>
         </div>
@@ -334,7 +324,7 @@ export function LoginForm({
           variant="quiet"
         >
           {socialLoading !== "google" ? <GoogleMark /> : null}
-          Tiếp tục với Google
+          {t("auth.login.continueWithGoogle")}
         </Button>
         <Button
           className="border border-border bg-white text-ink hover:bg-sky"
@@ -351,12 +341,14 @@ export function LoginForm({
           variant="quiet"
         >
           {socialLoading !== "facebook" ? <FacebookMark /> : null}
-          Tiếp tục với Facebook
+          {t("auth.login.continueWithFacebook")}
         </Button>
       </div>
       <ButtonLink href="/register" variant="quiet" className="account-signup">
-        <span className="sm:hidden">Đăng ký tài khoản</span>
-        <span className="hidden sm:inline">Chưa có tài khoản? Đăng ký</span>
+        <span className="sm:hidden">{t("auth.login.signupMobile")}</span>
+        <span className="hidden sm:inline">
+          {t("auth.login.signupDesktop")}
+        </span>
       </ButtonLink>
     </form>
   );

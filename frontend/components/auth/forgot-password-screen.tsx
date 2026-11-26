@@ -9,6 +9,7 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAuthService } from "@/hooks/use-auth-service";
+import { useTranslations } from "@/hooks/use-i18n";
 import type { AuthMockScenario } from "@/types/auth";
 
 interface ForgotPasswordScreenProps {
@@ -16,6 +17,7 @@ interface ForgotPasswordScreenProps {
 }
 
 export function ForgotPasswordScreen({ scenario }: ForgotPasswordScreenProps) {
+  const tAuth = useTranslations("auth");
   const authService = useAuthService();
   const [submittedEmail, setSubmittedEmail] = useState<string | null>(
     scenario === "submitted" ? "minhanh@example.com" : null,
@@ -49,26 +51,25 @@ export function ForgotPasswordScreen({ scenario }: ForgotPasswordScreenProps) {
         <Card className="border border-border bg-white">
           <div>
             <p className="text-sm font-semibold text-primary">
-              Bảo mật tài khoản ViRead
+              {tAuth("securityEyebrow")}
             </p>
             <h1 className="mt-2 text-heading font-extrabold text-ink">
               {resendState === "success"
-                ? "Đã yêu cầu gửi lại"
-                : "Kiểm tra email nhé"}
+                ? tAuth("forgotPassword.resentTitle")
+                : tAuth("forgotPassword.checkEmailTitle")}
             </h1>
             <p className="mt-3 text-body leading-relaxed text-muted">
-              Nếu email này đã được đăng ký, ba mẹ sẽ nhận được hướng dẫn đặt
-              lại mật khẩu. Hãy kiểm tra cả thư rác.
+              {tAuth("forgotPassword.checkEmailBody")}
             </p>
           </div>
           {resendState === "error" ? (
             <StatusMessage tone="error">
-              Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
+              {tAuth("errors.generic")}
             </StatusMessage>
           ) : null}
           <ButtonLink href="/login">
-            Về đăng nhập
-            <ArrowRight aria-hidden="true" className="size-5" />
+            {tAuth("forgotPassword.backToLogin")}
+            <ArrowRight aria-hidden="true" className="size-5 viread-rtl-flip" />
           </ButtonLink>
           <Button
             disabled={resendState === "loading"}
@@ -76,7 +77,9 @@ export function ForgotPasswordScreen({ scenario }: ForgotPasswordScreenProps) {
             onClick={handleResend}
             variant="secondary"
           >
-            {resendState === "loading" ? "Đang gửi lại…" : "Gửi lại hướng dẫn"}
+            {resendState === "loading"
+              ? tAuth("forgotPassword.resending")
+              : tAuth("forgotPassword.resend")}
           </Button>
         </Card>
       </AuthShell>
@@ -88,13 +91,13 @@ export function ForgotPasswordScreen({ scenario }: ForgotPasswordScreenProps) {
       <Card className="border border-border bg-white">
         <div>
           <p className="text-sm font-semibold text-primary">
-            Bảo mật tài khoản ViRead
+            {tAuth("securityEyebrow")}
           </p>
           <h1 className="mt-2 text-heading font-extrabold text-ink">
-            Khôi phục mật khẩu
+            {tAuth("forgotPassword.heading")}
           </h1>
           <p className="mt-3 text-body leading-relaxed text-muted">
-            Nhập email của ba mẹ để nhận hướng dẫn đặt lại mật khẩu.
+            {tAuth("forgotPassword.subtitleShort")}
           </p>
         </div>
         <ForgotPasswordForm

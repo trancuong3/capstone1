@@ -1,7 +1,21 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+
+import { translateMessage } from "@/lib/i18n/formatter";
+import {
+  DEFAULT_LOCALE,
+  getLocaleMetadata,
+  type SupportedLocale,
+} from "@/lib/i18n/locales";
+import {
+  readGuestLocalePreference,
+  readLocaleCookie,
+} from "@/lib/i18n/persistence";
+import type { MessagesDictionary } from "@/lib/i18n/types";
+import { loadLocaleMessages } from "@/messages/loader";
+import { viMessages } from "@/messages/vi";
+import "./globals.css";
 
 function readErrorDigest(error: unknown): string | null {
   if (
@@ -16,20 +30,72 @@ function readErrorDigest(error: unknown): string | null {
   return null;
 }
 
-export default function GlobalError({
+export default function GlobalErrorPage({
   error,
-  retry,
   reset,
+  retry,
 }: {
-  error: unknown;
-  retry?: () => void;
-  reset?: () => void;
+  readonly error: unknown;
+  readonly reset?: () => void;
+  readonly retry?: () => void;
 }) {
+  const [localeState, setLocaleState] = useState<{
+    readonly locale: SupportedLocale;
+    readonly messages: MessagesDictionary;
+  }>({
+    locale: DEFAULT_LOCALE,
+    messages: viMessages,
+  });
+
   useEffect(() => {
-    console.error("[ViReadGlobalError]", error);
+    const digest = readErrorDigest(error);
+    console.error("[ViReadGlobalError]", digest ? { error, digest } : error);
   }, [error]);
 
-  const digest = readErrorDigest(error);
+  useEffect(() => {
+    let active = true;
+    const clientLocale =
+      readLocaleCookie() ?? readGuestLocalePreference() ?? DEFAULT_LOCALE;
+    if (clientLocale === DEFAULT_LOCALE) {
+      return;
+    }
+
+    void loadLocaleMessages(clientLocale).then((messages) => {
+      if (!active) return;
+      setLocaleState({ locale: clientLocale, messages });
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const meta = getLocaleMetadata(localeState.locale);
+  const title = translateMessage(
+    localeState.messages,
+    viMessages,
+    localeState.locale,
+    "common.errorPage.globalTitle",
+  );
+  const description = translateMessage(
+    localeState.messages,
+    viMessages,
+    localeState.locale,
+    "common.errorPage.globalDescription",
+  );
+  const retryLabel = translateMessage(
+    localeState.messages,
+    viMessages,
+    localeState.locale,
+    "common.actions.retry",
+  );
+  const homeLabel = translateMessage(
+    localeState.messages,
+    viMessages,
+    localeState.locale,
+    "common.errorPage.backHome",
+  );
+
   const handleRetry = () => {
     if (typeof retry === "function") {
       retry();
@@ -43,124 +109,38 @@ export default function GlobalError({
   };
 
   return (
-    <html lang="vi">
-      <body
-        style={{
-          margin: 0,
-          minHeight: "100dvh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "24px 16px",
-          backgroundColor: "#fffaf0",
-          color: "#233e40",
-          fontFamily:
-            '"Nunito Variable", "Nunito", ui-rounded, system-ui, -apple-system, sans-serif',
-        }}
-      >
-        <title>Sự cố hệ thống | ViRead</title>
-        <main
-          role="alert"
-          style={{
-            width: "100%",
-            maxWidth: "512px",
-            backgroundColor: "#ffffff",
-            border: "1px solid #ceded8",
-            borderRadius: "12px",
-            padding: "32px 24px",
-            boxShadow: "0 1px 4px rgba(35, 62, 64, 0.08)",
-          }}
-        >
-          <p
-            style={{
-              margin: 0,
-              fontSize: "13px",
-              fontWeight: 700,
-              textTransform: "uppercase",
-              letterSpacing: "0.04em",
-              color: "#8f3039",
-            }}
+    <html lang={meta.bcp47} dir={meta.dir}>
+      <body className="min-h-dvh bg-canvas text-ink">
+        <title>{title}</title>
+        <main className="mx-auto flex min-h-dvh w-full max-w-[640px] flex-col justify-center gap-4 px-4 py-12">
+          <section
+            aria-labelledby="global-error-title"
+            className="rounded-card border border-border bg-white p-6 shadow-sm"
+            role="alert"
           >
-            ViRead
-          </p>
-          <h1
-            style={{
-              margin: "8px 0 0",
-              fontSize: "28px",
-              lineHeight: 1.2,
-              fontWeight: 800,
-            }}
-          >
-            Ứng dụng đang gặp sự cố tạm thời
-          </h1>
-          <p
-            style={{
-              margin: "12px 0 0",
-              fontSize: "16px",
-              lineHeight: 1.5,
-              color: "#52676b",
-            }}
-          >
-            Đã có lỗi ngoài ý muốn khi hiển thị trang. Ba mẹ vui lòng bấm Thử
-            lại hoặc tải lại trang chủ ViRead.
-          </p>
-          {digest ? (
-            <p
-              style={{
-                margin: "12px 0 0",
-                fontSize: "12px",
-                fontWeight: 600,
-                color: "#52676b",
-              }}
+            <h1
+              className="text-heading font-extrabold text-ink"
+              id="global-error-title"
             >
-              Mã tham chiếu: {digest}
-            </p>
-          ) : null}
-          <div
-            style={{
-              marginTop: "24px",
-              display: "flex",
-              flexWrap: "wrap",
-              gap: "12px",
-            }}
-          >
-            <button
-              onClick={handleRetry}
-              style={{
-                minHeight: "48px",
-                padding: "0 20px",
-                borderRadius: "8px",
-                border: "none",
-                backgroundColor: "#087467",
-                color: "#ffffff",
-                fontSize: "16px",
-                fontWeight: 700,
-                cursor: "pointer",
-              }}
-              type="button"
-            >
-              Thử lại
-            </button>
-            <Link
-              href="/"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                minHeight: "48px",
-                padding: "0 20px",
-                borderRadius: "8px",
-                border: "1px solid #ceded8",
-                backgroundColor: "#ffffff",
-                color: "#233e40",
-                fontSize: "16px",
-                fontWeight: 700,
-                textDecoration: "none",
-              }}
-            >
-              Về trang chủ
-            </Link>
-          </div>
+              {title}
+            </h1>
+            <p className="mt-3 text-body text-muted">{description}</p>
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+              <button
+                className="inline-flex min-h-12 items-center justify-center rounded-control bg-primary px-6 py-2.5 text-button font-bold text-white hover:bg-primary-hover focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+                onClick={handleRetry}
+                type="button"
+              >
+                {retryLabel}
+              </button>
+              <a
+                className="inline-flex min-h-12 items-center justify-center rounded-control bg-sky px-6 py-2.5 text-button font-bold text-primary-hover hover:bg-border focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+                href="/dashboard"
+              >
+                {homeLabel}
+              </a>
+            </div>
+          </section>
         </main>
       </body>
     </html>

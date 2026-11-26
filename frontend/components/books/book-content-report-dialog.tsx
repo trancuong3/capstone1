@@ -6,23 +6,24 @@ import { useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
 import { useBookContentReportService } from "@/hooks/use-book-content-report-service";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import type {
   BookContentIssueType,
   BookContentReportDetailDTO,
 } from "@/types/book-content-quality";
 
-const issueLabels: Record<BookContentIssueType, string> = {
-  BOOK_METADATA_ERROR: "Sai thông tin sách",
-  SPELLING_ERROR: "Sai chính tả",
-  MISSING_CONTENT: "Thiếu từ hoặc câu",
-  OCR_MISMATCH: "Nội dung không khớp ảnh gốc",
-  IMAGE_QUALITY_ERROR: "Ảnh trang sách bị lỗi",
-  DUPLICATE_PAGE: "Trang có dấu hiệu bị trùng",
-  PAGE_ORDER_ERROR: "Trang sai thứ tự",
-  CHILD_SAFETY_CONCERN: "Nội dung có dấu hiệu không phù hợp cho trẻ em",
-  COPYRIGHT_CONCERN: "Nghi ngại bản quyền / quyền sử dụng",
-  OTHER: "Lỗi khác",
-};
+const ISSUE_TYPES: readonly BookContentIssueType[] = [
+  "BOOK_METADATA_ERROR",
+  "SPELLING_ERROR",
+  "MISSING_CONTENT",
+  "OCR_MISMATCH",
+  "IMAGE_QUALITY_ERROR",
+  "DUPLICATE_PAGE",
+  "PAGE_ORDER_ERROR",
+  "CHILD_SAFETY_CONCERN",
+  "COPYRIGHT_CONCERN",
+  "OTHER",
+];
 
 interface BookContentReportDialogProps {
   bookId: string;
@@ -39,6 +40,8 @@ export function BookContentReportDialog({
   pageNumber,
   onClose,
 }: BookContentReportDialogProps) {
+  const { formatNumber } = useI18n();
+  const t = useTranslations("books");
   const reportService = useBookContentReportService();
   const idempotencyKeyRef = useRef<string | null>(null);
   const [issueType, setIssueType] =
@@ -57,12 +60,12 @@ export function BookContentReportDialog({
     if (submitting || created) return;
     const normalizedDescription = description.trim();
     if (!normalizedDescription) {
-      setError("Vui lòng mô tả vấn đề để Admin có thể kiểm tra.");
+      setError(t("reportDialog.missingDescriptionError"));
       return;
     }
     if (!idempotencyKeyRef.current) {
       if (typeof globalThis.crypto?.randomUUID !== "function") {
-        setError("Trình duyệt hiện tại không hỗ trợ gửi báo cáo an toàn.");
+        setError(t("reportDialog.unsupportedCryptoError"));
         return;
       }
       idempotencyKeyRef.current = globalThis.crypto.randomUUID();
@@ -81,9 +84,7 @@ export function BookContentReportDialog({
       });
       setCreated(result);
     } catch {
-      setError(
-        "Chưa thể gửi báo cáo. Dữ liệu chưa được xác nhận lưu thành công; vui lòng thử lại.",
-      );
+      setError(t("reportDialog.saveUnconfirmedError"));
     } finally {
       setSubmitting(false);
     }
@@ -97,13 +98,13 @@ export function BookContentReportDialog({
         created ? (
           <div className="flex flex-wrap gap-3">
             <Button fullWidth={false} onClick={onClose}>
-              Hoàn tất
+              {t("reportDialog.done")}
             </Button>
             <Link
               className="inline-flex min-h-12 items-center rounded-control border border-border px-4 font-semibold text-primary hover:bg-canvas"
               href="/book-reports"
             >
-              Xem báo cáo của tôi
+              {t("reportDialog.viewMyReports")}
             </Link>
           </div>
         ) : (
@@ -115,7 +116,7 @@ export function BookContentReportDialog({
               type="button"
               variant="secondary"
             >
-              Hủy
+              {t("reportDialog.cancel")}
             </Button>
             <Button
               disabled={submitting || !description.trim()}
@@ -123,7 +124,9 @@ export function BookContentReportDialog({
               fullWidth={false}
               type="submit"
             >
-              {submitting ? "Đang gửi báo cáo…" : "Gửi báo cáo"}
+              {submitting
+                ? t("reportDialog.submitting")
+                : t("reportDialog.submit")}
             </Button>
           </div>
         )
@@ -133,16 +136,20 @@ export function BookContentReportDialog({
         if (!submitting) onClose();
       }}
       showCloseButton={!submitting}
-      title={pageId ? "Báo lỗi trang sách" : "Báo lỗi sách"}
+      title={pageId ? t("reportDialog.titlePage") : t("reportDialog.titleBook")}
       tone="paper"
     >
       <div className="mb-4">
         <p className="text-sm font-semibold text-primary">
-          ViRead · Góp ý chất lượng
+          {t("reportDialog.brandContext")}
         </p>
         <p className="mt-1 break-words text-sm text-muted">
-          {bookTitle}
-          {pageNumber !== null ? ` · Trang ${pageNumber}` : " · Toàn bộ sách"}
+          <span className="viread-learning-content" dir="ltr" lang="vi">
+            {bookTitle}
+          </span>
+          {pageNumber !== null
+            ? t("reportDialog.pageSuffix", { page: pageNumber })
+            : t("reportDialog.wholeBookSuffix")}
         </p>
       </div>
 
@@ -150,29 +157,35 @@ export function BookContentReportDialog({
         <div className="space-y-4" role="status">
           <div className="rounded-control border border-emerald-200 bg-emerald-50 p-4">
             <p className="font-semibold text-emerald-900">
-              Báo cáo đã được lưu thành công.
+              {t("reportDialog.savedTitle")}
             </p>
             <p className="mt-1 text-sm text-emerald-800">
-              ViRead đã ghi nhận yêu cầu kiểm tra toàn bộ cuốn sách. Admin sẽ
-              xem báo cáo và kết quả kiểm tra trước khi quyết định chỉnh sửa.
+              {t("reportDialog.wholeBookFollowup")}
             </p>
           </div>
           <dl className="grid gap-2 rounded-control border border-border p-4 text-sm sm:grid-cols-2">
             <div>
-              <dt className="text-muted">Mã báo cáo</dt>
+              <dt className="text-muted">{t("reportDialog.reportIdLabel")}</dt>
               <dd className="break-all font-mono font-semibold text-ink">
                 {created.id}
               </dd>
             </div>
             <div>
-              <dt className="text-muted">Trạng thái</dt>
-              <dd className="font-semibold text-ink">{created.status}</dd>
+              <dt className="text-muted">{t("reportDialog.statusLabel")}</dt>
+              <dd className="font-semibold text-ink">
+                {t(
+                  `reportDialog.statuses.${created.status}`,
+                  undefined,
+                  created.status,
+                )}
+              </dd>
             </div>
             <div className="sm:col-span-2">
-              <dt className="text-muted">Yêu cầu kiểm tra</dt>
+              <dt className="text-muted">
+                {t("reportDialog.scanRequestLabel")}
+              </dt>
               <dd className="break-all font-mono text-ink">
-                {created.scan_run_id ??
-                  "Đã lưu báo cáo; chưa có mã scan trả về"}
+                {created.scan_run_id ?? t("reportDialog.noScanIdReturned")}
               </dd>
             </div>
           </dl>
@@ -188,7 +201,7 @@ export function BookContentReportDialog({
               className="mb-2 block text-sm font-semibold text-ink"
               htmlFor="book-report-issue"
             >
-              Loại vấn đề
+              {t("reportDialog.issueTypeLabel")}
             </label>
             <select
               className="min-h-12 w-full rounded-control border border-border bg-white px-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
@@ -198,9 +211,9 @@ export function BookContentReportDialog({
               }
               value={issueType}
             >
-              {Object.entries(issueLabels).map(([value, label]) => (
+              {ISSUE_TYPES.map((value) => (
                 <option key={value} value={value}>
-                  {label}
+                  {t(`reportDialog.issueTypes.${value}`)}
                 </option>
               ))}
             </select>
@@ -211,19 +224,20 @@ export function BookContentReportDialog({
               className="mb-2 block text-sm font-semibold text-ink"
               htmlFor="book-report-description"
             >
-              Mô tả vấn đề <span className="text-danger">*</span>
+              {t("reportDialog.descriptionLabel")}{" "}
+              <span className="text-danger">*</span>
             </label>
             <textarea
               className="min-h-28 w-full rounded-control border border-border bg-white p-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
               id="book-report-description"
               maxLength={4000}
               onChange={(event) => setDescription(event.target.value)}
-              placeholder="Mô tả vị trí hoặc nội dung mà ba mẹ cho rằng chưa chính xác…"
+              placeholder={t("reportDialog.descriptionPlaceholder")}
               required
               value={description}
             />
-            <p className="mt-1 text-right text-xs text-muted">
-              {description.length}/4000
+            <p className="mt-1 text-end text-xs text-muted">
+              {formatNumber(description.length)}/{formatNumber(4000)}
             </p>
           </div>
 
@@ -232,14 +246,16 @@ export function BookContentReportDialog({
               className="mb-2 block text-sm font-semibold text-ink"
               htmlFor="book-report-text"
             >
-              Đoạn nội dung nghi ngờ (không bắt buộc)
+              {t("reportDialog.suspectedTextLabel")}
             </label>
             <textarea
-              className="min-h-20 w-full rounded-control border border-border bg-white p-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
+              className="viread-learning-content min-h-20 w-full rounded-control border border-border bg-white p-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
+              dir="ltr"
               id="book-report-text"
+              lang="vi"
               maxLength={1200}
               onChange={(event) => setReportedText(event.target.value)}
-              placeholder="Nhập từ hoặc câu có vấn đề…"
+              placeholder={t("reportDialog.suspectedTextPlaceholder")}
               value={reportedText}
             />
           </div>
@@ -249,14 +265,16 @@ export function BookContentReportDialog({
               className="mb-2 block text-sm font-semibold text-ink"
               htmlFor="book-report-correction"
             >
-              Nội dung đề xuất sửa (không bắt buộc)
+              {t("reportDialog.suggestedTextLabel")}
             </label>
             <textarea
-              className="min-h-20 w-full rounded-control border border-border bg-white p-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
+              className="viread-learning-content min-h-20 w-full rounded-control border border-border bg-white p-3 text-ink focus-visible:outline-3 focus-visible:outline-primary"
+              dir="ltr"
               id="book-report-correction"
+              lang="vi"
               maxLength={1200}
               onChange={(event) => setSuggestedCorrection(event.target.value)}
-              placeholder="Đề xuất cách viết đúng nếu ba mẹ đã xác định được…"
+              placeholder={t("reportDialog.suggestedTextPlaceholder")}
               value={suggestedCorrection}
             />
           </div>

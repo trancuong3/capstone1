@@ -7,6 +7,7 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminKaraoke } from "@/components/karaoke/karaoke-services-provider";
+import { useTranslations } from "@/hooks/use-i18n";
 import { karaokeErrorMessage } from "@/lib/api/admin-karaoke-service";
 import { isServiceError } from "@/lib/api/service-error";
 import type { AdminKaraokeDetail } from "@/types/karaoke";
@@ -35,6 +36,7 @@ export function KaraokeWorkspaceScreen({
 }
 function SimpleWorkspace({ songId }: { songId?: string }) {
   const service = useAdminKaraoke();
+  const t = useTranslations("admin");
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
@@ -92,29 +94,28 @@ function SimpleWorkspace({ songId }: { songId?: string }) {
             setReload((n) => n + 1);
           }}
         >
-          Thử tải lại
+          {t("karaoke.workspace.retryLoad")}
         </Button>
       </StatusMessage>
     );
   if (!loaded)
-    return <AdminLoading label="Đang kiểm tra khả năng tạo karaoke…" />;
+    return <AdminLoading label={t("karaoke.workspace.loadingCapabilities")} />;
   if (loaded.detail && !loaded.detail.draft)
     return (
       <Card>
-        <h1 className="text-2xl font-extrabold">Bài hát đã xuất bản</h1>
-        <p>
-          Bản xuất bản được giữ nguyên. Chỉ tạo bản nháp mới khi bạn muốn chỉnh
-          sửa.
-        </p>
+        <h1 className="text-2xl font-extrabold">
+          {t("karaoke.workspace.publishedTitle")}
+        </h1>
+        <p>{t("karaoke.workspace.publishedDesc")}</p>
         <Button
           disabled={creating}
           isLoading={creating}
           onClick={() => void createDraft()}
         >
-          Tạo bản nháp để chỉnh sửa
+          {t("karaoke.workspace.createDraftToEdit")}
         </Button>
         <ButtonLink href="/admin/karaoke" variant="quiet">
-          Về danh sách
+          {t("karaoke.workspace.backToList")}
         </ButtonLink>
       </Card>
     );
@@ -126,8 +127,7 @@ function SimpleWorkspace({ songId }: { songId?: string }) {
     return (
       <div className="grid gap-5">
         <StatusMessage tone="info">
-          Tự động tạo karaoke chưa sẵn sàng trên máy chủ này. Bạn vẫn có thể tải
-          nhạc và căn lời bằng trình chỉnh sửa hiện có.
+          {t("karaoke.workspace.autoNotReadyBanner")}
         </StatusMessage>
         <KaraokeEditorScreen songId={songId} />
       </div>

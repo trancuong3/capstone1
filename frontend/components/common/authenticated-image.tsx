@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { useTranslations } from "@/hooks/use-i18n";
 import {
   fetchAuthenticatedBlobUrl,
   isPrivateApiMediaUrl,
@@ -29,8 +30,11 @@ export function AuthenticatedImage({
   className,
   onImageLoad,
   onImageError,
-  fallbackLabel = "Không tải được ảnh trang",
+  fallbackLabel,
 }: AuthenticatedImageProps) {
+  const tCommon = useTranslations("common");
+  const resolvedFallbackLabel =
+    fallbackLabel ?? tCommon("states.imageLoadFailed");
   const needsAuth = isPrivateApiMediaUrl(src);
   const retriedSrcRef = useRef<string | null>(null);
   const onImageErrorRef = useRef(onImageError);
@@ -98,7 +102,7 @@ export function AuthenticatedImage({
         role="img"
         aria-label={alt}
       >
-        {fallbackLabel}
+        {resolvedFallbackLabel}
       </div>
     );
   }

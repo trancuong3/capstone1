@@ -1,3 +1,6 @@
+"use client";
+
+import { useTranslations } from "@/hooks/use-i18n";
 import { activeLyricIndex } from "@/lib/karaoke/lyrics-timeline";
 import type { KaraokeLine } from "@/types/karaoke";
 import { SyllableLyrics } from "@/components/karaoke/syllable-lyrics";
@@ -11,16 +14,17 @@ export function LyricsDisplay({
   currentMs: number;
   ended?: boolean;
 }) {
+  const t = useTranslations("entertainment");
   const active = activeLyricIndex(lines, currentMs);
   const next = lines.find((l) => l.start_ms !== null && l.start_ms > currentMs);
   return (
     <div
       className="rounded-control bg-sky p-6 text-center"
-      aria-label="Lời bài hát"
+      aria-label={t("karaoke.lyrics.regionAria")}
     >
       {active >= 0 && !ended && (
         <p className="mb-3 text-sm font-bold text-primary-hover">
-          Câu đang hát
+          {t("karaoke.lyrics.activeLineLabel")}
         </p>
       )}
       <p
@@ -28,23 +32,30 @@ export function LyricsDisplay({
         data-testid="karaoke-active-line"
       >
         {ended ? (
-          "Đã hết bài hát · Bé có thể bấm Hát lại"
+          t("karaoke.lyrics.ended")
         ) : active >= 0 ? (
           lines[active].syllables?.length ? (
             <SyllableLyrics line={lines[active]} currentMs={currentMs} />
           ) : (
-            lines[active].text
+            <span className="viread-learning-content" dir="ltr" lang="vi">
+              {lines[active].text}
+            </span>
           )
         ) : next ? (
-          "Đoạn nhạc · Chờ câu tiếp theo"
+          t("karaoke.lyrics.instrumentalWaitNext")
         ) : lines.length ? (
-          "Đoạn nhạc · Cùng nghe nhạc nhé"
+          t("karaoke.lyrics.instrumentalEnjoy")
         ) : (
-          "Chưa có câu hát tại vị trí này"
+          t("karaoke.lyrics.emptyPosition")
         )}
       </p>
       {next && (
-        <p className="mt-3 break-words text-muted">Tiếp theo: {next.text}</p>
+        <p className="mt-3 break-words text-muted">
+          {t("karaoke.lyrics.nextPrefix")}
+          <span className="viread-learning-content" dir="ltr" lang="vi">
+            {next.text}
+          </span>
+        </p>
       )}
     </div>
   );

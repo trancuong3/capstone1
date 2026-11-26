@@ -1,0 +1,15 @@
+{
+  "reminders": {
+    "saved": "Đã lưu lịch nhắc đọc sách.",
+    "deleted": "Đã xóa lịch nhắc đọc sách.",
+    "emailSent": "Đã gửi email nhắc lịch đọc sách."
+  },
+  "presence": {
+    "childStarted": "{alias} vừa bắt đầu buổi đọc mới.",
+    "childCompleted": "{alias} đã hoàn thành buổi đọc."
+  },
+  "updates": {
+    "saved": "Đã lưu thay đổi.",
+    "localeChanged": "Đã cập nhật ngôn ngữ hiển thị thành {language}."
+  }
+}

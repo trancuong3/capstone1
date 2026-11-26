@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { apiQuery, requestApi } from "@/lib/api/api-client";
+import { translateRuntime } from "@/lib/i18n/runtime";
 import type {
   DifficultWordBookGroup,
   DifficultWordDTO,
@@ -253,7 +254,10 @@ export function createDifficultWordService(): DifficultWordService {
       return {
         normalized_word: started.normalized_word,
         action_id: started.attempt_id,
-        message: `Đã mở lượt luyện #${started.attempt_number} cho từ "${started.display_text}".`,
+        message: translateRuntime("difficultWords.runtime.practiceOpened", {
+          attempt: started.attempt_number,
+          word: started.display_text,
+        }),
         evidence_count_unchanged: started.evidence_count_unchanged,
       };
     },
@@ -481,7 +485,8 @@ export function groupDifficultWordsByBook(
           upsertBucket(
             bid,
             bid,
-            rep.book_title?.trim() || "Chưa xác định nguồn sách",
+            rep.book_title?.trim() ||
+              translateRuntime("difficultWords.runtime.unknownBookSource"),
             rep.book_author ?? null,
             rep.book_cover_url ?? null,
             rep.min_grade ?? null,
@@ -496,7 +501,7 @@ export function groupDifficultWordsByBook(
         upsertBucket(
           "__unknown_book__",
           null,
-          "Chưa xác định nguồn sách",
+          translateRuntime("difficultWords.runtime.unknownBookSource"),
           first.book_author ?? null,
           first.book_cover_url ?? null,
           first.min_grade ?? null,
@@ -510,7 +515,7 @@ export function groupDifficultWordsByBook(
       upsertBucket(
         "__unknown_book__",
         null,
-        "Chưa xác định nguồn sách",
+        translateRuntime("difficultWords.runtime.unknownBookSource"),
         null,
         null,
         null,

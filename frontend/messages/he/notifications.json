@@ -1,0 +1,15 @@
+{
+  "reminders": {
+    "saved": "תזכורת הקריאה נשמרה.",
+    "deleted": "תזכורת הקריאה נמחקה.",
+    "emailSent": "אימייל תזכורת קריאה נשלח."
+  },
+  "presence": {
+    "childStarted": "{alias} התחיל כרגע פעילות קריאה חדשה.",
+    "childCompleted": "{alias} השלים פעילות קריאה."
+  },
+  "updates": {
+    "saved": "השינויים נשמרו.",
+    "localeChanged": "שפת התצוגה עודכנה ל-{language}."
+  }
+}

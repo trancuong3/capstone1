@@ -1,0 +1,117 @@
+{
+  "recorder": {
+    "permissionRequired": "需要麥克風權限以錄製孩子的聲音。",
+    "recording": "正在聆聽孩子朗讀...",
+    "processing": "正在分析發音...",
+    "playback": "聆聽錄音"
+  },
+  "preferences": {
+    "title": "語音選項",
+    "voiceSpeed": "範讀速度",
+    "autoRead": "開啟頁面時自動播放範讀",
+    "slow": "慢",
+    "normal": "中",
+    "fast": "快"
+  },
+  "status": {
+    "micReady": "麥克風已就緒",
+    "micMuted": "麥克風已關閉",
+    "ttsReady": "範讀語音已就緒"
+  },
+  "settings": {
+    "buttonLabel": "語音",
+    "modalTitle": "範讀語音",
+    "savedVoice": "已儲存語音",
+    "defaultVoice": "預設語音",
+    "localOnlyMode": "僅限本裝置",
+    "localWithGoogleMode": "本裝置 + Google 備用",
+    "speedLabel": "閱讀速度",
+    "regionAndVoiceTitle": "選擇地區與語音",
+    "regionAria": "選擇地區",
+    "filterAria": "篩選語音",
+    "allVoices": "所有語音",
+    "maleVoice": "男聲",
+    "femaleVoice": "女聲",
+    "youngVoice": "年輕語音",
+    "childVoice": "兒童語音",
+    "loadingVoices": "正在載入語音清單…",
+    "loadErrorFallback": "無法載入語音清單。預設語音仍可使用。",
+    "retry": "重試",
+    "emptyVoices": "清單中沒有語音。寶寶可以使用本機的預設語音。",
+    "emptyFiltered": "沒有符合篩選條件的語音。",
+    "parentModeTitle": "語音處理模式（家長專用）",
+    "localAvailable": "準備就緒",
+    "localUnavailable": "未啟用",
+    "googleConfigured": "已設定",
+    "googleUnconfigured": "尚未設定金鑰",
+    "localOnlyTitle": "僅限本裝置",
+    "localOnlyDesc": "100% 本機執行（伺服器 + 瀏覽器），不呼叫 Google",
+    "localWithGoogleTitle": "本裝置 + Google 備用",
+    "localWithGoogleDesc": "優先使用本機，自動啟用線上備援",
+    "googleSttFallback": "語音辨識 (STT) 的 Google 備援",
+    "googleTtsFallback": "語音朗讀 (TTS) 的 Google 備援",
+    "missingGoogleKeyHint": "當伺服器未設定 Google Cloud API 金鑰時，ViRead 將自動使用 Google/線上瀏覽器作為備援。",
+    "useDefaultVoice": "使用預設語音",
+    "preview": "試聽",
+    "stopPreview": "停止試聽",
+    "previewFailed": "無法播放語音。請重試或選擇其他語音。",
+    "savedVoiceResetNotice": "先前儲存的語音已無法使用，ViRead 已切換回預設語音，請家長重新檢查。",
+    "regions": {
+      "all": "所有地區",
+      "north": "北部",
+      "central": "中部",
+      "south": "南部"
+    },
+    "genders": {
+      "female": "女",
+      "male": "男"
+    },
+    "ageGroups": {
+      "young": "年輕",
+      "child": "兒童語音",
+      "middle_aged": "中年",
+      "old": "年長"
+    },
+    "accents": {
+      "northern": "北方口音",
+      "southern": "南方口音",
+      "central": "中部口音",
+      "american": "美式口音",
+      "british": "英式口音"
+    },
+    "googleProviderLabel": "Google 備用"
+  },
+  "engineBadge": {
+    "ariaLabel": "語音來源：STT {stt}，TTS {tts}",
+    "fallbackDetail": "{base}（備用：{reason}）",
+    "androidDetail": "{base}（設備 · Android vi-VN 語音）",
+    "catalogCacheDetail": "{base}（標準快取 · 零延遲示範朗讀）",
+    "googleCloudDetail": "{base}（線上 · 正在使用 Google Cloud API 備用）",
+    "browserDefaultDetail": "{base}（線上 · Google/瀏覽器備用）",
+    "wasmDetail": "{base}（離線 · 透過 WASM 進行裝置端識別）",
+    "localDetail": "{base}（離線 · 直接在此裝置上執行）",
+    "shortLabels": {
+      "local_offline": "離線",
+      "browser_wasm": "離線 (WASM)",
+      "catalog_cache": "標準快取",
+      "android_native": "Android (vi-VN)",
+      "google_cloud": "線上 (Google API)",
+      "browser_default": "線上 (Google/瀏覽器)"
+    }
+  },
+  "playback": {
+    "unavailable": "裝置端語音尚未就緒。請家長和寶貝查看螢幕上的文字，然後點擊「重試」。",
+    "lockedVoiceUnavailableNotice": "選定的語音暫時忙碌。ViRead 會保留文字指引，避免自動切換其他語音——請寶貝點擊「重試」。",
+    "serverFallbackNotice": "所選語音目前不可用，系統正使用備用語音朗讀。",
+    "androidNativeFallbackNotice": "伺服器語音未啟用——ViRead 正在使用 Android 裝置上的越南語語音。",
+    "browserFallbackNotice": "裝置端語音未啟用——ViRead 正在使用瀏覽器的線上語音。",
+    "autoplayBlocked": "瀏覽器正在等待點擊「再次聆聽」以啟用音訊。",
+    "partialPlayback": "音訊中斷。寶貝可以從頭開始重新聆聽。"
+  },
+  "wasm": {
+    "workerUnavailable": "Web Worker 不可用",
+    "wasmUnavailable": "WebAssembly 不可用",
+    "cryptoUnavailable": "Web Crypto API 不可用",
+    "deviceUnsupported": "此裝置上不支援 WASM STT。"
+  }
+}

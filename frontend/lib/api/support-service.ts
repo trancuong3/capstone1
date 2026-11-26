@@ -6,6 +6,7 @@ import {
   getBrowserAccessToken,
   invalidateBrowserTokenCache,
 } from "@/lib/api/browser-auth";
+import { translateRuntime } from "@/lib/i18n/runtime";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 import type {
   SupportFeedbackRequest,
@@ -30,15 +31,15 @@ export class SupportFeedbackError extends Error {
 
 function safeMessageForStatus(status: number): string {
   if (status === 401) {
-    return "Phiên đăng nhập đã hết hạn. Ba mẹ vui lòng đăng nhập lại.";
+    return translateRuntime("errors.clientRuntime.sessionExpiredParent");
   }
   if (status === 422) {
-    return "Thông tin gửi đi chưa hợp lệ. Ba mẹ vui lòng kiểm tra lại.";
+    return translateRuntime("errors.clientRuntime.supportInvalidPayload");
   }
   if (status === 503) {
-    return "Hệ thống email hỗ trợ đang tạm thời không khả dụng. Ba mẹ có thể thử gửi lại sau.";
+    return translateRuntime("errors.clientRuntime.supportEmailUnavailable");
   }
-  return "Chưa gửi được phản hồi. Ba mẹ vui lòng thử lại sau.";
+  return translateRuntime("errors.clientRuntime.supportSubmitFailed");
 }
 
 export interface SupportService {

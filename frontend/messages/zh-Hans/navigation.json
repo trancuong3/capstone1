@@ -1,0 +1,77 @@
+{
+  "parent": {
+    "navLabel": "家长导航",
+    "skipToContent": "跳过导航，前往内容",
+    "dashboard": "概览",
+    "myBooks": "我的书架",
+    "reports": "进度",
+    "readingManagement": "阅读管理",
+    "sessions": "历史记录",
+    "sessionsLong": "阅读历史",
+    "entertainment": "娱乐",
+    "difficultWords": "难点词汇",
+    "children": "孩子档案",
+    "parentProfile": "家长档案",
+    "parentProfileLong": "家长档案",
+    "settings": "设置",
+    "helpSupport": "帮助与支持",
+    "moreTitle": "更多功能",
+    "booksShort": "图书",
+    "scannerShort": "扫描",
+    "moreButton": "更多",
+    "mobileAriaLabel": "移动端快速导航",
+    "moreDescriptions": {
+      "myBooks": "上传并管理家庭藏书",
+      "readingManagement": "查看孩子的阅读目标、计划及已保存的图书",
+      "sessions": "回顾已完成的阅读会话",
+      "entertainment": "语言游戏、故事讲述和卡拉OK",
+      "difficultWords": "练习孩子容易读错的词汇"
+    }
+  },
+  "admin": {
+    "navLabel": "管理后台导航",
+    "skipToContent": "跳过导航，前往管理内容",
+    "badge": "管理",
+    "karaoke": "歌曲",
+    "parents": "家长",
+    "books": "图书库",
+    "metadataQuality": "图书质量",
+    "auditLogs": "审计日志",
+    "training": "OCR 训练",
+    "health": "运营",
+    "moreTitle": "更多管理",
+    "mobileQualityShort": "质量",
+    "mobileOcrShort": "OCR",
+    "mobileMoreDescriptions": {
+      "auditLogs": "追踪管理审计日志",
+      "training": "训练并运行 VietOCR V2 模型",
+      "health": "系统状态、OCR worker 和语音"
+    }
+  },
+  "accountMenu": {
+    "openAria": "打开账户菜单",
+    "closeAria": "关闭账户菜单",
+    "menuAria": "ViRead 账户菜单",
+    "shortMenuAria": "账户菜单",
+    "accountNavAria": "ViRead 账户",
+    "profileSection": "档案",
+    "accountSection": "账户",
+    "helpSection": "帮助",
+    "sessionSection": "会话",
+    "defaultAccountLabel": "ViRead 账户"
+  },
+  "childSwitcher": {
+    "selectedAria": "当前选择：{alias}，点击切换",
+    "openAria": "快速切换孩子",
+    "compactLabel": "{alias} · {grade} 年级",
+    "selectChild": "选择孩子",
+    "listAria": "快速切换孩子档案",
+    "gradeLabel": " · {grade} 年级",
+    "manageChildren": "管理孩子档案"
+  },
+  "footer": {
+    "ariaLabel": "ViRead 信息",
+    "logoDashboardAria": "ViRead - 前往概览",
+    "logoHomeAria": "ViRead - 前往首页"
+  }
+}

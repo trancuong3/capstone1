@@ -10,14 +10,15 @@ import {
   useRef,
   type RefObject,
 } from "react";
+import { useTranslations } from "@/hooks/use-i18n";
 import {
   computeUniversalPageWordLayout,
   type WordLayoutEntry,
 } from "@/lib/reading/ocr-text-reflow";
 import { useReadingAutoScroll } from "@/lib/reading/use-reading-auto-scroll";
+import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
 import {
   getWordHighlightTier,
-  getWordPresentationLabel,
   wordPresentationClasses,
   type PageWordEvidence,
   type WordPresentationState,
@@ -46,6 +47,8 @@ interface WordTokenProps {
   readonly breakCount: number;
   readonly isIndented: boolean;
   readonly presentationState: WordPresentationState;
+  readonly stateLabel: string;
+  readonly titleText?: string;
   readonly isCurrent: boolean;
   readonly readOnly: boolean;
   readonly onSelectWord: (word: ReadingPageWordDTO) => void;
@@ -60,6 +63,8 @@ const MemoWordToken = memo(function WordToken({
   breakCount,
   isIndented,
   presentationState,
+  stateLabel,
+  titleText,
   isCurrent,
   readOnly,
   onSelectWord,
@@ -95,7 +100,7 @@ const MemoWordToken = memo(function WordToken({
       <span
         ref={handleRef}
         className={cn(
-          "mr-1.5 inline-block scroll-mt-4 scroll-mb-6 rounded-control px-2 py-0.5 transition-[background-color,color,border-color,box-shadow] duration-200 ease-out motion-reduce:transition-none",
+          "me-1.5 inline-block scroll-mt-4 scroll-mb-6 rounded-control px-2 py-0.5 transition-[background-color,color,border-color,box-shadow] duration-200 ease-out motion-reduce:transition-none",
           !readOnly &&
             "min-h-11 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
           !readOnly && "cursor-pointer select-none",
@@ -128,44 +133,38 @@ const MemoWordToken = memo(function WordToken({
         onClick={readOnly ? undefined : handleClick}
         role={readOnly ? undefined : "button"}
         tabIndex={readOnly ? undefined : 0}
-        title={
-          readOnly
-            ? undefined
-            : isCurrent && presentationState === "incorrect"
-              ? `Chưa chính xác: "${word.text}". Bé đọc lại từ này nhé.`
-              : `Bấm để nghe đọc mẫu chữ: "${word.text}"`
-        }
+        title={readOnly ? undefined : titleText}
         onKeyDown={readOnly ? undefined : handleKeyDown}
       >
         {word.text}
         {!readOnly ? (
           <span hidden id={`text-word-state-${pageRevisionId}-${word.word_id}`}>
-            {getWordPresentationLabel(presentationState)}
+            {stateLabel}
           </span>
         ) : null}
         {presentationState === "preview-correct" ? (
           <span
             aria-hidden="true"
-            className="ml-1 inline-block size-1.5 rounded-full bg-emerald-600 align-middle"
+            className="ms-1 inline-block size-1.5 rounded-full bg-emerald-600 align-middle"
           />
         ) : null}
         {presentationState === "self-corrected" ? (
-          <span aria-hidden="true" className="ml-1 text-sm">
+          <span aria-hidden="true" className="ms-1 text-sm">
             ↺
           </span>
         ) : null}
         {presentationState === "unresolved" ? (
-          <span aria-hidden="true" className="ml-1 text-sm">
+          <span aria-hidden="true" className="ms-1 text-sm">
             ◇
           </span>
         ) : null}
         {presentationState === "uncertain" ? (
-          <span aria-hidden="true" className="ml-1 text-sm">
+          <span aria-hidden="true" className="ms-1 text-sm">
             ?
           </span>
         ) : null}
         {presentationState === "assisted" ? (
-          <span aria-hidden="true" className="ml-1 text-sm">
+          <span aria-hidden="true" className="ms-1 text-sm">
             {"\u266A"}
           </span>
         ) : null}
@@ -175,6 +174,8 @@ const MemoWordToken = memo(function WordToken({
 });
 
 export function BookPageContent(props: BookPageContentProps) {
+  const t = useTranslations("reading");
+  const isMalePersona = getEffectiveTeacherPersona().gender === "male";
   const {
     page,
     currentWordId,
@@ -259,32 +260,53 @@ export function BookPageContent(props: BookPageContentProps) {
       className="min-h-0 flex-1 py-2"
     >
       {hasWords ? (
-        <p className="w-full max-w-[58ch] text-[24px] font-bold leading-[2] tracking-[0.01em] text-ink sm:text-[30px] sm:leading-[1.9]">
-          {layout.map((entry) => (
-            <MemoWordToken
-              key={entry.word.word_id}
-              word={entry.word}
-              pageRevisionId={page.page_revision_id}
-              lineIndex={entry.lineIndex}
-              breakCount={entry.breakCount}
-              isIndented={entry.isIndented}
-              presentationState={stateFor(entry.word, entry.index)}
-              isCurrent={activeWordId === entry.word.word_id}
-              readOnly={readOnly}
-              onSelectWord={handleSelectWord}
-              registerNode={registerNode}
-              onRender={onWordTokenRender}
-            />
-          ))}
+        <p
+          className="viread-learning-content w-full max-w-[58ch] text-[24px] font-bold leading-[2] tracking-[0.01em] text-ink sm:text-[30px] sm:leading-[1.9]"
+          dir="ltr"
+          lang="vi"
+        >
+          {layout.map((entry) => {
+            const pState = stateFor(entry.word, entry.index);
+            const isCurr = activeWordId === entry.word.word_id;
+            const stateLabel =
+              pState === "assisted" && isMalePersona
+                ? t("wordStates.assistedMale")
+                : t(`wordStates.${pState}`);
+            const titleText = readOnly
+              ? undefined
+              : isCurr && pState === "incorrect"
+                ? t("pageContent.incorrectWordAria", { word: entry.word.text })
+                : t("pageContent.tapToListenAria", { word: entry.word.text });
+            return (
+              <MemoWordToken
+                key={entry.word.word_id}
+                word={entry.word}
+                pageRevisionId={page.page_revision_id}
+                lineIndex={entry.lineIndex}
+                breakCount={entry.breakCount}
+                isIndented={entry.isIndented}
+                presentationState={pState}
+                stateLabel={stateLabel}
+                titleText={titleText}
+                isCurrent={isCurr}
+                readOnly={readOnly}
+                onSelectWord={handleSelectWord}
+                registerNode={registerNode}
+                onRender={onWordTokenRender}
+              />
+            );
+          })}
         </p>
       ) : page.text ? (
-        <p className="whitespace-pre-wrap text-[22px] font-semibold leading-[1.8] text-ink sm:text-[26px]">
+        <p
+          className="viread-learning-content whitespace-pre-wrap text-[22px] font-semibold leading-[1.8] text-ink sm:text-[26px]"
+          dir="ltr"
+          lang="vi"
+        >
           {page.text}
         </p>
       ) : (
-        <p className="text-body text-muted">
-          Đang tải nội dung văn bản của trang…
-        </p>
+        <p className="text-body text-muted">{t("pageContent.loadingText")}</p>
       )}
       {!isManagedByParent && isDetached && activeWordId ? (
         <div className="pointer-events-none sticky bottom-3 z-20 flex h-0 justify-end overflow-visible">
@@ -295,7 +317,7 @@ export function BookPageContent(props: BookPageContentProps) {
             className="pointer-events-auto inline-flex min-h-11 -translate-y-full items-center gap-1.5 rounded-full border border-primary/40 bg-primary px-3.5 py-2 text-xs font-bold text-white shadow-md hover:bg-primary-hover focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
           >
             <ArrowDown aria-hidden="true" className="size-4 shrink-0" />
-            Về từ đang đọc
+            {t("pageContent.scrollToCurrentWord")}
           </button>
         </div>
       ) : null}

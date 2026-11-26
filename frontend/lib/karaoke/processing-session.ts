@@ -1,5 +1,6 @@
 import type { AdminKaraokeService } from "@/lib/api/admin-karaoke-service";
 import { isServiceError } from "@/lib/api/service-error";
+import { translateRuntime } from "@/lib/i18n/runtime";
 import type { KaraokeDraftSaveQueue } from "@/lib/karaoke/draft-save-queue";
 import type { AdminKaraokeDetail } from "@/types/karaoke";
 import type {
@@ -205,7 +206,12 @@ export class KaraokeProcessingSession {
     const epoch = this.epoch;
     try {
       const job = await this.queue.enqueueMutation(async (detail, signal) => {
-        if (!detail.draft) throw new Error("Cần bản nháp trước khi xử lý.");
+        if (!detail.draft)
+          throw new Error(
+            translateRuntime(
+              "admin.karaoke.wizardRuntime.needDraftBeforeProcessing",
+            ),
+          );
         const generation = this.queue.getSnapshot().generation;
         if (!this.startIntent)
           this.startIntent = {
@@ -225,7 +231,9 @@ export class KaraokeProcessingSession {
           intent.body.source_kind !== sourceKind
         )
           throw new Error(
-            "Yêu cầu trước chưa rõ kết quả. Hãy tải tiến trình để đối chiếu trước khi tạo lượt mới.",
+            translateRuntime(
+              "admin.karaoke.wizardRuntime.previousStartUncertain",
+            ),
           );
         return {
           value: await this.service.startProcessing(
@@ -284,19 +292,28 @@ export class KaraokeProcessingSession {
       !["FAILED", "CANCELLED", "STALE"].includes(previous.status) ||
       previous.retry_policy === "NEEDS_INPUT_CHANGE"
     )
-      throw new Error("Hãy sửa đầu vào rồi tạo lượt xử lý mới.");
+      throw new Error(
+        translateRuntime("admin.karaoke.wizardRuntime.editInputBeforeRetry"),
+      );
     if (
       previous.retry_policy === "EXPLICIT_COST_ACK" &&
       !acknowledgePossibleCharge
     )
       throw new Error(
-        "Cần xác nhận có thể phát sinh thêm phí trước khi thử lại.",
+        translateRuntime(
+          "admin.karaoke.wizardRuntime.ackPossibleChargeRequired",
+        ),
       );
     this.set({ action: true, error: null });
     const epoch = this.epoch;
     try {
       const job = await this.queue.enqueueMutation(async (detail, signal) => {
-        if (!detail.draft) throw new Error("Cần bản nháp trước khi thử lại.");
+        if (!detail.draft)
+          throw new Error(
+            translateRuntime(
+              "admin.karaoke.wizardRuntime.needDraftBeforeRetry",
+            ),
+          );
         const generation = this.queue.getSnapshot().generation;
         if (!this.retryIntent)
           this.retryIntent = {
@@ -316,7 +333,9 @@ export class KaraokeProcessingSession {
           intent.body.acknowledge_possible_charge !== acknowledgePossibleCharge
         )
           throw new Error(
-            "Lượt thử trước chưa rõ kết quả. Hãy đối chiếu tiến trình.",
+            translateRuntime(
+              "admin.karaoke.wizardRuntime.previousRetryUncertain",
+            ),
           );
         return {
           value: await this.service.retryProcessing(
@@ -361,7 +380,11 @@ export class KaraokeProcessingSession {
   };
   private async performApply(job: ProcessingJob | null) {
     if (!job || !this.active || !job.can_apply)
-      throw new Error("Kết quả không còn có thể áp dụng.");
+      throw new Error(
+        translateRuntime(
+          "admin.karaoke.wizardRuntime.resultNoLongerApplicable",
+        ),
+      );
     this.owned = null;
     const detail = await this.queue.enqueueMutation(async (current, signal) => {
       if (
@@ -369,7 +392,9 @@ export class KaraokeProcessingSession {
         current.draft?.id !== job.draft_version_id
       )
         throw new Error(
-          "Bản nháp đã đổi. Hãy đối chiếu kết quả trước khi áp dụng.",
+          translateRuntime(
+            "admin.karaoke.wizardRuntime.draftChangedReconcileApply",
+          ),
         );
       const detail = await this.service.applyProcessing(
         current.song_id,
@@ -400,7 +425,9 @@ export class KaraokeProcessingSession {
   ) => {
     if (!this.active || this.view.action) return null;
     if (!confirmedListened)
-      throw new Error("Hãy nghe và xác nhận bản nháp hiện tại trước.");
+      throw new Error(
+        translateRuntime("admin.karaoke.wizardRuntime.listenDraftFirst"),
+      );
     this.set({ action: true, error: null });
     try {
       return await this.queue.enqueueMutation(async (current, signal) => {
@@ -410,7 +437,11 @@ export class KaraokeProcessingSession {
           !review?.required ||
           !review.current_content_fingerprint
         )
-          throw new Error("Bản nháp chưa có nội dung để xác nhận duyệt.");
+          throw new Error(
+            translateRuntime(
+              "admin.karaoke.wizardRuntime.draftMissingReviewContent",
+            ),
+          );
         const detail = await this.service.confirmReview(
           current.song_id,
           {
@@ -432,7 +463,10 @@ export class KaraokeProcessingSession {
     }
   };
   getPreview = (signal?: AbortSignal) => {
-    if (!this.view.job) throw new Error("Chưa có kết quả để nghe.");
+    if (!this.view.job)
+      throw new Error(
+        translateRuntime("admin.karaoke.wizardRuntime.noResultToPreview"),
+      );
     return this.service.getProcessingPreview(this.view.job, signal);
   };
 }

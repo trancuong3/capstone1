@@ -1,6 +1,10 @@
-import { ViReadLogo } from "@/components/common/viread-logo";
-import { cn } from "@/lib/utils/cn";
+"use client";
+
 import { ButtonLink } from "@/components/common/button";
+import { ViReadLogo } from "@/components/common/viread-logo";
+import { LanguageSelector } from "@/components/i18n/language-selector";
+import { useTranslations } from "@/hooks/use-i18n";
+import { cn } from "@/lib/utils/cn";
 
 interface SiteHeaderProps {
   readonly className?: string;
@@ -9,6 +13,8 @@ interface SiteHeaderProps {
 
 /** Public branding only. Parent/Admin navigation stays in its existing layout. */
 export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
+  const tAuth = useTranslations("auth");
+  const tNav = useTranslations("navigation");
   const isAdminLogin = variant === "admin-login";
 
   return (
@@ -18,49 +24,55 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
         className,
       )}
     >
-      <div className="mx-auto flex min-h-14 w-full max-w-[1376px] flex-row items-center justify-between gap-2 px-3 py-2 sm:min-h-20 sm:gap-6 sm:px-8 sm:py-4">
+      <div className="mx-auto flex min-h-14 w-full max-w-[1376px] flex-wrap items-center justify-between gap-2 px-3 py-2 sm:min-h-20 sm:flex-nowrap sm:gap-6 sm:px-8 sm:py-4">
         <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <ViReadLogo
             ariaLabel={
               isAdminLogin
-                ? "ViRead - đăng nhập quản trị"
-                : "ViRead - đăng nhập"
+                ? tAuth("adminLogin.logoAria")
+                : tAuth("login.logoAria")
             }
             href={isAdminLogin ? "/admin/login" : "/login"}
             size="md"
           />
           {isAdminLogin ? (
             <span className="rounded-full bg-sky px-2.5 py-1 text-xs font-semibold tracking-wide text-primary-hover sm:px-3">
-              ADMIN
+              {tAuth("adminLogin.badge")}
             </span>
           ) : null}
         </div>
 
         {isAdminLogin ? (
-          <p className="truncate text-xs font-medium text-muted sm:text-label">
-            Khu vực quản trị
-          </p>
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+            <p className="hidden truncate text-xs font-medium text-muted sm:block sm:text-label">
+              {tAuth("adminLogin.areaLabel")}
+            </p>
+            <LanguageSelector variant="compact" />
+          </div>
         ) : (
-          <nav
-            aria-label="Tài khoản ViRead"
-            className="flex shrink-0 items-center gap-2 sm:gap-3"
-          >
-            <ButtonLink
-              href="/login"
-              size="compact"
-              variant="quiet"
-              className="w-auto whitespace-nowrap border border-border px-3 text-sm sm:min-w-32 sm:px-4 sm:text-label"
+          <div className="flex flex-wrap items-center justify-end gap-2 sm:flex-nowrap sm:gap-3">
+            <nav
+              aria-label={tNav("accountMenu.accountNavAria")}
+              className="flex shrink-0 items-center gap-2 sm:gap-3"
             >
-              Đăng nhập
-            </ButtonLink>
-            <ButtonLink
-              href="/register"
-              size="compact"
-              className="w-auto whitespace-nowrap px-3 text-sm sm:min-w-32 sm:px-4 sm:text-label"
-            >
-              Đăng ký
-            </ButtonLink>
-          </nav>
+              <ButtonLink
+                href="/login"
+                size="compact"
+                variant="quiet"
+                className="w-auto whitespace-nowrap border border-border px-3 text-sm sm:min-w-32 sm:px-4 sm:text-label"
+              >
+                {tAuth("login.submit")}
+              </ButtonLink>
+              <ButtonLink
+                href="/register"
+                size="compact"
+                className="w-auto whitespace-nowrap px-3 text-sm sm:min-w-32 sm:px-4 sm:text-label"
+              >
+                {tAuth("register.submit")}
+              </ButtonLink>
+            </nav>
+            <LanguageSelector variant="compact" />
+          </div>
         )}
       </div>
     </header>

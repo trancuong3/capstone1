@@ -1,14 +1,30 @@
 import { Skeleton } from "@/components/common/skeleton";
+import { translateMessage } from "@/lib/i18n/formatter";
+import { getServerI18n } from "@/lib/i18n/server";
+import { viMessages } from "@/messages/vi";
 
-export default function ParentAppLoading() {
+export default async function ParentAppLoading() {
+  const { locale, messages } = await getServerI18n();
+  const loadingText = translateMessage(
+    messages,
+    viMessages,
+    locale,
+    "accessibility.loadingContent",
+  );
+
   return (
     <section
       aria-busy="true"
-      aria-label="Đang tải trang"
+      aria-label={loadingText}
       className="mx-auto flex w-full max-w-[1120px] flex-col gap-5"
     >
       <span className="sr-only" role="status">
-        Đang tải nội dung…
+        {translateMessage(
+          messages,
+          viMessages,
+          locale,
+          "common.states.loading",
+        )}
       </span>
       <div className="flex items-center justify-between gap-4">
         <Skeleton className="h-9 w-52 rounded-control" />

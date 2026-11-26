@@ -1,0 +1,77 @@
+{
+  "parent": {
+    "navLabel": "Navigation für Eltern",
+    "skipToContent": "Navigation überspringen, zum Inhalt",
+    "dashboard": "Übersicht",
+    "myBooks": "Meine Bücher",
+    "reports": "Fortschritt",
+    "readingManagement": "Leseverwaltung",
+    "sessions": "Verlauf",
+    "sessionsLong": "Leseverlauf",
+    "entertainment": "Unterhaltung",
+    "difficultWords": "Wörter zum Üben",
+    "children": "Kinderprofile",
+    "parentProfile": "Elternprofil",
+    "parentProfileLong": "Elternprofil",
+    "settings": "Einstellungen",
+    "helpSupport": "Hilfe & Support",
+    "moreTitle": "Weitere Funktionen",
+    "booksShort": "Bücher",
+    "scannerShort": "Scannen",
+    "moreButton": "Mehr",
+    "mobileAriaLabel": "Schnelle Mobilnavigation",
+    "moreDescriptions": {
+      "myBooks": "Bücher Ihrer Familie hochladen und verwalten",
+      "readingManagement": "Ziele, Leseplan und gespeicherte Bücher für Ihr Kind",
+      "sessions": "Abgeschlossene Lesesitzungen ansehen",
+      "entertainment": "Sprachspiele, Geschichten und Karaoke",
+      "difficultWords": "Wörter üben, die Ihr Kind oft falsch liest"
+    }
+  },
+  "admin": {
+    "navLabel": "Administrator-Navigation",
+    "skipToContent": "Navigation überspringen, zum Admin-Inhalt",
+    "badge": "Administration",
+    "karaoke": "Lieder",
+    "parents": "Eltern",
+    "books": "Bücherregal",
+    "metadataQuality": "Buchqualität",
+    "auditLogs": "Prüfprotokolle",
+    "training": "OCR-Training",
+    "health": "Betrieb",
+    "moreTitle": "Weitere Verwaltung",
+    "mobileQualityShort": "Qualität",
+    "mobileOcrShort": "OCR",
+    "mobileMoreDescriptions": {
+      "auditLogs": "Admin-Prüfprotokolle verfolgen",
+      "training": "VietOCR V2-Modell trainieren und betreiben",
+      "health": "Systemstatus, OCR-Worker und Stimme"
+    }
+  },
+  "accountMenu": {
+    "openAria": "Kontoverwaltung öffnen",
+    "closeAria": "Kontoverwaltung schließen",
+    "menuAria": "ViRead-Kontomenü",
+    "shortMenuAria": "Kontomenü",
+    "accountNavAria": "ViRead-Konto",
+    "profileSection": "Profil",
+    "accountSection": "Konto",
+    "helpSection": "Hilfe",
+    "sessionSection": "Sitzung",
+    "defaultAccountLabel": "ViRead-Konto"
+  },
+  "childSwitcher": {
+    "selectedAria": "Ausgewähltes Kind: {alias}, zum Wechseln tippen",
+    "openAria": "Kind schnell wechseln",
+    "compactLabel": "{alias} · Kl. {grade}",
+    "selectChild": "Kind auswählen",
+    "listAria": "Kindesprofil schnell wechseln",
+    "gradeLabel": "· Klasse {grade}",
+    "manageChildren": "Kindesprofile verwalten"
+  },
+  "footer": {
+    "ariaLabel": "ViRead-Informationen",
+    "logoDashboardAria": "ViRead - Zur Übersicht",
+    "logoHomeAria": "ViRead - Zur Startseite"
+  }
+}

@@ -2,6 +2,7 @@
 
 import { BookOpenCheck, Heart, Sparkles, Volume2 } from "lucide-react";
 
+import { useTranslations } from "@/hooks/use-i18n";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import {
   adaptTextToTeacherPersona,
@@ -32,7 +33,7 @@ const MOOD_STYLES: Readonly<
       readonly card: string;
       readonly badge: string;
       readonly titleColor: string;
-      readonly label: string;
+      readonly labelKeys: { readonly female: string; readonly male: string };
     }
   >
 > = {
@@ -40,25 +41,37 @@ const MOOD_STYLES: Readonly<
     card: "border-primary/30 bg-sky/70",
     badge: "bg-primary text-white",
     titleColor: "text-primary",
-    label: "Cô giáo đồng hành · Đang lắng nghe",
+    labelKeys: {
+      female: "companion.listeningFemale",
+      male: "companion.listeningMale",
+    },
   },
   comforting: {
     card: "border-amber-300 bg-cream",
     badge: "bg-amber-500 text-white",
     titleColor: "text-amber-900",
-    label: "Cô giáo dịu dàng · Đang khích lệ bé",
+    labelKeys: {
+      female: "companion.comfortingFemale",
+      male: "companion.comfortingMale",
+    },
   },
   teaching: {
     card: "border-purple/60 bg-purple/40",
     badge: "bg-purple-ink text-white",
     titleColor: "text-purple-ink",
-    label: "Cô giáo hướng dẫn · Cùng đánh vần nhé",
+    labelKeys: {
+      female: "companion.teachingFemale",
+      male: "companion.teachingMale",
+    },
   },
   celebrating: {
     card: "border-emerald-300 bg-success-surface",
     badge: "bg-emerald-600 text-white",
     titleColor: "text-emerald-900",
-    label: "Cô giáo khen bé · Giỏi quá!",
+    labelKeys: {
+      female: "companion.celebratingFemale",
+      male: "companion.celebratingMale",
+    },
   },
 };
 
@@ -85,13 +98,27 @@ export function ReadingCompanionBubble({
   isSpeaking = false,
   gender,
 }: ReadingCompanionBubbleProps) {
+  const t = useTranslations("reading");
   const activePersona = useTeacherPersona();
   const theme = MOOD_STYLES[state.mood];
   const persona = gender ? getTeacherPersona(gender) : activePersona;
-  const displayTitle = adaptTextToTeacherPersona(
-    state.title || theme.label,
+  const localizedPersonaTitle = t(
+    persona.gender === "male"
+      ? "companion.teacherMaleTitle"
+      : "companion.teacherFemaleTitle",
+  );
+  const fallbackLabel = t(
+    persona.gender === "male" ? theme.labelKeys.male : theme.labelKeys.female,
+  );
+  const normalizedTitle = adaptTextToTeacherPersona(
+    state.title || fallbackLabel,
     persona.gender,
-  ).replace(/^(Cô giáo|Thầy giáo)(?!\s+AI)/u, persona.title);
+  ).replace(/^(Cô giáo|Thầy giáo)(?!\s+AI)/u, localizedPersonaTitle);
+  const displayTitle =
+    normalizedTitle.includes(localizedPersonaTitle) ||
+    normalizedTitle.includes(persona.title)
+      ? normalizedTitle
+      : `${localizedPersonaTitle} · ${normalizedTitle}`;
   const displayMessage = adaptTextToTeacherPersona(
     state.message,
     persona.gender,

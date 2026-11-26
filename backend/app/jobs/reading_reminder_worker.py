@@ -27,6 +27,7 @@ from app.providers.reading_reminder_email_provider import (
 )
 from app.providers.supabase_auth_contact_provider import SupabaseAuthContactProvider
 from app.repositories.reading_management_repository import ReadingManagementRepository
+from app.services.i18n.locales import DEFAULT_LOCALE, resolve_supported_locale
 from app.services.worker_telemetry import record_worker_error, record_worker_success
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,48 @@ async def _release_repository_db(repository: object) -> None:
             await res
 
 
+def _sender_accepts_locale(email_sender) -> bool:
+    try:
+        sig = inspect.signature(email_sender)
+    except (TypeError, ValueError):
+        return False
+    for param in sig.parameters.values():
+        if param.kind == inspect.Parameter.VAR_KEYWORD:
+            return True
+        if param.name == "locale" and param.kind in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        ):
+            return True
+    return False
+
+
+def _extract_explicit_locale(reminder: ReadingReminder, child: ChildProfile) -> str:
+    explicit = getattr(reminder, "Locale", None) or getattr(child, "Locale", None)
+    if explicit:
+        return resolve_supported_locale(explicit)
+    settings = getattr(child, "Settings", None)
+    if isinstance(settings, dict):
+        pref = settings.get("preferred_locale") or settings.get("locale")
+        if pref:
+            return resolve_supported_locale(pref)
+    return DEFAULT_LOCALE
+
+
+async def _resolve_claim_locale(
+    reminder: ReadingReminder,
+    child: ChildProfile,
+    locale_resolver=None,
+) -> str:
+    if locale_resolver is not None:
+        raw = locale_resolver(child.ParentId)
+        if inspect.isawaitable(raw):
+            raw = await raw
+        if raw:
+            return resolve_supported_locale(raw)
+    return _extract_explicit_locale(reminder, child)
+
+
 async def deliver_claimed_occurrences(
     repository: ReadingManagementRepository,
     claims: list[tuple[ReadingReminderOccurrence, ReadingReminder, ChildProfile]],
@@ -116,6 +159,7 @@ async def deliver_claimed_occurrences(
     *,
     recipient_resolver=get_verified_parent_email,
     email_sender=send_reading_reminder_email,
+    locale_resolver=None,
     max_attempts: int = READING_REMINDER_MAX_ATTEMPTS,
 ) -> int:
     # Snapshot scalar claim attributes up front so rollback()/commit() never expires
@@ -129,10 +173,12 @@ async def deliver_claimed_occurrences(
             reminder.Timezone,
             child.ParentId,
             child.Alias,
+            _extract_explicit_locale(reminder, child),
         )
         for occurrence, reminder, child in claims
     ]
     delivered = 0
+    supports_locale = _sender_accepts_locale(email_sender)
     for (
         occurrence_id,
         attempts,
@@ -141,19 +187,29 @@ async def deliver_claimed_occurrences(
         timezone_name,
         parent_id,
         child_alias,
+        explicit_locale,
     ) in claim_snapshots:
         await _release_repository_db(repository)
         try:
             recipient = await recipient_resolver(parent_id)
-            await asyncio.to_thread(
-                email_sender,
-                recipient=recipient,
-                child_alias=child_alias,
-                local_date=local_date,
-                local_time=local_time,
-                timezone_name=timezone_name,
-                occurrence_id=occurrence_id,
-            )
+            send_kwargs: dict[str, object] = {
+                "recipient": recipient,
+                "child_alias": child_alias,
+                "local_date": local_date,
+                "local_time": local_time,
+                "timezone_name": timezone_name,
+                "occurrence_id": occurrence_id,
+            }
+            if supports_locale:
+                claim_locale = explicit_locale
+                if locale_resolver is not None:
+                    raw_locale = locale_resolver(parent_id)
+                    if inspect.isawaitable(raw_locale):
+                        raw_locale = await raw_locale
+                    if raw_locale:
+                        claim_locale = resolve_supported_locale(raw_locale)
+                send_kwargs["locale"] = claim_locale
+            await asyncio.to_thread(email_sender, **send_kwargs)
         except ParentEmailUnavailable as error:
             await repository.update_email_delivery(
                 occurrence_id,

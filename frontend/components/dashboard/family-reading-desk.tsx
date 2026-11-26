@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button, ButtonLink } from "@/components/common/button";
+import { useTranslations } from "@/hooks/use-i18n";
 import { useReportServices } from "@/hooks/use-report-services";
 import type { ChildProfileDTO } from "@/types/child";
 import type { DashboardLatestSessionDTO } from "@/types/profile";
@@ -49,6 +50,7 @@ export function FamilyReadingDesk({
   summarySource,
   onChooseBook,
 }: ReadingDeskProps) {
+  const tParent = useTranslations("parent");
   const { sessionService } = useReportServices();
   const [fallbackRecent, setFallbackRecent] = useState<RecentReading | null>(
     null,
@@ -100,26 +102,33 @@ export function FamilyReadingDesk({
       <div className="desk-copy">
         <div className="desk-label">
           <BookOpen aria-hidden="true" size={17} />
-          {recent?.resumable ? "Tiếp tục đọc" : "Tủ sách gia đình"}
+          {recent?.resumable
+            ? tParent("desk.continueReadingLabel")
+            : tParent("desk.familyBookshelfLabel")}
         </div>
         <h2 id="desk-title">
-          {recent?.resumable ? recent.title : "Hôm nay bé đọc gì?"}
+          {recent?.resumable ? recent.title : tParent("desk.defaultHeading")}
         </h2>
         <p>
           {recent?.resumable
-            ? `Cùng ${child?.alias} tiếp tục buổi đọc còn dở.`
+            ? tParent("desk.resumePrompt", { alias: child?.alias ?? "" })
             : child
-              ? `Mở tủ sách và chọn một cuốn cho ${child.alias}.`
+              ? tParent("desk.chooseForChild", { alias: child.alias })
               : isLoadingProfiles
-                ? "Đang tải hồ sơ gia đình để chuẩn bị tủ sách của bé…"
+                ? tParent("desk.loadingProfiles")
                 : hasProfiles
-                  ? "Chọn hồ sơ của bé để mở tủ sách riêng."
-                  : "Tạo hồ sơ cho bé để mở cuốn sách đầu tiên."}
+                  ? tParent("desk.selectChildPrompt")
+                  : tParent("desk.createFirstChildPrompt")}
         </p>
         <div className="desk-actions">
           {recent?.resumable ? (
             <ButtonLink href={recent.href} className="desk-primary">
-              Đọc tiếp <ArrowRight aria-hidden="true" size={18} />
+              {tParent("desk.resumeButton")}{" "}
+              <ArrowRight
+                aria-hidden="true"
+                className="viread-rtl-flip"
+                size={18}
+              />
             </ButtonLink>
           ) : hasProfiles || isLoadingProfiles ? (
             <Button
@@ -127,11 +136,21 @@ export function FamilyReadingDesk({
               className="desk-primary"
               disabled={isLoadingProfiles && !child}
             >
-              Chọn sách <ArrowRight aria-hidden="true" size={18} />
+              {tParent("desk.chooseBookButton")}{" "}
+              <ArrowRight
+                aria-hidden="true"
+                className="viread-rtl-flip"
+                size={18}
+              />
             </Button>
           ) : (
             <ButtonLink href="/children/new" className="desk-primary">
-              Tạo hồ sơ đầu tiên <ArrowRight aria-hidden="true" size={18} />
+              {tParent("desk.createFirstChildButton")}{" "}
+              <ArrowRight
+                aria-hidden="true"
+                className="viread-rtl-flip"
+                size={18}
+              />
             </ButtonLink>
           )}
           {recent?.resumable ? (
@@ -140,13 +159,13 @@ export function FamilyReadingDesk({
               type="button"
               onClick={onChooseBook}
             >
-              Chọn sách
+              {tParent("desk.chooseBookButton")}
             </button>
           ) : null}
         </div>
         {recent && !recent.resumable ? (
           <Link className="desk-recent" href={recent.href}>
-            Lần đọc gần nhất · {recent.title}
+            {tParent("desk.latestReadPrefix", { title: recent.title })}
           </Link>
         ) : null}
       </div>

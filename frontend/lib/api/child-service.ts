@@ -15,6 +15,7 @@ import {
 } from "@/lib/api/read-cache";
 import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
 import { clearUserCache } from "@/lib/cache/user-query-cache";
+import { translateRuntime } from "@/lib/i18n/runtime";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
 export interface ChildService {
@@ -208,7 +209,7 @@ async function request<T>(
       if (signal?.aborted) throw error;
       throw new ServiceError({
         code: "NETWORK_ERROR",
-        message: DEFAULT_CHILD_ERROR_MESSAGE,
+        message: translateRuntime("errors.clientRuntime.genericParentRetry"),
         status: 0,
         request_id: "",
         retryable: true,
@@ -234,7 +235,7 @@ async function request<T>(
     } catch {
       throw new ServiceError({
         code: "NETWORK_ERROR",
-        message: DEFAULT_CHILD_ERROR_MESSAGE,
+        message: translateRuntime("errors.clientRuntime.genericParentRetry"),
         status: response.status,
         request_id: requestId,
         retryable: false,

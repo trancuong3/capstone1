@@ -455,18 +455,22 @@ export function BookCover({
                 titleAsHeading ? (
                   <h2
                     className={cn(
-                      "line-clamp-3 break-words font-extrabold leading-snug",
+                      "viread-learning-content line-clamp-3 break-words font-extrabold leading-snug",
                       size === "medium" ? "text-xs" : "text-xl",
                     )}
+                    dir="ltr"
+                    lang="vi"
                   >
                     {displayTitle}
                   </h2>
                 ) : (
                   <p
                     className={cn(
-                      "line-clamp-3 break-words font-extrabold leading-snug",
+                      "viread-learning-content line-clamp-3 break-words font-extrabold leading-snug",
                       size === "medium" ? "text-xs" : "text-xl",
                     )}
+                    dir="ltr"
+                    lang="vi"
                   >
                     {displayTitle}
                   </p>
@@ -482,7 +486,9 @@ export function BookCover({
               )}
               {displayAuthor && size === "default" ? (
                 <p
-                  className="line-clamp-1 text-xs font-semibold opacity-85"
+                  className="viread-learning-content line-clamp-1 text-xs font-semibold opacity-85"
+                  dir="ltr"
+                  lang="vi"
                   style={{ color: palette.accent }}
                 >
                   {displayAuthor}

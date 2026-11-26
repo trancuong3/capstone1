@@ -1,0 +1,77 @@
+{
+  "parent": {
+    "navLabel": "부모님용 내비게이션",
+    "skipToContent": "내비게이션 건너뛰기, 콘텐츠로 이동",
+    "dashboard": "개요",
+    "myBooks": "내 책",
+    "reports": "진도",
+    "readingManagement": "읽기 관리",
+    "sessions": "기록",
+    "sessionsLong": "읽기 기록",
+    "entertainment": "엔터테인먼트",
+    "difficultWords": "연습이 필요한 단어",
+    "children": "자녀 프로필",
+    "parentProfile": "부모님 프로필",
+    "parentProfileLong": "부모님 프로필",
+    "settings": "설정",
+    "helpSupport": "도움말 및 지원",
+    "moreTitle": "기타 기능",
+    "booksShort": "책",
+    "scannerShort": "스캔",
+    "moreButton": "더 보기",
+    "mobileAriaLabel": "모바일 빠른 내비게이션",
+    "moreDescriptions": {
+      "myBooks": "가족용 도서 업로드 및 관리",
+      "readingManagement": "자녀의 목표, 읽기 일정 및 저장된 책",
+      "sessions": "완료된 읽기 세션 검토",
+      "entertainment": "언어 게임, 스토리텔링 및 노래방",
+      "difficultWords": "자녀가 자주 틀리는 단어 연습"
+    }
+  },
+  "admin": {
+    "navLabel": "관리자 내비게이션",
+    "skipToContent": "내비게이션 건너뛰기, 관리자 콘텐츠로 이동",
+    "badge": "관리자",
+    "karaoke": "노래",
+    "parents": "부모님",
+    "books": "도서관",
+    "metadataQuality": "도서 품질",
+    "auditLogs": "감사 로그",
+    "training": "OCR 학습",
+    "health": "운영",
+    "moreTitle": "기타 관리",
+    "mobileQualityShort": "품질",
+    "mobileOcrShort": "OCR",
+    "mobileMoreDescriptions": {
+      "auditLogs": "관리자 감사 로그 추적",
+      "training": "VietOCR V2 모델 학습 및 운영",
+      "health": "시스템 상태, OCR 워커 및 음성"
+    }
+  },
+  "accountMenu": {
+    "openAria": "계정 메뉴 열기",
+    "closeAria": "계정 메뉴 닫기",
+    "menuAria": "ViRead 계정 메뉴",
+    "shortMenuAria": "계정 메뉴",
+    "accountNavAria": "ViRead 계정",
+    "profileSection": "프로필",
+    "accountSection": "계정",
+    "helpSection": "도움말",
+    "sessionSection": "세션",
+    "defaultAccountLabel": "ViRead 계정"
+  },
+  "childSwitcher": {
+    "selectedAria": "선택된 자녀: {alias}, 변경하려면 누르세요",
+    "openAria": "자녀 빠른 전환",
+    "compactLabel": "{alias} · {grade}학년",
+    "selectChild": "자녀 선택",
+    "listAria": "자녀 프로필 빠른 전환",
+    "gradeLabel": "· {grade}학년",
+    "manageChildren": "자녀 프로필 관리"
+  },
+  "footer": {
+    "ariaLabel": "ViRead 정보",
+    "logoDashboardAria": "ViRead - 대시보드로 이동",
+    "logoHomeAria": "ViRead - 홈으로 이동"
+  }
+}

@@ -13,6 +13,7 @@ import { z } from "zod";
 import { requestApi, unavailableOperation } from "@/lib/api/api-client";
 import { isServiceError, ServiceError } from "@/lib/api/service-error";
 import { adminRevisionDetailSchema } from "@/lib/api/ocr-review-service";
+import { translateRuntime } from "@/lib/i18n/runtime";
 
 export const adminOcrJobStatusSchema = z.enum([
   "QUEUED",
@@ -337,7 +338,7 @@ async function fetchRevisionForCompletedJob(
       retryable: job.status !== "CANCELLED",
       message:
         job.error_message ||
-        "Tác vụ OCR chưa hoàn tất. Hãy kiểm tra máy chủ OCR Windows rồi thử lại.",
+        translateRuntime("admin.pageUploadRuntime.ocrTaskIncomplete"),
     });
   }
   if (job.status !== "SUCCEEDED") {
@@ -346,8 +347,7 @@ async function fetchRevisionForCompletedJob(
       status: 503,
       request_id: job.id,
       retryable: true,
-      message:
-        "Ảnh trang đã được xếp hàng chờ máy chủ OCR Windows xử lý. Bạn có thể làm mới lại sau khi máy chủ OCR hoàn tất.",
+      message: translateRuntime("admin.pageUploadRuntime.ocrTaskQueuedWindows"),
     });
   }
   const targetPageId = job.page_id ?? pageId;
@@ -456,13 +456,24 @@ function formatDocumentSummary(
 ): string {
   const notes: string[] = [];
   if (response.skipped_empty_count > 0) {
-    notes.push(`bỏ qua ${response.skipped_empty_count} trang trắng`);
+    notes.push(
+      translateRuntime("admin.pageUploadRuntime.skippedEmptyNote", {
+        count: response.skipped_empty_count,
+      }),
+    );
   }
   if (response.failed_pages_count > 0) {
-    notes.push(`lỗi ${response.failed_pages_count} trang`);
+    notes.push(
+      translateRuntime("admin.pageUploadRuntime.failedPagesNote", {
+        count: response.failed_pages_count,
+      }),
+    );
   }
   const suffix = notes.length > 0 ? ` (${notes.join(", ")})` : "";
-  return `Đã tạo ${response.created_pages_count} trang · Cần duyệt${suffix}`;
+  return translateRuntime("admin.pageUploadRuntime.createdPagesSummary", {
+    count: response.created_pages_count,
+    suffix,
+  });
 }
 
 export function createAdminPageService(options?: {
@@ -591,7 +602,10 @@ export function createAdminPageService(options?: {
                   created_pages_count: enqueued.queued_count,
                   skipped_empty_count: 0,
                   failed_pages_count: 0,
-                  summary_message: `Đã xếp hàng ${enqueued.queued_count} trang chờ máy chủ OCR Windows bật`,
+                  summary_message: translateRuntime(
+                    "admin.pageUploadRuntime.queuedDocPagesForWorker",
+                    { count: enqueued.queued_count },
+                  ),
                 });
               } else {
                 const jobsToPoll =
@@ -652,8 +666,21 @@ export function createAdminPageService(options?: {
                   failed_pages_count: failedCount,
                   summary_message:
                     pendingCount > 0
-                      ? `Hoàn tất ${completedCount}/${enqueued.queued_count} trang (${pendingCount} trang đang tiếp tục xếp hàng OCR)`
-                      : `Đã hoàn tất OCR ${completedCount}/${enqueued.queued_count} trang · Cần duyệt`,
+                      ? translateRuntime(
+                          "admin.pageUploadRuntime.docPagesPartialProgress",
+                          {
+                            completed: completedCount,
+                            total: enqueued.queued_count,
+                            pending: pendingCount,
+                          },
+                        )
+                      : translateRuntime(
+                          "admin.pageUploadRuntime.docPagesComplete",
+                          {
+                            completed: completedCount,
+                            total: enqueued.queued_count,
+                          },
+                        ),
                 });
               }
             } catch (docError) {
@@ -690,8 +717,12 @@ export function createAdminPageService(options?: {
                 status: "PROCESSING",
                 summary_message:
                   job.status === "QUEUED"
-                    ? "Đã xếp hàng chờ máy chủ OCR Windows xử lý"
-                    : "Đang nhận diện OCR trang sách…",
+                    ? translateRuntime(
+                        "admin.pageUploadRuntime.singlePageQueued",
+                      )
+                    : translateRuntime(
+                        "admin.pageUploadRuntime.singlePageRecognizing",
+                      ),
               });
               const finalJob = await pollAdminOcrJob(job, {
                 pollIntervalMs,
@@ -708,7 +739,9 @@ export function createAdminPageService(options?: {
                   status: "FAILED",
                   error_message:
                     finalJob.error_message ||
-                    "Tác vụ OCR trang sách chưa hoàn tất. Vui lòng thử lại.",
+                    translateRuntime(
+                      "admin.pageUploadRuntime.singlePageFailed",
+                    ),
                 });
               } else {
                 onProgress?.({
@@ -718,8 +751,12 @@ export function createAdminPageService(options?: {
                   status: "PROCESSING",
                   summary_message:
                     finalJob.status === "SUCCEEDED"
-                      ? "Đã nhận diện OCR · Cần duyệt"
-                      : "Đã xếp hàng an toàn chờ máy chủ OCR Windows hoàn tất",
+                      ? translateRuntime(
+                          "admin.pageUploadRuntime.singlePageSucceeded",
+                        )
+                      : translateRuntime(
+                          "admin.pageUploadRuntime.singlePageWaitingWorker",
+                        ),
                 });
               }
             } catch (pageJobError) {
@@ -746,7 +783,9 @@ export function createAdminPageService(options?: {
             status: "FAILED",
             error_message: isServiceError(cause)
               ? cause.message
-              : "Upload thất bại. Hãy kiểm tra Backend và thử lại.",
+              : translateRuntime(
+                  "admin.pageUploadRuntime.uploadFailedCheckBackend",
+                ),
           });
         }
       }

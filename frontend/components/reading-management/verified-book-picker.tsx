@@ -14,6 +14,7 @@ import { BookCover } from "@/components/books/book-cover";
 import { Button } from "@/components/common/button";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
+import { useTranslations } from "@/hooks/use-i18n";
 import type { BookListItemDTO } from "@/types/book";
 import type {
   BookCollectionType,
@@ -24,14 +25,14 @@ const PAGE_SIZE = 5;
 const collectionActions = [
   {
     type: "FAVORITE",
-    label: "Yêu thích",
-    activeLabel: "Đã yêu thích",
+    labelKey: "readingManagement.bookPicker.favorite",
+    activeLabelKey: "readingManagement.bookPicker.favorited",
     icon: Heart,
   },
   {
     type: "WANT_TO_READ",
-    label: "Muốn đọc",
-    activeLabel: "Đã lưu đọc",
+    labelKey: "readingManagement.bookPicker.wantToRead",
+    activeLabelKey: "readingManagement.bookPicker.savedToRead",
     icon: ListChecks,
   },
 ] as const;
@@ -60,6 +61,7 @@ export function VerifiedBookPicker({
   onToggle: (bookId: string, type: BookCollectionType) => void;
   onReload: () => void;
 }) {
+  const t = useTranslations("reports");
   const [expanded, setExpanded] = useState(books === null);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -85,39 +87,44 @@ export function VerifiedBookPicker({
     >
       <summary className="flex min-h-12 cursor-pointer list-none items-center gap-2 rounded-control px-1 font-semibold text-primary hover:bg-sky/45 [&::-webkit-details-marker]:hidden">
         <BookOpen aria-hidden="true" className="size-4 shrink-0" />
-        Thêm từ thư viện sách đã xác minh
+        {t("readingManagement.bookPicker.heading")}
         <ChevronDown
           aria-hidden="true"
-          className="ml-auto size-4 shrink-0 group-open/catalog:rotate-180"
+          className="ms-auto size-4 shrink-0 group-open/catalog:rotate-180"
         />
       </summary>
       {books === null ? (
-        <StatusMessage tone="error" title="Chưa tải được thư viện sách">
+        <StatusMessage
+          tone="error"
+          title={t("readingManagement.bookPicker.loadErrorTitle")}
+        >
           <Button
             className="mt-2 w-auto!"
             size="compact"
             variant="secondary"
             onClick={onReload}
           >
-            Tải lại thư viện
+            {t("readingManagement.bookPicker.reloadLibrary")}
           </Button>
         </StatusMessage>
       ) : books.length === 0 ? (
         <p className="rounded-control bg-cream p-3 text-sm text-muted">
-          Hiện chưa có sách khả dụng phù hợp với lớp của bé.
+          {t("readingManagement.bookPicker.emptyEligible")}
         </p>
       ) : (
         <>
           <label className="relative mt-2 block">
-            <span className="sr-only">Tìm theo tên sách hoặc tác giả</span>
+            <span className="sr-only">
+              {t("readingManagement.bookPicker.searchSr")}
+            </span>
             <Search
               aria-hidden="true"
-              className="pointer-events-none absolute left-3 top-3 size-4 text-muted"
+              className="pointer-events-none absolute start-3 top-3 size-4 text-muted"
             />
             <input
-              className="min-h-10 w-full rounded-control border border-border bg-cream py-2 pl-9 pr-3 text-sm text-ink"
+              className="min-h-10 w-full rounded-control border border-border bg-cream py-2 ps-9 pe-3 text-sm text-ink"
               type="search"
-              placeholder="Tên sách hoặc tác giả"
+              placeholder={t("readingManagement.bookPicker.searchPlaceholder")}
               value={query}
               onChange={(event) => {
                 setQuery(event.target.value);
@@ -127,8 +134,12 @@ export function VerifiedBookPicker({
           </label>
           <p className="mt-3 text-sm text-muted" role="status">
             {matches.length
-              ? `${(activePage - 1) * PAGE_SIZE + 1}–${(activePage - 1) * PAGE_SIZE + visible.length} / ${matches.length} cuốn`
-              : "Không tìm thấy sách phù hợp."}
+              ? t("readingManagement.bookPicker.rangeSummary", {
+                  from: (activePage - 1) * PAGE_SIZE + 1,
+                  to: (activePage - 1) * PAGE_SIZE + visible.length,
+                  total: matches.length,
+                })
+              : t("readingManagement.bookPicker.noMatches")}
           </p>
           <ul className="divide-y divide-border">
             {visible.map((book) => (
@@ -143,25 +154,45 @@ export function VerifiedBookPicker({
                   className="row-span-2 self-start"
                 />
                 <div className="min-w-0">
-                  <h4 className="break-words text-base font-bold leading-tight text-ink">
+                  <h4
+                    className="viread-learning-content break-words text-base font-bold leading-tight text-ink"
+                    dir="ltr"
+                    lang="vi"
+                  >
                     {book.title}
                   </h4>
                   <p className="mt-1 break-words text-sm text-muted">
-                    {book.author || "Tác giả đang cập nhật"} ·{" "}
+                    {book.author ? (
+                      <span
+                        className="viread-learning-content"
+                        dir="ltr"
+                        lang="vi"
+                      >
+                        {book.author}
+                      </span>
+                    ) : (
+                      t("readingManagement.bookPicker.authorPending")
+                    )}{" "}
+                    ·{" "}
                     {book.min_grade === book.max_grade
-                      ? `Lớp ${book.min_grade}`
-                      : `Lớp ${book.min_grade}–${book.max_grade}`}
+                      ? t("readingManagement.bookPicker.gradeSingle", {
+                          grade: book.min_grade,
+                        })
+                      : t("readingManagement.bookPicker.gradeRange", {
+                          min: book.min_grade,
+                          max: book.max_grade,
+                        })}
                   </p>
                 </div>
                 <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                   {collectionActions.map(
-                    ({ type, label, activeLabel, icon: Icon }) => {
+                    ({ type, labelKey, activeLabelKey, icon: Icon }) => {
                       const selected = collections.some(
                         (entry) =>
                           entry.book_id === book.id &&
                           entry.collection_type === type,
                       );
-                      const text = selected ? activeLabel : label;
+                      const text = t(selected ? activeLabelKey : labelKey);
                       return (
                         <button
                           key={type}
@@ -182,14 +213,16 @@ export function VerifiedBookPicker({
                     },
                   )}
                   <Link
-                    aria-label={`Mở sách ${book.title}`}
+                    aria-label={t("readingManagement.bookPicker.openBookAria", {
+                      title: book.title,
+                    })}
                     href={`/books/${encodeURIComponent(book.id)}?childId=${encodeURIComponent(childId)}`}
                     className="inline-flex min-h-9 items-center gap-1 rounded-control px-2 text-sm font-bold text-primary hover:bg-sky"
                   >
-                    Mở sách{" "}
+                    {t("readingManagement.bookPicker.openBook")}{" "}
                     <ArrowUpRight
                       aria-hidden="true"
-                      className="size-4 shrink-0"
+                      className="viread-rtl-flip size-4 shrink-0"
                     />
                   </Link>
                 </div>
@@ -197,10 +230,10 @@ export function VerifiedBookPicker({
             ))}
           </ul>
           <PaginationBar
-            ariaLabel="Trang thư viện sách"
+            ariaLabel={t("readingManagement.bookPicker.paginationAria")}
             className="mt-2"
             compact
-            itemLabel="cuốn"
+            itemLabel={t("readingManagement.bookPicker.paginationItem")}
             onPageChange={setPage}
             page={activePage}
             pageSize={PAGE_SIZE}

@@ -10,6 +10,7 @@ import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
 import {
   FLOW2_REJECTION_CODE_LABELS,
@@ -20,16 +21,19 @@ import {
 } from "@/types/parent-private-book";
 
 const STATUS_FILTERS: readonly {
-  key: "" | Flow2CandidateStatus;
-  label: string;
+  readonly key: "" | Flow2CandidateStatus;
+  readonly labelKey: string;
 }[] = [
-  { key: "", label: "Tất cả" },
-  { key: "PENDING_VERIFICATION", label: "Chờ xác minh mẫu" },
-  { key: "VERIFIED", label: "Đã xác minh" },
-  { key: "SYNC_QUEUED", label: "Chờ đồng bộ Drive" },
-  { key: "SYNCED", label: "Đã đồng bộ Flow 2" },
-  { key: "REJECTED", label: "Đã từ chối" },
-  { key: "REVOKED", label: "Đã thu hồi" },
+  { key: "", labelKey: "common.all" },
+  {
+    key: "PENDING_VERIFICATION",
+    labelKey: "flow2.filters.PENDING_VERIFICATION",
+  },
+  { key: "VERIFIED", labelKey: "statusBadges.VERIFIED" },
+  { key: "SYNC_QUEUED", labelKey: "flow2.filters.SYNC_QUEUED" },
+  { key: "SYNCED", labelKey: "flow2.filters.SYNCED" },
+  { key: "REJECTED", labelKey: "flow2.filters.REJECTED" },
+  { key: "REVOKED", labelKey: "flow2.filters.REVOKED" },
 ];
 
 const REJECTION_CODES = Object.keys(
@@ -38,6 +42,8 @@ const REJECTION_CODES = Object.keys(
 
 export function AdminFlow2CandidatesPanel() {
   const { bookContentQuality } = useAdminServices();
+  const t = useTranslations("admin");
+  const { formatNumber } = useI18n();
   const FLOW2_PAGE_SIZE = 50;
   const [statusFilter, setStatusFilter] = useState<"" | Flow2CandidateStatus>(
     "PENDING_VERIFICATION",
@@ -116,11 +122,7 @@ export function AdminFlow2CandidatesPanel() {
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(
-          isServiceError(err)
-            ? err.message
-            : "Không thể tải danh sách ứng viên mẫu OCR Flow 2.",
-        );
+        setError(isServiceError(err) ? err.message : t("flow2.loadError"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -128,7 +130,7 @@ export function AdminFlow2CandidatesPanel() {
     return () => {
       cancelled = true;
     };
-  }, [bookContentQuality, offset, statusFilter, reloadKey]);
+  }, [bookContentQuality, offset, statusFilter, reloadKey, t]);
 
   async function handleApprove() {
     if (!selected || !bookContentQuality.decideFlow2Candidate) return;
@@ -140,13 +142,11 @@ export function AdminFlow2CandidatesPanel() {
         decision: "APPROVE",
         verified_label: labelDraft.trim(),
       });
-      setActionNotice(
-        "Đã xác minh nhãn mẫu OCR và đưa vào hàng đợi outbox đồng bộ lên Google Drive (Flow 2).",
-      );
+      setActionNotice(t("flow2.verifiedNotice"));
       reload();
     } catch (err) {
       setActionError(
-        isServiceError(err) ? err.message : "Không thể xác nhận mẫu OCR này.",
+        isServiceError(err) ? err.message : t("flow2.verifyError"),
       );
     } finally {
       setBusy(false);
@@ -163,13 +163,13 @@ export function AdminFlow2CandidatesPanel() {
         decision: "REJECT",
         rejection_code: rejectionCode,
         reason:
-          rejectionReason.trim() || FLOW2_REJECTION_CODE_LABELS[rejectionCode],
+          rejectionReason.trim() || t(`flow2.rejectionCodes.${rejectionCode}`),
       });
-      setActionNotice("Đã từ chối mẫu OCR và ghi nhận lý do vào audit log.");
+      setActionNotice(t("flow2.rejectedNotice"));
       reload();
     } catch (err) {
       setActionError(
-        isServiceError(err) ? err.message : "Không thể từ chối mẫu OCR này.",
+        isServiceError(err) ? err.message : t("flow2.rejectError"),
       );
     } finally {
       setBusy(false);
@@ -209,7 +209,7 @@ export function AdminFlow2CandidatesPanel() {
                 }}
                 type="button"
               >
-                {f.label} ({count})
+                {t(f.labelKey)} ({formatNumber(count)})
               </button>
             );
           })}
@@ -222,31 +222,26 @@ export function AdminFlow2CandidatesPanel() {
           variant="secondary"
         >
           <RefreshCw aria-hidden="true" className="size-3.5" />
-          Làm mới
+          {t("common.refresh")}
         </Button>
       </div>
 
-      <p className="text-xs text-muted">
-        Đối chiếu trực tiếp <strong>ảnh cắt dòng chữ</strong> với{" "}
-        <strong>nhãn NFC tiếng Việt</strong> (giữ đúng dấu thanh, chữ đ/Đ, dấu
-        câu và thứ tự). Không hiển thị email phụ huynh hay hồ sơ trẻ để bảo vệ
-        quyền riêng tư.
-      </p>
+      <p className="text-xs text-muted">{t("flow2.privacyBanner")}</p>
 
       {error ? (
-        <StatusMessage title="Lỗi tải hàng đợi" tone="error">
+        <StatusMessage title={t("flow2.queueErrorTitle")} tone="error">
           {error}
         </StatusMessage>
       ) : null}
 
       {actionError ? (
-        <StatusMessage title="Thao tác chưa hoàn tất" tone="error">
+        <StatusMessage title={t("flow2.actionErrorTitle")} tone="error">
           {actionError}
         </StatusMessage>
       ) : null}
 
       {actionNotice ? (
-        <StatusMessage title="Đã xử lý mẫu OCR" tone="success">
+        <StatusMessage title={t("flow2.successTitle")} tone="success">
           {actionNotice}
         </StatusMessage>
       ) : null}
@@ -255,8 +250,8 @@ export function AdminFlow2CandidatesPanel() {
         <Skeleton className="h-48 w-full rounded-card" />
       ) : !page || page.items.length === 0 ? (
         <EmptyState
-          description="Chưa có mẫu dòng chữ nào ở trạng thái này."
-          title="Hàng đợi xác minh mẫu OCR trống"
+          description={t("flow2.emptyDesc")}
+          title={t("flow2.emptyTitle")}
         />
       ) : (
         <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
@@ -267,7 +262,7 @@ export function AdminFlow2CandidatesPanel() {
                 return (
                   <button
                     key={item.id}
-                    className={`flex flex-col items-start gap-1 rounded-control border p-3 text-left text-xs transition ${
+                    className={`flex flex-col items-start gap-1 rounded-control border p-3 text-start text-xs transition ${
                       isSelected
                         ? "border-primary bg-sky/40"
                         : "border-border bg-white hover:bg-surface-subtle"
@@ -280,10 +275,17 @@ export function AdminFlow2CandidatesPanel() {
                         {item.book_title}
                       </span>
                       <span className="shrink-0 font-mono text-[11px] text-muted">
-                        Tr.{item.page_number} · Dòng {item.line_index + 1}
+                        {t("flow2.itemTitle", {
+                          pageNumber: item.page_number,
+                          lineNumber: item.line_index + 1,
+                        })}
                       </span>
                     </div>
-                    <p className="line-clamp-2 text-ink">
+                    <p
+                      className="viread-learning-content line-clamp-2 text-ink"
+                      dir="ltr"
+                      lang="vi"
+                    >
                       {item.proposed_label}
                     </p>
                     <span className="text-[11px] text-muted">
@@ -294,10 +296,10 @@ export function AdminFlow2CandidatesPanel() {
               })}
             </div>
             <PaginationBar
-              ariaLabel="Phân trang ứng viên mẫu OCR Flow 2"
+              ariaLabel={t("flow2.paginationAria")}
               compact
               disabled={loading || busy}
-              itemLabel="mẫu"
+              itemLabel={t("flow2.itemLabel")}
               onPageChange={(nextPage) => {
                 setLoading(true);
                 setOffset((nextPage - 1) * FLOW2_PAGE_SIZE);
@@ -313,15 +315,18 @@ export function AdminFlow2CandidatesPanel() {
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
                 <div>
                   <h3 className="text-base font-extrabold text-ink">
-                    {selected.book_title} · Trang {selected.page_number} · Dòng{" "}
-                    {selected.line_index + 1}
+                    {t("flow2.selectedHeader", {
+                      title: selected.book_title,
+                      pageNumber: selected.page_number,
+                      lineNumber: selected.line_index + 1,
+                    })}
                   </h3>
                   <p className="mt-0.5 text-xs text-muted">
-                    Căn cứ quyền: <strong>{selected.rights_basis_label}</strong>{" "}
-                    · Phiên bản đồng ý #{selected.consent_version} · SHA-256:{" "}
-                    <span className="font-mono">
-                      {selected.image_sha256.slice(0, 12)}
-                    </span>
+                    {t("flow2.rightsMeta", {
+                      rights: selected.rights_basis_label,
+                      consentVersion: selected.consent_version,
+                      sha: selected.image_sha256.slice(0, 12),
+                    })}
                   </p>
                 </div>
                 <span className="rounded-full border border-border bg-surface-subtle px-2.5 py-0.5 text-xs font-bold text-ink">
@@ -333,17 +338,22 @@ export function AdminFlow2CandidatesPanel() {
                 <div className="flex items-center gap-2 rounded-control border border-rose-300 bg-rose-50 p-3 text-xs text-rose-900">
                   <ShieldAlert aria-hidden="true" className="size-4 shrink-0" />
                   <span>
-                    Phát hiện dấu hiệu PII: {selected.pii_flags.join(", ")}
+                    {t("flow2.piiWarning", {
+                      flags: selected.pii_flags.join(", "),
+                    })}
                   </span>
                 </div>
               ) : null}
 
               <div className="rounded-control border border-border bg-slate-50 p-4">
                 <p className="mb-2 text-xs font-bold text-muted">
-                  Ảnh cắt dòng chữ (so khớp trực tiếp từng ký tự in trên ảnh)
+                  {t("flow2.cropHeading")}
                 </p>
                 <AuthenticatedImage
-                  alt={`Ảnh cắt dòng ${selected.line_index + 1} trang ${selected.page_number}`}
+                  alt={t("flow2.cropAlt", {
+                    lineNumber: selected.line_index + 1,
+                    pageNumber: selected.page_number,
+                  })}
                   className="max-h-40 w-auto max-w-full rounded border border-border bg-white object-contain"
                   src={selected.crop_image_url}
                 />
@@ -354,21 +364,22 @@ export function AdminFlow2CandidatesPanel() {
                   className="text-xs font-bold text-ink"
                   htmlFor="flow2-verified-label-input"
                 >
-                  Nhãn dòng chữ chính xác theo chữ in thật trên ảnh (NFC tiếng
-                  Việt)
+                  {t("flow2.labelInputHeading")}
                 </label>
                 <input
                   id="flow2-verified-label-input"
-                  className="w-full rounded-control border border-border bg-white px-3 py-2 text-sm font-medium text-ink focus:border-primary focus:outline-none"
+                  className="viread-learning-content w-full rounded-control border border-border bg-white px-3 py-2 text-sm font-medium text-ink focus:border-primary focus:outline-none"
+                  dir="ltr"
                   disabled={busy || selected.status !== "PENDING_VERIFICATION"}
+                  lang="vi"
                   onChange={(event) => setLabelDraft(event.target.value)}
                   type="text"
                   value={labelDraft}
                 />
                 <p className="text-[11px] text-muted">
-                  OCR/AI chỉ đề xuất: <code>{selected.proposed_label}</code>.
-                  Nếu chữ in trên ảnh khác đề xuất, hãy sửa đúng theo chữ thật
-                  trên ảnh hoặc từ chối nếu ảnh mờ/cắt cụt.
+                  {t("flow2.proposedHint", {
+                    proposed: selected.proposed_label,
+                  })}
                 </p>
               </div>
 
@@ -383,18 +394,18 @@ export function AdminFlow2CandidatesPanel() {
                     >
                       <CheckCircle2 aria-hidden="true" className="size-4" />
                       {busy
-                        ? "Đang xử lý..."
-                        : "Xác nhận nhãn (Đạt · Đẩy đồng bộ)"}
+                        ? t("flow2.verifySubmitting")
+                        : t("flow2.verifySubmit")}
                     </Button>
                   </div>
 
                   <div className="flex flex-col gap-2 rounded-control border border-rose-200 bg-rose-50/50 p-3">
                     <p className="text-xs font-bold text-rose-900">
-                      Hoặc từ chối mẫu này
+                      {t("flow2.rejectSectionTitle")}
                     </p>
                     <div className="grid gap-2 sm:grid-cols-2">
                       <select
-                        aria-label="Mã lý do từ chối"
+                        aria-label={t("flow2.rejectCodeAria")}
                         className="rounded-control border border-border bg-white px-2.5 py-2 text-xs text-ink"
                         disabled={busy}
                         onChange={(event) =>
@@ -406,18 +417,18 @@ export function AdminFlow2CandidatesPanel() {
                       >
                         {REJECTION_CODES.map((code) => (
                           <option key={code} value={code}>
-                            {FLOW2_REJECTION_CODE_LABELS[code]}
+                            {t(`flow2.rejectionCodes.${code}`)}
                           </option>
                         ))}
                       </select>
                       <input
-                        aria-label="Ghi chú từ chối"
+                        aria-label={t("flow2.rejectNotesAria")}
                         className="rounded-control border border-border bg-white px-2.5 py-2 text-xs text-ink"
                         disabled={busy}
                         onChange={(event) =>
                           setRejectionReason(event.target.value)
                         }
-                        placeholder="Ghi chú thêm (không bắt buộc)"
+                        placeholder={t("flow2.rejectNotesPlaceholder")}
                         type="text"
                         value={rejectionReason}
                       />
@@ -431,18 +442,20 @@ export function AdminFlow2CandidatesPanel() {
                         variant="secondary"
                       >
                         <XCircle aria-hidden="true" className="size-3.5" />
-                        Từ chối mẫu
+                        {t("flow2.rejectSubmit")}
                       </Button>
                     </div>
                   </div>
                 </div>
               ) : selected.rejection_reason ? (
                 <p className="text-xs text-rose-800">
-                  <strong>Lý do từ chối:</strong> {selected.rejection_reason}
+                  <strong>{t("flow2.rejectionReasonLabel")}</strong>{" "}
+                  {selected.rejection_reason}
                 </p>
               ) : selected.revoke_reason ? (
                 <p className="text-xs text-amber-800">
-                  <strong>Lý do thu hồi:</strong> {selected.revoke_reason}
+                  <strong>{t("flow2.revokeReasonLabel")}</strong>{" "}
+                  {selected.revoke_reason}
                 </p>
               ) : null}
             </div>

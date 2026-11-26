@@ -1,0 +1,117 @@
+{
+  "recorder": {
+    "permissionRequired": "Cần cấp quyền micro để ghi âm giọng đọc của bé.",
+    "recording": "Đang lắng nghe bé đọc…",
+    "processing": "Đang phân tích phát âm…",
+    "playback": "Nghe lại giọng đọc"
+  },
+  "preferences": {
+    "title": "Tùy chọn giọng đọc",
+    "voiceSpeed": "Tốc độ đọc mẫu",
+    "autoRead": "Tự động đọc mẫu khi mở trang",
+    "slow": "Chậm",
+    "normal": "Vừa",
+    "fast": "Nhanh"
+  },
+  "status": {
+    "micReady": "Micro sẵn sàng",
+    "micMuted": "Micro đang tắt",
+    "ttsReady": "Giọng đọc mẫu sẵn sàng"
+  },
+  "settings": {
+    "buttonLabel": "Giọng đọc",
+    "modalTitle": "Giọng đọc mẫu",
+    "savedVoice": "Giọng đã lưu",
+    "defaultVoice": "Giọng mặc định",
+    "localOnlyMode": "Chỉ máy này",
+    "localWithGoogleMode": "Máy này + Google dự phòng",
+    "speedLabel": "Tốc độ đọc",
+    "regionAndVoiceTitle": "Chọn vùng miền & giọng đọc",
+    "regionAria": "Chọn vùng miền",
+    "filterAria": "Lọc giọng đọc",
+    "allVoices": "Tất cả giọng đọc",
+    "maleVoice": "Giọng nam",
+    "femaleVoice": "Giọng nữ",
+    "youngVoice": "Giọng trẻ trung",
+    "childVoice": "Giọng trẻ em",
+    "loadingVoices": "Đang tải danh sách giọng…",
+    "loadErrorFallback": "Chưa tải được danh sách giọng. Giọng mặc định vẫn dùng được.",
+    "retry": "Thử lại",
+    "emptyVoices": "Chưa có giọng đọc trong danh sách. Bé có thể dùng giọng mặc định trên máy này.",
+    "emptyFiltered": "Không có giọng phù hợp với bộ lọc.",
+    "parentModeTitle": "Chế độ xử lý giọng nói (Dành cho phụ huynh)",
+    "localAvailable": "Sẵn sàng",
+    "localUnavailable": "Chưa bật",
+    "googleConfigured": "Đã cấu hình",
+    "googleUnconfigured": "Chưa cấu hình key",
+    "localOnlyTitle": "Chỉ máy này",
+    "localOnlyDesc": "Chạy 100% nội bộ (máy chủ + trình duyệt), không gọi Google",
+    "localWithGoogleTitle": "Máy này + Google dự phòng",
+    "localWithGoogleDesc": "Ưu tiên local, bật tự động chuyển Online dự phòng",
+    "googleSttFallback": "Dự phòng Google cho Nhận diện giọng nói (STT)",
+    "googleTtsFallback": "Dự phòng Google cho Đọc mẫu (TTS)",
+    "missingGoogleKeyHint": "Khi máy chủ chưa cấu hình khóa Google Cloud API, ViRead sẽ tự động dùng Google/Trình duyệt Online làm dự phòng.",
+    "useDefaultVoice": "Dùng giọng mặc định",
+    "preview": "Nghe thử",
+    "stopPreview": "Dừng nghe thử",
+    "previewFailed": "Chưa phát được giọng đọc. Bé thử lại hoặc chọn giọng khác nhé.",
+    "savedVoiceResetNotice": "Giọng đã lưu trước đây không còn khả dụng, ViRead đã chuyển về giọng mặc định để phụ huynh kiểm tra lại.",
+    "regions": {
+      "all": "Tất cả vùng",
+      "north": "Miền Bắc",
+      "central": "Miền Trung",
+      "south": "Miền Nam"
+    },
+    "genders": {
+      "female": "Nữ",
+      "male": "Nam"
+    },
+    "ageGroups": {
+      "young": "Trẻ trung",
+      "child": "Giọng trẻ em",
+      "middle_aged": "Trung niên",
+      "old": "Lớn tuổi"
+    },
+    "accents": {
+      "northern": "Giọng Bắc",
+      "southern": "Giọng Nam",
+      "central": "Giọng Trung",
+      "american": "Giọng Mỹ",
+      "british": "Giọng Anh"
+    },
+    "googleProviderLabel": "Google dự phòng"
+  },
+  "engineBadge": {
+    "ariaLabel": "Nguồn giọng nói: STT {stt}, TTS {tts}",
+    "fallbackDetail": "{base} (Dự phòng: {reason})",
+    "androidDetail": "{base} (Thiết bị · Giọng Android vi-VN)",
+    "catalogCacheDetail": "{base} (Cache chuẩn · Đọc mẫu 0 độ trễ)",
+    "googleCloudDetail": "{base} (Online · Đang dùng dự phòng Google Cloud API)",
+    "browserDefaultDetail": "{base} (Online · Dự phòng Google/Trình duyệt)",
+    "wasmDetail": "{base} (Offline · Nhận diện trên thiết bị bằng WASM)",
+    "localDetail": "{base} (Offline · Chạy trực tiếp trên máy này)",
+    "shortLabels": {
+      "local_offline": "Offline",
+      "browser_wasm": "Offline (WASM)",
+      "catalog_cache": "Cache chuẩn",
+      "android_native": "Android (vi-VN)",
+      "google_cloud": "Online (Google API)",
+      "browser_default": "Online (Google/Trình duyệt)"
+    }
+  },
+  "playback": {
+    "unavailable": "Giọng đọc trên máy hiện chưa sẵn sàng. Ba mẹ và bé có thể xem chữ trên màn hình và bấm Thử lại nhé.",
+    "lockedVoiceUnavailableNotice": "Giọng đọc đã khóa đang tạm bận. ViRead giữ nguyên hướng dẫn bằng chữ để không tự đổi giọng khác — bé bấm Thử lại nhé.",
+    "serverFallbackNotice": "Giọng đã chọn hiện chưa khả dụng, hệ thống đang đọc bằng giọng dự phòng.",
+    "androidNativeFallbackNotice": "Giọng đọc trên máy chủ chưa bật — ViRead đang dùng giọng tiếng Việt trên thiết bị Android.",
+    "browserFallbackNotice": "Giọng đọc trên máy chưa bật — ViRead đang dùng giọng Online của trình duyệt.",
+    "autoplayBlocked": "Trình duyệt đang chờ bé chạm nút Nghe lại để bật âm thanh.",
+    "partialPlayback": "Âm thanh bị gián đoạn. Bé có thể nghe lại từ đầu nhé."
+  },
+  "wasm": {
+    "workerUnavailable": "Web Worker không khả dụng",
+    "wasmUnavailable": "WebAssembly không khả dụng",
+    "cryptoUnavailable": "Web Crypto API không khả dụng",
+    "deviceUnsupported": "WASM STT không khả dụng trên thiết bị."
+  }
+}
