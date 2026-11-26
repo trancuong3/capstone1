@@ -9,23 +9,13 @@ import { AdminPageHeader } from "@/components/admin/admin-ui";
 import { AdminUserBooksQualitySection } from "@/components/admin/admin-user-books-quality-section";
 import { Button } from "@/components/common/button";
 import { useTranslations } from "@/hooks/use-i18n";
+import {
+  parseQualityHubTab,
+  type QualityHubTab,
+} from "@/lib/admin/quality-hub-tab";
 import { cn } from "@/lib/utils/cn";
 
-export type QualityHubTab = "metadata" | "reports" | "approval" | "user-books";
-
-const VALID_TABS: readonly QualityHubTab[] = [
-  "metadata",
-  "reports",
-  "approval",
-  "user-books",
-];
-
-export function parseQualityHubTab(value?: string | null): QualityHubTab {
-  if (value && (VALID_TABS as readonly string[]).includes(value)) {
-    return value as QualityHubTab;
-  }
-  return "metadata";
-}
+export { parseQualityHubTab, type QualityHubTab };
 
 export interface AdminQualityHubScreenProps {
   readonly initialTab?: QualityHubTab;

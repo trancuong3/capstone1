@@ -348,34 +348,42 @@ describe("LocalSegmentSpeechRecognition 503 Offline -> Online browser fallback",
 
     const voiced = new Float32Array(640).fill(0.05);
     const silent = new Float32Array(640).fill(0);
-    for (let i = 0; i < 10; i += 1) internal.consumeSamples16k(voiced);
-    for (let i = 0; i < 20; i += 1) internal.consumeSamples16k(silent);
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    try {
+      for (let i = 0; i < 10; i += 1) internal.consumeSamples16k(voiced);
+      for (let i = 0; i < 20; i += 1) internal.consumeSamples16k(silent);
+      await vi.waitFor(
+        () => {
+          expect(FakeNativeBrowserSpeechRecognition.instances).toHaveLength(1);
+        },
+        { timeout: 1_000 },
+      );
 
-    expect(FakeNativeBrowserSpeechRecognition.instances).toHaveLength(1);
-    const nativeRec = FakeNativeBrowserSpeechRecognition.instances[0]!;
-    expect(nativeRec.started).toBe(true);
-    expect(nativeRec.lang).toBe("vi-VN");
-    expect(nativeRec.continuous).toBe(true);
-    expect(nativeRec.interimResults).toBe(true);
+      const nativeRec = FakeNativeBrowserSpeechRecognition.instances[0]!;
+      expect(nativeRec.started).toBe(true);
+      expect(nativeRec.lang).toBe("vi-VN");
+      expect(nativeRec.continuous).toBe(true);
+      expect(nativeRec.interimResults).toBe(true);
 
-    // Voice engine status flipped to Online browser fallback
-    const status = getVoiceEngineStatus();
-    expect(status.stt.tier).toBe("browser_default");
-    expect(status.stt.shortLabel).toBe("Online (Google/Trình duyệt)");
-    expect(status.stt.fallbackUsed).toBe(true);
-    expect(status.stt.fallbackReason).toBe("LOCAL_STT_UNAVAILABLE");
+      // Voice engine status flipped to Online browser fallback
+      const status = getVoiceEngineStatus();
+      expect(status.stt.tier).toBe("browser_default");
+      expect(status.stt.shortLabel).toBe("Online (Google/Trình duyệt)");
+      expect(status.stt.fallbackUsed).toBe(true);
+      expect(status.stt.fallbackReason).toBe("LOCAL_STT_UNAVAILABLE");
 
-    // Emitted interim & final results flow cleanly through rec.onresult
-    nativeRec.emitResult("nhà em có", false);
-    nativeRec.emitResult("nhà em có một chú mèo", true);
-    expect(emitted).toEqual([
-      { isFinal: false, transcript: "nhà em có" },
-      { isFinal: true, transcript: "nhà em có một chú mèo" },
-    ]);
+      // Emitted interim & final results flow cleanly through rec.onresult
+      nativeRec.emitResult("nhà em có", false);
+      nativeRec.emitResult("nhà em có một chú mèo", true);
+      expect(emitted).toEqual([
+        { isFinal: false, transcript: "nhà em có" },
+        { isFinal: true, transcript: "nhà em có một chú mèo" },
+      ]);
 
-    rec.stop();
-    expect(nativeRec.stopped).toBe(true);
+      rec.stop();
+      expect(nativeRec.stopped).toBe(true);
+    } finally {
+      rec.stop();
+    }
   });
 
   it("never activates Google Browser SpeechRecognition under default local_only privacy policy when WASM is unavailable", () => {

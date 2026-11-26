@@ -6,13 +6,26 @@ os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 
+import math
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-import pytest
+
+
+def _approx(expected: float, rel: float = 1e-6, abs_tol: float = 1e-9):
+    class _Approx:
+        def __eq__(self, other: object) -> bool:
+            return isinstance(other, (int, float)) and math.isclose(
+                float(other), float(expected), rel_tol=rel, abs_tol=abs_tol
+            )
+
+        def __repr__(self) -> str:
+            return f"approx({expected!r})"
+
+    return _Approx()
 
 from app.api.deps import get_current_parent_id, require_parent_id
 from app.api.routes.karaoke_practice import get_karaoke_practice_service, router
@@ -196,9 +209,9 @@ def test_create_full_musical_session_records_evidence_and_history():
     assert len(repo.evidence) == 3
     skill_map = {e.SkillKey: e for e in repo.evidence}
     assert set(skill_map.keys()) == {"rhythm_timing", "pitch_melody", "lyric_delivery"}
-    assert skill_map["rhythm_timing"].ScoreNormalized == pytest.approx(0.90)
-    assert skill_map["pitch_melody"].ScoreNormalized == pytest.approx(0.85)
-    assert skill_map["lyric_delivery"].ScoreNormalized == pytest.approx(0.92)
+    assert skill_map["rhythm_timing"].ScoreNormalized == _approx(0.90)
+    assert skill_map["pitch_melody"].ScoreNormalized == _approx(0.85)
+    assert skill_map["lyric_delivery"].ScoreNormalized == _approx(0.92)
     assert all(e.SourceModule == "KARAOKE" for e in repo.evidence)
     assert all(e.EvidenceType == "OBSERVED" for e in repo.evidence)
     assert all(e.DifficultyLevel == 3 for e in repo.evidence)
@@ -430,7 +443,7 @@ def test_graceful_degradation_when_v4_tables_unmigrated():
     assert prof["source_method"] == "LYRICS_TIMING"
     assert prof["has_beat_grid"] is True
     assert prof["beat_grid_ms"] == [1000, 1500, 2000, 2500, 3500, 4000, 4500, 5000]
-    assert prof["bpm"] == pytest.approx(120.0)
+    assert prof["bpm"] == _approx(120.0)
 
 
 def test_musical_profile_returns_stored_profile_or_404_for_draft():
@@ -456,12 +469,12 @@ def test_musical_profile_returns_stored_profile_or_404_for_draft():
     res = client.get(f"/karaoke/songs/{SONG_ID}/musical-profile")
     assert res.status_code == 200
     data = res.json()
-    assert data["bpm"] == pytest.approx(108.5)
+    assert data["bpm"] == _approx(108.5)
     assert data["audio_type"] == "DUAL_TRACK"
     assert data["has_pitch_contour"] is True
     assert data["source_method"] == "AUDIO_DSP"
     assert len(data["pitch_contour"]) == 2
-    assert data["pitch_contour"][0]["hz"] == pytest.approx(261.63)
+    assert data["pitch_contour"][0]["hz"] == _approx(261.63)
 
     # Draft/unpublished song returns 404.
     r_draft = client.get(f"/karaoke/songs/{DRAFT_SONG_ID}/musical-profile")
@@ -481,7 +494,7 @@ def test_derive_musical_profile_handles_v1_line_only_lyrics():
     assert len(beats) == 8
     assert beats[0] == 0
     assert beats[4] == 2000
-    assert bpm == pytest.approx(120.0)
+    assert bpm == _approx(120.0)
     assert len(phrases) == 2
 
 

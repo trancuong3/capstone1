@@ -182,11 +182,10 @@ describe("OCR pipeline UX & polling hardening", () => {
 
     expect(await screen.findByTestId("async-ocr-job-card")).toBeInTheDocument();
 
-    // Unmount mid-queue -> must issue cancel request for activeJobIdRef.
+    // Unmount mid-queue -> durable offline OCR queue MUST preserve the queued job (never auto-cancel on reload/navigation).
     unmount();
-    await waitFor(() => {
-      expect(cancelledJobIds).toContain("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
-    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(cancelledJobIds).toEqual([]);
   });
 
   it("CameraPreview pauses autoScan and shows clear banner on 503 remote OCR offline (stopping 1.8s upload storm)", async () => {
@@ -364,7 +363,7 @@ describe("OCR pipeline UX & polling hardening", () => {
 
     expect(
       await screen.findByTestId("admin-ocr-worker-offline-banner"),
-    ).toHaveTextContent(/Máy chủ OCR Windows hiện đang tắt/i);
+    ).toHaveTextContent(/Máy chủ OCR.*(hiện đang tắt|đang tạm tắt)/i);
   });
 
   it("OcrReviewService runCombinedWorkflow fails cleanly instead of spinning forever when stuck QUEUED", async () => {

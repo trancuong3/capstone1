@@ -1,9 +1,7 @@
 import type { Metadata } from "next";
 
-import {
-  AdminQualityHubScreen,
-  parseQualityHubTab,
-} from "@/components/admin/admin-quality-hub-screen";
+import { AdminQualityHubScreen } from "@/components/admin/admin-quality-hub-screen";
+import { parseQualityHubTab } from "@/lib/admin/quality-hub-tab";
 import { translateMessage } from "@/lib/i18n/formatter";
 import { getServerI18n } from "@/lib/i18n/server";
 import { viMessages } from "@/messages/vi";

@@ -105,31 +105,17 @@ export class EchoGuard {
 
   evaluate(segment: EchoSegment): EchoVerdict {
     const active = this.records.find((record) => {
-      // When VAD timestamps are available, evaluate actual speech timing rather
-      // than STT HTTP/WASM delivery latency (`receivedAt`) so a child utterance
-      // spoken BEFORE TTS started (or AFTER TTS ended) is never falsely dropped.
+      // When VAD timestamps prove the child finished speaking strictly BEFORE
+      // TTS started, never drop the utterance just because STT delivered late.
       if (
         segment.audioEndedAt != null &&
         segment.audioEndedAt < record.startedAt
       ) {
         return false;
       }
-      if (
-        record.endedAt !== null &&
-        segment.onsetAt != null &&
-        segment.onsetAt >= record.endedAt + this.onsetGraceMs
-      ) {
-        return false;
-      }
-      const refTime =
-        segment.audioEndedAt != null
-          ? segment.audioEndedAt
-          : segment.onsetAt != null
-            ? segment.onsetAt
-            : segment.receivedAt;
       return (
-        record.startedAt <= refTime &&
-        (record.endedAt === null || refTime < record.endedAt)
+        record.startedAt <= segment.receivedAt &&
+        (record.endedAt === null || segment.receivedAt < record.endedAt)
       );
     });
     if (active)

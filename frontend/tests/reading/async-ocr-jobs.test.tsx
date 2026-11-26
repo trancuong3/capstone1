@@ -103,6 +103,18 @@ describe("Async OCR Queue UX (/book-scanner, /my-books, Admin /jobs)", () => {
       if (path === `/profiles/children/${TEST_CHILD_ID}`) {
         return Response.json(childFixture);
       }
+      if (path === "/health") {
+        return Response.json({
+          status: "ok",
+          ocr: { mode: "remote_worker", ready: false, workers: [] },
+        });
+      }
+      if (
+        path === "/reading/scan-page-ocr/jobs" &&
+        (init?.method ?? "GET") === "GET"
+      ) {
+        return Response.json({ worker_online: false, jobs: [] });
+      }
       if (path === "/reading/scan-page-ocr/jobs" && init?.method === "POST") {
         return Response.json(
           {
@@ -156,14 +168,14 @@ describe("Async OCR Queue UX (/book-scanner, /my-books, Admin /jobs)", () => {
 
     expect(
       await screen.findByText(
-        /Đang xếp hàng chờ máy chủ OCR Windows bật — ảnh đã được lưu an toàn/i,
+        /Đã lưu trang sách trong hàng chờ OCR — Hệ thống sẽ tự động nhận diện ngay khi máy chủ OCR bật lại/i,
       ),
     ).toBeInTheDocument();
     expect(screen.getByTestId("ocr-worker-online-badge")).toHaveTextContent(
       /Đang tắt/i,
     );
 
-    await user.click(screen.getByRole("button", { name: /Hủy quét/i }));
+    await user.click(screen.getByTestId("cancel-queued-ocr-job"));
     await waitFor(() => expect(cancelCalled).toBe(true));
     expect(screen.queryByTestId("async-ocr-job-card")).not.toBeInTheDocument();
   });
@@ -175,6 +187,18 @@ describe("Async OCR Queue UX (/book-scanner, /my-books, Admin /jobs)", () => {
       const path = new URL(String(input)).pathname;
       if (path === `/profiles/children/${TEST_CHILD_ID}`) {
         return Response.json(childFixture);
+      }
+      if (path === "/health") {
+        return Response.json({
+          status: "ok",
+          ocr: { mode: "remote_worker", ready: false, workers: [] },
+        });
+      }
+      if (
+        path === "/reading/scan-page-ocr/jobs" &&
+        (init?.method ?? "GET") === "GET"
+      ) {
+        return Response.json({ worker_online: false, jobs: [] });
       }
       if (path === "/reading/scan-page-ocr/jobs" && init?.method === "POST") {
         return Response.json(
@@ -363,7 +387,7 @@ describe("Async OCR Queue UX (/book-scanner, /my-books, Admin /jobs)", () => {
     );
 
     expect(
-      await screen.findByText(/Đang chờ máy chủ OCR Windows bật/i),
+      await screen.findByText(/Đã lưu trong hàng chờ OCR \(1 trang\)/i),
     ).toBeInTheDocument();
   });
 
@@ -468,9 +492,13 @@ describe("Async OCR Queue UX (/book-scanner, /my-books, Admin /jobs)", () => {
       ],
       (p) => docProgress.push(p.summary_message),
     );
-    expect(docProgress.some((m) => m?.includes("Đã xếp hàng 2 trang"))).toBe(
-      true,
-    );
+    expect(
+      docProgress.some(
+        (m) =>
+          m?.includes("Đã xếp hàng 2 trang") ||
+          m?.includes("Đã lưu 2 trang trong hàng chờ OCR"),
+      ),
+    ).toBe(true);
 
     const imgFile = new File(["img"], "p1.png", { type: "image/png" });
     const replaced = await pageService.replaceImageAndReprocess(

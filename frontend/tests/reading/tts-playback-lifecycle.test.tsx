@@ -446,7 +446,7 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       const first = await audioAt(0);
       act(() => frame());
       expect(onWordChange).toHaveBeenLastCalledWith(0);
-      expect(studio.synthesizeTimed).toHaveBeenCalledTimes(1);
+      expect(studio.synthesizeTimed).toHaveBeenCalledTimes(count > 800 ? 2 : 1);
       act(() => first.finish());
       if (count > 800) {
         const second = await audioAt(1);

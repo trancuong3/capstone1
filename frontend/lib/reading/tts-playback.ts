@@ -2792,14 +2792,20 @@ export class TtsPlayback {
               modelVersion:
                 timedMeta?.modelVersion ?? operation.voice.modelVersion,
             });
-            // Prefetch next timed chunk while current chunk plays to eliminate inter-chunk stalls!
-            if (idx + 1 < chunks.length) {
-              const upcomingWords = chunks[idx + 1].words;
-              if (!this.cache.has(makeTimedKeyForWords(upcomingWords))) {
-                nextTimedPrefetch = fetchTimedChunk(upcomingWords);
-                nextTimedPrefetch.catch(() => undefined);
+            // Prefetch next timed chunk once the current chunk actually starts playing
+            // so we avoid inter-chunk stalls without racing audio decode or wasting calls on autoplay errors.
+            let prefetchedNext = false;
+            const onStartWithPrefetch = () => {
+              onStart();
+              if (!prefetchedNext && idx + 1 < chunks.length) {
+                prefetchedNext = true;
+                const upcomingWords = chunks[idx + 1].words;
+                if (!this.cache.has(makeTimedKeyForWords(upcomingWords))) {
+                  nextTimedPrefetch = fetchTimedChunk(upcomingWords);
+                  nextTimedPrefetch.catch(() => undefined);
+                }
               }
-            }
+            };
             this.setFallbackNotice(
               timed.usedFallbackVoice ? getServerFallbackVoiceNotice() : null,
             );
@@ -2813,7 +2819,7 @@ export class TtsPlayback {
                 timed.audio,
                 timed.words,
                 elapsed,
-                onStart,
+                onStartWithPrefetch,
                 onWord,
                 undefined,
                 timedPlaybackRate,

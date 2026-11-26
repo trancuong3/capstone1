@@ -747,7 +747,7 @@ class SentenceShooterService:
             if isinstance(token, dict) and "id" in token
         }
         shuffled_ids = [str(token_id) for token_id in game_round.ShuffledTokenIds]
-        expected_count = len(game_round.ExpectedTokenIds or [])
+        expected_count = len(getattr(game_round, "ExpectedTokenIds", None) or [])
         learning_mode: LearningMode = meta.get("learning_mode", "WORD_ORDER")
         raw_slots = meta.get("prompt_slots") or []
         prompt_slots = [

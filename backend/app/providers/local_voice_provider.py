@@ -763,14 +763,16 @@ class LocalVoiceProvider:
             }
         probe_client = self._get_client() if "_get_client" in self.__dict__ else None
         if self._is_remote_circuit_open(probe_client):
+            err_code = self._remote_unavailable_error_code or "LOCAL_VOICE_UNAVAILABLE"
+            is_timeout = err_code == "LOCAL_VOICE_TIMEOUT"
             return {
                 "configured": True,
                 "available": False,
                 "stt_ready": False,
                 "tts_ready": False,
-                "error_code": "LOCAL_VOICE_UNAVAILABLE",
-                "stt_error_code": "LOCAL_STT_UNAVAILABLE",
-                "tts_error_code": "LOCAL_TTS_UNAVAILABLE",
+                "error_code": err_code,
+                "stt_error_code": "LOCAL_STT_TIMEOUT" if is_timeout else "LOCAL_STT_UNAVAILABLE",
+                "tts_error_code": "LOCAL_TTS_TIMEOUT" if is_timeout else "LOCAL_TTS_UNAVAILABLE",
                 "stt_model_version": LOCAL_STT_MODEL_VERSION,
                 "tts_model_version": LOCAL_TTS_MODEL_VERSION,
                 "latency_ms": 0,

@@ -284,6 +284,9 @@ class TestAsyncScanPageOcrJobsAndMatchPageCache(unittest.TestCase):
             async def list_worker_heartbeats(self, *, limit=20):
                 return []
 
+            async def get_queue_positions(self, job_ids):
+                return {jid: idx + 1 for idx, jid in enumerate(job_ids)}
+
         class _FakeScanRepo:
             def __init__(self, db):
                 self.db = db

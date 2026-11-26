@@ -165,8 +165,8 @@ describe("Wave 2+3 reading core, WASM STT, cache, and hooks regressions", () => 
 
     const posted: Array<Record<string, unknown>> = [];
     const dbCloseSpy = vi.fn();
-    let capturedSignal: AbortSignal | undefined;
-    let rejectFetch!: (reason: unknown) => void;
+    const capturedSignals: AbortSignal[] = [];
+    const rejectFetches: Array<(reason: unknown) => void> = [];
 
     const fakeIndexedDb = {
       open: () => {
@@ -216,9 +216,9 @@ describe("Wave 2+3 reading core, WASM STT, cache, and hooks regressions", () => 
     };
 
     const fakeFetch = vi.fn((_url: string, opts?: { signal?: AbortSignal }) => {
-      capturedSignal = opts?.signal;
+      if (opts?.signal) capturedSignals.push(opts.signal);
       return new Promise((_, reject) => {
-        rejectFetch = reject;
+        rejectFetches.push(reject);
         opts?.signal?.addEventListener("abort", () =>
           reject(new DOMException("Aborted", "AbortError")),
         );
@@ -254,13 +254,15 @@ describe("Wave 2+3 reading core, WASM STT, cache, and hooks regressions", () => 
     }) => Promise<void>;
 
     const initTask = onmessage({ data: { type: "init", id: "init_1" } });
-    await vi.waitFor(() => expect(fakeFetch).toHaveBeenCalledTimes(1));
-    expect(capturedSignal).toBeDefined();
-    expect(capturedSignal?.aborted).toBe(false);
+    await vi.waitFor(() => expect(fakeFetch).toHaveBeenCalledTimes(4));
+    expect(capturedSignals).toHaveLength(4);
+    expect(capturedSignals.every((s) => s.aborted === false)).toBe(true);
 
     await onmessage({ data: { type: "dispose", id: "dispose_1" } });
-    expect(capturedSignal?.aborted).toBe(true);
-    rejectFetch(new DOMException("Aborted", "AbortError"));
+    expect(capturedSignals.every((s) => s.aborted === true)).toBe(true);
+    for (const rejectFetch of rejectFetches) {
+      rejectFetch(new DOMException("Aborted", "AbortError"));
+    }
     await initTask;
 
     expect(dbCloseSpy).toHaveBeenCalledTimes(1);
