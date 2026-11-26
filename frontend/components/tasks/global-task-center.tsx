@@ -289,7 +289,11 @@ export function GlobalTaskCenter({
     activeTasks.every((item) => item.status === "WAITING_FOR_WORKER");
 
   const pillText = allActiveWaitingForWorker
-    ? `Hàng chờ OCR (${activeCount})`
+    ? t(
+        "taskCenter.pillWaitingForWorker",
+        { count: activeCount },
+        "Hàng chờ OCR ({count})",
+      )
     : activeCount > 0
       ? t(
           "taskCenter.pillRunning",

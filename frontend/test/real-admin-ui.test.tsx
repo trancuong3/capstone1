@@ -1180,14 +1180,14 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     expect(screen.getByText("Chưa ghi nhận")).toBeInTheDocument();
     expect(
       screen.getByTestId("operational-state-ocr_worker"),
-    ).toHaveTextContent("Queued");
+    ).toHaveTextContent("Đang xếp hàng");
     expect(screen.getByTestId("admin-audio-cache-summary")).toBeInTheDocument();
     expect(screen.getByText("14")).toBeInTheDocument();
     expect(screen.getByText("75%")).toBeInTheDocument();
     expect(
       await screen.findByTestId("admin-client-device-capabilities"),
     ).toBeInTheDocument();
-    expect(screen.getByText("Client Device Capabilities")).toBeInTheDocument();
+    expect(screen.getByText("Năng lực thiết bị hiện tại")).toBeInTheDocument();
   });
   it("health error is safe and recheck recovers", async () => {
     const user = userEvent.setup();

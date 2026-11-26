@@ -625,7 +625,23 @@ export function AdminBookAiBatchReview({
                     >
                       {result.changes > 0
                         ? `${formatNumber(result.changes)} Δ`
-                        : result.status}
+                        : result.status === "failed"
+                          ? t(
+                              "books.aiBatch.statusBadges.failed",
+                              undefined,
+                              "Cần kiểm tra",
+                            )
+                          : result.status === "verified"
+                            ? t(
+                                "books.aiBatch.statusBadges.verified",
+                                undefined,
+                                "Đã xác minh",
+                              )
+                            : t(
+                                "books.aiBatch.statusBadges.saved",
+                                undefined,
+                                "Đã lưu nháp",
+                              )}
                     </AdminBadge>
                   </div>
                   {result.status !== "verified" ? (

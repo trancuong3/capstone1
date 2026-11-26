@@ -227,11 +227,11 @@ export function AdminParentFormModal({
             </Button>
             <Button
               disabled={isLoading || saving}
+              form={formId}
               fullWidth={false}
               isLoading={saving}
-              onClick={() => void submitForm()}
               size="admin"
-              type="button"
+              type="submit"
               variant="primary"
             >
               {mode === "create"

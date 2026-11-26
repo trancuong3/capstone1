@@ -15,7 +15,13 @@
     "auditLogsTitle": "稽核日誌",
     "healthTitle": "營運狀態",
     "protectedLoadingAria": "正在載入管理區域",
-    "protectedLoadingStatus": "正在載入管理資料…"
+    "protectedLoadingStatus": "正在載入管理資料…",
+    "bookDetailTitle": "圖書詳情",
+    "karaokeEditTitle": "編輯歌曲",
+    "karaokeNewTitle": "新增歌曲",
+    "karaokeTitle": "歌曲管理",
+    "ocrReviewTitle": "書頁 OCR 覆核",
+    "vireadTrainingTitle": "OCR 訓練"
   },
   "layout": {
     "skipToContent": "跳過導覽，前往管理內容",
@@ -35,7 +41,12 @@
     },
     "signOut": "登出",
     "signingOut": "正在登出…",
-    "signOutError": "目前無法登出。請再試一次。"
+    "signOutError": "目前無法登出。請再試一次。",
+    "groups": {
+      "content": "內容",
+      "systemAi": "系統與 AI",
+      "users": "使用者"
+    }
   },
   "login": {
     "areaLabel": "管理區域",
@@ -97,7 +108,9 @@
     "sessionInvalidTitle": "登入工作階段無效",
     "yes": "是",
     "no": "否",
-    "notYet": "尚未"
+    "notYet": "尚未",
+    "breadcrumbAria": "麵包屑導覽",
+    "clearSearch": "清除搜尋"
   },
   "auditLogs": {
     "title": "稽核日誌",
@@ -117,7 +130,22 @@
     "viewMetadataDetails": "檢視 metadata 詳細資訊 ({count} 個字元)",
     "loadMoreError": "無法載入更多日誌。先前的記錄保持不變。",
     "retryLoadMore": "重試載入",
-    "loadMore": "載入更多"
+    "loadMore": "載入更多",
+    "clearFilters": "清除篩選",
+    "columns": {
+      "action": "操作",
+      "metadata": "中繼資料",
+      "resource": "資源",
+      "timestamp": "時間"
+    },
+    "drawerTitleFallback": "事件詳情",
+    "eventIdLabel": "事件 ID",
+    "filterActionPlaceholder": "例如：book.read、parent.update…",
+    "filterAria": "稽核日誌篩選器",
+    "filterResourcePlaceholder": "例如：book、parent、song…",
+    "inspectBtn": "詳情",
+    "inspectEventAria": "檢視事件 {action} 詳情",
+    "tableAria": "稽核日誌表格"
   },
   "health": {
     "title": "營運狀態",
@@ -137,7 +165,14 @@
       "healthy": "已驗證",
       "failed": "發生錯誤",
       "unknown": "未驗證",
-      "disabled": "未執行"
+      "disabled": "未執行",
+      "cached": "預生成快取",
+      "client_side": "瀏覽器端執行",
+      "cloud_ready": "雲端就緒",
+      "local_only": "僅本機",
+      "remote_delegated": "遠端委派",
+      "scheduled": "定期排程",
+      "standby": "待命"
     },
     "queueDepthLabel": "佇列",
     "queueDepthValue": "{count, plural, =0 {0 個任務} other {# 個任務}}",
@@ -186,8 +221,87 @@
       "Queued": "已排隊",
       "Quota exhausted": "超出限制",
       "Unsupported": "不支援",
-      "Unknown": "未知"
-    }
+      "Unknown": "未知",
+      "Local only": "僅本機",
+      "Scheduled": "排程運作",
+      "Standby": "待命"
+    },
+    "actionHintLabel": "建議處置",
+    "audioCacheErrorDetail": "診斷代碼：{code}",
+    "audioCacheErrorTitle": "無法載入預生成 TTS 快取指標",
+    "audioCachePercentUsed": "已用 {percent}",
+    "audioCacheUnlimited": "無限制",
+    "audioCacheUsageAria": "{label} 使用率：{percent}%",
+    "autoRefresh30s": "30秒",
+    "autoRefresh60s": "60秒",
+    "autoRefreshActive": "每 {seconds} 秒自動重新整理",
+    "autoRefreshLabel": "自動重新整理",
+    "autoRefreshOff": "關閉",
+    "autoRefreshPaused": "分頁隱藏時已暫停自動重新整理",
+    "clearTtsCache": "清除 TTS 快取",
+    "clearTtsCacheError": "目前無法清除瀏覽器 TTS 快取。",
+    "clearTtsCacheSuccess": "已清除瀏覽器 TTS 快取。",
+    "clearWasmCache": "清除 STT 模型快取",
+    "clearWasmCacheError": "目前無法清除 STT 模型快取。",
+    "clearWasmCacheSuccess": "已清除瀏覽器 STT 模型快取。",
+    "clearingCache": "正在清除…",
+    "deviceProbeError": "無法完整檢測目前裝置能力。",
+    "dismissErrorAria": "關閉錯誤提示",
+    "errorHttpStatus": "HTTP {status}",
+    "errorRequestId": "請求 ID：{requestId}",
+    "filterAria": "依狀態篩選服務",
+    "filteredEmpty": "沒有符合此狀態篩選條件的服務。",
+    "filters": {
+      "all": "全部",
+      "attention": "需要關注",
+      "healthy": "正常",
+      "local_only": "僅本機",
+      "standby": "待命"
+    },
+    "groups": {
+      "core": "核心基礎設施",
+      "coreDesc": "支撐平台運作的核心 API、資料庫與物件儲存。",
+      "localOnlyWorkers": "僅本機 / 遠端委派 / 依設定停用",
+      "localOnlyWorkersToggleHint": "{count} 項",
+      "ocr": "OCR 管線與 AI 引擎",
+      "ocrDesc": "遠端 OCR 工作節點、4 個文字辨識引擎與 AI 校對。",
+      "voice": "語音與音訊快取",
+      "voiceDesc": "文字轉語音（TTS）、語音辨識（STT）與預生成音訊快取。",
+      "workers": "背景工作節點與排程",
+      "workersDesc": "定期作業、審核佇列與閱讀事件處理節點。"
+    },
+    "kpiAria": "服務狀態指標",
+    "kpiTotalDetail": "/ {total} 項服務",
+    "ocrEnginesSubheading": "OCR 辨識引擎",
+    "probeDevice": "檢測裝置",
+    "probingDevice": "正在檢測裝置…",
+    "refreshTimeoutError": "健康檢查請求於 15 秒後逾時。",
+    "refreshWarningBody": "目前保留最近一次檢查快照，請重試。",
+    "refreshWarningTitle": "無法重新整理最新狀態",
+    "refreshing": "正在更新…",
+    "resetFilter": "顯示全部服務",
+    "sttEnvAndroidWebView": "Android WebView",
+    "sttEnvIosWebView": "iOS WebView",
+    "sttEnvPwa": "PWA 應用程式",
+    "sttInsecureContextWarning": "目前連線並非安全的 HTTPS 環境；麥克風與部分瀏覽器 API 可能受限。",
+    "sttMicNeedsHttps": "使用麥克風需要 HTTPS",
+    "sttMicNoMediaDevices": "不支援 getUserMedia",
+    "sttModelBytesDetail": "{used} / {total}",
+    "sttModelCacheError": "IndexedDB 讀取錯誤 ({code})",
+    "sttNoIndexedDbWarning": "IndexedDB 無法使用，無法在本機儲存 STT 模型或 TTS 快取。",
+    "summaryAllHealthy": "全部 {healthy} 項服務皆正常運作。",
+    "summaryAria": "系統運作狀態概覽",
+    "summaryAttentionSegment": "{count} 項需關注",
+    "summaryHealthySegment": "{count} 項正常",
+    "summaryLocalOnlySegment": "{count} 項僅本機",
+    "summaryStandbySegment": "{count} 項待命",
+    "ttsCacheBrowserEmpty": "空（0 項）",
+    "ttsCacheBrowserError": "快取錯誤 ({code})",
+    "ttsCacheBrowserHitsMisses": "命中：{hits} · 未命中：{misses}",
+    "wakeOcrError": "無法傳送喚醒 OCR 工作節點的指令，請重試。",
+    "wakeOcrRechecking": "數秒後自動重新檢查…",
+    "wakeOcrWorker": "喚醒 OCR 節點",
+    "wakingOcrWorker": "正在喚醒…"
   },
   "parents": {
     "title": "家長管理",
@@ -264,7 +378,8 @@
       "childGrade": "{grade} 年級",
       "authNotConfigured": "因後端未設定 Supabase Auth 存取權限，無法載入電子郵件與電話號碼。",
       "authNotFound": "找不到與此檔案連結的 Supabase Auth 帳號。檔案與兒童資訊仍會顯示。",
-      "authUnavailable": "目前無法從 Supabase Auth 載入聯絡資訊。請檢查設定或嘗試重新整理。"
+      "authUnavailable": "目前無法從 Supabase Auth 載入聯絡資訊。請檢查設定或嘗試重新整理。",
+      "parentIdLabel": "家長 ID"
     },
     "modal": {
       "createTitle": "新增家長",
@@ -301,6 +416,16 @@
         "genericUpdate": "目前無法更新帳號。請重試。",
         "fallback": "目前無法更新帳號。已保留輸入的資料。"
       }
+    },
+    "copiedId": "已複製",
+    "copyId": "複製 ID",
+    "copyIdAria": "複製 ID {id}",
+    "directoryAria": "家長帳號清單",
+    "overviewAria": "家長概覽",
+    "searchToolbarAria": "搜尋家長",
+    "tableHeaders": {
+      "actions": "操作",
+      "parent": "家長"
     }
   },
   "books": {
@@ -415,7 +540,13 @@
         "maxInt": "最高年級必須為 1 到 5 之間的整數。",
         "maxRange": "最高年級必須介於 1 到 5 之間。",
         "gradeOrder": "最低年級不得大於最高年級。"
-      }
+      },
+      "authorPlaceholder": "例如：夏爾·佩羅",
+      "livePreviewDesc": "未上傳自訂封面時，ViRead 會依據書名、作者與年級範圍自動產生清晰的文字封面。",
+      "livePreviewHeading": "封面預覽",
+      "livePreviewTitleFallback": "新書標題",
+      "namePlaceholder": "例如：穿靴子的貓（內部目錄名稱）",
+      "titlePlaceholder": "例如：穿靴子的貓"
     },
     "detail": {
       "eyebrow": "書籍詳情",
@@ -462,7 +593,18 @@
       "ocrQueueCheckNow": "立即檢查",
       "queuedNewPageBadge": "新書頁 #{index} · 已儲存至 OCR 佇列",
       "pageQueuedOfflineBadge": "已儲存至 OCR 佇列 — 等待伺服器上線",
-      "pageQueuedOnlineBadge": "正在重新執行 OCR…"
+      "pageQueuedOnlineBadge": "正在重新執行 OCR…",
+      "copiedId": "已複製",
+      "copyIdAria": "複製圖書 ID",
+      "openOcrShort": "開啟 OCR 覆核",
+      "publishRuleToggle": "兒童圖書館發佈規則",
+      "statNeedsReview": "待覆核",
+      "statProcessing": "處理中",
+      "statTotalPages": "總頁數",
+      "statVerified": "已核驗",
+      "summaryStripAria": "圖書摘要",
+      "toggleAiBatchBtn": "執行 AI 批次覆核",
+      "toggleUploadBtn": "上傳書頁"
     },
     "editor": {
       "loading": "正在載入書籍元數據…",
@@ -498,7 +640,14 @@
       "cannotRetireTitle": "無法停用書籍",
       "safetyBlocked": "兒童安全機制尚未允許將此書放入圖書館。請完成 OCR VERIFIED 並確認所有頁面的 Safety 與 Candidate 相符；HIGH 或 NOT_RECOMMENDED 的檢測結果仍會被封鎖。",
       "invalidMetadata": "目前的元數據無效。請在表單中修正標題和年級範圍，並在啟用前儲存。",
-      "genericToggleError": "請求未確認。請檢查管理員權限或後端連線，然後再試一次。"
+      "genericToggleError": "請求未確認。請檢查管理員權限或後端連線，然後再試一次。",
+      "closeCoverStudio": "關閉封面工作室",
+      "coverDesc": "更新圖書封面（上傳、3:4 裁切、旋轉或 AI 生成封面），不會變更閱讀書頁或已核驗修訂版。",
+      "coverHeading": "圖書封面",
+      "dangerZoneActiveDesc": "停用後圖書將從家長書庫隱藏，但所有書頁、修訂版本與閱讀紀錄都會保留。",
+      "dangerZoneHeading": "圖書生命週期",
+      "dangerZoneRetiredDesc": "此圖書目前處於停用狀態。待中繼資料與 OCR 書頁符合要求後即可重新啟用。",
+      "openCoverStudio": "開啟封面工作室"
     },
     "uploader": {
       "heading": "上傳頁面圖片或文件並執行 OCR",
@@ -526,11 +675,13 @@
         "noValidFiles": "沒有可上傳的有效檔案。請檢查格式、大小和圖片尺寸。",
         "someInvalidFiles": "部分檔案無效，因此未上傳。有效的檔案仍在處理中。"
       },
-      "workerOfflineTitle": "OCR 伺服器目前暫時離線",
+      "workerOfflineTitle": "OCR 處理服務目前離線",
       "workerOfflineBody": "您現在仍可上傳圖片或 PDF/DOCX：書頁將持久儲存於佇列中，待 OCR 伺服器重新上線後自動處理。",
-      "workerUnreachableTitle": "暫時無法確認 OCR 伺服器狀態",
+      "workerUnreachableTitle": "無法驗證 OCR 服務狀態",
       "workerUnreachableBody": "後端正在啟動或網路較慢。您可重新檢查，或直接上傳並儲存至 OCR 佇列。",
-      "recheckWorkerBtn": "重新檢查 OCR 連線"
+      "recheckWorkerBtn": "重新檢查 OCR 連線",
+      "workerOfflineDesc": "您現在仍可上傳圖片或 PDF/DOCX 檔案：系統會安全排程，並在 OCR 服務上線後自動執行辨識。",
+      "workerUnreachableDesc": "後端可能正在啟動或網路較慢。您可以重新檢查連線，或先上傳檔案加入 OCR 佇列。"
     },
     "imagePreview": {
       "hideButton": "隱藏第 {pageNumber} 頁圖片",
@@ -587,8 +738,25 @@
         "savedNoChanges": "AI 未提出修改，已執行安全掃描。等待管理員審核圖片、使用權限與手動驗證。",
         "savedPrefix": "AI 草稿已儲存，等待管理員手動驗證：{detail}",
         "failedKeepReview": "AI 處理失敗；頁面仍保留在 NEEDS_REVIEW 狀態（未自動 VERIFIED）。{detail}"
+      },
+      "statusBadges": {
+        "failed": "需要覆核",
+        "saved": "已儲存草稿",
+        "verified": "已核驗"
       }
-    }
+    },
+    "emptyFilteredDesc": "請嘗試變更關鍵字或重設篩選條件以檢視完整書庫。",
+    "filterToolbarAria": "書庫篩選條件",
+    "kpi": {
+      "activeBooks": "啟用中圖書",
+      "childLibraryEligible": "符合兒童書庫條件",
+      "needsReview": "需要 OCR 覆核",
+      "needsReviewDetail": "{count} 頁待覆核",
+      "total": "圖書總數"
+    },
+    "listAria": "管理端圖書清單",
+    "resetFilters": "重設",
+    "searchPlaceholder": "依書名、標題或作者搜尋…"
   },
   "metadataQuality": {
     "title": "書籍資料品質",
@@ -620,7 +788,8 @@
       "invalidGradeRange": "年級範圍無效",
       "invalidGradeRangeDetail": "超出 1–5 年級範圍或最小年級大於最大年級",
       "duplicateGroups": "潛在重複項目",
-      "duplicateGroupsDetail": "{count} 本書位於候選群組中"
+      "duplicateGroupsDetail": "{count} 本書位於候選群組中",
+      "missingMetadataSummary": "缺少作者：{missingAuthor} · 年級無效：{invalidGrade}"
     },
     "issuesHeading": "待審核書籍",
     "duplicateNote": "重複項目是根據標題和作者識別，已去除前後空白並忽略大小寫。",
@@ -662,7 +831,8 @@
     "lifecycleLabels": {
       "ACTIVE": "運作中",
       "RETIRED": "已停止"
-    }
+    },
+    "searchPlaceholder": "依標題或作者搜尋…"
   },
   "contentQuality": {
     "eyebrow": "書籍品質管理",
@@ -680,7 +850,9 @@
       "RESOLVED": "已解決",
       "REJECTED": "已拒絕",
       "REPORTED_BOOKS": "已舉報書籍",
-      "REPORTED_PAGES": "已舉報頁面"
+      "REPORTED_PAGES": "已舉報頁面",
+      "reportedScope": "被舉報圖書",
+      "reportedScopeDetail": "被舉報頁數：{pages} · 已駁回：{rejected}"
     },
     "reportIssueTypes": {
       "BOOK_METADATA_ERROR": "書籍資訊錯誤",
@@ -859,7 +1031,14 @@
       "scanning": "正在掃描…",
       "scanWholeBook": "掃描全書",
       "paginationAria": "品質檢查書籍分頁",
-      "itemLabel": "書籍"
+      "itemLabel": "書籍",
+      "kpiApprovedDetail": "就緒：{ready} · 管理員核准：{approved} · 自動發佈：{published}",
+      "kpiApprovedGroup": "符合條件 / 已核准",
+      "kpiAria": "圖書審核與安全概覽",
+      "kpiCopyrightDetail": "安全與版權雙項：{both}",
+      "kpiProcessingDetail": "掃描中：{processing} · 過期：{stale} · 掃描失敗：{failed}",
+      "kpiProcessingGroup": "處理中 / 需重掃",
+      "statusBreakdownToggle": "檢視依狀態的詳細分佈（{count} 組）"
     },
     "bookDetail": {
       "subheading": "書籍品質、AI 歷史、發現結果與管理員審核",
@@ -987,7 +1166,12 @@
       "checkAndFixPage": "檢查並編輯頁面",
       "rescanPage": "重新掃描此頁面",
       "noFindingThisScan": "此檢查中無發現項目。",
-      "noScanResultYet": "頁面尚無檢查結果；請參閱上方的狀態與原因。"
+      "noScanResultYet": "頁面尚無檢查結果；請參閱上方的狀態與原因。",
+      "compactFindingsDetail": "HIGH {high} · MEDIUM {medium} · {pages} 頁存在警示",
+      "compactMetricsToggle": "檢視詳細 AI 指標、工作流程與評估雜湊",
+      "compactOcrDetail": "有效雜湊：{valid}/{total} · 未掃描：{unscanned}",
+      "compactPipelineDetail": "已過期：{stale} · 處理中：{processing}",
+      "compactSafetyDetail": "校對：{proofreading}"
     }
   },
   "userBooks": {
@@ -1085,7 +1269,8 @@
       "suspendedBook": "已暫停私人書籍。",
       "rejected": "此頁面版本已遭拒絕。",
       "suspendedWithTitle": "已暫停私人書籍「{title}」。擁有者家庭將無法立即閱讀。"
-    }
+    },
+    "kpiAria": "使用者圖書審核佇列概覽"
   },
   "flow2": {
     "filters": {
@@ -1438,7 +1623,9 @@
       "providerUnavailable": "不可用",
       "providerChecking": "檢查中",
       "noProviderEvents": "無提供者事件。",
-      "safetyDisclaimer": "AI 結果無法保證內容絕對安全。對於 AI 工作流程，僅能在管理員確認目前候選項目的安全性後，才能儲存為已驗證 (VERIFIED)。"
+      "safetyDisclaimer": "AI 結果無法保證內容絕對安全。對於 AI 工作流程，僅能在管理員確認目前候選項目的安全性後，才能儲存為已驗證 (VERIFIED)。",
+      "emptyDesc": "點擊下方操作列中的「確認並執行 AI」以自動校對拼字並掃描兒童安全內容。",
+      "emptyTitle": "此修訂版尚無 AI 安全掃描結果"
     },
     "tabs": {
       "words": "檢查單字與位置",
@@ -1566,12 +1753,91 @@
       "noWords": "此修訂版中尚無單詞。",
       "addWord": "新增單詞",
       "deleteWord": "刪除單詞",
-      "finishReview": "完成審核"
+      "finishReview": "完成審核",
+      "hashColumnLabel": "#"
     },
     "historyView": {
       "heading": "OCR 處理歷史",
       "subtitle": "{title} · 第 {pageNumber} 頁 · 修訂版 R{revisionNo}",
       "mobileCardAria": "選擇修訂版 {revisionNo}"
+    },
+    "smartBlocks": {
+      "acceptClearBtn": "接受清晰文字區塊",
+      "blockCardAria": "{typeLabel} 文字區塊",
+      "circuitBreakerDesc": "預計排除的文字佔比超過整頁 35%，系統已自動保留這些區塊並移至「待核驗」供人工檢查。",
+      "circuitBreakerTitle": "已觸發防內容遺失保護",
+      "cropReviewTitle": "已保留原圖邊界以避免裁切文字",
+      "decisions": {
+        "EXCLUDE": "已排除",
+        "KEEP": "保留",
+        "REVIEW": "待核驗"
+      },
+      "editBtn": "編輯文字",
+      "editLabel": "編輯文字區塊內容",
+      "emptyClean": "尚未保留任何純淨正文區塊。",
+      "emptyExcluded": "本頁沒有被排除的雜訊或頁碼。",
+      "emptyReview": "本頁已無需要進一步核驗的文字區塊。",
+      "excludeBtn": "排除",
+      "geometryMeta": "估計傾斜角：{angle}° · 頁面佔比：{area}% · {gutterReason}",
+      "heading": "智慧 OCR 擷取內容覆核",
+      "headingWithPage": "智慧 OCR 擷取內容覆核 — 第 {pageNumber} 頁",
+      "keepBtn": "保留",
+      "loaderDesc": "自動將正文與頁碼、頁首及冗餘文字分離（絕不會自動刪除正文內容）。",
+      "loaderError": "無法對此頁執行智慧文字區塊分類。",
+      "loaderOpenBtn": "開啟智慧文字區塊分類",
+      "loaderReextractBtn": "重新分析文字區塊",
+      "manualOverrideBadge": "已手動編輯",
+      "noImageFallback": "未附帶原圖 — 仍完整顯示已分析的 {count} 個文字區塊。",
+      "notices": {
+        "acceptClearAll": "已確認全部 {confirmed} 個清晰文字區塊。",
+        "acceptClearRemoteRemaining": "已接受清晰文字區塊。仍有 {remaining} 個區塊需要人工核驗。",
+        "acceptClearWithRemaining": "已確認 {confirmed} 個清晰文字區塊。仍有 {remaining} 個區塊需要您人工核驗。",
+        "editSaved": "已更新文字區塊內容並保留在閱讀正文中。",
+        "emptyEditError": "儲存編輯時文字區塊內容不可為空。",
+        "excluded": "已將該文字區塊從閱讀正文中排除。",
+        "humanEditReason": "使用者編輯了此文字區塊內容。",
+        "humanExcludeReason": "使用者選擇排除此文字區塊。",
+        "humanKeepReason": "使用者選擇保留此文字區塊。",
+        "humanRestoreReason": "已將此文字區塊還原至閱讀正文中。",
+        "kept": "已將該文字區塊保留在閱讀正文中。",
+        "nothingToUndo": "沒有可復原的操作。",
+        "restored": "已將該文字區塊還原至閱讀正文中。",
+        "saved": "已儲存內容區塊變更。",
+        "undone": "已復原最近一次操作。",
+        "updateFailed": "無法更新此區塊的判定，請重試。",
+        "updated": "已更新內容區塊狀態。"
+      },
+      "originalImageAlt": "書頁原圖",
+      "originalImageAltWithPage": "第 {pageNumber} 頁原圖",
+      "overlayAria": "擷取文字區域疊加層",
+      "previewEmpty": "篩選後尚無可供閱讀的文字。",
+      "previewHeading": "兒童閱讀正文",
+      "previewReviewNotice": "為避免遺漏正文，目前預覽包含 {count} 個待核驗文字區塊。",
+      "readingOrderMeta": "閱讀順序 #{order} · 信心度 {confidence}%",
+      "reasonPrefix": "原因：",
+      "restoreBtn": "還原",
+      "reviewBanner": "為避免遺漏文字，以下區塊暫時保留於預覽中。請為每個區塊選擇「保留」或「排除」。",
+      "saveEditBtn": "儲存編輯",
+      "shadowModeDesc": "去雜訊判定僅記錄作為比對用途，暫不變更正式閱讀文字。",
+      "shadowModeTitle": "正在比對模式（Shadow）下運作",
+      "summaryLine": "頁面類型：{pageKind} · 保留 {retention}% 字元（保留 {keep}、排除 {excluded}、待核驗 {review}）",
+      "tabs": {
+        "clean": "純淨內容",
+        "excluded": "已排除",
+        "original": "原圖",
+        "preview": "閱讀預覽",
+        "review": "待核驗"
+      },
+      "tabsAria": "OCR 擷取檢視模式",
+      "undoBtn": "復原"
+    },
+    "workbenchTabs": {
+      "ariaLabel": "OCR 覆核工作區",
+      "draft": "文字與覆核",
+      "history": "修訂歷程",
+      "safety": "AI 安全",
+      "smartBlocks": "智慧區塊 V2",
+      "words": "詞彙與邊界框"
     }
   },
   "training": {
@@ -1720,7 +1986,15 @@
       "closeDriftSuccess": "設定錯誤的任務已關閉。執行檔與 checkpoint 已保留，候選項目尚未進行基準測試或核准；系統可能會根據正確鎖定的設定建立新任務。",
       "closeDriftFailed": "無法關閉此候選項目；狀態或血緣關係可能已變更。",
       "closeUnbenchmarkedSuccess": "未經基準測試的候選項目已關閉；執行檔與 checkpoint 已保留。當有足夠的獨立 VERIFIED 留存資料時，系統將自動產生 Locked Test 與替代任務。",
-      "closeUnbenchmarkedFailed": "無法關閉候選項目。Worker 可能仍在執行中，該候選項目已有基準測試，或血緣關係已變更。"
+      "closeUnbenchmarkedFailed": "無法關閉候選項目。Worker 可能仍在執行中，該候選項目已有基準測試，或血緣關係已變更。",
+      "flow2AlreadyTrained": "目前 Flow 2 資料集與設定已有先前的訓練結果。請新增 VERIFIED 樣本或評估現有候選模型。",
+      "flow2NoEligibleSamples": "尚無符合條件的純淨 Flow 2 樣本可供建立快照。",
+      "flow2Paused": "Flow 2 已暫停（VIREAD_FLOW2_INGESTION_PAUSED=true）。",
+      "flow2ScheduleBlocked": "無法將 Flow 2 加入佇列（{reason}）。",
+      "flow2Scheduled": "已建立 Flow 2 快照（{train} 訓練 / {validation} 驗證）並排入任務 {jobId}（{status}）。",
+      "flow2TrainValRequired": "快照目前包含 {train} 筆訓練與 {validation} 筆驗證資料；需同時具備兩組資料才可排入 Colab。",
+      "flow2TriggerFailed": "建立快照或排入 Flow 2 訓練失敗。",
+      "flow2UnresolvedJob": "佇列中已有未完成的訓練任務，未建立新任務。"
     },
     "flow1": {
       "badgeEyebrow": "串流 1 新增 · Direct Model Replacement",
@@ -1888,7 +2162,10 @@
         "APPS_SCRIPT_ACCESS_DENIED": "Apps Script Web App 正封鎖匿名存取。請在 script.google.com 重新部署，並選擇「存取權限：任何人 (Anyone)」（仍受 HMAC-SHA256 簽章保護）。",
         "BRIDGE_SECRET_MISMATCH": "Apps Script Bridge 簽章不符，或 script.google.com 的 Script Properties 中缺少 VIREAD_BRIDGE_SECRET。",
         "DRIVE_SCOPE_MISMATCH": "OAuth 權限範圍不正確，需具備最低 drive.file 權限。請重新連接並授予應用程式專屬資料夾權限。",
-        "genericCode": "錯誤代碼：{code}。請檢查 Google Drive 連接或點擊「檢查連接與儲存空間」。"
+        "genericCode": "錯誤代碼：{code}。請檢查 Google Drive 連接或點擊「檢查連接與儲存空間」。",
+        "DESKTOP_REQUIRES_WINDOWS": "Linux 伺服器不支援本機掛載 Google Drive for Desktop。請透過 Apps Script Bridge 連線。",
+        "DESKTOP_UNAVAILABLE_CLOUD": "雲端伺服器（Render）無法存取個人電腦上的 Google Drive for Desktop（G:\\）。請切換至 Apps Script Bridge。",
+        "ENCRYPTION_KEY_MISSING": "伺服器缺少環境變數 VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY（至少 32 個字元）。"
       },
       "notices": {
         "redirectingOauth": "正在重新導向至 Google OAuth 2.0 驗證頁面（僅請求最低限度的 drive.file 權限）…",
@@ -1909,8 +2186,37 @@
         "disconnectConfirm": "是否將 Google Drive 與 Flow 2 斷開連接？原始書籍資料與已儲存的檔案不會被刪除；新的輸出項目將安全等待（不會同步至 Supabase）。",
         "disconnected": "已安全斷開 Google Drive 連接並從後端移除重新整理權杖 (refresh token)。",
         "disconnectFailed": "目前無法斷開 Google Drive 連接。"
-      }
-    }
+      },
+      "desktopCloudWarningMid": "（僅能於本機 Windows G:\\ 磁碟讀取）。若需雲端後端（Render）與 Google Colab 讀寫 Drive，請切換至",
+      "desktopCloudWarningPrefix": "目前連線使用",
+      "disconnectModalConfirm": "中斷連線",
+      "disconnectModalTitle": "中斷 Google Drive 連線？"
+    },
+    "colabGuideAnd": "與",
+    "colabGuideMid1": "，選擇 Runtime",
+    "colabGuideMid2": "，啟用 2 個 Colab Secrets",
+    "colabGuidePrefix": "開啟筆記本",
+    "colabGuideSuffix": "，接著點擊",
+    "colabGuideTitle": "Colab 免費 T4 GPU 執行指南（0 VND）",
+    "driveUnavailableDesc": "後端尚未回傳 Flow 2 的 Google Drive 連線狀態。",
+    "driveUnavailableTitle": "尚未設定 Google Drive",
+    "errors": {
+      "loadFailed": "無法載入訓練狀態。請檢查管理員權限與 VietOCR V2 資料庫遷移。",
+      "serviceUnavailable": "VietOCR 訓練管理服務無法使用。"
+    },
+    "kpiGridAria": "OCR 訓練指標",
+    "tabs": {
+      "drive": "Google Drive",
+      "flow1": "Flow 1 模型替換",
+      "flow2": "Flow 2 訓練與評估",
+      "overview": "概覽與執行階段"
+    },
+    "tabsAria": "OCR 訓練分區",
+    "triggerFlow2Btn": "建立快照並排入 Flow 2 訓練",
+    "workerExecutionModeLabel": "執行模式：",
+    "workerWebHeavyDisabled": "已停用（請使用下方觸發按鈕）",
+    "workerWebHeavyEnabled": "已啟用",
+    "workerWebHeavyLabel": "Web 背景工作節點："
   },
   "karaoke": {
     "library": {
@@ -1950,7 +2256,11 @@
         "DRAFT": "草稿",
         "PUBLISHED": "顯示中",
         "HIDDEN": "已隱藏"
-      }
+      },
+      "emptyTitle": "尚無歌曲",
+      "filterAria": "歌曲庫篩選器",
+      "hasCoverBadge": "有封面",
+      "searchPlaceholder": "輸入歌曲名稱或作者…"
     },
     "workspace": {
       "retryLoad": "嘗試重新載入",
@@ -2513,6 +2823,24 @@
         "minOneLyricLine": "請至少輸入 1 行有效歌詞。",
         "reviewFingerprintMissing": "缺少處理審核指紋標識。"
       }
+    },
+    "confirm": {
+      "continueAction": "繼續",
+      "editLyricsTitle": "編輯已設定時間軸的歌詞？",
+      "expandRepeatsAction": "確認展開",
+      "expandRepeatsTitle": "展開重複記號？",
+      "leaveAction": "離開頁面",
+      "leaveTitle": "離開目前頁面？",
+      "publishAction": "確認發佈",
+      "publishTitle": "發佈歌曲？",
+      "reloadAction": "重新載入已儲存版本",
+      "reloadTitle": "從伺服器重新載入？",
+      "replaceAudioAction": "取代音訊",
+      "replaceAudioTitle": "取代 MP3 音訊檔案？",
+      "replaceLyricsAction": "取代歌詞",
+      "replaceLyricsTitle": "取代目前全部歌詞？",
+      "resplitAction": "確認重新拆分",
+      "resplitTitle": "重新拆分此行音節？"
     }
   },
   "pageUploadRuntime": {
@@ -2533,5 +2861,44 @@
     "reloadAfterUploadFailed": "上傳後無法重新載入頁面清單。資料可能已儲存；請重新整理以確認。",
     "reprocessIncomplete": "重新執行頁面 OCR 的任務尚未完成，請重試。",
     "reprocessQueuedWindows": "已將重新 OCR 請求儲存至佇列 — OCR 伺服器重新上線後將自動處理"
+  },
+  "qualityHub": {
+    "description": "於統一介面中檢查目錄中繼資料、處理家長舉報、核准圖書安全並審核使用者私有圖書。",
+    "eyebrow": "品質維運",
+    "tabs": {
+      "approval": "審核與圖書安全",
+      "metadata": "圖書中繼資料",
+      "reports": "使用者舉報",
+      "userBooks": "使用者圖書與 Flow 2"
+    },
+    "tabsAria": "圖書品質管理分區"
+  },
+  "taskCenter": {
+    "backgroundProcessing": "正在背景處理…",
+    "closeAria": "關閉 AI 任務中心",
+    "defaultBookLabel": "圖書",
+    "elapsedHours": "{hours} 小時",
+    "elapsedHoursMinutes": "{hours} 小時 {minutes} 分鐘",
+    "elapsedMinutes": "{minutes} 分鐘",
+    "elapsedMinutesSeconds": "{minutes} 分鐘 {seconds} 秒",
+    "elapsedRunning": "已執行 {elapsed}",
+    "elapsedSeconds": "{seconds} 秒",
+    "emptyDescription": "當您上傳書頁、擷取 OCR 或生成封面時，即時進度將顯示於此。",
+    "emptyTitle": "尚無 AI 任務",
+    "openAria": "開啟 AI 任務中心",
+    "pageSeparator": " • 第 {pageNumber} 頁",
+    "pillFailed": "失敗任務 ({count})",
+    "pillIdle": "AI 任務",
+    "pillRunning": "AI 執行中 ({count})",
+    "pillWaitingReview": "待核驗 ({count})",
+    "processingAria": "正在處理 {title}",
+    "progressAria": "{title} 進度",
+    "refreshAria": "重新整理任務清單",
+    "stagePrefix": "階段：{stage}",
+    "subtitle": "即使切換頁面，背景任務仍會安全持續執行。",
+    "title": "AI 任務中心",
+    "viewResultAction": "檢視結果",
+    "workerOfflineBanner": "等待 AI 工作節點重新連線。任務已安全保存並會自動繼續。",
+    "pillWaitingForWorker": "OCR 佇列 ({count})"
   }
 }

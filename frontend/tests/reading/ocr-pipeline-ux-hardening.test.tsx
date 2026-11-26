@@ -182,7 +182,7 @@ describe("OCR pipeline UX & polling hardening", () => {
 
     expect(await screen.findByTestId("async-ocr-job-card")).toBeInTheDocument();
 
-    // Unmount mid-queue when worker is online -> must issue cancel request for activeJobIdRef.
+    // Unmount mid-queue -> must issue cancel request for activeJobIdRef.
     unmount();
     await waitFor(() => {
       expect(cancelledJobIds).toContain("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
@@ -364,7 +364,7 @@ describe("OCR pipeline UX & polling hardening", () => {
 
     expect(
       await screen.findByTestId("admin-ocr-worker-offline-banner"),
-    ).toHaveTextContent(/Máy chủ OCR.*(hiện đang tắt|đang tạm tắt)/i);
+    ).toHaveTextContent(/Dịch vụ xử lý OCR hiện đang ngoại tuyến/i);
   });
 
   it("OcrReviewService runCombinedWorkflow fails cleanly instead of spinning forever when stuck QUEUED", async () => {

@@ -15,7 +15,13 @@
     "auditLogsTitle": "감사 로그",
     "healthTitle": "운영 상태",
     "protectedLoadingAria": "관리자 영역 로딩 중",
-    "protectedLoadingStatus": "관리자 데이터 로딩 중..."
+    "protectedLoadingStatus": "관리자 데이터 로딩 중...",
+    "bookDetailTitle": "도서 상세",
+    "karaokeEditTitle": "노래 편집",
+    "karaokeNewTitle": "새 노래 만들기",
+    "karaokeTitle": "노래 관리",
+    "ocrReviewTitle": "페이지 OCR 검토",
+    "vireadTrainingTitle": "OCR 학습"
   },
   "layout": {
     "skipToContent": "내비게이션 건너뛰기, 관리자 콘텐츠로 이동",
@@ -35,7 +41,12 @@
     },
     "signOut": "로그아웃",
     "signingOut": "로그아웃 중…",
-    "signOutError": "현재 로그아웃할 수 없습니다. 다시 시도해 주세요."
+    "signOutError": "현재 로그아웃할 수 없습니다. 다시 시도해 주세요.",
+    "groups": {
+      "content": "콘텐츠",
+      "systemAi": "시스템 & AI",
+      "users": "사용자"
+    }
   },
   "login": {
     "areaLabel": "관리자 영역",
@@ -97,7 +108,9 @@
     "sessionInvalidTitle": "유효하지 않은 로그인 세션",
     "yes": "예",
     "no": "아니요",
-    "notYet": "아직 아님"
+    "notYet": "아직 아님",
+    "breadcrumbAria": "이동 경로 탐색",
+    "clearSearch": "검색어 지우기"
   },
   "auditLogs": {
     "title": "감사 로그",
@@ -117,7 +130,22 @@
     "viewMetadataDetails": "메타데이터 상세 보기 ({count}자)",
     "loadMoreError": "로그를 더 불러올 수 없습니다. 이전 기록은 유지됩니다.",
     "retryLoadMore": "다시 불러오기",
-    "loadMore": "더 보기"
+    "loadMore": "더 보기",
+    "clearFilters": "필터 초기화",
+    "columns": {
+      "action": "작업",
+      "metadata": "메타데이터",
+      "resource": "리소스",
+      "timestamp": "시각"
+    },
+    "drawerTitleFallback": "이벤트 상세",
+    "eventIdLabel": "이벤트 ID",
+    "filterActionPlaceholder": "예: book.read, parent.update…",
+    "filterAria": "감사 로그 필터",
+    "filterResourcePlaceholder": "예: book, parent, song…",
+    "inspectBtn": "상세",
+    "inspectEventAria": "{action} 이벤트 상세 보기",
+    "tableAria": "감사 로그 표"
   },
   "health": {
     "title": "운영 상태",
@@ -137,7 +165,14 @@
       "healthy": "인증됨",
       "failed": "오류 발생",
       "unknown": "인증되지 않음",
-      "disabled": "실행 중 아님"
+      "disabled": "실행 중 아님",
+      "cached": "사전 생성 캐시",
+      "client_side": "클라이언트 측",
+      "cloud_ready": "클라우드 준비됨",
+      "local_only": "로컬 전용",
+      "remote_delegated": "원격 위임",
+      "scheduled": "정기 예약",
+      "standby": "대기"
     },
     "queueDepthLabel": "대기열",
     "queueDepthValue": "{count, plural, =0 {0개 작업} other {#개 작업}}",
@@ -186,8 +221,87 @@
       "Queued": "대기 중",
       "Quota exhausted": "한도 초과",
       "Unsupported": "지원되지 않음",
-      "Unknown": "알 수 없음"
-    }
+      "Unknown": "알 수 없음",
+      "Local only": "로컬 전용",
+      "Scheduled": "예약됨",
+      "Standby": "대기"
+    },
+    "actionHintLabel": "권장 조치",
+    "audioCacheErrorDetail": "진단 코드: {code}",
+    "audioCacheErrorTitle": "사전 생성 TTS 캐시 통계를 불러올 수 없습니다",
+    "audioCachePercentUsed": "{percent} 사용됨",
+    "audioCacheUnlimited": "제한 없음",
+    "audioCacheUsageAria": "{label} 사용률: {percent}%",
+    "autoRefresh30s": "30초",
+    "autoRefresh60s": "60초",
+    "autoRefreshActive": "{seconds}초마다 자동 새로고침",
+    "autoRefreshLabel": "자동 새로고침",
+    "autoRefreshOff": "끔",
+    "autoRefreshPaused": "탭이 숨겨져 있어 자동 새로고침 일시 중지됨",
+    "clearTtsCache": "TTS 캐시 삭제",
+    "clearTtsCacheError": "지금은 브라우저 TTS 캐시를 삭제할 수 없습니다.",
+    "clearTtsCacheSuccess": "브라우저 TTS 캐시를 삭제했습니다.",
+    "clearWasmCache": "STT 모델 캐시 삭제",
+    "clearWasmCacheError": "지금은 STT 모델 캐시를 삭제할 수 없습니다.",
+    "clearWasmCacheSuccess": "브라우저 STT 모델 캐시를 삭제했습니다.",
+    "clearingCache": "삭제 중…",
+    "deviceProbeError": "현재 기기 성능을 완전히 확인하지 못했습니다.",
+    "dismissErrorAria": "오류 알림 닫기",
+    "errorHttpStatus": "HTTP {status}",
+    "errorRequestId": "요청 ID: {requestId}",
+    "filterAria": "상태별 서비스 필터",
+    "filteredEmpty": "이 상태 필터와 일치하는 서비스가 없습니다.",
+    "filters": {
+      "all": "전체",
+      "attention": "주의 필요",
+      "healthy": "정상",
+      "local_only": "로컬 전용",
+      "standby": "대기"
+    },
+    "groups": {
+      "core": "핵심 인프라",
+      "coreDesc": "플랫폼 운영에 필수적인 API, 데이터베이스 및 객체 스토리지입니다.",
+      "localOnlyWorkers": "로컬 전용 / 원격 위임 / 설정으로 비활성화",
+      "localOnlyWorkersToggleHint": "{count}개 항목",
+      "ocr": "OCR 파이프라인 & AI 엔진",
+      "ocrDesc": "원격 OCR 워커, 4개 문자 인식 엔진 및 AI 맞춤법 교정입니다.",
+      "voice": "음성 & 오디오 캐시",
+      "voiceDesc": "텍스트 음성 변환(TTS), 음성 인식(STT) 및 사전 생성 오디오 캐시입니다.",
+      "workers": "백그라운드 워커 & Cron",
+      "workersDesc": "정기 작업, 검수 대기열 및 읽기 이벤트 워커입니다."
+    },
+    "kpiAria": "서비스 상태 지표",
+    "kpiTotalDetail": "/ {total}개 서비스",
+    "ocrEnginesSubheading": "OCR 인식 엔진",
+    "probeDevice": "기기 확인",
+    "probingDevice": "기기 확인 중…",
+    "refreshTimeoutError": "상태 확인 요청이 15초를 초과하여 시간 초과되었습니다.",
+    "refreshWarningBody": "가장 최근 스냅샷을 유지하고 있습니다. 다시 시도해 주세요.",
+    "refreshWarningTitle": "최신 상태를 새로고침할 수 없습니다",
+    "refreshing": "업데이트 중…",
+    "resetFilter": "모든 서비스 보기",
+    "sttEnvAndroidWebView": "Android WebView",
+    "sttEnvIosWebView": "iOS WebView",
+    "sttEnvPwa": "PWA 앱",
+    "sttInsecureContextWarning": "안전한 HTTPS 환경이 아닙니다. 마이크와 일부 브라우저 API가 제한될 수 있습니다.",
+    "sttMicNeedsHttps": "마이크 사용 시 HTTPS 필요",
+    "sttMicNoMediaDevices": "getUserMedia 미지원",
+    "sttModelBytesDetail": "{used} / {total}",
+    "sttModelCacheError": "IndexedDB 읽기 오류 ({code})",
+    "sttNoIndexedDbWarning": "IndexedDB를 사용할 수 없어 로컬 STT 모델과 TTS 캐시를 저장할 수 없습니다.",
+    "summaryAllHealthy": "모든 {healthy}개 서비스가 정상 작동 중입니다.",
+    "summaryAria": "시스템 운영 상태 요약",
+    "summaryAttentionSegment": "{count}개 주의 필요",
+    "summaryHealthySegment": "{count}개 정상",
+    "summaryLocalOnlySegment": "{count}개 로컬 전용",
+    "summaryStandbySegment": "{count}개 대기 중",
+    "ttsCacheBrowserEmpty": "비어 있음 (0개 항목)",
+    "ttsCacheBrowserError": "캐시 오류 ({code})",
+    "ttsCacheBrowserHitsMisses": "적중: {hits} · 미적중: {misses}",
+    "wakeOcrError": "OCR 워커 깨우기 명령을 보낼 수 없습니다. 다시 시도해 주세요.",
+    "wakeOcrRechecking": "잠시 후 자동으로 다시 확인합니다…",
+    "wakeOcrWorker": "OCR 워커 깨우기",
+    "wakingOcrWorker": "깨우는 중…"
   },
   "parents": {
     "title": "학부모 관리",
@@ -264,7 +378,8 @@
       "childGrade": "{grade}학년",
       "authNotConfigured": "Supabase Auth 액세스 권한이 백엔드에 구성되어 있지 않아 이메일과 전화번호를 불러올 수 없습니다.",
       "authNotFound": "이 프로필에 연동된 Supabase Auth 계정을 찾을 수 없습니다. 프로필 및 자녀 정보는 계속 표시됩니다.",
-      "authUnavailable": "지금 Supabase Auth에서 연락처 정보를 불러올 수 없습니다. 구성을 확인하거나 다시 시도해 주세요."
+      "authUnavailable": "지금 Supabase Auth에서 연락처 정보를 불러올 수 없습니다. 구성을 확인하거나 다시 시도해 주세요.",
+      "parentIdLabel": "학부모 ID"
     },
     "modal": {
       "createTitle": "학부모 추가",
@@ -301,6 +416,16 @@
         "genericUpdate": "지금 계정을 업데이트할 수 없습니다. 다시 시도해 주세요.",
         "fallback": "지금 계정을 업데이트할 수 없습니다. 입력한 데이터가 유지되었습니다."
       }
+    },
+    "copiedId": "복사됨",
+    "copyId": "ID 복사",
+    "copyIdAria": "ID {id} 복사",
+    "directoryAria": "학부모 계정 목록",
+    "overviewAria": "학부모 개요",
+    "searchToolbarAria": "학부모 검색",
+    "tableHeaders": {
+      "actions": "작업",
+      "parent": "학부모"
     }
   },
   "books": {
@@ -415,7 +540,13 @@
         "maxInt": "최대 학년은 1에서 5 사이의 정수여야 합니다.",
         "maxRange": "최대 학년은 1에서 5 사이여야 합니다.",
         "gradeOrder": "최소 학년은 최대 학년보다 클 수 없습니다."
-      }
+      },
+      "authorPlaceholder": "예: 샤를 페로",
+      "livePreviewDesc": "별도 표지 이미지를 업로드하지 않으면 ViRead가 제목, 저자, 학년 범위를 바탕으로 깔끔한 타이포그래피 표지를 자동 생성합니다.",
+      "livePreviewHeading": "도서 표지 미리보기",
+      "livePreviewTitleFallback": "새 도서 제목",
+      "namePlaceholder": "예: 장화 신은 고양이 (내부 관리명)",
+      "titlePlaceholder": "예: 장화 신은 고양이"
     },
     "detail": {
       "eyebrow": "도서 상세 정보",
@@ -462,7 +593,18 @@
       "ocrQueueCheckNow": "지금 다시 확인",
       "queuedNewPageBadge": "새 페이지 #{index} · OCR 대기열 저장됨",
       "pageQueuedOfflineBadge": "OCR 대기열 저장됨 — 서버 재연결 대기 중",
-      "pageQueuedOnlineBadge": "OCR 다시 실행 중…"
+      "pageQueuedOnlineBadge": "OCR 다시 실행 중…",
+      "copiedId": "복사됨",
+      "copyIdAria": "도서 ID 복사",
+      "openOcrShort": "OCR 검토 열기",
+      "publishRuleToggle": "어린이 도서관 공개 규칙",
+      "statNeedsReview": "검토 대기",
+      "statProcessing": "처리 중",
+      "statTotalPages": "전체 페이지",
+      "statVerified": "검증됨",
+      "summaryStripAria": "도서 요약",
+      "toggleAiBatchBtn": "AI 일괄 검토 실행",
+      "toggleUploadBtn": "페이지 업로드"
     },
     "editor": {
       "loading": "도서 메타데이터를 불러오는 중입니다…",
@@ -498,7 +640,14 @@
       "cannotRetireTitle": "책을 비활성화할 수 없습니다",
       "safetyBlocked": "Child Safety 정책에 따라 이 책은 아직 도서관에 추가할 수 없습니다. 모든 페이지에 대해 OCR VERIFIED를 완료하고 Safety가 Candidate와 일치하는지 확인하세요. HIGH 또는 NOT_RECOMMENDED 등급의 결과가 포함된 경우 차단됩니다.",
       "invalidMetadata": "현재 메타데이터가 유효하지 않습니다. 활성화하기 전에 양식에서 제목과 학년 범위를 수정하고 저장해 주세요.",
-      "genericToggleError": "요청이 확인되지 않았습니다. 관리자 권한이나 백엔드 연결을 확인하고 다시 시도해 주세요."
+      "genericToggleError": "요청이 확인되지 않았습니다. 관리자 권한이나 백엔드 연결을 확인하고 다시 시도해 주세요.",
+      "closeCoverStudio": "표지 스튜디오 닫기",
+      "coverDesc": "읽기 페이지나 검증된 리비전을 변경하지 않고 도서 표지를 업데이트(업로드, 3:4 자르기, 회전, AI 표지 생성)합니다.",
+      "coverHeading": "도서 표지",
+      "dangerZoneActiveDesc": "비활성화하면 학부모 도서관에서 도서가 숨겨지지만 모든 페이지, 리비전, 읽기 기록은 보존됩니다.",
+      "dangerZoneHeading": "도서 수명 주기",
+      "dangerZoneRetiredDesc": "현재 비활성화된 도서입니다. 메타데이터와 OCR 페이지가 요건을 충족하면 다시 활성화할 수 있습니다.",
+      "openCoverStudio": "표지 스튜디오 열기"
     },
     "uploader": {
       "heading": "도서 페이지 이미지나 문서를 업로드하고 OCR을 실행하세요.",
@@ -526,11 +675,13 @@
         "noValidFiles": "업로드할 유효한 파일이 없습니다. 형식, 용량 및 이미지 크기를 확인해 주세요.",
         "someInvalidFiles": "일부 파일이 유효하지 않아 업로드되지 않았습니다. 유효한 파일은 계속 처리 중입니다."
       },
-      "workerOfflineTitle": "OCR 서버가 일시적으로 오프라인입니다",
+      "workerOfflineTitle": "OCR 처리 서비스가 현재 오프라인입니다",
       "workerOfflineBody": "지금 바로 이미지나 PDF/DOCX를 업로드할 수 있습니다. 페이지는 대기열에 안전하게 저장되며 OCR 서버가 다시 켜지면 자동으로 처리됩니다.",
-      "workerUnreachableTitle": "OCR 서버 상태를 확인할 수 없습니다",
+      "workerUnreachableTitle": "OCR 서비스 상태를 확인할 수 없습니다",
       "workerUnreachableBody": "백엔드가 시작 중이거나 네트워크가 느립니다. 다시 확인하거나 OCR 대기열에 업로드할 수 있습니다.",
-      "recheckWorkerBtn": "OCR 연결 다시 확인"
+      "recheckWorkerBtn": "OCR 연결 다시 확인",
+      "workerOfflineDesc": "지금도 이미지나 PDF/DOCX 파일을 업로드할 수 있습니다. 안전하게 대기열에 저장되며 OCR 서비스가 온라인이 되면 자동으로 처리됩니다.",
+      "workerUnreachableDesc": "백엔드가 시작 중이거나 네트워크가 느릴 수 있습니다. 연결을 다시 확인하거나 파일을 업로드해 OCR 대기열에 등록하세요."
     },
     "imagePreview": {
       "hideButton": "{pageNumber} 페이지 이미지 숨기기",
@@ -587,8 +738,25 @@
         "savedNoChanges": "AI가 제안한 수정 사항이 없으며 텍스트 안전 검사를 수행했습니다. 이미지, 사용 권한 및 수동 검증에 대한 관리자 검토를 기다리는 중입니다.",
         "savedPrefix": "AI 초안이 저장되었으며 관리자의 수동 검증을 기다리는 중입니다: {detail}",
         "failedKeepReview": "AI 처리 실패; 페이지가 NEEDS_REVIEW 상태로 유지됩니다(자동 VERIFIED 아님). {detail}"
+      },
+      "statusBadges": {
+        "failed": "검토 필요",
+        "saved": "초안 저장됨",
+        "verified": "검증됨"
       }
-    }
+    },
+    "emptyFilteredDesc": "검색어를 변경하거나 필터를 초기화하여 전체 도서 목록을 확인하세요.",
+    "filterToolbarAria": "도서 목록 필터",
+    "kpi": {
+      "activeBooks": "활성 도서",
+      "childLibraryEligible": "어린이 도서관 적격",
+      "needsReview": "OCR 검토 필요",
+      "needsReviewDetail": "{count}개 페이지 검토 대기",
+      "total": "전체 도서"
+    },
+    "listAria": "관리자 도서 목록",
+    "resetFilters": "초기화",
+    "searchPlaceholder": "도서명, 제목 또는 저자로 검색…"
   },
   "metadataQuality": {
     "title": "도서 데이터 품질",
@@ -620,7 +788,8 @@
       "invalidGradeRange": "유효하지 않은 학년 범위",
       "invalidGradeRangeDetail": "1~5학년 범위를 벗어나거나 최소 학년이 최대 학년보다 큼",
       "duplicateGroups": "중복 가능성",
-      "duplicateGroupsDetail": "후보 그룹에 포함된 도서 {count}권"
+      "duplicateGroupsDetail": "후보 그룹에 포함된 도서 {count}권",
+      "missingMetadataSummary": "저자 누락: {missingAuthor} · 잘못된 학년: {invalidGrade}"
     },
     "issuesHeading": "검토가 필요한 도서",
     "duplicateNote": "중복은 공백을 제거하고 대소문자를 구분하지 않은 상태에서 제목과 저자를 기준으로 식별됩니다.",
@@ -662,7 +831,8 @@
     "lifecycleLabels": {
       "ACTIVE": "활성",
       "RETIRED": "중지됨"
-    }
+    },
+    "searchPlaceholder": "제목 또는 저자로 검색…"
   },
   "contentQuality": {
     "eyebrow": "도서 품질 관리",
@@ -680,7 +850,9 @@
       "RESOLVED": "해결됨",
       "REJECTED": "거부됨",
       "REPORTED_BOOKS": "신고된 도서",
-      "REPORTED_PAGES": "신고된 페이지"
+      "REPORTED_PAGES": "신고된 페이지",
+      "reportedScope": "신고된 도서",
+      "reportedScopeDetail": "신고 페이지: {pages} · 반려: {rejected}"
     },
     "reportIssueTypes": {
       "BOOK_METADATA_ERROR": "잘못된 도서 정보",
@@ -859,7 +1031,14 @@
       "scanning": "스캔 중…",
       "scanWholeBook": "전체 도서 스캔",
       "paginationAria": "품질 검사 도서 페이지 매기기",
-      "itemLabel": "권"
+      "itemLabel": "권",
+      "kpiApprovedDetail": "준비됨: {ready} · 관리자 승인: {approved} · 자동 게시: {published}",
+      "kpiApprovedGroup": "적격 / 승인됨",
+      "kpiAria": "도서 승인 및 안전성 개요",
+      "kpiCopyrightDetail": "안전성 & 저작권 모두: {both}",
+      "kpiProcessingDetail": "스캔 중: {processing} · 오래됨: {stale} · 스캔 실패: {failed}",
+      "kpiProcessingGroup": "처리 중 / 재스캔 필요",
+      "statusBreakdownToggle": "상태별 상세 분포 보기 ({count}개 그룹)"
     },
     "bookDetail": {
       "subheading": "도서 품질, AI 내역, 발견 사항 및 관리자 검토",
@@ -987,7 +1166,12 @@
       "checkAndFixPage": "페이지 확인 및 수정",
       "rescanPage": "이 페이지 다시 스캔",
       "noFindingThisScan": "이번 검사에서 발견된 사항이 없습니다.",
-      "noScanResultYet": "페이지 검사 결과가 없습니다. 위 상태 및 사유를 확인하세요."
+      "noScanResultYet": "페이지 검사 결과가 없습니다. 위 상태 및 사유를 확인하세요.",
+      "compactFindingsDetail": "HIGH {high} · MEDIUM {medium} · 경고 페이지 {pages}개",
+      "compactMetricsToggle": "상세 AI 지표, 워크플로 및 평가 해시 보기",
+      "compactOcrDetail": "유효 해시: {valid}/{total} · 미스캔: {unscanned}",
+      "compactPipelineDetail": "오래됨: {stale} · 처리 중: {processing}",
+      "compactSafetyDetail": "교정: {proofreading}"
     }
   },
   "userBooks": {
@@ -1085,7 +1269,8 @@
       "suspendedBook": "개별 도서가 일시 중지되었습니다.",
       "rejected": "이 페이지 버전이 거절되었습니다.",
       "suspendedWithTitle": "개별 도서 \"{title}\"이(가) 일시 중지되었습니다. 소유 가정이 즉시 읽을 수 없습니다."
-    }
+    },
+    "kpiAria": "사용자 도서 검수 대기열 개요"
   },
   "flow2": {
     "filters": {
@@ -1438,7 +1623,9 @@
       "providerUnavailable": "사용 불가",
       "providerChecking": "확인 중",
       "noProviderEvents": "제공자 이벤트 없음.",
-      "safetyDisclaimer": "AI 결과가 절대적인 콘텐츠 안전을 보장하지는 않습니다. AI 워크플로우에서는 관리자가 현재 후보(Candidate)에 대해 안전성을 확인한 후 VERIFIED로 저장할 수 있습니다."
+      "safetyDisclaimer": "AI 결과가 절대적인 콘텐츠 안전을 보장하지는 않습니다. AI 워크플로우에서는 관리자가 현재 후보(Candidate)에 대해 안전성을 확인한 후 VERIFIED로 저장할 수 있습니다.",
+      "emptyDesc": "아래 작업 표시줄에서 '확인 및 AI 실행'을 실행해 맞춤법 교정과 어린이 안전 검사를 진행하세요.",
+      "emptyTitle": "이 리비전의 AI 안전 결과가 아직 없습니다"
     },
     "tabs": {
       "words": "단어 및 위치 확인",
@@ -1566,12 +1753,91 @@
       "noWords": "이 수정본에 단어가 없습니다.",
       "addWord": "단어 추가",
       "deleteWord": "단어 삭제",
-      "finishReview": "검토 완료"
+      "finishReview": "검토 완료",
+      "hashColumnLabel": "#"
     },
     "historyView": {
       "heading": "OCR 처리 기록",
       "subtitle": "{title} · {pageNumber} 페이지 · 수정 R{revisionNo}",
       "mobileCardAria": "수정본 {revisionNo} 선택"
+    },
+    "smartBlocks": {
+      "acceptClearBtn": "명확한 블록 승인",
+      "blockCardAria": "{typeLabel} 블록",
+      "circuitBreakerDesc": "제외 예상 텍스트 비율이 페이지의 35%를 초과하여 시스템이 해당 블록을 유지하고 수동 확인을 위해 '검증 필요'로 이동했습니다.",
+      "circuitBreakerTitle": "콘텐츠 손실 방지 보호가 작동했습니다",
+      "cropReviewTitle": "글자 잘림 방지를 위해 원본 이미지 프레임을 유지했습니다",
+      "decisions": {
+        "EXCLUDE": "제외됨",
+        "KEEP": "유지",
+        "REVIEW": "검증 필요"
+      },
+      "editBtn": "텍스트 편집",
+      "editLabel": "블록 텍스트 편집",
+      "emptyClean": "유지된 정상 본문 블록이 아직 없습니다.",
+      "emptyExcluded": "이 페이지에서 제외된 노이즈나 페이지 번호가 없습니다.",
+      "emptyReview": "이 페이지에서 추가 검증이 필요한 블록이 없습니다.",
+      "excludeBtn": "제외",
+      "geometryMeta": "추정 기울기: {angle}° · 페이지 면적: {area}% · {gutterReason}",
+      "heading": "스마트 OCR 콘텐츠 추출 검토",
+      "headingWithPage": "스마트 OCR 콘텐츠 추출 검토 — {pageNumber}페이지",
+      "keepBtn": "유지",
+      "loaderDesc": "페이지 번호, 머리글 및 불필요한 문자를 본문과 자동 분리합니다(본문은 절대 자동 삭제하지 않습니다).",
+      "loaderError": "이 페이지의 스마트 텍스트 블록을 분류할 수 없습니다.",
+      "loaderOpenBtn": "스마트 텍스트 블록 분류 열기",
+      "loaderReextractBtn": "텍스트 블록 다시 분석",
+      "manualOverrideBadge": "수동 편집됨",
+      "noImageFallback": "원본 이미지가 첨부되지 않았지만 분석된 {count}개 텍스트 블록을 모두 표시합니다.",
+      "notices": {
+        "acceptClearAll": "명확한 블록 {confirmed}개를 모두 승인했습니다.",
+        "acceptClearRemoteRemaining": "명확한 블록을 승인했습니다. {remaining}개 블록은 수동 검증이 필요합니다.",
+        "acceptClearWithRemaining": "명확한 블록 {confirmed}개를 승인했습니다. 아직 {remaining}개 블록을 수동 검증해야 합니다.",
+        "editSaved": "블록 텍스트를 수정하고 읽기 본문에 유지했습니다.",
+        "emptyEditError": "저장 시 블록 텍스트는 비워 둘 수 없습니다.",
+        "excluded": "텍스트 블록을 읽기 본문에서 제외했습니다.",
+        "humanEditReason": "사용자가 이 블록의 텍스트를 수정했습니다.",
+        "humanExcludeReason": "사용자가 이 블록을 제외했습니다.",
+        "humanKeepReason": "사용자가 이 블록을 유지했습니다.",
+        "humanRestoreReason": "블록을 읽기 본문으로 복원했습니다.",
+        "kept": "텍스트 블록을 읽기 본문에 유지했습니다.",
+        "nothingToUndo": "실행 취소할 작업이 없습니다.",
+        "restored": "텍스트 블록을 읽기 본문으로 복원했습니다.",
+        "saved": "콘텐츠 블록 변경 사항을 저장했습니다.",
+        "undone": "최근 작업을 실행 취소했습니다.",
+        "updateFailed": "이 블록의 결정을 업데이트할 수 없습니다. 다시 시도해 주세요.",
+        "updated": "콘텐츠 블록 상태를 업데이트했습니다."
+      },
+      "originalImageAlt": "도서 페이지 원본 이미지",
+      "originalImageAltWithPage": "{pageNumber}페이지 원본 이미지",
+      "overlayAria": "추출된 텍스트 영역 오버레이",
+      "previewEmpty": "필터링 후 표시할 읽기 텍스트가 없습니다.",
+      "previewHeading": "어린이 읽기 본문",
+      "previewReviewNotice": "본문 누락을 방지하기 위해 현재 미리보기에 검증 필요 블록 {count}개가 포함되어 있습니다.",
+      "readingOrderMeta": "읽기 순서 #{order} · 신뢰도 {confidence}%",
+      "reasonPrefix": "사유:",
+      "restoreBtn": "복원",
+      "reviewBanner": "텍스트 손실을 막기 위해 아래 블록이 미리보기에 임시 유지됩니다. 각 블록에 대해 유지 또는 제외를 선택하세요.",
+      "saveEditBtn": "편집 저장",
+      "shadowModeDesc": "노이즈 필터링 결정은 비교용으로만 기록되며 공식 읽기 본문은 아직 변경되지 않습니다.",
+      "shadowModeTitle": "비교 모드 실행 중 (Shadow)",
+      "summaryLine": "페이지 유형: {pageKind} · 문자 {retention}% 유지 (유지 {keep}, 제외 {excluded}, 검증 필요 {review})",
+      "tabs": {
+        "clean": "정제된 본문",
+        "excluded": "제외됨",
+        "original": "원본 이미지",
+        "preview": "읽기 미리보기",
+        "review": "검증 필요"
+      },
+      "tabsAria": "OCR 추출 보기 모드",
+      "undoBtn": "실행 취소"
+    },
+    "workbenchTabs": {
+      "ariaLabel": "OCR 검토 작업 공간",
+      "draft": "텍스트 및 검토",
+      "history": "리비전 이력",
+      "safety": "AI 안전",
+      "smartBlocks": "스마트 블록 V2",
+      "words": "단어 및 BBox"
     }
   },
   "training": {
@@ -1720,7 +1986,15 @@
       "closeDriftSuccess": "구성 오류가 발생한 작업을 닫았습니다. 실행 기록과 체크포인트는 유지되며 후보는 아직 벤치마크/승인되지 않았습니다. 시스템이 올바르게 잠긴 구성에 따라 새 작업을 생성할 수 있습니다.",
       "closeDriftFailed": "이 후보를 닫을 수 없습니다. 상태 또는 계보가 변경되었을 수 있습니다.",
       "closeUnbenchmarkedSuccess": "벤치마크되지 않은 후보를 닫았습니다. 실행 기록과 체크포인트는 유지됩니다. 충분한 독립적 VERIFIED 홀드아웃이 확보되면 시스템이 자동으로 Locked Test와 대체 작업을 생성합니다.",
-      "closeUnbenchmarkedFailed": "후보를 닫을 수 없습니다. 워커가 여전히 실행 중이거나, 후보가 이미 벤치마크되었거나, 계보가 변경되었을 수 있습니다."
+      "closeUnbenchmarkedFailed": "후보를 닫을 수 없습니다. 워커가 여전히 실행 중이거나, 후보가 이미 벤치마크되었거나, 계보가 변경되었을 수 있습니다.",
+      "flow2AlreadyTrained": "현재 Flow 2 데이터셋과 설정에는 이전 학습 결과가 이미 있습니다. 새 VERIFIED 샘플을 추가하거나 기존 후보를 평가하세요.",
+      "flow2NoEligibleSamples": "스냅샷을 생성할 수 있는 깨끗한 Flow 2 샘플이 아직 없습니다.",
+      "flow2Paused": "Flow 2가 일시 중지되었습니다 (VIREAD_FLOW2_INGESTION_PAUSED=true).",
+      "flow2ScheduleBlocked": "Flow 2를 대기열에 등록할 수 없습니다 ({reason}).",
+      "flow2Scheduled": "Flow 2 스냅샷({train} 학습 / {validation} 검증)을 생성하고 작업 {jobId}({status})을 대기열에 등록했습니다.",
+      "flow2TrainValRequired": "현재 스냅샷에 학습 {train}건, 검증 {validation}건이 있습니다. Colab 대기열 등록에는 두 세트가 모두 필요합니다.",
+      "flow2TriggerFailed": "스냅샷 생성 또는 Flow 2 학습 대기열 등록에 실패했습니다.",
+      "flow2UnresolvedJob": "미완료 학습 작업이 이미 대기열에 있어 새 작업을 생성하지 않았습니다."
     },
     "flow1": {
       "badgeEyebrow": "스트림 1 신규 · 직접 모델 교체",
@@ -1888,7 +2162,10 @@
         "APPS_SCRIPT_ACCESS_DENIED": "Apps Script 웹 앱이 익명 액세스를 차단하고 있습니다. script.google.com에서 '액세스 권한이 있는 사용자: 모든 사용자(Anyone)' 옵션으로 다시 배포하세요 (HMAC-SHA256 서명으로 계속 보호됨).",
         "BRIDGE_SECRET_MISMATCH": "Apps Script Bridge 서명이 일치하지 않거나 script.google.com의 Script Properties에 VIREAD_BRIDGE_SECRET이 없습니다.",
         "DRIVE_SCOPE_MISMATCH": "OAuth 권한 범위가 최소 drive.file 권한과 일치하지 않습니다. 다시 연결하여 앱 전용 폴더 권한을 허용해 주세요.",
-        "genericCode": "오류 코드: {code}. Google Drive 연결을 확인하거나 '연결 및 용량 확인'을 클릭하세요."
+        "genericCode": "오류 코드: {code}. Google Drive 연결을 확인하거나 '연결 및 용량 확인'을 클릭하세요.",
+        "DESKTOP_REQUIRES_WINDOWS": "Linux 서버는 Google Drive for Desktop 로컬 마운트를 지원하지 않습니다. Apps Script Bridge로 연결해 주세요.",
+        "DESKTOP_UNAVAILABLE_CLOUD": "클라우드 서버(Render)는 개인 PC의 Google Drive for Desktop(G:\\)에 접근할 수 없습니다. Apps Script Bridge로 전환해 주세요.",
+        "ENCRYPTION_KEY_MISSING": "서버에 VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY(32자 이상) 환경 변수가 누락되었습니다."
       },
       "notices": {
         "redirectingOauth": "Google OAuth 2.0 인증 페이지로 리디렉션하는 중입니다(최소 drive.file 권한만 요청)…",
@@ -1909,8 +2186,37 @@
         "disconnectConfirm": "파이프라인 2에서 Google Drive 연결을 해제하시겠습니까? Drive에 저장된 원본 도서 데이터와 파일은 삭제되지 않으며, 새로운 아웃박스 항목은 안전하게 대기합니다 (Supabase로 동기화되지 않음).",
         "disconnected": "Google Drive 연결이 안전하게 해제되었으며 백엔드에서 리프레시 토큰이 삭제되었습니다.",
         "disconnectFailed": "현재 Google Drive 연결을 해제할 수 없습니다."
-      }
-    }
+      },
+      "desktopCloudWarningMid": "(로컬 Windows G:\\ 드라이브에서만 읽을 수 있음). 클라우드 백엔드(Render)와 Google Colab이 Drive를 읽고 쓰려면 다음으로 전환하세요:",
+      "desktopCloudWarningPrefix": "현재 연결 방식:",
+      "disconnectModalConfirm": "연결 해제",
+      "disconnectModalTitle": "Google Drive 연결을 해제할까요?"
+    },
+    "colabGuideAnd": "및",
+    "colabGuideMid1": ", Runtime 선택",
+    "colabGuideMid2": ", 2개의 Colab Secrets 활성화",
+    "colabGuidePrefix": "노트북 열기",
+    "colabGuideSuffix": ", 그다음 클릭",
+    "colabGuideTitle": "Colab 무료 T4 GPU 실행 가이드 (0 VND)",
+    "driveUnavailableDesc": "백엔드에서 Flow 2의 Google Drive 연결 상태를 반환하지 않았습니다.",
+    "driveUnavailableTitle": "Google Drive 미구성",
+    "errors": {
+      "loadFailed": "학습 상태를 불러올 수 없습니다. 관리자 권한과 VietOCR V2 마이그레이션을 확인하세요.",
+      "serviceUnavailable": "VietOCR 학습 관리 서비스를 사용할 수 없습니다."
+    },
+    "kpiGridAria": "OCR 학습 지표",
+    "tabs": {
+      "drive": "Google Drive",
+      "flow1": "Flow 1 모델 교체",
+      "flow2": "Flow 2 학습 및 평가",
+      "overview": "개요 및 런타임"
+    },
+    "tabsAria": "OCR 학습 섹션",
+    "triggerFlow2Btn": "스냅샷 생성 및 Flow 2 학습 등록",
+    "workerExecutionModeLabel": "실행 모드:",
+    "workerWebHeavyDisabled": "비활성화 (아래 버튼으로 실행)",
+    "workerWebHeavyEnabled": "활성화",
+    "workerWebHeavyLabel": "웹 백그라운드 워커:"
   },
   "karaoke": {
     "library": {
@@ -1950,7 +2256,11 @@
         "DRAFT": "임시 저장",
         "PUBLISHED": "표시 중",
         "HIDDEN": "숨김"
-      }
+      },
+      "emptyTitle": "아직 등록된 노래가 없습니다",
+      "filterAria": "노래 라이브러리 필터",
+      "hasCoverBadge": "표지 있음",
+      "searchPlaceholder": "노래 제목 또는 저자 입력…"
     },
     "workspace": {
       "retryLoad": "다시 시도",
@@ -2513,6 +2823,24 @@
         "minOneLyricLine": "올바른 가사 줄을 최소 1줄 이상 입력해주세요.",
         "reviewFingerprintMissing": "처리 검토 콘텐츠 지문이 누락되었어요."
       }
+    },
+    "confirm": {
+      "continueAction": "계속",
+      "editLyricsTitle": "타이밍이 지정된 가사를 수정할까요?",
+      "expandRepeatsAction": "펼치기 확인",
+      "expandRepeatsTitle": "반복 기호를 펼칠까요?",
+      "leaveAction": "페이지 나가기",
+      "leaveTitle": "이 페이지를 나갈까요?",
+      "publishAction": "게시 확인",
+      "publishTitle": "노래를 게시할까요?",
+      "reloadAction": "저장본 다시 불러오기",
+      "reloadTitle": "서버에서 다시 불러올까요?",
+      "replaceAudioAction": "음원 교체",
+      "replaceAudioTitle": "MP3 음원 파일을 교체할까요?",
+      "replaceLyricsAction": "가사 교체",
+      "replaceLyricsTitle": "현재 가사를 모두 교체할까요?",
+      "resplitAction": "재분할 확인",
+      "resplitTitle": "이 줄의 음절을 다시 나눌까요?"
     }
   },
   "pageUploadRuntime": {
@@ -2533,5 +2861,44 @@
     "reloadAfterUploadFailed": "업로드 후 페이지 목록을 다시 불러올 수 없습니다. 데이터가 저장되었을 수 있으니 새로고침해 확인하세요.",
     "reprocessIncomplete": "페이지 OCR 재처리 작업이 완료되지 않았습니다. 다시 시도해 주세요.",
     "reprocessQueuedWindows": "OCR 재실행 요청을 대기열에 저장했습니다 — OCR 서버가 다시 켜지면 자동 처리됩니다"
+  },
+  "qualityHub": {
+    "description": "카탈로그 메타데이터 점검, 학부모 신고 처리, 도서 안전성 승인 및 사용자 도서 검수를 한 화면에서 관리합니다.",
+    "eyebrow": "품질 운영",
+    "tabs": {
+      "approval": "승인 및 안전성",
+      "metadata": "도서 메타데이터",
+      "reports": "사용자 신고",
+      "userBooks": "사용자 도서 & Flow 2"
+    },
+    "tabsAria": "도서 품질 관리 섹션"
+  },
+  "taskCenter": {
+    "backgroundProcessing": "백그라운드 처리 중…",
+    "closeAria": "AI 작업 센터 닫기",
+    "defaultBookLabel": "도서",
+    "elapsedHours": "{hours}시간",
+    "elapsedHoursMinutes": "{hours}시간 {minutes}분",
+    "elapsedMinutes": "{minutes}분",
+    "elapsedMinutesSeconds": "{minutes}분 {seconds}초",
+    "elapsedRunning": "{elapsed} 실행 중",
+    "elapsedSeconds": "{seconds}초",
+    "emptyDescription": "도서 페이지 업로드, OCR 추출, 표지 생성 시 실시간 진행 상황이 여기에 표시됩니다.",
+    "emptyTitle": "아직 AI 작업이 없습니다",
+    "openAria": "AI 작업 센터 열기",
+    "pageSeparator": " • {pageNumber}페이지",
+    "pillFailed": "실패한 작업 ({count})",
+    "pillIdle": "AI 작업",
+    "pillRunning": "AI 실행 중 ({count})",
+    "pillWaitingReview": "검증 필요 ({count})",
+    "processingAria": "{title} 처리 중",
+    "progressAria": "{title} 진행률",
+    "refreshAria": "작업 목록 새로고침",
+    "stagePrefix": "단계: {stage}",
+    "subtitle": "다른 페이지로 이동해도 백그라운드 작업이 안전하게 계속 실행됩니다.",
+    "title": "AI 작업 센터",
+    "viewResultAction": "결과 보기",
+    "workerOfflineBanner": "AI 워커 재연결을 기다리는 중입니다. 작업은 안전하게 저장되었으며 자동으로 재개됩니다.",
+    "pillWaitingForWorker": "OCR 대기열 ({count})"
   }
 }

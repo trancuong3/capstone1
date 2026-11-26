@@ -9,11 +9,11 @@ import { AdminPageHeader } from "@/components/admin/admin-ui";
 import { AdminUserBooksQualitySection } from "@/components/admin/admin-user-books-quality-section";
 import { Button } from "@/components/common/button";
 import { useTranslations } from "@/hooks/use-i18n";
+import { cn } from "@/lib/utils/cn";
 import {
   parseQualityHubTab,
   type QualityHubTab,
-} from "@/lib/admin/quality-hub-tab";
-import { cn } from "@/lib/utils/cn";
+} from "@/lib/utils/quality-hub-tab";
 
 export { parseQualityHubTab, type QualityHubTab };
 

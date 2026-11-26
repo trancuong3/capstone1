@@ -1,5 +1,7 @@
 "use client";
 
+import { ExternalLink, Loader2, RefreshCw, UploadCloud } from "lucide-react";
+import Link from "next/link";
 import {
   useEffect,
   useRef,
@@ -7,8 +9,6 @@ import {
   useSyncExternalStore,
   type FormEvent,
 } from "react";
-import Link from "next/link";
-import { ExternalLink, Loader2, RefreshCw, UploadCloud } from "lucide-react";
 
 import { AdminBadge } from "@/components/admin/admin-ui";
 import { Button } from "@/components/common/button";
@@ -428,14 +428,30 @@ export function AdminPageUploader({
           <StatusMessage
             title={
               workerStatus === "offline"
-                ? t("books.uploader.workerOfflineTitle")
-                : t("books.uploader.workerUnreachableTitle")
+                ? t(
+                    "books.uploader.workerOfflineTitle",
+                    undefined,
+                    "Dịch vụ xử lý OCR hiện đang ngoại tuyến",
+                  )
+                : t(
+                    "books.uploader.workerUnreachableTitle",
+                    undefined,
+                    "Chưa kiểm tra được trạng thái dịch vụ OCR",
+                  )
             }
             tone="warning"
           >
             {workerStatus === "offline"
-              ? t("books.uploader.workerOfflineBody")
-              : t("books.uploader.workerUnreachableBody")}
+              ? t(
+                  "books.uploader.workerOfflineBody",
+                  undefined,
+                  "Bạn vẫn có thể tải ảnh hoặc PDF/DOCX ngay bây giờ: hệ thống sẽ xếp hàng an toàn và tự động chạy OCR khi dịch vụ xử lý OCR hoạt động.",
+                )
+              : t(
+                  "books.uploader.workerUnreachableBody",
+                  undefined,
+                  "Backend đang khởi động hoặc mạng chậm. Bạn vẫn có thể bấm Kiểm tra lại hoặc tải lên để xếp hàng OCR.",
+                )}
           </StatusMessage>
           <Button
             className="self-start"
@@ -448,7 +464,11 @@ export function AdminPageUploader({
             variant="outline"
           >
             <RefreshCw aria-hidden="true" className="size-3.5 shrink-0" />
-            {t("books.uploader.recheckWorkerBtn")}
+            {t(
+              "books.uploader.recheckWorkerBtn",
+              undefined,
+              "Kiểm tra lại kết nối OCR",
+            )}
           </Button>
         </div>
       ) : null}

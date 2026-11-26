@@ -15,8 +15,8 @@ import {
 } from "@/components/admin/karaoke/karaoke-confirm-modal";
 import {
   SongMetadataForm,
-  karaokeFileInputClass,
-  karaokeTextareaClass,
+  adminCompactFileInputClass,
+  adminCompactTextareaClass,
 } from "@/components/admin/karaoke/song-metadata-form";
 import { KaraokeProcessingStatus } from "@/components/admin/karaoke/karaoke-processing-status";
 import { KaraokeReviewPanel } from "@/components/admin/karaoke/karaoke-review-panel";
@@ -360,7 +360,7 @@ export function KaraokeWizardScreen({
                             ? t("karaoke.wizard.vocalSongMp3")
                             : t("karaoke.wizard.instrumentalMp3")
                         }
-                        className={karaokeFileInputClass}
+                        className={adminCompactFileInputClass}
                         type="file"
                         accept=".mp3,audio/mpeg"
                         onChange={(event) => {
@@ -384,7 +384,7 @@ export function KaraokeWizardScreen({
                     {t("karaoke.wizard.lyricsLabel")}
                     <textarea
                       aria-label={t("karaoke.wizard.lyricsLabel")}
-                      className={`${karaokeTextareaClass} viread-learning-content min-h-52`}
+                      className={`${adminCompactTextareaClass} viread-learning-content min-h-52`}
                       dir="ltr"
                       lang="vi"
                       value={view.rawLyrics}
@@ -527,7 +527,7 @@ export function KaraokeWizardScreen({
                         <label className="grid gap-1.5 text-sm font-semibold text-ink">
                           {t("karaoke.wizard.referenceAudioLabel")}
                           <input
-                            className={karaokeFileInputClass}
+                            className={adminCompactFileInputClass}
                             type="file"
                             accept=".mp3,audio/mpeg"
                             onChange={(event) => {
@@ -547,7 +547,7 @@ export function KaraokeWizardScreen({
                       <label className="grid gap-1.5 text-sm font-semibold text-ink">
                         {t("karaoke.wizard.coverOptionalLabel")}
                         <input
-                          className={karaokeFileInputClass}
+                          className={adminCompactFileInputClass}
                           type="file"
                           accept=".jpg,.jpeg,.png,.webp"
                           onChange={(event) => {

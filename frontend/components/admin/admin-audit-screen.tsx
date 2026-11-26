@@ -18,6 +18,9 @@ import { useAdminServices } from "@/hooks/use-admin-services";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import type { AuditLogDTO } from "@/types/admin";
 
+const AUDIT_TABLE_GRID_COLS =
+  "md:grid-cols-[minmax(0,11rem)_minmax(0,1.25fr)_minmax(0,1.7fr)_minmax(0,1.15fr)_7.5rem]";
+
 function resolveAuditActionTone(action: string): AdminBadgeTone {
   const normalized = action.toLowerCase();
   if (
@@ -243,7 +246,7 @@ export function AdminAuditScreen() {
           >
             <div
               aria-hidden="true"
-              className="hidden border-b border-border bg-surface-subtle/75 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-muted md:grid md:grid-cols-[minmax(0,11rem)_minmax(0,1.25fr)_minmax(0,1.7fr)_minmax(0,1.15fr)_auto] md:items-center md:gap-4"
+              className={`hidden border-b border-border bg-surface-subtle/75 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-muted md:grid md:items-center md:gap-4 ${AUDIT_TABLE_GRID_COLS}`}
             >
               <span>
                 {t("auditLogs.columns.timestamp", undefined, "Thời điểm")}
@@ -265,7 +268,7 @@ export function AdminAuditScreen() {
                 const metadataPreview = summarizeMetadata(item.metadata);
                 return (
                   <li
-                    className="flex flex-col gap-2.5 p-4 transition-colors hover:bg-surface-subtle/40 md:grid md:grid-cols-[minmax(0,11rem)_minmax(0,1.25fr)_minmax(0,1.7fr)_minmax(0,1.15fr)_auto] md:items-center md:gap-4 md:px-4 md:py-3"
+                    className={`flex flex-col gap-2.5 p-4 transition-colors hover:bg-surface-subtle/40 md:grid md:items-center md:gap-4 md:px-4 md:py-3 ${AUDIT_TABLE_GRID_COLS}`}
                     key={item.id}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2 md:contents">

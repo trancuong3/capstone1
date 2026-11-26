@@ -33,7 +33,6 @@ export interface AdminBookFormProps {
   onSubmit: (value: AdminBookCreateDTO) => Promise<void>;
   showLiveCoverPreview?: boolean;
   sidebarExtra?: ReactNode;
-  submitErrorFallback?: string;
   submitLabel?: string;
 }
 
@@ -54,7 +53,6 @@ export function AdminBookForm({
   onSubmit,
   showLiveCoverPreview = false,
   sidebarExtra,
-  submitErrorFallback,
   submitLabel,
 }: AdminBookFormProps) {
   const t = useTranslations("admin");
@@ -94,9 +92,7 @@ export function AdminBookForm({
 
   const resolvedSubmitLabel = submitLabel ?? t("books.form.defaultSubmit");
   const resolvedErrorFallback =
-    errorFallbackMessage ??
-    submitErrorFallback ??
-    t("books.form.genericSaveError");
+    errorFallbackMessage ?? t("books.form.genericSaveError");
 
   const {
     control,
@@ -119,8 +115,10 @@ export function AdminBookForm({
   const watchedAuthor = useWatch({ control, name: "author" });
   const watchedMinGrade = useWatch({ control, name: "min_grade" });
   const watchedMaxGrade = useWatch({ control, name: "max_grade" });
+  const previewMinGrade = Number(watchedMinGrade);
+  const previewMaxGrade = Number(watchedMaxGrade);
 
-  const handleValidSubmit = async (value: AdminBookCreateDTO) => {
+  async function handleValidSubmit(value: AdminBookCreateDTO) {
     if (submittingRef.current) return;
     submittingRef.current = true;
     try {
@@ -137,7 +135,7 @@ export function AdminBookForm({
     } finally {
       submittingRef.current = false;
     }
-  };
+  }
 
   const nameId = `${baseId}-name`;
   const titleId = `${baseId}-title`;
@@ -149,7 +147,9 @@ export function AdminBookForm({
     <form
       className="space-y-4"
       noValidate
-      onSubmit={(event) => void handleSubmit(handleValidSubmit)(event)}
+      onSubmit={(event) => {
+        void handleSubmit(handleValidSubmit)(event);
+      }}
     >
       {formBanner}
       {formHeading ? (
@@ -408,12 +408,14 @@ export function AdminBookForm({
                       "Tiêu đề sách mới",
                     ),
                   author: watchedAuthor || null,
-                  min_grade: Number.isFinite(watchedMinGrade)
-                    ? watchedMinGrade
-                    : 1,
-                  max_grade: Number.isFinite(watchedMaxGrade)
-                    ? watchedMaxGrade
-                    : 5,
+                  min_grade:
+                    Number.isFinite(previewMinGrade) && previewMinGrade > 0
+                      ? previewMinGrade
+                      : 1,
+                  max_grade:
+                    Number.isFinite(previewMaxGrade) && previewMaxGrade > 0
+                      ? previewMaxGrade
+                      : 5,
                   lifecycle_status: lifecycleStatus,
                 }}
                 coverSourceType={coverSourceType}

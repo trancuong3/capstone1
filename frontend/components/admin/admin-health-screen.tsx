@@ -135,7 +135,7 @@ const OPERATIONAL_STATE_FALLBACK_LABELS: Record<
   Healthy: "Ổn định",
   Degraded: "Suy giảm",
   Offline: "Ngoại tuyến",
-  Queued: "Queued",
+  Queued: "Đang xếp hàng",
   "Quota exhausted": "Vượt hạn mức",
   Unsupported: "Không hỗ trợ",
   Unknown: "Không rõ",

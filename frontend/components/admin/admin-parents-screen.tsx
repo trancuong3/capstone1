@@ -46,6 +46,8 @@ import { isServiceError } from "@/lib/api/service-error";
 import type { AdminParentProfileItemDTO } from "@/types/admin";
 
 const PAGE_SIZE = 10;
+const PARENTS_TABLE_GRID_COLS =
+  "md:grid-cols-[minmax(0,1fr)_6.5rem_7rem_15.5rem] xl:grid-cols-[minmax(0,1fr)_7.5rem_8rem_22rem]";
 type LoadError = "auth" | "forbidden" | "unavailable";
 type ParentForm = AdminParentFormValues;
 
@@ -421,14 +423,18 @@ export function AdminParentsScreen() {
           >
             <div
               aria-hidden="true"
-              className="hidden border-b border-border bg-surface-subtle/75 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-muted md:grid md:grid-cols-[minmax(0,2.2fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_auto] md:items-center md:gap-4"
+              className={`hidden border-b border-border bg-surface-subtle/75 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-muted md:grid md:items-center md:gap-4 ${PARENTS_TABLE_GRID_COLS}`}
             >
-              <span>
+              <span className="text-start">
                 {t("parents.tableHeaders.parent", undefined, "Phụ huynh")}
               </span>
-              <span>{t("parents.childProfiles")}</span>
-              <span>{t("parents.createdAt")}</span>
-              <span className="text-end">
+              <span className="text-center whitespace-nowrap">
+                {t("parents.childProfiles")}
+              </span>
+              <span className="text-start whitespace-nowrap">
+                {t("parents.createdAt")}
+              </span>
+              <span className="text-end whitespace-nowrap">
                 {t("parents.tableHeaders.actions", undefined, "Thao tác")}
               </span>
             </div>
@@ -436,7 +442,7 @@ export function AdminParentsScreen() {
             <ul className="divide-y divide-border">
               {items.map((parent) => (
                 <li
-                  className="flex flex-col gap-3 p-4 transition-colors hover:bg-surface-subtle/40 md:grid md:grid-cols-[minmax(0,2.2fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_auto] md:items-center md:gap-4 md:px-4 md:py-3"
+                  className={`flex flex-col gap-3 p-4 transition-colors hover:bg-surface-subtle/40 md:grid md:items-center md:gap-4 md:px-4 md:py-3 ${PARENTS_TABLE_GRID_COLS}`}
                   key={parent.id}
                 >
                   <div className="min-w-0">
@@ -478,7 +484,7 @@ export function AdminParentsScreen() {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-x-5 gap-y-2 md:contents">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 md:justify-center">
                       <span className="text-xs font-semibold text-muted md:hidden">
                         {t("parents.childProfiles")}:
                       </span>
@@ -489,7 +495,7 @@ export function AdminParentsScreen() {
                       </AdminBadge>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 md:justify-start">
                       <span className="text-xs font-semibold text-muted md:hidden">
                         {t("parents.createdAt")}:
                       </span>

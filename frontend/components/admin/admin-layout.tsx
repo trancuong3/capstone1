@@ -172,7 +172,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
                 href="/admin/parents"
                 size="md"
               />
-              <span className="max-[360px]:sr-only truncate rounded-full border border-[#c2ddd3] bg-sky/75 px-2 py-0.5 text-[11px] font-bold tracking-wide text-primary-hover">
+              <span className="hidden shrink-0 whitespace-nowrap rounded-full border border-[#c2ddd3] bg-sky/75 px-2 py-0.5 text-[11px] font-bold tracking-wide text-primary-hover min-[440px]:inline-flex">
                 {t("layout.badge")}
               </span>
             </div>

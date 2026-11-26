@@ -159,7 +159,7 @@ export function AdminBadge({
   return (
     <span
       className={cn(
-        "inline-flex w-fit shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-bold leading-5 whitespace-nowrap",
+        "inline-flex w-fit max-w-full shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-start text-xs font-bold leading-5 whitespace-normal sm:whitespace-nowrap",
         badgeToneClassNames[tone],
         className,
       )}

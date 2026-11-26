@@ -19,7 +19,7 @@ import {
 } from "@/lib/karaoke/syllable-timing";
 import type { KaraokeLine, KaraokeSyllable } from "@/types/karaoke";
 import type { KaraokePlayerController } from "@/hooks/use-karaoke-player";
-import { karaokeInputClass } from "./song-metadata-form";
+import { adminCompactInputClass } from "./song-metadata-form";
 
 export type TimingControls = Pick<
   KaraokePlayerController,
@@ -72,11 +72,10 @@ export function SyllableTimingEditor({
   const index = Math.min(selected, Math.max(0, units.length - 1));
   const unit = units[index];
   const getCurrentMs = player?.getCurrentMs;
-  const isPlaying = Boolean(player?.playing);
   const pause = player?.pause;
   useEffect(() => () => pause?.(), [pause]);
   useEffect(() => {
-    if (!getCurrentMs || !isPlaying) return;
+    if (!getCurrentMs) return;
     let frame = 0;
     const tick = () => {
       setTime(getCurrentMs());
@@ -84,7 +83,7 @@ export function SyllableTimingEditor({
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [getCurrentMs, isPlaying]);
+  }, [getCurrentMs]);
   useEffect(() => {
     if (focusTarget?.lineId !== line.id) return;
     const target = root.current?.querySelector<HTMLButtonElement>(
@@ -111,7 +110,6 @@ export function SyllableTimingEditor({
   function mark(edge: "start_ms" | "end_ms", advance = false) {
     if (!player?.ready || !unit) return;
     const at = player.getCurrentMs();
-    setTime(at);
     if (
       line.start_ms === null ||
       line.end_ms === null ||
@@ -335,7 +333,7 @@ export function SyllableTimingEditor({
                 {t("karaoke.syllableEditor.selectedTextLabel")}
                 <input
                   aria-label={t("karaoke.syllableEditor.selectedTextAria")}
-                  className={`${karaokeInputClass} viread-learning-content`}
+                  className={`${adminCompactInputClass} viread-learning-content`}
                   dir="ltr"
                   lang="vi"
                   value={unit.text}
@@ -365,7 +363,7 @@ export function SyllableTimingEditor({
                       type="number"
                       min={0}
                       max={duration ?? 300000}
-                      className={`${karaokeInputClass} tabular-nums`}
+                      className={`${adminCompactInputClass} tabular-nums`}
                       value={unit[edge] ?? ""}
                       onChange={(e) =>
                         changeUnit({

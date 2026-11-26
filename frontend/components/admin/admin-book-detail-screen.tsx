@@ -617,34 +617,17 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
             </Button>
           </div>
         </div>
-        {/* Always mounted so tests/sessions preserve state; collapsed visually when pages already exist */}
-        <AdminPageUploader
-          bookId={book.id}
-          collapsed={!isUploaderExpanded}
-          onUploaded={refreshPages}
-        />
-
-        {items && items.length > 0 ? (
-          <section aria-label={t("books.detail.batchReviewAria")}>
-            <AdminBookAiBatchReview
-              bookId={book.id}
-              collapsed={!aiBatchOpen}
-              items={items}
-              onCompleted={() => void refreshPages()}
-            />
-          </section>
-        ) : null}
 
         {activeOcrJobs.length > 0 ? (
           <div
-            className="mb-4 flex flex-col gap-3 rounded-card border border-amber-300 bg-amber-50/85 p-4 text-amber-950"
+            className="flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50/85 p-4 text-amber-950"
             data-testid="admin-book-ocr-queue-banner"
             role="status"
           >
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="flex items-start gap-2.5">
                 <Clock3
-                  aria-hidden
+                  aria-hidden="true"
                   className="mt-0.5 size-5 shrink-0 text-amber-700"
                 />
                 <div>
@@ -665,16 +648,15 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                 </div>
               </div>
               <Button
-                className="sm:w-auto"
                 onClick={() => {
                   clearApiReadCache();
                   void refreshPages();
                 }}
-                size="compact"
+                size="admin"
                 type="button"
                 variant="secondary"
               >
-                <RefreshCw aria-hidden className="size-4" />
+                <RefreshCw aria-hidden="true" className="size-3.5 shrink-0" />
                 {t("books.detail.ocrQueueCheckNow")}
               </Button>
             </div>
@@ -686,7 +668,10 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                     data-testid="admin-queued-new-page-badge"
                     key={job.id}
                   >
-                    <Clock3 aria-hidden className="size-3.5 text-amber-700" />
+                    <Clock3
+                      aria-hidden="true"
+                      className="size-3.5 text-amber-700"
+                    />
                     {t("books.detail.queuedNewPageBadge", {
                       index: formatNumber(idx + 1),
                     })}
@@ -695,6 +680,24 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
               </div>
             ) : null}
           </div>
+        ) : null}
+
+        {/* Always mounted so tests/sessions preserve state; collapsed visually when pages already exist */}
+        <AdminPageUploader
+          bookId={book.id}
+          collapsed={!isUploaderExpanded}
+          onUploaded={refreshPages}
+        />
+
+        {items && items.length > 0 ? (
+          <section aria-label={t("books.detail.batchReviewAria")}>
+            <AdminBookAiBatchReview
+              bookId={book.id}
+              collapsed={!aiBatchOpen}
+              items={items}
+              onCompleted={() => void refreshPages()}
+            />
+          </section>
         ) : null}
         {pageActionNotice ? (
           <StatusMessage
@@ -766,7 +769,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                             className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-extrabold text-amber-950"
                             data-testid="admin-page-queued-ocr-badge"
                           >
-                            <Clock3 aria-hidden className="size-3.5" />
+                            <Clock3 aria-hidden="true" className="size-3.5" />
                             {queuedPageJob.worker_online === false
                               ? t("books.detail.pageQueuedOfflineBadge")
                               : t("books.detail.pageQueuedOnlineBadge")}

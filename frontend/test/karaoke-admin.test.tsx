@@ -95,11 +95,15 @@ function editor(service: AdminKaraokeService, id: string | undefined = songId) {
     </KaraokeServicesProvider>,
   );
 }
+let confirmSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   replace.mockReset();
-  vi.spyOn(window, "confirm").mockReturnValue(true);
+  confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  expect(confirmSpy).not.toHaveBeenCalled();
+  vi.restoreAllMocks();
+});
 async function waitEditor() {
   await screen.findByRole("button", { name: "Lưu bản nháp" });
 }

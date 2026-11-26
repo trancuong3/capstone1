@@ -20,9 +20,9 @@ import {
 } from "@/lib/karaoke/lyrics-timeline";
 import type { KaraokeLyrics, KaraokeLine } from "@/types/karaoke";
 import {
-  karaokeFileInputClass,
-  karaokeInputClass,
-  karaokeTextareaClass,
+  adminCompactFileInputClass,
+  adminCompactInputClass,
+  adminCompactTextareaClass,
 } from "@/components/admin/karaoke/song-metadata-form";
 import {
   SyllableTimingEditor,
@@ -220,7 +220,7 @@ const TimingEditorForm = memo(function TimingEditorForm({
           {t("karaoke.lyricEditor.pasteLabel")}
           <textarea
             rows={4}
-            className={`${karaokeTextareaClass} viread-learning-content`}
+            className={`${adminCompactTextareaClass} viread-learning-content`}
             dir="ltr"
             lang="vi"
             value={paste}
@@ -244,7 +244,7 @@ const TimingEditorForm = memo(function TimingEditorForm({
               type="file"
               aria-label={t("karaoke.lyricEditor.importFileAria")}
               accept=".txt,.lrc,.json"
-              className={karaokeFileInputClass}
+              className={adminCompactFileInputClass}
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 e.target.value = "";
@@ -345,7 +345,7 @@ const TimingEditorForm = memo(function TimingEditorForm({
                 <label className="grid gap-1.5 text-sm font-semibold text-ink">
                   {t("karaoke.lyricEditor.lineTextLabel", { num })}
                   <input
-                    className={`${karaokeInputClass} viread-learning-content`}
+                    className={`${adminCompactInputClass} viread-learning-content`}
                     dir="ltr"
                     lang="vi"
                     value={item.text}
@@ -375,7 +375,7 @@ const TimingEditorForm = memo(function TimingEditorForm({
                         min={0}
                         max={duration ?? 300000}
                         step={1}
-                        className={`${karaokeInputClass} tabular-nums`}
+                        className={`${adminCompactInputClass} tabular-nums`}
                         value={item[key] ?? ""}
                         onChange={(e) =>
                           update(item.id, {
