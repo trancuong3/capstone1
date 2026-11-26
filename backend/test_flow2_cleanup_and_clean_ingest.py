@@ -387,8 +387,12 @@ class Flow2CleanupAndCleanIngestTests(unittest.IsolatedAsyncioTestCase):
                     return None
 
             db = _IdempotentDb()
-            first = await clean_ingest.ingest_validated_samples(accepted, db=db, router=router)
-            second = await clean_ingest.ingest_validated_samples(accepted, db=db, router=router)
+            first = await clean_ingest.ingest_validated_samples(
+                accepted, db=db, router=router, workers=2, commit_every=1
+            )
+            second = await clean_ingest.ingest_validated_samples(
+                accepted, db=db, router=router, workers=2, commit_every=1
+            )
             self.assertEqual(first, {"inserted": 2, "skipped_existing": 0})
             self.assertEqual(second, {"inserted": 0, "skipped_existing": 2})
 

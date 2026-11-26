@@ -23,7 +23,7 @@
     "jobHeadlineRunning": "تحديد الصفحة...",
     "jobHeadlineRetrying": "إعادة المحاولة لتحديد الصفحة...",
     "jobHeadlineQueuedOnline": "تم وضع الصورة في قائمة الانتظار - انتظار التعرف...",
-    "jobHeadlineQueuedOffline": "انتظار خادم OCR لنظام التشغيل Windows - تم حفظ الصورة بأمان",
+    "jobHeadlineQueuedOffline": "تم حفظ الصفحة في قائمة انتظار OCR — سيبدأ التعرف تلقائيًا فور عودة خادم OCR للعمل",
     "jobIdMeta": "{fileName} · معرف المهمة: ",
     "scanFailedTitle": "عذرًا، لم يتم مسح الصفحة",
     "relogin": "تسجيل الدخول مرة أخرى",
@@ -59,7 +59,18 @@
     "errorSubmitFailed": "لا يمكن الاتصال بخادم OCR المحلي. يرجى المحاولة مرة أخرى.",
     "errorUnsupportedFormat": "صيغة الصورة غير مدعومة. يرجى اختيار JPG أو PNG أو WebP.",
     "errorEmptyFile": "ملف الصورة فارغ. يرجى اختيار صورة أخرى.",
-    "errorFileTooLarge": "تجاوز حجم الصورة الحد المسموح به والبالغ 32 ميجابايت. يرجى اختيار ملف أصغر."
+    "errorFileTooLarge": "تجاوز حجم الصورة الحد المسموح به والبالغ 32 ميجابايت. يرجى اختيار ملف أصغر.",
+    "workerOfflineBannerTitle": "خادم OCR متوقف مؤقتًا",
+    "workerOfflineBannerBody": "خادم OCR متوقف مؤقتًا — لا يزال بإمكانكم التقاط الصور أو رفعها لحفظها في قائمة الانتظار، وسيبدأ التعرف تلقائيًا عند عودة الخادم.",
+    "workerUnreachableBannerTitle": "خادم OCR قيد التشغيل أو لا يستجيب مؤقتًا",
+    "workerUnreachableBannerBody": "تعذر التحقق من حالة خادم OCR حاليًا بسبب بدء التشغيل أو بطء الشبكة. يمكنكم رفع الصور لحفظها في قائمة الانتظار أو إعادة المحاولة بعد ثوانٍ.",
+    "recheckOcrConnection": "إعادة فحص اتصال OCR",
+    "queuePositionLabel": "الترتيب في قائمة الانتظار: #{position}",
+    "savedAtLabel": "تم الحفظ الساعة {time}",
+    "checkQueueNow": "تحقق الآن",
+    "scanAnotherPageQueued": "مسح صفحة أخرى",
+    "cancelQueuedTask": "إلغاء المهمة",
+    "queuedListHeading": "صفحات أخرى محفوظة في قائمة انتظار OCR ({count} صفحة)"
   },
   "camera": {
     "missingBookInfo": "ViRead تعرفت على الصفحة لكن معلومات الكتاب مفقودة. يرجى محاذاة وإعادة المسح الضوئي.",

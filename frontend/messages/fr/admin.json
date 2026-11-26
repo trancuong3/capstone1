@@ -454,7 +454,15 @@
       "notFoundTitle": "Livre introuvable",
       "loadErrorTitle": "Impossible de charger le livre",
       "notFoundDesc": "L'identifiant du livre n'appartient pas aux données administratives actuelles.",
-      "genericErrorDesc": "Veuillez réessayer plus tard."
+      "genericErrorDesc": "Veuillez réessayer plus tard.",
+      "ocrQueueOfflineBanner": "{count} pages enregistrées dans la file OCR — Traitement automatique dès le retour du serveur OCR",
+      "ocrQueueOnlineBanner": "Traitement OCR en cours pour {count} pages…",
+      "ocrQueueOfflineHint": "Les tâches sont enregistrées durablement ; la liste des pages s’actualisera automatiquement dès le retour du serveur, même après rechargement.",
+      "ocrQueueOnlineHint": "Actualisation automatique de l’avancement OCR page par page.",
+      "ocrQueueCheckNow": "Vérifier maintenant",
+      "queuedNewPageBadge": "Nouvelle page #{index} · En file OCR",
+      "pageQueuedOfflineBadge": "En file OCR — En attente du serveur",
+      "pageQueuedOnlineBadge": "Relance OCR en cours…"
     },
     "editor": {
       "loading": "Chargement des métadonnées du livre…",
@@ -517,7 +525,12 @@
         "imageUnreadable": "Impossible de lire les dimensions de l'image dans le navigateur.",
         "noValidFiles": "Aucun fichier valide à téléverser. Vérifiez le format, la taille et les dimensions de l'image.",
         "someInvalidFiles": "Certains fichiers sont invalides et n'ont pas été téléversés. Les fichiers valides sont toujours en cours de traitement."
-      }
+      },
+      "workerOfflineTitle": "Le serveur OCR est temporairement hors ligne",
+      "workerOfflineBody": "Vous pouvez importer des images ou PDF/DOCX dès maintenant : les pages sont enregistrées durablement dans la file et traitées automatiquement dès le retour du serveur OCR.",
+      "workerUnreachableTitle": "Impossible de vérifier l’état du serveur OCR",
+      "workerUnreachableBody": "Le serveur démarre ou la connexion est lente. Vous pouvez revérifier ou importer des pages dans la file OCR.",
+      "recheckWorkerBtn": "Revérifier la connexion OCR"
     },
     "imagePreview": {
       "hideButton": "Masquer l'image de la page {pageNumber}",
@@ -2504,21 +2517,21 @@
   },
   "pageUploadRuntime": {
     "ocrTaskIncomplete": "La tâche OCR n'est pas terminée. Vérifiez le serveur OCR Windows puis réessayez.",
-    "ocrTaskQueuedWindows": "L'image de la page est en file d'attente pour le serveur OCR Windows. Actualisez après la fin du traitement.",
+    "ocrTaskQueuedWindows": "Page enregistrée dans la file OCR — Traitement automatique dès le retour du serveur",
     "skippedEmptyNote": "{count} pages blanches ignorées",
     "failedPagesNote": "{count} pages en erreur",
     "createdPagesSummary": "{count} pages créées · À valider{suffix}",
-    "queuedDocPagesForWorker": "{count} pages mises en file d'attente du serveur OCR Windows",
+    "queuedDocPagesForWorker": "{count} pages enregistrées dans la file OCR — Traitement automatique dès le retour du serveur",
     "docPagesPartialProgress": "{completed}/{total} pages terminées ({pending} pages encore en file OCR)",
     "docPagesComplete": "OCR terminé pour {completed}/{total} pages · À valider",
     "singlePageQueued": "Mis en file d'attente pour le serveur OCR Windows",
     "singlePageRecognizing": "Reconnaissance OCR de la page en cours…",
     "singlePageFailed": "La tâche OCR de la page n'a pas abouti. Veuillez réessayer.",
     "singlePageSucceeded": "OCR reconnu · À valider",
-    "singlePageWaitingWorker": "Mis en file d'attente en toute sécurité pour le serveur OCR Windows",
+    "singlePageWaitingWorker": "1 page enregistrée dans la file OCR — Traitement automatique dès le retour du serveur",
     "uploadFailedCheckBackend": "Échec du téléversement. Vérifiez le Backend puis réessayez.",
     "reloadAfterUploadFailed": "Impossible de recharger la liste des pages après l'envoi. Les données ont peut-être été enregistrées ; actualisez pour vérifier.",
     "reprocessIncomplete": "La réanalyse OCR de la page ne s'est pas terminée. Veuillez réessayer.",
-    "reprocessQueuedWindows": "La page est en file d'attente pour réanalyse par le serveur OCR Windows. Actualisez une fois terminé."
+    "reprocessQueuedWindows": "Demande de relance OCR enregistrée dans la file — Traitement automatique dès le retour du serveur"
   }
 }

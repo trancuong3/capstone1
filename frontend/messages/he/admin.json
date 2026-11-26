@@ -454,7 +454,15 @@
       "notFoundTitle": "הספר לא נמצא",
       "loadErrorTitle": "לא ניתן לטעון את הספר",
       "notFoundDesc": "מזהה הספר אינו שייך לנתוני הניהול הנוכחיים.",
-      "genericErrorDesc": "נא לנסות שוב מאוחר יותר."
+      "genericErrorDesc": "נא לנסות שוב מאוחר יותר.",
+      "ocrQueueOfflineBanner": "נשמרו {count} עמודים בתור ה-OCR — יעובדו אוטומטית ברגע ששרת ה-OCR יחזור לפעול",
+      "ocrQueueOnlineBanner": "מעבד OCR עבור {count} עמודים…",
+      "ocrQueueOfflineHint": "המשימות נשמרו באופן מתמיד; רשימת העמודים תתעדכן אוטומטית כשהשרת יחזור גם לאחר רענון הדף.",
+      "ocrQueueOnlineHint": "מעדכן אוטומטית את התקדמות ה-OCR.",
+      "ocrQueueCheckNow": "בדיקה עכשיו",
+      "queuedNewPageBadge": "עמוד חדש #{index} · נשמר בתור OCR",
+      "pageQueuedOfflineBadge": "נשמר בתור OCR — ממתין לשרת",
+      "pageQueuedOnlineBadge": "מריץ OCR מחדש…"
     },
     "editor": {
       "loading": "טוען מטא-נתונים של הספר…",
@@ -517,7 +525,12 @@
         "imageUnreadable": "לא ניתן לקרוא את מימדי התמונה בדפדפן.",
         "noValidFiles": "אין קבצים תקינים להעלאה. בדוק את הפורמט, הגודל ומימדי התמונה.",
         "someInvalidFiles": "חלק מהקבצים אינם תקינים ולכן לא הועלו. קבצים תקינים ממשיכים להיות ממוינים."
-      }
+      },
+      "workerOfflineTitle": "שרת ה-OCR כבוי זמנית",
+      "workerOfflineBody": "עדיין ניתן להעלות תמונות או קבצי PDF/DOCX כעת: העמודים יישמרו בתור ויעובדו אוטומטית ברגע ששרת ה-OCR יחזור לפעול.",
+      "workerUnreachableTitle": "לא ניתן לבדוק את מצב שרת ה-OCR",
+      "workerUnreachableBody": "השרת מופעל כעת או שהחיבור איטי. ניתן לבדוק שוב או להעלות עמודים לתור ה-OCR.",
+      "recheckWorkerBtn": "בדיקה חוזרת של חיבור OCR"
     },
     "imagePreview": {
       "hideButton": "הסתרת תמונת עמוד {pageNumber}",
@@ -2504,21 +2517,21 @@
   },
   "pageUploadRuntime": {
     "ocrTaskIncomplete": "משימת ה-OCR לא הושלמה. יש לבדוק את שרת ה-OCR ב-Windows ולנסות שוב.",
-    "ocrTaskQueuedWindows": "תמונת העמוד נכנסה לתור עבור שרת ה-OCR ב-Windows. ניתן לרענן לאחר השלמת העיבוד.",
+    "ocrTaskQueuedWindows": "העמוד נשמר בתור ה-OCR — יעובד אוטומטית כשהשרת יחזור",
     "skippedEmptyNote": "דולגו {count} עמודים ריקים",
     "failedPagesNote": "שגיאה ב-{count} עמודים",
     "createdPagesSummary": "נוצרו {count} עמודים · ממתין לאישור{suffix}",
-    "queuedDocPagesForWorker": "{count} עמודים נוספו לתור בהמתנה להפעלת שרת ה-OCR ב-Windows",
+    "queuedDocPagesForWorker": "נשמרו {count} עמודים בתור ה-OCR — יעובדו אוטומטית כשהשרת יחזור",
     "docPagesPartialProgress": "הושלמו {completed}/{total} עמודים ({pending} עמודים עדיין בתור ה-OCR)",
     "docPagesComplete": "הושלם OCR עבור {completed}/{total} עמודים · ממתין לאישור",
     "singlePageQueued": "נוסף לתור בהמתנה לעיבוד בשרת ה-OCR ב-Windows",
     "singlePageRecognizing": "מבצע זיהוי OCR לעמוד הספר…",
     "singlePageFailed": "משימת ה-OCR של עמוד הספר לא הושלמה. אנא נסו שוב.",
     "singlePageSucceeded": "זוהה ב-OCR · ממתין לאישור",
-    "singlePageWaitingWorker": "נשמר בתור בבטחה בהמתנה להשלמה בשרת ה-OCR ב-Windows",
+    "singlePageWaitingWorker": "נשמר עמוד אחד בתור ה-OCR — יעובד אוטומטית כשהשרת יחזור",
     "uploadFailedCheckBackend": "ההעלאה נכשלה. יש לבדוק את ה-Backend ולנסות שוב.",
     "reloadAfterUploadFailed": "לא ניתן לטעון מחדש את רשימת העמודים לאחר ההעלאה. ייתכן שהנתונים נשמרו; יש לרענן לאימות.",
     "reprocessIncomplete": "משימת העיבוד החוזר של OCR לעמוד לא הושלמה. אנא נסו שוב.",
-    "reprocessQueuedWindows": "העמוד נכנס לתור לעיבוד חוזר בשרת ה-OCR ב-Windows. יש לרענן לאחר ההשלמה."
+    "reprocessQueuedWindows": "בקשת ה-OCR החוזר נשמרה בתור — תעובד אוטומטית כשהשרת יחזור"
   }
 }

@@ -6,6 +6,7 @@ import type {
 } from "@/types/admin";
 import { z } from "zod";
 import {
+  AdminOcrJobQueuedSignal,
   adminOcrJobSchema,
   adminProcessingSchema,
   pollAdminOcrJob,
@@ -122,15 +123,10 @@ export function createRevisionService(options?: {
           });
         }
         if (finalJob.status !== "SUCCEEDED") {
-          throw new ServiceError({
-            code: "NETWORK_ERROR",
-            status: 503,
-            request_id: finalJob.id,
-            retryable: true,
-            message: translateRuntime(
-              "admin.pageUploadRuntime.reprocessQueuedWindows",
-            ),
-          });
+          throw new AdminOcrJobQueuedSignal(
+            finalJob,
+            translateRuntime("admin.pageUploadRuntime.reprocessQueuedWindows"),
+          );
         }
         if (finalJob.revision_id) {
           detail = await requestApi(

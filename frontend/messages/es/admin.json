@@ -454,7 +454,15 @@
       "notFoundTitle": "Libro no encontrado",
       "loadErrorTitle": "No se puede cargar el libro",
       "notFoundDesc": "El ID del libro no pertenece a los datos de administración actuales.",
-      "genericErrorDesc": "Por favor, inténtalo de nuevo más tarde."
+      "genericErrorDesc": "Por favor, inténtalo de nuevo más tarde.",
+      "ocrQueueOfflineBanner": "Se guardaron {count} páginas en la cola de OCR — Se procesarán automáticamente cuando el servidor OCR vuelva a encenderse",
+      "ocrQueueOnlineBanner": "Procesando OCR para {count} páginas…",
+      "ocrQueueOfflineHint": "Las tareas están guardadas de forma persistente; la lista se actualizará automáticamente al reconectarse el servidor OCR, incluso tras recargar.",
+      "ocrQueueOnlineHint": "Actualizando automáticamente el progreso de OCR página por página.",
+      "ocrQueueCheckNow": "Comprobar ahora",
+      "queuedNewPageBadge": "Página nueva #{index} · Guardada en cola OCR",
+      "pageQueuedOfflineBadge": "Guardada en cola OCR — Esperando servidor",
+      "pageQueuedOnlineBadge": "Reprocesando OCR…"
     },
     "editor": {
       "loading": "Cargando metadatos del libro…",
@@ -517,7 +525,12 @@
         "imageUnreadable": "No se pueden leer las dimensiones de la imagen en el navegador.",
         "noValidFiles": "No hay archivos válidos para subir. Verifique el formato, el tamaño y las dimensiones de la imagen.",
         "someInvalidFiles": "Algunos archivos no son válidos y no se han subido. Los archivos válidos se siguen procesando."
-      }
+      },
+      "workerOfflineTitle": "El servidor OCR está temporalmente apagado",
+      "workerOfflineBody": "Aún puedes subir imágenes o PDF/DOCX ahora: se guardarán de forma duradera en la cola y se procesarán automáticamente cuando el servidor OCR vuelva a encenderse.",
+      "workerUnreachableTitle": "No se pudo comprobar el estado del servidor OCR",
+      "workerUnreachableBody": "El servidor está iniciando o la red es lenta. Puedes volver a comprobar o subir páginas para guardarlas en la cola OCR.",
+      "recheckWorkerBtn": "Volver a comprobar conexión OCR"
     },
     "imagePreview": {
       "hideButton": "Ocultar imagen de la página {pageNumber}",
@@ -2504,21 +2517,21 @@
   },
   "pageUploadRuntime": {
     "ocrTaskIncomplete": "La tarea de OCR no finalizó. Revisa el servidor OCR de Windows e inténtalo de nuevo.",
-    "ocrTaskQueuedWindows": "La imagen de la página quedó en cola para el servidor OCR de Windows. Actualiza cuando finalice.",
+    "ocrTaskQueuedWindows": "Página guardada en la cola de OCR — Se procesará automáticamente al volver el servidor",
     "skippedEmptyNote": "{count} páginas en blanco omitidas",
     "failedPagesNote": "{count} páginas con error",
     "createdPagesSummary": "{count} páginas creadas · Pendiente de revisión{suffix}",
-    "queuedDocPagesForWorker": "{count} páginas en cola esperando la activación del servidor OCR de Windows",
+    "queuedDocPagesForWorker": "Se guardaron {count} páginas en la cola de OCR — Se procesarán automáticamente al volver el servidor",
     "docPagesPartialProgress": "{completed}/{total} páginas completadas ({pending} páginas siguen en cola OCR)",
     "docPagesComplete": "OCR completado en {completed}/{total} páginas · Pendiente de revisión",
     "singlePageQueued": "En cola esperando procesamiento del servidor OCR de Windows",
     "singlePageRecognizing": "Reconociendo página mediante OCR…",
     "singlePageFailed": "La tarea de OCR de la página no terminó. Por favor, inténtalo de nuevo.",
     "singlePageSucceeded": "OCR reconocido · Pendiente de revisión",
-    "singlePageWaitingWorker": "En cola segura esperando que el servidor OCR de Windows termine",
+    "singlePageWaitingWorker": "Se guardó 1 página en la cola de OCR — Se procesará automáticamente al volver el servidor",
     "uploadFailedCheckBackend": "Error al subir. Revisa el Backend e inténtalo de nuevo.",
     "reloadAfterUploadFailed": "No se pudo recargar la lista de páginas tras la subida. Es posible que se hayan guardado los datos; recarga para verificar.",
     "reprocessIncomplete": "La tarea de reprocesamiento OCR no terminó. Inténtalo de nuevo.",
-    "reprocessQueuedWindows": "La página quedó en cola para reprocesamiento en el servidor OCR de Windows. Actualiza al finalizar."
+    "reprocessQueuedWindows": "Solicitud de re-OCR guardada en la cola — Se procesará automáticamente al volver el servidor"
   }
 }

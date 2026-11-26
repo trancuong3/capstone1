@@ -2560,7 +2560,8 @@ class OcrInferenceJobService:
                 created_at=job.CreatedAt,
                 reason="admin_poll_nudge",
             )
-        return self.serialize_job(job)
+        worker_online = await self.has_online_worker()
+        return self.serialize_job(job, worker_online=worker_online)
 
     async def list_book_jobs_payload(self, book_id: UUID, *, limit: int = 200) -> list[dict[str, Any]]:
         rows = await self.repo.list_for_book(book_id, limit=limit)
@@ -2578,7 +2579,8 @@ class OcrInferenceJobService:
                 created_at=queued_row.CreatedAt,
                 reason="admin_book_poll_nudge",
             )
-        return [self.serialize_job(row) for row in rows]
+        worker_online = await self.has_online_worker()
+        return [self.serialize_job(row, worker_online=worker_online) for row in rows]
 
     async def retry_job(self, job_id: UUID) -> dict[str, Any]:
         job = await self.repo.get(job_id, lock=True)
@@ -2657,8 +2659,12 @@ class OcrInferenceJobService:
         return self.serialize_job(job)
 
     @staticmethod
-    def serialize_job(job: OcrInferenceJob) -> dict[str, Any]:
-        return {
+    def serialize_job(
+        job: OcrInferenceJob,
+        *,
+        worker_online: bool | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
             "id": str(job.Id),
             "job_kind": job.JobKind,
             "status": job.Status,
@@ -2681,3 +2687,6 @@ class OcrInferenceJobService:
             "updated_at": job.UpdatedAt.isoformat() if job.UpdatedAt else None,
             "completed_at": job.CompletedAt.isoformat() if job.CompletedAt else None,
         }
+        if worker_online is not None:
+            payload["worker_online"] = bool(worker_online)
+        return payload

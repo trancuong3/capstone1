@@ -454,7 +454,15 @@
       "notFoundTitle": "Book not found",
       "loadErrorTitle": "Cannot load book",
       "notFoundDesc": "Book ID does not belong to current administrative data.",
-      "genericErrorDesc": "Please try again later."
+      "genericErrorDesc": "Please try again later.",
+      "ocrQueueOfflineBanner": "Saved {count} pages in the OCR queue — Will process automatically when the OCR server comes back online",
+      "ocrQueueOnlineBanner": "Processing OCR for {count} pages…",
+      "ocrQueueOfflineHint": "Jobs are durably queued and will automatically update this page list once the OCR server reconnects, even after a reload.",
+      "ocrQueueOnlineHint": "Automatically refreshing page-by-page OCR progress.",
+      "ocrQueueCheckNow": "Check now",
+      "queuedNewPageBadge": "New page #{index} · Saved in OCR queue",
+      "pageQueuedOfflineBadge": "Saved in OCR queue — Waiting for server",
+      "pageQueuedOnlineBadge": "Re-running OCR…"
     },
     "editor": {
       "loading": "Loading book metadata…",
@@ -517,7 +525,12 @@
         "imageUnreadable": "Cannot read image dimensions in browser.",
         "noValidFiles": "No valid files to upload. Check format, size, and image dimensions.",
         "someInvalidFiles": "Some files are invalid and were not uploaded. Valid files are still being processed."
-      }
+      },
+      "workerOfflineTitle": "OCR server is temporarily offline",
+      "workerOfflineBody": "You can still upload images or PDF/DOCX files right now: pages are durably saved in the queue and will be processed automatically once the OCR server comes back online.",
+      "workerUnreachableTitle": "Could not verify OCR server status",
+      "workerUnreachableBody": "The backend is starting up or the connection is slow. You can recheck or upload to save pages into the OCR queue.",
+      "recheckWorkerBtn": "Recheck OCR connection"
     },
     "imagePreview": {
       "hideButton": "Hide page {pageNumber} image",
@@ -2504,21 +2517,21 @@
   },
   "pageUploadRuntime": {
     "ocrTaskIncomplete": "OCR task not finished. Check the Windows OCR server and try again.",
-    "ocrTaskQueuedWindows": "Page image queued for Windows OCR server processing. Refresh after the server completes.",
+    "ocrTaskQueuedWindows": "Page saved in the OCR queue — Will process automatically when the OCR server comes back online",
     "skippedEmptyNote": "skip {count} blank pages",
     "failedPagesNote": "error {count} pages",
     "createdPagesSummary": "Created {count} pages · Pending approval{suffix}",
-    "queuedDocPagesForWorker": "Queued {count} pages waiting for Windows OCR server activation",
+    "queuedDocPagesForWorker": "Saved {count} pages in the OCR queue — Will process automatically when the OCR server comes back online",
     "docPagesPartialProgress": "Completed {completed}/{total} pages ({pending} pages still queued for OCR)",
     "docPagesComplete": "OCR completed {completed}/{total} pages · Pending approval",
     "singlePageQueued": "Queued waiting for Windows OCR server processing",
     "singlePageRecognizing": "Recognizing OCR page…",
     "singlePageFailed": "OCR page task not finished. Please try again.",
     "singlePageSucceeded": "OCR recognized · Pending approval",
-    "singlePageWaitingWorker": "Queued safely waiting for Windows OCR server completion",
+    "singlePageWaitingWorker": "Saved 1 page in the OCR queue — Will process automatically when the OCR server comes back online",
     "uploadFailedCheckBackend": "Upload failed. Check Backend and try again.",
     "reloadAfterUploadFailed": "Cannot reload page list after upload. Data may have been saved; reload to verify.",
     "reprocessIncomplete": "OCR reprocessing task not finished. Please try again.",
-    "reprocessQueuedWindows": "Page queued for Windows OCR server reprocessing. Refresh after completion."
+    "reprocessQueuedWindows": "Re-OCR request saved in the queue — Will process automatically when the OCR server comes back online"
   }
 }

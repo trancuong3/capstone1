@@ -2,6 +2,7 @@
 
 import {
   Check,
+  Clock3,
   Copy,
   Info,
   Pencil,
@@ -31,6 +32,10 @@ import { StatusMessage } from "@/components/common/status-message";
 import { useSkippedAiPageIds } from "@/hooks/use-admin-ai-batch-skipped-pages";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import {
+  isActiveAdminOcrJobStatus,
+  type AdminOcrJobDTO,
+} from "@/lib/api/admin-page-service";
 import { clearApiReadCache } from "@/lib/api/read-cache";
 import { isServiceError } from "@/lib/api/service-error";
 import type { AdminBookDTO, AdminPageListItemUI } from "@/types/admin";
@@ -47,6 +52,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
   const [items, setItems] = useState<readonly AdminPageListItemUI[] | null>(
     null,
   );
+  const [ocrJobs, setOcrJobs] = useState<readonly AdminOcrJobDTO[]>([]);
   const [error, setError] = useState<"not-found" | "safe" | null>(null);
   const [pagesUnavailable, setPagesUnavailable] = useState(false);
   const [pendingRetire, setPendingRetire] =
@@ -67,7 +73,14 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
   const copyTimerRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(
     null,
   );
-
+  const fetchBookOcrJobs = useCallback(async () => {
+    if (typeof pages.listOcrJobs !== "function") return [];
+    try {
+      return await pages.listOcrJobs(bookId);
+    } catch {
+      return [];
+    }
+  }, [bookId, pages]);
   const load = useCallback(
     async (options?: { resetPage?: boolean }) => {
       const requestId = ++requestIdRef.current;
@@ -82,13 +95,18 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
           .list(bookId)
           .then((list) => ({ ok: true as const, list }))
           .catch((cause: unknown) => ({ ok: false as const, cause }));
+        const jobsPromise = fetchBookOcrJobs();
 
         const nextBook = await bookPromise;
         if (requestId !== requestIdRef.current) return;
         setBook(nextBook);
 
-        const pagesOutcome = await pagesPromise;
+        const [pagesOutcome, nextJobs] = await Promise.all([
+          pagesPromise,
+          jobsPromise,
+        ]);
         if (requestId !== requestIdRef.current) return;
+        setOcrJobs(nextJobs);
         if (!pagesOutcome.ok) {
           if (
             isServiceError(pagesOutcome.cause) &&
@@ -117,19 +135,24 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
         setItems([]);
       }
     },
-    [bookId, books, pageSize, pages],
+    [bookId, books, fetchBookOcrJobs, pageSize, pages],
   );
 
   const refreshPages = useCallback(async () => {
     const requestId = ++requestIdRef.current;
     try {
-      const nextPages = (await pages.list(bookId)).filter(
+      const [rawPages, nextJobs] = await Promise.all([
+        pages.list(bookId),
+        fetchBookOcrJobs(),
+      ]);
+      const nextPages = rawPages.filter(
         (item) => item.processing.lifecycle_status === "ACTIVE",
       );
       if (requestId !== requestIdRef.current) return;
       const maxPage = Math.max(1, Math.ceil(nextPages.length / pageSize));
       setPageNumber((current) => Math.min(current, maxPage));
       setItems(nextPages);
+      setOcrJobs(nextJobs);
     } catch {
       if (requestId !== requestIdRef.current) return;
       setPageActionNotice({
@@ -138,8 +161,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
         message: t("books.detail.refreshErrorDesc"),
       });
     }
-  }, [bookId, pages, t]);
-
+  }, [bookId, fetchBookOcrJobs, pages, t]);
   async function retirePendingPage() {
     const item = pendingRetire;
     const pageId = item?.processing.page_id;
@@ -227,6 +249,102 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     };
   }, [items]);
 
+  const activeOcrJobs = ocrJobs.filter((job) =>
+    isActiveAdminOcrJobStatus(job.status),
+  );
+  const activeOcrJobsCount = activeOcrJobs.length;
+  const ocrWorkerOffline = activeOcrJobs.some(
+    (job) => job.worker_online === false,
+  );
+
+  // Gently auto-poll active OCR jobs (12s when laptop worker is offline, 4s when online)
+  // and refresh pages automatically as soon as any queued job finishes.
+  useEffect(() => {
+    if (activeOcrJobsCount === 0 || typeof pages.listOcrJobs !== "function") {
+      return;
+    }
+    let active = true;
+    let timerId: ReturnType<typeof globalThis.setTimeout> | null = null;
+    const delayMs = ocrWorkerOffline ? 12_000 : 4_000;
+
+    const clearTimer = () => {
+      if (timerId !== null) {
+        globalThis.clearTimeout(timerId);
+        timerId = null;
+      }
+    };
+
+    const schedule = (ms: number) => {
+      clearTimer();
+      if (!active) return;
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
+      timerId = globalThis.setTimeout(() => {
+        void tick();
+      }, ms);
+    };
+
+    const tick = async () => {
+      if (!active) return;
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
+      const nextJobs = await fetchBookOcrJobs();
+      if (!active) return;
+      const nextActiveCount = nextJobs.filter((job) =>
+        isActiveAdminOcrJobStatus(job.status),
+      ).length;
+      setOcrJobs(nextJobs);
+      if (nextActiveCount < activeOcrJobsCount) {
+        clearApiReadCache();
+        await refreshPages();
+        return;
+      }
+      if (nextActiveCount > 0) {
+        const nextOffline = nextJobs.some(
+          (job) =>
+            isActiveAdminOcrJobStatus(job.status) &&
+            job.worker_online === false,
+        );
+        schedule(nextOffline ? 12_000 : 4_000);
+      }
+    };
+
+    const onVisibilityChange = () => {
+      if (!active) return;
+      if (document.visibilityState === "hidden") {
+        clearTimer();
+      } else {
+        schedule(400);
+      }
+    };
+
+    schedule(delayMs);
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityChange);
+    }
+    return () => {
+      active = false;
+      clearTimer();
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+      }
+    };
+  }, [
+    activeOcrJobsCount,
+    fetchBookOcrJobs,
+    ocrWorkerOffline,
+    pages,
+    refreshPages,
+  ]);
+
   if (!book && !error) return <AdminLoading variant="skeleton" />;
   if (error) {
     return (
@@ -263,12 +381,25 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     );
   }
   if (!book) return null;
-
   const resolvedTitle = book.title.trim()
     ? book.title
     : t("books.detail.missingTitle");
   const isUploaderExpanded =
     uploaderOpenOverride ?? (items !== null && items.length === 0);
+  const activePageIds = new Set(
+    (items ?? []).map((item) => item.processing.page_id),
+  );
+  const activeJobByPageId = new Map<string, AdminOcrJobDTO>();
+  for (const job of activeOcrJobs) {
+    if (job.page_id && !activeJobByPageId.has(job.page_id)) {
+      activeJobByPageId.set(job.page_id, job);
+    }
+  }
+  const pendingNewPageJobs = activeOcrJobs.filter(
+    (job) =>
+      job.job_kind === "ADMIN_PAGE_UPLOAD" &&
+      (!job.page_id || !activePageIds.has(job.page_id)),
+  );
   const visibleItems = items?.slice(
     (pageNumber - 1) * pageSize,
     pageNumber * pageSize,
@@ -486,7 +617,6 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
             </Button>
           </div>
         </div>
-
         {/* Always mounted so tests/sessions preserve state; collapsed visually when pages already exist */}
         <AdminPageUploader
           bookId={book.id}
@@ -505,6 +635,67 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
           </section>
         ) : null}
 
+        {activeOcrJobs.length > 0 ? (
+          <div
+            className="mb-4 flex flex-col gap-3 rounded-card border border-amber-300 bg-amber-50/85 p-4 text-amber-950"
+            data-testid="admin-book-ocr-queue-banner"
+            role="status"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="flex items-start gap-2.5">
+                <Clock3
+                  aria-hidden
+                  className="mt-0.5 size-5 shrink-0 text-amber-700"
+                />
+                <div>
+                  <p className="text-sm font-extrabold">
+                    {ocrWorkerOffline
+                      ? t("books.detail.ocrQueueOfflineBanner", {
+                          count: formatNumber(activeOcrJobs.length),
+                        })
+                      : t("books.detail.ocrQueueOnlineBanner", {
+                          count: formatNumber(activeOcrJobs.length),
+                        })}
+                  </p>
+                  <p className="mt-1 text-xs text-amber-900">
+                    {ocrWorkerOffline
+                      ? t("books.detail.ocrQueueOfflineHint")
+                      : t("books.detail.ocrQueueOnlineHint")}
+                  </p>
+                </div>
+              </div>
+              <Button
+                className="sm:w-auto"
+                onClick={() => {
+                  clearApiReadCache();
+                  void refreshPages();
+                }}
+                size="compact"
+                type="button"
+                variant="secondary"
+              >
+                <RefreshCw aria-hidden className="size-4" />
+                {t("books.detail.ocrQueueCheckNow")}
+              </Button>
+            </div>
+            {pendingNewPageJobs.length > 0 ? (
+              <div className="flex flex-wrap gap-2">
+                {pendingNewPageJobs.map((job, idx) => (
+                  <span
+                    className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-bold text-amber-950"
+                    data-testid="admin-queued-new-page-badge"
+                    key={job.id}
+                  >
+                    <Clock3 aria-hidden className="size-3.5 text-amber-700" />
+                    {t("books.detail.queuedNewPageBadge", {
+                      index: formatNumber(idx + 1),
+                    })}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         {pageActionNotice ? (
           <StatusMessage
             title={pageActionNotice.title}
@@ -523,12 +714,12 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
           >
             {t("books.detail.pageDataPendingDesc")}
           </StatusMessage>
-        ) : items.length === 0 ? (
+        ) : items.length === 0 && activeOcrJobs.length === 0 ? (
           <EmptyState
             description={t("books.detail.emptyPagesDesc")}
             title={t("books.detail.emptyPagesTitle")}
           />
-        ) : (
+        ) : items.length === 0 ? null : (
           <div className="space-y-4">
             {showPagination ? (
               <AdminResultsPagination
@@ -543,6 +734,9 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
             <div className="grid gap-3.5 md:grid-cols-2 xl:grid-cols-3">
               {visibleItems?.map((item) => {
                 const active = item.processing.lifecycle_status === "ACTIVE";
+                const queuedPageJob = activeJobByPageId.get(
+                  item.processing.page_id,
+                );
                 return (
                   <article
                     className="flex h-full flex-col gap-3 rounded-xl border border-border bg-white p-4 shadow-2xs transition-colors hover:border-primary/35"
@@ -559,13 +753,26 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                           R{item.processing.revision_no}
                         </span>
                       </div>
-                      <AdminStatusBadge
-                        status={
-                          active
-                            ? item.processing.verification_status
-                            : "RETIRED"
-                        }
-                      />
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <AdminStatusBadge
+                          status={
+                            active
+                              ? item.processing.verification_status
+                              : "RETIRED"
+                          }
+                        />
+                        {queuedPageJob ? (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-extrabold text-amber-950"
+                            data-testid="admin-page-queued-ocr-badge"
+                          >
+                            <Clock3 aria-hidden className="size-3.5" />
+                            {queuedPageJob.worker_online === false
+                              ? t("books.detail.pageQueuedOfflineBadge")
+                              : t("books.detail.pageQueuedOnlineBadge")}
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
 
                     {item.processing.verification_status === "VERIFIED" &&

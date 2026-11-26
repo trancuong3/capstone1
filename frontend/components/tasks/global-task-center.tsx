@@ -167,6 +167,24 @@ function TaskProgressView({
     );
   }
 
+  if (task.status === "WAITING_FOR_WORKER") {
+    return (
+      <div
+        className="mt-2.5 flex items-center gap-2 rounded-control border border-amber-200 bg-amber-50/80 px-2.5 py-1.5 text-xs font-medium text-amber-900"
+        data-testid={`task-queued-offline-${task.id}`}
+      >
+        <Clock
+          aria-hidden="true"
+          className="size-3.5 shrink-0 text-amber-700"
+        />
+        <span>
+          {task.stage_label_vi ||
+            "Đã lưu trong hàng chờ — Chờ máy chủ OCR bật lại"}
+        </span>
+      </div>
+    );
+  }
+
   if (isActive) {
     return (
       <div
@@ -262,8 +280,17 @@ export function GlobalTaskCenter({
   const fullTasksPageHref =
     actorRole === "admin" ? "/admin/tasks" : "/studio/tasks";
 
-  const pillText =
-    activeCount > 0
+  const activeTasks = tasks.filter((item) =>
+    ACTIVE_GLOBAL_TASK_STATUSES.has(item.status),
+  );
+  const allActiveWaitingForWorker =
+    activeCount > 0 &&
+    activeTasks.length > 0 &&
+    activeTasks.every((item) => item.status === "WAITING_FOR_WORKER");
+
+  const pillText = allActiveWaitingForWorker
+    ? `Hàng chờ OCR (${activeCount})`
+    : activeCount > 0
       ? t(
           "taskCenter.pillRunning",
           { count: activeCount },
@@ -309,13 +336,15 @@ export function GlobalTaskCenter({
           "min-h-11 min-w-11 justify-center gap-1.5 rounded-full px-2.5 text-xs shadow-sm sm:gap-2 sm:px-3.5 sm:text-sm",
         variant === "floating" &&
           "fixed bottom-20 end-4 z-40 min-h-12 justify-center gap-2 rounded-full px-4 text-xs shadow-lg sm:text-sm xl:bottom-5 xl:end-5",
-        activeCount > 0
-          ? "border-primary/40 bg-sky text-primary-hover hover:bg-sky/80"
-          : failedCount > 0
-            ? "border-red-200 bg-red-50 text-danger hover:bg-red-100/70"
-            : waitingReviewCount > 0
-              ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100/70"
-              : "border-border bg-white text-ink hover:bg-canvas",
+        allActiveWaitingForWorker
+          ? "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100/70"
+          : activeCount > 0
+            ? "border-primary/40 bg-sky text-primary-hover hover:bg-sky/80"
+            : failedCount > 0
+              ? "border-red-200 bg-red-50 text-danger hover:bg-red-100/70"
+              : waitingReviewCount > 0
+                ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100/70"
+                : "border-border bg-white text-ink hover:bg-canvas",
         className,
       )}
       data-testid="global-task-center-trigger"
@@ -324,7 +353,9 @@ export function GlobalTaskCenter({
       type="button"
     >
       <span className="flex min-w-0 items-center gap-2">
-        {activeCount > 0 ? (
+        {allActiveWaitingForWorker ? (
+          <Clock aria-hidden="true" className="size-4 shrink-0 text-amber-700" />
+        ) : activeCount > 0 ? (
           <Loader2
             aria-hidden="true"
             className="size-4 shrink-0 animate-spin"
@@ -462,7 +493,7 @@ export function GlobalTaskCenter({
                   {t(
                     "taskCenter.workerOfflineBanner",
                     undefined,
-                    "Chờ máy xử lý AI kết nối lại. Tác vụ đã lưu bền vững và sẽ tự tiếp tục.",
+                    "Máy chủ OCR đang tạm tắt — Các tác vụ đã lưu trong hàng chờ và sẽ tự động nhận diện ngay khi máy chủ OCR bật lại.",
                   )}
                 </span>
               </div>

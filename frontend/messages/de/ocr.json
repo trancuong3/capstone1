@@ -23,7 +23,7 @@
     "jobHeadlineRunning": "Buchseite wird erkannt...",
     "jobHeadlineRetrying": "Seitenerkennung wird wiederholt...",
     "jobHeadlineQueuedOnline": "Bild in der Warteschlange – wartet auf Erkennung der Buchseite...",
-    "jobHeadlineQueuedOffline": "Warten auf Windows-OCR-Server – Bild sicher gespeichert",
+    "jobHeadlineQueuedOffline": "Seite in der OCR-Warteschlange gespeichert — Die Erkennung startet automatisch, sobald der OCR-Server wieder online ist",
     "jobIdMeta": "{fileName} · Aufgaben-ID: ",
     "scanFailedTitle": "Buchseite konnte nicht gescannt werden",
     "relogin": "Erneut anmelden",
@@ -59,7 +59,18 @@
     "errorSubmitFailed": "Keine Verbindung zum lokalen OCR-Server möglich. Bitte versuchen Sie es erneut.",
     "errorUnsupportedFormat": "Nicht unterstütztes Bildformat. Bitte wählen Sie JPG, PNG oder WebP.",
     "errorEmptyFile": "Die Bilddatei ist leer. Bitte wählen Sie ein anderes Bild.",
-    "errorFileTooLarge": "Das Bild überschreitet das Limit von 32 MB. Bitte wählen Sie eine kleinere Datei."
+    "errorFileTooLarge": "Das Bild überschreitet das Limit von 32 MB. Bitte wählen Sie eine kleinere Datei.",
+    "workerOfflineBannerTitle": "OCR-Server ist vorübergehend offline",
+    "workerOfflineBannerBody": "Der OCR-Server ist vorübergehend offline — Sie können weiterhin Seiten fotografieren oder hochladen, um sie in der Warteschlange zu speichern; die Erkennung startet automatisch, sobald der Server wieder läuft.",
+    "workerUnreachableBannerTitle": "OCR-Server startet gerade oder antwortet vorübergehend nicht",
+    "workerUnreachableBannerBody": "Der Status des OCR-Servers konnte wegen Startvorgang oder langsamer Verbindung nicht geprüft werden. Sie können Bilder dennoch in die Warteschlange legen oder in wenigen Sekunden erneut prüfen.",
+    "recheckOcrConnection": "OCR-Verbindung erneut prüfen",
+    "queuePositionLabel": "Warteschlangenposition: #{position}",
+    "savedAtLabel": "Gespeichert um {time}",
+    "checkQueueNow": "Jetzt prüfen",
+    "scanAnotherPageQueued": "Weitere Seite scannen",
+    "cancelQueuedTask": "Aufgabe abbrechen",
+    "queuedListHeading": "Weitere Seiten in der OCR-Warteschlange ({count} Seiten)"
   },
   "camera": {
     "missingBookInfo": "ViRead hat die Seite erkannt, aber es fehlen Buchinformationen. Bitte richten Sie das Buch aus und scannen Sie erneut.",

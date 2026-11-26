@@ -501,9 +501,16 @@ class LocalOcrPageScanJobRead(BaseModel):
     worker_online: bool
     created_at: datetime
     updated_at: datetime
+    file_name: str | None = None
+    queue_position: int | None = Field(default=None, ge=1)
     error_code: str | None = None
     error_message: str | None = None
     result: LocalOcrPageScanRead | None = None
+
+
+class LocalOcrPageScanJobListRead(BaseModel):
+    worker_online: bool
+    jobs: list[LocalOcrPageScanJobRead]
 
 
 
