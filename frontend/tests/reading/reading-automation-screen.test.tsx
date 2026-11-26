@@ -783,7 +783,7 @@ describe("automatic reading flow on the reading screen", () => {
     await act(async () => vi.advanceTimersByTimeAsync(1_000));
     await act(async () => vi.advanceTimersByTimeAsync(2_000));
     await act(async () => vi.advanceTimersByTimeAsync(2_000));
-    expect(screen.getByText("Chú")).toBeInTheDocument();
+    expect(word("Chú")).toBeInTheDocument();
 
     // On Page 2: child reads "Chú chó" then hesitates on "trắng" -> auto-coaching MUST speak "trắng" (Page 2 word, NOT stale Page 1!)
     speechPlayerMock.play.mockClear();
@@ -799,7 +799,7 @@ describe("automatic reading flow on the reading screen", () => {
     await act(async () => vi.advanceTimersByTimeAsync(1_000));
     await act(async () => vi.advanceTimersByTimeAsync(2_000));
     await act(async () => vi.advanceTimersByTimeAsync(2_000));
-    expect(screen.getByText("Bông")).toBeInTheDocument();
+    expect(word("Bông")).toBeInTheDocument();
 
     // On Page 3: child reads "Bông hoa" then hesitates on "hồng" -> auto-coaching MUST speak "hồng" (Page 3 word!)
     speechPlayerMock.play.mockClear();
