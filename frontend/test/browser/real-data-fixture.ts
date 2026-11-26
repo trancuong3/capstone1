@@ -602,6 +602,22 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         contact_info_status: "available",
         children: state.emptyChildren ? [] : [child],
       });
+    if (path === "/parent-notifications/preferences")
+      return respond(route, {
+        weekly_digest_enabled: true,
+        inactivity_alert_enabled: true,
+        inactivity_days: 5,
+        milestone_enabled: true,
+        digest_weekday: 6,
+        timezone: "Asia/Ho_Chi_Minh",
+        quiet_hours_start: 21,
+        quiet_hours_end: 7,
+        max_emails_per_week: 4,
+        delivery_configured: true,
+        delivery_provider: "resend",
+        updated_at: timestamp,
+      });
+    if (path === "/parent-notifications/history") return respond(route, []);
     if (path === "/profiles/children")
       return respond(route, state.emptyChildren ? [] : [child]);
     if (path === `/profiles/children/${ids.child}`)

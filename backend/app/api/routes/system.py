@@ -36,6 +36,7 @@ from app.services.remote_ocr_wakeup import (
     send_remote_ocr_wakeup,
 )
 from app.services.runtime_diagnostics import (
+    collect_email_delivery_health,
     collect_ocr_health,
     collect_persisted_worker_heartbeats,
     collect_remote_ocr_health,
@@ -2251,6 +2252,15 @@ class AdminSystemService:
             )
 
         if workers is not None:
+            items.append(
+                AdminHealthItemRead(
+                    **collect_email_delivery_health(),
+                    checked_at=checked_at,
+                    service_group="workers",
+                    execution_mode="cron_scheduled",
+                    criticality="optional",
+                )
+            )
             raw_workers = collect_worker_health(workers)
 
             # Honest ocr_worker health entry (with quiet_standby / scale_to_zero & sleeping support)
@@ -2448,6 +2458,18 @@ class AdminSystemService:
                             service_group="workers",
                             execution_mode="local_only",
                             criticality="optional",
+                        )
+                    )
+                    continue
+
+                if wid == "parent_email_dispatcher" and worker_obj is None and hosted_cron_mode:
+                    items.append(
+                        _build_cron_or_event_worker_item(
+                            wid,
+                            wlabel,
+                            criticality="optional",
+                            default_execution_mode="cron_scheduled",
+                            allow_old_db_activity_healthy=True,
                         )
                     )
                     continue

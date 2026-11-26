@@ -3,5 +3,11 @@
   "framework": "nextjs",
   "regions": ["sin1"],
   "buildCommand": "npm run build:hosting",
-  "installCommand": "npm ci"
+  "installCommand": "npm ci",
+  "crons": [
+    {
+      "path": "/api/cron/parent-emails",
+      "schedule": "0 2 * * *"
+    }
+  ]
 }

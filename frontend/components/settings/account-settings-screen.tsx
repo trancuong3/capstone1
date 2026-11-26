@@ -11,6 +11,7 @@ import { PageHeader } from "@/components/common/page-header";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { LanguageSelector } from "@/components/i18n/language-selector";
+import { ParentEmailPreferencesCard } from "@/components/settings/parent-email-preferences-card";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useI18n } from "@/hooks/use-i18n";
 import { AuthServiceError } from "@/lib/api/auth-service";
@@ -495,6 +496,8 @@ export function AccountSettingsScreen() {
       >
         {t("settings.account.changePassword")}
       </Button>
+
+      <ParentEmailPreferencesCard emailVerified={profile.email_verified} />
 
       <Card>
         <div className="flex items-center gap-3">
