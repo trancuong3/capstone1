@@ -1,0 +1,88 @@
+name: Hugging Face OCR Space Build & Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      space_id:
+        description: "Target Hugging Face Space ID (<owner>/<space-name>)"
+        required: false
+        default: ""
+        type: string
+      push_to_hf:
+        description: "Push verified bundle to Hugging Face Space (requires HF_TOKEN secret)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hf-ocr-space-sync
+  cancel-in-progress: true
+
+jobs:
+  verify-and-sync-hf-space:
+    name: Build, smoke-verify (UID 1000 / port 7860), and optionally push HF OCR Space
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Generate and verify <1 MiB HF Space bundle
+        run: python3 -B scripts/build_hf_space_bundle.py --output-dir /tmp/viread-hf-space --json
+
+      - name: Build linux/amd64 HF Space Docker image and verify UID 1000 + port 7860 + /wakeup
+        run: |
+          docker build -t viread-hf-ocr-space:verify /tmp/viread-hf-space
+          TEST_WORKER_TOKEN="ci-smoke-worker-token-0123456789abcdef0123456789"
+          docker run -d --name viread-hf-smoke \
+            -p 127.0.0.1:7860:7860 \
+            -e VIREAD_OCR_WORKER_TOKEN="${TEST_WORKER_TOKEN}" \
+            -e VIREAD_OCR_WORKER_ID="hf-ci-smoke-1" \
+            -e VIREAD_OCR_QUIET_STANDBY="true" \
+            viread-hf-ocr-space:verify
+          trap 'docker logs viread-hf-smoke || true; docker rm -f viread-hf-smoke || true' EXIT
+
+          CONTAINER_UID="$(docker exec viread-hf-smoke id -u)"
+          test "${CONTAINER_UID}" = "1000"
+
+          for i in $(seq 1 90); do
+            if curl -fsS "http://127.0.0.1:7860/health" > /tmp/hf-health.json 2>/dev/null; then
+              if python3 -c "import json,sys; d=json.load(open('/tmp/hf-health.json')); sys.exit(0 if d.get('ready') else 1)"; then
+                break
+              fi
+            fi
+            sleep 3
+          done
+
+          python3 - <<'PY'
+          import json
+          health = json.load(open("/tmp/hf-health.json", encoding="utf-8"))
+          assert health["ready"] is True, f"Worker not ready: {health}"
+          assert health["engines"]["paddleocr"]["inference_verified"] is True, health
+          assert health["engines"]["vietocr"]["inference_verified"] is True, health
+          assert health["engines"]["tesseract_vie"]["installed"] is True, health
+          print("Verified 3-engine OCR container health:", health["worker_id"], health["standby_mode"])
+          PY
+
+          UNAUTH_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:7860/wakeup)"
+          test "${UNAUTH_CODE}" = "401"
+
+          AUTH_CODE="$(curl -s -o /tmp/hf-wake.json -w '%{http_code}' -X POST http://127.0.0.1:7860/wakeup -H "X-ViRead-Ocr-Worker-Token: ${TEST_WORKER_TOKEN}" -H "Content-Type: application/json" -d '{"reason":"ci_verify"}')"
+          test "${AUTH_CODE}" = "200"
+
+      - name: Push verified bundle to Private Hugging Face Space
+        if: ${{ inputs.push_to_hf == true }}
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_ID: ${{ inputs.space_id || secrets.HF_SPACE_ID }}
+          VIREAD_OCR_BACKEND_URL: ${{ secrets.VIREAD_OCR_BACKEND_URL }}
+          VIREAD_OCR_WORKER_TOKEN: ${{ secrets.VIREAD_OCR_WORKER_TOKEN }}
+        run: |
+          if [ -z "${HF_SPACE_ID}" ]; then
+            echo "ERROR: Provide space_id input or HF_SPACE_ID secret (<owner>/<space-name>)." >&2
+            exit 1
+          fi
+          python3 -B scripts/push_hf_space.py --space-id "${HF_SPACE_ID}" --sync-secrets

@@ -304,7 +304,30 @@ class ZeroCostPhase2BackendTests(unittest.IsolatedAsyncioTestCase):
         env["DATABASE_URL"] = "postgresql+asyncpg://u:p@db.example.com:6543/postgres"
         env["SUPABASE_URL"] = "https://x.supabase.co"
         env["SUPABASE_KEY"] = "test-key"
-        code = (
+        env.pop("DATABASE_FORCE_NULL_POOL", None)
+        code_bounded = (
+            "import sys; sys.path.insert(0, r'" + str(BACKEND_ROOT) + "');"
+            "from sqlalchemy.pool import AsyncAdaptedQueuePool;"
+            "from app.database import session;"
+            "assert isinstance(session.engine.pool, AsyncAdaptedQueuePool), type(session.engine.pool);"
+            "assert session.engine.pool.size() == 2, session.engine.pool.size();"
+            "assert session.engine.pool._max_overflow == 2, session.engine.pool._max_overflow;"
+            "assert session.asyncpg_connect_args['statement_cache_size'] == 0;"
+            "assert session.sqlalchemy_database_url.query['prepared_statement_cache_size'] == '0';"
+            "print('BOUNDED_POOL_OK')"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", code_bounded],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr or proc.stdout)
+        self.assertIn("BOUNDED_POOL_OK", proc.stdout)
+
+        env_forced = {**env, "DATABASE_FORCE_NULL_POOL": "true"}
+        code_null = (
             "import sys; sys.path.insert(0, r'" + str(BACKEND_ROOT) + "');"
             "from sqlalchemy.pool import NullPool;"
             "from app.database import session;"
@@ -313,15 +336,15 @@ class ZeroCostPhase2BackendTests(unittest.IsolatedAsyncioTestCase):
             "assert session.sqlalchemy_database_url.query['prepared_statement_cache_size'] == '0';"
             "print('NULLPOOL_OK')"
         )
-        proc = subprocess.run(
-            [sys.executable, "-c", code],
-            env=env,
+        proc_null = subprocess.run(
+            [sys.executable, "-c", code_null],
+            env=env_forced,
             capture_output=True,
             text=True,
             check=False,
         )
-        self.assertEqual(proc.returncode, 0, msg=proc.stderr or proc.stdout)
-        self.assertIn("NULLPOOL_OK", proc.stdout)
+        self.assertEqual(proc_null.returncode, 0, msg=proc_null.stderr or proc_null.stdout)
+        self.assertIn("NULLPOOL_OK", proc_null.stdout)
 
     def test_diagnostic_logging_extracts_safe_pgcode_without_pii(self) -> None:
         buf = io.StringIO()
@@ -541,7 +564,7 @@ class ZeroCostPhase2BackendTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(r1.status_code, 200, r1.text)
                     self.assertEqual(r1.headers.get("X-TTS-Cache"), "HIT")
                     self.assertEqual(r1.headers.get("X-TTS-Provider"), "precomputed_cache")
-                    self.assertEqual(r1.headers.get("Cache-Control"), "private, max-age=86400")
+                    self.assertEqual(r1.headers.get("Cache-Control"), "no-store")
                     self.assertEqual(r1.content, cat_mp3)
 
                     # 2. CATALOG timed hit when local worker offline

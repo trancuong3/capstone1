@@ -614,12 +614,17 @@ export function isPhonicsInProgress(
       const singleParts = decomposeVietnameseSyllable(single);
       if (
         singleParts &&
-        singleParts.untonedSyllable === parts.untonedSyllable &&
-        parts.rhyme !== "ơ"
+        singleParts.untonedSyllable === parts.untonedSyllable
       ) {
+        // Never swallow a wrong-tone reading of the exact same syllable (including
+        // -ơ words such as "mờ" for "mớ", "cơ" for "cờ", "bơ" for "bờ") as a
+        // standalone phonics cue. Multi-token spelling ("mờ ơ mơ sắc mớ") still passes.
         return false;
       }
-    } else if (parts.rhyme.length === 1 && single !== parts.untonedSyllable) {
+    } else if (parts.rhyme.length === 1) {
+      // Onsetless single-vowel syllables (e.g. "á", "à", "ở", "ô"): any single-token
+      // different-tone variant (including the untoned "a" for "á") is a tone mistake,
+      // not spelling-in-progress.
       return false;
     }
   }

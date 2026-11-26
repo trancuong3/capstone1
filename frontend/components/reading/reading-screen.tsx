@@ -23,6 +23,10 @@ import { ReadingVoiceSettings } from "@/components/reading/reading-voice-setting
 import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import {
+  detectBrowserWasmSttSupport,
+  getBrowserWasmSttClient,
+} from "@/lib/reading/browser-wasm-stt";
+import {
   isInjectedTestSpeechRecognition,
   LocalSegmentSpeechRecognition,
   resolveLocalFirstSpeechRecognitionConstructor,
@@ -536,6 +540,7 @@ function ReadingSessionScreen({
   const transcriptionAbortRef = useRef<AbortController | null>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const isListeningActiveRef = useRef(false);
+  const recordingStartedAtRef = useRef<number | null>(null);
   const listeningStartRef = useRef<Promise<boolean> | null>(null);
   const listeningStopRef = useRef<Promise<string> | null>(null);
   const listeningGenerationRef = useRef(0);
@@ -768,18 +773,28 @@ function ReadingSessionScreen({
         const localSttDown = !health.local.available || !health.local.stt_ready;
         const localTtsDown = !health.local.available || !health.local.tts_ready;
 
-        if (sttAllowsFallback && localSttDown) {
-          const useGoogleStt =
-            health.google.stt_configured && !health.google.stt_cooldown;
-          recordSttEngineUsage({
-            provider: useGoogleStt ? "google" : "browser",
-            fallbackUsed: true,
-            fallbackReason: "LOCAL_STT_UNAVAILABLE",
-          });
-        } else if (
-          !localSttDown ||
-          (!sttAllowsFallback && getVoiceEngineStatus().stt.fallbackUsed)
-        ) {
+        const currentSttTier = getVoiceEngineStatus().stt.tier;
+        const wasmSupported = detectBrowserWasmSttSupport().supported;
+        if (localSttDown) {
+          if (currentSttTier === "browser_wasm" && wasmSupported) {
+            // Preserve active Tier-1 on-device Browser WASM STT; never clobber it back to local/browser.
+          } else if (sttAllowsFallback) {
+            const useGoogleStt =
+              health.google.stt_configured && !health.google.stt_cooldown;
+            recordSttEngineUsage({
+              provider: useGoogleStt
+                ? "google"
+                : wasmSupported
+                  ? "wasm"
+                  : "browser",
+              fallbackUsed: true,
+              fallbackReason: "LOCAL_STT_UNAVAILABLE",
+            });
+          }
+          // Under `local_only` when STT has not started yet, keep the idle mount
+          // badge honestly at `"idle"`; Tier-1 `browser_wasm` activates lazily
+          // when the child actually begins reading.
+        } else {
           recordSttEngineUsage({
             provider: "local",
             fallbackUsed: false,
@@ -1907,14 +1922,26 @@ function ReadingSessionScreen({
           readonly tts_word_timings?: readonly WordTiming[] | null;
         })
       | null;
-    const precomputedUrl =
-      options.precomputedAudioUrl ?? pageAudioMeta?.tts_audio_url ?? undefined;
-    const precomputedTimings =
-      options.precomputedWordTimings ??
-      pageAudioMeta?.tts_word_timings ??
-      undefined;
+    const isPrivateBook = Boolean(
+      options.isPrivateBook ?? activeCacheIsPrivate,
+    );
+    const precomputedUrl = isPrivateBook
+      ? undefined
+      : (options.precomputedAudioUrl ??
+        pageAudioMeta?.tts_audio_url ??
+        undefined);
+    const precomputedTimings = isPrivateBook
+      ? undefined
+      : (options.precomputedWordTimings ??
+        pageAudioMeta?.tts_word_timings ??
+        undefined);
+    const resolvedFallbackScope = isPrivateBook
+      ? "PRIVATE"
+      : (options.cacheScope ?? "CATALOG");
     const mergedOptions: WordTimedPlayOptions = {
       ...options,
+      isPrivateBook,
+      cacheScope: resolvedFallbackScope,
       ...(precomputedUrl ? { precomputedAudioUrl: precomputedUrl } : {}),
       ...(precomputedTimings
         ? { precomputedWordTimings: precomputedTimings }
@@ -1929,8 +1956,8 @@ function ReadingSessionScreen({
           bookId: options.bookId,
           pageId: options.pageId,
           pageRevisionId: options.pageRevisionId,
-          isPrivateBook: options.isPrivateBook,
-          cacheScope: options.cacheScope ?? "CATALOG",
+          isPrivateBook,
+          cacheScope: resolvedFallbackScope,
           onPlay: () => options.onPlay?.(),
           onEnded: options.onEnded,
         }),
@@ -2306,6 +2333,7 @@ function ReadingSessionScreen({
     }
 
     isListeningActiveRef.current = true;
+    recordingStartedAtRef.current = getRetryCaptureTimeMs();
     let browserRecognitionStarted = false;
 
     if (typeof window !== "undefined") {
@@ -2413,7 +2441,7 @@ function ReadingSessionScreen({
             if (
               audioQuality &&
               audioQuality.durationMs >= 300 &&
-              hasUnusableAudio(audioQuality)
+              audioQuality.status === "INVALID_AUDIO"
             ) {
               markCaptureUncertain(captureEngine, capturePage);
               setLatestTranscript(
@@ -2931,7 +2959,19 @@ function ReadingSessionScreen({
               `[REALTIME STT ERROR] error=${String(event.error ?? "unknown")} recorderStarted=${String(recorderStarted)} browserRecognitionStarted=${String(browserRecognitionStarted)} isListeningActive=${String(isListeningActiveRef.current)}`,
             );
 
-            if (
+            if (event.error === "stt-unavailable") {
+              isListeningActiveRef.current = false;
+              isUsingRecorderRef.current = false;
+              recognitionRef.current = null;
+              speechRecorder.cancel();
+              setIsMicRecording(false);
+              setUiState("stt-error");
+              setLatestTranscript(
+                adaptPersona(
+                  "Nhận diện giọng nói đang tạm bận. Bé bấm Thử lại để tiếp tục nhé.",
+                ),
+              );
+            } else if (
               event.error === "not-allowed" ||
               (!recorderStarted &&
                 (event.error === "service-not-allowed" ||
@@ -3173,8 +3213,11 @@ function ReadingSessionScreen({
     const alreadyUsingEmergencyBrowserStt =
       Boolean(browserText) &&
       (sttStatus.tier === "android_native" ||
+        sttStatus.tier === "browser_wasm" ||
         (sttStatus.tier === "browser_default" &&
           sttStatus.fallbackReason === "LOCAL_STT_UNAVAILABLE"));
+    const captureStartedAt = recordingStartedAtRef.current;
+    recordingStartedAtRef.current = null;
 
     if (
       !passageContainsHelpRef.current &&
@@ -3194,7 +3237,7 @@ function ReadingSessionScreen({
       elevenLabsResult &&
       !echoGuard.evaluate({
         text: elevenLabsResult.text,
-        receivedAt: performance.now(),
+        receivedAt: captureStartedAt ?? getRetryCaptureTimeMs(),
       }).accept
     ) {
       elevenLabsResult = null;
@@ -3414,9 +3457,19 @@ function ReadingSessionScreen({
   }
 
   function handleVoicePreview(sample: string): Promise<void> {
-    return playAssistantAudio(() =>
-      speechPlayer.playWithWordTimings(sample.split(" "), {}),
-    );
+    const id = `voice-preview-${(assistantPlaybackSeqRef.current += 1)}`;
+    return playAssistantAudio(() => {
+      echoGuard.playbackStarted(id, sample, performance.now());
+      return speechPlayer
+        .playWithWordTimings(sample.split(" "), {
+          bookId: null,
+          pageId: null,
+          pageRevisionId: null,
+          isPrivateBook: false,
+          cacheScope: "COACHING",
+        })
+        .finally(() => echoGuard.playbackEnded(id, performance.now()));
+    });
   }
 
   function clearRetryCaptureTimeout(): void {
@@ -4144,9 +4197,20 @@ function ReadingSessionScreen({
           ) {
             return;
           }
-          await speechPlayer.play(action?.tts_text ?? word, {
-            wordSample: !action || action.tts_text === word,
-          });
+          const tutorText = action?.tts_text ?? word;
+          const tutorPlaybackId = `tutor-read-${(assistantPlaybackSeqRef.current += 1)}`;
+          echoGuard.playbackStarted(
+            tutorPlaybackId,
+            tutorText,
+            performance.now(),
+          );
+          try {
+            await speechPlayer.play(tutorText, {
+              wordSample: !action || action.tts_text === word,
+            });
+          } finally {
+            echoGuard.playbackEnded(tutorPlaybackId, performance.now());
+          }
           if (
             mountedRef.current &&
             playbackGeneration === tutorPlaybackGenerationRef.current
@@ -4204,9 +4268,20 @@ function ReadingSessionScreen({
           ) {
             return;
           }
-          await speechPlayer.play(nextAction?.tts_text ?? word, {
-            wordSample: !nextAction || nextAction.tts_text === word,
-          });
+          const retryTutorText = nextAction?.tts_text ?? word;
+          const retryTutorPlaybackId = `tutor-retry-${(assistantPlaybackSeqRef.current += 1)}`;
+          echoGuard.playbackStarted(
+            retryTutorPlaybackId,
+            retryTutorText,
+            performance.now(),
+          );
+          try {
+            await speechPlayer.play(retryTutorText, {
+              wordSample: !nextAction || nextAction.tts_text === word,
+            });
+          } finally {
+            echoGuard.playbackEnded(retryTutorPlaybackId, performance.now());
+          }
         },
         false,
         false,
@@ -4971,13 +5046,76 @@ function ReadingSessionScreen({
         return;
       }
 
-      // Lần 1: STT bình thường, không dùng keyterms.
+      // Lần 1: STT bình thường, không dùng keyterms (tự chuyển sang Browser WASM khi Voice Worker offline).
       const submittedAt = getRetryCaptureTimeMs();
-      let transcription = await speechService.transcribe(recording, {
-        languageCode: "vi",
-        signal: controller.signal,
-        timeoutMs: 10_000,
-      });
+      const freshHealth = getFreshVoiceEngineHealth();
+      const localSttConfirmedDown =
+        freshHealth !== null &&
+        (!freshHealth.local.available || !freshHealth.local.stt_ready);
+      const tryWasmRetryTranscribe = async () => {
+        const wasmRes = await getBrowserWasmSttClient().transcribeBlob(
+          recording,
+          {
+            signal: controller.signal,
+            timeoutMs: 12_000,
+            voicedDurationMs: speechRecorder.getQuality?.()?.speechDurationMs,
+          },
+        );
+        recordSttEngineUsage({
+          provider: "wasm",
+          fallbackUsed: true,
+          fallbackReason: "LOCAL_STT_UNAVAILABLE",
+        });
+        return {
+          text: wasmRes.text.normalize("NFC"),
+          language_code: "vi",
+          language_probability: 1,
+          words: null,
+          provider: "wasm",
+          fallback_used: true,
+        };
+      };
+
+      let transcription;
+      if (localSttConfirmedDown && detectBrowserWasmSttSupport().supported) {
+        try {
+          transcription = await tryWasmRetryTranscribe();
+        } catch (wasmErr) {
+          if (controller.signal.aborted) return;
+          console.warn("[RETRY WASM STT FALLBACK -> SERVER]", wasmErr);
+          transcription = await speechService.transcribe(recording, {
+            languageCode: "vi",
+            signal: controller.signal,
+            timeoutMs: 10_000,
+          });
+        }
+      } else {
+        try {
+          transcription = await speechService.transcribe(recording, {
+            languageCode: "vi",
+            signal: controller.signal,
+            timeoutMs: 10_000,
+          });
+        } catch (serverErr) {
+          if (controller.signal.aborted) return;
+          if (
+            detectBrowserWasmSttSupport().supported &&
+            isServiceError(serverErr) &&
+            (serverErr.status >= 500 ||
+              serverErr.status === 0 ||
+              serverErr.status === 408 ||
+              serverErr.status === 429)
+          ) {
+            try {
+              transcription = await tryWasmRetryTranscribe();
+            } catch {
+              throw serverErr;
+            }
+          } else {
+            throw serverErr;
+          }
+        }
+      }
 
       if (
         !mountedRef.current ||

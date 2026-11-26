@@ -417,7 +417,8 @@ class ChildSafetyOrchestrator:
             ])
         if config.groq_enabled:
             self.providers.append(SafetyProvider("groq_qwen", config.groq_model, "groq"))
-        self.providers.append(SafetyProvider("ollama_local", config.local.model, "ollama"))
+        if config.local_enabled or not self.providers:
+            self.providers.append(SafetyProvider("ollama_local", config.local.model, "ollama"))
 
     async def analyze(self, text: str) -> dict[str, Any]:
         normalized, normalized_spans = _nfc_with_offsets(text)

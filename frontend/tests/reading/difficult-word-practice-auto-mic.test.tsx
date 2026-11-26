@@ -222,9 +222,12 @@ describe("DifficultWordPracticePanel hands-free pre-warm + auto-retry + loop bre
     await waitFor(() =>
       expect(speechRecorderMock.start).toHaveBeenCalledTimes(4),
     );
-    expect(speechPlayerMock.play).toHaveBeenCalledWith("một", {
-      wordSample: true,
-    });
+    expect(speechPlayerMock.play).toHaveBeenCalledWith(
+      "một",
+      expect.objectContaining({
+        wordSample: true,
+      }),
+    );
 
     // Silence after the model pauses the automatic loop.
     await user.click(screen.getByRole("button", { name: /Dừng ghi âm/ }));
@@ -326,4 +329,48 @@ describe("DifficultWordPracticePanel hands-free pre-warm + auto-retry + loop bre
       { timeout: 4000 },
     );
   }, 15_000);
+
+  it("isolates PARENT_PRIVATE book difficult words to PRIVATE TTS cache scope (never shared CATALOG)", async () => {
+    const user = userEvent.setup();
+    const privateWord: DifficultWordDTO = {
+      ...wordItem,
+      normalized_word: "bướm",
+      display_text: "bướm",
+      sources: [
+        {
+          book_id: "99999999-9999-4999-8999-999999999999",
+          visibility_scope: "PARENT_PRIVATE",
+          is_private_book: true,
+          page_id: "88888888-8888-4888-8888-888888888888",
+          page_revision_id: "77777777-7777-4777-8777-777777777777",
+          context_phrase: "con bướm vàng",
+          last_seen_at: "2026-11-26T00:00:00Z",
+        },
+      ],
+    };
+
+    render(
+      <DifficultWordPracticePanel
+        child={childFixture}
+        onClose={vi.fn()}
+        onProgressSaved={vi.fn(async () => {})}
+        onSelectWord={vi.fn()}
+        word={privateWord}
+        words={[privateWord]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /Nghe phát âm mẫu/i }));
+    await waitFor(() =>
+      expect(speechPlayerMock.play).toHaveBeenCalledWith(
+        "bướm",
+        expect.objectContaining({
+          wordSample: true,
+          bookId: "99999999-9999-4999-8999-999999999999",
+          isPrivateBook: true,
+          cacheScope: "PRIVATE",
+        }),
+      ),
+    );
+  });
 });

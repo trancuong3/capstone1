@@ -38,6 +38,10 @@ import {
   BrowserTranscriptCollector,
   type SegmentResultMeta,
 } from "@/lib/reading/browser-transcript-collector";
+import {
+  detectBrowserWasmSttSupport,
+  getBrowserWasmSttClient,
+} from "@/lib/reading/browser-wasm-stt";
 import { EchoGuard } from "@/lib/reading/echo-guard";
 import {
   LocalSegmentSpeechRecognition,
@@ -52,6 +56,7 @@ import {
 import {
   fetchVoiceEngineHealth,
   getFreshVoiceEngineHealth,
+  recordSttEngineUsage,
 } from "@/lib/reading/voice-engine-status";
 import {
   buildPhonicsLesson,
@@ -337,6 +342,16 @@ export function DifficultWordPracticePanel({
   });
 
   const primarySource = word.sources?.[0];
+  // Fail-closed privacy isolation (Invariant #48 / TTS-03): any book-bound difficult word
+  // that is explicitly PARENT_PRIVATE or not explicitly PUBLIC_CATALOG never touches
+  // shared CATALOG or Browser IndexedDB caches.
+  const isPrivateBookSource =
+    primarySource?.visibility_scope === "PARENT_PRIVATE" ||
+    Boolean(primarySource?.is_private_book) ||
+    Boolean(
+      primarySource?.book_id &&
+      primarySource?.visibility_scope !== "PUBLIC_CATALOG",
+    );
   const rawContextPhrase =
     explicitContextPhrase ?? primarySource?.context_phrase ?? null;
   const contextPhrase = shortWordContext(word.display_text, rawContextPhrase);
@@ -471,6 +486,25 @@ export function DifficultWordPracticePanel({
     };
   });
 
+  const setSpeechCacheContext = speechPlayer.setCacheContext;
+  useEffect(() => {
+    setSpeechCacheContext?.({
+      bookId: primarySource?.book_id ?? null,
+      pageId: primarySource?.page_id ?? null,
+      pageRevisionId: primarySource?.page_revision_id ?? null,
+      isPrivateBook: isPrivateBookSource,
+    });
+    return () => {
+      setSpeechCacheContext?.(null);
+    };
+  }, [
+    setSpeechCacheContext,
+    primarySource?.book_id,
+    primarySource?.page_id,
+    primarySource?.page_revision_id,
+    isPrivateBookSource,
+  ]);
+
   useEffect(() => {
     mountedRef.current = true;
     lockSessionVoice(practiceSessionLockId, { forceUpdate: true });
@@ -506,8 +540,19 @@ export function DifficultWordPracticePanel({
         await withRequestDeadline(
           () =>
             wordSample
-              ? speechPlayer.play(adaptedText, { wordSample: true })
-              : speechPlayer.play(adaptedText, { coaching: true }),
+              ? speechPlayer.play(adaptedText, {
+                  wordSample: true,
+                  bookId: primarySource?.book_id ?? null,
+                  pageId: primarySource?.page_id ?? null,
+                  pageRevisionId: primarySource?.page_revision_id ?? null,
+                  isPrivateBook: isPrivateBookSource,
+                  cacheScope: isPrivateBookSource ? "PRIVATE" : "CATALOG",
+                })
+              : speechPlayer.play(adaptedText, {
+                  coaching: true,
+                  isPrivateBook: false,
+                  cacheScope: "COACHING",
+                }),
           undefined,
           CUE_TIMEOUT_MS,
         );
@@ -521,7 +566,17 @@ export function DifficultWordPracticePanel({
       }
       return mountedRef.current && generation === flowGenerationRef.current;
     },
-    [echoGuard, speechPlayer, speechRecorder, stopBrowserRecognition, t],
+    [
+      echoGuard,
+      isPrivateBookSource,
+      primarySource?.book_id,
+      primarySource?.page_id,
+      primarySource?.page_revision_id,
+      speechPlayer,
+      speechRecorder,
+      stopBrowserRecognition,
+      t,
+    ],
   );
 
   const runPhonicsGuidance = useCallback(
@@ -579,6 +634,11 @@ export function DifficultWordPracticePanel({
           await withRequestDeadline(
             () =>
               speechPlayer.playPhonicsLesson(phonicsLesson, {
+                bookId: primarySource?.book_id ?? null,
+                pageId: primarySource?.page_id ?? null,
+                pageRevisionId: primarySource?.page_revision_id ?? null,
+                isPrivateBook: isPrivateBookSource,
+                cacheScope: isPrivateBookSource ? "PRIVATE" : "CATALOG",
                 onStepChange: (idx) => {
                   if (
                     mountedRef.current &&
@@ -624,8 +684,12 @@ export function DifficultWordPracticePanel({
     },
     [
       echoGuard,
+      isPrivateBookSource,
       phonicsLesson,
       playCue,
+      primarySource?.book_id,
+      primarySource?.page_id,
+      primarySource?.page_revision_id,
       speechPlayer,
       speechRecorder,
       stopBrowserRecognition,
@@ -1112,13 +1176,57 @@ export function DifficultWordPracticePanel({
       stopSelfPlayback();
       setRecordedBlob(recording);
 
+      let effectiveTranscript = transcript
+        ? transcript.normalize("NFC").trim()
+        : null;
+      let effectiveConfidence = browserBestConfRef.current;
+      const freshHealth = getFreshVoiceEngineHealth();
+      const localSttDown =
+        freshHealth !== null &&
+        (!freshHealth.local.available || !freshHealth.local.stt_ready);
+      if (
+        localSttDown &&
+        !effectiveTranscript &&
+        detectBrowserWasmSttSupport().supported
+      ) {
+        try {
+          const wasmRes = await getBrowserWasmSttClient().transcribeBlob(
+            recording,
+            {
+              timeoutMs: 12_000,
+              voicedDurationMs: quality?.speechDurationMs,
+            },
+          );
+          if (!mountedRef.current || generation !== flowGenerationRef.current) {
+            return;
+          }
+          const wasmText = wasmRes.text.normalize("NFC").trim();
+          if (wasmText) {
+            effectiveTranscript = wasmText;
+            recordSttEngineUsage({
+              provider: "wasm",
+              fallbackUsed: true,
+              fallbackReason: "LOCAL_STT_UNAVAILABLE",
+            });
+            if (
+              normalizeVietnameseWord(wasmText) ===
+              normalizeVietnameseWord(word.display_text)
+            ) {
+              effectiveConfidence = Math.max(effectiveConfidence ?? 0, 0.95);
+            }
+          }
+        } catch {
+          // Proceed to backend evaluation cleanly if WASM decode fails.
+        }
+      }
+
       const captured: CapturedAttemptPayload = {
         requestId: createRequestUuid(),
         audioBlob: recording,
         durationMs: elapsed,
         audioQualityStatus: quality?.status,
-        browserTranscript: transcript || null,
-        browserConfidence: browserBestConfRef.current,
+        browserTranscript: effectiveTranscript,
+        browserConfidence: effectiveConfidence,
       };
       await submitEvaluation(captured, generation);
     },
@@ -1524,7 +1632,15 @@ export function DifficultWordPracticePanel({
     echoGuard.playbackStarted(playbackId, word.display_text, performance.now());
     try {
       await withRequestDeadline(
-        () => speechPlayer.play(word.display_text, { wordSample: true }),
+        () =>
+          speechPlayer.play(word.display_text, {
+            wordSample: true,
+            bookId: primarySource?.book_id ?? null,
+            pageId: primarySource?.page_id ?? null,
+            pageRevisionId: primarySource?.page_revision_id ?? null,
+            isPrivateBook: isPrivateBookSource,
+            cacheScope: isPrivateBookSource ? "PRIVATE" : "CATALOG",
+          }),
         undefined,
         CUE_TIMEOUT_MS,
       );

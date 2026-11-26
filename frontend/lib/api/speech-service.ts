@@ -143,6 +143,7 @@ export interface SpeechToTextOptions {
   readonly sessionId?: string | null;
   readonly pageId?: string | null;
   readonly turnId?: string | null;
+  readonly voicedDurationMs?: number | null;
   readonly source?: string;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
@@ -613,6 +614,16 @@ export function createSpeechService(): SpeechService {
       if (options.turnId) {
         form.append("turn_id", options.turnId);
       }
+      if (
+        typeof options.voicedDurationMs === "number" &&
+        Number.isFinite(options.voicedDurationMs) &&
+        options.voicedDurationMs >= 0
+      ) {
+        form.append(
+          "voiced_duration_ms",
+          String(Math.round(options.voicedDurationMs)),
+        );
+      }
       if (options.source) {
         form.append("source", options.source);
       }
@@ -665,10 +676,15 @@ export function createSpeechService(): SpeechService {
               fallbackReason,
             });
             return {
-              text: parsed.data.text,
+              text: parsed.data.text.normalize("NFC"),
               language_code: parsed.data.language_code ?? null,
               language_probability: parsed.data.language_probability ?? null,
-              words: parsed.data.words ?? null,
+              words: parsed.data.words
+                ? parsed.data.words.map((w) => ({
+                    ...w,
+                    text: w.text.normalize("NFC"),
+                  }))
+                : null,
               ...(providerHeader ? { provider: providerHeader } : {}),
               ...(fallbackUsed ? { fallback_used: true } : {}),
             };

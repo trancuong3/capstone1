@@ -24,9 +24,11 @@ import logging
 import os
 import re
 import struct
+import sys
 import threading
 import time
 import unicodedata
+import wave
 from collections import OrderedDict
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -34,12 +36,34 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-import av
-import librosa
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_BACKEND_ROOT = _REPO_ROOT / "backend"
+if _BACKEND_ROOT.is_dir() and str(_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_ROOT))
+
+try:
+    import av  # type: ignore[import-not-found]
+except ImportError:
+    av = None  # type: ignore[assignment]
+
+try:
+    import librosa  # type: ignore[import-not-found]
+except ImportError:
+    librosa = None  # type: ignore[assignment]
+
 import numpy as np
 from scipy import signal as scipy_signal
-import sherpa_onnx
-import soundfile as sf
+
+try:
+    import sherpa_onnx  # type: ignore[import-not-found]
+except ImportError:
+    sherpa_onnx = None  # type: ignore[assignment]
+
+try:
+    import soundfile as sf  # type: ignore[import-not-found]
+except ImportError:
+    sf = None  # type: ignore[assignment]
+
 from fastapi import (
     Depends,
     FastAPI,
@@ -68,9 +92,50 @@ if (HF_CACHE_DIR / "hub").is_dir() and any((HF_CACHE_DIR / "hub").iterdir()):
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
     os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
-from vieneu import Vieneu  # noqa: E402
-from vieneu_utils.core_utils import gaps_to_silence  # noqa: E402
-from vieneu_utils.phonemize_text import normalize_to_chunks_v3_with_gaps  # noqa: E402
+try:
+    from vieneu import Vieneu  # type: ignore[import-not-found]  # noqa: E402
+    from vieneu_utils.core_utils import gaps_to_silence  # type: ignore[import-not-found]  # noqa: E402
+    from vieneu_utils.phonemize_text import (  # type: ignore[import-not-found]  # noqa: E402
+        normalize_to_chunks_v3_with_gaps,
+    )
+except ImportError:
+    Vieneu = None  # type: ignore[assignment]
+
+    def gaps_to_silence(gaps: list[Any]) -> list[float]:
+        return [0.28 for _ in (gaps or [])]
+
+    def normalize_to_chunks_v3_with_gaps(
+        text: str, *, max_chars: int = 220
+    ) -> tuple[list[str], list[str]]:
+        cleaned = " ".join((text or "").split()).strip()
+        if not cleaned:
+            return [], []
+        if len(cleaned) <= max_chars:
+            return [cleaned], []
+        sentences = [
+            s.strip()
+            for s in re.split(r"(?<=[.!?])\s+", cleaned)
+            if s.strip()
+        ]
+        chunks: list[str] = []
+        buf = ""
+        for sent in sentences:
+            if buf and len(buf) + 1 + len(sent) > max_chars:
+                chunks.append(buf)
+                buf = sent
+            else:
+                buf = f"{buf} {sent}".strip() if buf else sent
+        if buf:
+            chunks.append(buf)
+        return chunks, ["sentence"] * max(0, len(chunks) - 1)
+
+from app.services.vietnamese_tts_normalizer import (  # noqa: E402
+    CHOICE_LETTER_SPOKEN as _CHOICE_LETTER_SPOKEN,
+    QUIZ_CHOICE_LABEL_RE as _QUIZ_CHOICE_LABEL_RE,
+    ensure_tts_terminal_punctuation,
+    normalize_vietnamese_tts_text,
+    project_chunk_spans_to_surface_words,
+)
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 _request_id_ctx: ContextVar[str] = ContextVar("viread_voice_request_id", default="-")
@@ -344,10 +409,11 @@ class PhonicsSynthesisRequest(BaseModel):
 
 class VoiceRuntimeEngine:
     def __init__(self) -> None:
-        self.stt_recognizer: sherpa_onnx.OfflineRecognizer | None = None
+        self.stt_recognizer: Any | None = None
         self.tts_engine: Any | None = None
         self.tts_engine_fp32: Any | None = None
         self.tts_engine_int8: Any | None = None
+        self.word_fp32_tts_engine: Any | None = None
         self.stt_semaphore = asyncio.Semaphore(2)
         self.tts_semaphore = asyncio.Semaphore(1)
         self._load_lock = asyncio.Lock()
@@ -362,17 +428,27 @@ class VoiceRuntimeEngine:
         is_phonics: bool = False,
         word_count: int = 0,
     ) -> tuple[Any, str]:
+        wants_crisp = bool(is_phonics or word_sample or word_count <= 4)
         if TTS_PRECISION == "fp32":
-            assert self.tts_engine_fp32 is not None
-            return self.tts_engine_fp32, "fp32"
+            engine = self.tts_engine_fp32 or self.tts_engine
+            assert engine is not None
+            return engine, "fp32"
         if TTS_PRECISION == "int8":
-            assert self.tts_engine_int8 is not None
-            return self.tts_engine_int8, "int8"
-        if is_phonics or word_sample or word_count <= 4:
+            if wants_crisp and TTS_HYBRID_WORD_FP32 and self.word_fp32_tts_engine is not None:
+                return self.word_fp32_tts_engine, "fp32"
+            engine = self.tts_engine_int8 or self.tts_engine
+            assert engine is not None
+            return engine, "int8"
+        # Hybrid mode: route short words / phonics to crisp fp32, longer passages to fast int8.
+        if wants_crisp:
             if self.tts_engine_fp32 is not None:
                 return self.tts_engine_fp32, "fp32"
+            if self.word_fp32_tts_engine is not None:
+                return self.word_fp32_tts_engine, "fp32"
         if self.tts_engine_int8 is not None:
             return self.tts_engine_int8, "int8"
+        if self.tts_engine_fp32 is not None:
+            return self.tts_engine_fp32, "fp32"
         assert self.tts_engine is not None
         return self.tts_engine, "fp32"
 
@@ -538,7 +614,7 @@ async def _prewarm_coaching_phrases() -> None:
                     preset,
                     1.0,
                     False,
-                    active_prec,
+                    precision_override=active_prec,
                 )
                 cache_mode = "word" if word_count <= 3 else "sentence"
                 cache_key = make_cache_key(
@@ -654,108 +730,6 @@ def resolve_strict_voice(voice_id: str) -> LocalVoicePreset:
     return preset
 
 
-_VIET_DIACRITIC_RE = re.compile(
-    r"[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ"
-    r"ÀÁẢÃẠĂẰẮẲẴẶÂẦẤẨẪẬÈÉẺẼẸÊỀẾỂỄỆÌÍỈĨỊÒÓỎÕỌÔỒỐỔỖỘƠỜỚỞỠỢÙÚỦŨỤƯỪỨỬỮỰỲÝỶỸỴĐ]"
-)
-_VIET_ONSETS = (
-    "ngh", "ng", "nh", "ch", "gh", "gi", "kh", "ph", "qu", "th", "tr",
-    "b", "c", "d", "đ", "g", "h", "k", "l", "m", "n", "p", "q", "r", "s", "t", "v", "x", "",
-)
-_VIET_CODAS = ("nh", "ng", "ch", "c", "m", "n", "p", "t", "")
-_VIET_VOWELS = set("aeiouyàáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ")
-_LATIN_LETTER_VIET_NAMES: dict[str, str] = {
-    "A": "a", "B": "bê", "C": "xê", "D": "đê", "E": "e", "F": "ép",
-    "G": "gờ", "H": "hát", "I": "i", "J": "di", "K": "ca", "L": "lờ",
-    "M": "mờ", "N": "nờ", "O": "o", "P": "pê", "Q": "quy", "R": "rờ",
-    "S": "ét", "T": "tê", "U": "u", "V": "vê", "W": "vê kép", "X": "ích",
-    "Y": "i", "Z": "dét",
-}
-_KNOWN_ACRONYMS = {"LEC", "LAB", "PDF", "AI", "TTS", "STT", "OCR", "API", "LAN", "APK", "URL", "HTTP", "HTTPS", "WIFI", "CPU", "GPU", "RAM"}
-_YEAR_RANGE_RE = re.compile(r"\b((?:19|20)\d{2})\s*[-–—]\s*((?:19|20)\d{2})\b")
-_CODE_HYPHEN_RE = re.compile(r"\b([A-Z]{2,5})-(\d{1,5})\b")
-_ALPHA_TOKEN_RE = re.compile(r"[A-Za-zÀ-ỹĐđ]+")
-_PHONICS_SINGLE_CHAR_FIX: dict[str, str] = {
-    "ă": "á",
-    "â": "ớ",
-    "đ": "đờ",
-}
-
-
-def _is_likely_vietnamese_syllable(word: str) -> bool:
-    lower = unicodedata.normalize("NFC", word).lower()
-    if not lower or len(lower) > 8:
-        return False
-    if _VIET_DIACRITIC_RE.search(lower):
-        return True
-    if word.upper() in _KNOWN_ACRONYMS:
-        return False
-    for onset in _VIET_ONSETS:
-        if onset and not lower.startswith(onset):
-            continue
-        rest = lower[len(onset):]
-        if not rest:
-            continue
-        for coda in _VIET_CODAS:
-            if coda and not rest.endswith(coda):
-                continue
-            nucleus = rest[: len(rest) - len(coda)] if coda else rest
-            if not nucleus or len(nucleus) > 3:
-                continue
-            if all(ch in _VIET_VOWELS for ch in nucleus):
-                return True
-    return False
-
-
-def _spell_acronym_vietnamese(code: str) -> str:
-    return " ".join(_LATIN_LETTER_VIET_NAMES.get(ch, ch.lower()) for ch in code.upper())
-
-
-def normalize_vietnamese_tts_text(
-    text: str,
-    *,
-    expand_ranges_and_codes: bool = True,
-    for_phonics_step: bool = False,
-) -> str:
-    cleaned = unicodedata.normalize("NFC", text or "").strip()
-    if not cleaned:
-        return ""
-    cleaned = re.sub(r"\s+", " ", cleaned)
-
-    if expand_ranges_and_codes:
-        cleaned = _YEAR_RANGE_RE.sub(r"\1 đến \2", cleaned)
-        cleaned = _CODE_HYPHEN_RE.sub(
-            lambda m: f"{_spell_acronym_vietnamese(m.group(1))} {m.group(2)}", cleaned
-        )
-
-    out_parts: list[str] = []
-    last_end = 0
-    for m in _ALPHA_TOKEN_RE.finditer(cleaned):
-        out_parts.append(cleaned[last_end : m.start()])
-        token = m.group(0)
-        if len(token) >= 2 and token.isupper():
-            before_text = cleaned[: m.start()].rstrip()
-            is_start = not before_text or before_text[-1] in ".!?:;\n"
-            if token in _KNOWN_ACRONYMS:
-                out_parts.append(_spell_acronym_vietnamese(token))
-            elif _is_likely_vietnamese_syllable(token):
-                lower = token.lower()
-                out_parts.append(lower[0].upper() + lower[1:] if is_start else lower)
-            elif len(token) <= 4 and token.isascii():
-                out_parts.append(_spell_acronym_vietnamese(token))
-            else:
-                out_parts.append(token.lower())
-        else:
-            out_parts.append(token)
-        last_end = m.end()
-    out_parts.append(cleaned[last_end:])
-    normalized = unicodedata.normalize("NFC", re.sub(r"\s+", " ", "".join(out_parts)).strip())
-
-    if for_phonics_step and normalized.lower() in _PHONICS_SINGLE_CHAR_FIX:
-        return _PHONICS_SINGLE_CHAR_FIX[normalized.lower()]
-    return normalized
-
-
 def normalize_nfc_text(text: str) -> str:
     cleaned = unicodedata.normalize("NFC", text).strip()
     if not cleaned:
@@ -788,7 +762,7 @@ def make_cache_key(
             "voice_id": voice_id,
             "model_version": model_version,
             "precision": precision,
-            "norm_v": 4,
+            "norm_v": 5,
             "speed": normalize_speed(speed),
             "mode": mode,
             "payload": unicodedata.normalize("NFC", payload),
@@ -799,11 +773,45 @@ def make_cache_key(
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+_BASE_WAV_CACHE_MAX_ENTRIES = 64
+_BASE_WAV_CACHE: OrderedDict[str, tuple[np.ndarray, int]] = OrderedDict()
+_BASE_WAV_CACHE_LOCK = threading.Lock()
+
+
+def _base_wav_cache_get(key: str) -> tuple[np.ndarray, int] | None:
+    with _BASE_WAV_CACHE_LOCK:
+        hit = _BASE_WAV_CACHE.get(key)
+        if hit is not None:
+            _BASE_WAV_CACHE.move_to_end(key)
+        return hit
+
+
+def _base_wav_cache_put(key: str, wav: np.ndarray, sr: int) -> None:
+    with _BASE_WAV_CACHE_LOCK:
+        _BASE_WAV_CACHE[key] = (wav.astype(np.float32, copy=True), int(sr))
+        _BASE_WAV_CACHE.move_to_end(key)
+        while len(_BASE_WAV_CACHE) > _BASE_WAV_CACHE_MAX_ENTRIES:
+            _BASE_WAV_CACHE.popitem(last=False)
+
+
+def clear_base_wav_cache() -> None:
+    with _BASE_WAV_CACHE_LOCK:
+        _BASE_WAV_CACHE.clear()
+
+
 def apply_speed_preserve_pitch(wav: np.ndarray, speed: float) -> np.ndarray:
+    """Deterministically scale waveform duration inversely with speed (monotonic across 0.70..1.30)."""
     spd = normalize_speed(speed)
-    if wav.size == 0 or abs(spd - 1.0) < 0.01:
-        return wav.astype(np.float32)
-    stretched = librosa.effects.time_stretch(wav.astype(np.float32), rate=spd)
+    arr = np.asarray(wav, dtype=np.float32)
+    if arr.size == 0 or abs(spd - 1.0) < 0.01:
+        return arr.astype(np.float32, copy=False)
+    target_len = max(1, int(round(arr.size / spd)))
+    if librosa is not None:
+        stretched = librosa.effects.time_stretch(arr, rate=spd)
+        if stretched.size != target_len:
+            stretched = scipy_signal.resample(stretched, target_len).astype(np.float32)
+    else:
+        stretched = scipy_signal.resample(arr, target_len).astype(np.float32)
     return np.clip(stretched, -1.0, 1.0).astype(np.float32)
 
 
@@ -820,8 +828,98 @@ def pad_edges(
 
 def encode_wav_bytes(wav: np.ndarray, sr: int) -> bytes:
     buf = io.BytesIO()
-    sf.write(buf, wav, sr, format="WAV", subtype="PCM_16")
+    if sf is not None:
+        sf.write(buf, wav, sr, format="WAV", subtype="PCM_16")
+        return buf.getvalue()
+    pcm16 = (np.clip(np.asarray(wav, dtype=np.float32), -1.0, 1.0) * 32767.0).astype("<i2")
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(int(sr))
+        wf.writeframes(pcm16.tobytes())
     return buf.getvalue()
+
+
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    """Atomically write bytes via sibling temp file + os.replace so readers never see partial files."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(
+        f".{path.name}.{os.getpid()}.{threading.get_ident()}.{time.time_ns()}.tmp"
+    )
+    try:
+        with open(tmp_path, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    _atomic_write_bytes(path, encoded)
+
+
+def _read_disk_cache_entry(
+    wav_cache: Path, meta_cache: Path
+) -> tuple[bytes, dict[str, Any]] | None:
+    """Safely load a cached (wav, meta) pair; discard and recompute if truncated or corrupted."""
+    if not (wav_cache.is_file() and meta_cache.is_file()):
+        return None
+    try:
+        meta = json.loads(meta_cache.read_text(encoding="utf-8"))
+        if not isinstance(meta, dict) or "duration_seconds" not in meta:
+            raise ValueError("Invalid cache metadata schema")
+        dur = float(meta["duration_seconds"])
+        if dur <= 0:
+            raise ValueError("Non-positive duration_seconds")
+        wav_bytes = wav_cache.read_bytes()
+        if len(wav_bytes) < 44 or wav_bytes[:4] != b"RIFF":
+            raise ValueError("Truncated or invalid WAV cache entry")
+        _touch_cache_files(wav_cache, meta_cache)
+        return wav_bytes, meta
+    except Exception as exc:
+        logger.warning(
+            "Discarding corrupt TTS disk cache entry %s (%s)",
+            wav_cache.name,
+            type(exc).__name__,
+        )
+        for p in (wav_cache, meta_cache):
+            try:
+                p.unlink(missing_ok=True)
+            except OSError:
+                pass
+        return None
+
+
+def _detect_chunk_speech_bounds(wav: np.ndarray, sr: int) -> tuple[float, float]:
+    """Return active (speech_start_s, speech_end_s) within a synthesized chunk using frame RMS."""
+    arr = np.asarray(wav, dtype=np.float32)
+    total_s = float(arr.size / max(1, sr))
+    if arr.size < max(1, int(sr * 0.04)):
+        return 0.0, total_s
+    frame_len = max(1, int(sr * 0.01))
+    n_frames = arr.size // frame_len
+    if n_frames <= 1:
+        return 0.0, total_s
+    frames = arr[: n_frames * frame_len].reshape(n_frames, frame_len)
+    rms = np.sqrt(np.mean(frames * frames, axis=1))
+    peak_rms = float(np.max(rms))
+    if peak_rms < 1e-4:
+        return 0.0, total_s
+    thresh = max(0.003, peak_rms * 0.08)
+    active = np.flatnonzero(rms >= thresh)
+    if active.size == 0:
+        return 0.0, total_s
+    start_s = max(0.0, (int(active[0]) * frame_len) / float(sr))
+    end_s = min(total_s, ((int(active[-1]) + 1) * frame_len) / float(sr))
+    if end_s - start_s < 0.02:
+        return 0.0, total_s
+    return start_s, end_s
 
 
 _AUDIO_FORMAT_ALIAS_TO_MIME = {
@@ -1190,6 +1288,105 @@ def build_stt_words_from_sherpa(
     return words
 
 
+_STT_CHECK_TOKEN_RE = re.compile(r"[0-9A-Za-zÀ-ỹĐđ]+", re.UNICODE)
+_CHOICE_LETTER_ACCEPT_STT: dict[str, set[str]] = {
+    "a": {"a", "à", "á", "ạ"},
+    "bê": {"bê", "b", "be", "bề", "bể"},
+    "xê": {"xê", "c", "xe", "sê", "se"},
+    "đê": {"đê", "d", "đ", "de", "dê"},
+}
+
+
+def _tokenize_stt_check(text: str) -> list[str]:
+    return _STT_CHECK_TOKEN_RE.findall(unicodedata.normalize("NFC", text or "").lower())
+
+
+def _check_tts_audio_quality(
+    wav_float32: np.ndarray,
+    sr: int,
+    expected_spoken: str,
+    *,
+    is_short_word: bool,
+    event_loop: asyncio.AbstractEventLoop | None = None,
+) -> tuple[bool, str, str]:
+    """Fast local Sherpa STT self-check to catch trailing hallucinations, stutters, or swallowed choice labels."""
+    if runtime.stt_recognizer is None or wav_float32.size < 400:
+        return True, "skipped", ""
+    expected_tokens = _tokenize_stt_check(expected_spoken)
+    if not expected_tokens:
+        return True, "empty_expected", ""
+
+    if sr != 16000:
+        if librosa is not None:
+            samples16 = librosa.resample(
+                wav_float32.astype(np.float32), orig_sr=sr, target_sr=16000
+            )
+        else:
+            target_n = max(1, int(round(wav_float32.size * 16000.0 / float(sr))))
+            samples16 = scipy_signal.resample(wav_float32.astype(np.float32), target_n).astype(
+                np.float32
+            )
+    else:
+        samples16 = wav_float32.astype(np.float32, copy=False)
+
+    acquired_async_sem = False
+    if event_loop is not None and event_loop.is_running():
+        try:
+            fut = asyncio.run_coroutine_threadsafe(
+                asyncio.wait_for(runtime.stt_semaphore.acquire(), timeout=10.0),
+                event_loop,
+            )
+            fut.result(timeout=11.0)
+            acquired_async_sem = True
+            runtime.active_stt_jobs += 1
+        except Exception:
+            return True, "stt_busy_skipped", ""
+    try:
+        stt_text, _words, _ms = decode_stt_window_sync(
+            samples16,
+            lead_pad_s=0.25,
+            trail_pad_s=0.35,
+        )
+    finally:
+        if acquired_async_sem and event_loop is not None:
+            runtime.active_stt_jobs = max(0, runtime.active_stt_jobs - 1)
+            event_loop.call_soon_threadsafe(runtime.stt_semaphore.release)
+
+    stt_tokens = _tokenize_stt_check(stt_text)
+    if not stt_tokens:
+        return False, "empty_stt", stt_text
+
+    max_extra = 0 if is_short_word or len(expected_tokens) <= 5 else 1
+    if len(stt_tokens) > len(expected_tokens) + max_extra:
+        return False, f"extra_words:{len(stt_tokens)}>{len(expected_tokens)}", stt_text
+
+    expected_adjacent_dups = sum(
+        1 for i in range(1, len(expected_tokens)) if expected_tokens[i] == expected_tokens[i - 1]
+    )
+    stt_adjacent_dups = sum(
+        1 for i in range(1, len(stt_tokens)) if stt_tokens[i] == stt_tokens[i - 1]
+    )
+    if stt_adjacent_dups > expected_adjacent_dups:
+        return False, "adjacent_repeat_stutter", stt_text
+    for i in range(1, len(stt_tokens)):
+        prev_t, cur_t = stt_tokens[i - 1], stt_tokens[i]
+        if (
+            len(prev_t) >= 2
+            and len(cur_t) > len(prev_t)
+            and cur_t.startswith(prev_t)
+            and prev_t not in expected_tokens
+        ):
+            return False, f"prefix_stutter:{prev_t}->{cur_t}", stt_text
+
+    if len(expected_tokens) >= 3 and expected_tokens[0] == "đáp" and expected_tokens[1] == "án":
+        label_tok = expected_tokens[2]
+        accepted = _CHOICE_LETTER_ACCEPT_STT.get(label_tok)
+        if accepted and not any(tok in accepted for tok in stt_tokens[:5]):
+            return False, f"missing_choice_label:{label_tok}", stt_text
+
+    return True, "ok", stt_text
+
+
 def synthesize_single_utterance_sync(
     tts_engine: Any,
     text_nfc: str,
@@ -1198,6 +1395,7 @@ def synthesize_single_utterance_sync(
     word_sample: bool,
     *,
     precision_override: str | None = None,
+    event_loop: asyncio.AbstractEventLoop | None = None,
 ) -> tuple[bytes, float]:
     syllable_estimate = len(text_nfc.split())
     use_crisp_temp = word_sample or syllable_estimate <= 3
@@ -1206,49 +1404,164 @@ def synthesize_single_utterance_sync(
 
     cache_mode = "word" if use_crisp_temp else "sentence"
     precision = precision_override or TTS_PRECISION
+    norm_speed = normalize_speed(speed)
     key = make_cache_key(
         voice_id=preset.voice_id,
-        speed=speed,
+        speed=norm_speed,
         mode=cache_mode,
         payload=text_nfc,
         precision=precision,
     )
     wav_cache = TTS_CACHE_DIR / f"{key}.wav"
     meta_cache = TTS_CACHE_DIR / f"{key}.json"
-    if wav_cache.is_file() and meta_cache.is_file():
-        meta = json.loads(meta_cache.read_text(encoding="utf-8"))
-        _touch_cache_files(wav_cache, meta_cache)
-        return wav_cache.read_bytes(), float(meta["duration_seconds"])
+    disk_hit = _read_disk_cache_entry(wav_cache, meta_cache)
+    if disk_hit is not None:
+        cached_wav, meta = disk_hit
+        return cached_wav, float(meta["duration_seconds"])
 
-    normalized_text = (
-        normalize_vietnamese_tts_text(text_nfc, expand_ranges_and_codes=True)
-        or text_nfc
+    sr = int(tts_engine.sample_rate)
+    base_key = make_cache_key(
+        voice_id=preset.voice_id,
+        speed=1.0,
+        mode=f"{cache_mode}_base",
+        payload=text_nfc,
+        precision=precision,
     )
-    spoken_input = (
-        normalized_text if normalized_text[-1] in ".!?" else f"{normalized_text}."
-    )
-    raw_wav = tts_engine.infer(
-        spoken_input,
-        voice=preset.preset_name,
-        temperature=temp,
-        top_k=top_k,
-        apply_watermark=False,
-    )
-    stretched = apply_speed_preserve_pitch(raw_wav, speed)
+    base_hit = _base_wav_cache_get(base_key)
+    if base_hit is not None:
+        base_wav, sr = base_hit
+    else:
+        normalized_text = (
+            normalize_vietnamese_tts_text(text_nfc, expand_ranges_and_codes=True)
+            or text_nfc
+        )
+        spoken_input = ensure_tts_terminal_punctuation(normalized_text)
+        quiz_choice_match = _QUIZ_CHOICE_LABEL_RE.match(text_nfc)
+        is_quiz_choice = bool(quiz_choice_match)
+        should_guard = word_sample or syllable_estimate <= 8 or is_quiz_choice
+
+        def _infer_base_once(
+            cand_text: str, cand_temp: float, cand_top_k: int, attempt_idx: int = 0
+        ) -> np.ndarray:
+            if quiz_choice_match:
+                prefix_word = quiz_choice_match.group(1)
+                letter = quiz_choice_match.group(2)
+                spoken_letter = _CHOICE_LETTER_SPOKEN.get(letter.upper(), letter.lower())
+                label_body = text_nfc[quiz_choice_match.end() :].strip()
+                norm_body = (
+                    normalize_vietnamese_tts_text(label_body, expand_ranges_and_codes=True)
+                    or label_body
+                )
+                body_core = norm_body.rstrip(".!?").strip() if norm_body else ""
+                if attempt_idx == 0:
+                    prefix_text = f"{prefix_word} {spoken_letter}."
+                    body_text = ensure_tts_terminal_punctuation(norm_body)
+                    gap_s = 0.36
+                elif attempt_idx == 1:
+                    prefix_text = f"{prefix_word} {spoken_letter}!"
+                    body_text = f"{body_core}!" if body_core else norm_body
+                    gap_s = 0.42
+                else:
+                    prefix_text = f"{prefix_word}, {spoken_letter}."
+                    body_text = body_core or norm_body
+                    gap_s = 0.45
+                wav_prefix = np.asarray(
+                    tts_engine.infer(
+                        prefix_text,
+                        voice=preset.preset_name,
+                        temperature=cand_temp,
+                        top_k=cand_top_k,
+                        apply_watermark=False,
+                    ),
+                    dtype=np.float32,
+                )
+                wav_body = np.asarray(
+                    tts_engine.infer(
+                        body_text,
+                        voice=preset.preset_name,
+                        temperature=cand_temp,
+                        top_k=cand_top_k,
+                        apply_watermark=False,
+                    ),
+                    dtype=np.float32,
+                )
+                gap = np.zeros(int(sr * gap_s), dtype=np.float32)
+                return np.concatenate([wav_prefix, gap, wav_body]).astype(np.float32)
+
+            if len(cand_text) > 140:
+                clauses, gaps = normalize_to_chunks_v3_with_gaps(cand_text, max_chars=140)
+                if not clauses:
+                    clauses, gaps = [cand_text], []
+                silence_secs = gaps_to_silence(gaps) if gaps else []
+                parts: list[np.ndarray] = []
+                for c_idx, clause in enumerate(clauses):
+                    raw_clause = np.asarray(
+                        tts_engine.infer(
+                            ensure_tts_terminal_punctuation(clause),
+                            voice=preset.preset_name,
+                            temperature=cand_temp,
+                            top_k=cand_top_k,
+                            apply_watermark=False,
+                        ),
+                        dtype=np.float32,
+                    )
+                    parts.append(raw_clause)
+                    if c_idx < len(silence_secs):
+                        gap_s = max(0.14, float(silence_secs[c_idx]))
+                        parts.append(np.zeros(int(sr * gap_s), dtype=np.float32))
+                return np.concatenate(parts).astype(np.float32)
+
+            return np.asarray(
+                tts_engine.infer(
+                    cand_text,
+                    voice=preset.preset_name,
+                    temperature=cand_temp,
+                    top_k=cand_top_k,
+                    apply_watermark=False,
+                ),
+                dtype=np.float32,
+            )
+
+        attempt_specs = (
+            [(spoken_input, temp, top_k), (spoken_input, 0.16, 10), (spoken_input, 0.12, 8)]
+            if should_guard
+            else [(spoken_input, temp, top_k)]
+        )
+        base_wav = np.zeros(0, dtype=np.float32)
+        for attempt_idx, (cand_text, cand_temp, cand_top_k) in enumerate(attempt_specs):
+            cand_wav = _infer_base_once(cand_text, cand_temp, cand_top_k, attempt_idx=attempt_idx)
+            base_wav = cand_wav
+            if not should_guard or attempt_idx == len(attempt_specs) - 1:
+                break
+            ok, reason, _stt = _check_tts_audio_quality(
+                cand_wav,
+                sr,
+                normalized_text,
+                is_short_word=bool(word_sample or syllable_estimate <= 3),
+                event_loop=event_loop,
+            )
+            if ok:
+                break
+            logger.info(
+                "tts_quality_retry attempt=%d reason=%s voice=%s",
+                attempt_idx + 1,
+                reason,
+                preset.voice_id,
+            )
+        _base_wav_cache_put(base_key, base_wav, sr)
+
+    stretched = apply_speed_preserve_pitch(base_wav, norm_speed)
     padded = pad_edges(
         stretched,
-        tts_engine.sample_rate,
+        sr,
         lead_ms=90 if use_crisp_temp else 70,
         tail_ms=220 if use_crisp_temp else 160,
     )
-    duration_s = round(float(len(padded) / tts_engine.sample_rate), 3)
-    wav_bytes = encode_wav_bytes(padded, tts_engine.sample_rate)
+    duration_s = round(float(len(padded) / sr), 3)
+    wav_bytes = encode_wav_bytes(padded, sr)
 
-    wav_cache.write_bytes(wav_bytes)
-    meta_cache.write_text(
-        json.dumps({"duration_seconds": duration_s}, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    _atomic_write_bytes(wav_cache, wav_bytes)
+    _atomic_write_json(meta_cache, {"duration_seconds": duration_s})
     prune_tts_cache_dir()
     return wav_bytes, duration_s
 
@@ -1259,21 +1572,25 @@ def synthesize_timed_passage_sync(
     preset: LocalVoicePreset,
     speed: float,
     *,
+    precision_override: str | None = None,
     preferred_media_type: str = "audio/wav",
 ) -> dict[str, Any]:
+    precision = precision_override or TTS_PRECISION
+    norm_speed = normalize_speed(speed)
     key = make_cache_key(
         voice_id=preset.voice_id,
-        speed=speed,
+        speed=norm_speed,
         mode="timed_passage",
         payload=text_nfc,
+        precision=precision,
     )
     wav_cache = TTS_CACHE_DIR / f"{key}.wav"
     meta_cache = TTS_CACHE_DIR / f"{key}.json"
-    if wav_cache.is_file() and meta_cache.is_file():
-        meta = json.loads(meta_cache.read_text(encoding="utf-8"))
-        _touch_cache_files(wav_cache, meta_cache)
+    disk_hit = _read_disk_cache_entry(wav_cache, meta_cache)
+    if disk_hit is not None:
+        cached_wav, meta = disk_hit
         out_bytes, out_media_type = encode_audio_bytes_for_media_type(
-            wav_cache.read_bytes(), preferred_media_type
+            cached_wav, preferred_media_type
         )
         return {
             "audio_base64": base64.b64encode(out_bytes).decode("ascii"),
@@ -1282,7 +1599,7 @@ def synthesize_timed_passage_sync(
             "voice_id": preset.voice_id,
             "region": preset.region,
             "model_version": TTS_MODEL_VERSION,
-            "speed": normalize_speed(speed),
+            "speed": norm_speed,
             "duration_seconds": float(meta["duration_seconds"]),
             "words": meta["words"],
         }
@@ -1306,22 +1623,40 @@ def synthesize_timed_passage_sync(
     chunk_spans: list[tuple[str, float, float]] = []
 
     for idx, chunk_text in enumerate(chunks):
-        raw_chunk = tts_engine.infer(
-            chunk_text,
-            voice=preset.preset_name,
-            temperature=0.52,
-            top_k=22,
-            apply_watermark=False,
+        chunk_base_key = make_cache_key(
+            voice_id=preset.voice_id,
+            speed=1.0,
+            mode="timed_chunk_base",
+            payload=chunk_text,
+            precision=precision,
         )
-        stretched = apply_speed_preserve_pitch(raw_chunk, speed)
-        start_s = cursor_samples / sr
-        end_s = (cursor_samples + len(stretched)) / sr
+        base_hit = _base_wav_cache_get(chunk_base_key)
+        if base_hit is not None:
+            raw_chunk, _ = base_hit
+        else:
+            raw_chunk = np.asarray(
+                tts_engine.infer(
+                    ensure_tts_terminal_punctuation(chunk_text),
+                    voice=preset.preset_name,
+                    temperature=0.52,
+                    top_k=22,
+                    apply_watermark=False,
+                ),
+                dtype=np.float32,
+            )
+            _base_wav_cache_put(chunk_base_key, raw_chunk, sr)
+
+        stretched = apply_speed_preserve_pitch(raw_chunk, norm_speed)
+        rel_start_s, rel_end_s = _detect_chunk_speech_bounds(stretched, sr)
+        chunk_offset_s = cursor_samples / float(sr)
+        start_s = chunk_offset_s + rel_start_s
+        end_s = chunk_offset_s + rel_end_s
         chunk_spans.append((chunk_text, start_s, end_s))
         assembled.append(stretched)
         cursor_samples += len(stretched)
 
         if idx < len(silence_secs):
-            gap_s = max(0.12, float(silence_secs[idx]) / max(speed, 0.7))
+            gap_s = max(0.12, float(silence_secs[idx]) / max(norm_speed, 0.7))
             gap_samples = int(sr * gap_s)
             assembled.append(np.zeros(gap_samples, dtype=np.float32))
             cursor_samples += gap_samples
@@ -1330,65 +1665,20 @@ def synthesize_timed_passage_sync(
     full_wav = np.concatenate(assembled).astype(np.float32)
     duration_seconds = round(float(len(full_wav) / sr), 3)
 
-    # Align original whitespace-delimited surface words across chunk spans proportionally
+    # Project chunk spans back onto original surface words preserving inter-chunk silence gaps
     surface_words = WORD_TOKEN_RE.findall(text_nfc)
-    chunk_word_lists = [WORD_TOKEN_RE.findall(c) for c, _, _ in chunk_spans]
-    total_chunk_words = sum(len(cw) for cw in chunk_word_lists)
-
-    timed_words: list[dict[str, Any]] = []
-    if surface_words:
-        if total_chunk_words == len(surface_words):
-            sw_idx = 0
-            for (_, c_start, c_end), c_words in zip(chunk_spans, chunk_word_lists):
-                if not c_words:
-                    continue
-                weights = [max(1, len(re.sub(r"[^\w]", "", w))) for w in c_words]
-                w_sum = float(sum(weights))
-                span = max(0.05, c_end - c_start)
-                acc = c_start
-                for w_weight in weights:
-                    w_dur = span * (w_weight / w_sum)
-                    w_start = min(duration_seconds, max(0.0, acc))
-                    w_end = min(duration_seconds, max(w_start, acc + w_dur))
-                    timed_words.append(
-                        {
-                            "word": surface_words[sw_idx],
-                            "start": round(w_start, 3),
-                            "end": round(w_end, 3),
-                        }
-                    )
-                    acc += w_dur
-                    sw_idx += 1
-        else:
-            active_start = chunk_spans[0][1] if chunk_spans else 0.07
-            active_end = (
-                chunk_spans[-1][2] if chunk_spans else max(0.1, duration_seconds - 0.16)
-            )
-            weights = [max(1, len(re.sub(r"[^\w]", "", w))) for w in surface_words]
-            w_sum = float(sum(weights))
-            span = max(0.05, active_end - active_start)
-            acc = active_start
-            for word, w_weight in zip(surface_words, weights):
-                w_dur = span * (w_weight / w_sum)
-                w_start = min(duration_seconds, max(0.0, acc))
-                w_end = min(duration_seconds, max(w_start, acc + w_dur))
-                timed_words.append(
-                    {
-                        "word": word,
-                        "start": round(w_start, 3),
-                        "end": round(w_end, 3),
-                    }
-                )
-                acc += w_dur
+    timed_words = project_chunk_spans_to_surface_words(
+        surface_words,
+        chunk_spans,
+        duration_seconds,
+        expand_ranges_and_codes=True,
+    )
 
     wav_bytes = encode_wav_bytes(full_wav, sr)
-    wav_cache.write_bytes(wav_bytes)
-    meta_cache.write_text(
-        json.dumps(
-            {"duration_seconds": duration_seconds, "words": timed_words},
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    _atomic_write_bytes(wav_cache, wav_bytes)
+    _atomic_write_json(
+        meta_cache,
+        {"duration_seconds": duration_seconds, "words": timed_words},
     )
     prune_tts_cache_dir()
     out_bytes, out_media_type = encode_audio_bytes_for_media_type(
@@ -1401,7 +1691,7 @@ def synthesize_timed_passage_sync(
         "voice_id": preset.voice_id,
         "region": preset.region,
         "model_version": TTS_MODEL_VERSION,
-        "speed": normalize_speed(speed),
+        "speed": norm_speed,
         "duration_seconds": duration_seconds,
         "words": timed_words,
     }
@@ -1428,20 +1718,21 @@ def synthesize_phonics_steps_sync(
         ensure_ascii=False,
     )
     precision = precision_override or TTS_PRECISION
+    norm_speed = normalize_speed(speed)
     key = make_cache_key(
         voice_id=preset.voice_id,
-        speed=speed,
+        speed=norm_speed,
         mode="phonics_steps",
         payload=serialized_steps,
         precision=precision,
     )
     wav_cache = TTS_CACHE_DIR / f"{key}.wav"
     meta_cache = TTS_CACHE_DIR / f"{key}.json"
-    if wav_cache.is_file() and meta_cache.is_file():
-        meta = json.loads(meta_cache.read_text(encoding="utf-8"))
-        _touch_cache_files(wav_cache, meta_cache)
+    disk_hit = _read_disk_cache_entry(wav_cache, meta_cache)
+    if disk_hit is not None:
+        cached_wav, meta = disk_hit
         out_bytes, out_media_type = encode_audio_bytes_for_media_type(
-            wav_cache.read_bytes(), preferred_media_type
+            cached_wav, preferred_media_type
         )
         return {
             "audio_base64": base64.b64encode(out_bytes).decode("ascii"),
@@ -1450,7 +1741,7 @@ def synthesize_phonics_steps_sync(
             "voice_id": preset.voice_id,
             "region": preset.region,
             "model_version": TTS_MODEL_VERSION,
-            "speed": normalize_speed(speed),
+            "speed": norm_speed,
             "duration_seconds": float(meta["duration_seconds"]),
             "step_timings": meta["step_timings"],
         }
@@ -1470,15 +1761,31 @@ def synthesize_phonics_steps_sync(
             )
             or unicodedata.normalize("NFC", step.spoken_text.strip())
         )
-        spoken = clean_step if clean_step[-1] in ".!?" else f"{clean_step}."
-        raw_wav = tts_engine.infer(
-            spoken,
-            voice=preset.preset_name,
-            temperature=0.22,
-            top_k=15,
-            apply_watermark=False,
+        spoken = ensure_tts_terminal_punctuation(clean_step)
+        step_base_key = make_cache_key(
+            voice_id=preset.voice_id,
+            speed=1.0,
+            mode="phonics_step_base",
+            payload=spoken,
+            precision=precision,
         )
-        stretched = apply_speed_preserve_pitch(raw_wav, speed)
+        base_hit = _base_wav_cache_get(step_base_key)
+        if base_hit is not None:
+            raw_wav, _ = base_hit
+        else:
+            raw_wav = np.asarray(
+                tts_engine.infer(
+                    spoken,
+                    voice=preset.preset_name,
+                    temperature=0.22,
+                    top_k=15,
+                    apply_watermark=False,
+                ),
+                dtype=np.float32,
+            )
+            _base_wav_cache_put(step_base_key, raw_wav, sr)
+
+        stretched = apply_speed_preserve_pitch(raw_wav, norm_speed)
         start_s = round(cursor_samples / sr, 3)
         end_s = round((cursor_samples + len(stretched)) / sr, 3)
         step_timings.append(
@@ -1500,13 +1807,10 @@ def synthesize_phonics_steps_sync(
     duration_seconds = round(float(len(full_wav) / sr), 3)
     wav_bytes = encode_wav_bytes(full_wav, sr)
 
-    wav_cache.write_bytes(wav_bytes)
-    meta_cache.write_text(
-        json.dumps(
-            {"duration_seconds": duration_seconds, "step_timings": step_timings},
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    _atomic_write_bytes(wav_cache, wav_bytes)
+    _atomic_write_json(
+        meta_cache,
+        {"duration_seconds": duration_seconds, "step_timings": step_timings},
     )
     prune_tts_cache_dir()
     out_bytes, out_media_type = encode_audio_bytes_for_media_type(
@@ -1519,7 +1823,7 @@ def synthesize_phonics_steps_sync(
         "voice_id": preset.voice_id,
         "region": preset.region,
         "model_version": TTS_MODEL_VERSION,
-        "speed": normalize_speed(speed),
+        "speed": norm_speed,
         "duration_seconds": duration_seconds,
         "step_timings": step_timings,
     }
@@ -1623,7 +1927,11 @@ async def post_tts(req: TtsSynthesisRequest, request: Request) -> Response:
     word_count = len(WORD_TOKEN_RE.findall(text_nfc))
     use_crisp_temp = bool(req.word_sample or word_count <= 3)
     cache_mode = "word" if use_crisp_temp else "sentence"
-    tts_engine, used_precision = runtime.get_tts_engine_for_mode(crisp=use_crisp_temp)
+    tts_engine, used_precision = runtime.select_tts_engine(
+        word_sample=bool(req.word_sample),
+        is_phonics=False,
+        word_count=word_count,
+    )
     preferred_media_type = resolve_preferred_audio_media_type(
         request.headers.get("accept"), req.audio_format
     )
@@ -1671,6 +1979,7 @@ async def post_tts(req: TtsSynthesisRequest, request: Request) -> Response:
                 speed,
                 req.word_sample,
                 precision_override=used_precision,
+                event_loop=asyncio.get_running_loop(),
             )
         finally:
             runtime.active_tts_jobs -= 1
@@ -1711,6 +2020,12 @@ async def post_tts_timed(req: TtsSynthesisRequest, request: Request) -> dict[str
     preset = resolve_strict_voice(req.voice_id)
     text_nfc = normalize_nfc_text(req.text)
     speed = normalize_speed(req.speed)
+    word_count = len(WORD_TOKEN_RE.findall(text_nfc))
+    tts_engine, used_precision = runtime.select_tts_engine(
+        word_sample=False,
+        is_phonics=False,
+        word_count=word_count,
+    )
     preferred_media_type = resolve_preferred_audio_media_type(
         request.headers.get("accept"), req.audio_format
     )
@@ -1733,10 +2048,11 @@ async def post_tts_timed(req: TtsSynthesisRequest, request: Request) -> dict[str
     try:
         result = await asyncio.to_thread(
             synthesize_timed_passage_sync,
-            runtime.tts_engine,
+            tts_engine,
             text_nfc,
             preset,
             speed,
+            precision_override=used_precision,
             preferred_media_type=preferred_media_type,
         )
         logger.info(
@@ -1758,7 +2074,11 @@ async def post_tts_phonics(req: PhonicsSynthesisRequest, request: Request) -> di
     await _ensure_capability_loaded("tts")
     preset = resolve_strict_voice(req.voice_id)
     speed = normalize_speed(req.speed)
-    tts_engine, used_precision = runtime.get_tts_engine_for_mode(crisp=True)
+    tts_engine, used_precision = runtime.select_tts_engine(
+        word_sample=False,
+        is_phonics=True,
+        word_count=len(req.steps),
+    )
     preferred_media_type = resolve_preferred_audio_media_type(
         request.headers.get("accept"), req.audio_format
     )
@@ -1836,22 +2156,53 @@ def preprocess_audio_for_stt(samples16: np.ndarray) -> np.ndarray:
     return arr
 
 
+def estimate_voiced_duration_s(samples16: np.ndarray, sample_rate: int = 16000) -> float:
+    """Estimate active voiced speech duration excluding quiet lead/pre-roll and trailing silence."""
+    arr = np.asarray(samples16, dtype=np.float32)
+    if arr.size < 320:
+        return 0.0
+    frame_len = 320  # 20ms at 16 kHz
+    n_frames = arr.size // frame_len
+    if n_frames == 0:
+        return 0.0
+    frames = arr[: n_frames * frame_len].reshape(n_frames, frame_len)
+    frame_rms = np.sqrt(np.mean(frames * frames, axis=1))
+    max_rms = float(np.max(frame_rms))
+    if max_rms < 0.002:
+        return 0.0
+    thresh = max(0.004, max_rms * 0.15)
+    active = np.flatnonzero(frame_rms >= thresh)
+    if active.size == 0:
+        return 0.0
+    # Span from first to last active voiced frame (handles intra-word stop closures cleanly)
+    voiced_frames = int(active[-1] - active[0] + 1)
+    return float((voiced_frames * frame_len) / float(sample_rate))
+
+
 def decode_stt_window_sync(
     samples16: np.ndarray,
     *,
     lead_pad_s: float = 0.20,
     trail_pad_s: float = 0.24,
+    voiced_duration_ms: float | None = None,
 ) -> tuple[str, list[dict[str, Any]], float]:
     """Decode one 16kHz float32 audio window using Sherpa-ONNX Zipformer."""
     assert runtime.stt_recognizer is not None
     t_d0 = time.perf_counter()
     if samples16.size < 400:
         return "", [], (time.perf_counter() - t_d0) * 1000.0
+    if float(np.max(np.abs(samples16))) <= 0.0008:
+        return "", [], (time.perf_counter() - t_d0) * 1000.0
     duration_s = float(samples16.size / 16000.0)
     arr = preprocess_audio_for_stt(samples16)
-    # Keep <1.2s isolated word clips free of trailing silence padding so Zipformer
-    # does not hallucinate trailing collocations (e.g. "trường" -> "trường đại học").
-    effective_trail_pad = trail_pad_s if duration_s >= 1.2 else 0.0
+    # Gate trailing silence padding on VOICED speech duration (excluding pre-roll/tail),
+    # so short isolated words (~0.6s speech + 0.45s pre-roll) never trigger collocation hallucinations.
+    voiced_s = (
+        float(voiced_duration_ms) / 1000.0
+        if voiced_duration_ms is not None and voiced_duration_ms > 0
+        else estimate_voiced_duration_s(arr, sample_rate=16000)
+    )
+    effective_trail_pad = trail_pad_s if voiced_s >= 1.2 else 0.0
     padded = np.concatenate(
         [
             np.zeros(int(16000 * lead_pad_s), dtype=np.float32),
@@ -1885,6 +2236,7 @@ async def post_stt(
     source: str = Form(default=""),
     session_id: str = Form(default=""),
     turn_id: str = Form(default=""),
+    voiced_duration_ms: float | None = Form(default=None),
 ) -> dict[str, Any]:
     del language, turn_id
     global _INTERIM_COUNTER
@@ -1989,6 +2341,7 @@ async def post_stt(
             samples16,
             lead_pad_s=0.25,
             trail_pad_s=0.35,
+            voiced_duration_ms=voiced_duration_ms,
         )
         total_ms = (time.perf_counter() - t_req_start) * 1000.0
         response.headers["X-STT-Queue-Ms"] = f"{queue_ms:.2f}"
@@ -2018,6 +2371,12 @@ _WS_INTERIM_MIN_SPEECH_SAMPLES = int(_WS_TARGET_SR * 0.12)
 _WS_INTERIM_STEP_SAMPLES = int(_WS_TARGET_SR * 0.12)
 _WS_SILENCE_FLUSH_SAMPLES = int(_WS_TARGET_SR * 0.42)
 _WS_MIN_FLUSH_SAMPLES = int(_WS_TARGET_SR * 0.12)
+_WS_CLIENT_VAD_MAX_SAMPLES = int(_WS_TARGET_SR * 18.0)
+_WS_CLIP_SAMPLE_THRESHOLD = 0.985
+_WS_CLIP_SUSTAINED_RATIO = 0.03
+_WS_CLIP_WINDOW_RATIO = 0.05
+_WS_CLIP_MIN_SAMPLES = 480
+_WS_CLIP_WINDOW_CHUNKS = 8
 
 
 def _merge_window_words(
@@ -2116,6 +2475,7 @@ class _PendingFlushJob:
     page_id: str
     audio_ended_ms: int
     audio_quality: dict[str, Any]
+    voiced_duration_ms: float | None = None
 
 
 class _WsSttSession:
@@ -2125,6 +2485,7 @@ class _WsSttSession:
         self.turn_id: str = ""
         self.sample_rate: int = _WS_TARGET_SR
         self.language: str = "vi"
+        self.vad_mode: Literal["server", "client"] = "server"
         self.total_samples_received: int = 0
         self.noise_floor: float = 0.0018
         self.pre_roll: np.ndarray = np.zeros(0, dtype=np.float32)
@@ -2134,11 +2495,17 @@ class _WsSttSession:
         self.segment_id: str = "ws:seg_0"
         self.seg_chunks: list[np.ndarray] = []
         self.seg_total_samples: int = 0
+        self.pre_roll_samples: int = 0
+        self.leading_silence_samples: int = 0
         self.silence_samples: int = 0
         self.quiet_streak: int = 0
         self.voiced_samples: int = 0
         self.sum_sq: float = 0.0
+        self.total_sum_sq: float = 0.0
         self.peak: float = 0.0
+        self.clipped_samples: int = 0
+        self.checked_samples: int = 0
+        self.recent_clip_ratios: list[float] = []
 
         self.window_origin_sample: int = 0
         self.committed_words: list[dict[str, Any]] = []
@@ -2151,14 +2518,29 @@ class _WsSttSession:
         self.stopped: bool = False
 
     def _build_quality(self) -> dict[str, Any]:
-        active_ms = round(
-            max(0.0, (self.seg_total_samples - self.silence_samples) / _WS_TARGET_SR * 1000.0)
+        active_samples = (
+            self.voiced_samples
+            if self.voiced_samples > 0
+            else max(0, self.seg_total_samples - self.silence_samples - self.leading_silence_samples)
         )
-        rms = float(np.sqrt(self.sum_sq / max(1, self.seg_total_samples)))
+        active_ms = round(max(0.0, active_samples / _WS_TARGET_SR * 1000.0))
+        denom = max(1, self.voiced_samples if self.voiced_samples > 0 else self.seg_total_samples)
+        energy = self.sum_sq if self.voiced_samples > 0 else self.total_sum_sq
+        rms = float(np.sqrt(energy / denom))
+        overall_clip_ratio = self.clipped_samples / float(max(1, self.checked_samples))
+        sustained_window_clip = bool(
+            len(self.recent_clip_ratios) >= 2
+            and (sum(self.recent_clip_ratios) / float(len(self.recent_clip_ratios)))
+            >= _WS_CLIP_WINDOW_RATIO
+        )
+        is_sustained_clipping = (
+            self.clipped_samples >= _WS_CLIP_MIN_SAMPLES
+            and (overall_clip_ratio >= _WS_CLIP_SUSTAINED_RATIO or sustained_window_clip)
+        )
         status = "OK"
         if active_ms < 80:
             status = "AUDIO_TOO_SHORT"
-        elif self.peak >= 0.99:
+        elif is_sustained_clipping:
             status = "CLIPPING"
         elif rms < 0.002 and self.peak < 0.01:
             status = "LOW_VOLUME"
@@ -2173,11 +2555,17 @@ class _WsSttSession:
         self.in_speech = False
         self.seg_chunks = []
         self.seg_total_samples = 0
+        self.pre_roll_samples = 0
+        self.leading_silence_samples = 0
         self.silence_samples = 0
         self.quiet_streak = 0
         self.voiced_samples = 0
         self.sum_sq = 0.0
+        self.total_sum_sq = 0.0
         self.peak = 0.0
+        self.clipped_samples = 0
+        self.checked_samples = 0
+        self.recent_clip_ratios = []
         self.window_origin_sample = 0
         self.committed_words = []
         self.last_committed_end_s = 0.0
@@ -2205,8 +2593,36 @@ class _WsSttSession:
             self.last_committed_end_s,
         )
 
-    def enqueue_flush(self, *, carry_tail: bool) -> None:
+    def enqueue_flush(
+        self,
+        *,
+        carry_tail: bool,
+        turn_id_override: str | None = None,
+        emit_empty_ack: bool = False,
+    ) -> None:
+        flush_turn_id = (turn_id_override or "").strip() or self.turn_id
         if not self.in_speech or self.seg_total_samples < _WS_MIN_FLUSH_SAMPLES:
+            if emit_empty_ack:
+                self.seg_seq += 1
+                prefix = self.session_id or "ws"
+                empty_job = _PendingFlushJob(
+                    audio_window=np.zeros(0, dtype=np.float32),
+                    window_origin_sample=0,
+                    committed_words=[],
+                    last_committed_end_s=0.0,
+                    segment_id=f"{prefix}:seg_{self.seg_seq}",
+                    turn_id=flush_turn_id,
+                    session_id=self.session_id,
+                    page_id=self.page_id,
+                    audio_ended_ms=round(self.total_samples_received / _WS_TARGET_SR * 1000.0),
+                    audio_quality=self._build_quality(),
+                    voiced_duration_ms=0.0,
+                )
+                self.pending_flushes.append(empty_job)
+                self.latest_interim_seq += 1
+                self.reset_segment()
+                self.decode_event.set()
+                return
             self.reset_segment()
             return
         win_audio, origin, committed, last_end = self._snapshot_window()
@@ -2215,17 +2631,19 @@ class _WsSttSession:
             if carry_tail and self.seg_chunks and self.silence_samples > 0
             else None
         )
+        voiced_ms = round(self.voiced_samples / float(_WS_TARGET_SR) * 1000.0, 1)
         job = _PendingFlushJob(
             audio_window=win_audio,
             window_origin_sample=origin,
             committed_words=committed,
             last_committed_end_s=last_end,
             segment_id=self.segment_id,
-            turn_id=self.turn_id,
+            turn_id=flush_turn_id,
             session_id=self.session_id,
             page_id=self.page_id,
             audio_ended_ms=round(self.total_samples_received / _WS_TARGET_SR * 1000.0),
             audio_quality=self._build_quality(),
+            voiced_duration_ms=voiced_ms,
         )
         self.pending_flushes.append(job)
         self.latest_interim_seq += 1  # Supersede any in-flight interim for this segment
@@ -2236,31 +2654,49 @@ class _WsSttSession:
         if chunk.size == 0:
             return
         self.total_samples_received += int(chunk.size)
+        abs_chunk = np.abs(chunk)
         sum_sq = float(np.sum(chunk * chunk))
         rms = float(np.sqrt(sum_sq / chunk.size))
-        peak = float(np.max(np.abs(chunk)))
+        peak = float(np.max(abs_chunk))
+        clipped_count = int(np.sum(abs_chunk >= _WS_CLIP_SAMPLE_THRESHOLD))
+        chunk_clip_ratio = clipped_count / float(chunk.size)
         onset_thresh = max(0.0028, self.noise_floor * 2.0)
         hold_thresh = max(0.0016, self.noise_floor * 1.4)
         is_onset = rms >= onset_thresh or peak >= onset_thresh * 3.0
         is_voiced = rms >= hold_thresh or peak >= hold_thresh * 3.0
 
         if not self.in_speech:
-            if is_onset:
+            if is_onset or self.vad_mode == "client":
                 self.in_speech = True
                 self.seg_seq += 1
                 prefix = self.session_id or "ws"
                 self.segment_id = f"{prefix}:seg_{self.seg_seq}"
                 self.silence_samples = 0
+                self.leading_silence_samples = 0
                 self.quiet_streak = 0
-                self.sum_sq = sum_sq
-                self.peak = peak
+                self.clipped_samples = clipped_count
+                self.checked_samples = int(chunk.size)
+                self.recent_clip_ratios = [chunk_clip_ratio]
                 if self.pre_roll.size > 0:
                     self.seg_chunks.append(self.pre_roll)
+                    self.pre_roll_samples = int(self.pre_roll.size)
                     self.seg_total_samples += int(self.pre_roll.size)
                     self.pre_roll = np.zeros(0, dtype=np.float32)
                 self.seg_chunks.append(chunk)
                 self.seg_total_samples += int(chunk.size)
-                self.voiced_samples += int(chunk.size)
+                self.total_sum_sq = sum_sq
+                if is_onset or is_voiced:
+                    self.sum_sq = sum_sq
+                    self.peak = peak
+                    self.voiced_samples = int(chunk.size)
+                else:
+                    self.noise_floor = min(
+                        0.0055, max(0.0009, self.noise_floor * 0.95 + rms * 0.05)
+                    )
+                    self.sum_sq = 0.0
+                    self.peak = peak
+                    self.voiced_samples = 0
+                    self.leading_silence_samples = int(chunk.size)
             else:
                 self.noise_floor = min(
                     0.0055, max(0.0009, self.noise_floor * 0.95 + rms * 0.05)
@@ -2274,10 +2710,22 @@ class _WsSttSession:
 
         self.seg_chunks.append(chunk)
         self.seg_total_samples += int(chunk.size)
+        self.total_sum_sq += sum_sq
+        self.clipped_samples += clipped_count
+        self.checked_samples += int(chunk.size)
+        self.recent_clip_ratios.append(chunk_clip_ratio)
+        if len(self.recent_clip_ratios) > _WS_CLIP_WINDOW_CHUNKS:
+            self.recent_clip_ratios.pop(0)
         if not is_voiced:
-            self.quiet_streak += 1
-            if self.quiet_streak >= 2:
-                self.silence_samples += int(chunk.size)
+            if self.voiced_samples == 0:
+                self.noise_floor = min(
+                    0.0055, max(0.0009, self.noise_floor * 0.95 + rms * 0.05)
+                )
+                self.leading_silence_samples += int(chunk.size)
+            else:
+                self.quiet_streak += 1
+                if self.quiet_streak >= 2:
+                    self.silence_samples += int(chunk.size)
         else:
             self.quiet_streak = 0
             self.silence_samples = 0
@@ -2286,10 +2734,18 @@ class _WsSttSession:
             if peak > self.peak:
                 self.peak = peak
 
-        if (
-            self.silence_samples >= _WS_SILENCE_FLUSH_SAMPLES
-            and self.seg_total_samples >= _WS_MIN_FLUSH_SAMPLES
-        ):
+        # Single source of truth for VAD:
+        # - vad_mode == "server": auto-flush after 420ms silence.
+        # - vad_mode == "client": client drives flushes explicitly via {type:"flush", turn_id};
+        #   server never prematurely auto-flushes at 420ms (only hard-caps at 18s).
+        if self.vad_mode != "client":
+            if (
+                self.silence_samples >= _WS_SILENCE_FLUSH_SAMPLES
+                and self.seg_total_samples >= _WS_MIN_FLUSH_SAMPLES
+            ):
+                self.enqueue_flush(carry_tail=True)
+                return
+        elif self.seg_total_samples >= _WS_CLIENT_VAD_MAX_SAMPLES:
             self.enqueue_flush(carry_tail=True)
             return
 
@@ -2348,59 +2804,68 @@ async def stt_stream(websocket: WebSocket) -> None:
                 full_tail = job.audio_window
                 total_decode_ms = 0.0
                 max_step_decode_ms = 0.0
+                _txt = ""
 
-                # Bound every Sherpa decode call to <= ~1.9s even if a client bursts audio
-                # faster than real-time before interim ticks advance the window.
-                step_offset = 0
-                while True:
-                    remaining = full_tail.size - step_offset
-                    if remaining <= _WS_MAX_ACTIVE_WINDOW_SAMPLES:
-                        chunk_audio = full_tail[step_offset:]
-                        is_last_slice = True
-                    else:
-                        chunk_audio = full_tail[
-                            step_offset : step_offset + _WS_ADVANCE_TRIGGER_SAMPLES
-                        ]
-                        is_last_slice = False
+                if full_tail.size == 0:
+                    final_words = committed
+                else:
+                    # Bound every Sherpa decode call to <= ~1.9s even if a client bursts audio
+                    # faster than real-time before interim ticks advance the window.
+                    step_offset = 0
+                    while True:
+                        remaining = full_tail.size - step_offset
+                        if remaining <= _WS_MAX_ACTIVE_WINDOW_SAMPLES:
+                            chunk_audio = full_tail[step_offset:]
+                            is_last_slice = True
+                        else:
+                            chunk_audio = full_tail[
+                                step_offset : step_offset + _WS_ADVANCE_TRIGGER_SAMPLES
+                            ]
+                            is_last_slice = False
 
-                    await runtime.stt_semaphore.acquire()
-                    runtime.active_stt_jobs += 1
-                    try:
-                        _txt, win_words, step_decode_ms = await asyncio.to_thread(
-                            decode_stt_window_sync,
-                            chunk_audio,
-                            lead_pad_s=0.18,
-                            trail_pad_s=0.22,
+                        await runtime.stt_semaphore.acquire()
+                        runtime.active_stt_jobs += 1
+                        try:
+                            _txt, win_words, step_decode_ms = await asyncio.to_thread(
+                                decode_stt_window_sync,
+                                chunk_audio,
+                                lead_pad_s=0.18,
+                                trail_pad_s=0.22,
+                                voiced_duration_ms=(
+                                    job.voiced_duration_ms
+                                    if step_offset == 0 and is_last_slice
+                                    else None
+                                ),
+                            )
+                        finally:
+                            runtime.active_stt_jobs -= 1
+                            runtime.stt_semaphore.release()
+
+                        total_decode_ms += step_decode_ms
+                        if step_decode_ms > max_step_decode_ms:
+                            max_step_decode_ms = step_decode_ms
+                        slice_origin_sample = origin + step_offset
+                        slice_origin_s = slice_origin_sample / float(_WS_TARGET_SR)
+                        merged = _merge_window_words(
+                            committed, win_words, slice_origin_s, last_end
                         )
-                    finally:
-                        runtime.active_stt_jobs -= 1
-                        runtime.stt_semaphore.release()
+                        if is_last_slice:
+                            final_words = merged
+                            break
 
-                    total_decode_ms += step_decode_ms
-                    if step_decode_ms > max_step_decode_ms:
-                        max_step_decode_ms = step_decode_ms
-                    slice_origin_sample = origin + step_offset
-                    slice_origin_s = slice_origin_sample / float(_WS_TARGET_SR)
-                    merged = _merge_window_words(
-                        committed, win_words, slice_origin_s, last_end
-                    )
-                    if is_last_slice:
-                        final_words = merged
-                        break
-
-                    if len(merged) > len(committed) + 1:
-                        committed = merged[:-1]
-                    else:
-                        committed = merged
-                    if committed:
-                        last_end = float(committed[-1]["end"])
-                    next_offset = max(
-                        step_offset + _WS_TARGET_SR,
-                        int(last_end * _WS_TARGET_SR) - origin - _WS_ACOUSTIC_OVERLAP_SAMPLES,
-                    )
-                    if next_offset <= step_offset:
-                        next_offset = step_offset + _WS_ADVANCE_TRIGGER_SAMPLES - _WS_ACOUSTIC_OVERLAP_SAMPLES
-                    step_offset = next_offset
+                        if len(merged) > len(committed) + 1:
+                            committed = merged[:-1]
+                        else:
+                            committed = merged
+                        if committed:
+                            last_end = float(committed[-1]["end"])
+                        next_offset = max(
+                            step_offset + _WS_TARGET_SR,
+                            int(last_end * _WS_TARGET_SR) - origin - _WS_ACOUSTIC_OVERLAP_SAMPLES,
+                        )
+                        if next_offset <= step_offset:
+                            next_offset = step_offset + _WS_ADVANCE_TRIGGER_SAMPLES - _WS_ACOUSTIC_OVERLAP_SAMPLES
+                        step_offset = next_offset
 
                 final_text = unicodedata.normalize(
                     "NFC", " ".join(w["text"] for w in final_words).strip()
@@ -2577,6 +3042,9 @@ async def stt_stream(websocket: WebSocket) -> None:
                     lang_val = ctrl.get("language")
                     if isinstance(lang_val, str) and lang_val.strip():
                         session.language = lang_val.strip()[:8]
+                    vad_val = str(ctrl.get("vad_mode") or "").strip().lower()
+                    if vad_val in ("client", "server"):
+                        session.vad_mode = vad_val
                     await websocket.send_json(
                         {
                             "type": "ready",
@@ -2584,17 +3052,28 @@ async def stt_stream(websocket: WebSocket) -> None:
                             "page_id": session.page_id,
                             "turn_id": session.turn_id,
                             "sample_rate": _WS_TARGET_SR,
+                            "vad_mode": session.vad_mode,
                             "model_version": STT_MODEL_VERSION,
                             "stt_mode": STT_MODE,
                         }
                     )
                 elif action == "flush":
-                    next_turn = str(ctrl.get("turn_id") or "").strip()[:80]
-                    session.enqueue_flush(carry_tail=True)
+                    flush_turn = str(ctrl.get("turn_id") or "").strip()[:80]
+                    next_turn = str(ctrl.get("next_turn_id") or "").strip()[:80]
+                    session.enqueue_flush(
+                        carry_tail=(session.vad_mode != "client"),
+                        turn_id_override=flush_turn or session.turn_id,
+                        emit_empty_ack=(session.vad_mode == "client" or bool(flush_turn)),
+                    )
                     if next_turn:
                         session.turn_id = next_turn
+                    elif flush_turn:
+                        session.turn_id = flush_turn
                 elif action == "stop":
-                    session.enqueue_flush(carry_tail=False)
+                    session.enqueue_flush(
+                        carry_tail=False,
+                        emit_empty_ack=(session.vad_mode == "client" and session.in_speech),
+                    )
                     session.stopped = True
                     session.decode_event.set()
                     break

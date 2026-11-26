@@ -80,7 +80,7 @@ afterEach(() => {
 });
 
 describe("Bug 5b: BrowserTranscriptCollector -> EchoGuard onsetAt propagation", () => {
-  it("accepts child repeating exact TTS word at +300ms via onsetAt, while blocking speaker echo during playback", () => {
+  it("blocks speaker echo during playback and within 800ms tail-overlap, while accepting child speech after tail-overlap or non-overlapping speech", () => {
     const guard = new EchoGuard({ onsetGraceMs: 250, tailMs: 1500 });
     const collector = new BrowserTranscriptCollector();
 
@@ -110,8 +110,8 @@ describe("Bug 5b: BrowserTranscriptCollector -> EchoGuard onsetAt propagation", 
     );
     expect(rejectedEcho).toEqual([]);
 
-    // 2. Child repeats exact word "hoa thơm" at +300ms (onsetAt=1900 >= 1600+250, receivedAt=2200 <= 1600+1500) -> ACCEPTED!
-    const acceptedChild = collector.addResults(
+    // 2. Reverb bleed repeating exact TTS at +300ms (onsetAt=1900 <= 1600+800) -> REJECTED (tail-overlap)!
+    const rejectedTailReverb = collector.addResults(
       {
         resultIndex: 1,
         results: [
@@ -132,6 +132,38 @@ describe("Bug 5b: BrowserTranscriptCollector -> EchoGuard onsetAt propagation", 
         guard.evaluate({
           text,
           receivedAt: 2_200,
+          onsetAt: meta?.onsetAt ?? null,
+        }).accept,
+    );
+    expect(rejectedTailReverb).toEqual([]);
+
+    // 3. Child repeats exact word "hoa thơm" after 800ms tail-overlap (onsetAt=2450) -> ACCEPTED!
+    const acceptedChild = collector.addResults(
+      {
+        resultIndex: 2,
+        results: [
+          {
+            isFinal: true,
+            onsetAt: 1_550,
+            0: { transcript: "hoa thơm", confidence: 0.95 },
+          },
+          {
+            isFinal: true,
+            onsetAt: 1_900,
+            0: { transcript: "hoa thơm", confidence: 0.96 },
+          },
+          {
+            isFinal: true,
+            onsetAt: 2_450,
+            0: { transcript: "hoa thơm", confidence: 0.96 },
+          },
+        ],
+      },
+      (text, usable, _conf, meta) =>
+        usable &&
+        guard.evaluate({
+          text,
+          receivedAt: 2_750,
           onsetAt: meta?.onsetAt ?? null,
         }).accept,
     );
@@ -217,6 +249,130 @@ describe("ComprehensionQuestion rec.onerror + rec.onend infinite restart loop fi
 
     // Must NOT restart in a loop!
     expect(startCalls).toBe(1);
+  });
+
+  it("resets processedUpTo on rec.onend restart, deduplicates by turnId, and applies 850ms settle window to 'A ạ'", async () => {
+    let startCalls = 0;
+    class RestartingQuizRecognition {
+      static latest: RestartingQuizRecognition | null = null;
+      continuous = true;
+      interimResults = true;
+      lang = "vi-VN";
+      maxAlternatives = 1;
+      onresult: ((ev: unknown) => void) | null = null;
+      onerror: ((ev: { error?: string }) => void) | null = null;
+      onend: (() => void) | null = null;
+      constructor() {
+        RestartingQuizRecognition.latest = this;
+      }
+      start() {
+        startCalls += 1;
+      }
+      stop() {}
+    }
+    Object.defineProperty(window, "SpeechRecognition", {
+      configurable: true,
+      value: RestartingQuizRecognition,
+    });
+
+    const submitAnswer = vi.fn().mockResolvedValue({
+      question_id: "q-2",
+      is_correct: true,
+      feedback: "Chính xác!",
+      selected_answer: "Rau",
+      correct_answer: "Rau",
+    });
+    readingServicesMock.mockReturnValue({
+      comprehensionService: {
+        getQuestion: vi.fn().mockResolvedValue({
+          question: {
+            id: "q-2",
+            type: "FACTUAL",
+            prompt: "Thỏ con ăn gì?",
+            page_revision_id: "rev-1",
+            source_span: {
+              start_word_index: 0,
+              end_word_index_exclusive: 3,
+              sentence_index: 0,
+            },
+            difficulty: 1,
+            answered: false,
+          },
+          progress_label: "Câu 1/1",
+          choices: [
+            { id: "A", label: "Cá", value: "Cá" },
+            { id: "B", label: "Rau", value: "Rau" },
+          ],
+          position: 1,
+          total: 1,
+        }),
+        submitAnswer,
+      },
+    } as unknown as ReadingServices);
+
+    render(
+      <ComprehensionQuestion
+        child={childFixture}
+        onComplete={vi.fn()}
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    await waitFor(() => expect(startCalls).toBe(1));
+
+    // Cycle 1: bare letter + polite particle "A ạ" must NOT submit immediately (850ms settle!)
+    act(() => {
+      RestartingQuizRecognition.latest?.onresult?.({
+        resultIndex: 0,
+        results: [
+          {
+            isFinal: true,
+            turnId: "turn-a",
+            0: { transcript: "A ạ", confidence: 0.95 },
+          },
+        ],
+      });
+    });
+    expect(submitAnswer).not.toHaveBeenCalled();
+
+    // Simulate recognition end & auto-restart -> processedUpTo must reset to -1!
+    act(() => {
+      RestartingQuizRecognition.latest?.onend?.();
+    });
+    expect(startCalls).toBe(2);
+
+    // Cycle 2 starts at resultIndex=0 with self-correction "à không, con chọn B" + duplicate turnId
+    act(() => {
+      RestartingQuizRecognition.latest?.onresult?.({
+        resultIndex: 0,
+        results: [
+          {
+            isFinal: true,
+            turnId: "turn-b",
+            0: { transcript: "à không, con chọn B", confidence: 0.96 },
+          },
+        ],
+      });
+      // Duplicate final with identical turnId must be ignored
+      RestartingQuizRecognition.latest?.onresult?.({
+        resultIndex: 1,
+        results: [
+          {
+            isFinal: true,
+            turnId: "turn-b",
+            0: { transcript: "à không, con chọn B", confidence: 0.96 },
+          },
+          {
+            isFinal: true,
+            turnId: "turn-b",
+            0: { transcript: "à không, con chọn B", confidence: 0.96 },
+          },
+        ],
+      });
+    });
+
+    await waitFor(() => expect(submitAnswer).toHaveBeenCalledTimes(1));
+    expect(submitAnswer).toHaveBeenCalledWith(TEST_SESSION_ID, "q-2", "Rau");
   });
 });
 

@@ -253,6 +253,9 @@ class AdminAiWorkflowService:
             if existing is None:
                 raise HTTPException(status_code=409, detail="Unable to create AI workflow")
             return self._read(existing)
+        from app.jobs.admin_ai_workflow_worker import schedule_admin_ai_workflow
+
+        schedule_admin_ai_workflow()
         return self._read(row)
 
     async def get(
@@ -335,6 +338,9 @@ class AdminAiWorkflowService:
         row.UpdatedAt = now
         await self.db.commit()
         await self.db.refresh(row)
+        from app.jobs.admin_ai_workflow_worker import schedule_admin_ai_workflow
+
+        schedule_admin_ai_workflow()
         return self._read(row)
 
     async def retry(
@@ -357,6 +363,9 @@ class AdminAiWorkflowService:
             )
             await self.db.commit()
             await self.db.refresh(row)
+            from app.jobs.admin_ai_workflow_worker import schedule_admin_ai_workflow
+
+            schedule_admin_ai_workflow()
             return self._read(row)
         if row.Status != "FAILED":
             raise HTTPException(status_code=409, detail="Only a failed workflow stage can be retried")
@@ -367,6 +376,9 @@ class AdminAiWorkflowService:
         self.prepare_retry(row, actor_id, datetime.now(timezone.utc))
         await self.db.commit()
         await self.db.refresh(row)
+        from app.jobs.admin_ai_workflow_worker import schedule_admin_ai_workflow
+
+        schedule_admin_ai_workflow()
         return self._read(row)
 
     @staticmethod

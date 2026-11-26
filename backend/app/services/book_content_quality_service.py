@@ -1422,6 +1422,9 @@ class BookContentQualityService:
             getattr(self.repository, "book", None)
         ):
             await self.repository.db.commit()
+        from app.jobs.admin_ai_workflow_worker import schedule_admin_ai_workflow
+
+        schedule_admin_ai_workflow()
 
     async def list_book_scans(
         self, actor_id: UUID, book_id: UUID
@@ -2108,6 +2111,10 @@ class BookContentQualityService:
             request_id=str(uuid4()),
         )
         await self.repository.commit()
+        if payload.decision == "REQUEST_RESCAN":
+            from app.jobs.admin_ai_workflow_worker import schedule_admin_ai_workflow
+
+            schedule_admin_ai_workflow()
         refreshed_rows = await self.repository.book_assessment_rows(book_id)
         refreshed_decisions = await self.repository.book_decisions(book_id)
         refreshed_rights = (

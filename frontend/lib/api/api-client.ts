@@ -404,6 +404,28 @@ const safeFlow2BackendMessages: Readonly<Record<string, string>> = {
     "Job đánh giá candidate này đã được xếp hàng hoặc đang chạy.",
   "Pilot holdout does not meet minimum samples or groups":
     "Tập holdout sạch chưa đạt mức tối thiểu 20 mẫu và 5 nhóm sách/trang độc lập để chạy Pilot.",
+  "Remote OCR worker is offline; live page scan is temporarily unavailable.":
+    "Máy chủ OCR Windows hiện đang ngoại tuyến nên tính năng quét trang trực tiếp tạm thời không khả dụng. Ba mẹ hãy bật máy trạm OCR hoặc chọn sách trong Thư viện nhé.",
+  "Remote OCR worker is offline; cannot run synchronous page OCR":
+    "Máy chủ OCR Windows đang ngoại tuyến; chưa thể chạy nhận diện OCR đồng bộ lúc này. Hãy bật máy trạm OCR rồi thử lại.",
+  "Remote OCR worker is offline; cannot run synchronous replacement OCR":
+    "Máy chủ OCR Windows đang ngoại tuyến; chưa thể thay ảnh và chạy OCR đồng bộ lúc này. Hãy bật máy trạm OCR rồi thử lại.",
+  "Remote OCR worker is offline; cannot reprocess page synchronously":
+    "Máy chủ OCR Windows đang ngoại tuyến; chưa thể chạy lại OCR đồng bộ lúc này. Hãy bật máy trạm OCR rồi thử lại.",
+  "Remote OCR worker did not finish before sync timeout; poll job status asynchronously.":
+    "Máy chủ OCR xử lý lâu hơn thời gian chờ trực tiếp. Tác vụ đã được xếp hàng — vui lòng kiểm tra lại trạng thái sau ít giây.",
+  "Remote OCR worker failed":
+    "Máy chủ OCR gặp sự cố khi nhận diện trang. Vui lòng thử lại sau ít giây.",
+  "Database temporarily unavailable":
+    "Hệ thống dữ liệu tạm thời đang bận. Vui lòng thử lại sau vài giây.",
+  "Database temporarily unavailable; please retry":
+    "Hệ thống dữ liệu tạm thời đang bận. Vui lòng thử lại sau vài giây.",
+  "Idempotency key already used for a different OCR payload.":
+    "Mã gửi ảnh đã dùng cho một ảnh khác. Hãy chọn lại ảnh để quét mới.",
+  "OCR inference job not found.":
+    "Không tìm thấy tác vụ OCR hoặc tác vụ đã hết hạn.",
+  "Scan OCR job not found":
+    "Không tìm thấy tác vụ quét trang sách hoặc tác vụ đã hết hạn.",
 };
 
 const SAFE_BACKEND_PREFIX_CODES = [

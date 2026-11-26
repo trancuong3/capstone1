@@ -16,6 +16,7 @@ from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
 from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.config import APP_ENVIRONMENT, SUPABASE_PRIVATE_BOOKS_BUCKET
@@ -147,7 +148,7 @@ def compute_candidate_hash(
 
 
 def _valid_bbox(raw: object) -> list[float] | None:
-    """Coerce list/tuple/dict bounding box into a non-negative 4-float [x, y, w, h] list."""
+    """Coerce list/tuple/dict bounding box into a valid normalized [x, y, w, h] inside [0.0, 1.0]."""
     vals: list[float] | None = None
     if isinstance(raw, (list, tuple)) and len(raw) == 4:
         try:
@@ -164,11 +165,24 @@ def _valid_bbox(raw: object) -> list[float] | None:
             ]
         except (KeyError, TypeError, ValueError):
             return None
-    if vals is None or not all(math.isfinite(v) and v >= 0.0 for v in vals):
+    if vals is None or not all(math.isfinite(v) for v in vals):
         return None
-    if vals[2] <= 0.0 or vals[3] <= 0.0:
+    x, y, w, h = vals
+    if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0 and w > 0.0 and h > 0.0):
         return None
-    return [round(v, 6) for v in vals]
+    if x + w > 1.001 or y + h > 1.001:
+        return None
+    clamped_w = min(w, 1.0 - x)
+    clamped_h = min(h, 1.0 - y)
+    if clamped_w <= 0.0 or clamped_h <= 0.0:
+        return None
+    rx = round(x, 6)
+    ry = round(y, 6)
+    rw = round(min(clamped_w, 1.0 - rx), 6)
+    rh = round(min(clamped_h, 1.0 - ry), 6)
+    if rw <= 0.0 or rh <= 0.0:
+        return None
+    return [rx, ry, rw, rh]
 
 
 def _extract_word_bbox_list(item: dict[str, Any]) -> list[float] | None:
@@ -195,11 +209,15 @@ def build_proofread_suggestions(
         tokens = [
             tok
             for tok in normalize_private_book_text(ocr_words_or_text).split()
-            if tok
+            if tok and normalize_word(tok)
         ]
         ocr_words = [{"text": tok} for tok in tokens]
     else:
-        ocr_words = list(ocr_words_or_text or [])
+        ocr_words = [
+            w
+            for w in (ocr_words_or_text or [])
+            if isinstance(w, dict) and normalize_word(str(w.get("text") or ""))
+        ]
     return _shared_build_proofread_suggestions(ocr_words, proofread_text, uncertain_indices)
 
 
@@ -240,8 +258,6 @@ def _sanitize_error_message(message: str | None, *, max_len: int = 300) -> str |
 
 
 def _post_ocr_concurrency_limit() -> int:
-    import os
-
     raw = (os.getenv("VIREAD_POST_OCR_CONCURRENCY") or "").strip()
     if raw:
         try:
@@ -249,6 +265,10 @@ def _post_ocr_concurrency_limit() -> int:
         except ValueError:
             parsed = 1
         return max(1, min(8, parsed))
+    # Protect Render Free 512 MB RAM and NullPool DB permits (DATABASE_CONCURRENCY_LIMIT=8)
+    # so post-OCR image+LLM work never starves interactive child STT/TTS reading.
+    if is_heavy_workers_disabled():
+        return 1
     cloud_enabled = (os.getenv("OCR_CLOUD_CORRECTION_ENABLED") or "").strip().lower() in {
         "1", "true", "yes", "on",
     }
@@ -256,6 +276,16 @@ def _post_ocr_concurrency_limit() -> int:
         "1", "true", "yes", "on",
     }
     return 4 if (cloud_enabled and private_cloud) else 1
+
+
+_ACTIVE_MODEL_MANIFEST_CACHE: tuple[float, tuple[str, str, str], dict[str, Any]] | None = None
+_ACTIVE_MODEL_MANIFEST_CACHE_TTL_SECONDS = 600.0
+
+
+def clear_active_model_manifest_cache() -> None:
+    """Clear cached active VietOCR manifest + signed shard URLs."""
+    global _ACTIVE_MODEL_MANIFEST_CACHE
+    _ACTIVE_MODEL_MANIFEST_CACHE = None
 
 
 _POST_OCR_SEMAPHORE_KEY: tuple[int, int] | None = None
@@ -313,6 +343,55 @@ async def shutdown_post_ocr_tasks(*, timeout_seconds: float = 5.0) -> None:
         task.cancel()
     if pending:
         await asyncio.wait(pending, timeout=timeout_seconds)
+
+
+_TRANSIENT_POST_OCR_ERROR_CODES = {
+    "PROVIDER_QUOTA",
+    "PROVIDER_UNAVAILABLE",
+    "PROVIDER_TIMEOUT",
+    "PROVIDER_NETWORK",
+    "ALL_PROVIDERS_FAILED",
+    "CHILD_SAFETY_TIMEOUT",
+    "DOCUMENT_TIMEOUT",
+    "INCOMPLETE_CHUNK_COVERAGE",
+}
+
+
+def _is_transient_post_ocr_error(exc: Exception) -> bool:
+    code = str(getattr(exc, "code", "") or "").upper()
+    status_code = getattr(exc, "status_code", None)
+    if code in _TRANSIENT_POST_OCR_ERROR_CODES:
+        return True
+    if status_code in (429, 502, 503, 504):
+        return True
+    msg = str(exc).lower()
+    return "timeout" in msg or "429" in msg or "503" in msg
+
+
+async def _run_with_transient_retry(
+    fn: Any,
+    *,
+    max_attempts: int = 3,
+    base_delay_seconds: float | None = None,
+) -> Any:
+    delay_base = (
+        0.01
+        if APP_ENVIRONMENT == "test"
+        else (1.0 if base_delay_seconds is None else max(0.0, float(base_delay_seconds)))
+    )
+    last_exc: Exception | None = None
+    for attempt in range(1, max(1, int(max_attempts)) + 1):
+        try:
+            return await fn()
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= max_attempts or not _is_transient_post_ocr_error(exc):
+                raise
+            wait_for = delay_base * (2 ** (attempt - 1))
+            if wait_for > 0:
+                await asyncio.sleep(wait_for)
+    assert last_exc is not None
+    raise last_exc
 
 
 async def run_parent_submission_post_ocr(
@@ -388,16 +467,24 @@ async def run_parent_submission_post_ocr(
             if hashlib.sha256(image_bytes).hexdigest() != snapshot_source_sha256:
                 raise RuntimeError("SOURCE_IMAGE_HASH_MISMATCH")
 
+            # Filter standalone punctuation (e.g. Vietnamese dialogue dash '–'/'—')
+            # identically to chunk_ocr_text(..., word_normalizer=normalize_word) so
+            # word_boxes always match len(plan.tokens) 1-to-1 with zero WORD_BOX_MISMATCH.
             tokens = [
                 t
                 for t in _WHITESPACE_RE.split(normalize_private_book_text(snapshot_ocr_text))
-                if t
+                if t and normalize_word(t)
+            ]
+            filtered_ocr_words = [
+                w
+                for w in snapshot_ocr_words
+                if isinstance(w, dict) and normalize_word(str(w.get("text") or ""))
             ]
             word_boxes: list[tuple[float, float, float, float]] = []
             for idx in range(len(tokens)):
                 box = None
-                if idx < len(snapshot_ocr_words) and isinstance(snapshot_ocr_words[idx], dict):
-                    box = _extract_word_bbox_list(snapshot_ocr_words[idx])
+                if idx < len(filtered_ocr_words):
+                    box = _extract_word_bbox_list(filtered_ocr_words[idx])
                 if box is None:
                     box = [0.0, 0.0, 1.0, 1.0]
                 word_boxes.append((box[0], box[1], box[2], box[3]))
@@ -424,14 +511,18 @@ async def run_parent_submission_post_ocr(
             def _on_uncertain(_chunk_id: int, indices: tuple[int, ...]) -> None:
                 uncertain_set.update(int(i) for i in indices)
 
-            proofread_text = await orchestrator.correct(
-                snapshot_ocr_text,
-                image_bytes,
-                word_boxes,
-                on_provider_event=_on_event,
-                on_uncertain_tokens=_on_uncertain,
-                word_normalizer=normalize_word,
-            )
+            async def _invoke_proofread() -> str:
+                uncertain_set.clear()
+                return await orchestrator.correct(
+                    snapshot_ocr_text,
+                    image_bytes,
+                    word_boxes,
+                    on_provider_event=_on_event,
+                    on_uncertain_tokens=_on_uncertain,
+                    word_normalizer=normalize_word,
+                )
+
+            proofread_text = await _run_with_transient_retry(_invoke_proofread, max_attempts=3)
             proofread_text = normalize_private_book_text(proofread_text)
             if not proofread_text:
                 raise OcrOrchestrationError("EMPTY_PROOFREAD_OUTPUT")
@@ -540,7 +631,10 @@ async def run_parent_submission_post_ocr(
             )
             try:
                 safety_runner = safety_orchestrator or build_private_book_child_safety_orchestrator()
-                safety_result = await safety_runner.analyze(text_to_check)
+                safety_result = await _run_with_transient_retry(
+                    lambda: safety_runner.analyze(text_to_check),
+                    max_attempts=3,
+                )
                 if not isinstance(safety_result, dict) or not safety_result.get("suitability"):
                     raise ChildSafetyError("INVALID_SAFETY_RESPONSE")
                 suitability = str(safety_result.get("suitability") or "REVIEW_REQUIRED")
@@ -734,8 +828,8 @@ async def reconcile_orphaned_parent_submissions(
                 ParentBookPageSubmission.WorkflowStatus == "CHECKING",
                 ParentBookPageSubmission.OcrStatus.in_(("COMPLETED", "NO_TEXT_DETECTED")),
                 or_(
-                    ParentBookPageSubmission.ProofreadStatus == "PENDING",
-                    ParentBookPageSubmission.ToolCheckStatus == "PENDING",
+                    ParentBookPageSubmission.ProofreadStatus.in_(("PENDING", "RUNNING")),
+                    ParentBookPageSubmission.ToolCheckStatus.in_(("PENDING", "RUNNING")),
                 ),
             )
             .order_by(ParentBookPageSubmission.UpdatedAt.asc())
@@ -752,7 +846,7 @@ async def reconcile_orphaned_parent_submissions(
 
             attempts = int(row.Attempts or 0)
             if attempts >= max_attempts:
-                if row.ProofreadStatus == "PENDING" and not bool(row.IsImageOnly):
+                if row.ProofreadStatus in ("PENDING", "RUNNING") and not bool(row.IsImageOnly):
                     row.ProofreadStatus = "FAILED"
                     row.ProofreadErrorCode = "POST_OCR_ORPHANED_MAX_ATTEMPTS"
                 else:
@@ -766,6 +860,10 @@ async def reconcile_orphaned_parent_submissions(
                 row.UpdatedAt = current_time
                 failed_ids.append(row.Id)
             else:
+                if row.ProofreadStatus == "RUNNING":
+                    row.ProofreadStatus = "PENDING"
+                if row.ToolCheckStatus == "RUNNING":
+                    row.ToolCheckStatus = "PENDING"
                 row.Attempts = attempts + 1
                 row.WorkerId = None
                 row.LeaseExpiresAt = None
@@ -800,6 +898,42 @@ class OcrInferenceJobService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.repo = OcrInferenceJobRepository(db)
+
+    async def _persist_job_with_idempotency_recovery(
+        self,
+        job: OcrInferenceJob,
+        *,
+        clean_idem: str | None,
+        job_kind: str,
+        owner_user_id: UUID | None,
+        image_sha256: str,
+        page_id: UUID | None,
+    ) -> tuple[OcrInferenceJob, bool]:
+        """Insert a job while gracefully recovering from concurrent duplicate idempotency IntegrityError."""
+        try:
+            if hasattr(self.db, "begin_nested"):
+                async with self.db.begin_nested():
+                    await self.repo.create_job(job)
+            else:
+                await self.repo.create_job(job)
+            return job, True
+        except IntegrityError:
+            if clean_idem is None:
+                raise
+            existing = await self.repo.get_by_idempotency(
+                job_kind, owner_user_id, clean_idem
+            )
+            if existing is None:
+                raise
+            if existing.ImageSha256 != image_sha256 or (
+                page_id is not None and existing.PageId not in (None, page_id)
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Idempotency key already used for a different OCR payload.",
+                )
+            setattr(existing, "should_schedule_post_ocr", False)
+            return existing, False
 
     async def _resolve_cache_key_components(
         self, processing_meta: dict[str, Any] | None = None
@@ -935,6 +1069,7 @@ class OcrInferenceJobService:
         expected_latest_revision_id: UUID | None = None,
         processing_meta: dict[str, Any] | None = None,
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+        schedule_post_ocr: bool = True,
     ) -> OcrInferenceJob:
         clean_idem = (idempotency_key or "").strip() or None
         if clean_idem is not None:
@@ -949,7 +1084,19 @@ class OcrInferenceJobService:
                         status_code=status.HTTP_409_CONFLICT,
                         detail="Idempotency key already used for a different OCR payload.",
                     )
+                setattr(existing, "should_schedule_post_ocr", False)
                 return existing
+        else:
+            active_dup = await self.repo.find_active_duplicate_job(
+                job_kind=job_kind,
+                image_sha256=image_sha256,
+                owner_user_id=owner_user_id,
+                page_id=page_id,
+                submission_id=submission_id,
+            )
+            if active_dup is not None:
+                setattr(active_dup, "should_schedule_post_ocr", False)
+                return active_dup
 
         if book_id is not None:
             book_row = await self.db.scalar(select(Book).where(Book.Id == book_id))
@@ -1039,7 +1186,16 @@ class OcrInferenceJobService:
                 UpdatedAt=now,
                 CompletedAt=now,
             )
-            await self.repo.create_job(job)
+            job, created = await self._persist_job_with_idempotency_recovery(
+                job,
+                clean_idem=clean_idem,
+                job_kind=job_kind,
+                owner_user_id=owner_user_id,
+                image_sha256=image_sha256,
+                page_id=page_id,
+            )
+            if not created:
+                return job
 
             if job_kind in ADMIN_JOB_KINDS:
                 from app.services.admin_ocr_service import AdminOcrService
@@ -1069,6 +1225,7 @@ class OcrInferenceJobService:
                         detail={"code": "STALE_TARGET_MODIFIED", "reason": job.CancelledReason},
                     )
                 job.RevisionId = applied.get("revision_id")
+                setattr(job, "should_schedule_post_ocr", False)
             elif job_kind == JOB_KIND_PARENT_SUBMISSION:
                 sub_id = await self._apply_parent_submission_ocr_result(
                     job=job,
@@ -1081,7 +1238,11 @@ class OcrInferenceJobService:
                     model_sha256=active_model_sha,
                     now=now,
                 )
-                schedule_parent_submission_post_ocr(sub_id)
+                setattr(job, "should_schedule_post_ocr", True)
+                if schedule_post_ocr:
+                    schedule_parent_submission_post_ocr(sub_id)
+            else:
+                setattr(job, "should_schedule_post_ocr", False)
             return job
 
         job = OcrInferenceJob(
@@ -1112,7 +1273,24 @@ class OcrInferenceJobService:
             CreatedAt=now,
             UpdatedAt=now,
         )
-        return await self.repo.create_job(job)
+        persisted, _created = await self._persist_job_with_idempotency_recovery(
+            job,
+            clean_idem=clean_idem,
+            job_kind=job_kind,
+            owner_user_id=owner_user_id,
+            image_sha256=image_sha256,
+            page_id=page_id,
+        )
+        setattr(persisted, "should_schedule_post_ocr", False)
+        if str(persisted.Status or "").upper() == "QUEUED":
+            from app.services.remote_ocr_wakeup import schedule_post_commit_ocr_wakeup
+
+            schedule_post_commit_ocr_wakeup(
+                self.db,
+                job_id=persisted.Id,
+                reason=f"enqueue:{job_kind}",
+            )
+        return persisted
 
     async def has_online_worker(self) -> bool:
         now = datetime.now(timezone.utc)
@@ -1128,7 +1306,33 @@ class OcrInferenceJobService:
             )
             if (now - hb_at) <= ttl and str(worker.Status or "").upper() != "OFFLINE":
                 return True
-        return False
+
+        from app.services.remote_ocr_wakeup import (
+            is_remote_worker_wakeup_configured,
+            peek_cached_remote_ocr_worker_health,
+            probe_configured_remote_ocr_worker_health,
+        )
+
+        if not is_remote_worker_wakeup_configured():
+            return False
+
+        cache_valid, cached_probe = peek_cached_remote_ocr_worker_health()
+        if cache_valid:
+            return bool(cached_probe and cached_probe.get("online"))
+
+        # Release any clean read-only DB transaction permit before performing outbound HTTP probe.
+        if not (
+            getattr(self.db, "new", None)
+            or getattr(self.db, "dirty", None)
+            or getattr(self.db, "deleted", None)
+        ):
+            try:
+                await self.db.rollback()
+            except Exception:
+                pass
+
+        probe = await probe_configured_remote_ocr_worker_health()
+        return bool(probe and probe.get("online"))
 
     async def cancel_for_page(self, page_id: UUID, *, reason: str) -> int:
         return await self.repo.cancel_open_for_page(page_id, reason=reason)
@@ -1168,10 +1372,78 @@ class OcrInferenceJobService:
             elif APP_ENVIRONMENT == "test":
                 sleep_for = 0.15
             else:
-                # Adaptive backoff (0.5s -> 1.0s -> 1.5s) to avoid NullPool exhaustion on Supabase pooler.
-                sleep_for = 0.5 if attempt < 4 else (1.0 if attempt < 12 else 1.5)
+                # Adaptive backoff (1.5s -> 2.5s -> 4.0s) to protect Supabase pooler under concurrency.
+                sleep_for = 1.5 if attempt < 4 else (2.5 if attempt < 10 else 4.0)
             attempt += 1
             await asyncio.sleep(min(sleep_for, remaining))
+
+    async def reap_expired_leases(
+        self,
+        *,
+        now: datetime | None = None,
+        retry_delay_seconds: int = 0,
+    ) -> dict[str, int]:
+        """Independent stale-job lease reaper for cron & periodic reconciler."""
+        current = now or datetime.now(timezone.utc)
+        reclaimed, dead_lettered = await self.repo.reclaim_expired_leases(
+            now=current,
+            retry_delay_seconds=retry_delay_seconds,
+        )
+        for reclaimed_job in reclaimed:
+            if (
+                reclaimed_job.JobKind == JOB_KIND_PARENT_SUBMISSION
+                and reclaimed_job.SubmissionId is not None
+            ):
+                sub = await self.db.scalar(
+                    select(ParentBookPageSubmission)
+                    .where(ParentBookPageSubmission.Id == reclaimed_job.SubmissionId)
+                    .with_for_update()
+                )
+                if (
+                    sub is not None
+                    and sub.WorkflowStatus == "CHECKING"
+                    and sub.OcrStatus == "RUNNING"
+                ):
+                    sub.OcrStatus = "PENDING"
+                    sub.UpdatedAt = current
+        for expired_job in dead_lettered:
+            await self._propagate_dead_letter_to_target(
+                expired_job,
+                error_code="LEASE_EXPIRED_MAX_ATTEMPTS",
+                now=current,
+            )
+        if reclaimed or dead_lettered:
+            if reclaimed:
+                from app.services.remote_ocr_wakeup import schedule_post_commit_ocr_wakeup
+
+                schedule_post_commit_ocr_wakeup(
+                    self.db,
+                    job_id=reclaimed[0].Id,
+                    reason="lease_reclaimed",
+                )
+            await self.db.commit()
+            for expired_job in dead_lettered:
+                if expired_job.JobKind == JOB_KIND_LOCAL_SCAN:
+                    await self._cleanup_local_scan_temp_object(expired_job)
+        return {
+            "reclaimed": len(reclaimed),
+            "dead_lettered": len(dead_lettered),
+        }
+
+    async def prune_stale_worker_heartbeats(
+        self,
+        *,
+        max_age_hours: int = 24,
+        now: datetime | None = None,
+    ) -> int:
+        """Delete stale ocr_worker_heartbeats older than max_age_hours."""
+        pruned = await self.repo.prune_stale_worker_heartbeats(
+            max_age_hours=max_age_hours,
+            now=now,
+        )
+        if pruned > 0:
+            await self.db.commit()
+        return pruned
 
     async def record_worker_heartbeat(
         self,
@@ -1212,20 +1484,29 @@ class OcrInferenceJobService:
         await self.db.commit()
         return row
 
-    def _build_source_descriptor(
-        self, job: OcrInferenceJob, *, worker_id: str, expires_in: int = 300
+    async def _build_source_descriptor_async(
+        self,
+        *,
+        job_id: UUID,
+        worker_id: str,
+        fencing_token: int,
+        image_path: str,
+        image_bucket: str | None,
+        expires_in: int = 300,
     ) -> tuple[str | None, str]:
         fallback_path = (
-            f"/internal/ocr-jobs/{job.Id}/source"
-            f"?worker_id={worker_id}&fencing_token={int(job.FencingToken)}"
+            f"/internal/ocr-jobs/{job_id}/source"
+            f"?worker_id={worker_id}&fencing_token={int(fencing_token)}"
         )
         local_dir = (os.getenv("VIREAD_LOCAL_STORAGE_DIR") or "").strip()
         if local_dir or APP_ENVIRONMENT == "test":
             return None, fallback_path
         try:
-            signed = storage_service.create_signed_image_url(
-                job.ImagePath,
-                bucket_name=job.ImageBucket,
+            signed = await asyncio.to_thread(
+                storage_service.create_signed_image_url,
+                image_path,
+                bucket_name=image_bucket,
+                ttl_seconds=expires_in,
             )
             return signed, fallback_path
         except Exception:
@@ -1275,40 +1556,63 @@ class OcrInferenceJobService:
                 sub.OcrStatus = "RUNNING"
                 sub.UpdatedAt = now
 
-        signed_url, fallback_path = self._build_source_descriptor(
-            job,
-            worker_id=job.WorkerId or worker_id,
+        job_id = job.Id
+        job_kind = job.JobKind
+        job_priority = int(job.Priority)
+        job_fencing = int(job.FencingToken)
+        job_attempt = int(job.AttemptCount)
+        job_max_attempts = int(job.MaxAttempts)
+        job_lease_iso = job.LeaseExpiresAt.isoformat() if job.LeaseExpiresAt else None
+        job_sha = job.ImageSha256
+        job_mime = job.ImageMimeType
+        job_width = job.ImageWidth
+        job_height = job.ImageHeight
+        job_expected_ver = int(job.ExpectedVersion)
+        job_image_path = job.ImagePath
+        job_image_bucket = job.ImageBucket
+        job_worker = job.WorkerId or worker_id
+        job_expected_profile = (job.ProcessingMeta or {}).get("expected_model_profile")
+
+        # Commit DB transaction BEFORE calling Supabase Storage signed URL API so row locks
+        # and ConcurrencyLimitedAsyncSession permits are never held across network I/O.
+        await self.db.commit()
+
+        signed_url, fallback_path = await self._build_source_descriptor_async(
+            job_id=job_id,
+            worker_id=job_worker,
+            fencing_token=job_fencing,
+            image_path=job_image_path,
+            image_bucket=job_image_bucket,
             expires_in=bounded_lease + 180,
         )
-        await self.db.commit()
         log_diagnostic(
             logger,
             logging.INFO,
             event="ocr_job_claimed",
             stage="worker_claim",
-            job_id=str(job.Id),
-            job_kind=job.JobKind,
-            worker_id=job.WorkerId,
-            fencing_token=int(job.FencingToken),
-            attempt=int(job.AttemptCount),
+            job_id=str(job_id),
+            job_kind=job_kind,
+            worker_id=job_worker,
+            fencing_token=job_fencing,
+            attempt=job_attempt,
         )
         return {
-            "job_id": str(job.Id),
-            "job_kind": job.JobKind,
-            "priority": int(job.Priority),
-            "fencing_token": int(job.FencingToken),
-            "attempt_count": int(job.AttemptCount),
-            "max_attempts": int(job.MaxAttempts),
-            "lease_expires_at": job.LeaseExpiresAt.isoformat() if job.LeaseExpiresAt else None,
-            "image_sha256": job.ImageSha256,
-            "image_mime_type": job.ImageMimeType,
-            "image_width": job.ImageWidth,
-            "image_height": job.ImageHeight,
-            "expected_version": int(job.ExpectedVersion),
+            "job_id": str(job_id),
+            "job_kind": job_kind,
+            "priority": job_priority,
+            "fencing_token": job_fencing,
+            "attempt_count": job_attempt,
+            "max_attempts": job_max_attempts,
+            "lease_expires_at": job_lease_iso,
+            "image_sha256": job_sha,
+            "image_mime_type": job_mime,
+            "image_width": job_width,
+            "image_height": job_height,
+            "expected_version": job_expected_ver,
             "source_url": signed_url,
             "source_fallback_path": fallback_path,
-            "refresh_url_path": f"/internal/ocr-jobs/{job.Id}/refresh-source-url",
-            "expected_model_profile": (job.ProcessingMeta or {}).get("expected_model_profile"),
+            "refresh_url_path": f"/internal/ocr-jobs/{job_id}/refresh-source-url",
+            "expected_model_profile": job_expected_profile,
         }
 
     async def _require_active_claim(
@@ -1463,6 +1767,13 @@ class OcrInferenceJobService:
             meta = dict(job.ProcessingMeta or {})
             meta["worker_phase"] = str(phase)[:64]
             job.ProcessingMeta = meta
+        await self.repo.touch_worker_heartbeat(
+            worker_id=worker_id.strip()[:120],
+            status="BUSY",
+            active_job_id=job.Id,
+            active_job_count=1,
+            now=now,
+        )
         await self.db.commit()
         return {
             "job_id": str(job.Id),
@@ -1486,14 +1797,25 @@ class OcrInferenceJobService:
             worker_id=worker_id,
             fencing_token=fencing_token,
         )
-        signed_url, fallback_path = self._build_source_descriptor(
-            job, worker_id=worker_id, expires_in=expires_in
-        )
+        captured_id = job.Id
+        captured_fencing = int(job.FencingToken)
+        captured_sha = job.ImageSha256
+        captured_path = job.ImagePath
+        captured_bucket = job.ImageBucket
+        # Release row lock & DB concurrency permit BEFORE calling Storage signed URL API.
         await self.db.rollback()
+        signed_url, fallback_path = await self._build_source_descriptor_async(
+            job_id=captured_id,
+            worker_id=worker_id,
+            fencing_token=captured_fencing,
+            image_path=captured_path,
+            image_bucket=captured_bucket,
+            expires_in=expires_in,
+        )
         return {
-            "job_id": str(job.Id),
-            "fencing_token": int(job.FencingToken),
-            "image_sha256": job.ImageSha256,
+            "job_id": str(captured_id),
+            "fencing_token": captured_fencing,
+            "image_sha256": captured_sha,
             "source_url": signed_url,
             "source_fallback_path": fallback_path,
         }
@@ -1700,6 +2022,13 @@ class OcrInferenceJobService:
         job.LeaseExpiresAt = None
         job.CompletedAt = now
         job.UpdatedAt = now
+        await self.repo.touch_worker_heartbeat(
+            worker_id=worker_id.strip()[:120],
+            status="IDLE",
+            active_job_id=None,
+            active_job_count=0,
+            now=now,
+        )
         await self.db.commit()
 
         if job.JobKind == JOB_KIND_LOCAL_SCAN:
@@ -1833,6 +2162,13 @@ class OcrInferenceJobService:
             job.CompletedAt = now
             await self._propagate_dead_letter_to_target(job, error_code=clean_code, now=now)
 
+        await self.repo.touch_worker_heartbeat(
+            worker_id=worker_id.strip()[:120],
+            status="IDLE",
+            active_job_id=None,
+            active_job_count=0,
+            now=now,
+        )
         await self.db.commit()
         if job.Status == "DEAD_LETTER" and job.JobKind == JOB_KIND_LOCAL_SCAN:
             await self._cleanup_local_scan_temp_object(job)
@@ -1844,7 +2180,20 @@ class OcrInferenceJobService:
         }
 
     async def get_active_model_manifest(self) -> dict[str, Any]:
+        global _ACTIVE_MODEL_MANIFEST_CACHE
+        import time as _time
+
         pointer = await self.repo.get_active_model_pointer()
+        if not (
+            getattr(self.db, "new", None)
+            or getattr(self.db, "dirty", None)
+            or getattr(self.db, "deleted", None)
+        ):
+            try:
+                await self.db.rollback()
+            except Exception:
+                pass
+
         profile = str((pointer or {}).get("profile") or "ORIGINAL")
         checkpoint_sha = str(
             (pointer or {}).get("checkpoint_sha256") or ORIGINAL_VIETOCR_SHA256
@@ -1857,11 +2206,22 @@ class OcrInferenceJobService:
             "storage_path": storage_path,
             "has_custom_config": False,
             "config_sha256": None,
+            "config_signed_url": None,
             "shard_count": 0,
             "shards": [],
         }
         if not storage_path:
             return base
+
+        cache_key = (profile, checkpoint_sha, str(storage_path))
+        now_mono = _time.monotonic()
+        if (
+            _ACTIVE_MODEL_MANIFEST_CACHE is not None
+            and _ACTIVE_MODEL_MANIFEST_CACHE[1] == cache_key
+            and now_mono < _ACTIVE_MODEL_MANIFEST_CACHE[0]
+        ):
+            return dict(_ACTIVE_MODEL_MANIFEST_CACHE[2])
+
         try:
             manifest_bytes = await asyncio.to_thread(self._download_model_ref, str(storage_path))
             manifest = json.loads(manifest_bytes.decode("utf-8"))
@@ -1869,20 +2229,53 @@ class OcrInferenceJobService:
             logger.warning("Failed reading active VietOCR manifest: %s", type(exc).__name__)
             return base
 
+        from app.services.training_storage.references import is_gdrive_ref
+
+        local_dir = (os.getenv("VIREAD_LOCAL_STORAGE_DIR") or "").strip()
+        can_sign_storage = not local_dir and APP_ENVIRONMENT != "test"
+
+        def _maybe_sign_ref(ref_val: object) -> str | None:
+            if not can_sign_storage or not isinstance(ref_val, str) or not ref_val.strip():
+                return None
+            if is_gdrive_ref(ref_val):
+                return None
+            try:
+                return storage_service.create_signed_image_url(ref_val.strip(), ttl_seconds=900)
+            except Exception:
+                return None
+
         chunks = manifest.get("chunks") if isinstance(manifest.get("chunks"), list) else []
         config_info = manifest.get("config") if isinstance(manifest.get("config"), dict) else {}
-        base["has_custom_config"] = bool(config_info.get("storage_path"))
+        config_ref = config_info.get("storage_path")
+        base["has_custom_config"] = bool(config_ref)
         base["config_sha256"] = config_info.get("sha256")
+        base["config_signed_url"] = (
+            await asyncio.to_thread(_maybe_sign_ref, config_ref) if config_ref else None
+        )
         base["shard_count"] = len(chunks)
-        base["shards"] = [
-            {
-                "index": idx,
-                "sha256": chunk.get("sha256"),
-                "bytes": chunk.get("bytes"),
-            }
-            for idx, chunk in enumerate(chunks)
-            if isinstance(chunk, dict)
-        ]
+
+        shard_entries: list[dict[str, Any]] = []
+        for idx, chunk in enumerate(chunks):
+            if not isinstance(chunk, dict):
+                continue
+            shard_ref = chunk.get("path") or chunk.get("storage_path")
+            signed_shard_url = (
+                await asyncio.to_thread(_maybe_sign_ref, shard_ref) if shard_ref else None
+            )
+            shard_entries.append(
+                {
+                    "index": idx,
+                    "sha256": chunk.get("sha256"),
+                    "bytes": chunk.get("bytes"),
+                    "signed_url": signed_shard_url,
+                }
+            )
+        base["shards"] = shard_entries
+        _ACTIVE_MODEL_MANIFEST_CACHE = (
+            _time.monotonic() + _ACTIVE_MODEL_MANIFEST_CACHE_TTL_SECONDS,
+            cache_key,
+            dict(base),
+        )
         return base
 
     def _download_model_ref(self, ref: str) -> bytes:
@@ -1898,6 +2291,15 @@ class OcrInferenceJobService:
         self, *, kind: str, shard_index: int | None = None
     ) -> tuple[bytes, str]:
         pointer = await self.repo.get_active_model_pointer()
+        if not (
+            getattr(self.db, "new", None)
+            or getattr(self.db, "dirty", None)
+            or getattr(self.db, "deleted", None)
+        ):
+            try:
+                await self.db.rollback()
+            except Exception:
+                pass
         storage_path = (pointer or {}).get("storage_path")
         if not storage_path:
             raise HTTPException(status_code=404, detail="No custom active VietOCR artifact.")
@@ -1970,6 +2372,13 @@ class OcrInferenceJobService:
         job.Priority = PRIORITY_RETRY
         job.UpdatedAt = now
         await self.db.commit()
+        from app.services.remote_ocr_wakeup import trigger_ocr_wakeup_background
+
+        trigger_ocr_wakeup_background(
+            job_ids=[job.Id],
+            reason="retry_job",
+            session_factory_check_enabled=APP_ENVIRONMENT != "test",
+        )
         return self.serialize_job(job)
 
     async def _cleanup_local_scan_temp_object(self, job: OcrInferenceJob) -> None:
