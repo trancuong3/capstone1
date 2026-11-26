@@ -72,10 +72,7 @@ const healthSnapshotSchema = z.object({
       checked_at: z.iso.datetime({ offset: true }),
       safe_message: z.string(),
       detail_status: runtimeDetailStatusSchema.nullable().optional(),
-      last_success_at: z.iso
-        .datetime({ offset: true })
-        .nullable()
-        .optional(),
+      last_success_at: z.iso.datetime({ offset: true }).nullable().optional(),
       oldest_pending_job_age_seconds: z
         .number()
         .nonnegative()
@@ -96,11 +93,7 @@ const healthSnapshotSchema = z.object({
       storage_used_bytes: z.number().nonnegative(),
       storage_quota_bytes: z.number().nonnegative(),
       daily_egress_bytes: z.number().nonnegative(),
-      daily_egress_limit_bytes: z
-        .number()
-        .nonnegative()
-        .nullable()
-        .optional(),
+      daily_egress_limit_bytes: z.number().nonnegative().nullable().optional(),
       cache_hit_ratio: z.number().min(0).max(1).nullable(),
       quota_exhausted: z.boolean().optional(),
     })

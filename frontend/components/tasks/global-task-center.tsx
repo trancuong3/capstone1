@@ -176,11 +176,7 @@ function TaskProgressView({
         <div className="flex items-center justify-between text-xs font-medium text-muted">
           <span>{task.stage_label_vi}</span>
           <span>
-            {t(
-              "taskCenter.backgroundProcessing",
-              undefined,
-              "Đang xử lý nền…",
-            )}
+            {t("taskCenter.backgroundProcessing", undefined, "Đang xử lý nền…")}
           </span>
         </div>
         <div
@@ -302,11 +298,7 @@ export function GlobalTaskCenter({
     <button
       aria-controls="viread-global-task-center-panel"
       aria-expanded={isOpen}
-      aria-label={t(
-        "taskCenter.openAria",
-        undefined,
-        "Mở trung tâm tác vụ AI",
-      )}
+      aria-label={t("taskCenter.openAria", undefined, "Mở trung tâm tác vụ AI")}
       className={cn(
         "inline-flex items-center border font-semibold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
         variant === "sidebar" &&
@@ -333,7 +325,10 @@ export function GlobalTaskCenter({
     >
       <span className="flex min-w-0 items-center gap-2">
         {activeCount > 0 ? (
-          <Loader2 aria-hidden="true" className="size-4 shrink-0 animate-spin" />
+          <Loader2
+            aria-hidden="true"
+            className="size-4 shrink-0 animate-spin"
+          />
         ) : failedCount > 0 ? (
           <AlertCircle aria-hidden="true" className="size-4 shrink-0" />
         ) : (

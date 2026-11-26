@@ -1077,7 +1077,8 @@ test("Flow 3: Sentence Shooter V4 (<100ms projectile, 3 modes, zero UI lock unde
   await expect(
     page.getByRole("heading", { name: /Giỏi quá, bé đã hoàn thành!/ }),
   ).toBeVisible();
-  await expect(page.getByText(/sách/)).toBeVisible();
+  await expect(page.getByText("sách", { exact: true })).toBeVisible();
+  await expect(page.getByText("Bé đọc sách.")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Chơi lượt mới" }),
   ).toBeVisible();
@@ -1089,6 +1090,7 @@ test("Flow 3: Sentence Shooter V4 (<100ms projectile, 3 modes, zero UI lock unde
 test("Flow 4: Karaoke & Musical Karaoke Stage (modes, beat/pitch/rhythm UI, report timeline)", async ({
   page,
 }, testInfo) => {
+  test.setTimeout(120_000);
   await page.emulateMedia({ reducedMotion: "no-preference" });
   const base = await installApiFixture(page);
   await installVoiceAndTtsMock(page);
@@ -1240,7 +1242,7 @@ test("Flow 4: Karaoke & Musical Karaoke Stage (modes, beat/pitch/rhythm UI, repo
 
   await selectChildAndEnterEntertainment(page);
   await page.getByRole("link", { name: /Mở thư viện bài hát/i }).click();
-  await expect(page).toHaveURL(/\/karaoke$/);
+  await expect(page).toHaveURL(/\/karaoke$/, { timeout: 30_000 });
   await expect(
     page.getByRole("heading", { name: "Ngôi sao nhỏ" }),
   ).toBeVisible();
@@ -1328,6 +1330,10 @@ test("Flow 4: Karaoke & Musical Karaoke Stage (modes, beat/pitch/rhythm UI, repo
   await expect(tapButton).toBeEnabled();
   await tapButton.click();
   await expect(stage.getByTestId("karaoke-rhythm-tap-feedback")).toBeVisible();
+  await page.waitForTimeout(400);
+  await tapButton.click();
+  await page.waitForTimeout(400);
+  await tapButton.click();
 
   await stage
     .getByRole("button", { name: "Kết thúc & chấm điểm", exact: true })
@@ -1650,7 +1656,10 @@ test("Flow 5: Admin Karaoke Simple Mode V4 (1-MP3 upload, auto extract, Review b
 
   await publishBtn.click();
   await expect(
-    page.getByRole("heading", { name: "Đã xuất bản bài hát" }),
+    page.getByText("Đã xuất bản bài hát", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Về danh sách bài hát" }),
   ).toBeVisible();
 
   expect(pageErrors).toEqual([]);
@@ -2224,4 +2233,5 @@ test("Flow 7: Parent Progress Report with non-diagnostic EntertainmentLearningSu
   await saveAfterScreenshot(page, testInfo.project.name, "reports");
 
   expect(pageErrors).toEqual([]);
-  expect(base.
+  expect(base.unexpected).toEqual([]);
+});

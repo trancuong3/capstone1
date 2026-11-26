@@ -413,7 +413,7 @@ describe("Hosted Voice FE Hardening (STT-01..STT-10 & TTS-03..TTS-09)", () => {
         default_voice_id: "local_north_truc_ly",
         local: { available: false, stt_ready: false, tts_ready: false },
         google: {
-          stt_configured: false,
+          stt_configured: true,
           tts_configured: false,
           stt_cooldown: false,
           tts_cooldown: false,

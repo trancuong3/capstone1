@@ -165,8 +165,8 @@ function resetCachedDbHandle(): void {
 
 function isReusableDbHandle(db: IDBDatabase): boolean {
   return (
-    typeof (db as unknown as { addEventListener?: unknown }).addEventListener ===
-    "function"
+    typeof (db as unknown as { addEventListener?: unknown })
+      .addEventListener === "function"
   );
 }
 
@@ -193,9 +193,7 @@ function openTtsDbWithReason(): Promise<TtsDbOpenResult> {
   }
   if (cachedDbPromise) {
     return cachedDbPromise.then((db) =>
-      db
-        ? { db, error: null }
-        : { db: null, error: "INDEXEDDB_OPEN_ERROR" },
+      db ? { db, error: null } : { db: null, error: "INDEXEDDB_OPEN_ERROR" },
     );
   }
   let resolveDb: ((db: IDBDatabase | null) => void) | null = null;
@@ -791,7 +789,8 @@ export async function getBrowserTtsCacheStats(): Promise<BrowserTtsCacheStats> {
         return;
       }
       const tx = db.transaction(targetStore, "readonly");
-      tx.onerror = () => finish(unavailableStats("INDEXEDDB_TRANSACTION_ERROR"));
+      tx.onerror = () =>
+        finish(unavailableStats("INDEXEDDB_TRANSACTION_ERROR"));
       tx.onabort = () =>
         finish(unavailableStats("INDEXEDDB_TRANSACTION_ABORTED"));
       const objectStore = tx.objectStore(targetStore);
@@ -814,8 +813,7 @@ export async function getBrowserTtsCacheStats(): Promise<BrowserTtsCacheStats> {
             return;
           }
           const rec = cursor.value as
-            | { byteSize?: unknown; buffer?: ArrayBuffer | null }
-            | undefined;
+            { byteSize?: unknown; buffer?: ArrayBuffer | null } | undefined;
           entryCount += 1;
           usedBytes += sanitizeByteSize(rec?.byteSize, rec?.buffer);
           cursor.continue();

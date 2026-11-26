@@ -30,7 +30,9 @@ function resolveAuditActionTone(action: string): AdminBadgeTone {
   if (/(create|approve|verify|publish|activate|connect)/.test(normalized)) {
     return "success";
   }
-  if (/(update|edit|flag|rollback|retry|request|change|hide)/.test(normalized)) {
+  if (
+    /(update|edit|flag|rollback|retry|request|change|hide)/.test(normalized)
+  ) {
     return "warning";
   }
   return "info";
@@ -232,7 +234,11 @@ export function AdminAuditScreen() {
       ) : (
         <>
           <section
-            aria-label={t("auditLogs.tableAria", undefined, "Bảng nhật ký kiểm toán")}
+            aria-label={t(
+              "auditLogs.tableAria",
+              undefined,
+              "Bảng nhật ký kiểm toán",
+            )}
             className="overflow-hidden rounded-xl border border-border bg-white shadow-2xs"
           >
             <div

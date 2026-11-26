@@ -233,7 +233,11 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       <EmptyState
         action={
           <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={() => void load()} size="admin" variant="secondary">
+            <Button
+              onClick={() => void load()}
+              size="admin"
+              variant="secondary"
+            >
               {t("common.retry")}
             </Button>
             <Link
@@ -300,7 +304,11 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
 
       {/* Compact Book Summary Strip */}
       <section
-        aria-label={t("books.detail.summaryStripAria", undefined, "Tóm tắt sách")}
+        aria-label={t(
+          "books.detail.summaryStripAria",
+          undefined,
+          "Tóm tắt sách",
+        )}
         className="rounded-xl border border-border bg-white p-4 shadow-2xs"
       >
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">

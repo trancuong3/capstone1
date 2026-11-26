@@ -850,8 +850,8 @@ function ReadingSessionScreen({
               Boolean(
                 (window as unknown as { SpeechRecognition?: unknown })
                   .SpeechRecognition ||
-                  (window as unknown as { webkitSpeechRecognition?: unknown })
-                    .webkitSpeechRecognition,
+                (window as unknown as { webkitSpeechRecognition?: unknown })
+                  .webkitSpeechRecognition,
               );
             recordSttEngineUsage({
               provider: useGoogleStt
@@ -870,9 +870,9 @@ function ReadingSessionScreen({
           if (hostedLocalUnconfigured && wasmSupported && !sttAllowsFallback) {
             void getWasmModelCacheStatus()
               .then((cacheStatus) => {
-                if (!cancelled && cacheStatus.cached) {
+                if (!cancelled && cacheStatus.ready) {
                   void getBrowserWasmSttClient()
-                    .ensureReady()
+                    .init()
                     .catch(() => undefined);
                 }
               })
@@ -936,8 +936,7 @@ function ReadingSessionScreen({
           }
         } else if (
           !ttsUsingCachedAudio &&
-          (!localTtsDown ||
-            (!ttsAllowsFallback && currentTtsSnap.fallbackUsed))
+          (!localTtsDown || (!ttsAllowsFallback && currentTtsSnap.fallbackUsed))
         ) {
           const activeLock = getActiveSessionVoiceLock();
           recordTtsEngineUsage({
@@ -2795,7 +2794,10 @@ function ReadingSessionScreen({
                       const curIdx = activePage.words.findIndex(
                         (w) => w.word_id === curId,
                       );
-                      const startIdx = Math.max(0, curIdx >= 0 ? curIdx - 1 : 0);
+                      const startIdx = Math.max(
+                        0,
+                        curIdx >= 0 ? curIdx - 1 : 0,
+                      );
                       return activePage.words
                         .slice(startIdx, startIdx + 6)
                         .map((w) => w.text);
@@ -3242,7 +3244,10 @@ function ReadingSessionScreen({
                       const curIdx = activePage.words.findIndex(
                         (w) => w.word_id === curId,
                       );
-                      const startIdx = Math.max(0, curIdx >= 0 ? curIdx - 1 : 0);
+                      const startIdx = Math.max(
+                        0,
+                        curIdx >= 0 ? curIdx - 1 : 0,
+                      );
                       return activePage.words
                         .slice(startIdx, startIdx + 6)
                         .map((w) => w.text);
@@ -6109,7 +6114,8 @@ function ReadingSessionScreen({
             ? rawOnsetAt
             : null;
         const normalizedAudioEndedAt =
-          typeof rawAudioEndedAt === "number" && Number.isFinite(rawAudioEndedAt)
+          typeof rawAudioEndedAt === "number" &&
+          Number.isFinite(rawAudioEndedAt)
             ? rawAudioEndedAt
             : null;
         if (result.isFinal) {
@@ -7772,4 +7778,5 @@ function ReadingSessionScreen({
 
 function getDurationMinutes(durationMs: number | null): number | null {
   if (durationMs === null) return null;
-  return Math.ceil(Math.ma
+  return Math.ceil(Math.max(0, durationMs) / 60000);
+}

@@ -356,9 +356,7 @@ export function KaraokeEditorScreen({
         <div>
           <ButtonLink
             fullWidth={false}
-            href={
-              detail ? `/admin/karaoke/${detail.song_id}/edit` : simpleHref
-            }
+            href={detail ? `/admin/karaoke/${detail.song_id}/edit` : simpleHref}
             size="admin"
             variant="outline"
           >
@@ -438,7 +436,11 @@ export function KaraokeEditorScreen({
                 void run(
                   t("karaoke.editor.creatingRevision"),
                   (signal) =>
-                    service.createDraft(detail.song_id, detail.revision, signal),
+                    service.createDraft(
+                      detail.song_id,
+                      detail.revision,
+                      signal,
+                    ),
                   adopt,
                 )
               }

@@ -120,7 +120,7 @@ export function AdminBookForm({
   const watchedMinGrade = useWatch({ control, name: "min_grade" });
   const watchedMaxGrade = useWatch({ control, name: "max_grade" });
 
-  const submit = handleSubmit(async (value) => {
+  const handleValidSubmit = async (value: AdminBookCreateDTO) => {
     if (submittingRef.current) return;
     submittingRef.current = true;
     try {
@@ -137,7 +137,7 @@ export function AdminBookForm({
     } finally {
       submittingRef.current = false;
     }
-  });
+  };
 
   const nameId = `${baseId}-name`;
   const titleId = `${baseId}-title`;
@@ -146,7 +146,11 @@ export function AdminBookForm({
   const maxGradeId = `${baseId}-max-grade`;
 
   const formFields = (
-    <form className="space-y-4" noValidate onSubmit={submit}>
+    <form
+      className="space-y-4"
+      noValidate
+      onSubmit={(event) => void handleSubmit(handleValidSubmit)(event)}
+    >
       {formBanner}
       {formHeading ? (
         <h2 className="text-lg font-extrabold tracking-tight text-ink">

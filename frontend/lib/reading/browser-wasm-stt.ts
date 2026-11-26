@@ -202,7 +202,9 @@ export async function getWasmModelCacheStatus(): Promise<WasmModelCacheStatus> {
           }
           const tx = db.transaction(IDB_STORE, "readonly");
           tx.onabort = () =>
-            finish(emptyWasmCacheStatus(false, "INDEXEDDB_TRANSACTION_ABORTED"));
+            finish(
+              emptyWasmCacheStatus(false, "INDEXEDDB_TRANSACTION_ABORTED"),
+            );
           tx.onerror = () =>
             finish(emptyWasmCacheStatus(false, "INDEXEDDB_TRANSACTION_ERROR"));
           const store = tx.objectStore(IDB_STORE);
@@ -214,8 +216,7 @@ export async function getWasmModelCacheStatus(): Promise<WasmModelCacheStatus> {
               const getReq = store.get(`${SHERPA_WASM_MODEL_ID}/${spec.name}`);
               getReq.onsuccess = () => {
                 const rec = getReq.result as
-                  | { byteLength?: number; buffer?: ArrayBuffer }
-                  | undefined;
+                  { byteLength?: number; buffer?: ArrayBuffer } | undefined;
                 const rawLen = rec?.buffer?.byteLength ?? rec?.byteLength ?? 0;
                 const len =
                   typeof rawLen === "number" &&
@@ -762,11 +763,7 @@ export class BrowserWasmSttClient {
       if (!this.readyPromise) {
         // Keep shared init independent of individual caller aborts so a TTS pause
         // never cancels an in-flight 34MB model download for the next utterance.
-        this.readyPromise = this.postRequest<void>(
-          { type: "init" },
-          [],
-          90_000,
-        )
+        this.readyPromise = this.postRequest<void>({ type: "init" }, [], 90_000)
           .then(() => {
             this.ready = true;
           })

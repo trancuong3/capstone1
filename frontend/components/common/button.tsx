@@ -103,7 +103,12 @@ export function Button({
       aria-busy={isLoading || undefined}
       className={cn(
         baseClassName,
-        resolveWidthClassName(fullWidth, className, resolvedSize, inheritedSize),
+        resolveWidthClassName(
+          fullWidth,
+          className,
+          resolvedSize,
+          inheritedSize,
+        ),
         variantClassNames[variant],
         sizeClassNames[resolvedSize],
         className,
@@ -150,7 +155,12 @@ export function ButtonLink({
     <Link
       className={cn(
         baseClassName,
-        resolveWidthClassName(fullWidth, className, resolvedSize, inheritedSize),
+        resolveWidthClassName(
+          fullWidth,
+          className,
+          resolvedSize,
+          inheritedSize,
+        ),
         variantClassNames[variant],
         sizeClassNames[resolvedSize],
         className,

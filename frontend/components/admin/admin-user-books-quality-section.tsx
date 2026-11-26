@@ -697,10 +697,7 @@ export const AdminUserBooksQualitySection = memo(
               {loadingQueue ? (
                 <div aria-busy="true" className="mt-4 grid gap-3">
                   {[0, 1, 2].map((idx) => (
-                    <Skeleton
-                      className="h-24 w-full rounded-xl"
-                      key={idx}
-                    />
+                    <Skeleton className="h-24 w-full rounded-xl" key={idx} />
                   ))}
                 </div>
               ) : !queue || queue.items.length === 0 ? (

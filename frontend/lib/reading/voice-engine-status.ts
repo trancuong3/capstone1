@@ -120,7 +120,10 @@ export function subscribeVoiceEngineHealth(listener: () => void): () => void {
 }
 
 export function getBrowserOnlineStatus(): boolean {
-  if (typeof navigator === "undefined" || typeof navigator.onLine !== "boolean") {
+  if (
+    typeof navigator === "undefined" ||
+    typeof navigator.onLine !== "boolean"
+  ) {
     return true;
   }
   return navigator.onLine;

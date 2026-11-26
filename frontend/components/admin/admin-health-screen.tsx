@@ -66,7 +66,8 @@ const MIC_PERMISSION_TIMEOUT_MS = 2_000;
 const WAKE_RECHECK_DELAY_MS = 2_500;
 
 type AutoRefreshIntervalSeconds = 0 | 30 | 60;
-type HealthFilterKey = "all" | "attention" | "healthy" | "standby" | "local_only";
+type HealthFilterKey =
+  "all" | "attention" | "healthy" | "standby" | "local_only";
 type ServiceBucket = Exclude<HealthFilterKey, "all">;
 type DeviceEnvironmentKind =
   | "viread_android_webview"
@@ -318,10 +319,7 @@ function isLocalOrDelegatedGroupItem(service: HealthServiceItemUI): boolean {
   if (service.id === "local_ocr") {
     return false;
   }
-  if (
-    service.execution_mode &&
-    LOCAL_ONLY_MODES.has(service.execution_mode)
-  ) {
+  if (service.execution_mode && LOCAL_ONLY_MODES.has(service.execution_mode)) {
     return true;
   }
   if (
@@ -924,28 +922,24 @@ export function AdminHealthScreen() {
     try {
       const wasmCaps = detectBrowserWasmSttSupport();
       const [wasmCache, ttsCache] = await Promise.all([
-        getWasmModelCacheStatus().catch(
-          (): WasmModelCacheStatus => ({
-            ready: false,
-            cachedFiles: 0,
-            expectedFiles: 4,
-            cachedBytes: 0,
-            totalBytes: 0,
-            supported: false,
-            error: "PROBE_FAILED",
-          }),
-        ),
-        getBrowserTtsCacheStats().catch(
-          (): BrowserTtsCacheStats => ({
-            supported: false,
-            entryCount: 0,
-            usedBytes: 0,
-            quotaBytes: 0,
-            hits: 0,
-            misses: 0,
-            error: "PROBE_FAILED",
-          }),
-        ),
+        getWasmModelCacheStatus().catch((): WasmModelCacheStatus => ({
+          ready: false,
+          cachedFiles: 0,
+          expectedFiles: 4,
+          cachedBytes: 0,
+          totalBytes: 0,
+          supported: false,
+          error: "PROBE_FAILED",
+        })),
+        getBrowserTtsCacheStats().catch((): BrowserTtsCacheStats => ({
+          supported: false,
+          entryCount: 0,
+          usedBytes: 0,
+          quotaBytes: 0,
+          hits: 0,
+          misses: 0,
+          error: "PROBE_FAILED",
+        })),
       ]);
 
       const hasMediaDevices =
@@ -973,11 +967,7 @@ export function AdminHealthScreen() {
           if (permTimer !== null) {
             globalThis.clearTimeout(permTimer);
           }
-          if (
-            perm &&
-            mountedRef.current &&
-            seq === clientProbeSeqRef.current
-          ) {
+          if (perm && mountedRef.current && seq === clientProbeSeqRef.current) {
             micPermission = perm.state;
             micPermissionStatusRef.current = perm;
             perm.onchange = () => {
@@ -1124,7 +1114,8 @@ export function AdminHealthScreen() {
       }
     } catch (err) {
       if (!mountedRef.current || controller.signal.aborted) return;
-      const safeDetail = isServiceError(err) && err.message ? err.message : null;
+      const safeDetail =
+        isServiceError(err) && err.message ? err.message : null;
       setWakeNotice({
         tone: "error",
         message:
@@ -1364,8 +1355,7 @@ export function AdminHealthScreen() {
   const localOnlyHasAttention = groupedServices.localOnlyWorkers.some(
     (item) => classifyServiceBucket(item) === "attention",
   );
-  const autoExpandLocalGroup =
-    activeFilter !== "all" || localOnlyHasAttention;
+  const autoExpandLocalGroup = activeFilter !== "all" || localOnlyHasAttention;
   const isLocalGroupExpanded =
     autoExpandLocalGroup || localGroupManualOpen === true;
 
@@ -1508,11 +1498,7 @@ export function AdminHealthScreen() {
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <div
-              aria-label={t(
-                "health.autoRefreshLabel",
-                undefined,
-                "Tự làm mới",
-              )}
+              aria-label={t("health.autoRefreshLabel", undefined, "Tự làm mới")}
               className="inline-flex items-center rounded-control border border-border bg-white p-0.5 text-xs font-semibold"
               role="group"
             >
@@ -1563,7 +1549,10 @@ export function AdminHealthScreen() {
             >
               <RefreshCw
                 aria-hidden="true"
-                className={cn("size-4 shrink-0", isRefreshing && "animate-spin")}
+                className={cn(
+                  "size-4 shrink-0",
+                  isRefreshing && "animate-spin",
+                )}
               />
               {t("health.recheck")}
             </Button>
@@ -1705,11 +1694,7 @@ export function AdminHealthScreen() {
           </section>
 
           <AdminKpiGrid
-            ariaLabel={t(
-              "health.kpiAria",
-              undefined,
-              "Thống kê nhanh dịch vụ",
-            )}
+            ariaLabel={t("health.kpiAria", undefined, "Thống kê nhanh dịch vụ")}
             columns={4}
           >
             <AdminKpiCard
@@ -1841,10 +1826,7 @@ export function AdminHealthScreen() {
           ) : null}
 
           {groupedServices.core.length > 0 ? (
-            <section
-              className="space-y-3"
-              data-testid="health-group-core"
-            >
+            <section className="space-y-3" data-testid="health-group-core">
               <GroupSectionHeader
                 description={t(
                   "health.groups.coreDesc",
@@ -1869,10 +1851,7 @@ export function AdminHealthScreen() {
           ) : null}
 
           {showVoiceGroup ? (
-            <section
-              className="space-y-3"
-              data-testid="health-group-voice"
-            >
+            <section className="space-y-3" data-testid="health-group-voice">
               <GroupSectionHeader
                 description={t(
                   "health.groups.voiceDesc",
@@ -1930,10 +1909,7 @@ export function AdminHealthScreen() {
           ) : null}
 
           {showOcrGroup ? (
-            <section
-              className="space-y-3"
-              data-testid="health-group-ocr"
-            >
+            <section className="space-y-3" data-testid="health-group-ocr">
               <GroupSectionHeader
                 description={t(
                   "health.groups.ocrDesc",
@@ -2043,10 +2019,7 @@ export function AdminHealthScreen() {
           ) : null}
 
           {showWorkersGroup ? (
-            <section
-              className="space-y-3"
-              data-testid="health-group-workers"
-            >
+            <section className="space-y-3" data-testid="health-group-workers">
               <GroupSectionHeader
                 description={t(
                   "health.groups.workersDesc",
@@ -2335,8 +2308,7 @@ export function AdminHealthScreen() {
                     {t("health.sttBrowserTtsLabel")}
                   </dt>
                   <dd className="font-bold text-ink tabular-nums">
-                    {!clientCaps.ttsCache.supported ||
-                    clientCaps.ttsCache.error
+                    {!clientCaps.ttsCache.supported || clientCaps.ttsCache.error
                       ? clientCaps.ttsCache.error
                         ? t(
                             "health.ttsCacheBrowserError",
@@ -2358,7 +2330,8 @@ export function AdminHealthScreen() {
                             ),
                           })}
                   </dd>
-                  {clientCaps.ttsCache.supported && !clientCaps.ttsCache.error ? (
+                  {clientCaps.ttsCache.supported &&
+                  !clientCaps.ttsCache.error ? (
                     <>
                       <p className="text-xs text-muted tabular-nums">
                         {formatByteSize(

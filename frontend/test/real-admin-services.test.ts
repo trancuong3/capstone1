@@ -179,16 +179,14 @@ describe("real Admin adapters", () => {
       verified_count: 4,
       parent_catalog_eligible: true,
     };
-    fetchMock
-      .mockResolvedValueOnce(Response.json([row]))
-      .mockResolvedValueOnce(
-        Response.json({
-          ...coveredBook,
-          cover_url: null,
-          cover_source_type: null,
-          next_page_number: 5,
-        }),
-      );
+    fetchMock.mockResolvedValueOnce(Response.json([row])).mockResolvedValueOnce(
+      Response.json({
+        ...coveredBook,
+        cover_url: null,
+        cover_source_type: null,
+        next_page_number: 5,
+      }),
+    );
     const service = createAdminBookService();
     const listed = await service.list();
     expect(listed[0].book.cover_url).toBe(

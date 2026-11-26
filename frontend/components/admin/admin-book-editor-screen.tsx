@@ -188,7 +188,11 @@ export function AdminBookEditorScreen({
       <EmptyState
         action={
           <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={() => void load()} size="admin" variant="secondary">
+            <Button
+              onClick={() => void load()}
+              size="admin"
+              variant="secondary"
+            >
               {t("common.retry")}
             </Button>
             <Link
@@ -215,11 +219,6 @@ export function AdminBookEditorScreen({
   }
 
   const resolvedTitle = book.title.trim() || t("books.missingTitle");
-  const resolvedCoverUrl = activeCoverAsset?.media_url ?? book.cover_url ?? null;
-  const resolvedCoverSourceType =
-    activeCoverAsset?.source_type ??
-    (book.cover_source_type as AssetSourceType | null) ??
-    null;
 
   const initial: AdminBookCreateDTO = {
     name: book.name ?? "",
@@ -239,7 +238,8 @@ export function AdminBookEditorScreen({
   const resolvedCoverSourceType: AssetSourceType | null = coverExplicitlyCleared
     ? "METADATA_RENDER"
     : (activeCoverAsset?.source_type ??
-      ((book.cover_source_type as AssetSourceType | null | undefined) ?? null));
+      (book.cover_source_type as AssetSourceType | null | undefined) ??
+      null);
 
   return (
     <section className="space-y-4">
@@ -355,7 +355,11 @@ export function AdminBookEditorScreen({
                 className="text-sm font-extrabold text-ink"
                 id="book-lifecycle-danger-title"
               >
-                {t("books.editor.dangerZoneHeading", undefined, "Vòng đời sách")}
+                {t(
+                  "books.editor.dangerZoneHeading",
+                  undefined,
+                  "Vòng đời sách",
+                )}
               </h2>
               <AdminStatusBadge status={book.lifecycle_status} />
             </div>

@@ -177,7 +177,12 @@ export function KaraokeLibraryScreen() {
       <form onSubmit={filter}>
         <AdminToolbar
           actions={
-            <Button disabled={busy} fullWidth={false} size="admin" type="submit">
+            <Button
+              disabled={busy}
+              fullWidth={false}
+              size="admin"
+              type="submit"
+            >
               {t("karaoke.library.apply")}
             </Button>
           }

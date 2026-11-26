@@ -275,7 +275,9 @@ describe("Client IndexedDB probes (tts-audio-cache & browser-wasm-stt)", () => {
                   oncomplete: (() => void) | null;
                   onerror: (() => void) | null;
                   onabort: (() => void) | null;
-                  objectStore: (name: string) => { clear: () => Record<string, unknown> };
+                  objectStore: (name: string) => {
+                    clear: () => Record<string, unknown>;
+                  };
                 } = {
                   oncomplete: null,
                   onerror: null,
@@ -444,7 +446,10 @@ describe("Client IndexedDB probes (tts-audio-cache & browser-wasm-stt)", () => {
 
     it("purges cached STT model files via clearWasmModelCache() and handles onblocked/timeout", async () => {
       const files = new Map<string, unknown>([
-        [`${SHERPA_WASM_MODEL_ID}/encoder.int8.onnx`, { byteLength: 27_699_063 }],
+        [
+          `${SHERPA_WASM_MODEL_ID}/encoder.int8.onnx`,
+          { byteLength: 27_699_063 },
+        ],
       ]);
       const closeSpy = vi.fn();
       vi.stubGlobal("indexedDB", {

@@ -3777,665 +3777,648 @@ export function AdminOcrReviewScreen({
                 className="mb-3 flex flex-wrap gap-1.5"
                 role="group"
               >
-                  {(
-                    [
-                      {
-                        id: "all",
-                        label: t("ocrReview.wordsPanel.filters.all"),
-                        count: words.length,
-                      },
-                      {
-                        id: "review",
-                        label: t("ocrReview.wordsPanel.filters.attention"),
-                        count: colorCounts.red + colorCounts.yellow,
-                      },
-                      {
-                        id: "risk",
-                        label: t("ocrReview.wordsPanel.filters.risk"),
-                        count: colorCounts.yellow,
-                      },
-                      {
-                        id: "disagreement",
-                        label: t("ocrReview.wordsPanel.filters.disagreement"),
-                        count: words.filter((word) => {
-                          return hasEngineDisagreementEvidence(word);
-                        }).length,
-                      },
-                      {
-                        id: "red",
-                        label: t("ocrReview.wordsPanel.filters.red"),
-                        count: colorCounts.red,
-                      },
-                      {
-                        id: "green",
-                        label: t("ocrReview.wordsPanel.filters.green"),
-                        count: colorCounts.green,
-                      },
-                    ] as const satisfies readonly {
-                      id: WordFilter;
-                      label: string;
-                      count: number;
-                    }[]
-                  ).map((filter) => (
-                    <button
-                      aria-pressed={wordFilter === filter.id}
-                      className={`min-h-10 rounded-full border px-3 text-sm font-semibold ${
-                        wordFilter === filter.id
-                          ? filter.id === "risk" || filter.id === "disagreement"
-                            ? "border-amber-700 bg-amber-100 text-amber-950 ring-2 ring-amber-700/15"
-                            : filter.id === "green"
-                              ? "border-green-700 bg-green-100 text-green-950 ring-2 ring-green-700/15"
-                              : filter.id === "red"
-                                ? "border-red-700 bg-red-100 text-red-950 ring-2 ring-red-700/15"
-                                : "border-primary bg-sky text-primary-hover"
-                          : "border-border bg-white text-muted hover:bg-canvas"
-                      }`}
-                      key={filter.id}
-                      onClick={() => setWordFilter(filter.id)}
-                      type="button"
-                    >
-                      {filter.label} ({formatNumber(filter.count)})
-                    </button>
-                  ))}
-                  <span
-                    aria-live="polite"
-                    className="self-center text-xs font-semibold text-muted"
+                {(
+                  [
+                    {
+                      id: "all",
+                      label: t("ocrReview.wordsPanel.filters.all"),
+                      count: words.length,
+                    },
+                    {
+                      id: "review",
+                      label: t("ocrReview.wordsPanel.filters.attention"),
+                      count: colorCounts.red + colorCounts.yellow,
+                    },
+                    {
+                      id: "risk",
+                      label: t("ocrReview.wordsPanel.filters.risk"),
+                      count: colorCounts.yellow,
+                    },
+                    {
+                      id: "disagreement",
+                      label: t("ocrReview.wordsPanel.filters.disagreement"),
+                      count: words.filter((word) => {
+                        return hasEngineDisagreementEvidence(word);
+                      }).length,
+                    },
+                    {
+                      id: "red",
+                      label: t("ocrReview.wordsPanel.filters.red"),
+                      count: colorCounts.red,
+                    },
+                    {
+                      id: "green",
+                      label: t("ocrReview.wordsPanel.filters.green"),
+                      count: colorCounts.green,
+                    },
+                  ] as const satisfies readonly {
+                    id: WordFilter;
+                    label: string;
+                    count: number;
+                  }[]
+                ).map((filter) => (
+                  <button
+                    aria-pressed={wordFilter === filter.id}
+                    className={`min-h-10 rounded-full border px-3 text-sm font-semibold ${
+                      wordFilter === filter.id
+                        ? filter.id === "risk" || filter.id === "disagreement"
+                          ? "border-amber-700 bg-amber-100 text-amber-950 ring-2 ring-amber-700/15"
+                          : filter.id === "green"
+                            ? "border-green-700 bg-green-100 text-green-950 ring-2 ring-green-700/15"
+                            : filter.id === "red"
+                              ? "border-red-700 bg-red-100 text-red-950 ring-2 ring-red-700/15"
+                              : "border-primary bg-sky text-primary-hover"
+                        : "border-border bg-white text-muted hover:bg-canvas"
+                    }`}
+                    key={filter.id}
+                    onClick={() => setWordFilter(filter.id)}
+                    type="button"
                   >
+                    {filter.label} ({formatNumber(filter.count)})
+                  </button>
+                ))}
+                <span
+                  aria-live="polite"
+                  className="self-center text-xs font-semibold text-muted"
+                >
+                  {wordFilter === "review"
+                    ? t("ocrReview.wordsPanel.attentionRemaining", {
+                        count: formatNumber(filteredWords.length),
+                      })
+                    : t("ocrReview.wordsPanel.showingRatio", {
+                        shown: formatNumber(filteredWords.length),
+                        total: formatNumber(words.length),
+                      })}
+                </span>
+              </div>
+              <div className="grid gap-3">
+                {filteredWords.length === 0 ? (
+                  <p className="rounded-control border border-border bg-canvas p-4 text-sm text-muted">
                     {wordFilter === "review"
-                      ? t("ocrReview.wordsPanel.attentionRemaining", {
-                          count: formatNumber(filteredWords.length),
-                        })
-                      : t("ocrReview.wordsPanel.showingRatio", {
-                          shown: formatNumber(filteredWords.length),
-                          total: formatNumber(words.length),
-                        })}
-                  </span>
-                </div>
-                <div className="grid gap-3">
-                  {filteredWords.length === 0 ? (
-                    <p className="rounded-control border border-border bg-canvas p-4 text-sm text-muted">
-                      {wordFilter === "review"
-                        ? t("ocrReview.wordsPanel.emptyAttention")
-                        : t("ocrReview.wordsPanel.emptyGroup", {
-                            group:
-                              wordFilter === "risk"
-                                ? t("ocrReview.wordsPanel.groupNames.risk")
-                                : wordFilter === "red"
-                                  ? t("ocrReview.wordsPanel.groupNames.red")
-                                  : wordFilter === "green"
-                                    ? t("ocrReview.wordsPanel.groupNames.green")
-                                    : wordFilter === "disagreement"
-                                      ? t(
-                                          "ocrReview.wordsPanel.groupNames.disagreement",
-                                        )
-                                      : t(
-                                          "ocrReview.wordsPanel.groupNames.default",
-                                        ),
-                          })}
-                    </p>
-                  ) : (
-                    filteredWords.map((word) => {
-                      const reviewStatus = getWordReviewStatus(
-                        word,
-                        detail.verification_status,
-                      );
-                      const paddleLineScore = getPaddleLineScoreForWord(
-                        detail.ocr_metadata,
-                        word,
-                      );
-                      const colorGroup = getWordReviewColorGroup(
-                        reviewStatus,
-                        word,
-                        paddleLineScore,
-                      );
-                      const reviewLabel = getWordReviewLabel(
-                        reviewStatus,
-                        word,
-                        paddleLineScore,
-                        t,
-                      );
-                      const draftToken = draftTokens[word.word_index];
-                      const canCompareToken =
-                        textAlignment.canCompare && draftToken !== undefined;
-                      const tokenMatches =
-                        canCompareToken &&
-                        normalizeVietnameseWord(draftToken) ===
-                          normalizeVietnameseWord(word.text);
-
-                      return (
-                        <div
-                          ref={(el) => {
-                            if (el) wordRefs.current.set(word.word_index, el);
-                            else wordRefs.current.delete(word.word_index);
-                          }}
-                          id={`ocr-word-${word.word_index}`}
-                          className={`rounded-control border border-border border-s-4 p-3 transition-shadow ${
-                            colorGroup === "green"
-                              ? "border-s-green-600"
-                              : colorGroup === "red"
-                                ? "border-s-red-600"
-                                : colorGroup === "yellow"
-                                  ? "border-s-amber-500"
-                                  : "border-s-slate-400"
-                          } ${
-                            word.word_index === selectedWord
-                              ? "border-y-primary border-e-primary bg-sky/30 shadow-md ring-2 ring-primary/20"
-                              : "bg-white hover:shadow-sm"
-                          }`}
-                          key={word.word_index}
-                        >
-                          <div className="mb-3 flex items-center justify-between gap-2">
-                            <button
-                              aria-pressed={word.word_index === selectedWord}
-                              className="rounded-sm text-start text-sm font-semibold text-primary underline underline-offset-2"
-                              onClick={() => selectWordOnImage(word.word_index)}
-                              type="button"
-                            >
-                              {t("ocrReview.wordsPanel.wordIndexLine", {
-                                index: formatNumber(word.word_index),
-                                line: formatNumber(word.line_index),
-                              })}
-                            </button>
-                            <div className="flex flex-wrap items-center justify-end gap-2">
-                              <span
-                                className={`rounded border px-2 py-0.5 text-xs font-semibold ${getWordReviewBadgeColor(reviewStatus, word, paddleLineScore)}`}
-                              >
-                                {reviewLabel}
-                              </span>
-                            </div>
-                          </div>
-
-                          {colorGroup === "red" ? (
-                            <div className="mb-3 grid gap-1 rounded-control border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-950">
-                              {reviewStatus === "confirmed_mismatch" ? (
-                                <>
-                                  <span className="font-semibold">
-                                    {t(
-                                      "ocrReview.wordsPanel.referenceMismatchHeading",
-                                    )}
-                                  </span>
-                                  <span className="break-words">
-                                    {t("ocrReview.wordsPanel.ocrReadPrefix", {
-                                      text: word.text,
-                                    })}
-                                    {word.ocr_evidence?.reference_text
-                                      ? t(
-                                          "ocrReview.wordsPanel.verifiedReferenceSuffix",
-                                          {
-                                            text: word.ocr_evidence
-                                              .reference_text,
-                                          },
-                                        )
-                                      : ""}
-                                  </span>
-                                </>
-                              ) : (
-                                <>
-                                  <span className="font-semibold">
-                                    {t(
-                                      "ocrReview.wordsPanel.mismatchConfirmedTitle",
-                                    )}
-                                  </span>
-                                  <span className="break-words">
-                                    {t("ocrReview.wordsPanel.ocrTokenLine", {
-                                      text: word.text,
-                                    })}
-                                    {getWordScoreLabel(
-                                      word,
-                                      detail.ocr_metadata,
-                                      t,
-                                    )}
-                                  </span>
-                                  <span className="text-xs">
-                                    {t("ocrReview.wordsPanel.redWarningNote")}
-                                  </span>
-                                </>
-                              )}
-                              {word.ocr_evidence?.review_reason ? (
-                                <span className="text-xs">
-                                  {word.ocr_evidence.review_reason}
-                                </span>
-                              ) : null}
-                            </div>
-                          ) : null}
-
-                          <div className="mb-3 grid gap-1 rounded-control border border-border bg-canvas px-3 py-2 text-sm">
-                            <span className="text-xs font-semibold text-muted">
-                              {t("ocrReview.wordsPanel.textVsBoxHeading")}
-                            </span>
-                            <span className="break-words font-semibold">
-                              {canCompareToken ? (
-                                <span
-                                  className="viread-learning-content"
-                                  dir="ltr"
-                                  lang="vi"
-                                >
-                                  {t("ocrReview.wordsPanel.tokenCompare", {
-                                    draftToken,
-                                    wordText: word.text,
-                                  })}
-                                </span>
-                              ) : (
-                                t("ocrReview.wordsPanel.cannotAlignByPosition")
-                              )}
-                              {canCompareToken ? (
-                                <span className="ms-2 whitespace-nowrap text-xs font-semibold text-muted">
-                                  {tokenMatches
-                                    ? t("ocrReview.wordsPanel.matchedLabel")
+                      ? t("ocrReview.wordsPanel.emptyAttention")
+                      : t("ocrReview.wordsPanel.emptyGroup", {
+                          group:
+                            wordFilter === "risk"
+                              ? t("ocrReview.wordsPanel.groupNames.risk")
+                              : wordFilter === "red"
+                                ? t("ocrReview.wordsPanel.groupNames.red")
+                                : wordFilter === "green"
+                                  ? t("ocrReview.wordsPanel.groupNames.green")
+                                  : wordFilter === "disagreement"
+                                    ? t(
+                                        "ocrReview.wordsPanel.groupNames.disagreement",
+                                      )
                                     : t(
-                                        "ocrReview.wordsPanel.needsCompareLabel",
-                                      )}
-                                </span>
-                              ) : null}
+                                        "ocrReview.wordsPanel.groupNames.default",
+                                      ),
+                        })}
+                  </p>
+                ) : (
+                  filteredWords.map((word) => {
+                    const reviewStatus = getWordReviewStatus(
+                      word,
+                      detail.verification_status,
+                    );
+                    const paddleLineScore = getPaddleLineScoreForWord(
+                      detail.ocr_metadata,
+                      word,
+                    );
+                    const colorGroup = getWordReviewColorGroup(
+                      reviewStatus,
+                      word,
+                      paddleLineScore,
+                    );
+                    const reviewLabel = getWordReviewLabel(
+                      reviewStatus,
+                      word,
+                      paddleLineScore,
+                      t,
+                    );
+                    const draftToken = draftTokens[word.word_index];
+                    const canCompareToken =
+                      textAlignment.canCompare && draftToken !== undefined;
+                    const tokenMatches =
+                      canCompareToken &&
+                      normalizeVietnameseWord(draftToken) ===
+                        normalizeVietnameseWord(word.text);
+
+                    return (
+                      <div
+                        ref={(el) => {
+                          if (el) wordRefs.current.set(word.word_index, el);
+                          else wordRefs.current.delete(word.word_index);
+                        }}
+                        id={`ocr-word-${word.word_index}`}
+                        className={`rounded-control border border-border border-s-4 p-3 transition-shadow ${
+                          colorGroup === "green"
+                            ? "border-s-green-600"
+                            : colorGroup === "red"
+                              ? "border-s-red-600"
+                              : colorGroup === "yellow"
+                                ? "border-s-amber-500"
+                                : "border-s-slate-400"
+                        } ${
+                          word.word_index === selectedWord
+                            ? "border-y-primary border-e-primary bg-sky/30 shadow-md ring-2 ring-primary/20"
+                            : "bg-white hover:shadow-sm"
+                        }`}
+                        key={word.word_index}
+                      >
+                        <div className="mb-3 flex items-center justify-between gap-2">
+                          <button
+                            aria-pressed={word.word_index === selectedWord}
+                            className="rounded-sm text-start text-sm font-semibold text-primary underline underline-offset-2"
+                            onClick={() => selectWordOnImage(word.word_index)}
+                            type="button"
+                          >
+                            {t("ocrReview.wordsPanel.wordIndexLine", {
+                              index: formatNumber(word.word_index),
+                              line: formatNumber(word.line_index),
+                            })}
+                          </button>
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            <span
+                              className={`rounded border px-2 py-0.5 text-xs font-semibold ${getWordReviewBadgeColor(reviewStatus, word, paddleLineScore)}`}
+                            >
+                              {reviewLabel}
                             </span>
                           </div>
+                        </div>
 
-                          <label className="grid gap-1 text-sm font-semibold">
-                            {t("ocrReview.wordsPanel.editWordInputAria", {
-                              num: formatNumber(word.word_index + 1),
-                            })}
-                            <input
-                              className="viread-learning-content min-h-10 rounded-control border border-border px-3 font-normal disabled:bg-canvas"
-                              dir="ltr"
-                              disabled={verified || busy !== null}
-                              lang="vi"
-                              onChange={(event) =>
-                                updateWord(word.word_index, {
-                                  text: event.target.value,
-                                  normalized_text: normalizeVietnameseWord(
-                                    event.target.value,
-                                  ),
-                                })
-                              }
-                              value={word.text}
-                            />
-                          </label>
-                          <details className="mt-2 rounded-control border border-border bg-white">
-                            <summary className="cursor-pointer rounded-control px-3 py-2 text-sm font-semibold text-primary hover:bg-canvas focus-visible:outline-3 focus-visible:outline-primary">
-                              {t("ocrReview.wordsPanel.advancedBboxSummary")}
-                            </summary>
-                            <div className="grid grid-cols-4 gap-2 border-t border-border p-3">
-                              {(["x", "y", "w", "h"] as const).map(
-                                (label, coordinate) => (
-                                  <label
-                                    className="grid gap-1 text-xs font-semibold"
-                                    key={label}
-                                  >
-                                    {label}
-                                    <input
-                                      aria-label={t(
-                                        "ocrReview.wordsPanel.bboxInputAria",
+                        {colorGroup === "red" ? (
+                          <div className="mb-3 grid gap-1 rounded-control border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-950">
+                            {reviewStatus === "confirmed_mismatch" ? (
+                              <>
+                                <span className="font-semibold">
+                                  {t(
+                                    "ocrReview.wordsPanel.referenceMismatchHeading",
+                                  )}
+                                </span>
+                                <span className="break-words">
+                                  {t("ocrReview.wordsPanel.ocrReadPrefix", {
+                                    text: word.text,
+                                  })}
+                                  {word.ocr_evidence?.reference_text
+                                    ? t(
+                                        "ocrReview.wordsPanel.verifiedReferenceSuffix",
                                         {
-                                          index: formatNumber(word.word_index),
-                                          axis: label,
+                                          text: word.ocr_evidence
+                                            .reference_text,
                                         },
-                                      )}
-                                      className="min-h-10 min-w-0 rounded-control border border-border px-2 font-normal disabled:bg-canvas"
-                                      disabled={verified || busy !== null}
-                                      max={1}
-                                      min={0}
-                                      onChange={(event) =>
-                                        updateBbox(
-                                          word.word_index,
-                                          coordinate,
-                                          Number(event.target.value),
-                                        )
-                                      }
-                                      step="0.001"
-                                      type="number"
-                                      value={word.bbox[coordinate]}
-                                    />
-                                  </label>
+                                      )
+                                    : ""}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <span className="font-semibold">
+                                  {t(
+                                    "ocrReview.wordsPanel.mismatchConfirmedTitle",
+                                  )}
+                                </span>
+                                <span className="break-words">
+                                  {t("ocrReview.wordsPanel.ocrTokenLine", {
+                                    text: word.text,
+                                  })}
+                                  {getWordScoreLabel(
+                                    word,
+                                    detail.ocr_metadata,
+                                    t,
+                                  )}
+                                </span>
+                                <span className="text-xs">
+                                  {t("ocrReview.wordsPanel.redWarningNote")}
+                                </span>
+                              </>
+                            )}
+                            {word.ocr_evidence?.review_reason ? (
+                              <span className="text-xs">
+                                {word.ocr_evidence.review_reason}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        <div className="mb-3 grid gap-1 rounded-control border border-border bg-canvas px-3 py-2 text-sm">
+                          <span className="text-xs font-semibold text-muted">
+                            {t("ocrReview.wordsPanel.textVsBoxHeading")}
+                          </span>
+                          <span className="break-words font-semibold">
+                            {canCompareToken ? (
+                              <span
+                                className="viread-learning-content"
+                                dir="ltr"
+                                lang="vi"
+                              >
+                                {t("ocrReview.wordsPanel.tokenCompare", {
+                                  draftToken,
+                                  wordText: word.text,
+                                })}
+                              </span>
+                            ) : (
+                              t("ocrReview.wordsPanel.cannotAlignByPosition")
+                            )}
+                            {canCompareToken ? (
+                              <span className="ms-2 whitespace-nowrap text-xs font-semibold text-muted">
+                                {tokenMatches
+                                  ? t("ocrReview.wordsPanel.matchedLabel")
+                                  : t("ocrReview.wordsPanel.needsCompareLabel")}
+                              </span>
+                            ) : null}
+                          </span>
+                        </div>
+
+                        <label className="grid gap-1 text-sm font-semibold">
+                          {t("ocrReview.wordsPanel.editWordInputAria", {
+                            num: formatNumber(word.word_index + 1),
+                          })}
+                          <input
+                            className="viread-learning-content min-h-10 rounded-control border border-border px-3 font-normal disabled:bg-canvas"
+                            dir="ltr"
+                            disabled={verified || busy !== null}
+                            lang="vi"
+                            onChange={(event) =>
+                              updateWord(word.word_index, {
+                                text: event.target.value,
+                                normalized_text: normalizeVietnameseWord(
+                                  event.target.value,
                                 ),
-                              )}
-                            </div>
-                          </details>
-                          <details
-                            className="mt-2 rounded-control border border-border bg-canvas"
-                            open={word.word_index === selectedWord}
+                              })
+                            }
+                            value={word.text}
+                          />
+                        </label>
+                        <details className="mt-2 rounded-control border border-border bg-white">
+                          <summary className="cursor-pointer rounded-control px-3 py-2 text-sm font-semibold text-primary hover:bg-canvas focus-visible:outline-3 focus-visible:outline-primary">
+                            {t("ocrReview.wordsPanel.advancedBboxSummary")}
+                          </summary>
+                          <div className="grid grid-cols-4 gap-2 border-t border-border p-3">
+                            {(["x", "y", "w", "h"] as const).map(
+                              (label, coordinate) => (
+                                <label
+                                  className="grid gap-1 text-xs font-semibold"
+                                  key={label}
+                                >
+                                  {label}
+                                  <input
+                                    aria-label={t(
+                                      "ocrReview.wordsPanel.bboxInputAria",
+                                      {
+                                        index: formatNumber(word.word_index),
+                                        axis: label,
+                                      },
+                                    )}
+                                    className="min-h-10 min-w-0 rounded-control border border-border px-2 font-normal disabled:bg-canvas"
+                                    disabled={verified || busy !== null}
+                                    max={1}
+                                    min={0}
+                                    onChange={(event) =>
+                                      updateBbox(
+                                        word.word_index,
+                                        coordinate,
+                                        Number(event.target.value),
+                                      )
+                                    }
+                                    step="0.001"
+                                    type="number"
+                                    value={word.bbox[coordinate]}
+                                  />
+                                </label>
+                              ),
+                            )}
+                          </div>
+                        </details>
+                        <details
+                          className="mt-2 rounded-control border border-border bg-canvas"
+                          open={word.word_index === selectedWord}
+                        >
+                          <summary className="cursor-pointer rounded-control px-3 py-2 text-sm font-semibold text-primary hover:bg-white focus-visible:outline-3 focus-visible:outline-primary">
+                            {t("ocrReview.wordsPanel.evidenceSummaryPrefix")}
+                            {getWordScoreLabel(word, detail.ocr_metadata, t)}
+                          </summary>
+                          <section
+                            aria-label={t(
+                              "ocrReview.wordsPanel.evidenceRegionAria",
+                              { num: formatNumber(word.word_index + 1) },
+                            )}
+                            className="grid gap-1 border-t border-border px-3 py-3 text-xs"
                           >
-                            <summary className="cursor-pointer rounded-control px-3 py-2 text-sm font-semibold text-primary hover:bg-white focus-visible:outline-3 focus-visible:outline-primary">
-                              {t("ocrReview.wordsPanel.evidenceSummaryPrefix")}
-                              {getWordScoreLabel(word, detail.ocr_metadata, t)}
-                            </summary>
-                            <section
-                              aria-label={t(
-                                "ocrReview.wordsPanel.evidenceRegionAria",
-                                { num: formatNumber(word.word_index + 1) },
-                              )}
-                              className="grid gap-1 border-t border-border px-3 py-3 text-xs"
-                            >
-                              <h3 className="text-sm font-semibold">
-                                {t("ocrReview.wordsPanel.evidenceHeading")}
-                              </h3>
-                              <span>
-                                PaddleOCR:{" "}
-                                {getEngineEvidenceDisplay(
-                                  word,
-                                  "paddleocr",
-                                  detail.ocr_metadata,
-                                  t,
-                                )}
-                              </span>
-                              <span>
-                                VietOCR:{" "}
-                                {getEngineEvidenceDisplay(
-                                  word,
-                                  "vietocr",
-                                  detail.ocr_metadata,
-                                  t,
-                                )}
-                              </span>
-                              {typeof word.ocr_evidence?.engine_outputs
-                                .paddleocr !== "string" &&
-                              getLineEngineOutput(
+                            <h3 className="text-sm font-semibold">
+                              {t("ocrReview.wordsPanel.evidenceHeading")}
+                            </h3>
+                            <span>
+                              PaddleOCR:{" "}
+                              {getEngineEvidenceDisplay(
                                 word,
                                 "paddleocr",
                                 detail.ocr_metadata,
-                              ) ? (
-                                <span>
-                                  {t("ocrReview.wordsPanel.paddleRawLineLabel")}{" "}
-                                  {getLineEngineOutput(
-                                    word,
-                                    "paddleocr",
-                                    detail.ocr_metadata,
-                                  )}
-                                </span>
-                              ) : null}
-                              {typeof word.ocr_evidence?.engine_outputs
-                                .vietocr !== "string" &&
-                              getLineEngineOutput(
+                                t,
+                              )}
+                            </span>
+                            <span>
+                              VietOCR:{" "}
+                              {getEngineEvidenceDisplay(
                                 word,
                                 "vietocr",
                                 detail.ocr_metadata,
-                              ) ? (
+                                t,
+                              )}
+                            </span>
+                            {typeof word.ocr_evidence?.engine_outputs
+                              .paddleocr !== "string" &&
+                            getLineEngineOutput(
+                              word,
+                              "paddleocr",
+                              detail.ocr_metadata,
+                            ) ? (
+                              <span>
+                                {t("ocrReview.wordsPanel.paddleRawLineLabel")}{" "}
+                                {getLineEngineOutput(
+                                  word,
+                                  "paddleocr",
+                                  detail.ocr_metadata,
+                                )}
+                              </span>
+                            ) : null}
+                            {typeof word.ocr_evidence?.engine_outputs
+                              .vietocr !== "string" &&
+                            getLineEngineOutput(
+                              word,
+                              "vietocr",
+                              detail.ocr_metadata,
+                            ) ? (
+                              <span>
+                                {t("ocrReview.wordsPanel.vietOcrRawLineLabel")}{" "}
+                                {getLineEngineOutput(
+                                  word,
+                                  "vietocr",
+                                  detail.ocr_metadata,
+                                )}
+                              </span>
+                            ) : null}
+                            <span>
+                              Tesseract:{" "}
+                              {getEngineEvidenceDisplay(
+                                word,
+                                "tesseract",
+                                detail.ocr_metadata,
+                                t,
+                              )}
+                            </span>
+                            <span>
+                              {t("ocrReview.wordsPanel.ocrSourceTokenLine", {
+                                value:
+                                  word.ocr_evidence?.source_text ??
+                                  t("ocrReview.wordsPanel.notRecorded"),
+                              })}
+                            </span>
+                            {word.ocr_evidence?.source_text &&
+                            normalizeVietnameseWord(
+                              word.ocr_evidence.source_text,
+                            ) !== normalizeVietnameseWord(word.text) ? (
+                              <span className="text-amber-900">
+                                {t(
+                                  "ocrReview.wordsPanel.editedWordEvidenceNote",
+                                  {
+                                    sourceText: word.ocr_evidence.source_text,
+                                    currentText: word.text,
+                                  },
+                                )}
+                              </span>
+                            ) : null}
+                            <span>
+                              {t("ocrReview.wordsPanel.alignmentLine", {
+                                value:
+                                  word.ocr_evidence?.alignment ??
+                                  t("ocrReview.wordsPanel.notComputed"),
+                              })}
+                            </span>
+                            <span>
+                              {t("ocrReview.wordsPanel.agreementScoreLabel")}{" "}
+                              {word.ocr_evidence?.engine_agreement_score ===
+                                null ||
+                              word.ocr_evidence?.engine_agreement_score ===
+                                undefined
+                                ? t("ocrReview.wordsPanel.notComputed")
+                                : t("ocrReview.wordsPanel.agreementHeuristic", {
+                                    score: Math.round(
+                                      word.ocr_evidence.engine_agreement_score *
+                                        100,
+                                    ),
+                                  })}
+                            </span>
+                            <span>
+                              {t("ocrReview.wordsPanel.referenceTextLabel")}{" "}
+                              {word.ocr_evidence?.reference_text ??
+                                t("ocrReview.wordsPanel.notProvided")}
+                            </span>
+                            <span>
+                              {t(
+                                "ocrReview.wordsPanel.verificationSourceLabel",
+                              )}{" "}
+                              {word.ocr_evidence?.verification_source ??
+                                t("ocrReview.wordsPanel.noneValue")}
+                            </span>
+                            <span>
+                              {t(
+                                "ocrReview.wordsPanel.calibratedAccuracyLabel",
+                              )}{" "}
+                              {word.ocr_score_source ===
+                                "ocr_calibrated_word_accuracy_v1" &&
+                              word.ocr_confidence !== null
+                                ? `${Math.round(word.ocr_confidence * 100)}%`
+                                : t(
+                                    "ocrReview.wordsPanel.notCalibratedEvidence",
+                                  )}
+                            </span>
+                            <span>
+                              {t("ocrReview.wordsPanel.draftEngineLabel")}{" "}
+                              {word.ocr_evidence?.selected_engine ??
+                                t("ocrReview.wordsPanel.notSelected")}
+                              {t("ocrReview.wordsPanel.tempSelectionSuffix")}
+                            </span>
+                            <span>
+                              {t("ocrReview.wordsPanel.selectionReasonLabel")}{" "}
+                              {word.ocr_evidence?.selection_reason ??
+                                t("ocrReview.wordsPanel.notRecorded")}
+                            </span>
+                            <span>
+                              {t("ocrReview.wordsPanel.geometryLabel", {
+                                label: getWordGeometryLabel(word, t),
+                              })}
+                            </span>
+                            <span>
+                              {t("ocrReview.wordsPanel.punctuationLabel", {
+                                label: getWordPunctuationLabel(word, t),
+                              })}
+                            </span>
+                            <span>
+                              {t("ocrReview.wordsPanel.bboxQualityLabel")}{" "}
+                              {word.ocr_evidence?.bbox_quality ??
+                                t("ocrReview.wordsPanel.notAssessed")}
+                            </span>
+                            <span>
+                              {t("ocrReview.wordsPanel.cropQualityLabel")}{" "}
+                              {word.ocr_evidence?.crop_quality ??
+                                t("ocrReview.wordsPanel.notProcessed")}
+                            </span>
+                            {word.ocr_evidence?.crop_evidence ? (
+                              <>
+                                <span>
+                                  {t("ocrReview.wordsPanel.cropPaddleLabel")}{" "}
+                                  {typeof word.ocr_evidence.crop_evidence
+                                    .paddleocr_candidate === "string"
+                                    ? word.ocr_evidence.crop_evidence
+                                        .paddleocr_candidate
+                                    : t("ocrReview.wordsPanel.noCropCandidate")}
+                                </span>
+                                <span>
+                                  {t("ocrReview.wordsPanel.cropVietOcrLabel")}{" "}
+                                  {typeof word.ocr_evidence.crop_evidence
+                                    .vietocr_candidate === "string"
+                                    ? word.ocr_evidence.crop_evidence
+                                        .vietocr_candidate
+                                    : t("ocrReview.wordsPanel.noCropCandidate")}
+                                </span>
+                                <span>
+                                  {t("ocrReview.wordsPanel.cropTesseractLabel")}{" "}
+                                  {typeof word.ocr_evidence.crop_evidence
+                                    .tesseract_candidate === "string"
+                                    ? word.ocr_evidence.crop_evidence
+                                        .tesseract_candidate
+                                    : t("ocrReview.wordsPanel.noTesseractCrop")}
+                                </span>
+                                <span>
+                                  {t("ocrReview.wordsPanel.adjudicationLabel")}{" "}
+                                  {typeof word.ocr_evidence.crop_evidence
+                                    .adjudication_status === "string"
+                                    ? word.ocr_evidence.crop_evidence
+                                        .adjudication_status
+                                    : t("ocrReview.wordsPanel.notRecorded")}
+                                  {typeof word.ocr_evidence.crop_evidence
+                                    .adjudication_support === "string" &&
+                                  word.ocr_evidence.crop_evidence
+                                    .adjudication_support
+                                    ? ` · ${word.ocr_evidence.crop_evidence.adjudication_support}`
+                                    : ""}
+                                </span>
+                                {typeof word.ocr_evidence.crop_evidence
+                                  .text_before_adjudication === "string" ? (
+                                  <span>
+                                    {t(
+                                      "ocrReview.wordsPanel.textBeforeAdjudication",
+                                    )}{" "}
+                                    <span
+                                      className="viread-learning-content"
+                                      dir="ltr"
+                                      lang="vi"
+                                    >
+                                      {
+                                        word.ocr_evidence.crop_evidence
+                                          .text_before_adjudication
+                                      }
+                                    </span>
+                                  </span>
+                                ) : null}
                                 <span>
                                   {t(
-                                    "ocrReview.wordsPanel.vietOcrRawLineLabel",
+                                    "ocrReview.wordsPanel.paddleCropRawScoreLabel",
                                   )}{" "}
-                                  {getLineEngineOutput(
-                                    word,
-                                    "vietocr",
-                                    detail.ocr_metadata,
-                                  )}
-                                </span>
-                              ) : null}
-                              <span>
-                                Tesseract:{" "}
-                                {getEngineEvidenceDisplay(
-                                  word,
-                                  "tesseract",
-                                  detail.ocr_metadata,
-                                  t,
-                                )}
-                              </span>
-                              <span>
-                                {t("ocrReview.wordsPanel.ocrSourceTokenLine", {
-                                  value:
-                                    word.ocr_evidence?.source_text ??
-                                    t("ocrReview.wordsPanel.notRecorded"),
-                                })}
-                              </span>
-                              {word.ocr_evidence?.source_text &&
-                              normalizeVietnameseWord(
-                                word.ocr_evidence.source_text,
-                              ) !== normalizeVietnameseWord(word.text) ? (
-                                <span className="text-amber-900">
-                                  {t(
-                                    "ocrReview.wordsPanel.editedWordEvidenceNote",
-                                    {
-                                      sourceText: word.ocr_evidence.source_text,
-                                      currentText: word.text,
-                                    },
-                                  )}
-                                </span>
-                              ) : null}
-                              <span>
-                                {t("ocrReview.wordsPanel.alignmentLine", {
-                                  value:
-                                    word.ocr_evidence?.alignment ??
-                                    t("ocrReview.wordsPanel.notComputed"),
-                                })}
-                              </span>
-                              <span>
-                                {t("ocrReview.wordsPanel.agreementScoreLabel")}{" "}
-                                {word.ocr_evidence?.engine_agreement_score ===
-                                  null ||
-                                word.ocr_evidence?.engine_agreement_score ===
-                                  undefined
-                                  ? t("ocrReview.wordsPanel.notComputed")
-                                  : t(
-                                      "ocrReview.wordsPanel.agreementHeuristic",
-                                      {
-                                        score: Math.round(
-                                          word.ocr_evidence
-                                            .engine_agreement_score * 100,
-                                        ),
-                                      },
-                                    )}
-                              </span>
-                              <span>
-                                {t("ocrReview.wordsPanel.referenceTextLabel")}{" "}
-                                {word.ocr_evidence?.reference_text ??
-                                  t("ocrReview.wordsPanel.notProvided")}
-                              </span>
-                              <span>
-                                {t(
-                                  "ocrReview.wordsPanel.verificationSourceLabel",
-                                )}{" "}
-                                {word.ocr_evidence?.verification_source ??
-                                  t("ocrReview.wordsPanel.noneValue")}
-                              </span>
-                              <span>
-                                {t(
-                                  "ocrReview.wordsPanel.calibratedAccuracyLabel",
-                                )}{" "}
-                                {word.ocr_score_source ===
-                                  "ocr_calibrated_word_accuracy_v1" &&
-                                word.ocr_confidence !== null
-                                  ? `${Math.round(word.ocr_confidence * 100)}%`
-                                  : t(
-                                      "ocrReview.wordsPanel.notCalibratedEvidence",
-                                    )}
-                              </span>
-                              <span>
-                                {t("ocrReview.wordsPanel.draftEngineLabel")}{" "}
-                                {word.ocr_evidence?.selected_engine ??
-                                  t("ocrReview.wordsPanel.notSelected")}
-                                {t("ocrReview.wordsPanel.tempSelectionSuffix")}
-                              </span>
-                              <span>
-                                {t("ocrReview.wordsPanel.selectionReasonLabel")}{" "}
-                                {word.ocr_evidence?.selection_reason ??
-                                  t("ocrReview.wordsPanel.notRecorded")}
-                              </span>
-                              <span>
-                                {t("ocrReview.wordsPanel.geometryLabel", {
-                                  label: getWordGeometryLabel(word, t),
-                                })}
-                              </span>
-                              <span>
-                                {t("ocrReview.wordsPanel.punctuationLabel", {
-                                  label: getWordPunctuationLabel(word, t),
-                                })}
-                              </span>
-                              <span>
-                                {t("ocrReview.wordsPanel.bboxQualityLabel")}{" "}
-                                {word.ocr_evidence?.bbox_quality ??
-                                  t("ocrReview.wordsPanel.notAssessed")}
-                              </span>
-                              <span>
-                                {t("ocrReview.wordsPanel.cropQualityLabel")}{" "}
-                                {word.ocr_evidence?.crop_quality ??
-                                  t("ocrReview.wordsPanel.notProcessed")}
-                              </span>
-                              {word.ocr_evidence?.crop_evidence ? (
-                                <>
-                                  <span>
-                                    {t("ocrReview.wordsPanel.cropPaddleLabel")}{" "}
-                                    {typeof word.ocr_evidence.crop_evidence
-                                      .paddleocr_candidate === "string"
-                                      ? word.ocr_evidence.crop_evidence
-                                          .paddleocr_candidate
-                                      : t(
-                                          "ocrReview.wordsPanel.noCropCandidate",
-                                        )}
-                                  </span>
-                                  <span>
-                                    {t("ocrReview.wordsPanel.cropVietOcrLabel")}{" "}
-                                    {typeof word.ocr_evidence.crop_evidence
-                                      .vietocr_candidate === "string"
-                                      ? word.ocr_evidence.crop_evidence
-                                          .vietocr_candidate
-                                      : t(
-                                          "ocrReview.wordsPanel.noCropCandidate",
-                                        )}
-                                  </span>
-                                  <span>
-                                    {t(
-                                      "ocrReview.wordsPanel.cropTesseractLabel",
-                                    )}{" "}
-                                    {typeof word.ocr_evidence.crop_evidence
-                                      .tesseract_candidate === "string"
-                                      ? word.ocr_evidence.crop_evidence
-                                          .tesseract_candidate
-                                      : t(
-                                          "ocrReview.wordsPanel.noTesseractCrop",
-                                        )}
-                                  </span>
-                                  <span>
-                                    {t(
-                                      "ocrReview.wordsPanel.adjudicationLabel",
-                                    )}{" "}
-                                    {typeof word.ocr_evidence.crop_evidence
-                                      .adjudication_status === "string"
-                                      ? word.ocr_evidence.crop_evidence
-                                          .adjudication_status
-                                      : t("ocrReview.wordsPanel.notRecorded")}
-                                    {typeof word.ocr_evidence.crop_evidence
-                                      .adjudication_support === "string" &&
+                                  {formatRawOcrEvidence(
                                     word.ocr_evidence.crop_evidence
-                                      .adjudication_support
-                                      ? ` · ${word.ocr_evidence.crop_evidence.adjudication_support}`
-                                      : ""}
-                                  </span>
+                                      .paddle_crop_recognition_score,
+                                    t,
+                                  )}
+                                  {t(
+                                    "ocrReview.wordsPanel.notProbabilitySuffix",
+                                  )}
+                                </span>
+                                <span>
+                                  {t(
+                                    "ocrReview.wordsPanel.vietOcrCropRawScoreLabel",
+                                  )}{" "}
+                                  {formatRawOcrEvidence(
+                                    word.ocr_evidence.crop_evidence
+                                      .vietocr_crop_recognition_score,
+                                    t,
+                                  )}
+                                  {t(
+                                    "ocrReview.wordsPanel.notProbabilitySuffix",
+                                  )}
+                                </span>
+                                <span>
+                                  {t("ocrReview.wordsPanel.cropStatusLabel")}{" "}
                                   {typeof word.ocr_evidence.crop_evidence
-                                    .text_before_adjudication === "string" ? (
-                                    <span>
-                                      {t(
-                                        "ocrReview.wordsPanel.textBeforeAdjudication",
-                                      )}{" "}
-                                      <span
-                                        className="viread-learning-content"
-                                        dir="ltr"
-                                        lang="vi"
-                                      >
-                                        {
-                                          word.ocr_evidence.crop_evidence
-                                            .text_before_adjudication
-                                        }
-                                      </span>
-                                    </span>
-                                  ) : null}
-                                  <span>
-                                    {t(
-                                      "ocrReview.wordsPanel.paddleCropRawScoreLabel",
-                                    )}{" "}
-                                    {formatRawOcrEvidence(
-                                      word.ocr_evidence.crop_evidence
-                                        .paddle_crop_recognition_score,
-                                      t,
-                                    )}
-                                    {t(
-                                      "ocrReview.wordsPanel.notProbabilitySuffix",
-                                    )}
-                                  </span>
-                                  <span>
-                                    {t(
-                                      "ocrReview.wordsPanel.vietOcrCropRawScoreLabel",
-                                    )}{" "}
-                                    {formatRawOcrEvidence(
-                                      word.ocr_evidence.crop_evidence
-                                        .vietocr_crop_recognition_score,
-                                      t,
-                                    )}
-                                    {t(
-                                      "ocrReview.wordsPanel.notProbabilitySuffix",
-                                    )}
-                                  </span>
-                                  <span>
-                                    {t("ocrReview.wordsPanel.cropStatusLabel")}{" "}
-                                    {typeof word.ocr_evidence.crop_evidence
-                                      .status === "string"
-                                      ? word.ocr_evidence.crop_evidence.status
-                                      : t("ocrReview.wordsPanel.notProcessed")}
-                                  </span>
-                                  <span>
-                                    {t(
-                                      "ocrReview.wordsPanel.vietOcrDecodingModeLabel",
-                                    )}{" "}
-                                    {typeof word.ocr_evidence.crop_evidence
-                                      .vietocr_decoding_mode === "string"
-                                      ? word.ocr_evidence.crop_evidence
-                                          .vietocr_decoding_mode
-                                      : t("ocrReview.wordsPanel.notApplicable")}
-                                  </span>
-                                  <span>
-                                    {t(
-                                      "ocrReview.wordsPanel.cropContrastStdLabel",
-                                    )}{" "}
-                                    {formatRawOcrEvidence(
-                                      word.ocr_evidence.crop_evidence
-                                        .contrast_std,
-                                      t,
-                                    )}
-                                  </span>
-                                  <span>
-                                    {t("ocrReview.wordsPanel.inkRatioLabel")}{" "}
-                                    {formatRawOcrEvidence(
-                                      word.ocr_evidence.crop_evidence.ink_ratio,
-                                      t,
-                                    )}
-                                  </span>
-                                  <span>
-                                    {t(
-                                      "ocrReview.wordsPanel.paddingClippedLabel",
-                                    )}{" "}
-                                    {typeof word.ocr_evidence.crop_evidence
-                                      .padding_clipped === "boolean"
-                                      ? word.ocr_evidence.crop_evidence
-                                          .padding_clipped
-                                        ? t("ocrReview.wordsPanel.yesLabel")
-                                        : t("ocrReview.wordsPanel.noLabel")
-                                      : t("ocrReview.wordsPanel.notAssessed")}
-                                  </span>
-                                </>
-                              ) : null}
-                              <span>
-                                {t("ocrReview.wordsPanel.statusReasonLabel")}{" "}
-                                {word.ocr_evidence?.review_reason ??
-                                  (colorGroup === "green"
-                                    ? t(
-                                        "ocrReview.wordsPanel.greenStatusFallback",
-                                      )
-                                    : t(
-                                        "ocrReview.wordsPanel.reviewStatusFallback",
-                                      ))}
-                              </span>
-                              <span>
-                                {getPaddleLineScoreLabel(
-                                  detail.ocr_metadata,
-                                  word.line_index,
-                                  t,
-                                )}
-                              </span>
-                            </section>
-                          </details>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
+                                    .status === "string"
+                                    ? word.ocr_evidence.crop_evidence.status
+                                    : t("ocrReview.wordsPanel.notProcessed")}
+                                </span>
+                                <span>
+                                  {t(
+                                    "ocrReview.wordsPanel.vietOcrDecodingModeLabel",
+                                  )}{" "}
+                                  {typeof word.ocr_evidence.crop_evidence
+                                    .vietocr_decoding_mode === "string"
+                                    ? word.ocr_evidence.crop_evidence
+                                        .vietocr_decoding_mode
+                                    : t("ocrReview.wordsPanel.notApplicable")}
+                                </span>
+                                <span>
+                                  {t(
+                                    "ocrReview.wordsPanel.cropContrastStdLabel",
+                                  )}{" "}
+                                  {formatRawOcrEvidence(
+                                    word.ocr_evidence.crop_evidence
+                                      .contrast_std,
+                                    t,
+                                  )}
+                                </span>
+                                <span>
+                                  {t("ocrReview.wordsPanel.inkRatioLabel")}{" "}
+                                  {formatRawOcrEvidence(
+                                    word.ocr_evidence.crop_evidence.ink_ratio,
+                                    t,
+                                  )}
+                                </span>
+                                <span>
+                                  {t(
+                                    "ocrReview.wordsPanel.paddingClippedLabel",
+                                  )}{" "}
+                                  {typeof word.ocr_evidence.crop_evidence
+                                    .padding_clipped === "boolean"
+                                    ? word.ocr_evidence.crop_evidence
+                                        .padding_clipped
+                                      ? t("ocrReview.wordsPanel.yesLabel")
+                                      : t("ocrReview.wordsPanel.noLabel")
+                                    : t("ocrReview.wordsPanel.notAssessed")}
+                                </span>
+                              </>
+                            ) : null}
+                            <span>
+                              {t("ocrReview.wordsPanel.statusReasonLabel")}{" "}
+                              {word.ocr_evidence?.review_reason ??
+                                (colorGroup === "green"
+                                  ? t(
+                                      "ocrReview.wordsPanel.greenStatusFallback",
+                                    )
+                                  : t(
+                                      "ocrReview.wordsPanel.reviewStatusFallback",
+                                    ))}
+                            </span>
+                            <span>
+                              {getPaddleLineScoreLabel(
+                                detail.ocr_metadata,
+                                word.line_index,
+                                t,
+                              )}
+                            </span>
+                          </section>
+                        </details>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </section>
           </div>
 
@@ -4446,30 +4429,30 @@ export function AdminOcrReviewScreen({
             id="ocr-workbench-panel-safety"
             role="tabpanel"
           >
-            {activeTab === "safety" ? (
-              aiWorkflowCard ?? (
-                <section className="rounded-xl border border-border bg-white p-5 text-center shadow-2xs">
-                  <ShieldCheck
-                    aria-hidden="true"
-                    className="mx-auto mb-2 size-7 text-muted"
-                  />
-                  <h2 className="text-sm font-extrabold text-ink">
-                    {t(
-                      "ocrReview.safetyPanel.emptyTitle",
-                      undefined,
-                      "Chưa có kết quả AI Safety cho revision này",
-                    )}
-                  </h2>
-                  <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-muted">
-                    {t(
-                      "ocrReview.safetyPanel.emptyDesc",
-                      undefined,
-                      "Chạy XÁC NHẬN & CHẠY AI ở thanh thao tác bên dưới để tự động rà soát chính tả và quét an toàn trẻ em.",
-                    )}
-                  </p>
-                </section>
-              )
-            ) : null}
+            {activeTab === "safety"
+              ? (aiWorkflowCard ?? (
+                  <section className="rounded-xl border border-border bg-white p-5 text-center shadow-2xs">
+                    <ShieldCheck
+                      aria-hidden="true"
+                      className="mx-auto mb-2 size-7 text-muted"
+                    />
+                    <h2 className="text-sm font-extrabold text-ink">
+                      {t(
+                        "ocrReview.safetyPanel.emptyTitle",
+                        undefined,
+                        "Chưa có kết quả AI Safety cho revision này",
+                      )}
+                    </h2>
+                    <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-muted">
+                      {t(
+                        "ocrReview.safetyPanel.emptyDesc",
+                        undefined,
+                        "Chạy XÁC NHẬN & CHẠY AI ở thanh thao tác bên dưới để tự động rà soát chính tả và quét an toàn trẻ em.",
+                      )}
+                    </p>
+                  </section>
+                ))
+              : null}
           </div>
 
           {/* Tab 4: Khối thông minh V2 */}

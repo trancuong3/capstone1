@@ -171,8 +171,7 @@ export function ReadingLayout({
     useState<ReadingDisplayMode | null>(null);
   const activeReadingMode =
     readingMode !== undefined ? readingMode : internalReadingMode;
-  const handleReadingModeChange =
-    onReadingModeChange ?? setInternalReadingMode;
+  const handleReadingModeChange = onReadingModeChange ?? setInternalReadingMode;
   const pageHasVerifiedIllustration =
     Boolean(page.illustration_url) && page.illustration_text_free === true;
   const resolvedInitialReadingMode: ReadingDisplayMode =
@@ -186,9 +185,7 @@ export function ReadingLayout({
       (isCurrentWordMispronounced || Boolean(latestTranscript))) ||
     Boolean(latestTranscript);
   const hasDockedFeedbackPanel =
-    retryMode ||
-    Boolean(sentenceReinforcementPanel) ||
-    Boolean(phonicsPanel);
+    retryMode || Boolean(sentenceReinforcementPanel) || Boolean(phonicsPanel);
   const hasFeedbackPanel =
     hasStatusBanner ||
     Boolean(sentenceReinforcementPanel) ||

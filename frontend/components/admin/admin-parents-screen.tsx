@@ -423,7 +423,9 @@ export function AdminParentsScreen() {
               aria-hidden="true"
               className="hidden border-b border-border bg-surface-subtle/75 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-muted md:grid md:grid-cols-[minmax(0,2.2fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_auto] md:items-center md:gap-4"
             >
-              <span>{t("parents.tableHeaders.parent", undefined, "Phụ huynh")}</span>
+              <span>
+                {t("parents.tableHeaders.parent", undefined, "Phụ huynh")}
+              </span>
               <span>{t("parents.childProfiles")}</span>
               <span>{t("parents.createdAt")}</span>
               <span className="text-end">

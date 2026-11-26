@@ -98,23 +98,82 @@ class VercelReadingFlowOverhaulBackendTests(unittest.IsolatedAsyncioTestCase):
     async def test_single_query_cache_lookup_bg_write_behind_and_ram_lru_isolation(
         self,
     ) -> None:
-        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-        async with engine.begin() as conn:
-            await conn.run_sync(
-                lambda sync_conn: TtsAudioCacheEntry.__table__.create(
-                    sync_conn, checkfirst=True
-                )
-            )
-            await conn.run_sync(
-                lambda sync_conn: TtsAudioCacheDailyUsage.__table__.create(
-                    sync_conn, checkfirst=True
-                )
-            )
+        from sqlalchemy import create_engine
+        from sqlalchemy.dialects.postgresql import JSONB
+        from sqlalchemy.ext.compiler import compiles
+        from sqlalchemy.orm import sessionmaker
 
-        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        @compiles(JSONB, "sqlite")
+        def _compile_jsonb_sqlite(_type, _compiler, **_kw):
+            return "JSON"
+
+        sync_engine = create_engine("sqlite:///:memory:")
+        TtsAudioCacheEntry.__table__.create(sync_engine, checkfirst=True)
+        TtsAudioCacheDailyUsage.__table__.create(sync_engine, checkfirst=True)
+        sync_factory = sessionmaker(bind=sync_engine, expire_on_commit=False)
+
+        class _SyncAsyncSession(AsyncSession):
+            def __init__(self, sync_db) -> None:
+                self._db = sync_db
+                self.bind = sync_db.get_bind()
+
+            def get_bind(self, *args, **kwargs):
+                return self._db.get_bind(*args, **kwargs)
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb) -> None:
+                self._db.close()
+
+            def add(self, obj) -> None:
+                self._db.add(obj)
+
+            def add_all(self, objs) -> None:
+                self._db.add_all(objs)
+
+            async def get(self, *args, **kwargs):
+                return self._db.get(*args, **kwargs)
+
+            async def execute(self, *args, **kwargs):
+                return self._db.execute(*args, **kwargs)
+
+            async def scalar(self, *args, **kwargs):
+                return self._db.scalar(*args, **kwargs)
+
+            async def scalars(self, *args, **kwargs):
+                return self._db.scalars(*args, **kwargs)
+
+            async def flush(self) -> None:
+                self._db.flush()
+
+            async def commit(self) -> None:
+                self._db.commit()
+
+            async def rollback(self) -> None:
+                self._db.rollback()
+
+            async def refresh(self, obj) -> None:
+                self._db.refresh(obj)
+
+            def begin_nested(self):
+                nested = self._db.begin_nested()
+
+                class _AsyncNested:
+                    async def __aenter__(self_inner):
+                        return nested.__enter__()
+
+                    async def __aexit__(self_inner, exc_type, exc, tb):
+                        return nested.__exit__(exc_type, exc, tb)
+
+                return _AsyncNested()
+
+        def session_factory():
+            return _SyncAsyncSession(sync_factory())
+
         select_sqls: list[str] = []
 
-        @event.listens_for(engine.sync_engine, "before_cursor_execute")
+        @event.listens_for(sync_engine, "before_cursor_execute")
         def _record_sql(_conn, _cursor, statement, _params, _ctx, _many):
             if statement.lstrip().upper().startswith("SELECT"):
                 select_sqls.append(statement)
@@ -247,7 +306,7 @@ class VercelReadingFlowOverhaulBackendTests(unittest.IsolatedAsyncioTestCase):
                     )
                 self.assertIsNone(priv_hit2)
 
-        await engine.dispose()
+        sync_engine.dispose()
 
     async def test_reading_page_dto_precomputed_word_timings_public_only(self) -> None:
         page_id = uuid4()

@@ -206,9 +206,9 @@ describe("Admin Chất lượng sách -> Sách người dùng tab", () => {
     expect(userBooksTab).toHaveAttribute("aria-selected", "true");
 
     // Regression guard: NO duplicate #quality-panel-user-books or any duplicate IDs
-    expect(container.querySelectorAll("#quality-panel-user-books")).toHaveLength(
-      1,
-    );
+    expect(
+      container.querySelectorAll("#quality-panel-user-books"),
+    ).toHaveLength(1);
     const ids = Array.from(container.querySelectorAll("[id]")).map(
       (el) => el.id,
     );
@@ -277,7 +277,9 @@ describe("Admin Chất lượng sách -> Sách người dùng tab", () => {
     });
     // Drawer auto-closes on success while keeping confirmation notice visible above queue
     await waitFor(() => {
-      expect(screen.queryByTestId("admin-drawer-panel")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("admin-drawer-panel"),
+      ).not.toBeInTheDocument();
     });
     expect(
       await screen.findByText(/Đã phê duyệt đúng phiên bản v1/),

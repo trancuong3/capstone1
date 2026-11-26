@@ -318,10 +318,7 @@ const TimingEditorForm = memo(function TimingEditorForm({
                 label: t("karaoke.lyricEditor.pageRangeWithTotal", {
                   start: formatNumber(index * LINES_PER_PAGE + 1),
                   end: formatNumber(
-                    Math.min(
-                      (index + 1) * LINES_PER_PAGE,
-                      lyrics.lines.length,
-                    ),
+                    Math.min((index + 1) * LINES_PER_PAGE, lyrics.lines.length),
                   ),
                   total: formatNumber(lyrics.lines.length),
                 }),

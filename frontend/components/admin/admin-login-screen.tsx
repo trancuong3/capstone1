@@ -111,10 +111,7 @@ export function AdminLoginScreen({
             ) : null}
 
             <div className="flex flex-col gap-1.5">
-              <label
-                className="text-xs font-bold text-ink"
-                htmlFor={emailId}
-              >
+              <label className="text-xs font-bold text-ink" htmlFor={emailId}>
                 {t("login.emailLabel")}
               </label>
               <input

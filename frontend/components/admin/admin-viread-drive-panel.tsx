@@ -443,7 +443,10 @@ export function AdminVireadDrivePanel({
 
         {!status.oauth_configured && !isNonOauthConnected ? (
           <div className="flex items-start gap-2 rounded-control border border-border bg-surface-subtle p-3 text-sm text-ink">
-            <CloudOff aria-hidden className="mt-0.5 size-4 shrink-0 text-muted" />
+            <CloudOff
+              aria-hidden
+              className="mt-0.5 size-4 shrink-0 text-muted"
+            />
             <p>
               {desktopReady || bridgeReady ? (
                 <>

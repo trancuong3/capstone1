@@ -443,9 +443,10 @@ describe("admin components", () => {
       </div>,
     );
 
-    expect(
-      screen.getByRole("link", { name: "Kho sách" }),
-    ).toHaveAttribute("href", "/admin/books");
+    expect(screen.getByRole("link", { name: "Kho sách" })).toHaveAttribute(
+      "href",
+      "/admin/books",
+    );
     expect(
       screen.getByRole("heading", { level: 1, name: "Tiêu đề trang" })
         .className,

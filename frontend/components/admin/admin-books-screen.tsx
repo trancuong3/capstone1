@@ -568,7 +568,11 @@ export function AdminBooksScreen() {
           ) : null}
 
           <div
-            aria-label={t("books.listAria", undefined, "Danh sách sách quản trị")}
+            aria-label={t(
+              "books.listAria",
+              undefined,
+              "Danh sách sách quản trị",
+            )}
             className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-white shadow-2xs"
             role="list"
           >

@@ -42,11 +42,7 @@ import {
 } from "@/types/ocr-extraction";
 
 export type OcrReviewTabId =
-  | "original"
-  | "clean"
-  | "excluded"
-  | "review"
-  | "preview";
+  "original" | "clean" | "excluded" | "review" | "preview";
 
 export interface SmartOcrBlockReviewProps {
   readonly extraction: PageOcrExtractionDTO;
@@ -585,7 +581,11 @@ export function SmartOcrBlockReview({
     },
     {
       id: "excluded",
-      label: t("ocrReview.smartBlocks.tabs.excluded", undefined, "Phần bị loại"),
+      label: t(
+        "ocrReview.smartBlocks.tabs.excluded",
+        undefined,
+        "Phần bị loại",
+      ),
       count: excludedBlocks.length,
     },
     {
@@ -745,7 +745,10 @@ export function SmartOcrBlockReview({
               >
                 {block.decision === "EXCLUDE" ? (
                   <>
-                    <RotateCcw aria-hidden="true" className="size-3.5 shrink-0" />
+                    <RotateCcw
+                      aria-hidden="true"
+                      className="size-3.5 shrink-0"
+                    />
                     {t(
                       "ocrReview.smartBlocks.restoreBtn",
                       undefined,
@@ -1100,9 +1103,12 @@ export function SmartOcrBlockReview({
                       extraction.geometry_transform.deskew_angle_deg,
                     ),
                     area: formatNumber(
-                      Math.round(extraction.geometry_transform.area_ratio * 100),
+                      Math.round(
+                        extraction.geometry_transform.area_ratio * 100,
+                      ),
                     ),
-                    gutterReason: extraction.geometry_transform.gutter.reason_vi,
+                    gutterReason:
+                      extraction.geometry_transform.gutter.reason_vi,
                   },
                   "Góc nghiêng ước lượng: {angle}° · Diện tích vùng trang: {area}% · {gutterReason}",
                 )}

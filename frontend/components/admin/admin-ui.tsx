@@ -123,11 +123,7 @@ export function AdminPageHeader({
 }
 
 export type AdminBadgeTone =
-  | "success"
-  | "warning"
-  | "danger"
-  | "info"
-  | "neutral";
+  "success" | "warning" | "danger" | "info" | "neutral";
 
 const badgeToneClassNames: Record<AdminBadgeTone, string> = {
   success: "border-emerald-200 bg-success-surface text-success-ink",
@@ -171,7 +167,10 @@ export function AdminBadge({
       {dot ? (
         <span
           aria-hidden="true"
-          className={cn("size-1.5 shrink-0 rounded-full", badgeDotClassNames[tone])}
+          className={cn(
+            "size-1.5 shrink-0 rounded-full",
+            badgeDotClassNames[tone],
+          )}
         />
       ) : null}
       {icon}
@@ -431,11 +430,10 @@ export function AdminToolbar({
   );
 }
 
-export interface AdminSearchInputProps
-  extends Omit<
-    InputHTMLAttributes<HTMLInputElement>,
-    "onChange" | "size" | "type" | "value"
-  > {
+export interface AdminSearchInputProps extends Omit<
+  InputHTMLAttributes<HTMLInputElement>,
+  "onChange" | "size" | "type" | "value"
+> {
   readonly clearLabel?: string;
   readonly containerClassName?: string;
   readonly hideLabel?: boolean;
@@ -463,8 +461,7 @@ export function AdminSearchInput({
   const generatedId = useId();
   const inputId = id ?? generatedId;
   const resolvedClearLabel =
-    clearLabel ??
-    t("common.clearSearch", undefined, "Xóa từ khóa tìm kiếm");
+    clearLabel ?? t("common.clearSearch", undefined, "Xóa từ khóa tìm kiếm");
 
   return (
     <div
@@ -522,8 +519,10 @@ export interface AdminSelectOption {
   readonly value: string;
 }
 
-export interface AdminSelectProps
-  extends Omit<SelectHTMLAttributes<HTMLSelectElement>, "onChange" | "size"> {
+export interface AdminSelectProps extends Omit<
+  SelectHTMLAttributes<HTMLSelectElement>,
+  "onChange" | "size"
+> {
   readonly children?: ReactNode;
   readonly containerClassName?: string;
   readonly hideLabel?: boolean;
@@ -678,7 +677,10 @@ export function AdminDrawer({
               {title}
             </h2>
             {description ? (
-              <p className="mt-0.5 text-xs leading-relaxed text-muted" id={descriptionId}>
+              <p
+                className="mt-0.5 text-xs leading-relaxed text-muted"
+                id={descriptionId}
+              >
                 {description}
               </p>
             ) : null}

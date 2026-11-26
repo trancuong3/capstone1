@@ -71,9 +71,9 @@ export function AdminQualityHubScreen({
     useState<QualityHubTab>(initialTab);
   const [activeTab, setActiveTab] = useState<QualityHubTab>(initialTab);
   const [refreshSignal, setRefreshSignal] = useState(0);
-  const tabRefs = useRef<Partial<Record<QualityHubTab, HTMLButtonElement | null>>>(
-    {},
-  );
+  const tabRefs = useRef<
+    Partial<Record<QualityHubTab, HTMLButtonElement | null>>
+  >({});
 
   if (prevInitialTab !== initialTab) {
     setPrevInitialTab(initialTab);
@@ -86,7 +86,11 @@ export function AdminQualityHubScreen({
       try {
         const url = new URL(window.location.href);
         url.searchParams.set("tab", nextTab);
-        window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+        window.history.replaceState(
+          null,
+          "",
+          `${url.pathname}${url.search}${url.hash}`,
+        );
       } catch {
         // Ignore history sync errors in non-browser test environments.
       }

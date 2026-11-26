@@ -1,6 +1,5 @@
 "use client";
 
-import { RefreshCw, UploadCloud } from "lucide-react";
 import {
   useEffect,
   useRef,
@@ -17,7 +16,6 @@ import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { STUDIO_TASKS_CHANGED_EVENT } from "@/lib/api/global-tasks-service";
-import { getApiBaseUrl } from "@/lib/supabase/config";
 import {
   emptyAdminBookUploadSession,
   getAdminBookUploadSession,
@@ -481,7 +479,10 @@ export function AdminPageUploader({
 
       <form className="space-y-3" onSubmit={submit}>
         <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border bg-surface-subtle/60 px-4 py-4 text-center transition-colors hover:border-primary/50 hover:bg-sky/20">
-          <UploadCloud aria-hidden="true" className="mb-1.5 size-6 text-primary" />
+          <UploadCloud
+            aria-hidden="true"
+            className="mb-1.5 size-6 text-primary"
+          />
           <span className="text-sm font-bold text-ink">
             {t("books.uploader.selectFilesLabel")}
           </span>
@@ -501,7 +502,9 @@ export function AdminPageUploader({
         </label>
 
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs text-muted">{t("books.uploader.orderingNote")}</p>
+          <p className="text-xs text-muted">
+            {t("books.uploader.orderingNote")}
+          </p>
           <Button
             disabled={session.busy}
             isLoading={session.busy}

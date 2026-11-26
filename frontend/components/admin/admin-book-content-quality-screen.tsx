@@ -191,9 +191,7 @@ function FindingCard({
           })}
         </div>
         <div className="flex flex-wrap gap-1.5">
-          <AdminBadge
-            tone={finding.severity === "HIGH" ? "danger" : "warning"}
-          >
+          <AdminBadge tone={finding.severity === "HIGH" ? "danger" : "warning"}>
             {finding.severity}
           </AdminBadge>
           <AdminBadge tone={findingStatusTones[finding.status] ?? "neutral"}>
@@ -477,7 +475,14 @@ export function AdminBookContentQualityScreen({
       globalThis.clearTimeout(timeout);
       requestId.current += 1;
     };
-  }, [bookSearch, isCatalogVisible, loadBooks, refreshSignal, showBooks, showReports]);
+  }, [
+    bookSearch,
+    isCatalogVisible,
+    loadBooks,
+    refreshSignal,
+    showBooks,
+    showReports,
+  ]);
 
   const refreshSelectedBook = useCallback(
     async (bookId: string) => {
@@ -730,11 +735,11 @@ export function AdminBookContentQualityScreen({
 
   const hasReportFilters = Boolean(
     search.trim() ||
-      createdAfter ||
-      createdBefore ||
-      statusFilter ||
-      issueFilter ||
-      bookFilter,
+    createdAfter ||
+    createdBefore ||
+    statusFilter ||
+    issueFilter ||
+    bookFilter,
   );
   const hasBookFilters = Boolean(
     bookSearch.trim() || bookApprovalFilter || bookAlertFilter,
@@ -1098,7 +1103,9 @@ export function AdminBookContentQualityScreen({
             <AdminKpiCard
               active={bookApprovalFilter === "PENDING_ADMIN_REVIEW"}
               icon={<Clock className="size-4" />}
-              label={t("contentQuality.assessmentStatuses.PENDING_ADMIN_REVIEW")}
+              label={t(
+                "contentQuality.assessmentStatuses.PENDING_ADMIN_REVIEW",
+              )}
               onClick={() => {
                 setBookOffset(0);
                 setBookApprovalFilter((prev) =>
@@ -1223,7 +1230,9 @@ export function AdminBookContentQualityScreen({
                   }}
                   type="button"
                 >
-                  <span>{t(`contentQuality.assessmentStatuses.${status}`)}</span>
+                  <span>
+                    {t(`contentQuality.assessmentStatuses.${status}`)}
+                  </span>
                   <span className="tabular-nums opacity-80">
                     {formatNumber(bookSummary[status] ?? 0)}
                   </span>
@@ -1374,7 +1383,9 @@ export function AdminBookContentQualityScreen({
                         </AdminBadge>
                         {book.assessment.finding_count > 0 ? (
                           <AdminBadge tone="danger">
-                            {t("contentQuality.booksScan.childSafetyAlertBadge")}
+                            {t(
+                              "contentQuality.booksScan.childSafetyAlertBadge",
+                            )}
                           </AdminBadge>
                         ) : null}
                         {book.assessment.copyright_finding_count !== null &&
@@ -1405,9 +1416,12 @@ export function AdminBookContentQualityScreen({
                       </p>
 
                       <p className="mt-1 text-xs font-semibold tabular-nums text-warning">
-                        {t("contentQuality.booksScan.childSafetyFindingsCount", {
-                          count: formatNumber(book.assessment.finding_count),
-                        })}
+                        {t(
+                          "contentQuality.booksScan.childSafetyFindingsCount",
+                          {
+                            count: formatNumber(book.assessment.finding_count),
+                          },
+                        )}
                         {` · HIGH ${formatNumber(book.assessment.high_finding_count)}`}
                         {` · MEDIUM ${formatNumber(book.assessment.medium_finding_count)}`}
                         {` · ${t(
@@ -1627,11 +1641,7 @@ export function AdminBookContentQualityScreen({
         closeLabel={t("contentQuality.reports.closeDetail")}
         description={selectedReport?.id}
         footer={
-          <Button
-            onClick={closeReportDrawer}
-            size="admin"
-            variant="outline"
-          >
+          <Button onClick={closeReportDrawer} size="admin" variant="outline">
             {t("contentQuality.reports.closeDetail")}
           </Button>
         }
@@ -1946,8 +1956,7 @@ export function AdminBookContentQualityScreen({
                   detail={t(
                     "contentQuality.bookDetail.compactSafetyDetail",
                     {
-                      proofreading:
-                        selectedBook.assessment.proofreading_status,
+                      proofreading: selectedBook.assessment.proofreading_status,
                     },
                     "Proofreading: {proofreading}",
                   )}
@@ -2154,7 +2163,9 @@ export function AdminBookContentQualityScreen({
                       value={rightsStatus}
                     >
                       <option value="UNASSESSED">
-                        {t("contentQuality.bookDetail.rightsOptions.UNASSESSED")}
+                        {t(
+                          "contentQuality.bookDetail.rightsOptions.UNASSESSED",
+                        )}
                       </option>
                       <option value="INSUFFICIENT_EVIDENCE">
                         {t(
@@ -2380,9 +2391,12 @@ export function AdminBookContentQualityScreen({
                         >
                           <div className="min-w-0 flex-1">
                             <span className="font-extrabold text-ink">
-                              {t("contentQuality.bookDetail.pageNumberHeading", {
-                                pageNumber: formatNumber(item.page_number),
-                              })}
+                              {t(
+                                "contentQuality.bookDetail.pageNumberHeading",
+                                {
+                                  pageNumber: formatNumber(item.page_number),
+                                },
+                              )}
                             </span>
                             <div className="mt-1 flex flex-wrap gap-1">
                               {item.codes.map((code) => (

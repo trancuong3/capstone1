@@ -174,22 +174,23 @@ function makeMockAssetsService(
 ): BookAssetsService {
   return {
     getBookAssets: vi.fn().mockResolvedValue(makeSummary()),
-    uploadCover: vi
-      .fn()
-      .mockResolvedValue(
-        makeAsset({
-          book_page_id: null,
-          asset_role: "COVER",
-          source_type: "USER_UPLOAD",
-          moderation_status: "APPROVED",
-        }),
-      ),
+    uploadCover: vi.fn().mockResolvedValue(
+      makeAsset({
+        book_page_id: null,
+        asset_role: "COVER",
+        source_type: "USER_UPLOAD",
+        moderation_status: "APPROVED",
+      }),
+    ),
     deleteCover: vi.fn(),
     generateAiCover: vi.fn(),
     buildStyleBible: vi.fn(),
     extractPageIllustration: vi.fn().mockResolvedValue({
       status: "EXTRACTED_VERIFIED",
-      asset: makeAsset({ moderation_status: "PENDING", text_free_verified: true }),
+      asset: makeAsset({
+        moderation_status: "PENDING",
+        text_free_verified: true,
+      }),
       text_free_verified: true,
       text_density_score: 0.01,
       ocr_overlap_score: 0.0,
@@ -206,8 +207,9 @@ function makeMockAssetsService(
       recommended_reading_mode: "TEXT",
       message_vi: "Đã xếp hàng tạo tranh minh họa AI miễn phí.",
     }),
-    moderatePageIllustration: vi.fn().mockImplementation(
-      async (_bookId, _pageId, _assetId, action) =>
+    moderatePageIllustration: vi
+      .fn()
+      .mockImplementation(async (_bookId, _pageId, _assetId, action) =>
         makeAsset({
           moderation_status:
             action === "APPROVE"
@@ -216,7 +218,7 @@ function makeMockAssetsService(
                 ? "REJECTED"
                 : "PENDING",
         }),
-    ),
+      ),
     ...overrides,
   };
 }
@@ -642,9 +644,10 @@ describe("Wave 2B Studio V2 Complete Integration", () => {
 
     // Retry failed task
     await user.click(
-      within(
-        screen.getByTestId("studio-task-row-task-admin-failed"),
-      ).getByRole("button", { name: "Thử lại" }),
+      within(screen.getByTestId("studio-task-row-task-admin-failed")).getByRole(
+        "button",
+        { name: "Thử lại" },
+      ),
     );
     await waitFor(() =>
       expect(mockService.retryTask).toHaveBeenCalledWith("task-admin-failed"),
@@ -673,14 +676,12 @@ describe("Wave 2B Studio V2 Complete Integration", () => {
   });
 
   it("refreshes AiTaskCenterProvider on viread:tasks-changed & viread:android-resume even when autoSyncOnMount=false, and exposes /studio/tasks drawer link", async () => {
-    const listTasks = vi
-      .fn()
-      .mockResolvedValue(
-        makeTaskFeed([makeTask({ id: "t-resume", actor_role: "parent" })], {
-          actor_id: "parent-1",
-          actor_role: "parent",
-        }),
-      );
+    const listTasks = vi.fn().mockResolvedValue(
+      makeTaskFeed([makeTask({ id: "t-resume", actor_role: "parent" })], {
+        actor_id: "parent-1",
+        actor_role: "parent",
+      }),
+    );
     const service: GlobalTasksService = {
       listTasks,
       createTask: vi.fn(),

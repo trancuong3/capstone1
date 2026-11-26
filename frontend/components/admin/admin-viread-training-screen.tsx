@@ -611,9 +611,9 @@ export function AdminVireadTrainingScreen() {
       icon: HardDrive,
       alert: Boolean(
         data?.google_drive &&
-          (!data.google_drive.connected ||
-            data.google_drive.status === "TOKEN_REVOKED" ||
-            data.google_drive.status === "ERROR"),
+        (!data.google_drive.connected ||
+          data.google_drive.status === "TOKEN_REVOKED" ||
+          data.google_drive.status === "ERROR"),
       ),
     },
     {
@@ -1127,7 +1127,11 @@ export function AdminVireadTrainingScreen() {
                         <code className="font-mono">
                           ai/vietocr_v2/viread_vietocr_v2_colab_worker.ipynb
                         </code>
-                        {t("training.colabGuideMid1", undefined, ", chọn Runtime")}{" "}
+                        {t(
+                          "training.colabGuideMid1",
+                          undefined,
+                          ", chọn Runtime",
+                        )}{" "}
                         <strong>Change runtime type → T4 GPU</strong>
                         {t(
                           "training.colabGuideMid2",
@@ -1163,7 +1167,9 @@ export function AdminVireadTrainingScreen() {
                       <>
                         <p className="mt-1.5 text-sm text-ink tabular-nums">
                           {t("training.lockedTestReady", {
-                            samples: formatNumber(data.locked_test.sample_count),
+                            samples: formatNumber(
+                              data.locked_test.sample_count,
+                            ),
                             groups: formatNumber(data.locked_test.group_count),
                           })}
                         </p>
@@ -1212,9 +1218,7 @@ export function AdminVireadTrainingScreen() {
                         jobsPage,
                         Math.max(
                           1,
-                          Math.ceil(
-                            data.jobs.length / TRAINING_LIST_PAGE_SIZE,
-                          ),
+                          Math.ceil(data.jobs.length / TRAINING_LIST_PAGE_SIZE),
                         ),
                       ) -
                         1) *
@@ -1223,9 +1227,7 @@ export function AdminVireadTrainingScreen() {
                         jobsPage,
                         Math.max(
                           1,
-                          Math.ceil(
-                            data.jobs.length / TRAINING_LIST_PAGE_SIZE,
-                          ),
+                          Math.ceil(data.jobs.length / TRAINING_LIST_PAGE_SIZE),
                         ),
                       ) * TRAINING_LIST_PAGE_SIZE,
                     )
@@ -1671,9 +1673,7 @@ export function AdminVireadTrainingScreen() {
                         runsPage,
                         Math.max(
                           1,
-                          Math.ceil(
-                            data.runs.length / TRAINING_LIST_PAGE_SIZE,
-                          ),
+                          Math.ceil(data.runs.length / TRAINING_LIST_PAGE_SIZE),
                         ),
                       ) -
                         1) *
@@ -1682,9 +1682,7 @@ export function AdminVireadTrainingScreen() {
                         runsPage,
                         Math.max(
                           1,
-                          Math.ceil(
-                            data.runs.length / TRAINING_LIST_PAGE_SIZE,
-                          ),
+                          Math.ceil(data.runs.length / TRAINING_LIST_PAGE_SIZE),
                         ),
                       ) * TRAINING_LIST_PAGE_SIZE,
                     )
@@ -1805,7 +1803,8 @@ export function AdminVireadTrainingScreen() {
                 <p className="text-sm text-muted">
                   {t("training.approvalNote")}
                 </p>
-                {data.active_model && data.active_model.profile !== "ORIGINAL" ? (
+                {data.active_model &&
+                data.active_model.profile !== "ORIGINAL" ? (
                   <div>
                     <Button
                       disabled={busy || reason.trim().length < 8}

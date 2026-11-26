@@ -299,7 +299,10 @@ describe("AdminQualityHubScreen", () => {
 
     const user = userEvent.setup();
     const { container } = render(
-      withAdminFixture(<AdminQualityHubScreen initialTab="metadata" />, services),
+      withAdminFixture(
+        <AdminQualityHubScreen initialTab="metadata" />,
+        services,
+      ),
     );
 
     expect(await screen.findByText("12")).toBeInTheDocument();
@@ -318,12 +321,12 @@ describe("AdminQualityHubScreen", () => {
 
     await user.click(screen.getByRole("tab", { name: "Duyệt & An toàn sách" }));
     expect(
-      await screen.findByRole("heading", { name: "Kiểm tra nội dung toàn sách" }),
+      await screen.findByRole("heading", {
+        name: "Kiểm tra nội dung toàn sách",
+      }),
     ).toBeInTheDocument();
 
-    await user.click(
-      screen.getByRole("tab", { name: /Sách người dùng/ }),
-    );
+    await user.click(screen.getByRole("tab", { name: /Sách người dùng/ }));
     expect(
       await screen.findByRole("heading", {
         name: "Hàng đợi kiểm duyệt Sách người dùng",

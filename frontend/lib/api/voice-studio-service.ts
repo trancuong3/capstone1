@@ -431,7 +431,8 @@ export function createVoiceStudioService(): VoiceStudioService {
         provider: timedProvider,
         fallbackUsed:
           usedFallbackVoice ||
-          (timedProvider === "google" && !options.voiceId?.startsWith("google_")),
+          (timedProvider === "google" &&
+            !options.voiceId?.startsWith("google_")),
         voiceId: resolvedId,
         voiceGender: resolveVoiceGender(resolvedId),
       });

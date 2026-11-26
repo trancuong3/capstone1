@@ -38,12 +38,7 @@ import {
 } from "@/types/global-tasks";
 
 export type StudioTaskStatusFilter =
-  | "ALL"
-  | "ACTIVE"
-  | "WAITING_FOR_REVIEW"
-  | "FAILED"
-  | "SUCCEEDED"
-  | "OTHER";
+  "ALL" | "ACTIVE" | "WAITING_FOR_REVIEW" | "FAILED" | "SUCCEEDED" | "OTHER";
 
 export type StudioTaskRoleFilter = "ALL" | GlobalTaskActorRole;
 
@@ -246,9 +241,7 @@ export function StudioTasksPageScreen({
 
   const tasks: readonly GlobalTaskItem[] = useMemo(
     () =>
-      useProviderData
-        ? (taskCenter?.tasks ?? [])
-        : (localFeed?.tasks ?? []),
+      useProviderData ? (taskCenter?.tasks ?? []) : (localFeed?.tasks ?? []),
     [localFeed?.tasks, taskCenter?.tasks, useProviderData],
   );
   const activeCount = useProviderData
@@ -625,9 +618,7 @@ export function StudioTasksPageScreen({
                     {task.book_title || task.page_number ? (
                       <p className="text-xs font-medium text-muted">
                         {task.book_title ?? "Sách"}
-                        {task.page_number
-                          ? ` • Trang ${task.page_number}`
-                          : ""}
+                        {task.page_number ? ` • Trang ${task.page_number}` : ""}
                       </p>
                     ) : null}
                   </div>
@@ -654,7 +645,8 @@ export function StudioTasksPageScreen({
                         className="size-3.5 text-danger"
                       />
                     ) : null}
-                    Bước: <strong className="text-ink">{task.stage_label_vi}</strong>
+                    Bước:{" "}
+                    <strong className="text-ink">{task.stage_label_vi}</strong>
                   </span>
                   {elapsedText ? (
                     <span className="inline-flex items-center gap-1 tabular-nums">

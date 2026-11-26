@@ -9,7 +9,10 @@ interface TextFieldProps extends InputHTMLAttributes<HTMLInputElement> {
 }
 
 export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(
-  function TextField({ className, error, errorRole, id, label, ...props }, ref) {
+  function TextField(
+    { className, error, errorRole, id, label, ...props },
+    ref,
+  ) {
     const generatedId = useId();
     const inputId = id ?? generatedId;
     const errorId = `${inputId}-error`;
