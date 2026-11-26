@@ -446,3 +446,199 @@ def test_t27_invalid_external_boxes_go_to_review_instead_of_becoming_crops(tmp_p
                                               tmp_path / "crops")
     assert rows == []
     assert review[0]["reason"] == "invalid_annotation_box"
+
+
+def test_flow2_profile_hyperparams_runtime_shims_and_step0_baseline(tmp_path, monkeypatch):
+    import numpy as np
+    from PIL import Image
+    import ai.vietocr_v2.benchmark as benchmark_mod
+    from ai.vietocr_v2 import train as train_mod
+
+    flow2_profile = PROFILES["FLOW2_ADMIN_VERIFIED"]
+    assert flow2_profile["learning_rate"] == 3e-5
+    assert flow2_profile["weight_decay"] == 1e-3
+    assert flow2_profile["image_aug"] is False
+    assert flow2_profile["valid_every"] == 100
+
+    # Ensure np.bool shim is restored alongside np.sctypes and np.complex
+    monkeypatch.delattr(np, "bool", raising=False)
+    monkeypatch.setattr(train_mod, "_install_vietocr_numpy_bytes_compatibility", lambda *_a: None)
+    monkeypatch.setattr("importlib.metadata.version", lambda pkg: {
+        "vietocr": "0.3.12",
+        "imgaug": "0.4.0",
+        "prefetch-generator": "1.0.1",
+        "Pillow": "11.3.0",
+        "opencv-python": "4.13.0.92",
+    }.get(pkg, "1.0.0"))
+    fake_torch = types.SimpleNamespace(
+        __version__="2.14.1+cu126",
+        cuda=types.SimpleNamespace(is_available=lambda: False),
+    )
+    fake_tv = types.SimpleNamespace(__version__="0.29.1")
+    fake_cv2 = types.SimpleNamespace(__version__="4.13.0")
+    fake_vietocr = types.ModuleType("vietocr")
+    fake_vietocr.model = types.ModuleType("vietocr.model")
+    fake_vietocr.model.trainer = types.ModuleType("vietocr.model.trainer")
+    fake_vietocr.model.trainer.Trainer = object
+    fake_vietocr.tool = types.ModuleType("vietocr.tool")
+    fake_vietocr.tool.config = types.ModuleType("vietocr.tool.config")
+    fake_vietocr.tool.config.Cfg = object
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setitem(sys.modules, "torchvision", fake_tv)
+    monkeypatch.setitem(sys.modules, "cv2", fake_cv2)
+    monkeypatch.setitem(sys.modules, "vietocr", fake_vietocr)
+    monkeypatch.setitem(sys.modules, "vietocr.model", fake_vietocr.model)
+    monkeypatch.setitem(sys.modules, "vietocr.model.trainer", fake_vietocr.model.trainer)
+    monkeypatch.setitem(sys.modules, "vietocr.tool", fake_vietocr.tool)
+    monkeypatch.setitem(sys.modules, "vietocr.tool.config", fake_vietocr.tool.config)
+
+    runtime_info = train_mod.prepare_vietocr_training_runtime()
+    assert np.bool is bool
+    assert runtime_info["torch_version"] == "2.14.1"
+    assert hasattr(Image, "ANTIALIAS") and hasattr(benchmark_mod.Image, "ANTIALIAS")
+
+
+def test_run_training_saves_step0_baseline_so_worse_steps_preserve_parent(tmp_path, monkeypatch):
+    from pathlib import Path
+    import numpy as np
+    from PIL import Image
+    import torch
+    import torch.nn as nn
+    from ai.vietocr_v2 import train as train_mod
+
+    lock = json.loads((Path(train_mod.__file__).parent / "original_artifact.json").read_text(encoding="utf-8"))
+    arch = lock["architecture"]
+    service_dir = Path(train_mod.__file__).resolve().parents[2] / "backend" / "app" / "services"
+    if str(service_dir) not in sys.path:
+        sys.path.insert(0, str(service_dir))
+    from viread_flow2_hygiene import LOCKED_VIETOCR_VOCAB
+
+    base_cfg = {
+        "backbone": arch["backbone"],
+        "cnn": dict(arch["cnn"]),
+        "seq_modeling": arch["seq_modeling"],
+        "transformer": dict(arch["transformer"]),
+        "vocab": LOCKED_VIETOCR_VOCAB,
+        "dataset": dict(arch["input"]),
+        "trainer": {},
+        "aug": {},
+        "optimizer": {},
+        "dataloader": {},
+    }
+
+    img_t = tmp_path / "train.png"
+    img_v = tmp_path / "val.png"
+    for idx, p in enumerate((img_t, img_v)):
+        arr = np.full((36, 120, 3), 255, dtype=np.uint8)
+        arr[8:28, 10 + idx * 5 : 100 : 8] = 20
+        Image.fromarray(arr).save(p, format="PNG")
+
+    sha_t = hashlib.sha256(img_t.read_bytes()).hexdigest()
+    sha_v = hashlib.sha256(img_v.read_bytes()).hexdigest()
+    rows = [
+        DatasetRow(str(img_t), "xin", "g-train", "FLOW1_VERIFIED", "train", image_sha256=sha_t, verified=True),
+        DatasetRow(str(img_v), "chào", "g-val", "FLOW1_VERIFIED", "validation", image_sha256=sha_v, verified=True),
+    ]
+    manifest_path = tmp_path / "manifest.jsonl"
+    write_jsonl(manifest_path, rows)
+    receipt_path = tmp_path / "receipt.json"
+    receipt_path.write_text(json.dumps({
+        "schema": "viread-dataset-v1",
+        "source_flow": "FLOW1_VERIFIED",
+        "samples": [
+            {"source_flow": "FLOW1_VERIFIED", "group_id": r.group_id, "split": r.split,
+             "image_sha256": r.image_sha256, "label": r.label}
+            for r in rows
+        ],
+    }, ensure_ascii=False), encoding="utf-8")
+    receipt_sha = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
+
+    class TinyOcrModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.cnn = nn.Linear(4, 4)
+            self.decoder = nn.Linear(4, 4)
+
+        def forward(self, img, _tgt_input, tgt_key_padding_mask=None):
+            return self.decoder(self.cnn(img)).unsqueeze(1)
+
+    parent_model = TinyOcrModel()
+    parent_state = {k: v.clone() for k, v in parent_model.state_dict().items()}
+    parent_path = tmp_path / "parent.pth"
+    torch.save(parent_state, parent_path)
+
+    val_losses = [0.25, 0.90, 0.80]
+
+    class FakeTrainer:
+        def __init__(self, cfg, pretrained=False):
+            self.config = cfg
+            self.iter = 0
+            self.model = TinyOcrModel()
+            self.train_gen = [{
+                "img": torch.ones(2, 4),
+                "tgt_input": torch.zeros(2, 4),
+                "tgt_padding_mask": None,
+                "tgt_output": torch.zeros(2, 4),
+            }]
+            self.optimizer = None
+            self.scheduler = None
+
+        def batch_to_device(self, batch):
+            return batch
+
+        def criterion(self, out, _tgt):
+            return (out - 5.0).pow(2).sum()
+
+        def validate(self):
+            return val_losses.pop(0)
+
+    monkeypatch.setattr(train_mod, "prepare_vietocr_training_runtime", lambda: {})
+    monkeypatch.setitem(train_mod.PROFILES["FLOW2_ADMIN_VERIFIED"], "valid_every", 1)
+    fake_trainer_mod = types.ModuleType("vietocr.model.trainer")
+    fake_trainer_mod.Trainer = FakeTrainer
+    fake_cfg_mod = types.ModuleType("vietocr.tool.config")
+    fake_cfg_mod.Cfg = types.SimpleNamespace(load_config_from_name=lambda _name: base_cfg)
+    fake_vietocr = types.ModuleType("vietocr")
+    fake_vietocr.model = types.ModuleType("vietocr.model")
+    fake_vietocr.model.trainer = fake_trainer_mod
+    fake_vietocr.tool = types.ModuleType("vietocr.tool")
+    fake_vietocr.tool.config = fake_cfg_mod
+    monkeypatch.setitem(sys.modules, "vietocr", fake_vietocr)
+    monkeypatch.setitem(sys.modules, "vietocr.model", fake_vietocr.model)
+    monkeypatch.setitem(sys.modules, "vietocr.model.trainer", fake_trainer_mod)
+    monkeypatch.setitem(sys.modules, "vietocr.tool", fake_vietocr.tool)
+    monkeypatch.setitem(sys.modules, "vietocr.tool.config", fake_cfg_mod)
+
+    res = train_mod.run_training(
+        profile="FLOW2_ADMIN_VERIFIED",
+        manifest_path=str(manifest_path),
+        output_dir=str(tmp_path / "run_worse"),
+        parent_checkpoint=str(parent_path),
+        total_steps=2,
+        dataset_receipt_path=str(receipt_path),
+        dataset_version_sha256=receipt_sha,
+        batch_size=2,
+        freeze_epochs=1,
+        use_fp16=False,
+    )
+    assert res["best_step"] == 0
+    assert res["best_validation_loss"] == pytest.approx(0.25)
+    exported = torch.load(res["candidate_path"], map_location="cpu", weights_only=True)
+    for k, v in parent_state.items():
+        assert torch.allclose(exported[k], v)
+
+    val_losses[:] = [0.50, 0.12, 0.40]
+    res2 = train_mod.run_training(
+        profile="FLOW2_ADMIN_VERIFIED",
+        manifest_path=str(manifest_path),
+        output_dir=str(tmp_path / "run_better"),
+        parent_checkpoint=str(parent_path),
+        total_steps=2,
+        dataset_receipt_path=str(receipt_path),
+        dataset_version_sha256=receipt_sha,
+        batch_size=2,
+        freeze_epochs=1,
+        use_fp16=False,
+    )
+    assert res2["best_step"] == 1
+    assert res2["best_validation_loss"] == pytest.approx(0.12)

@@ -8,6 +8,9 @@ from typing import Any, Literal
 
 from PIL import Image, ImageOps
 
+if not hasattr(Image, "ANTIALIAS") and hasattr(Image, "Resampling"):
+    Image.ANTIALIAS = Image.Resampling.LANCZOS
+
 from .contracts import canonical_sha256, sha256_file
 from .metrics import PairedLine, benchmark_metrics
 from .quality_gate import GatePolicy, evaluate_gate
