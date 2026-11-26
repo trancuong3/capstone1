@@ -140,3 +140,35 @@ class SpeechToTextResponse(BaseModel):
     language_code: str | None = None
     language_probability: float | None = None
     words: list[SpeechWord] | None = None
+
+
+class SessionVoiceLockUpdateRequest(BaseModel):
+    """Explicit parent-initiated session voice lock update while reading is paused."""
+
+    session_id: str = Field(min_length=1, max_length=80)
+    voice_id: str = Field(min_length=1, max_length=100)
+    provider_mode: VoiceProviderMode = "local_only"
+    allow_google_tts: bool = False
+
+    @field_validator("session_id")
+    @classmethod
+    def normalize_session_id(cls, value: str) -> str:
+        validated = _validate_safe_id(value, max_len=80)
+        if not validated:
+            raise ValueError("session_id is invalid")
+        return validated
+
+    @field_validator("voice_id")
+    @classmethod
+    def normalize_voice_id(cls, value: str) -> str:
+        validated = _validate_safe_id(value, max_len=100)
+        if not validated:
+            raise ValueError("voice_id is invalid")
+        return validated
+
+
+class SessionVoiceLockRead(BaseModel):
+    session_id: str
+    voice_id: str
+    provider: Literal["local", "google"]
+    locked: bool = True

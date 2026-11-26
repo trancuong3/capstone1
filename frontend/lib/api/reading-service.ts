@@ -123,6 +123,12 @@ const wordDtoSchema = z.object({
   line_index: z.number().int().nonnegative().optional(),
 });
 
+const wordTimingDtoSchema = z.object({
+  index: z.number().int().nonnegative(),
+  start: z.number().nonnegative(),
+  end: z.number().nonnegative(),
+});
+
 export const readingPageDtoSchema = z.object({
   page_id: z.guid(),
   page_revision_id: z.guid(),
@@ -131,6 +137,10 @@ export const readingPageDtoSchema = z.object({
   width: z.number(),
   height: z.number(),
   image_url: z.string().nullable().optional(),
+  tts_audio_url: z.string().nullable().optional(),
+  tts_word_timings: z.array(wordTimingDtoSchema).nullable().optional(),
+  tts_voice_id: z.string().nullable().optional(),
+  tts_cached_speed: z.number().positive().nullable().optional(),
   image_overlay_safe: z.boolean().optional(),
   illustration_url: z.string().nullable().optional(),
   illustration_text_free: z.boolean().optional(),

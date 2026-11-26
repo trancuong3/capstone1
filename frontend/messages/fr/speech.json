@@ -79,7 +79,9 @@
       "american": "Accent américain",
       "british": "Accent britannique"
     },
-    "googleProviderLabel": "Secours Google"
+    "googleProviderLabel": "Secours Google",
+    "sessionLockedBadge": "Verrouillée pour cette séance de lecture",
+    "offlineBrowserBadge": "Navigateur hors ligne"
   },
   "engineBadge": {
     "ariaLabel": "Source audio : STT {stt}, TTS {tts}",
@@ -96,8 +98,10 @@
       "catalog_cache": "Cache standard",
       "android_native": "Android (vi-VN)",
       "google_cloud": "En ligne (Google API)",
-      "browser_default": "En ligne (Google/Navigateur)"
-    }
+      "browser_default": "En ligne (Google/Navigateur)",
+      "idle": "Vérification…"
+    },
+    "idleDetail": "{base} (Vérification du moteur vocal)"
   },
   "playback": {
     "unavailable": "La voix sur l'appareil n'est pas prête. Vous pouvez suivre le texte à l'écran et appuyer sur Réessayer.",

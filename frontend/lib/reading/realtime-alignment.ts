@@ -832,10 +832,26 @@ export class RealtimeAlignmentEngine {
         continue;
       }
 
-      // 3. Tìm từ ở phía trước.
+      // 3. Tìm từ ở phía trước (áp dụng shouldDeferLookaheadMatch đồng bộ với addFinalTranscript
+      // để interim không nhảy vọt qua 20 từ chức năng tiếng Việt rồi bật ngược khi final về).
       const matchedIndex = this.findAheadFrom(cursor, token);
+      const nextTokenConfirmsSkip =
+        matchedIndex !== -1 &&
+        tokenIndex + 1 < tokens.length &&
+        matchedIndex + 1 < this.bookWords.length &&
+        this.bookWords[matchedIndex + 1].normalizedText ===
+          tokens[tokenIndex + 1];
 
-      if (matchedIndex !== -1) {
+      if (
+        matchedIndex !== -1 &&
+        (!shouldDeferLookaheadMatch(
+          token,
+          cursor,
+          matchedIndex,
+          this.bookWords.length,
+        ) ||
+          nextTokenConfirmsSkip)
+      ) {
         // Điền trạng thái nhất quán cho mọi từ bị bỏ qua trong [cursor .. matchedIndex - 1],
         // giữ nguyên các từ đã có bằng chứng đọc sai (SUBSTITUTE) trước đó.
         for (let index = cursor; index < matchedIndex; index += 1) {

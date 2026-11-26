@@ -79,7 +79,9 @@
       "american": "미국 억양",
       "british": "영국 억양"
     },
-    "googleProviderLabel": "Google 대체"
+    "googleProviderLabel": "Google 대체",
+    "sessionLockedBadge": "이 읽기 세션에 고정됨",
+    "offlineBrowserBadge": "브라우저가 오프라인 상태입니다"
   },
   "engineBadge": {
     "ariaLabel": "음성 소스: STT {stt}, TTS {tts}",
@@ -96,8 +98,10 @@
       "catalog_cache": "표준 캐시",
       "android_native": "Android (vi-VN)",
       "google_cloud": "온라인 (Google API)",
-      "browser_default": "온라인 (Google/브라우저)"
-    }
+      "browser_default": "온라인 (Google/브라우저)",
+      "idle": "확인 중…"
+    },
+    "idleDetail": "{base} (음성 엔진 상태 확인 중)"
   },
   "playback": {
     "unavailable": "기기 내 음성을 사용할 수 없습니다. 화면의 텍스트를 확인하고 다시 시도하세요.",
