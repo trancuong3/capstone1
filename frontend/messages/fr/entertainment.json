@@ -12,7 +12,52 @@
     "pictureCta": "Sélectionner une image",
     "karaokeTitle": "Chanter avec l'enfant",
     "karaokeDesc": "Choisissez une chanson préférée, écoutez la musique et chantez avec votre enfant en suivant les paroles à l'écran.",
-    "karaokeCta": "Ouvrir la bibliothèque de chansons"
+    "karaokeCta": "Ouvrir la bibliothèque de chansons",
+    "eyebrow": "Apprendre le vietnamien avec joie chaque jour",
+    "selectChildLabel": "Choisir le profil de l'enfant",
+    "selectChildAria": "Choisir le profil de l'enfant pour l'espace Jeux et apprentissage",
+    "childOptionLabel": "{alias} · Classe {grade}",
+    "calmSound": "Son doux",
+    "soundMuted": "Son coupé",
+    "reduceMotion": "Réduire les animations",
+    "reducedMotionActive": "Animations réduites activées",
+    "onboardingGuideButton": "Guide de jeu",
+    "mascotBadge": "Conseil du Hibou ViRead",
+    "childProfileBadge": "Profil {alias} · Classe {grade}",
+    "defaultGreeting": "Bonjour petit lecteur ! Veux-tu raconter une image, former des phrases, chanter ou jouer à mémoriser aujourd'hui ?",
+    "defaultRecommendationReason": "Chaque jeu s'appuie en douceur sur les livres lus pour mémoriser les mots sans aucune pression.",
+    "focusDifficultWordsLabel": "Mots révisés en douceur :",
+    "playSuggestedCta": "Lancer l'activité suggérée",
+    "onboardingRegionAria": "Guide de prise en main de l'espace Jeux et apprentissage",
+    "onboardingCounter": "Guide rapide ({current}/{total})",
+    "onboardingStep1Title": "1. Choisis ton atelier préféré",
+    "onboardingStep1Body": "Quatre espaces calmes : Histoire en images, Tireur de phrases, Karaoké joyeux et Que retiens-tu ?",
+    "onboardingStep2Title": "2. Joue à la voix ou au toucher",
+    "onboardingStep2Body": "De grands boutons clairs, faciles à toucher sur téléphone et tablette. Tu peux parler ou choisir les mots.",
+    "onboardingStep3Title": "3. Apprendre dans la joie sans pression",
+    "onboardingStep3Body": "Des séances de 10 à 15 minutes sont idéales. Pas de chrono stressant, l'enseignante IA et le Hibou t'encouragent toujours !",
+    "onboardingNext": "Suivant",
+    "onboardingDone": "J'ai compris !",
+    "onboardingClose": "Fermer",
+    "pictureZoneBadge": "Monde des histoires",
+    "todaySuggestionBadge": "Suggestion du jour",
+    "suggestedWordsLabel": "Mots suggérés :",
+    "shooterZoneBadge": "Aventure des mots",
+    "karaokeZoneBadge": "Scène musicale",
+    "karaokeChipRhythm": "Rythme & mélodie",
+    "karaokeChipTap": "Taper le rythme",
+    "karaokeChipSlowPractice": "Passage à 0,85x",
+    "memoryZoneBadge": "Exploration mémoire",
+    "newBadge": "Nouveau",
+    "memoryChipObserve": "Observer l'image",
+    "memoryChipRemember": "Retenir les détails",
+    "memoryChipStory": "Imaginer la suite",
+    "memoryTitle": "Que retiens-tu ?",
+    "memoryDesc": "Observe des illustrations vietnamiennes à ton rythme, retiens les couleurs et positions, puis invente une belle suite à l'histoire !",
+    "memoryCta": "Explorer le jeu mémoire",
+    "breakReminderTitle": "Pause repos des yeux :",
+    "defaultBreakReminder": "Environ 10 à 15 minutes par séance gardent les yeux reposés et rendent l'apprentissage naturel.",
+    "recommendationLoadError": "Impossible de charger les recommandations pour le moment."
   },
   "karaoke": {
     "title": "Karaoké pour enfants",
@@ -150,6 +195,62 @@
         "countdownNext": "Début dans {seconds} secondes",
         "interludeNext": "Segment musical · Préparation de la phrase suivante",
         "outro": "Écoutons le segment final"
+      },
+      "practiceModeGroupAria": "Mode d'entraînement vocal",
+      "headphoneRecommendation": "Le casque est recommandé pour évaluer la justesse et le rythme avec précision !",
+      "speakerFilterHint": "Avec haut-parleurs, le filtrage intelligent du retour sonore est activé.",
+      "speakerBackingOn": "Accompagnement haut-parleur activé",
+      "speakerBackingOff": "Diffuser la musique sur haut-parleur (filtrée)",
+      "unsupportedScoringWithRhythmHint": "Ce navigateur prend en charge le chant libre et le mode Rythme. Pour la notation au micro, utilise un navigateur compatible.",
+      "micReadyNoticeDsp": "Autorise l'accès au micro pour chanter. L'analyse du rythme et de la justesse reste locale sur l'appareil sans enregistrer l'audio.",
+      "rhythmTapButton": "Taper le rythme (Barre d'espace)",
+      "rhythmTapFeedback": "{feedback} · Série : {streak}",
+      "livePitchHz": "Hauteur vocale : {hz} Hz",
+      "practicingSegment": "Entraînement sur le passage {number}",
+      "practicingRateSuffix": "({rate}× vitesse)",
+      "tempoSegment": "Passage lent · 0,85×",
+      "spaceHintRhythmTap": "Appuie sur la barre d'espace en rythme pendant la chanson.",
+      "practiceModes": {
+        "FULL_SONG": {
+          "label": "Chanson entière",
+          "shortLabel": "Entière",
+          "description": "Chante toute la chanson et enregistre ton meilleur score."
+        },
+        "SEGMENT": {
+          "label": "Passage difficile",
+          "shortLabel": "Passage",
+          "description": "Répète un passage délicat à 0,85x sans effacer ton record sur la chanson."
+        },
+        "LINE_PRACTICE": {
+          "label": "Ligne par ligne",
+          "shortLabel": "Par ligne",
+          "description": "Choisis chaque ligne pour articuler clairement et garder un rythme régulier."
+        },
+        "RHYTHM_TAP": {
+          "label": "Taper le rythme",
+          "shortLabel": "Rythme",
+          "description": "Appuie sur le bouton ou Espace sur chaque temps — pratique ludique même sans micro !"
+        }
+      },
+      "musicalSummary": {
+        "ariaLabel": "Analyse musicale de la séance",
+        "unmeasured": "Non mesuré",
+        "points": "{score} pts",
+        "statusGreat": "Très bien",
+        "statusGood": "Bien",
+        "statusPractice": "À travailler",
+        "bestFullSong": "Record chanson entière : {score} pts",
+        "rhythmLabel": "Rythme",
+        "pitchLabel": "Mélodie",
+        "lyricsLabel": "Paroles",
+        "fluencyLabel": "Fluidité",
+        "pitchBasisPrefix": "Base de calcul de la justesse :",
+        "speakerBleedNote": "Léger retour du haut-parleur capté par le micro.",
+        "insufficientHint": "Signal vocal insuffisant pour cette prise. Rapproche le micro ou essaie avec un casque !",
+        "weakestSegmentTitle": "Passage à travailler · Ligne {number}",
+        "retrySegmentSlow": "Travailler ce passage (0,85x)",
+        "segmentReportSummary": "Bilan par ligne ({count} lignes)",
+        "segmentLineHeader": "Ligne {number} ({start}–{end})"
       }
     },
     "score": {
@@ -173,6 +274,64 @@
       "linePrefix": "Phrase {number} · ",
       "lineMatchedRetry": "{matched}/{evaluated} mots correspondants · Pratiquer à nouveau",
       "lineUnheardRetry": "Non entendu clairement · Pratiquer à nouveau"
+    },
+    "rhythmTap": {
+      "steady": "Rythme bien régulier !",
+      "early": "Un peu en avance !",
+      "late": "Un peu en retard !",
+      "perfect": "En plein dans le temps !",
+      "good": "Tout près du rythme !",
+      "slightlyFast": "Un tout petit peu rapide !",
+      "slightlySlow": "Un tout petit peu lent !"
+    },
+    "musicalScoring": {
+      "modes": {
+        "FULL_MUSICAL": "Notation musicale complète (Rythme · Mélodie · Paroles)",
+        "RHYTHM_AND_LYRICS": "Notation Rythme & Paroles",
+        "LYRICS_ONLY": "Notation des paroles uniquement",
+        "INSUFFICIENT_EVIDENCE": "Signal vocal insuffisant",
+        "RHYTHM_TAP": "Notation par rythme tapé"
+      },
+      "pitchBasis": {
+        "REFERENCE_MELODY": "Comparé à la mélodie de référence (indépendant de l'octave)",
+        "VOCAL_STEADINESS_AND_CONTOUR": "Stabilité vocale et contour mélodique",
+        "UNAVAILABLE": "Hauteur non mesurée"
+      },
+      "gate": {
+        "silence": "On n'entend pas encore ta voix. Rapproche le micro ou vérifie-le puis réessaie !",
+        "noiseOnly": "Il y a un peu de bruit autour. Installe-toi au calme ou mets un casque !",
+        "electricalHum": "Le micro capte un bourdonnement. Demande à un parent de vérifier le branchement !",
+        "bleedHeadphones": "Un retour sonore gêne la captation. Baisse un peu le volume du casque et chante clairement !",
+        "bleedSpeaker": "Le micro capte plus la musique des haut-parleurs que ta voix. Mets un casque ou rapproche le micro !",
+        "lowCoverage": "Tu n'as chanté qu'un court passage. Chante encore quelques lignes pour une évaluation complète !",
+        "okHeadphones": "Le mode casque permet au micro de capter ta voix avec une grande clarté !",
+        "okSpeaker": "Astuce : le casque aide le micro à entendre ta mélodie et ton rythme encore plus clairement !"
+      },
+      "encouragement": {
+        "insufficient": "Signal insuffisant pour noter cette prise. Chante plus près du micro !",
+        "high": "Magnifique ! Tu as chanté en rythme, distinctement et avec beaucoup d'émotion !",
+        "good": "Bravo ! Ton rythme et ta mélodie sont déjà très solides !",
+        "medium": "Pas mal du tout ! Essaie le passage difficile à 0,85x !",
+        "low": "Continue ! Entraînons-nous doucement ligne par ligne !"
+      },
+      "lineTips": {
+        "unclear": "Cette ligne manquait de clarté : réessaie-la doucement à 0,85x !",
+        "great": "Super ! Tu as chanté cette ligne avec assurance et dans le tempo !",
+        "rhythmLate": "Tu es parti un peu tard sur cette ligne : écoute la musique et anticipe légèrement !",
+        "rhythmFast": "Tu es un peu en avance sur le rythme : suis régulièrement les paroles éclairées !",
+        "rhythmSteady": "Essaie le mode Rythme ou 0,85x sur cette ligne pour stabiliser le tempo !",
+        "pitch": "Écoute bien la mélodie de cette ligne et tiens les notes régulièrement !",
+        "lyrics": "Lis doucement ces paroles une fois, puis chante chaque syllabe clairement !",
+        "practiceMore": "C'est déjà bien ! Un passage de plus à 0,85x et ce sera parfait !",
+        "insufficientLine": "On n'a pas bien entendu cette ligne : chante un peu plus près du micro !"
+      },
+      "rhythmTap": {
+        "insufficientGuidance": "Appuie sur le bouton Rythme (ou Espace) au fil des syllabes à l'écran !",
+        "insufficientTip": "Essaie de battre la mesure régulièrement sur cette ligne !",
+        "okGuidance": "Le mode Rythme aide à sentir le tempo avant même de chanter au micro !"
+      },
+      "lyricsOnlyFallbackGuidance": "L'analyse Web Audio n'était pas active sur cet appareil : seules les paroles ont été notées.",
+      "mildSpeakerBleedGuidance": "Un léger son des haut-parleurs est entré dans le micro. Un casque rendra la note encore plus précise !"
     }
   },
   "pictureDescription": {
@@ -315,6 +474,70 @@
       "step2Detail": "Décrivez l'activité en cours et le décor environnant.",
       "step3Title": "Qu'en est-il des couleurs et des impressions ?",
       "step3Detail": "Ajoutez des détails sur les couleurs, la météo ou les émotions de l'enfant."
+    },
+    "aiTimeoutError": "L'enseignante IA met un peu de temps à répondre. Appuie sur Réessayer.",
+    "micPausedBackground": "L'application est passée en arrière-plan : le micro s'est coupé en toute sécurité et ton texte est conservé !",
+    "waitingTtsCooldown": "En attente de la fin de la lecture vocale avant d'ouvrir le micro...",
+    "offlineNotice": "Appareil hors ligne. Ton récit est conservé : appuie sur Réessayer l'évaluation dès le retour de la connexion !",
+    "gradeHintChipsLowerTitle": "Repères visuels pour bien démarrer (CP–CE1)",
+    "collapseGradeHints": "Réduire les repères du récit",
+    "expandGradeHints": "Afficher les repères du récit",
+    "listenGuideButton": "Écouter le guide",
+    "gradeHintsCollapsedNote": "Les repères sont repliés en classe {grade} pour encourager l'expression libre — affiche-les à tout moment !",
+    "teachingModeSectionAria": "Modes d'entraînement avec l'enseignante IA",
+    "teachingModeHeading": "Mode avec l'enseignante IA",
+    "listenModeButton": "Écouter ce mode",
+    "teachingModeGroupAria": "Choisir le mode d'entraînement au récit",
+    "targetWordsProgress": "Mots cibles travaillés ({used}/{total})",
+    "followUpSectionAria": "Prochaine question d'ouverture de l'enseignante",
+    "practiceFollowUpTitle": "Question suivante de l'enseignante",
+    "listenQuestionButton": "Écouter la question",
+    "resultModeBadge": "Mode : {mode}",
+    "usedTargetWordsTitle": "Mots cibles bien utilisés",
+    "resultFollowUpTitle": "Prochaine question d'approfondissement",
+    "answerFollowUpButton": "Répondre à cette question",
+    "teachingModes": {
+      "OBSERVE": {
+        "label": "Observer",
+        "cue": "Regarde bien l'image : qui ou que vois-tu, et quelles couleurs ressortent ?",
+        "audioHint": "Mode Observation. Regarde bien l'image et nomme les personnes, animaux ou objets les plus visibles."
+      },
+      "VOCABULARY": {
+        "label": "Vocabulaire",
+        "cue": "Essaie d'utiliser 1 à 2 mots suggérés ou mots cibles ci-dessus dans ta phrase.",
+        "audioHint": "Mode Vocabulaire. Choisis un ou deux mots suggérés ci-dessus pour enrichir ta description."
+      },
+      "SENTENCE": {
+        "label": "Faire une phrase",
+        "cue": "Assemble qui + action + lieu pour former une phrase complète.",
+        "audioHint": "Mode Phrase. Dis une phrase complète en précisant qui fait quoi et où."
+      },
+      "STORY": {
+        "label": "Raconter",
+        "cue": "Relie 2 à 3 phrases pour raconter ce qui se passe dans l'histoire.",
+        "audioHint": "Mode Histoire. Enchaîne deux ou trois phrases pour raconter clairement la scène."
+      },
+      "INFER": {
+        "label": "Déduire",
+        "cue": "Pourquoi le personnage fait-il cela ? Que pourrait-il se passer avant ou après ?",
+        "audioHint": "Mode Déduction. Essaie de deviner pourquoi le personnage agit ainsi ou ce qui va suivre."
+      },
+      "CREATE": {
+        "label": "Créativité",
+        "cue": "Imagine un dialogue amusant ou une fin originale pour cette scène !",
+        "audioHint": "Mode Créativité. Invente un dialogue drôle ou une belle suite pour cette illustration."
+      }
+    },
+    "scaffoldingSteps": {
+      "PROMPT": "Amorce guidée",
+      "EXPAND": "Élargir la phrase",
+      "PRAISE": "Encouragement",
+      "NEXT_CHALLENGE": "Prochain défi"
+    },
+    "visualHintChips": {
+      "who": "Qui ou quel animal ?",
+      "action": "Que fait-il ?",
+      "where": "Où et quelle couleur ?"
     }
   },
   "karaokeRuntime": {

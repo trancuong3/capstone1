@@ -65,10 +65,11 @@ export function SyllableTimingEditor({
   const index = Math.min(selected, Math.max(0, units.length - 1));
   const unit = units[index];
   const getCurrentMs = player?.getCurrentMs;
+  const isPlaying = Boolean(player?.playing);
   const pause = player?.pause;
   useEffect(() => () => pause?.(), [pause]);
   useEffect(() => {
-    if (!getCurrentMs) return;
+    if (!getCurrentMs || !isPlaying) return;
     let frame = 0;
     const tick = () => {
       setTime(getCurrentMs());
@@ -76,7 +77,7 @@ export function SyllableTimingEditor({
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [getCurrentMs]);
+  }, [getCurrentMs, isPlaying]);
   useEffect(() => {
     if (focusTarget?.lineId !== line.id) return;
     const target = root.current?.querySelector<HTMLButtonElement>(
@@ -102,6 +103,7 @@ export function SyllableTimingEditor({
   function mark(edge: "start_ms" | "end_ms", advance = false) {
     if (!player?.ready || !unit) return;
     const at = player.getCurrentMs();
+    setTime(at);
     if (
       line.start_ms === null ||
       line.end_ms === null ||

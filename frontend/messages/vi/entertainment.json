@@ -12,7 +12,52 @@
     "pictureCta": "Chọn tranh",
     "karaokeTitle": "Hát vui cùng bé",
     "karaokeDesc": "Chọn bài hát yêu thích, nghe nhạc và cùng bé hát theo lời trên màn hình.",
-    "karaokeCta": "Mở thư viện bài hát"
+    "karaokeCta": "Mở thư viện bài hát",
+    "eyebrow": "Vui học tiếng Việt mỗi ngày",
+    "selectChildLabel": "Chọn hồ sơ bé",
+    "selectChildAria": "Chọn hồ sơ bé cho khu Giải trí",
+    "childOptionLabel": "{alias} · Lớp {grade}",
+    "calmSound": "Âm thanh dịu",
+    "soundMuted": "Đang tắt tiếng",
+    "reduceMotion": "Giảm chuyển động",
+    "reducedMotionActive": "Đã giảm chuyển động",
+    "onboardingGuideButton": "Hướng dẫn chơi",
+    "mascotBadge": "Cú Mèo ViRead gợi ý",
+    "childProfileBadge": "Hồ sơ {alias} · Lớp {grade}",
+    "defaultGreeting": "Chào bé yêu! Hôm nay bé muốn kể chuyện tranh, ghép câu, hát vui hay thử trí nhớ nào?",
+    "defaultRecommendationReason": "Mỗi trò chơi đều kết nối nhẹ nhàng với sách bé đang đọc để giúp bé nhớ từ lâu hơn mà không hề áp lực.",
+    "focusDifficultWordsLabel": "Từ bé đang ôn nhẹ:",
+    "playSuggestedCta": "Chơi gợi ý ngay",
+    "onboardingRegionAria": "Hướng dẫn làm quen khu vực Giải trí",
+    "onboardingCounter": "Hướng dẫn nhanh ({current}/{total})",
+    "onboardingStep1Title": "1. Chọn góc chơi bé thích",
+    "onboardingStep1Body": "Bốn góc chơi nhẹ nhàng: Kể chuyện tranh, Xạ thủ ghép câu, Hát vui cùng bé và Bé nhớ được gì?",
+    "onboardingStep2Title": "2. Chơi bằng giọng nói hoặc chạm",
+    "onboardingStep2Body": "Các nút bấm to rõ, dễ chạm trên điện thoại và máy tính bảng. Bé có thể nói hoặc chọn chữ đều được.",
+    "onboardingStep3Title": "3. Vui học không áp lực",
+    "onboardingStep3Body": "Mỗi phiên 10–15 phút là tuyệt nhất. Không tính giờ căng thẳng, luôn có Cô giáo AI và Cú Mèo cổ vũ bé!",
+    "onboardingNext": "Tiếp theo",
+    "onboardingDone": "Bé đã hiểu rồi!",
+    "onboardingClose": "Đóng",
+    "pictureZoneBadge": "Thế giới kể chuyện",
+    "todaySuggestionBadge": "Gợi ý hôm nay",
+    "suggestedWordsLabel": "Từ gợi ý:",
+    "shooterZoneBadge": "Phiêu lưu cùng chữ",
+    "karaokeZoneBadge": "Sân khấu âm nhạc",
+    "karaokeChipRhythm": "Chấm nhịp & giai điệu",
+    "karaokeChipTap": "Gõ nhịp vui",
+    "karaokeChipSlowPractice": "Luyện đoạn 0.85x",
+    "memoryZoneBadge": "Khám phá trí nhớ",
+    "newBadge": "Mới",
+    "memoryChipObserve": "Quan sát tranh",
+    "memoryChipRemember": "Nhớ chi tiết",
+    "memoryChipStory": "Kể tiếp câu chuyện",
+    "memoryTitle": "Bé nhớ được gì?",
+    "memoryDesc": "Quan sát tranh minh họa tiếng Việt trong thời gian bé tự chọn, nhớ lại màu sắc và vị trí rồi tưởng tượng kể tiếp câu chuyện thật hay!",
+    "memoryCta": "Khám phá trí nhớ",
+    "breakReminderTitle": "Nhịp nghỉ mắt khỏe mạnh:",
+    "defaultBreakReminder": "Mỗi phiên chơi khoảng 10–15 phút là vừa đẹp để mắt bé luôn khỏe mạnh và tiếp thu tự nhiên.",
+    "recommendationLoadError": "Không thể tải gợi ý học tập lúc này."
   },
   "karaoke": {
     "title": "Karaoke thiếu nhi",
@@ -150,6 +195,62 @@
         "countdownNext": "Vào lời sau {seconds} giây",
         "interludeNext": "Đoạn nhạc · Chuẩn bị câu tiếp theo",
         "outro": "Cùng nghe đoạn nhạc cuối nhé"
+      },
+      "practiceModeGroupAria": "Kiểu luyện hát",
+      "headphoneRecommendation": "Khuyên dùng tai nghe để chấm cao độ và nhịp điệu chính xác nhất!",
+      "speakerFilterHint": "Khi dùng loa, micro bật chế độ lọc nhiễu loa thông minh.",
+      "speakerBackingOn": "Đang bật nhạc đệm qua loa",
+      "speakerBackingOff": "Bật nhạc đệm qua loa (lọc nhiễu)",
+      "unsupportedScoringWithRhythmHint": "Trình duyệt này hỗ trợ hát tự do và Gõ nhịp theo bài hát. Để chấm điểm bằng micro, ba mẹ hãy mở bằng trình duyệt có nhận dạng giọng nói.",
+      "micReadyNoticeDsp": "Khi bé bắt đầu hát, hãy cho phép dùng micro. Phân tích nhịp và cao độ chạy ngay trên thiết bị, không lưu âm thanh của bé.",
+      "rhythmTapButton": "Gõ nhịp theo bài hát (Phím Cách)",
+      "rhythmTapFeedback": "{feedback} · Chuỗi đúng: {streak}",
+      "livePitchHz": "Giọng hát: {hz} Hz",
+      "practicingSegment": "Đang luyện đoạn khó {number}",
+      "practicingRateSuffix": "({rate}×)",
+      "tempoSegment": "Luyện đoạn · 0.85×",
+      "spaceHintRhythmTap": "Phím cách để gõ nhịp theo phách khi bài hát đang phát.",
+      "practiceModes": {
+        "FULL_SONG": {
+          "label": "Hát cả bài",
+          "shortLabel": "Cả bài",
+          "description": "Hát trọn bài và lưu kỷ lục điểm cao nhất của bé."
+        },
+        "SEGMENT": {
+          "label": "Luyện đoạn khó",
+          "shortLabel": "Đoạn khó",
+          "description": "Lặp lại đoạn nhạc khó ở tốc độ 0.85x — không làm mất điểm cao nhất cả bài."
+        },
+        "LINE_PRACTICE": {
+          "label": "Tập từng câu",
+          "shortLabel": "Từng câu",
+          "description": "Chọn từng câu hát để luyện rõ lời và giữ nhịp thật vững."
+        },
+        "RHYTHM_TAP": {
+          "label": "Gõ nhịp theo bài hát",
+          "shortLabel": "Gõ nhịp",
+          "description": "Nhấn nút Gõ nhịp hoặc phím Cách theo từng phách — tập nhịp vui ngay cả khi không bật micro!"
+        }
+      },
+      "musicalSummary": {
+        "ariaLabel": "Phân tích nhạc lý buổi hát",
+        "unmeasured": "Chưa đo",
+        "points": "{score} điểm",
+        "statusGreat": "Rất tốt",
+        "statusGood": "Khá tốt",
+        "statusPractice": "Cần luyện",
+        "bestFullSong": "Kỷ lục cả bài: {score} điểm",
+        "rhythmLabel": "Nhịp điệu",
+        "pitchLabel": "Giai điệu",
+        "lyricsLabel": "Lời hát",
+        "fluencyLabel": "Độ trôi chảy",
+        "pitchBasisPrefix": "Cơ sở chấm cao độ:",
+        "speakerBleedNote": "Phát hiện nhẹ tiếng nhạc loa lọt vào micro.",
+        "insufficientHint": "Chưa đủ tín hiệu âm thanh để chấm nhạc lý lần này. Bé thử đưa micro lại gần miệng hơn hoặc đeo tai nghe rồi hát lại nhé!",
+        "weakestSegmentTitle": "Đoạn nên luyện thêm · Câu {number}",
+        "retrySegmentSlow": "Luyện lại đoạn này (0.85x)",
+        "segmentReportSummary": "Báo cáo theo từng đoạn ({count} câu)",
+        "segmentLineHeader": "Câu {number} ({start}–{end})"
       }
     },
     "score": {
@@ -173,6 +274,64 @@
       "linePrefix": "Câu {number} · ",
       "lineMatchedRetry": "{matched}/{evaluated} tiếng khớp · Luyện lại",
       "lineUnheardRetry": "Chưa nghe rõ · Luyện lại"
+    },
+    "rhythmTap": {
+      "steady": "Khá đều nhịp!",
+      "early": "Hơi sớm nhịp!",
+      "late": "Hơi trễ nhịp!",
+      "perfect": "Đúng phách tuyệt vời!",
+      "good": "Rất gần nhịp!",
+      "slightlyFast": "Hơi nhanh một chút!",
+      "slightlySlow": "Hơi chậm một chút!"
+    },
+    "musicalScoring": {
+      "modes": {
+        "FULL_MUSICAL": "Chấm đầy đủ nhạc lý (Nhịp · Giai điệu · Lời)",
+        "RHYTHM_AND_LYRICS": "Chấm nhịp điệu & lời hát",
+        "LYRICS_ONLY": "Chỉ chấm lời hát",
+        "INSUFFICIENT_EVIDENCE": "Chưa đủ tín hiệu giọng hát",
+        "RHYTHM_TAP": "Chấm gõ nhịp theo bài hát"
+      },
+      "pitchBasis": {
+        "REFERENCE_MELODY": "Đối chiếu giai điệu chuẩn (không phân biệt quãng 8)",
+        "VOCAL_STEADINESS_AND_CONTOUR": "Độ ổn định & đường nét giai điệu giọng hát",
+        "UNAVAILABLE": "Chưa đo cao độ"
+      },
+      "gate": {
+        "silence": "Mình chưa nghe thấy giọng hát của bé. Bé đưa micro lại gần hơn một chút hoặc kiểm tra micro rồi thử lại nhé!",
+        "noiseOnly": "Xung quanh hơi ồn nên mình chưa nghe rõ tiếng hát của bé. Bé hãy chọn góc yên tĩnh hơn hoặc đeo tai nghe nhé!",
+        "electricalHum": "Micro đang có tiếng ù nền. Ba mẹ giúp bé kiểm tra lại micro hoặc dây cắm rồi thử lại nhé!",
+        "bleedHeadphones": "Âm thanh bị lặp lại nên chưa tách rõ giọng bé. Bé giảm nhẹ âm lượng tai nghe và hát rõ hơn nhé!",
+        "bleedSpeaker": "Mình đang nghe tiếng nhạc từ loa nhiều hơn giọng bé. Bé đeo tai nghe hoặc đưa micro gần miệng hơn để mình chấm chính xác nhé!",
+        "lowCoverage": "Bé mới hát được một đoạn ngắn thôi. Hãy hát thêm vài câu nữa để mình chấm điểm đầy đủ cho bé nhé!",
+        "okHeadphones": "Chế độ tai nghe giúp micro thu giọng bé rất rõ nét!",
+        "okSpeaker": "Mẹo nhỏ: Đeo tai nghe sẽ giúp micro nghe rõ giai điệu và nhịp điệu của bé nhất!"
+      },
+      "encouragement": {
+        "insufficient": "Chưa đủ tín hiệu để chấm điểm lần này. Bé thử hát rõ hơn gần micro nhé!",
+        "high": "Tuyệt vời quá! Bé hát đúng nhịp, rõ lời và rất có cảm xúc!",
+        "good": "Giỏi lắm! Bé giữ nhịp và giai điệu khá tốt rồi đó!",
+        "medium": "Khá tốt! Bé thử luyện chậm lại đoạn khó ở tốc độ 0.85x nhé!",
+        "low": "Cố lên nhé! Mình cùng tập chậm từng câu để bé hát ngày càng hay hơn!"
+      },
+      "lineTips": {
+        "unclear": "Câu này bé chưa hát rõ, bấm luyện lại chậm 0.85x nhé!",
+        "great": "Tuyệt vời! Bé hát câu này rất tự tin và đúng nhịp!",
+        "rhythmLate": "Bé vào câu này hơi chậm nhịp một chút, nghe nhạc và vào sớm hơn nhé!",
+        "rhythmFast": "Bé hát hơi nhanh hơn nhịp một chút, hãy hát đều theo chữ chạy nhé!",
+        "rhythmSteady": "Bé thử gõ nhịp hoặc tập câu này ở tốc độ 0.85x cho đều nhịp hơn nhé!",
+        "pitch": "Bé nghe kỹ giai điệu câu này, hát ngân tròn chữ để giữ cao độ đều hơn nhé!",
+        "lyrics": "Bé đọc chậm lại lời câu này một lần rồi hát lại cho rõ từng tiếng nhé!",
+        "practiceMore": "Khá tốt rồi! Bé luyện thêm một lượt ở tốc độ 0.85x sẽ còn hay hơn nữa!",
+        "insufficientLine": "Chưa nghe rõ câu này, bé thử lại gần micro hơn nhé!"
+      },
+      "rhythmTap": {
+        "insufficientGuidance": "Bé hãy nhấn nút Gõ nhịp (hoặc phím Cách) theo từng tiếng chạy trên màn hình nhé!",
+        "insufficientTip": "Bé thử gõ nhịp đều theo câu này nhé!",
+        "okGuidance": "Chế độ gõ nhịp giúp bé làm quen với tiết tấu bài hát trước khi hát có micro!"
+      },
+      "lyricsOnlyFallbackGuidance": "Thiết bị chưa kích hoạt bộ phân tích âm thanh Web Audio, nên lần này hệ thống chỉ chấm lời hát.",
+      "mildSpeakerBleedGuidance": "Có một ít tiếng nhạc loa lọt vào micro. Bé đeo tai nghe sẽ giúp điểm cao độ và nhịp điệu chính xác hơn nữa!"
     }
   },
   "pictureDescription": {
@@ -315,6 +474,70 @@
       "step2Detail": "Kể hoạt động đang diễn ra và khung cảnh xung quanh.",
       "step3Title": "Màu sắc, cảm nghĩ ra sao?",
       "step3Detail": "Thêm màu sắc, thời tiết hoặc cảm xúc của bé."
+    },
+    "aiTimeoutError": "Cô giáo AI đang phản hồi hơi lâu. Bé hãy bấm Thử lại nhé.",
+    "micPausedBackground": "Ứng dụng vừa tạm ẩn nên micro đã tắt an toàn. Lời kể của bé vẫn được giữ nguyên!",
+    "waitingTtsCooldown": "Đang đợi giọng đọc dừng hẳn rồi mở micro cho bé...",
+    "offlineNotice": "Thiết bị đang mất mạng. Bài kể của bé vẫn được giữ nguyên — khi có mạng lại bé bấm Thử chấm lại ngay nhé!",
+    "gradeHintChipsLowerTitle": "Gợi ý trực quan cho bé (Lớp 1–2)",
+    "collapseGradeHints": "Thu gọn gợi ý khung kể",
+    "expandGradeHints": "Mở gợi ý khung kể",
+    "listenGuideButton": "Nghe hướng dẫn",
+    "gradeHintsCollapsedNote": "Gợi ý khung kể đang được thu gọn cho Lớp {grade} để bé tự do diễn đạt — bấm “Mở gợi ý khung kể” bất cứ lúc nào nhé!",
+    "teachingModeSectionAria": "Chế độ luyện tập cùng cô giáo AI",
+    "teachingModeHeading": "Chế độ học cùng cô giáo AI",
+    "listenModeButton": "Nghe chế độ",
+    "teachingModeGroupAria": "Chọn chế độ luyện kể chuyện",
+    "targetWordsProgress": "Từ khó mục tiêu bé đang luyện ({used}/{total})",
+    "followUpSectionAria": "Câu hỏi gợi mở tiếp theo của cô giáo",
+    "practiceFollowUpTitle": "Câu hỏi tiếp theo của cô giáo",
+    "listenQuestionButton": "Nghe câu hỏi",
+    "resultModeBadge": "Chế độ: {mode}",
+    "usedTargetWordsTitle": "Từ khó mục tiêu bé đã dùng rất tốt",
+    "resultFollowUpTitle": "Câu hỏi gợi mở tiếp theo của cô giáo",
+    "answerFollowUpButton": "Trả lời câu hỏi này",
+    "teachingModes": {
+      "OBSERVE": {
+        "label": "Quan sát",
+        "cue": "Bé nhìn kỹ tranh: thấy ai, đồ vật gì, màu sắc nào nổi bật?",
+        "audioHint": "Chế độ Quan sát. Bé hãy nhìn thật kỹ bức tranh và kể tên những người, con vật hoặc đồ vật nổi bật nhất nhé."
+      },
+      "VOCABULARY": {
+        "label": "Từ vựng",
+        "cue": "Bé thử dùng 1–2 từ gợi ý hoặc từ khó bên trên vào câu của mình nhé.",
+        "audioHint": "Chế độ Từ vựng. Bé hãy chọn một đến hai từ gợi ý bên trên để đưa vào câu mô tả của mình nhé."
+      },
+      "SENTENCE": {
+        "label": "Ghép câu",
+        "cue": "Bé ghép chủ ngữ + hành động + nơi chốn thành câu trọn vẹn nhé.",
+        "audioHint": "Chế độ Đặt câu. Bé hãy nói một câu đầy đủ ai đang làm gì và ở đâu nhé."
+      },
+      "STORY": {
+        "label": "Kể chuyện",
+        "cue": "Bé nối thành 2–3 câu kể diễn biến chuyện gì đang xảy ra nhé.",
+        "audioHint": "Chế độ Kể chuyện. Bé hãy nối hai đến ba câu kể rõ chuyện gì đang xảy ra trong bức tranh nhé."
+      },
+      "INFER": {
+        "label": "Suy luận",
+        "cue": "Vì sao nhân vật lại làm vậy? Điều gì có thể xảy ra ngay trước hoặc sau đó?",
+        "audioHint": "Chế độ Suy luận. Bé thử đoán xem vì sao nhân vật lại làm như vậy hoặc điều gì sắp xảy ra nhé."
+      },
+      "CREATE": {
+        "label": "Sáng tạo",
+        "cue": "Bé tưởng tượng thêm lời thoại hoặc kết thúc thật thú vị cho bức tranh nhé!",
+        "audioHint": "Chế độ Sáng tạo. Bé hãy tưởng tượng lời thoại vui hoặc phần tiếp theo thật hay cho bức tranh nhé."
+      }
+    },
+    "scaffoldingSteps": {
+      "PROMPT": "Gợi ý mở đầu",
+      "EXPAND": "Mở rộng câu",
+      "PRAISE": "Khen ngợi bé",
+      "NEXT_CHALLENGE": "Thử thách tiếp theo"
+    },
+    "visualHintChips": {
+      "who": "Có ai / con gì?",
+      "action": "Đang làm gì?",
+      "where": "Ở đâu / màu gì?"
     }
   },
   "karaokeRuntime": {

@@ -161,7 +161,8 @@
       "maxRetriesReached": "3회 연습 완료",
       "uncertainLabel": "잘 들리지 않아요",
       "uncertainNote": "별도로 기록되며, 확정된 발음 오류로 간주되지 않습니다."
-    }
+    },
+    "entertainmentSummaryHeading": "놀이 학습 및 언어 능력 요약 (V4.0)"
   },
   "sessions": {
     "title": "읽기 기록",
@@ -643,5 +644,26 @@
       "wantToRead": "읽고 싶은 책",
       "savedToRead": "독서 목록에 저장됨"
     }
+  },
+  "entertainmentSummary": {
+    "loading": "{childName}의 놀이 학습 진행 상황을 요약하는 중…",
+    "empty": "{childName}의 최근 놀이 학습 기록이 아직 없어요. 게임을 즐기면 요약이 자동으로 표시됩니다.",
+    "observedCounterLabel": "명확히 관찰된 영역",
+    "estimatedCounterLabel": "초기 추정 영역",
+    "unknownCounterLabel": "데이터가 더 필요한 영역",
+    "activitiesTitle": "놀이 학습 활동 (최근 {days}일)",
+    "avgScoreBadge": "평균 {pct}%",
+    "noScoreBadge": "점수 없음",
+    "skillsMapTitle": "역량 지도 (데이터 부족 시 추측하지 않음)",
+    "evidenceCount": "근거 {count}건",
+    "noPracticeYet": "이 영역의 활동 기록이 아직 없어 미평가 상태를 유지합니다.",
+    "statusObserved": "명확히 관찰됨",
+    "statusEstimated": "초기 추정",
+    "statusUnknown": "데이터 부족",
+    "practicedWordsTitle": "놀이로 복습한 어려운 단어",
+    "practiceTimes": "{count}회",
+    "karaokeWeakSegmentsTitle": "0.85배속으로 천천히 연습하면 좋은 소절",
+    "openSongAction": "노래 열기",
+    "homeTipsTitle": "가정에서 함께할 수 있는 팁"
   }
 }

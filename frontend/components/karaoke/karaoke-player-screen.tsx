@@ -1,18 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { KaraokeChildBoundary } from "@/components/karaoke/karaoke-child-boundary";
-import { KaraokePlayer } from "@/components/karaoke/karaoke-player";
+import {
+  KaraokeStage,
+  type KaraokePracticeHistorySummary,
+} from "@/components/karaoke/karaoke-stage";
 import { useKaraokeService } from "@/components/karaoke/karaoke-services-provider";
 import { SelectedChildIdentity } from "@/components/children/selected-child-identity";
 import { Button, ButtonLink } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
+import { useKaraokePlayer } from "@/hooks/use-karaoke-player";
 import { useTranslations } from "@/hooks/use-i18n";
 import {
   karaokeParentErrorMessage,
   type KaraokePlayback,
 } from "@/lib/api/karaoke-service";
+import { createKaraokePracticeService } from "@/lib/api/karaoke-practice-service";
 import { isServiceError } from "@/lib/api/service-error";
+import type { MusicalEvaluationResult } from "@/lib/karaoke/musical-scoring";
 import type { ChildProfileDTO } from "@/types/child";
 
 export function KaraokePlayerScreen({
@@ -35,6 +41,7 @@ export function KaraokePlayerScreen({
     </KaraokeChildBoundary>
   );
 }
+
 function Song({
   child,
   songId,
@@ -69,6 +76,93 @@ function Song({
     </section>
   );
 }
+
+/**
+ * Directly mounts `useKaraokePlayer` + `KaraokeStage` with a memoized `source`
+ * reference, eliminating per-frame `source={{ ...source, lyrics }}` cloning.
+ */
+function ChildKaraokeSession({
+  source,
+  child,
+  onReload,
+}: {
+  source: KaraokePlayback;
+  child: ChildProfileDTO;
+  onReload: () => void;
+}) {
+  const t = useTranslations("entertainment");
+  const practiceService = useMemo(() => createKaraokePracticeService(), []);
+  const player = useKaraokePlayer(
+    source.audio_url,
+    source.duration_ms,
+    source.audio_url_expires_at,
+  );
+
+  const onLoadMusicalProfile = useCallback(async () => {
+    try {
+      return await practiceService.getMusicalProfile(source.song_id);
+    } catch {
+      return null;
+    }
+  }, [practiceService, source.song_id]);
+
+  const onLoadPracticeHistory =
+    useCallback(async (): Promise<KaraokePracticeHistorySummary | null> => {
+      try {
+        const res = await practiceService.listPracticeSessions(
+          child.id,
+          source.song_id,
+          10,
+        );
+        return {
+          bestFullSongScore: res.best_full_song_score,
+          bestFullSongStars: res.best_full_song_stars,
+          totalSessions: res.total_sessions,
+        };
+      } catch {
+        return null;
+      }
+    }, [child.id, practiceService, source.song_id]);
+
+  const onSavePracticeSession = useCallback(
+    async (
+      evaluation: MusicalEvaluationResult,
+      meta: {
+        playbackRate: number;
+        headphoneMode: boolean;
+        segmentStartMs: number | null;
+        segmentEndMs: number | null;
+      },
+    ) => {
+      await practiceService.savePracticeSession({
+        childId: child.id,
+        songId: source.song_id,
+        songVersionId: source.version_id,
+        practiceMode: evaluation.practiceMode,
+        playbackRate: meta.playbackRate,
+        headphoneMode: meta.headphoneMode,
+        segmentStartMs: meta.segmentStartMs,
+        segmentEndMs: meta.segmentEndMs,
+        evaluation,
+      });
+    },
+    [child.id, practiceService, source.song_id, source.version_id],
+  );
+
+  return (
+    <KaraokeStage
+      source={source}
+      player={player}
+      childAlias={child.alias}
+      label={t("karaoke.playerScreen.childStageLabel")}
+      onReload={onReload}
+      onLoadMusicalProfile={onLoadMusicalProfile}
+      onLoadPracticeHistory={onLoadPracticeHistory}
+      onSavePracticeSession={onSavePracticeSession}
+    />
+  );
+}
+
 function Playback({
   child,
   songId,
@@ -132,11 +226,10 @@ function Playback({
     );
   const source = state.data;
   return (
-    <KaraokePlayer
+    <ChildKaraokeSession
+      key={`${source.version_id}:${source.audio_url}`}
       source={source}
-      label={t("karaoke.playerScreen.childStageLabel")}
-      presentation="child"
-      childAlias={child.alias}
+      child={child}
       onReload={() => onRefresh(source.version_id)}
     />
   );

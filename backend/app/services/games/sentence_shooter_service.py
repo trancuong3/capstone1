@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -13,16 +14,19 @@ from app.models import Book, BookPage, GameAttempt, GameRound, GameSession, Page
 from app.repositories.sentence_shooter_repository import SentenceShooterRepository
 from app.schemas.sentence_shooter import (
     Difficulty,
+    LearningMode,
     SentenceShooterAbandonRead,
     SentenceShooterBookRead,
     SentenceShooterHintRead,
     SentenceShooterNextRoundRead,
+    SentenceShooterPromptSlot,
     SentenceShooterResultRead,
     SentenceShooterRoundRead,
     SentenceShooterRoundToken,
     SentenceShooterSessionCreate,
     SentenceShooterSessionRead,
     SentenceShooterShotRead,
+    resolve_shot_request_uuid,
 )
 from app.services.games.scoring import stars_for_round
 from app.services.games.sentence_extraction import ExtractedSentence, extract_verified_sentences, normalize_token
@@ -35,6 +39,159 @@ DIFFICULTY_LENGTHS: dict[str, tuple[int, int]] = {
     "challenge": (10, 14),
 }
 
+DIFFICULTY_LEVEL_MAP: dict[str, int] = {
+    "easy": 1,
+    "medium": 3,
+    "challenge": 5,
+}
+
+SKILL_KEY_BY_MODE: dict[LearningMode, str] = {
+    "WORD_ORDER": "sentence_ordering",
+    "FILL_BLANK": "sentence_cloze",
+    "GRAMMAR_FOCUS": "grammar_awareness",
+}
+
+_FALLBACK_DISTRACTORS_VI: tuple[str, ...] = (
+    "hoa",
+    "mây",
+    "nắng",
+    "chim",
+    "cây",
+    "nhà",
+    "trường",
+    "bạn",
+    "bút",
+    "vở",
+    "bóng",
+    "mưa",
+    "sông",
+    "núi",
+    "vui",
+    "đẹp",
+)
+
+_VI_CONNECTORS: tuple[str, ...] = (
+    "và",
+    "nhưng",
+    "vì",
+    "nên",
+    "nếu",
+    "thì",
+    "hoặc",
+    "còn",
+    "mà",
+    "rồi",
+    "khi",
+    "để",
+    "tuy",
+    "nhờ",
+    "với",
+    "cùng",
+    "cũng",
+    "vẫn",
+    "đang",
+    "đã",
+    "sẽ",
+)
+
+_VI_CONNECTOR_TIPS: dict[str, str] = {
+    "đang": 'Từ "đang" cho biết hoạt động diễn ra ngay lúc nói.',
+    "đã": 'Từ "đã" chỉ việc đã xảy ra trước đó trong câu kể.',
+    "sẽ": 'Từ "sẽ" chỉ việc sắp diễn ra trong tương lai.',
+    "và": 'Từ nối "và" giúp nối hai ý hoặc hoạt động cùng nhau thật mượt mà.',
+    "cùng": 'Từ "cùng" diễn tả việc làm chung giữa các nhân vật.',
+    "với": 'Từ "với" giúp nối nhân vật hoặc sự vật đi kèm trong câu.',
+    "nhưng": 'Từ nối "nhưng" dùng để nối hai ý đối lập nhau trong câu.',
+    "tuy": 'Từ nối "tuy" mở đầu vế câu nêu điều kiện trái ngược.',
+    "mà": 'Từ nối "mà" giúp liên kết ý bất ngờ hoặc đối chiếu trong câu.',
+    "vì": 'Từ nối "vì" dùng để giải thích nguyên nhân của sự việc.',
+    "nên": 'Từ nối "nên" dùng để nêu kết quả của một nguyên nhân.',
+    "nhờ": 'Từ "nhờ" nêu nguyên nhân tốt đẹp giúp đạt được kết quả.',
+    "nếu": 'Từ nối "nếu" nêu điều kiện giả thiết trong câu.',
+    "thì": 'Từ nối "thì" nối kết quả đi sau điều kiện trong câu.',
+    "hoặc": 'Từ nối "hoặc" dùng khi chọn một trong các khả năng.',
+    "rồi": 'Từ nối "rồi" chỉ thứ tự việc xảy ra tiếp theo.',
+    "khi": 'Từ "khi" giúp xác định thời điểm diễn ra sự việc.',
+    "để": 'Từ "để" dùng để nêu mục đích của một hành động.',
+}
+
+_VI_ACTION_WORDS: frozenset[str] = frozenset(
+    {
+        "đọc",
+        "viết",
+        "học",
+        "chơi",
+        "xem",
+        "nghe",
+        "nói",
+        "hát",
+        "vẽ",
+        "chạy",
+        "nhảy",
+        "đi",
+        "ăn",
+        "uống",
+        "ngủ",
+        "cười",
+        "bay",
+        "bơi",
+        "trồng",
+        "tưới",
+        "giúp",
+        "tặng",
+        "kể",
+        "hỏi",
+        "mở",
+        "đóng",
+        "tìm",
+        "nhìn",
+        "gọi",
+        "thích",
+        "yêu",
+        "làm",
+        "mang",
+        "cầm",
+        "đặt",
+        "bắt",
+        "quét",
+        "rửa",
+    }
+)
+
+_VI_NON_ACTION_DISTRACTORS: tuple[str, ...] = (
+    "chiếc",
+    "mây",
+    "bàn",
+    "ghế",
+    "đèn",
+    "lá",
+    "hoa",
+    "cửa",
+)
+
+_TERMINAL_PUNCT_TIPS: dict[str, str] = {
+    "?": "Dấu chấm hỏi (?) đặt cuối câu dùng để hỏi điều bé muốn biết.",
+    "!": "Dấu chấm than (!) đặt cuối câu thể hiện cảm xúc vui mừng hoặc ngạc nhiên.",
+    ".": "Dấu chấm (.) đặt cuối câu kể để báo hiệu câu đã trọn ý.",
+}
+
+
+def _clean_display_word(raw: str) -> str:
+    text = unicodedata.normalize("NFC", raw).strip()
+    while text and unicodedata.category(text[0]).startswith(("P", "S")):
+        text = text[1:]
+    while text and unicodedata.category(text[-1]).startswith(("P", "S")):
+        text = text[:-1]
+    return text or raw.strip()
+
+
+def _extract_round_meta(tokens_snapshot: Any) -> dict[str, Any]:
+    if isinstance(tokens_snapshot, list):
+        for item in tokens_snapshot:
+            if isinstance(item, dict) and item.get("_v4_meta") is True:
+                return item
+    return {}
+
 
 @dataclass
 class _PageSource:
@@ -42,6 +199,15 @@ class _PageSource:
     page: BookPage
     revision: PageRevision
     words: list[PageRevisionWord]
+
+
+@dataclass
+class _PreparedRound:
+    expected_ids: list[UUID]
+    shuffled_ids: list[UUID]
+    tokens_snapshot: list[dict[str, Any]]
+    practiced_difficult_words: list[str]
+    learning_mode: LearningMode
 
 
 class SentenceShooterService:
@@ -106,6 +272,307 @@ class SentenceShooterService:
                 seen_sentences.add(key)
                 candidates.append((source, sentence))
         return candidates
+
+    @staticmethod
+    def _matched_difficult_words(
+        sentence: ExtractedSentence,
+        focus_set: set[str],
+    ) -> list[str]:
+        if not focus_set:
+            return []
+        matched: list[str] = []
+        seen: set[str] = set()
+        for token in sentence.tokens:
+            norm = normalize_token(token.text)
+            if norm and norm in focus_set and norm not in seen:
+                seen.add(norm)
+                matched.append(_clean_display_word(token.text))
+        return matched
+
+    @classmethod
+    def _select_prioritized_candidates(
+        cls,
+        candidates: list[tuple[_PageSource, ExtractedSentence]],
+        total_rounds: int,
+        focus_set: set[str],
+        rng: random.SystemRandom,
+    ) -> list[tuple[_PageSource, ExtractedSentence]]:
+        if not focus_set:
+            return rng.sample(candidates, total_rounds)
+
+        buckets: dict[int, list[tuple[_PageSource, ExtractedSentence]]] = defaultdict(list)
+        for item in candidates:
+            score = len(cls._matched_difficult_words(item[1], focus_set))
+            buckets[score].append(item)
+
+        chosen: list[tuple[_PageSource, ExtractedSentence]] = []
+        for score in sorted(buckets.keys(), reverse=True):
+            group = list(buckets[score])
+            rng.shuffle(group)
+            needed = total_rounds - len(chosen)
+            chosen.extend(group[:needed])
+            if len(chosen) >= total_rounds:
+                break
+        return chosen
+
+    @staticmethod
+    def _pick_distractors(
+        *,
+        count: int,
+        excluded_normalized: set[str],
+        book_pool: list[str],
+        fallback_pool: tuple[str, ...],
+        rng: random.SystemRandom,
+    ) -> list[tuple[UUID, str]]:
+        chosen: list[tuple[UUID, str]] = []
+        used = set(excluded_normalized)
+        shuffled_book = list(book_pool)
+        rng.shuffle(shuffled_book)
+        shuffled_fallback = list(fallback_pool)
+        rng.shuffle(shuffled_fallback)
+
+        for word in [*shuffled_book, *shuffled_fallback]:
+            clean = _clean_display_word(word)
+            norm = normalize_token(clean)
+            if not norm or norm in used:
+                continue
+            used.add(norm)
+            chosen.append((uuid4(), clean))
+            if len(chosen) >= count:
+                break
+        return chosen
+
+    @classmethod
+    def _prepare_round(
+        cls,
+        sentence: ExtractedSentence,
+        *,
+        learning_mode: LearningMode,
+        difficulty: Difficulty,
+        focus_set: set[str],
+        book_word_pool: list[str],
+        rng: random.SystemRandom,
+    ) -> _PreparedRound:
+        practiced = cls._matched_difficult_words(sentence, focus_set)
+        if learning_mode == "WORD_ORDER":
+            expected_ids = [token.token_id for token in sentence.tokens]
+            shuffled_ids = shuffle_token_ids(expected_ids, rng=rng)
+            tokens_snapshot: list[dict[str, Any]] = [
+                {
+                    "id": str(token.token_id),
+                    "text": token.text,
+                    "is_difficult_word": normalize_token(token.text) in focus_set,
+                }
+                for token in sentence.tokens
+            ]
+            tokens_snapshot.append(
+                {
+                    "_v4_meta": True,
+                    "learning_mode": "WORD_ORDER",
+                    "prompt_slots": [],
+                    "practiced_difficult_words": practiced,
+                    "grammar_tip": None,
+                    "prompt_hint": None,
+                }
+            )
+            return _PreparedRound(
+                expected_ids=expected_ids,
+                shuffled_ids=shuffled_ids,
+                tokens_snapshot=tokens_snapshot,
+                practiced_difficult_words=practiced,
+                learning_mode="WORD_ORDER",
+            )
+
+        if learning_mode == "FILL_BLANK":
+            blank_count = 1 if difficulty == "easy" or len(sentence.tokens) < 5 else 2
+            scored_indices: list[tuple[int, int]] = []
+            for idx, token in enumerate(sentence.tokens):
+                norm = normalize_token(token.text)
+                is_diff = 1 if norm in focus_set else 0
+                is_non_first = 1 if idx > 0 else 0
+                has_length = 1 if len(norm) >= 2 else 0
+                scored_indices.append((is_diff * 10 + has_length * 3 + is_non_first, idx))
+            scored_indices.sort(key=lambda pair: (-pair[0], pair[1]))
+            blank_indices = sorted(idx for _, idx in scored_indices[:blank_count])
+            blank_set = set(blank_indices)
+
+            expected_tokens = [sentence.tokens[idx] for idx in blank_indices]
+            expected_ids = [token.token_id for token in expected_tokens]
+            excluded_norms = {normalize_token(token.text) for token in sentence.tokens}
+            distractor_count = 3 if len(expected_ids) == 1 else 3
+            distractors = cls._pick_distractors(
+                count=distractor_count,
+                excluded_normalized=excluded_norms,
+                book_pool=book_word_pool,
+                fallback_pool=_FALLBACK_DISTRACTORS_VI,
+                rng=rng,
+            )
+            choice_ids = [*expected_ids, *(d_id for d_id, _ in distractors)]
+            shuffled_ids = shuffle_token_ids(choice_ids, rng=rng)
+
+            prompt_slots = [
+                {
+                    "position": idx,
+                    "text": None if idx in blank_set else token.text,
+                    "is_blank": idx in blank_set,
+                    "is_difficult_word": normalize_token(token.text) in focus_set,
+                }
+                for idx, token in enumerate(sentence.tokens)
+            ]
+            answer_words = [_clean_display_word(token.text) for token in expected_tokens]
+            if len(answer_words) == 1:
+                grammar_tip = f'Từ "{answer_words[0]}" giúp câu có nghĩa trọn vẹn và tự nhiên hơn.'
+                prompt_hint = "Đọc kỹ câu và bắn từ đúng vào chỗ trống nhé!"
+            else:
+                grammar_tip = (
+                    f'Hai từ "{answer_words[0]}" và "{answer_words[1]}" giúp câu đầy đủ và rõ ý hơn.'
+                )
+                prompt_hint = "Bắn lần lượt các từ phù hợp vào từng chỗ trống nhé!"
+
+            tokens_snapshot = [
+                {"id": str(token.token_id), "text": token.text, "is_difficult_word": False}
+                for token in expected_tokens
+            ] + [
+                {"id": str(d_id), "text": d_text, "is_difficult_word": False, "is_distractor": True}
+                for d_id, d_text in distractors
+            ]
+            tokens_snapshot.append(
+                {
+                    "_v4_meta": True,
+                    "learning_mode": "FILL_BLANK",
+                    "prompt_slots": prompt_slots,
+                    "practiced_difficult_words": practiced,
+                    "grammar_tip": grammar_tip,
+                    "prompt_hint": prompt_hint,
+                }
+            )
+            return _PreparedRound(
+                expected_ids=expected_ids,
+                shuffled_ids=shuffled_ids,
+                tokens_snapshot=tokens_snapshot,
+                practiced_difficult_words=practiced,
+                learning_mode="FILL_BLANK",
+            )
+
+        # GRAMMAR_FOCUS: focus on Vietnamese punctuation, connectors, or action words.
+        last_idx = len(sentence.tokens) - 1
+        last_text = sentence.tokens[last_idx].text
+        last_punct = last_text[-1] if last_text and last_text[-1] in ".!?" else ""
+
+        target_idx: int | None = None
+        focus_kind = "structure"
+        for idx, token in enumerate(sentence.tokens):
+            norm = normalize_token(token.text)
+            if norm in _VI_CONNECTORS:
+                target_idx = idx
+                focus_kind = "connector"
+                break
+
+        if last_punct in {"?", "!"}:
+            target_idx = last_idx
+            focus_kind = "punctuation"
+        elif target_idx is None:
+            for idx, token in enumerate(sentence.tokens):
+                norm = normalize_token(token.text)
+                if norm in _VI_ACTION_WORDS:
+                    target_idx = idx
+                    focus_kind = "action"
+                    break
+        if target_idx is None and last_punct == ".":
+            target_idx = last_idx
+            focus_kind = "punctuation"
+        if target_idx is None:
+            target_idx = min(len(sentence.tokens) - 1, max(1, len(sentence.tokens) // 2))
+            focus_kind = "structure"
+
+        target_token = sentence.tokens[target_idx]
+        target_norm = normalize_token(target_token.text)
+        target_clean = _clean_display_word(target_token.text)
+        expected_ids = [target_token.token_id]
+
+        distractors: list[tuple[UUID, str]] = []
+        if focus_kind == "punctuation":
+            base_word = target_token.text[:-1] if last_punct else target_token.text
+            alt_marks = [mark for mark in ("?", "!", ",", ".") if mark != last_punct]
+            for mark in alt_marks[:3]:
+                distractors.append((uuid4(), f"{base_word}{mark}"))
+            grammar_tip = _TERMINAL_PUNCT_TIPS.get(
+                last_punct,
+                "Dấu câu ở cuối câu giúp người đọc hiểu rõ sắc thái và ngắt nghỉ đúng.",
+            )
+            prompt_hint = "Chọn từ có dấu câu kết thúc phù hợp với ý nghĩa của câu nhé!"
+        elif focus_kind == "connector":
+            excluded = {normalize_token(t.text) for t in sentence.tokens} | {target_norm}
+            connector_choices = tuple(c for c in _VI_CONNECTORS if c != target_norm)
+            distractors = cls._pick_distractors(
+                count=3,
+                excluded_normalized=excluded,
+                book_pool=[],
+                fallback_pool=connector_choices,
+                rng=rng,
+            )
+            grammar_tip = _VI_CONNECTOR_TIPS.get(
+                target_norm,
+                f'Từ nối "{target_clean}" giúp các ý trong câu liên kết mạch lạc và dễ hiểu hơn.',
+            )
+            prompt_hint = "Chọn từ nối hoặc từ chỉ thời gian phù hợp để ghép vào câu nhé!"
+        elif focus_kind == "action":
+            excluded = {normalize_token(t.text) for t in sentence.tokens} | {target_norm}
+            distractors = cls._pick_distractors(
+                count=3,
+                excluded_normalized=excluded,
+                book_pool=[],
+                fallback_pool=_VI_NON_ACTION_DISTRACTORS,
+                rng=rng,
+            )
+            grammar_tip = f'Từ "{target_clean}" là từ chỉ hoạt động giúp câu kể rõ nhân vật đang làm gì.'
+            prompt_hint = "Chọn từ chỉ hoạt động phù hợp với câu nhé!"
+        else:
+            excluded = {normalize_token(t.text) for t in sentence.tokens} | {target_norm}
+            distractors = cls._pick_distractors(
+                count=3,
+                excluded_normalized=excluded,
+                book_pool=book_word_pool,
+                fallback_pool=_FALLBACK_DISTRACTORS_VI,
+                rng=rng,
+            )
+            grammar_tip = f'Từ "{target_clean}" đặt đúng vị trí giúp câu tiếng Việt tròn nghĩa và tự nhiên.'
+            prompt_hint = "Chọn từ đúng ngữ pháp để hoàn thành câu nhé!"
+
+        choice_ids = [*expected_ids, *(d_id for d_id, _ in distractors)]
+        shuffled_ids = shuffle_token_ids(choice_ids, rng=rng)
+        prompt_slots = [
+            {
+                "position": idx,
+                "text": None if idx == target_idx else token.text,
+                "is_blank": idx == target_idx,
+                "is_difficult_word": normalize_token(token.text) in focus_set,
+            }
+            for idx, token in enumerate(sentence.tokens)
+        ]
+        tokens_snapshot = [
+            {"id": str(target_token.token_id), "text": target_token.text, "is_difficult_word": False}
+        ] + [
+            {"id": str(d_id), "text": d_text, "is_difficult_word": False, "is_distractor": True}
+            for d_id, d_text in distractors
+        ]
+        tokens_snapshot.append(
+            {
+                "_v4_meta": True,
+                "learning_mode": "GRAMMAR_FOCUS",
+                "prompt_slots": prompt_slots,
+                "practiced_difficult_words": practiced,
+                "grammar_tip": grammar_tip,
+                "prompt_hint": prompt_hint,
+            }
+        )
+        return _PreparedRound(
+            expected_ids=expected_ids,
+            shuffled_ids=shuffled_ids,
+            tokens_snapshot=tokens_snapshot,
+            practiced_difficult_words=practiced,
+            learning_mode="GRAMMAR_FOCUS",
+        )
 
     async def list_books(
         self,
@@ -172,7 +639,29 @@ class SentenceShooterService:
         if len(candidates) < payload.total_rounds:
             raise HTTPException(status_code=409, detail="INSUFFICIENT_CONTENT")
 
-        chosen = random.SystemRandom().sample(candidates, payload.total_rounds)
+        # Gather active difficult words safely (explicit payload + child practice history).
+        repo_difficult_words: list[str] = []
+        if hasattr(self.repository, "active_difficult_words"):
+            repo_difficult_words = await self.repository.active_difficult_words(child_id)
+        focus_set = {
+            norm
+            for raw in [*payload.focus_words, *repo_difficult_words]
+            if (norm := normalize_token(str(raw)))
+        }
+
+        rng = random.SystemRandom()
+        chosen = self._select_prioritized_candidates(
+            candidates,
+            payload.total_rounds,
+            focus_set,
+            rng,
+        )
+        book_word_pool = [
+            token.text
+            for _, sentence in candidates
+            for token in sentence.tokens
+        ]
+
         game_session_id = uuid4()
         game_session = GameSession(
             Id=game_session_id,
@@ -189,13 +678,22 @@ class SentenceShooterService:
             StartedAt=datetime.now(timezone.utc),
         )
         game_rounds: list[GameRound] = []
+        session_practiced_words: list[str] = []
+        seen_practiced: set[str] = set()
         for round_number, (source, sentence) in enumerate(chosen, start=1):
-            expected_ids = [token.token_id for token in sentence.tokens]
-            shuffled_ids = shuffle_token_ids(expected_ids)
-            tokens_snapshot = [
-                {"id": str(token.token_id), "text": token.text}
-                for token in sentence.tokens
-            ]
+            prepared = self._prepare_round(
+                sentence,
+                learning_mode=payload.learning_mode,
+                difficulty=payload.difficulty,
+                focus_set=focus_set,
+                book_word_pool=book_word_pool,
+                rng=rng,
+            )
+            for word in prepared.practiced_difficult_words:
+                norm = normalize_token(word)
+                if norm and norm not in seen_practiced:
+                    seen_practiced.add(norm)
+                    session_practiced_words.append(word)
             game_rounds.append(
                 GameRound(
                     Id=uuid4(),
@@ -204,9 +702,9 @@ class SentenceShooterService:
                     BookPageId=source.page.Id,
                     PageRevisionId=source.revision.Id,
                     SentenceSnapshot=sentence.text,
-                    TokensSnapshot=tokens_snapshot,
-                    ExpectedTokenIds=[str(token_id) for token_id in expected_ids],
-                    ShuffledTokenIds=[str(token_id) for token_id in shuffled_ids],
+                    TokensSnapshot=prepared.tokens_snapshot,
+                    ExpectedTokenIds=[str(token_id) for token_id in prepared.expected_ids],
+                    ShuffledTokenIds=[str(token_id) for token_id in prepared.shuffled_ids],
                     NextExpectedPosition=0,
                     CorrectCount=0,
                     MistakeCount=0,
@@ -220,12 +718,14 @@ class SentenceShooterService:
             session_id=game_session_id,
             book=self._book_read(book, len(candidates)),
             difficulty=payload.difficulty,
+            learning_mode=payload.learning_mode,
             total_rounds=payload.total_rounds,
             completed_rounds=0,
             total_stars=0,
+            practiced_difficult_words=session_practiced_words,
             round=self._public_round(game_rounds[0]),
         )
-       # 1. Insert GameSession trước
+        # 1. Insert GameSession trước
         self.repository.add(game_session)
         await self.repository.flush()
 
@@ -239,20 +739,40 @@ class SentenceShooterService:
 
     @staticmethod
     def _public_round(game_round: GameRound) -> SentenceShooterRoundRead:
-        tokens = {str(token["id"]): token for token in game_round.TokensSnapshot}
+        snapshot = game_round.TokensSnapshot or []
+        meta = _extract_round_meta(snapshot)
+        tokens = {
+            str(token["id"]): token
+            for token in snapshot
+            if isinstance(token, dict) and "id" in token
+        }
         shuffled_ids = [str(token_id) for token_id in game_round.ShuffledTokenIds]
+        expected_count = len(game_round.ExpectedTokenIds or [])
+        learning_mode: LearningMode = meta.get("learning_mode", "WORD_ORDER")
+        raw_slots = meta.get("prompt_slots") or []
+        prompt_slots = [
+            SentenceShooterPromptSlot.model_validate(slot)
+            for slot in raw_slots
+            if isinstance(slot, dict)
+        ]
+        practiced = [str(w) for w in (meta.get("practiced_difficult_words") or []) if str(w).strip()]
         return SentenceShooterRoundRead(
             round_id=game_round.Id,
             round_number=game_round.RoundNumber,
-            token_count=len(shuffled_ids),
+            token_count=expected_count if expected_count > 0 else len(shuffled_ids),
             tokens=[
                 SentenceShooterRoundToken(
                     id=UUID(token_id),
                     text=str(tokens[token_id]["text"]),
+                    is_difficult_word=bool(tokens[token_id].get("is_difficult_word", False)),
                 )
                 for token_id in shuffled_ids
                 if token_id in tokens
             ],
+            learning_mode=learning_mode,
+            prompt_slots=prompt_slots,
+            practiced_difficult_words=practiced,
+            prompt_hint=meta.get("prompt_hint"),
         )
 
     async def shoot(
@@ -261,14 +781,17 @@ class SentenceShooterService:
         session_id: UUID,
         round_id: UUID,
         token_id: UUID,
-        request_id: UUID,
+        request_id: UUID | None,
+        *,
+        client_shot_id: str | None = None,
     ) -> SentenceShooterShotRead:
+        dedupe_request_id = resolve_shot_request_uuid(request_id, client_shot_id)
         bundle = (
             await self.repository.load_shot_bundle(
                 actor_id,
                 session_id,
                 round_id,
-                request_id,
+                dedupe_request_id,
             )
             if hasattr(self.repository, "load_shot_bundle")
             else None
@@ -291,7 +814,7 @@ class SentenceShooterService:
             )
             if game_session is None:
                 raise HTTPException(status_code=404, detail="Resource not found")
-            duplicate = await self.repository.attempt(session_id, request_id)
+            duplicate = await self.repository.attempt(session_id, dedupe_request_id)
             if duplicate is not None:
                 return SentenceShooterShotRead.model_validate(duplicate.ResultSnapshot)
             if game_session.Status != "IN_PROGRESS":
@@ -302,6 +825,15 @@ class SentenceShooterService:
                 raise HTTPException(status_code=404, detail="Resource not found")
             if game_round.Status != "IN_PROGRESS" or game_round.RoundNumber != game_session.CompletedRounds + 1:
                 raise HTTPException(status_code=409, detail="ROUND_NOT_ACTIVE")
+
+        round_meta = _extract_round_meta(game_round.TokensSnapshot)
+        learning_mode: LearningMode = round_meta.get("learning_mode", "WORD_ORDER")
+        practiced_words = [
+            str(word)
+            for word in (round_meta.get("practiced_difficult_words") or [])
+            if str(word).strip()
+        ]
+        round_grammar_tip = round_meta.get("grammar_tip")
 
         shuffled_ids = {str(value) for value in game_round.ShuffledTokenIds}
         expected_ids = [str(value) for value in game_round.ExpectedTokenIds]
@@ -346,6 +878,7 @@ class SentenceShooterService:
         stars_awarded = 0
         completed_sentence = None
         next_round_payload: dict[str, Any] | None = None
+        evidence_entries: list[dict[str, Any]] = []
         if round_completed:
             game_round.Status = "COMPLETED"
             game_round.CompletedAt = datetime.now(timezone.utc)
@@ -354,6 +887,53 @@ class SentenceShooterService:
             game_session.CompletedRounds += 1
             game_session.TotalStars += stars_awarded
             completed_sentence = game_round.SentenceSnapshot
+
+            # Snapshot fields before commit for learning_skill_evidence persistence.
+            total_attempts = max(1, game_round.CorrectCount + game_round.MistakeCount)
+            raw_accuracy = game_round.CorrectCount / total_attempts
+            hint_penalty = min(0.3, game_round.HintCount * 0.1)
+            score_normalized = round(max(0.0, min(1.0, raw_accuracy - hint_penalty)), 4)
+            confidence = 0.85 if game_round.HintCount == 0 else 0.7
+            difficulty_level = DIFFICULTY_LEVEL_MAP.get(str(game_session.Difficulty), 1)
+            evidence_meta = {
+                "session_id": str(game_session.Id),
+                "round_number": int(game_round.RoundNumber),
+                "learning_mode": learning_mode,
+                "mistakes": int(game_round.MistakeCount),
+                "hints": int(game_round.HintCount),
+                "stars": int(stars_awarded),
+            }
+            primary_skill = SKILL_KEY_BY_MODE.get(learning_mode, "sentence_ordering")
+            evidence_entries.append(
+                {
+                    "child_id": game_session.ChildProfileId,
+                    "parent_id": actor_id,
+                    "skill_key": primary_skill,
+                    "source_record_id": str(game_round.Id),
+                    "evidence_type": "OBSERVED",
+                    "score_normalized": score_normalized,
+                    "confidence": confidence,
+                    "difficulty_level": difficulty_level,
+                    "practice_words": practiced_words,
+                    "metadata_json": evidence_meta,
+                }
+            )
+            if practiced_words:
+                evidence_entries.append(
+                    {
+                        "child_id": game_session.ChildProfileId,
+                        "parent_id": actor_id,
+                        "skill_key": "difficult_word_mastery",
+                        "source_record_id": str(game_round.Id),
+                        "evidence_type": "OBSERVED",
+                        "score_normalized": score_normalized,
+                        "confidence": confidence,
+                        "difficulty_level": difficulty_level,
+                        "practice_words": practiced_words,
+                        "metadata_json": evidence_meta,
+                    }
+                )
+
             if game_session.CompletedRounds == game_session.TotalRounds:
                 game_session.Status = "COMPLETED"
                 game_session.CompletedAt = datetime.now(timezone.utc)
@@ -385,6 +965,7 @@ class SentenceShooterService:
         else:
             message = "Thử lại nhé! Bé làm được mà!"
 
+        authoritative_score = game_session.CorrectCount * 10 + game_session.TotalStars * 5
         result_snapshot: dict[str, Any] = {
             "is_correct": is_correct,
             "correct_count": game_round.CorrectCount,
@@ -396,22 +977,29 @@ class SentenceShooterService:
             "session_completed": game_session.Status == "COMPLETED",
             "next_expected_position": game_round.NextExpectedPosition,
             "stars_awarded": stars_awarded,
+            "score": authoritative_score,
             "completed_sentence": completed_sentence,
             "next_round": next_round_payload,
             "message": message,
+            "client_shot_id": client_shot_id,
+            "learning_mode": learning_mode,
+            "grammar_tip": round_grammar_tip if round_completed else None,
+            "practiced_difficult_words": practiced_words if round_completed else [],
         }
         self.repository.add(
             GameAttempt(
                 Id=uuid4(),
                 GameSessionId=game_session.Id,
                 GameRoundId=game_round.Id,
-                RequestId=request_id,
+                RequestId=dedupe_request_id,
                 TokenId=token_id,
                 IsCorrect=is_correct,
                 ResultSnapshot=result_snapshot,
             )
         )
         await self.repository.commit()
+        if evidence_entries and hasattr(self.repository, "record_learning_evidence"):
+            await self.repository.record_learning_evidence(evidence_entries)
         return SentenceShooterShotRead.model_validate(result_snapshot)
 
     async def hint(
@@ -504,6 +1092,25 @@ class SentenceShooterService:
             book = await self.repository.book(game_session.BookId)
             if book is None:
                 raise HTTPException(status_code=404, detail="Resource not found")
+
+        learning_mode: LearningMode = "WORD_ORDER"
+        practiced_words: list[str] = []
+        seen_words: set[str] = set()
+        if hasattr(self.repository, "rounds"):
+            try:
+                session_rounds = await self.repository.rounds(game_session.Id)
+                for rnd in session_rounds:
+                    meta = _extract_round_meta(rnd.TokensSnapshot)
+                    if meta.get("learning_mode") in ("WORD_ORDER", "FILL_BLANK", "GRAMMAR_FOCUS"):
+                        learning_mode = meta["learning_mode"]
+                    for word in meta.get("practiced_difficult_words") or []:
+                        norm = normalize_token(str(word))
+                        if norm and norm not in seen_words:
+                            seen_words.add(norm)
+                            practiced_words.append(str(word))
+            except Exception:
+                pass
+
         now = datetime.now(timezone.utc)
         started_at = game_session.StartedAt
         if started_at.tzinfo is None:
@@ -516,6 +1123,7 @@ class SentenceShooterService:
             session_id=game_session.Id,
             book=self._book_read(book, max(1, game_session.TotalRounds)),
             difficulty=game_session.Difficulty,
+            learning_mode=learning_mode,
             status=game_session.Status,
             total_rounds=game_session.TotalRounds,
             completed_rounds=game_session.CompletedRounds,
@@ -526,6 +1134,7 @@ class SentenceShooterService:
             duration_seconds=duration_seconds,
             started_at=game_session.StartedAt,
             completed_at=game_session.CompletedAt,
+            practiced_difficult_words=practiced_words,
         )
 
     async def abandon(

@@ -161,7 +161,8 @@
       "maxRetriesReached": "Practicado tres veces",
       "uncertainLabel": "No se escuchó claramente",
       "uncertainNote": "Registrado por separado, no cuenta como un error de pronunciación confirmado."
-    }
+    },
+    "entertainmentSummaryHeading": "Aprendizaje lúdico y habilidades lingüísticas (V4.0)"
   },
   "sessions": {
     "title": "Historial de lectura",
@@ -643,5 +644,26 @@
       "wantToRead": "Quiero leer",
       "savedToRead": "Guardado en la lista de lectura"
     }
+  },
+  "entertainmentSummary": {
+    "loading": "Resumiendo el progreso lúdico de {childName}…",
+    "empty": "Aún no hay datos recientes de juegos para {childName}. Aparecerán aquí tras jugar.",
+    "observedCounterLabel": "Habilidades bien observadas",
+    "estimatedCounterLabel": "Habilidades estimadas inicialmente",
+    "unknownCounterLabel": "Habilidades con pocos datos",
+    "activitiesTitle": "Actividades lúdicas (últimos {days} días)",
+    "avgScoreBadge": "Prom. {pct}%",
+    "noScoreBadge": "Sin puntuación aún",
+    "skillsMapTitle": "Mapa de habilidades (sin suposiciones ante pocos datos)",
+    "evidenceCount": "{count} evidencias",
+    "noPracticeYet": "Aún no hay práctica en esta área, por lo que sigue sin evaluarse.",
+    "statusObserved": "Bien observado",
+    "statusEstimated": "Estimación inicial",
+    "statusUnknown": "Datos insuficientes",
+    "practicedWordsTitle": "Palabras difíciles repasadas jugando",
+    "practiceTimes": "{count} veces",
+    "karaokeWeakSegmentsTitle": "Versos para practicar despacio a 0,85x",
+    "openSongAction": "Abrir canción",
+    "homeTipsTitle": "Consejos para acompañar en casa"
   }
 }

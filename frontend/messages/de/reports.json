@@ -161,7 +161,8 @@
       "maxRetriesReached": "Dreimal geübt",
       "uncertainLabel": "Nicht deutlich gehört",
       "uncertainNote": "Separat erfasst, zählt nicht als bestätigter Aussprachefehler."
-    }
+    },
+    "entertainmentSummaryHeading": "Spielerisches Lernen & Sprachkompetenzen (V4.0)"
   },
   "sessions": {
     "title": "Leseverlauf",
@@ -643,5 +644,26 @@
       "wantToRead": "Leseliste",
       "savedToRead": "In Leseliste gespeichert"
     }
+  },
+  "entertainmentSummary": {
+    "loading": "Fortschritte im Spiel- und Lernbereich für {childName} werden geladen…",
+    "empty": "Noch keine aktuellen Spiel- und Lerndaten für {childName}. Sobald ein Spiel genutzt wird, erscheint hier eine Übersicht.",
+    "observedCounterLabel": "Klar beobachtete Kompetenzen",
+    "estimatedCounterLabel": "Erste Einschätzungen",
+    "unknownCounterLabel": "Bereiche mit zu wenig Daten",
+    "activitiesTitle": "Spiel- und Lernaktivitäten (letzte {days} Tage)",
+    "avgScoreBadge": "Ø {pct}%",
+    "noScoreBadge": "Noch kein Wert",
+    "skillsMapTitle": "Kompetenzkarte (keine Spekulation bei fehlenden Daten)",
+    "evidenceCount": "{count} Belege",
+    "noPracticeYet": "In diesem Bereich wurde noch nicht geübt, daher bleibt der Status offen.",
+    "statusObserved": "Klar beobachtet",
+    "statusEstimated": "Erste Schätzung",
+    "statusUnknown": "Zu wenig Daten",
+    "practicedWordsTitle": "Spielerisch wiederholte Wörter",
+    "practiceTimes": "{count}×",
+    "karaokeWeakSegmentsTitle": "Liedzeilen zum langsamen Üben mit 0,85x",
+    "openSongAction": "Lied öffnen",
+    "homeTipsTitle": "Tipps für zu Hause für Eltern"
   }
 }
