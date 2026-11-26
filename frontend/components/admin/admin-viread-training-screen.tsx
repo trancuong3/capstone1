@@ -204,7 +204,9 @@ export function AdminVireadTrainingScreen() {
       } else if (result.reason === "NO_ELIGIBLE_FLOW2_SAMPLES") {
         setMessage("Chưa có mẫu Luồng 2 sạch nào đủ điều kiện tạo snapshot.");
       } else if (result.reason === "FLOW2_INGESTION_PAUSED") {
-        setMessage("Luồng 2 đang tạm dừng (VIREAD_FLOW2_INGESTION_PAUSED=true).");
+        setMessage(
+          "Luồng 2 đang tạm dừng (VIREAD_FLOW2_INGESTION_PAUSED=true).",
+        );
       } else {
         setMessage(`Không thể xếp hàng Luồng 2 (${result.reason}).`);
       }
@@ -403,9 +405,7 @@ export function AdminVireadTrainingScreen() {
       />
 
       {!data && !error ? <AdminLoading /> : null}
-      {error ? (
-        <StatusMessage tone="error">{error}</StatusMessage>
-      ) : null}
+      {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}
       {message ? (
         <p
           aria-live="polite"
@@ -704,9 +704,10 @@ export function AdminVireadTrainingScreen() {
                     ["FLOW2_ADMIN_VERIFIED", "FLOW1_VERIFIED"].includes(
                       j.profile,
                     ) &&
-                    ["WAITING_FOR_COLAB_WORKER", "FALLBACK_QUEUED_COLAB"].includes(
-                      j.status,
-                    ),
+                    [
+                      "WAITING_FOR_COLAB_WORKER",
+                      "FALLBACK_QUEUED_COLAB",
+                    ].includes(j.status),
                 ) ? (
                   <div className="mt-3 rounded-control border border-sky-300 bg-sky p-3 text-xs text-slate-900">
                     <p className="font-bold">
@@ -719,8 +720,8 @@ export function AdminVireadTrainingScreen() {
                       </code>
                       , chọn Runtime{" "}
                       <strong>Change runtime type → T4 GPU</strong>, bật 2 Colab
-                      Secrets{" "}
-                      <code className="font-mono">VIREAD_API_BASE</code> và{" "}
+                      Secrets <code className="font-mono">VIREAD_API_BASE</code>{" "}
+                      và{" "}
                       <code className="font-mono">
                         VIREAD_TRAINING_WORKER_TOKEN
                       </code>

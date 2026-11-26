@@ -403,8 +403,8 @@ export function AdminVireadDrivePanel({
           <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0" />
           <p>
             Kết nối hiện tại đang dùng{" "}
-            <code className="font-mono text-xs">drive_desktop_sync</code> (chỉ đọc
-            được ổ G:\ trên máy Windows local). Để backend Cloud (Render) và
+            <code className="font-mono text-xs">drive_desktop_sync</code> (chỉ
+            đọc được ổ G:\ trên máy Windows local). Để backend Cloud (Render) và
             Google Colab đọc/ghi Drive, hãy chuyển sang{" "}
             <strong>Apps Script Bridge</strong>.
           </p>

@@ -219,11 +219,16 @@ describe("real API client", () => {
   it("maps prefixed Flow 2 and Google Drive error codes cleanly without leaking raw details", async () => {
     fetchMock.mockResolvedValueOnce(
       Response.json(
-        { detail: "DRIVE_QUOTA_EXCEEDED: internal_bucket=secret_path 0 bytes left" },
+        {
+          detail:
+            "DRIVE_QUOTA_EXCEEDED: internal_bucket=secret_path 0 bytes left",
+        },
         { status: 507 },
       ),
     );
-    await expect(requestApi("/books/admin/viread-training/flow2/trigger", schema)).rejects.toMatchObject({
+    await expect(
+      requestApi("/books/admin/viread-training/flow2/trigger", schema),
+    ).rejects.toMatchObject({
       status: 507,
       message: expect.stringContaining("Google Drive"),
     });
@@ -234,7 +239,9 @@ describe("real API client", () => {
         { status: 422 },
       ),
     );
-    await expect(requestApi("/books/admin/viread-training/flow2/trigger", schema)).rejects.toMatchObject({
+    await expect(
+      requestApi("/books/admin/viread-training/flow2/trigger", schema),
+    ).rejects.toMatchObject({
       status: 422,
       message: "Có lỗi xảy ra. Vui lòng thử lại sau.",
     });
