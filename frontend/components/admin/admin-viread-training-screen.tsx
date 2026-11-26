@@ -15,6 +15,7 @@ import { Modal } from "@/components/common/modal";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { isServiceError } from "@/lib/api/service-error";
 import type { VireadTrainingOverview } from "@/lib/api/viread-training-service";
 
 function hash(value: string) {
@@ -34,7 +35,7 @@ function trainingProfileName(profile: string) {
 export function AdminVireadTrainingScreen() {
   const { vireadTraining } = useAdminServices();
   const [data, setData] = useState<VireadTrainingOverview | null>(null);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
   const [jobsPage, setJobsPage] = useState(1);
@@ -54,15 +55,19 @@ export function AdminVireadTrainingScreen() {
   const oauthCallbackHandled = useRef(false);
 
   const load = useCallback(async () => {
-    setError(false);
+    setError(null);
     if (!vireadTraining) {
-      setError(true);
+      setError("Dịch vụ quản trị huấn luyện VietOCR chưa sẵn sàng.");
       return;
     }
     try {
       setData(await vireadTraining.overview());
-    } catch {
-      setError(true);
+    } catch (err) {
+      setError(
+        isServiceError(err)
+          ? err.message
+          : "Chưa thể tải trạng thái huấn luyện. Kiểm tra quyền Admin và migration VietOCR V2.",
+      );
     }
   }, [vireadTraining]);
 
@@ -81,21 +86,22 @@ export function AdminVireadTrainingScreen() {
     if (!code && !oauthError) return;
     oauthCallbackHandled.current = true;
     const cleanUrl = `${window.location.pathname}${window.location.hash || ""}`;
-    window.history.replaceState({}, document.title, cleanUrl);
     // Use an uncancelled async task so React StrictMode double-mount cleanup
-    // does not drop an OAuth callback whose query parameters were already consumed.
+    // does not drop an OAuth callback before completion, and clean the URL in finally.
     void (async () => {
       await Promise.resolve();
       if (oauthError) {
         setMessage(
           `Google OAuth đã bị hủy hoặc từ chối (${oauthError}). Chưa có token nào được lưu.`,
         );
+        window.history.replaceState({}, document.title, cleanUrl);
         return;
       }
       if (!code || !state) {
         setMessage(
           "Thiếu tham số state từ Google OAuth. Vui lòng bấm Kết nối Google Drive để thử lại.",
         );
+        window.history.replaceState({}, document.title, cleanUrl);
         return;
       }
       setBusy(true);
@@ -108,11 +114,14 @@ export function AdminVireadTrainingScreen() {
           `Đã kết nối Google Drive Luồng 2 thành công (${connected.account_email ?? "tài khoản đã xác thực"}) với phạm vi tối thiểu drive.file.`,
         );
         await load();
-      } catch {
+      } catch (err) {
         setMessage(
-          "Không thể hoàn tất xác thực OAuth Google Drive (state hết hạn, không khớp phiên Admin hoặc thiếu phạm vi drive.file). Vui lòng thử kết nối lại.",
+          isServiceError(err)
+            ? err.message
+            : "Không thể hoàn tất xác thực OAuth Google Drive (state hết hạn, không khớp phiên Admin hoặc thiếu phạm vi drive.file). Vui lòng thử kết nối lại.",
         );
       } finally {
+        window.history.replaceState({}, document.title, cleanUrl);
         setBusy(false);
       }
     })();
@@ -157,9 +166,54 @@ export function AdminVireadTrainingScreen() {
           : "Đã ghi quyết định rollback về model trước đó.",
       );
       await load();
-    } catch {
+    } catch (err) {
       setMessage(
-        "Không thể lưu quyết định. Hãy kiểm tra trạng thái và thử lại.",
+        isServiceError(err)
+          ? err.message
+          : "Không thể lưu quyết định. Hãy kiểm tra trạng thái và thử lại.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function triggerFlow2() {
+    if (!vireadTraining?.triggerFlow2 || busy) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const result = await vireadTraining.triggerFlow2();
+      if (result.scheduled > 0) {
+        setMessage(
+          `Đã tạo snapshot Luồng 2 (${result.train_count ?? 0} train / ${result.validation_count ?? 0} validation) và xếp hàng job ${result.job_id ?? ""} (${result.status ?? "WAITING_FOR_COLAB_WORKER"}).`,
+        );
+      } else if (result.reason === "UNRESOLVED_TRAINING_JOB_EXISTS") {
+        setMessage(
+          "Đang có job huấn luyện chưa kết thúc trong hàng đợi; chưa tạo thêm job mới.",
+        );
+      } else if (
+        result.reason === "ALREADY_TRAINED_FOR_CURRENT_DATASET_AND_CONFIG"
+      ) {
+        setMessage(
+          "Dataset và cấu hình Luồng 2 hiện tại đã có kết quả train trước đó. Thêm mẫu VERIFIED mới hoặc đánh giá candidate hiện có.",
+        );
+      } else if (result.reason === "TRAIN_AND_VALIDATION_REQUIRED") {
+        setMessage(
+          `Snapshot hiện có ${result.train_count ?? 0} train và ${result.validation_count ?? 0} validation; cần cả 2 tập mới có thể xếp hàng Colab.`,
+        );
+      } else if (result.reason === "NO_ELIGIBLE_FLOW2_SAMPLES") {
+        setMessage("Chưa có mẫu Luồng 2 sạch nào đủ điều kiện tạo snapshot.");
+      } else if (result.reason === "FLOW2_INGESTION_PAUSED") {
+        setMessage("Luồng 2 đang tạm dừng (VIREAD_FLOW2_INGESTION_PAUSED=true).");
+      } else {
+        setMessage(`Không thể xếp hàng Luồng 2 (${result.reason}).`);
+      }
+      await load();
+    } catch (err) {
+      setMessage(
+        isServiceError(err)
+          ? err.message
+          : "Không thể tạo snapshot hoặc xếp hàng train Luồng 2.",
       );
     } finally {
       setBusy(false);
@@ -176,9 +230,11 @@ export function AdminVireadTrainingScreen() {
         "Đã đưa lại job lỗi vào hàng đợi. Colab sẽ nhận đúng snapshot dữ liệu khi bạn chạy worker.",
       );
       await load();
-    } catch {
+    } catch (err) {
       setMessage(
-        "Không thể thử lại job này. Job có thể đã tạo run, model gốc đã đổi hoặc một job khác đang chạy.",
+        isServiceError(err)
+          ? err.message
+          : "Không thể thử lại job này. Job có thể đã tạo run, model gốc đã đổi hoặc một job khác đang chạy.",
       );
     } finally {
       setBusy(false);
@@ -196,9 +252,11 @@ export function AdminVireadTrainingScreen() {
         "Đã xóa job cũ. Dataset, run và checkpoint được giữ; hàng đợi sẽ tạo job mới theo cấu hình backend hiện tại nếu dữ liệu vẫn đủ điều kiện.",
       );
       await load();
-    } catch {
+    } catch (err) {
       setMessage(
-        "Không thể xóa job. Job có thể đang chờ hoặc đang chạy; hãy làm mới trạng thái rồi thử lại.",
+        isServiceError(err)
+          ? err.message
+          : "Không thể xóa job. Job có thể đang chờ hoặc đang chạy; hãy làm mới trạng thái rồi thử lại.",
       );
     } finally {
       setDeletingJobId(null);
@@ -222,11 +280,16 @@ export function AdminVireadTrainingScreen() {
         `${evaluationType === "PILOT" ? "Pilot" : "Production"} đã vào hàng đợi: ${result.sample_count} mẫu, ${result.group_count} nhóm. Worker chỉ benchmark checkpoint có sẵn; không train lại.`,
       );
       await load();
-    } catch {
+    } catch (err) {
       setMessage(
-        evaluationType === "PRODUCTION" && data?.locked_test?.status !== "READY"
-          ? "Chưa đủ Locked Test Production độc lập. Candidate được giữ nguyên; có thể dùng Pilot để kiểm tra nhanh pipeline."
-          : "Không thể xếp đánh giá. Candidate hoặc cohort có thể đã đổi trạng thái; hãy tải lại trang.",
+        isServiceError(err)
+          ? err.message
+          : evaluationType === "PRODUCTION" &&
+              !["READY", "READY_TO_CREATE"].includes(
+                data?.locked_test?.status ?? "",
+              )
+            ? "Chưa đủ Locked Test Production độc lập. Candidate được giữ nguyên; có thể dùng Pilot để kiểm tra nhanh pipeline."
+            : "Không thể xếp đánh giá. Candidate hoặc cohort có thể đã đổi trạng thái; hãy tải lại trang.",
       );
     } finally {
       setBusy(false);
@@ -243,9 +306,11 @@ export function AdminVireadTrainingScreen() {
         "Đã đóng job lỗi cấu hình. Run và checkpoint được giữ nguyên, candidate chưa được benchmark/duyệt; hệ thống có thể tạo job mới theo cấu hình đã khóa đúng.",
       );
       await load();
-    } catch {
+    } catch (err) {
       setMessage(
-        "Không thể đóng candidate này; trạng thái hoặc lineage có thể đã thay đổi.",
+        isServiceError(err)
+          ? err.message
+          : "Không thể đóng candidate này; trạng thái hoặc lineage có thể đã thay đổi.",
       );
     } finally {
       setBusy(false);
@@ -262,9 +327,11 @@ export function AdminVireadTrainingScreen() {
         "Đã đóng candidate chưa benchmark; run và checkpoint được giữ nguyên. Hệ thống sẽ tự tạo Locked Test và job thay thế khi đủ holdout VERIFIED độc lập.",
       );
       await load();
-    } catch {
+    } catch (err) {
       setMessage(
-        "Không thể đóng candidate. Có thể worker vẫn đang chạy, candidate đã có benchmark hoặc lineage đã thay đổi.",
+        isServiceError(err)
+          ? err.message
+          : "Không thể đóng candidate. Có thể worker vẫn đang chạy, candidate đã có benchmark hoặc lineage đã thay đổi.",
       );
     } finally {
       setBusy(false);
@@ -337,10 +404,7 @@ export function AdminVireadTrainingScreen() {
 
       {!data && !error ? <AdminLoading /> : null}
       {error ? (
-        <StatusMessage tone="error">
-          Chưa thể tải trạng thái huấn luyện. Kiểm tra quyền Admin và migration
-          VietOCR V2.
-        </StatusMessage>
+        <StatusMessage tone="error">{error}</StatusMessage>
       ) : null}
       {message ? (
         <p
@@ -598,6 +662,72 @@ export function AdminVireadTrainingScreen() {
                       : "Chưa đủ điều kiện đánh giá để thay model (chưa đủ Locked Test độc lập)"}
                   </span>
                 </div>
+                {data.worker_status ? (
+                  <p className="mt-2 text-xs text-muted">
+                    Chế độ chạy:{" "}
+                    <strong>{data.worker_status.execution_mode}</strong> ·
+                    Worker nền Web:{" "}
+                    <strong>
+                      {data.worker_status.web_heavy_workers_disabled
+                        ? "Đang tắt (dùng nút kích hoạt bên dưới)"
+                        : "Đang bật"}
+                    </strong>
+                  </p>
+                ) : null}
+                {(() => {
+                  const blockers =
+                    data.flow2_blockers ??
+                    data.storage_summary?.flow2_blockers ??
+                    [];
+                  return blockers.length > 0 ? (
+                    <ul className="mt-2 list-disc space-y-1 rounded-control border border-amber-300 bg-amber-50 p-3 pl-7 text-xs text-amber-950">
+                      {blockers.map((blocker) => (
+                        <li key={blocker}>{blocker}</li>
+                      ))}
+                    </ul>
+                  ) : null;
+                })()}
+                {vireadTraining?.triggerFlow2 ? (
+                  <div className="mt-3">
+                    <Button
+                      className="h-11 w-auto"
+                      disabled={busy}
+                      onClick={() => void triggerFlow2()}
+                      variant="primary"
+                    >
+                      Tạo snapshot & Xếp hàng train Luồng 2
+                    </Button>
+                  </div>
+                ) : null}
+                {data.jobs.some(
+                  (j) =>
+                    ["FLOW2_ADMIN_VERIFIED", "FLOW1_VERIFIED"].includes(
+                      j.profile,
+                    ) &&
+                    ["WAITING_FOR_COLAB_WORKER", "FALLBACK_QUEUED_COLAB"].includes(
+                      j.status,
+                    ),
+                ) ? (
+                  <div className="mt-3 rounded-control border border-sky-300 bg-sky p-3 text-xs text-slate-900">
+                    <p className="font-bold">
+                      Hướng dẫn chạy Colab Free GPU T4 (0 VNĐ)
+                    </p>
+                    <p className="mt-1">
+                      Mở notebook{" "}
+                      <code className="font-mono">
+                        ai/vietocr_v2/viread_vietocr_v2_colab_worker.ipynb
+                      </code>
+                      , chọn Runtime{" "}
+                      <strong>Change runtime type → T4 GPU</strong>, bật 2 Colab
+                      Secrets{" "}
+                      <code className="font-mono">VIREAD_API_BASE</code> và{" "}
+                      <code className="font-mono">
+                        VIREAD_TRAINING_WORKER_TOKEN
+                      </code>
+                      , rồi bấm <strong>Runtime → Run all</strong>.
+                    </p>
+                  </div>
+                ) : null}
               </li>
             </ul>
           </Card>
@@ -703,8 +833,9 @@ export function AdminVireadTrainingScreen() {
                         </span>
                       </div>
                       {[
-                        "QUEUED",
-                        "LOCAL_RUNNING",
+                        ...(data.worker_status?.local_training_enabled === false
+                          ? []
+                          : ["QUEUED", "LOCAL_RUNNING"]),
                         "FALLBACK_QUEUED_COLAB",
                         "COLAB_RUNNING",
                         "WAITING_FOR_DATA",
@@ -803,13 +934,17 @@ export function AdminVireadTrainingScreen() {
                       ) : null}
                       {(job.status === "FAILED" ||
                         (job.status === "BLOCKED" &&
-                          job.run_status === "TRAINING" &&
+                          ["CREATED", "RUNNING"].includes(
+                            job.run_status ?? "",
+                          ) &&
                           job.last_error_code ===
                             "COLAB_RETRY_REQUIRES_RUN_RECOVERY")) &&
                       job.target === "COLAB" &&
                       job.attempts < 3 &&
                       (!job.run_id ||
-                        (job.run_status === "TRAINING" &&
+                        (["CREATED", "RUNNING"].includes(
+                          job.run_status ?? "",
+                        ) &&
                           (job.last_error_code === "HTTPERROR" ||
                             job.last_error_code ===
                               "COLAB_RETRY_REQUIRES_RUN_RECOVERY"))) &&
@@ -959,7 +1094,10 @@ export function AdminVireadTrainingScreen() {
                                 <Button
                                   className="mt-2 h-11 w-auto"
                                   disabled={
-                                    busy || data.locked_test?.status !== "READY"
+                                    busy ||
+                                    !["READY", "READY_TO_CREATE"].includes(
+                                      data.locked_test?.status ?? "",
+                                    )
                                   }
                                   onClick={() =>
                                     void evaluateCandidate(

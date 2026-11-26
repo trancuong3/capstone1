@@ -17,6 +17,7 @@ import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { isServiceError } from "@/lib/api/service-error";
 import type {
   GoogleDriveSelfTestResult,
   GoogleDriveTrainingStatus,
@@ -110,6 +111,15 @@ function recoveryHint(errorCode: string | null | undefined): string | null {
   ) {
     return "Quyền OAuth không đúng phạm vi tối thiểu drive.file. Hãy kết nối lại và chấp thuận đúng quyền thư mục riêng của ứng dụng.";
   }
+  if (errorCode === "GOOGLE_DRIVE_DESKTOP_UNAVAILABLE_ON_CLOUD_SERVER") {
+    return "Cloud server (Render) không thể truy cập Google Drive Desktop (G:\\) trên máy cá nhân. Hãy chuyển sang Apps Script Bridge.";
+  }
+  if (errorCode === "GOOGLE_DRIVE_DESKTOP_REQUIRES_WINDOWS_HOST") {
+    return "Máy chủ Linux không hỗ trợ Google Drive for Desktop local mount. Hãy kết nối qua Apps Script Bridge.";
+  }
+  if (errorCode === "DRIVE_ENCRYPTION_KEY_MISSING") {
+    return "Thiếu biến VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY (>= 32 ký tự) trên server.";
+  }
   return `Mã lỗi: ${errorCode}. Kiểm tra lại kết nối Google Drive hoặc bấm Kiểm tra kết nối & dung lượng.`;
 }
 
@@ -180,10 +190,12 @@ export function AdminVireadDrivePanel({
       if (typeof window !== "undefined") {
         window.location.assign(result.authorization_url);
       }
-    } catch {
+    } catch (err) {
       setFeedback({
         tone: "error",
-        text: "Không thể khởi tạo OAuth Google Drive. Kiểm tra cấu hình VIREAD_GDRIVE_OAUTH_* và VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY trên server.",
+        text: isServiceError(err)
+          ? err.message
+          : "Không thể khởi tạo OAuth Google Drive. Kiểm tra cấu hình VIREAD_GDRIVE_OAUTH_* và VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY trên server.",
       });
     } finally {
       setBusyAction(null);
@@ -275,10 +287,12 @@ export function AdminVireadDrivePanel({
             : "Kiểm tra Google Drive phát hiện lỗi. Xem mã lỗi và hướng dẫn khắc phục bên dưới."),
       });
       await onUpdated();
-    } catch {
+    } catch (err) {
       setFeedback({
         tone: "error",
-        text: "Không thể kiểm tra kết nối Google Drive lúc này.",
+        text: isServiceError(err)
+          ? err.message
+          : "Không thể kiểm tra kết nối Google Drive lúc này.",
       });
     } finally {
       setBusyAction(null);
@@ -300,10 +314,12 @@ export function AdminVireadDrivePanel({
           : "Kiểm thử Google Drive không đạt toàn bộ điều kiện.",
       });
       await onUpdated();
-    } catch {
+    } catch (err) {
       setFeedback({
         tone: "error",
-        text: "Kiểm thử upload/đọc/xóa trên Google Drive thất bại. Kiểm tra quyền ghi và dung lượng trống.",
+        text: isServiceError(err)
+          ? err.message
+          : "Kiểm thử upload/đọc/xóa trên Google Drive thất bại. Kiểm tra quyền ghi và dung lượng trống.",
       });
     } finally {
       setBusyAction(null);
@@ -329,10 +345,12 @@ export function AdminVireadDrivePanel({
         text: "Đã ngắt kết nối Google Drive an toàn và xóa refresh token khỏi backend.",
       });
       await onUpdated();
-    } catch {
+    } catch (err) {
       setFeedback({
         tone: "error",
-        text: "Không thể ngắt kết nối Google Drive lúc này.",
+        text: isServiceError(err)
+          ? err.message
+          : "Không thể ngắt kết nối Google Drive lúc này.",
       });
     } finally {
       setBusyAction(null);
@@ -377,6 +395,19 @@ export function AdminVireadDrivePanel({
         <div className="mt-3 flex items-start gap-2 rounded-control border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
           <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0" />
           <p>{hint}</p>
+        </div>
+      ) : null}
+
+      {isDesktopConnected ? (
+        <div className="mt-3 flex items-start gap-2 rounded-control border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+          <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0" />
+          <p>
+            Kết nối hiện tại đang dùng{" "}
+            <code className="font-mono text-xs">drive_desktop_sync</code> (chỉ đọc
+            được ổ G:\ trên máy Windows local). Để backend Cloud (Render) và
+            Google Colab đọc/ghi Drive, hãy chuyển sang{" "}
+            <strong>Apps Script Bridge</strong>.
+          </p>
         </div>
       ) : null}
 

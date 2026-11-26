@@ -21,6 +21,7 @@ from app.database.config import (
     SUPABASE_ADMIN_KEY,
     SUPABASE_STORAGE_BUCKET,
     SUPABASE_URL,
+    supabase_admin_headers,
 )
 from app.services.admin_ocr_local import LocalCorrectionError, LocalOcrConfig
 from app.services.worker_telemetry import get_worker_telemetry
@@ -165,10 +166,7 @@ async def probe_storage_health() -> dict[str, str]:
             f"{SUPABASE_URL.rstrip('/')}/storage/v1/bucket/"
             f"{quote(SUPABASE_STORAGE_BUCKET, safe='')}"
         )
-        headers = {
-            "apikey": SUPABASE_ADMIN_KEY,
-            "Authorization": f"Bearer {SUPABASE_ADMIN_KEY}",
-        }
+        headers = supabase_admin_headers(SUPABASE_ADMIN_KEY)
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(2.5, connect=1.5),
             follow_redirects=False, trust_env=False,

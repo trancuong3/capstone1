@@ -59,33 +59,24 @@ from app.schemas.parent_private_book import (
     SourceUsageType,
 )
 from app.services.storage_service import download_object
+from app.services.viread_flow2_hygiene import (
+    MIN_LINE_ASPECT_RATIO,
+    MIN_LINE_EDGE_VARIANCE,
+    MIN_LINE_HEIGHT_PX,
+    MIN_LINE_STDDEV,
+    MIN_LINE_WIDTH_PX,
+    compute_line_crop_box,
+    detect_vietnamese_pii_strict,
+    open_image_exif_safe,
+    sanitize_and_validate_vietocr_label,
+    validate_flow2_line_crop,
+    validate_line_word_geometry,
+)
 
 logger = logging.getLogger(__name__)
 
 ALLOWED_TRAINING_RIGHTS: frozenset[str] = frozenset(
     {"SELF_AUTHORED", "PUBLIC_DOMAIN", "LICENSED_OR_PERMISSION"}
-)
-
-MIN_LINE_WIDTH_PX = 24
-MIN_LINE_HEIGHT_PX = 12
-MIN_LINE_ASPECT_RATIO = 0.5
-MIN_LINE_STDDEV = 8.0
-MIN_LINE_EDGE_VARIANCE = 15.0
-
-_EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
-_VN_PHONE_RE = re.compile(r"(?<!\d)(?:\+84|84|0)(?:[\s.\-]?[35789])(?:[\s.\-]?\d){8}(?!\d)")
-_LONG_ID_RE = re.compile(r"(?<!\d)\d{9,14}(?!\d)")
-_ID_KEYWORD_RE = re.compile(
-    r"\b(?:cccd|cmnd|căn cước|số tài khoản|stk|tài khoản|sđt|điện thoại|hotline|zalo)\b",
-    re.IGNORECASE,
-)
-_ADDRESS_RE = re.compile(
-    r"\b(?:địa chỉ|số nhà|ngõ\s+\d+|hẻm\s+\d+|tổ dân phố|phường\s+\S+|quận\s+\S+|thôn\s+\S+)\b",
-    re.IGNORECASE,
-)
-_WORKSHEET_NAME_RE = re.compile(
-    r"\b(?:họ và tên|họ tên học sinh|họ tên bé|tên học sinh|tên bé|trường tiểu học)\s*[:\-]?\s*\S+",
-    re.IGNORECASE,
 )
 
 
@@ -99,72 +90,33 @@ def parse_book_source_type(source_declaration: str | None) -> SourceUsageType:
 
 
 def normalize_and_validate_ocr_label(raw: str) -> str:
-    text_val = unicodedata.normalize("NFC", str(raw or ""))
-    if any(ord(ch) < 32 and ch not in {"\t", " "} for ch in text_val):
-        raise ValueError("Nhãn OCR chứa ký tự điều khiển không hợp lệ.")
-    cleaned = unicodedata.normalize("NFC", " ".join(text_val.split()))
-    if not cleaned:
-        raise ValueError("Nhãn OCR không được để trống.")
-    if len(cleaned) > 300:
-        raise ValueError("Nhãn OCR vượt quá giới hạn 300 ký tự cho một dòng.")
+    cleaned, reason = sanitize_and_validate_vietocr_label(raw)
+    if cleaned is None:
+        messages = {
+            "FORBIDDEN_CONTROL_CHARS": "Nhãn OCR chứa ký tự điều khiển không hợp lệ.",
+            "EMPTY_LABEL": "Nhãn OCR không được để trống.",
+            "LABEL_TOO_LONG": "Nhãn OCR vượt quá giới hạn ký tự cho một dòng huấn luyện.",
+            "UNSUPPORTED_VIETOCR_VOCAB_CHAR": "Nhãn OCR chứa ký tự ngoài bảng chữ cái VietOCR được hỗ trợ.",
+            "OCR_GARBAGE_PATTERN": "Nhãn OCR chứa chuỗi nhiễu không hợp lệ.",
+            "NON_ALPHANUMERIC_GARBAGE": "Nhãn OCR chỉ chứa ký hiệu/dấu câu mà không có chữ hoặc số.",
+        }
+        raise ValueError(messages.get(reason or "", "Nhãn OCR không hợp lệ."))
     return cleaned
 
 
 def detect_line_pii(label_text: str) -> list[str]:
-    """Deterministic Vietnamese PII detector for line labels."""
-    normalized = unicodedata.normalize("NFC", label_text or "")
-    flags: list[str] = []
-    if _EMAIL_RE.search(normalized):
-        flags.append("EMAIL")
-    if _VN_PHONE_RE.search(normalized):
-        flags.append("PHONE_NUMBER")
-    if _ID_KEYWORD_RE.search(normalized) and _LONG_ID_RE.search(normalized):
-        flags.append("ACCOUNT_OR_ID_NUMBER")
-    if _ADDRESS_RE.search(normalized) and re.search(r"\d", normalized):
-        flags.append("PERSONAL_ADDRESS")
-    if _WORKSHEET_NAME_RE.search(normalized):
-        flags.append("CHILD_WORKSHEET_PERSONAL_INFO")
-    return flags
+    """Deterministic Vietnamese PII detector for parent private book line labels."""
+    return detect_vietnamese_pii_strict(label_text, mode="strict")
 
 
-def evaluate_line_crop_quality(crop_rgb: Image.Image) -> tuple[bool, dict[str, Any], str | None]:
+def evaluate_line_crop_quality(
+    crop_rgb: Image.Image,
+    *,
+    label: str | None = None,
+    page_height: int | None = None,
+) -> tuple[bool, dict[str, Any], str | None]:
     """Enforce clean-sample-standard.md image quality thresholds."""
-    width, height = crop_rgb.size
-    aspect_ratio = round(width / height, 3) if height > 0 else 0.0
-    gray = crop_rgb.convert("L")
-    stat = ImageStat.Stat(gray)
-    stddev = round(float(stat.stddev[0]) if stat.stddev else 0.0, 3)
-
-    arr = np.asarray(gray, dtype=np.float32)
-    if arr.shape[0] >= 3 and arr.shape[1] >= 3:
-        # Discrete Laplacian variance (sharpness / edge contrast)
-        lap = (
-            arr[:-2, 1:-1]
-            + arr[2:, 1:-1]
-            + arr[1:-1, :-2]
-            + arr[1:-1, 2:]
-            - 4.0 * arr[1:-1, 1:-1]
-        )
-        edge_variance = round(float(np.var(lap)), 3)
-    else:
-        edge_variance = 0.0
-
-    metrics = {
-        "width": width,
-        "height": height,
-        "aspect_ratio": aspect_ratio,
-        "stddev": stddev,
-        "edge_variance": edge_variance,
-    }
-    if width < MIN_LINE_WIDTH_PX or height < MIN_LINE_HEIGHT_PX:
-        return False, metrics, "IMAGE_TOO_SMALL"
-    if aspect_ratio < MIN_LINE_ASPECT_RATIO:
-        return False, metrics, "INVALID_ASPECT_RATIO"
-    if stddev < MIN_LINE_STDDEV:
-        return False, metrics, "LOW_CONTRAST_OR_BLANK"
-    if edge_variance < MIN_LINE_EDGE_VARIANCE:
-        return False, metrics, "BLURRY_OR_LOW_EDGE_DETAIL"
-    return True, metrics, None
+    return validate_flow2_line_crop(crop_rgb, label=label, page_height=page_height)
 
 
 def extract_line_crops_with_boxes(
@@ -172,9 +124,7 @@ def extract_line_crops_with_boxes(
     words: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Crop individual lines from a private page image and compute PNG bytes + quality metrics."""
-    with Image.open(BytesIO(image_bytes)) as src:
-        src.load()
-        page = src.convert("RGB")
+    page = open_image_exif_safe(image_bytes)
     if page.width <= 0 or page.height <= 0:
         return []
 
@@ -185,6 +135,18 @@ def extract_line_crops_with_boxes(
     results: list[dict[str, Any]] = []
     for line_index, line_words in sorted(by_line.items()):
         line_words.sort(key=lambda item: int(item["word_index"]))
+        geom_ok, geom_reason = validate_line_word_geometry(line_words)
+        if not geom_ok:
+            results.append(
+                {
+                    "line_index": line_index,
+                    "eligible": False,
+                    "reject_reason": geom_reason or "INVALID_WORD_GEOMETRY",
+                    "quality_metrics": {},
+                }
+            )
+            continue
+
         bounds: list[tuple[float, float, float, float]] = []
         tokens: list[str] = []
         valid_geometry = True
@@ -214,17 +176,9 @@ def extract_line_crops_with_boxes(
         if not valid_geometry or not bounds or not tokens:
             continue
 
-        left = min(b[0] for b in bounds)
-        top = min(b[1] for b in bounds)
-        right = max(b[2] for b in bounds)
-        bottom = max(b[3] for b in bounds)
-        pad_y = max(2, round((bottom - top) * 0.12))
-        crop_box = [
-            max(0, math.floor(left)),
-            max(0, math.floor(top - pad_y)),
-            min(page.width, math.ceil(right)),
-            min(page.height, math.ceil(bottom + pad_y)),
-        ]
+        crop_box = list(
+            compute_line_crop_box(bounds, page_width=page.width, page_height=page.height)
+        )
         if crop_box[2] <= crop_box[0] or crop_box[3] <= crop_box[1]:
             continue
 
@@ -234,7 +188,11 @@ def extract_line_crops_with_boxes(
             continue
 
         cropped = page.crop(tuple(crop_box))
-        quality_ok, quality_metrics, quality_reject = evaluate_line_crop_quality(cropped)
+        quality_ok, quality_metrics, quality_reject = evaluate_line_crop_quality(
+            cropped,
+            label=proposed_label,
+            page_height=page.height,
+        )
         if not quality_ok:
             results.append(
                 {
@@ -916,16 +874,14 @@ class ParentFlow2ContributionService:
         )
 
         def _render_crop() -> bytes:
-            with Image.open(BytesIO(image_bytes)) as src:
-                src.load()
-                rgb = src.convert("RGB")
-                box = list(cand.CropBoxJson or [])
-                if len(box) != 4:
-                    raise HTTPException(status_code=409, detail="Invalid line crop geometry")
-                cropped = rgb.crop((int(box[0]), int(box[1]), int(box[2]), int(box[3])))
-                out = BytesIO()
-                cropped.save(out, format="PNG", optimize=True)
-                return out.getvalue()
+            rgb = open_image_exif_safe(image_bytes)
+            box = list(cand.CropBoxJson or [])
+            if len(box) != 4:
+                raise HTTPException(status_code=409, detail="Invalid line crop geometry")
+            cropped = rgb.crop((int(box[0]), int(box[1]), int(box[2]), int(box[3])))
+            out = BytesIO()
+            cropped.save(out, format="PNG", optimize=True)
+            return out.getvalue()
 
         png_bytes = await asyncio.to_thread(_render_crop)
         return png_bytes, "image/png"

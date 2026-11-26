@@ -11,8 +11,14 @@ from urllib.parse import unquote, urlsplit
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / "supabase" / "migrations" / "20261112110945_viread_vietocr_v2.sql"
 DUAL_FLOW_MIGRATION = ROOT / "supabase" / "migrations" / "20261112123000_viread_dual_training_profiles.sql"
+TRAINING_JOB_QUEUE_MIGRATION = ROOT / "supabase" / "migrations" / "20261113023322_viread_training_job_queue.sql"
+COLAB_DISPATCH_MIGRATION = ROOT / "supabase" / "migrations" / "20261113051337_viread_colab_enterprise_dispatch.sql"
+AUTO_LOCK_HOLDOUT_MIGRATION = ROOT / "supabase" / "migrations" / "20261114093543_auto_lock_verified_holdout_and_job_lineage.sql"
+PROGRESSIVE_EVAL_MIGRATION = ROOT / "supabase" / "migrations" / "20261115151028_viread_progressive_evaluation.sql"
 ADMIN_AI_WORKFLOW_MIGRATION = ROOT / "supabase" / "migrations" / "20261116110000_admin_ai_workflows.sql"
 ADMIN_AI_SAFETY_HISTORY_MIGRATION = ROOT / "supabase" / "migrations" / "20261116120000_admin_ai_workflow_safety_history.sql"
+FLOW2_DRIVE_MIGRATION = ROOT / "supabase" / "migrations" / "20261121210000_flow2_google_drive_storage.sql"
+FLOW2_QUARANTINE_MIGRATION = ROOT / "supabase" / "migrations" / "20261122100000_flow2_sample_quarantine_and_archive.sql"
 SOFT_DELETE_BOOKS_MIGRATION = (
     ROOT / "supabase" / "migrations"
     / "20261124120000_soft_delete_catalog_books.sql"
@@ -20,8 +26,14 @@ SOFT_DELETE_BOOKS_MIGRATION = (
 MIGRATIONS = (
     MIGRATION,
     DUAL_FLOW_MIGRATION,
+    TRAINING_JOB_QUEUE_MIGRATION,
+    COLAB_DISPATCH_MIGRATION,
+    AUTO_LOCK_HOLDOUT_MIGRATION,
+    PROGRESSIVE_EVAL_MIGRATION,
     ADMIN_AI_WORKFLOW_MIGRATION,
     ADMIN_AI_SAFETY_HISTORY_MIGRATION,
+    FLOW2_DRIVE_MIGRATION,
+    FLOW2_QUARANTINE_MIGRATION,
     SOFT_DELETE_BOOKS_MIGRATION,
 )
 ALLOWED_DATABASE = "test"

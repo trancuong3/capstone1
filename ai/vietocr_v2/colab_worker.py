@@ -223,10 +223,7 @@ class ColabWorker:
         minimum_ram_gb = int(os.getenv("VIETOCR_TRAINING_MIN_RAM_GB", "4"))
         minimum_ram = minimum_ram_gb * 1024**3
         if available_ram < minimum_ram:
-            available_ram_gb = available_ram / 1024**3
-            raise RuntimeError(
-                f"COLAB_INSUFFICIENT_RAM:{available_ram_gb:.1f}GB_AVAILABLE_REQUIRED_{minimum_ram_gb}GB"
-            )
+            raise RuntimeError("COLAB_INSUFFICIENT_RAM")
         work_dir.mkdir(parents=True, exist_ok=True)
         free_disk = shutil.disk_usage(work_dir).free
         minimum_disk = int(os.getenv("VIETOCR_TRAINING_MIN_DISK_GB", "8")) * 1024**3
@@ -465,6 +462,7 @@ class ColabWorker:
         run = self.call("POST", f"{API_PREFIX}/jobs/{job_id}/runs", params={"worker_id": self.worker_id},
                         json=run_payload)
         run_id = str(run["run_id"])
+        job["run_id"] = run_id
         if run["status"] in {"CANDIDATE", "BENCHMARKED"}:
             if run.get("checkpoint_sha256") != candidate["checkpoint_sha256"]:
                 raise ValueError("REGISTERED_CANDIDATE_HASH_MISMATCH")
@@ -682,10 +680,17 @@ class ColabWorker:
             else:
                 from .train import run_training
 
+                last_synced_step = [0]
+
                 def persist_training_progress(completed: int, total: int) -> None:
                     progress.update({"stage": "training", "completed_steps": completed, "total_steps": total})
-                    if state_store is not None:
+                    if state_store is not None and (
+                        completed <= 0
+                        or completed >= total
+                        or completed - last_synced_step[0] >= 500
+                    ):
                         state_store.sync()
+                        last_synced_step[0] = completed
 
                 candidate = run_training(
                     profile=job["profile"], manifest_path=str(manifest), output_dir=str(run_dir),

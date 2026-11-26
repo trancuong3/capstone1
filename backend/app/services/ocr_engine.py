@@ -51,7 +51,7 @@ import cv2
 import numpy as np
 import requests
 from PIL import Image
-from app.database.config import SUPABASE_ADMIN_KEY, SUPABASE_URL
+from app.database.config import SUPABASE_ADMIN_KEY, SUPABASE_URL, supabase_admin_headers
 
 # Optional/worker-only OCR dependencies are imported lazily so light web deploys
 # (`requirements-web.txt`) never crash with ModuleNotFoundError if ocr_engine is
@@ -380,7 +380,7 @@ def refresh_active_viread_model() -> dict[str, Any] | None:
         response = requests.get(
             f"{SUPABASE_URL.rstrip('/')}/rest/v1/viread_ocr_active_model",
             params={"select": "checkpoint_sha256,storage_path,profile", "singleton": "eq.true", "limit": "1"},
-            headers={"apikey": SUPABASE_ADMIN_KEY, "Authorization": f"Bearer {SUPABASE_ADMIN_KEY}"},
+            headers=supabase_admin_headers(SUPABASE_ADMIN_KEY),
             timeout=(2, 3),
         )
         response.raise_for_status()

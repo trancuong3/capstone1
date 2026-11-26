@@ -84,7 +84,9 @@ class BenchmarkCreate(BaseModel):
 
     @field_validator("locked_test_manifest_sha256", "parent_checkpoint_sha256", "active_checkpoint_sha256")
     @classmethod
-    def locked_hash_valid(cls, value: str) -> str:
+    def locked_hash_valid(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _valid_sha(value)
 
 

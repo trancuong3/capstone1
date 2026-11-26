@@ -458,4 +458,78 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
       });
     });
   });
+
+  it("triggers Flow 2 training snapshot/job, renders blockers, and enables Production eval on READY_TO_CREATE", async () => {
+    const base = makeOverview();
+    mockService.triggerFlow2 = vi.fn().mockResolvedValue({
+      scheduled: 1,
+      reason: "JOB_ENQUEUED",
+      job_id: "77777777-7777-4777-8777-777777777777",
+      status: "WAITING_FOR_COLAB_WORKER",
+      target: "COLAB",
+      train_count: 141,
+      validation_count: 83,
+      locked_test_ready: false,
+    });
+    mockService.overview = vi.fn().mockResolvedValue({
+      ...base,
+      worker_status: {
+        local_training_enabled: false,
+        local_gpu_ready: false,
+        web_heavy_workers_disabled: true,
+        execution_mode: "COLAB",
+      },
+      flow2_blockers: ["Worker nền Web bị tắt (dùng nút kích hoạt bên dưới)."],
+      locked_test: {
+        ...base.locked_test!,
+        status: "READY_TO_CREATE",
+        eligible_sample_count: 210,
+        eligible_group_count: 31,
+      },
+      jobs: [
+        {
+          job_id: "88888888-8888-4888-8888-888888888888",
+          profile: "FLOW2_ADMIN_VERIFIED",
+          target: "COLAB",
+          status: "CANDIDATE",
+          dataset_version_id: "99999999-9999-4999-8999-999999999999",
+          manifest_sha256: "b".repeat(64),
+          config_sha256: "c".repeat(64),
+          parent_checkpoint_sha256: "a".repeat(64),
+          run_id: "11111111-1111-4111-8111-111111111111",
+          run_status: "CANDIDATE",
+          run_config_sha256: "c".repeat(64),
+          candidate_has_benchmark: false,
+          attempts: 1,
+          progress: {},
+          last_error_code: null,
+          metadata: {},
+          created_at: "2026-11-21T10:00:00+00:00",
+          updated_at: "2026-11-21T10:00:00+00:00",
+        },
+      ],
+    });
+
+    renderScreen();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Worker nền Web bị tắt \(dùng nút kích hoạt bên dưới\)/i),
+      ).toBeInTheDocument();
+    });
+
+    // Production Locked Test button is enabled for READY_TO_CREATE
+    expect(
+      screen.getByRole("button", { name: /Chạy Production Locked Test/i }),
+    ).not.toBeDisabled();
+
+    await user.click(
+      screen.getByRole("button", { name: /Tạo snapshot & Xếp hàng train Luồng 2/i }),
+    );
+    await waitFor(() => {
+      expect(mockService.triggerFlow2).toHaveBeenCalledTimes(1);
+      expect(screen.getByText(/141 train \/ 83 validation/i)).toBeInTheDocument();
+    });
+  });
 });
