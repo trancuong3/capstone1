@@ -11,6 +11,7 @@ from io import BytesIO
 from typing import Any, Awaitable, Callable
 from uuid import UUID, uuid4
 
+import httpx
 from fastapi import HTTPException, status
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import select
@@ -501,6 +502,72 @@ def _sanitize_child_safe_prompt_hint(raw_hint: str | None) -> str:
     return cleaned
 
 
+async def _default_image_generate_transport(
+    provider: ImageProviderAvailability, prompt: str
+) -> tuple[int, bytes]:
+    """Legacy/direct HTTP image-gen transport retained for backward compatibility & stream-cap tests.
+
+    Production flows route through `AiCapabilityRouter.generate_image()` via
+    `generate_image_via_router_and_scheduler()`; patching this function in tests is honored there.
+    """
+    if not provider.endpoint_url:
+        return 503, b""
+    headers: dict[str, str] = {}
+    payload: dict[str, Any] = {"prompt": prompt, "num_steps": 4}
+    if provider.provider_name == "cloudflare_workers_ai":
+        token = (os.getenv("CLOUDFLARE_API_TOKEN") or "").strip()
+        headers["Authorization"] = f"Bearer {token}"
+    max_wire_bytes = int(_MAX_GENERATED_RESPONSE_BYTES * 1.4) + 65536
+    async with httpx.AsyncClient(
+        timeout=45.0, trust_env=False, follow_redirects=False
+    ) as client:
+        async with client.stream(
+            "POST", provider.endpoint_url, json=payload, headers=headers
+        ) as resp:
+            if resp.status_code != 200:
+                return resp.status_code, b""
+            content_type = (resp.headers.get("content-type") or "").lower()
+            is_json = "application/json" in content_type
+            limit = max_wire_bytes if is_json else _MAX_GENERATED_RESPONSE_BYTES
+            raw_len_hdr = (resp.headers.get("content-length") or "").strip()
+            if raw_len_hdr.isdigit() and int(raw_len_hdr) > limit:
+                return 502, b""
+            buf = bytearray()
+            async for chunk in resp.aiter_bytes(65536):
+                buf.extend(chunk)
+                if len(buf) > limit:
+                    return 502, b""
+            raw_body = bytes(buf)
+        if is_json:
+            import base64
+            import json as _json
+
+            try:
+                body = _json.loads(raw_body.decode("utf-8"))
+            except Exception:
+                return 502, b""
+            raw_b64 = (
+                (body.get("result") or {}).get("image")
+                if isinstance(body, dict)
+                else None
+            )
+            if isinstance(raw_b64, str) and raw_b64:
+                try:
+                    decoded = base64.b64decode(raw_b64, validate=True)
+                except Exception:
+                    return 502, b""
+                if len(decoded) > _MAX_GENERATED_RESPONSE_BYTES:
+                    return 502, b""
+                return 200, decoded
+            return 502, b""
+        if len(raw_body) > _MAX_GENERATED_RESPONSE_BYTES:
+            return 502, b""
+        return 200, raw_body
+
+
+_ORIGINAL_DEFAULT_IMAGE_GENERATE_TRANSPORT = _default_image_generate_transport
+
+
 async def generate_image_via_router_and_scheduler(
     *,
     prompt: str,
@@ -522,26 +589,32 @@ async def generate_image_via_router_and_scheduler(
 ) -> tuple[int, bytes, str | None, str | None, str | None]:
     """Dispatch image generation strictly through AiCapabilityRouter + GpuWorkloadScheduler.
 
-    Preserves custom `image_transport` injection for isolated unit tests while still
-    enforcing GpuWorkloadScheduler serialization.
+    Preserves custom `image_transport` injection (and legacy `_default_image_generate_transport`
+    monkeypatching in unit tests) while still enforcing GpuWorkloadScheduler serialization.
 
     Returns `(http_status, image_bytes, provider_name, model_id, error_code)`.
     """
     scheduler = gpu_scheduler or get_default_gpu_scheduler()
     router = ai_router or get_default_ai_router()
+    effective_transport = image_transport
+    if (
+        effective_transport is None
+        and _default_image_generate_transport is not _ORIGINAL_DEFAULT_IMAGE_GENERATE_TRANSPORT
+    ):
+        effective_transport = _default_image_generate_transport
 
     async with scheduler.acquire(
         priority=priority,
         workload_id=workload_id,
         estimated_vram_mb=estimated_vram_mb,
     ):
-        if image_transport is not None:
+        if effective_transport is not None:
             hint = provider_hint or detect_image_generation_provider(
                 is_private_book=not allow_cloud,
                 router=router,
             )
             try:
-                http_status, raw_bytes = await image_transport(hint, prompt)
+                http_status, raw_bytes = await effective_transport(hint, prompt)
             except Exception as exc:
                 logger.warning(
                     "Custom AI image transport failed (type=%s)", type(exc).__name__
