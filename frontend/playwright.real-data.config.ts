@@ -32,7 +32,8 @@ export default defineConfig({
     trace: "off",
   },
   webServer: {
-    command: "npm run dev -- --webpack --hostname 127.0.0.1 --port 3106",
+    command:
+      "npm run dev -- --webpack --disable-source-maps --hostname 127.0.0.1 --port 3106",
     url: "http://127.0.0.1:3106",
     reuseExistingServer: false,
     timeout: 120_000,

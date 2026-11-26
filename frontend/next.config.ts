@@ -115,12 +115,24 @@ function buildContentSecurityPolicy(): string {
 }
 
 const turbopackRoot = resolveTurbopackRoot();
+const isPlaywrightDev =
+  process.env.NODE_ENV === "development" &&
+  process.env.PLAYWRIGHT_AUTH_FIXTURES === "1";
 
 const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
   allowedDevOrigins: ["127.0.0.1"],
   reactStrictMode: true,
   poweredByHeader: false,
+  ...(isPlaywrightDev
+    ? {
+        experimental: {
+          devMemoryThresholdRestart: false,
+          serverComponentsHmrCache: false,
+          webpackMemoryOptimizations: true,
+        },
+      }
+    : {}),
   ...(turbopackRoot ? { turbopack: { root: turbopackRoot } } : {}),
   async headers() {
     return [
