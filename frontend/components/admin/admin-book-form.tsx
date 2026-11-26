@@ -1,33 +1,43 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMemo, type ReactNode } from "react";
+import { ChevronDown } from "lucide-react";
+import { useId, useMemo, useRef, type ReactNode } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
+
 import { BookCover } from "@/components/books/book-cover";
 import { Button, ButtonLink } from "@/components/common/button";
-import { SelectField } from "@/components/common/select-field";
 import { StatusMessage } from "@/components/common/status-message";
-import { TextField } from "@/components/common/text-field";
 import { useTranslations } from "@/hooks/use-i18n";
+import { cn } from "@/lib/utils/cn";
 import type { AdminBookCreateDTO } from "@/types/admin";
+import type { BookLifecycleStatus } from "@/types/book";
 import type { AssetSourceType } from "@/types/book-assets";
 
 type AdminBookFormInitial = Omit<Partial<AdminBookCreateDTO>, "name"> & {
   readonly name?: string | null;
 };
 
-interface AdminBookFormProps {
+export interface AdminBookFormProps {
   bookId?: string;
   cancelHref?: string;
   coverSourceType?: AssetSourceType | null;
   coverStudioSlot?: ReactNode;
   coverUrl?: string | null;
+  errorFallbackMessage?: string;
+  formBanner?: ReactNode;
+  formHeading?: string;
   initial?: AdminBookFormInitial;
+  lifecycleStatus?: BookLifecycleStatus;
   onSubmit: (value: AdminBookCreateDTO) => Promise<void>;
   showLiveCoverPreview?: boolean;
+  sidebarExtra?: ReactNode;
   submitLabel?: string;
 }
+
+const inputBaseClassName =
+  "h-11 w-full rounded-control border bg-white px-3.5 text-sm text-ink placeholder:text-muted/70 transition-colors focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-muted";
 
 export function AdminBookForm({
   bookId = "draft-book",
@@ -35,12 +45,20 @@ export function AdminBookForm({
   coverSourceType = null,
   coverStudioSlot,
   coverUrl = null,
+  errorFallbackMessage,
+  formBanner,
+  formHeading,
   initial,
+  lifecycleStatus = "ACTIVE",
   onSubmit,
   showLiveCoverPreview = false,
+  sidebarExtra,
   submitLabel,
 }: AdminBookFormProps) {
   const t = useTranslations("admin");
+  const baseId = useId();
+  const submittingRef = useRef(false);
+
   const schema = useMemo(
     () =>
       z
@@ -71,7 +89,11 @@ export function AdminBookForm({
         }),
     [t],
   );
+
   const resolvedSubmitLabel = submitLabel ?? t("books.form.defaultSubmit");
+  const resolvedErrorFallback =
+    errorFallbackMessage ?? t("books.form.genericSaveError");
+
   const {
     control,
     register,
@@ -95,6 +117,8 @@ export function AdminBookForm({
   const watchedMaxGrade = useWatch({ control, name: "max_grade" });
 
   const submit = handleSubmit(async (value) => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     try {
       await onSubmit({
         ...value,
@@ -104,118 +128,321 @@ export function AdminBookForm({
       });
     } catch {
       setError("root", {
-        message: t("books.form.genericSaveError"),
+        message: resolvedErrorFallback,
       });
+    } finally {
+      submittingRef.current = false;
     }
   });
 
-  return (
-    <form className="grid gap-4" noValidate onSubmit={submit}>
+  const nameId = `${baseId}-name`;
+  const titleId = `${baseId}-title`;
+  const authorId = `${baseId}-author`;
+  const minGradeId = `${baseId}-min-grade`;
+  const maxGradeId = `${baseId}-max-grade`;
+
+  const formFields = (
+    <form className="space-y-4" noValidate onSubmit={submit}>
+      {formBanner}
+      {formHeading ? (
+        <h2 className="text-lg font-extrabold tracking-tight text-ink">
+          {formHeading}
+        </h2>
+      ) : null}
       {errors.root?.message ? (
         <StatusMessage tone="error">{errors.root.message}</StatusMessage>
       ) : null}
-      {showLiveCoverPreview ? (
-        <div
-          className="flex flex-wrap items-center gap-4 rounded-control border border-border bg-canvas/60 p-3"
-          data-testid="admin-book-live-cover-preview"
-        >
-          <BookCover
-            author={watchedAuthor || null}
-            book={{
-              id: bookId,
-              title: watchedTitle?.trim() || "Tiêu đề sách mới",
-              author: watchedAuthor || null,
-              min_grade: Number.isFinite(watchedMinGrade) ? watchedMinGrade : 1,
-              max_grade: Number.isFinite(watchedMaxGrade) ? watchedMaxGrade : 3,
-              lifecycle_status: "ACTIVE",
-            }}
-            coverSourceType={coverSourceType}
-            coverUrl={coverUrl}
-            size="medium"
-          />
-          <div className="min-w-0 flex-1 text-xs text-muted">
-            <p className="font-bold text-ink">Xem trước bìa chữ tự động</p>
-            <p className="mt-1">
-              Khi chưa tải ảnh bìa riêng, ViRead tự tạo bìa chữ tiếng Việt sắc
-              nét theo tiêu đề, tác giả và khối lớp.
-            </p>
-          </div>
-        </div>
-      ) : null}
-      {coverStudioSlot}
-      <TextField
-        error={errors.name?.message}
-        label={t("books.form.nameLabel")}
-        required
-        {...register("name")}
-      />
-      <TextField
-        error={errors.title?.message}
-        label={t("books.form.titleLabel")}
-        required
-        {...register("title")}
-      />
-      <TextField
-        error={errors.author?.message}
-        label={t("books.form.authorLabel")}
-        {...register("author")}
-      />
-      <div className="grid gap-4 sm:grid-cols-2">
-        <SelectField
-          error={errors.min_grade?.message}
-          label={t("books.form.minGradeLabel")}
+
+      <div className="space-y-1.5">
+        <label className="block text-xs font-bold text-ink" htmlFor={nameId}>
+          {t("books.form.nameLabel")}
+        </label>
+        <input
+          aria-describedby={errors.name ? `${nameId}-error` : undefined}
+          aria-invalid={Boolean(errors.name)}
+          className={cn(
+            inputBaseClassName,
+            errors.name ? "border-danger" : "border-border",
+          )}
+          id={nameId}
+          maxLength={250}
+          placeholder={t(
+            "books.form.namePlaceholder",
+            undefined,
+            "Ví dụ: Chú mèo đi hia (tên quản lý nội bộ)",
+          )}
           required
-          {...register("min_grade", { valueAsNumber: true })}
-        >
-          {initial?.min_grade !== undefined &&
-          (initial.min_grade < 1 || initial.min_grade > 5) ? (
-            <option value={initial.min_grade}>
-              {t("books.form.invalidGradeOption", {
-                grade: initial.min_grade,
-              })}
-            </option>
-          ) : null}
-          {[1, 2, 3, 4, 5].map((grade) => (
-            <option key={grade} value={grade}>
-              {t("books.form.gradeOption", { grade })}
-            </option>
-          ))}
-        </SelectField>
-        <SelectField
-          error={errors.max_grade?.message}
-          label={t("books.form.maxGradeLabel")}
-          required
-          {...register("max_grade", { valueAsNumber: true })}
-        >
-          {initial?.max_grade !== undefined &&
-          (initial.max_grade < 1 || initial.max_grade > 5) ? (
-            <option value={initial.max_grade}>
-              {t("books.form.invalidGradeOption", {
-                grade: initial.max_grade,
-              })}
-            </option>
-          ) : null}
-          {[1, 2, 3, 4, 5].map((grade) => (
-            <option key={grade} value={grade}>
-              {t("books.form.gradeOption", { grade })}
-            </option>
-          ))}
-        </SelectField>
+          {...register("name")}
+        />
+        {errors.name?.message ? (
+          <p
+            className="text-xs font-semibold text-danger"
+            id={`${nameId}-error`}
+            role="alert"
+          >
+            {errors.name.message}
+          </p>
+        ) : null}
       </div>
+
+      <div className="space-y-1.5">
+        <label className="block text-xs font-bold text-ink" htmlFor={titleId}>
+          {t("books.form.titleLabel")}
+        </label>
+        <input
+          aria-describedby={errors.title ? `${titleId}-error` : undefined}
+          aria-invalid={Boolean(errors.title)}
+          className={cn(
+            inputBaseClassName,
+            errors.title ? "border-danger" : "border-border",
+          )}
+          id={titleId}
+          maxLength={250}
+          placeholder={t(
+            "books.form.titlePlaceholder",
+            undefined,
+            "Ví dụ: Chú mèo đi hia",
+          )}
+          required
+          {...register("title")}
+        />
+        {errors.title?.message ? (
+          <p
+            className="text-xs font-semibold text-danger"
+            id={`${titleId}-error`}
+            role="alert"
+          >
+            {errors.title.message}
+          </p>
+        ) : null}
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="block text-xs font-bold text-ink" htmlFor={authorId}>
+          {t("books.form.authorLabel")}
+        </label>
+        <input
+          aria-describedby={errors.author ? `${authorId}-error` : undefined}
+          aria-invalid={Boolean(errors.author)}
+          className={cn(
+            inputBaseClassName,
+            errors.author ? "border-danger" : "border-border",
+          )}
+          id={authorId}
+          maxLength={250}
+          placeholder={t(
+            "books.form.authorPlaceholder",
+            undefined,
+            "Ví dụ: Charles Perrault",
+          )}
+          {...register("author")}
+        />
+        {errors.author?.message ? (
+          <p
+            className="text-xs font-semibold text-danger"
+            id={`${authorId}-error`}
+            role="alert"
+          >
+            {errors.author.message}
+          </p>
+        ) : null}
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <label
+            className="block text-xs font-bold text-ink"
+            htmlFor={minGradeId}
+          >
+            {t("books.form.minGradeLabel")}
+          </label>
+          <div className="relative flex items-center">
+            <select
+              aria-describedby={
+                errors.min_grade ? `${minGradeId}-error` : undefined
+              }
+              aria-invalid={Boolean(errors.min_grade)}
+              className={cn(
+                inputBaseClassName,
+                "cursor-pointer appearance-none pe-9",
+                errors.min_grade ? "border-danger" : "border-border",
+              )}
+              id={minGradeId}
+              required
+              {...register("min_grade", { valueAsNumber: true })}
+            >
+              {initial?.min_grade !== undefined &&
+              (initial.min_grade < 1 || initial.min_grade > 5) ? (
+                <option value={initial.min_grade}>
+                  {t("books.form.invalidGradeOption", {
+                    grade: initial.min_grade,
+                  })}
+                </option>
+              ) : null}
+              {[1, 2, 3, 4, 5].map((grade) => (
+                <option key={grade} value={grade}>
+                  {t("books.form.gradeOption", { grade })}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              aria-hidden="true"
+              className="pointer-events-none absolute end-3 size-4 text-muted"
+            />
+          </div>
+          {errors.min_grade?.message ? (
+            <p
+              className="text-xs font-semibold text-danger"
+              id={`${minGradeId}-error`}
+              role="alert"
+            >
+              {errors.min_grade.message}
+            </p>
+          ) : null}
+        </div>
+
+        <div className="space-y-1.5">
+          <label
+            className="block text-xs font-bold text-ink"
+            htmlFor={maxGradeId}
+          >
+            {t("books.form.maxGradeLabel")}
+          </label>
+          <div className="relative flex items-center">
+            <select
+              aria-describedby={
+                errors.max_grade ? `${maxGradeId}-error` : undefined
+              }
+              aria-invalid={Boolean(errors.max_grade)}
+              className={cn(
+                inputBaseClassName,
+                "cursor-pointer appearance-none pe-9",
+                errors.max_grade ? "border-danger" : "border-border",
+              )}
+              id={maxGradeId}
+              required
+              {...register("max_grade", { valueAsNumber: true })}
+            >
+              {initial?.max_grade !== undefined &&
+              (initial.max_grade < 1 || initial.max_grade > 5) ? (
+                <option value={initial.max_grade}>
+                  {t("books.form.invalidGradeOption", {
+                    grade: initial.max_grade,
+                  })}
+                </option>
+              ) : null}
+              {[1, 2, 3, 4, 5].map((grade) => (
+                <option key={grade} value={grade}>
+                  {t("books.form.gradeOption", { grade })}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              aria-hidden="true"
+              className="pointer-events-none absolute end-3 size-4 text-muted"
+            />
+          </div>
+          {errors.max_grade?.message ? (
+            <p
+              className="text-xs font-semibold text-danger"
+              id={`${maxGradeId}-error`}
+              role="alert"
+            >
+              {errors.max_grade.message}
+            </p>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-end gap-2.5 border-t border-border pt-4">
+        <ButtonLink href={cancelHref} size="admin" variant="outline">
+          {t("common.cancel")}
+        </ButtonLink>
         <Button
-          className="!max-w-none"
           disabled={isSubmitting}
           isLoading={isSubmitting}
-          size="compact"
+          size="admin"
           type="submit"
+          variant="primary"
         >
           {isSubmitting ? t("common.saving") : resolvedSubmitLabel}
         </Button>
-        <ButtonLink href={cancelHref} size="compact" variant="quiet">
-          {t("common.cancel")}
-        </ButtonLink>
       </div>
     </form>
+  );
+
+  if (!showLiveCoverPreview && !coverStudioSlot && !sidebarExtra) {
+    return formFields;
+  }
+
+  return (
+    <div className="grid items-start gap-6 lg:grid-cols-12">
+      <div className="rounded-xl border border-border bg-white p-5 shadow-2xs sm:p-6 lg:col-span-7">
+        {formFields}
+      </div>
+
+      <aside className="space-y-4 lg:sticky lg:top-6 lg:col-span-5">
+        {showLiveCoverPreview ? (
+          <div
+            className="rounded-xl border border-border bg-white p-5 shadow-2xs"
+            data-testid="admin-book-live-cover-preview"
+          >
+            <div className="flex items-start gap-4">
+              <BookCover
+                author={watchedAuthor || null}
+                book={{
+                  id: bookId,
+                  title:
+                    watchedTitle?.trim() ||
+                    t(
+                      "books.form.livePreviewTitleFallback",
+                      undefined,
+                      "Tiêu đề sách mới",
+                    ),
+                  author: watchedAuthor || null,
+                  min_grade: Number.isFinite(watchedMinGrade)
+                    ? watchedMinGrade
+                    : 1,
+                  max_grade: Number.isFinite(watchedMaxGrade)
+                    ? watchedMaxGrade
+                    : 5,
+                  lifecycle_status: lifecycleStatus,
+                }}
+                coverSourceType={coverSourceType}
+                coverUrl={coverUrl}
+                size="medium"
+              />
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <p className="text-sm font-extrabold text-ink">
+                  {t(
+                    "books.form.livePreviewHeading",
+                    undefined,
+                    "Xem trước bìa sách",
+                  )}
+                </p>
+                <p className="text-xs leading-relaxed text-muted">
+                  {t(
+                    "books.form.livePreviewDesc",
+                    undefined,
+                    "Khi chưa tải ảnh bìa riêng, ViRead tự tạo bìa chữ tiếng Việt sắc nét theo tiêu đề, tác giả và khối lớp.",
+                  )}
+                </p>
+              </div>
+            </div>
+            {coverStudioSlot ? (
+              <div className="mt-4 border-t border-border pt-4">
+                {coverStudioSlot}
+              </div>
+            ) : null}
+          </div>
+        ) : coverStudioSlot ? (
+          <div className="rounded-xl border border-border bg-white p-5 shadow-2xs">
+            {coverStudioSlot}
+          </div>
+        ) : null}
+
+        {sidebarExtra}
+      </aside>
+    </div>
   );
 }

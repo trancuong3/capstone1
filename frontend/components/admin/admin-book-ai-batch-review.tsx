@@ -3,14 +3,15 @@
 import { LoaderCircle, Sparkles, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useSyncExternalStore } from "react";
+
+import { AdminBadge } from "@/components/admin/admin-ui";
 import { Button } from "@/components/common/button";
-import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
-import { useAdminServices } from "@/hooks/use-admin-services";
 import {
   markAiPageRevisionSkipped,
   useSkippedAiPageIds,
 } from "@/hooks/use-admin-ai-batch-skipped-pages";
+import { useAdminServices } from "@/hooks/use-admin-services";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
 import type { TranslateFn } from "@/lib/i18n/types";
@@ -185,10 +186,12 @@ function preparePage(
 
 export function AdminBookAiBatchReview({
   bookId,
+  collapsed = false,
   items,
   onCompleted,
 }: {
   bookId: string;
+  collapsed?: boolean;
   items: readonly AdminPageListItemUI[];
   onCompleted: () => void;
 }) {
@@ -227,6 +230,10 @@ export function AdminBookAiBatchReview({
   }, [bookId, completedRunId, processing]);
 
   const skippedPageIds = useSkippedAiPageIds(bookId);
+
+  if (collapsed && !processing && results.length === 0 && !notice) {
+    return null;
+  }
 
   const waitingPages = items
     .filter(
@@ -479,170 +486,41 @@ export function AdminBookAiBatchReview({
   }
 
   return (
-    <Card className="mb-6 bg-white">
-      <div className="grid gap-4">
-        <div>
-          <h2 className="flex items-center gap-2 text-xl font-black">
-            <Sparkles aria-hidden className="size-5 text-primary" />
+    <div className="space-y-3 rounded-xl border border-border bg-white p-4 shadow-2xs sm:p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <h2 className="flex items-center gap-2 text-base font-extrabold text-ink">
+            <Sparkles
+              aria-hidden="true"
+              className="size-4 shrink-0 text-primary"
+            />
             {t("books.aiBatch.heading")}
           </h2>
-          <p className="mt-2 text-sm leading-6 text-muted">
+          <p className="text-xs leading-relaxed text-muted">
             {t("books.aiBatch.description")}
           </p>
         </div>
 
-        {notice ? (
-          <StatusMessage tone={notice.tone} title={notice.title}>
-            {notice.message}
-          </StatusMessage>
-        ) : null}
-
-        {progress ? (
-          <div
-            aria-live="polite"
-            className="rounded-control border border-border bg-sky/40 p-4"
-            role="status"
-          >
-            <div className="flex items-center gap-3">
-              <LoaderCircle
-                aria-hidden
-                className="size-6 shrink-0 animate-spin text-primary"
-              />
-              <div className="min-w-0">
-                <p className="font-bold text-ink">
-                  {t("books.aiBatch.progressLine", {
-                    pageNumber: formatNumber(progress.pageNumber),
-                    current: formatNumber(progress.current),
-                    total: formatNumber(progress.total),
-                  })}
-                </p>
-                <p className="mt-1 text-sm text-muted">
-                  {t("books.aiBatch.progressVerifiedSuffix", {
-                    count: formatNumber(
-                      results.filter((item) => item.status === "verified")
-                        .length,
-                    ),
-                  })}{" "}
-                  {progress.totalChunks > 0
-                    ? t("books.aiBatch.progressChunkLine", {
-                        completed: formatNumber(progress.completedChunks),
-                        total: formatNumber(progress.totalChunks),
-                      })
-                    : t("books.aiBatch.progressPreparingLine")}
-                  {t("books.aiBatch.progressKeepOpenHint")}
-                </p>
-                <div
-                  aria-hidden
-                  className="mt-3 h-2 overflow-hidden rounded-full bg-white"
-                >
-                  <div
-                    className="h-full rounded-full bg-primary transition-all duration-500"
-                    style={{ width: `${progressPercent}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {results.length > 0 ? (
-          <div
-            className="grid gap-2"
-            aria-label={t("books.aiBatch.resultsAria")}
-          >
-            <p className="text-sm font-bold text-ink">
-              {t("books.aiBatch.resultsSummary", {
-                verified: formatNumber(verifiedResults.length),
-                saved: formatNumber(savedResults.length),
-                failed: formatNumber(failedResults.length),
-              })}
-            </p>
-            <ul className="grid max-h-72 gap-2 overflow-y-auto rounded-control border border-border p-3">
-              {results.map((result) => (
-                <li
-                  className="grid gap-2 border-b border-border py-2 text-sm last:border-b-0"
-                  key={`${result.pageId}:${result.revisionId}`}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <span className="font-bold">
-                      {t("books.aiBatch.pageLabel", {
-                        pageNumber: formatNumber(result.pageNumber),
-                      })}
-                    </span>
-                    <span
-                      className={
-                        result.adminReviewRequired
-                          ? "text-red-700"
-                          : result.status === "failed"
-                            ? "text-danger"
-                            : result.status === "verified"
-                              ? "text-success-ink"
-                              : "text-warning"
-                      }
-                    >
-                      {result.message}
-                    </span>
-                  </div>
-                  {result.status !== "verified" ? (
-                    <Link
-                      className="w-fit font-bold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
-                      href={`/admin/books/${encodeURIComponent(bookId)}/pages/${encodeURIComponent(result.pageId)}`}
-                    >
-                      {t("books.aiBatch.openPageForVerify")}
-                    </Link>
-                  ) : null}
-                  {result.request?.proofread_audit.suggestions.length ? (
-                    <details className="rounded-control bg-sky/30 p-3">
-                      <summary className="cursor-pointer font-semibold text-primary">
-                        {t("books.aiBatch.viewChanges", {
-                          changes: formatNumber(result.changes),
-                          pageNumber: formatNumber(result.pageNumber),
-                        })}
-                      </summary>
-                      <ul className="mt-2 grid gap-1">
-                        {result.request.proofread_audit.suggestions.map(
-                          (suggestion) => (
-                            <li key={suggestion.word_index}>
-                              {t("books.aiBatch.wordChangeLabel", {
-                                wordIndex: suggestion.word_index + 1,
-                              })}{" "}
-                              <span
-                                className="viread-learning-content"
-                                dir="ltr"
-                                lang="vi"
-                              >
-                                “{suggestion.original}” → “{suggestion.proposed}
-                                ”
-                              </span>
-                            </li>
-                          ),
-                        )}
-                      </ul>
-                    </details>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-
-        <div className="flex flex-wrap gap-3">
+        <div className="shrink-0">
           {processing ? (
             <Button
-              className="sm:w-auto"
               onClick={stopReview}
-              variant="secondary"
+              size="admin"
+              type="button"
+              variant="outline"
             >
-              <X aria-hidden className="size-4" />{" "}
+              <X aria-hidden="true" className="size-4 shrink-0" />
               {t("books.aiBatch.stopButton")}
             </Button>
           ) : (
             <Button
-              className="sm:w-auto"
               disabled={waitingPages.length === 0}
               onClick={() => void reviewAllPages()}
+              size="admin"
+              type="button"
+              variant="primary"
             >
-              <Sparkles aria-hidden className="size-4" />
+              <Sparkles aria-hidden="true" className="size-4 shrink-0" />
               {waitingPages.length > 0
                 ? results.length > 0
                   ? t("books.aiBatch.runButtonContinue", {
@@ -660,6 +538,151 @@ export function AdminBookAiBatchReview({
           )}
         </div>
       </div>
-    </Card>
+
+      {notice ? (
+        <StatusMessage title={notice.title} tone={notice.tone}>
+          {notice.message}
+        </StatusMessage>
+      ) : null}
+
+      {progress ? (
+        <div
+          aria-live="polite"
+          className="rounded-lg border border-primary/20 bg-sky/35 p-3.5"
+          role="status"
+        >
+          <div className="flex items-center gap-3">
+            <LoaderCircle
+              aria-hidden="true"
+              className="size-5 shrink-0 animate-spin text-primary"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-ink">
+                {t("books.aiBatch.progressLine", {
+                  pageNumber: formatNumber(progress.pageNumber),
+                  current: formatNumber(progress.current),
+                  total: formatNumber(progress.total),
+                })}
+              </p>
+              <p className="mt-0.5 text-xs text-muted">
+                {t("books.aiBatch.progressVerifiedSuffix", {
+                  count: formatNumber(
+                    results.filter((item) => item.status === "verified").length,
+                  ),
+                })}{" "}
+                {progress.totalChunks > 0
+                  ? t("books.aiBatch.progressChunkLine", {
+                      completed: formatNumber(progress.completedChunks),
+                      total: formatNumber(progress.totalChunks),
+                    })
+                  : t("books.aiBatch.progressPreparingLine")}
+                {t("books.aiBatch.progressKeepOpenHint")}
+              </p>
+              <div
+                aria-hidden="true"
+                className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-white"
+              >
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-500"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {results.length > 0 ? (
+        <div aria-label={t("books.aiBatch.resultsAria")} className="space-y-2">
+          <p className="text-xs font-bold text-ink">
+            {t("books.aiBatch.resultsSummary", {
+              verified: formatNumber(verifiedResults.length),
+              saved: formatNumber(savedResults.length),
+              failed: formatNumber(failedResults.length),
+            })}
+          </p>
+          <ul className="max-h-64 divide-y divide-border overflow-y-auto rounded-lg border border-border px-3">
+            {results.map((result) => (
+              <li
+                className="space-y-1.5 py-2.5 text-xs"
+                key={`${result.pageId}:${result.revisionId}`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-ink">
+                      {t("books.aiBatch.pageLabel", {
+                        pageNumber: formatNumber(result.pageNumber),
+                      })}
+                    </span>
+                    <AdminBadge
+                      tone={
+                        result.status === "failed"
+                          ? "danger"
+                          : result.status === "verified"
+                            ? "success"
+                            : "warning"
+                      }
+                    >
+                      {result.changes > 0
+                        ? `${formatNumber(result.changes)} Δ`
+                        : result.status}
+                    </AdminBadge>
+                  </div>
+                  {result.status !== "verified" ? (
+                    <Link
+                      className="font-bold text-primary underline focus-visible:outline-2 focus-visible:outline-primary"
+                      href={`/admin/books/${encodeURIComponent(bookId)}/pages/${encodeURIComponent(result.pageId)}`}
+                    >
+                      {t("books.aiBatch.openPageForVerify")}
+                    </Link>
+                  ) : null}
+                </div>
+                <p
+                  className={
+                    result.adminReviewRequired
+                      ? "text-danger"
+                      : result.status === "failed"
+                        ? "text-danger"
+                        : result.status === "verified"
+                          ? "text-success-ink"
+                          : "text-warning"
+                  }
+                >
+                  {result.message}
+                </p>
+                {result.request?.proofread_audit.suggestions.length ? (
+                  <details className="rounded-lg bg-surface-subtle p-2.5">
+                    <summary className="cursor-pointer font-semibold text-primary">
+                      {t("books.aiBatch.viewChanges", {
+                        changes: formatNumber(result.changes),
+                        pageNumber: formatNumber(result.pageNumber),
+                      })}
+                    </summary>
+                    <ul className="mt-2 space-y-1">
+                      {result.request.proofread_audit.suggestions.map(
+                        (suggestion) => (
+                          <li key={suggestion.word_index}>
+                            {t("books.aiBatch.wordChangeLabel", {
+                              wordIndex: suggestion.word_index + 1,
+                            })}{" "}
+                            <span
+                              className="viread-learning-content"
+                              dir="ltr"
+                              lang="vi"
+                            >
+                              “{suggestion.original}” → “{suggestion.proposed}”
+                            </span>
+                          </li>
+                        ),
+                      )}
+                    </ul>
+                  </details>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
   );
 }

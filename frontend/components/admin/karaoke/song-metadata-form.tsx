@@ -1,10 +1,18 @@
 "use client";
+import { ChevronDown } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslations } from "@/hooks/use-i18n";
 import type { KaraokeMetadata } from "@/types/karaoke";
 
 export const karaokeInputClass =
-  "min-h-12 w-full min-w-0 rounded-control border border-border bg-white px-4 py-2 font-normal focus-visible:outline-3 focus-visible:outline-primary/40";
+  "h-11 min-h-11 w-full min-w-0 rounded-control border border-border bg-white px-3 text-sm font-normal text-ink placeholder:text-muted/70 transition-colors focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-muted";
+
+export const karaokeTextareaClass =
+  "w-full min-w-0 rounded-control border border-border bg-white px-3 py-2.5 text-sm font-normal text-ink placeholder:text-muted/70 transition-colors focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-muted";
+
+export const karaokeFileInputClass =
+  "block w-full min-w-0 cursor-pointer rounded-control border border-dashed border-border bg-surface-subtle/60 px-3 py-2 text-sm font-normal text-muted transition-colors hover:border-primary/50 hover:bg-sky/20 file:me-3 file:cursor-pointer file:rounded-control file:border file:border-border file:bg-white file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-ink hover:file:bg-sky/40 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-60";
+
 export function SongMetadataForm({
   value,
   onChange,
@@ -37,7 +45,7 @@ export function SongMetadataForm({
     max: number,
   ) {
     return (
-      <label className="grid gap-2 font-bold" key={key}>
+      <label className="grid gap-1.5 text-sm font-semibold text-ink" key={key}>
         {label}
         <input
           aria-label={label}
@@ -55,7 +63,7 @@ export function SongMetadataForm({
         />
         {errors?.[key] && (
           <span
-            className="text-sm font-normal text-danger"
+            className="text-xs font-normal text-danger"
             id={`${id}-${key}-error`}
           >
             {errors[key]}
@@ -75,30 +83,41 @@ export function SongMetadataForm({
           ["max_grade", t("karaoke.metadata.maxGradeLabel")],
         ] as const
       ).map(([key, label]) => (
-        <label className="grid gap-2 font-bold" key={key}>
+        <label
+          className="grid gap-1.5 text-sm font-semibold text-ink"
+          key={key}
+        >
           {label}
-          <select
-            aria-label={label}
-            ref={(node) => {
-              fields.current[key] = node;
-            }}
-            className={karaokeInputClass}
-            value={value[key]}
-            aria-invalid={!!errors?.[key]}
-            aria-describedby={errors?.[key] ? `${id}-${key}-error` : undefined}
-            onChange={(e) =>
-              onChange({ ...value, [key]: Number(e.target.value) })
-            }
-          >
-            {[1, 2, 3, 4, 5].map((grade) => (
-              <option value={grade} key={grade}>
-                {t("karaoke.metadata.gradeOption", { grade })}
-              </option>
-            ))}
-          </select>
+          <div className="relative flex items-center">
+            <select
+              aria-label={label}
+              ref={(node) => {
+                fields.current[key] = node;
+              }}
+              className={`${karaokeInputClass} appearance-none pe-9`}
+              value={value[key]}
+              aria-invalid={!!errors?.[key]}
+              aria-describedby={
+                errors?.[key] ? `${id}-${key}-error` : undefined
+              }
+              onChange={(e) =>
+                onChange({ ...value, [key]: Number(e.target.value) })
+              }
+            >
+              {[1, 2, 3, 4, 5].map((grade) => (
+                <option value={grade} key={grade}>
+                  {t("karaoke.metadata.gradeOption", { grade })}
+                </option>
+              ))}
+            </select>
+            <ChevronDown
+              aria-hidden="true"
+              className="pointer-events-none absolute end-3 size-4 text-muted"
+            />
+          </div>
           {errors?.[key] && (
             <span
-              className="text-sm font-normal text-danger"
+              className="text-xs font-normal text-danger"
               id={`${id}-${key}-error`}
             >
               {errors[key]}
@@ -117,7 +136,7 @@ export function SongMetadataForm({
           open={expanded || !!additionalError}
           onToggle={(e) => setExpanded(e.currentTarget.open)}
         >
-          <summary className="min-h-12 cursor-pointer py-3 font-bold text-primary-hover">
+          <summary className="min-h-11 cursor-pointer py-2 text-sm font-bold text-primary-hover">
             {t("karaoke.metadata.moreInfoSummary")}
           </summary>
           <div className="grid gap-4 pt-3 md:grid-cols-2">{additional}</div>
@@ -125,7 +144,7 @@ export function SongMetadataForm({
       ) : (
         additional
       )}
-      <p className="text-sm text-muted md:col-span-2">
+      <p className="text-xs text-muted md:col-span-2">
         {t("karaoke.metadata.publishRequirementsHint")}
       </p>
     </div>

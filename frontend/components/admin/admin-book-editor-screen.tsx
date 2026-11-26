@@ -1,15 +1,18 @@
 "use client";
 
+import { ImageIcon, Power } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
 import { AdminBookForm } from "@/components/admin/admin-book-form";
-import { BookCover } from "@/components/books/book-cover";
+import {
+  AdminLoading,
+  AdminPageHeader,
+  AdminStatusBadge,
+} from "@/components/admin/admin-ui";
 import { BookCoverStudio } from "@/components/books/book-cover-studio";
 import { Button } from "@/components/common/button";
-import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
 import { Modal } from "@/components/common/modal";
 import { StatusMessage } from "@/components/common/status-message";
@@ -17,7 +20,10 @@ import { useAdminServices } from "@/hooks/use-admin-services";
 import { useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
 import type { AdminBookCreateDTO, AdminBookDTO } from "@/types/admin";
-import type { BookPresentationAssetDTO } from "@/types/book-assets";
+import type {
+  AssetSourceType,
+  BookPresentationAssetDTO,
+} from "@/types/book-assets";
 
 const ISSUE_KEYS = new Set([
   "MISSING_TITLE",
@@ -157,33 +163,40 @@ export function AdminBookEditorScreen({
   if (error || !book) {
     return (
       <EmptyState
-        headingLevel={1}
-        title={
-          error === "not-found"
-            ? t("books.editor.notFoundTitle")
-            : t("books.editor.loadErrorTitle")
-        }
-        description={
-          error === "not-found"
-            ? t("books.editor.notFoundDesc")
-            : t("books.editor.genericErrorDesc")
-        }
         action={
           <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={() => void load()} variant="secondary">
+            <Button onClick={() => void load()} size="admin" variant="secondary">
               {t("common.retry")}
             </Button>
             <Link
-              className="inline-flex min-h-11 items-center rounded-md px-1 font-semibold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+              className="inline-flex min-h-10 items-center rounded-md px-1 font-semibold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
               href="/admin/books"
             >
               {t("books.detail.backToBooks")}
             </Link>
           </div>
         }
+        description={
+          error === "not-found"
+            ? t("books.editor.notFoundDesc")
+            : t("books.editor.genericErrorDesc")
+        }
+        headingLevel={1}
+        title={
+          error === "not-found"
+            ? t("books.editor.notFoundTitle")
+            : t("books.editor.loadErrorTitle")
+        }
       />
     );
   }
+
+  const resolvedTitle = book.title.trim() || t("books.missingTitle");
+  const resolvedCoverUrl = activeCoverAsset?.media_url ?? book.cover_url ?? null;
+  const resolvedCoverSourceType =
+    activeCoverAsset?.source_type ??
+    (book.cover_source_type as AssetSourceType | null) ??
+    null;
 
   const initial: AdminBookCreateDTO = {
     name: book.name ?? "",
@@ -198,119 +211,169 @@ export function AdminBookEditorScreen({
       : `/admin/books/${encodeURIComponent(bookId)}`;
 
   return (
-    <section className="figma-form-page mx-auto flex w-full max-w-[960px] flex-col gap-4">
+    <section className="space-y-4">
       <AdminPageHeader
-        title={t("books.editor.title")}
+        badge={<AdminStatusBadge status={book.lifecycle_status} />}
+        breadcrumbs={[
+          { label: t("books.detail.backToBooks"), href: "/admin/books" },
+          {
+            label: resolvedTitle,
+            href: `/admin/books/${encodeURIComponent(bookId)}`,
+          },
+          { label: t("books.editor.title") },
+        ]}
         description={t("books.editor.description")}
+        eyebrow={t("books.eyebrow")}
+        title={t("books.editor.title")}
       />
+
       {issue && ISSUE_KEYS.has(issue) ? (
         <StatusMessage
-          className="mb-5"
-          tone="info"
           title={t("books.editor.issueTitle", {
             issue: t(`books.editor.issueLabels.${issue}`),
           })}
+          tone="info"
         >
           {t("books.editor.issueHint")}
         </StatusMessage>
       ) : null}
-      <div className="flex flex-wrap items-center gap-4">
-        <Button
-          className="sm:w-auto"
-          disabled={statusBusy}
-          isLoading={statusBusy}
-          onClick={() => setConfirmLifecycleOpen(true)}
-          variant="secondary"
-        >
-          {book.lifecycle_status === "ACTIVE"
-            ? t("books.editor.retire")
-            : t("books.editor.reactivate")}
-        </Button>
-      </div>
+
       {notice ? (
-        <StatusMessage tone={notice.tone} title={notice.title}>
+        <StatusMessage title={notice.title} tone={notice.tone}>
           {notice.message}
         </StatusMessage>
       ) : null}
-      <Card className="w-full bg-white sm:px-8 sm:py-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-4">
-            <BookCover
-              author={book.author}
-              book={{
-                id: book.id,
-                title: book.title.trim() ? book.title : "Chưa có tiêu đề",
-                author: book.author,
-                min_grade: book.min_grade,
-                max_grade: book.max_grade,
-                lifecycle_status: book.lifecycle_status,
-              }}
-              coverSourceType={activeCoverAsset?.source_type ?? null}
-              coverUrl={activeCoverAsset?.media_url ?? null}
-              showTitle={false}
-              size="small"
-            />
-            <div className="min-w-0">
-              <h2 className="text-xl font-extrabold text-ink">Ảnh bìa sách</h2>
-              <p className="mt-0.5 text-xs text-muted">
-                Cập nhật ảnh bìa (tải lên, cắt 3:4, xoay hoặc tạo bìa AI) mà
-                không làm thay đổi các trang đọc hay revision đã xác minh.
-              </p>
+
+      <AdminBookForm
+        bookId={bookId}
+        cancelHref={cancelHref}
+        coverSourceType={resolvedCoverSourceType}
+        coverStudioSlot={
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <h2 className="text-sm font-extrabold text-ink">
+                  {t("books.editor.coverHeading", undefined, "Ảnh bìa sách")}
+                </h2>
+                <p className="mt-0.5 text-xs leading-relaxed text-muted">
+                  {t(
+                    "books.editor.coverDesc",
+                    undefined,
+                    "Cập nhật ảnh bìa (tải lên, cắt 3:4, xoay hoặc tạo bìa AI) mà không làm thay đổi các trang đọc hay revision đã xác minh.",
+                  )}
+                </p>
+              </div>
+              <Button
+                onClick={() => setCoverStudioOpen((open) => !open)}
+                size="admin"
+                type="button"
+                variant="secondary"
+              >
+                <ImageIcon aria-hidden="true" className="size-4 shrink-0" />
+                {coverStudioOpen
+                  ? t(
+                      "books.editor.closeCoverStudio",
+                      undefined,
+                      "Đóng Cover Studio",
+                    )
+                  : t(
+                      "books.editor.openCoverStudio",
+                      undefined,
+                      "Mở Cover Studio",
+                    )}
+              </Button>
             </div>
+            {coverStudioOpen ? (
+              <div className="pt-2">
+                <BookCoverStudio
+                  actorRole="admin"
+                  author={book.author}
+                  autoLoad
+                  bookId={bookId}
+                  bookTitle={resolvedTitle}
+                  initialCoverSourceType={resolvedCoverSourceType}
+                  initialCoverUrl={resolvedCoverUrl}
+                  maxGrade={book.max_grade}
+                  minGrade={book.min_grade}
+                  onCoverUpdated={(asset) => setActiveCoverAsset(asset)}
+                />
+              </div>
+            ) : null}
           </div>
-          <Button
-            className="sm:w-auto"
-            fullWidth={false}
-            onClick={() => setCoverStudioOpen((open) => !open)}
-            size="compact"
-            type="button"
-            variant="secondary"
+        }
+        coverUrl={resolvedCoverUrl}
+        formHeading={t("books.editor.infoHeading")}
+        initial={initial}
+        lifecycleStatus={book.lifecycle_status}
+        onSubmit={saveMetadata}
+        showLiveCoverPreview
+        sidebarExtra={
+          <section
+            aria-labelledby="book-lifecycle-danger-title"
+            className={
+              book.lifecycle_status === "ACTIVE"
+                ? "rounded-xl border border-danger/25 bg-white p-5 shadow-2xs"
+                : "rounded-xl border border-border bg-white p-5 shadow-2xs"
+            }
           >
-            {coverStudioOpen ? "Đóng Cover Studio" : "Mở Cover Studio"}
-          </Button>
-        </div>
-        {coverStudioOpen ? (
-          <div className="mt-4">
-            <BookCoverStudio
-              actorRole="admin"
-              author={book.author}
-              autoLoad
-              bookId={bookId}
-              bookTitle={book.title.trim() ? book.title : "Chưa có tiêu đề"}
-              initialCoverSourceType={activeCoverAsset?.source_type ?? null}
-              initialCoverUrl={activeCoverAsset?.media_url ?? null}
-              maxGrade={book.max_grade}
-              minGrade={book.min_grade}
-              onCoverUpdated={(asset) => setActiveCoverAsset(asset)}
-            />
-          </div>
-        ) : null}
-      </Card>
-      <Card className="w-full bg-white sm:px-8 sm:py-8">
-        <h2 className="text-2xl font-extrabold text-ink">
-          {t("books.editor.infoHeading")}
-        </h2>
-        <AdminBookForm
-          bookId={bookId}
-          cancelHref={cancelHref}
-          coverSourceType={activeCoverAsset?.source_type ?? null}
-          coverUrl={activeCoverAsset?.media_url ?? null}
-          initial={initial}
-          onSubmit={saveMetadata}
-          submitLabel={t("books.editor.submitLabel")}
-        />
-      </Card>
+            <div className="flex items-center justify-between gap-2">
+              <h2
+                className="text-sm font-extrabold text-ink"
+                id="book-lifecycle-danger-title"
+              >
+                {t("books.editor.dangerZoneHeading", undefined, "Vòng đời sách")}
+              </h2>
+              <AdminStatusBadge status={book.lifecycle_status} />
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-muted">
+              {book.lifecycle_status === "ACTIVE"
+                ? t(
+                    "books.editor.dangerZoneActiveDesc",
+                    undefined,
+                    "Ngừng hoạt động sẽ ẩn sách khỏi thư viện phụ huynh nhưng vẫn giữ nguyên toàn bộ trang, revision và lịch sử đọc.",
+                  )
+                : t(
+                    "books.editor.dangerZoneRetiredDesc",
+                    undefined,
+                    "Sách đang ngừng hoạt động. Bạn có thể kích hoạt lại khi metadata và các trang OCR đã đáp ứng yêu cầu.",
+                  )}
+            </p>
+            <div className="mt-4">
+              <Button
+                disabled={statusBusy}
+                isLoading={statusBusy}
+                onClick={() => setConfirmLifecycleOpen(true)}
+                size="admin"
+                type="button"
+                variant={
+                  book.lifecycle_status === "ACTIVE"
+                    ? "destructive-outline"
+                    : "secondary"
+                }
+              >
+                <Power aria-hidden="true" className="size-4 shrink-0" />
+                {book.lifecycle_status === "ACTIVE"
+                  ? t("books.editor.retire")
+                  : t("books.editor.reactivate")}
+              </Button>
+            </div>
+          </section>
+        }
+        submitLabel={t("books.editor.submitLabel")}
+      />
+
       <Modal
         closeOnBackdropClick={!statusBusy}
         closeOnEscape={!statusBusy}
         footer={
-          <div className="flex flex-wrap justify-end gap-3">
+          <div className="flex flex-wrap justify-end gap-2">
             <Button
               disabled={statusBusy}
               fullWidth={false}
               onClick={() => setConfirmLifecycleOpen(false)}
+              size="admin"
               type="button"
-              variant="secondary"
+              variant="outline"
             >
               {t("common.cancel")}
             </Button>
@@ -319,6 +382,7 @@ export function AdminBookEditorScreen({
               fullWidth={false}
               isLoading={statusBusy}
               onClick={() => void changeLifecycle()}
+              size="admin"
               type="button"
               variant={
                 book.lifecycle_status === "ACTIVE" ? "destructive" : "primary"
@@ -343,7 +407,7 @@ export function AdminBookEditorScreen({
         }
         tone="paper"
       >
-        <p className="text-body text-ink">
+        <p className="text-sm leading-relaxed text-ink">
           {book.lifecycle_status === "ACTIVE"
             ? t("books.editor.modalRetireBody")
             : t("books.editor.modalReactivateBody")}

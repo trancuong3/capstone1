@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -209,7 +209,22 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
 
   it("renders Google Drive status, quota, Desired vs Loaded mismatch warning, and blocks Pilot approval", async () => {
     renderScreen();
+    const user = userEvent.setup();
 
+    // Overview & Runtime tab is selected by default
+    await waitFor(() => {
+      expect(screen.getByText(/FALLBACK_TO_ORIGINAL/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Cảnh báo lệch model/i)).toBeInTheDocument();
+
+    // Outbox error/blocked and AI-only skipped breakdown shown
+    expect(screen.getByText(/1 lỗi\/chặn/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/3 sự kiện AI-only đã bỏ qua an toàn/i),
+    ).toBeInTheDocument();
+
+    // Switch to Google Drive tab
+    await user.click(screen.getByRole("tab", { name: /Google Drive/i }));
     await waitFor(() => {
       expect(
         screen.getByText(/Lưu trữ Luồng 2 · Google Drive \(0 VNĐ\)/i),
@@ -224,25 +239,25 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
     ).toBeInTheDocument();
     expect(screen.getByText(/Còn trống: 12\.00 GiB/i)).toBeInTheDocument();
 
-    // Desired vs Loaded runtime mismatch alert is clearly surfaced
-    expect(screen.getByText(/FALLBACK_TO_ORIGINAL/)).toBeInTheDocument();
-    expect(screen.getByText(/Cảnh báo lệch model/i)).toBeInTheDocument();
-
-    // Outbox error/blocked and AI-only skipped breakdown shown
-    expect(screen.getByText(/1 lỗi\/chặn/i)).toBeInTheDocument();
-    expect(
-      screen.getByText(/3 sự kiện AI-only đã bỏ qua an toàn/i),
-    ).toBeInTheDocument();
-
-    // PILOT benchmark must NEVER expose the Production Approve button!
+    // Switch to Flow 2 tab and verify PILOT benchmark never exposes Production Approve
+    await user.click(
+      screen.getByRole("tab", { name: /Huấn luyện & Đánh giá Flow 2/i }),
+    );
     expect(
       screen.queryByRole("button", { name: /Phê duyệt model/i }),
     ).not.toBeInTheDocument();
   });
 
-  it("runs Drive health-check and upload/read/delete self-test from the Admin UI", async () => {
+  it("runs Drive health-check, self-test, and modal-confirmed disconnect from the Admin UI", async () => {
     renderScreen();
     const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("tab", { name: /Google Drive/i }),
+      ).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("tab", { name: /Google Drive/i }));
 
     await waitFor(() => {
       expect(
@@ -266,6 +281,26 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
         screen.getByText(/_selftest\/selftest-123\.txt/),
       ).toBeInTheDocument();
     });
+
+    // Disconnect uses an accessible alertdialog modal (no globalThis.confirm)
+    await user.click(
+      screen.getByRole("button", { name: /Ngắt kết nối an toàn/i }),
+    );
+    const dialog = screen.getByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Hủy" }));
+    expect(mockService.disconnectDrive).not.toHaveBeenCalled();
+
+    await user.click(
+      screen.getByRole("button", { name: /Ngắt kết nối an toàn/i }),
+    );
+    await user.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Ngắt kết nối",
+      }),
+    );
+    await waitFor(() => {
+      expect(mockService.disconnectDrive).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("shows clear recovery guidance when Drive token is revoked and disables unsafe actions", async () => {
@@ -286,6 +321,14 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
     );
 
     renderScreen();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("tab", { name: /Google Drive/i }),
+      ).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("tab", { name: /Google Drive/i }));
 
     await waitFor(() => {
       expect(screen.getByText(/Token bị thu hồi/i)).toBeInTheDocument();
@@ -331,6 +374,16 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
     });
 
     renderScreen();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("tab", { name: /Huấn luyện & Đánh giá Flow 2/i }),
+      ).toBeInTheDocument();
+    });
+    await user.click(
+      screen.getByRole("tab", { name: /Huấn luyện & Đánh giá Flow 2/i }),
+    );
 
     await waitFor(() => {
       expect(
@@ -365,6 +418,13 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
 
     renderScreen();
     const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("tab", { name: /Google Drive/i }),
+      ).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("tab", { name: /Google Drive/i }));
 
     await waitFor(() => {
       expect(
@@ -432,6 +492,13 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
 
     renderScreen();
     const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("tab", { name: /Google Drive/i }),
+      ).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("tab", { name: /Google Drive/i }));
 
     await waitFor(() => {
       expect(
@@ -512,6 +579,15 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
 
     renderScreen();
     const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("tab", { name: /Huấn luyện & Đánh giá Flow 2/i }),
+      ).toBeInTheDocument();
+    });
+    await user.click(
+      screen.getByRole("tab", { name: /Huấn luyện & Đánh giá Flow 2/i }),
+    );
 
     await waitFor(() => {
       expect(

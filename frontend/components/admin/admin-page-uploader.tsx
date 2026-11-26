@@ -1,5 +1,6 @@
 "use client";
 
+import { RefreshCw, UploadCloud } from "lucide-react";
 import {
   useEffect,
   useRef,
@@ -7,12 +8,12 @@ import {
   useSyncExternalStore,
   type FormEvent,
 } from "react";
-import { RefreshCw, UploadCloud } from "lucide-react";
+
+import { AdminBadge } from "@/components/admin/admin-ui";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
-import { getApiBaseUrl } from "@/lib/supabase/config";
 import {
   emptyAdminBookUploadSession,
   getAdminBookUploadSession,
@@ -22,6 +23,7 @@ import {
   subscribeAdminBookUploadSession,
 } from "@/lib/admin/admin-book-upload-session";
 import type { TranslateFn } from "@/lib/i18n/types";
+import { getApiBaseUrl } from "@/lib/supabase/config";
 import type {
   AdminPageUploadInputUI,
   AdminPageUploadProgressUI,
@@ -30,6 +32,7 @@ import type {
 
 interface AdminPageUploaderProps {
   bookId: string;
+  collapsed?: boolean;
   onUploaded: () => void;
 }
 
@@ -161,6 +164,7 @@ function classifyUploadFile(
 
 export function AdminPageUploader({
   bookId,
+  collapsed = false,
   onUploaded,
 }: AdminPageUploaderProps) {
   const { pages } = useAdminServices();
@@ -179,7 +183,11 @@ export function AdminPageUploader({
   );
   const lastCompletedRunIdRef = useRef(0);
 
+  const shouldRender =
+    !collapsed || session.busy || session.progress.length > 0;
+
   useEffect(() => {
+    if (!shouldRender) return;
     let active = true;
     const controller = new AbortController();
     const timer = globalThis.setTimeout(() => controller.abort(), 10_000);
@@ -220,7 +228,7 @@ export function AdminPageUploader({
       globalThis.clearTimeout(timer);
       controller.abort();
     };
-  }, [healthNonce]);
+  }, [healthNonce, shouldRender]);
 
   useEffect(() => {
     if (
@@ -231,6 +239,10 @@ export function AdminPageUploader({
       onUploaded();
     }
   }, [onUploaded, session.busy, session.completedRunId]);
+
+  if (!shouldRender) {
+    return null;
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -350,129 +362,171 @@ export function AdminPageUploader({
   return (
     <section
       aria-labelledby="upload-title"
-      className="mb-8 rounded-card bg-sky p-4 sm:p-6"
+      className="space-y-3 rounded-xl border border-border bg-white p-4 shadow-2xs sm:p-5"
     >
-      <h2 className="mb-4 text-2xl font-semibold" id="upload-title">
-        {t("books.uploader.heading")}
-      </h2>
-      <p className="mb-4 text-sm text-muted">
-        {t("books.uploader.instructions")}
-      </p>
+      <div className="space-y-1">
+        <h2
+          className="flex items-center gap-2 text-base font-extrabold text-ink"
+          id="upload-title"
+        >
+          <UploadCloud
+            aria-hidden="true"
+            className="size-4 shrink-0 text-primary"
+          />
+          {t("books.uploader.heading")}
+        </h2>
+        <p className="text-xs leading-relaxed text-muted">
+          {t("books.uploader.instructions")}
+        </p>
+      </div>
+
       {workerStatus === "offline" || workerStatus === "unreachable" ? (
         <div
-          className="mb-4 flex flex-col gap-2"
+          className="flex flex-col gap-2"
           data-testid="admin-ocr-worker-offline-banner"
         >
           <StatusMessage
             title={
               workerStatus === "offline"
-                ? "Máy chủ OCR Windows hiện đang tắt"
-                : "Chưa kiểm tra được trạng thái máy chủ OCR"
+                ? t(
+                    "books.uploader.workerOfflineTitle",
+                    undefined,
+                    "Dịch vụ xử lý OCR hiện đang ngoại tuyến",
+                  )
+                : t(
+                    "books.uploader.workerUnreachableTitle",
+                    undefined,
+                    "Chưa kiểm tra được trạng thái dịch vụ OCR",
+                  )
             }
             tone="warning"
           >
             {workerStatus === "offline"
-              ? "Bạn vẫn có thể upload ảnh hoặc PDF/DOCX ngay bây giờ: hệ thống sẽ xếp hàng an toàn và tự động chạy OCR khi máy chủ OCR Windows hoạt động."
-              : "Backend đang khởi động hoặc mạng chậm. Bạn vẫn có thể bấm Kiểm tra lại hoặc upload để xếp hàng OCR."}
+              ? t(
+                  "books.uploader.workerOfflineDesc",
+                  undefined,
+                  "Bạn vẫn có thể tải ảnh hoặc PDF/DOCX ngay bây giờ: hệ thống sẽ xếp hàng an toàn và tự động chạy OCR khi dịch vụ xử lý OCR hoạt động.",
+                )
+              : t(
+                  "books.uploader.workerUnreachableDesc",
+                  undefined,
+                  "Backend đang khởi động hoặc mạng chậm. Bạn vẫn có thể bấm Kiểm tra lại hoặc tải lên để xếp hàng OCR.",
+                )}
           </StatusMessage>
           <Button
-            className="sm:w-auto sm:self-start"
+            className="self-start"
             onClick={() => {
               setWorkerStatus("checking");
               setHealthNonce((n) => n + 1);
             }}
-            size="compact"
+            size="admin"
             type="button"
-            variant="secondary"
+            variant="outline"
           >
-            <RefreshCw aria-hidden className="size-4" />
-            Kiểm tra lại kết nối OCR
+            <RefreshCw aria-hidden="true" className="size-3.5 shrink-0" />
+            {t(
+              "books.uploader.recheckWorkerBtn",
+              undefined,
+              "Kiểm tra lại kết nối OCR",
+            )}
           </Button>
         </div>
       ) : null}
+
       {formError || session.error ? (
-        <StatusMessage className="mb-4" tone="error">
-          {formError ?? session.error}
-        </StatusMessage>
+        <StatusMessage tone="error">{formError ?? session.error}</StatusMessage>
       ) : null}
-      <form className="grid gap-4" onSubmit={submit}>
-        <p className="text-sm font-semibold text-ink">
-          {t("books.uploader.orderingNote")}
-        </p>
-        <label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-control border-2 border-dashed border-border bg-white p-5 text-center">
-          <UploadCloud aria-hidden className="mb-2 size-8 text-primary" />
-          <span className="font-semibold">
+
+      <form className="space-y-3" onSubmit={submit}>
+        <label className="flex min-h-24 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border bg-surface-subtle/60 px-4 py-4 text-center transition-colors hover:border-primary/50 hover:bg-sky/20">
+          <UploadCloud aria-hidden="true" className="mb-1.5 size-6 text-primary" />
+          <span className="text-sm font-bold text-ink">
             {t("books.uploader.selectFilesLabel")}
           </span>
-          <span className="mt-1 text-sm text-muted">
+          <span className="mt-1 text-xs text-muted">
             {files.length
               ? t("books.uploader.filesSelected", { count: files.length })
               : t("books.uploader.noFilesHint")}
           </span>
           <input
-            id="page-images"
             accept={ACCEPTED_UPLOAD_ACCEPT}
             className="sr-only"
+            id="page-images"
             multiple
             onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
             type="file"
           />
         </label>
-        <Button
-          className="sm:w-auto sm:justify-self-start"
-          disabled={session.busy}
-          isLoading={session.busy}
-          type="submit"
-        >
-          {t("books.uploader.submit")}
-        </Button>
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-muted">{t("books.uploader.orderingNote")}</p>
+          <Button
+            disabled={session.busy}
+            isLoading={session.busy}
+            size="admin"
+            type="submit"
+            variant="primary"
+          >
+            <UploadCloud aria-hidden="true" className="size-4 shrink-0" />
+            {t("books.uploader.submit")}
+          </Button>
+        </div>
       </form>
+
       {session.progress.length ? (
-        <div className="mt-5 grid gap-2" aria-live="polite">
+        <div className="space-y-2" aria-live="polite">
           {session.progress.map((item) => (
             <div
-              className="flex flex-wrap items-center justify-between gap-3 rounded-control bg-white p-3"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface-subtle/50 px-3 py-2"
               key={item.client_id}
             >
-              <span className="break-all text-sm">
+              <span className="min-w-0 flex-1 break-all text-xs font-semibold text-ink">
                 {item.file_name ?? item.client_id}
               </span>
+              <div className="flex items-center gap-2">
+                <AdminBadge
+                  tone={
+                    item.status === "FAILED"
+                      ? "danger"
+                      : item.status === "UPLOADING"
+                        ? "info"
+                        : item.status === "QUEUED"
+                          ? "neutral"
+                          : "success"
+                  }
+                >
+                  {item.status === "FAILED"
+                    ? t("books.uploader.statusFailed")
+                    : item.status === "UPLOADING"
+                      ? t("books.uploader.statusUploading")
+                      : item.status === "QUEUED"
+                        ? t("books.uploader.statusPending")
+                        : (item.summary_message ??
+                          t("books.uploader.statusSavedFallback"))}
+                </AdminBadge>
+                <span className="text-xs font-bold text-muted tabular-nums">
+                  {formatNumber(item.progress_percent)}%
+                </span>
+              </div>
               {item.status === "FAILED" && item.error_message ? (
-                <span className="basis-full text-sm text-red-700">
+                <span className="basis-full text-xs text-danger">
                   {item.error_message}
                 </span>
               ) : null}
-              <span
-                className={
-                  item.status === "FAILED"
-                    ? "text-sm font-semibold text-red-700"
-                    : "text-sm font-semibold"
-                }
-              >
-                {item.status === "FAILED"
-                  ? t("books.uploader.statusFailed")
-                  : item.status === "UPLOADING"
-                    ? t("books.uploader.statusUploading")
-                    : item.status === "QUEUED"
-                      ? t("books.uploader.statusPending")
-                      : (item.summary_message ??
-                        t("books.uploader.statusSavedFallback"))}
-              </span>
-              <span className="text-sm tabular-nums">
-                {formatNumber(item.progress_percent)}%
-              </span>
             </div>
           ))}
         </div>
       ) : null}
+
       {hasRetryableAdminBookUploads(bookId) ? (
         <Button
-          className="mt-4 sm:w-auto"
           disabled={session.busy}
           isLoading={session.busy}
           onClick={() => void retryAdminBookUpload(bookId, pages)}
-          variant="secondary"
+          size="admin"
+          variant="outline"
         >
+          <RefreshCw aria-hidden="true" className="size-3.5 shrink-0" />
           {t("books.uploader.retryFailed")}
         </Button>
       ) : null}

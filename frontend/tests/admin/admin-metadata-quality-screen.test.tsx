@@ -4,6 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdminMetadataQualityScreen } from "@/components/admin/admin-metadata-quality-screen";
 import {
+  AdminQualityHubScreen,
+  parseQualityHubTab,
+} from "@/components/admin/admin-quality-hub-screen";
+import {
   createAdminServiceFixture,
   withAdminFixture,
 } from "@/test/fixtures/admin-service-fixture";
@@ -257,5 +261,78 @@ describe("AdminMetadataQualityScreen", () => {
     expect(
       await screen.findByText("Đang xem 11–20 / 21 kết quả"),
     ).toBeInTheDocument();
+  });
+});
+
+describe("AdminQualityHubScreen", () => {
+  it("renders a single h1 header with 4 segmented tabs, supports ?tab parsing, and has unique DOM IDs", async () => {
+    expect(parseQualityHubTab(undefined)).toBe("metadata");
+    expect(parseQualityHubTab("unknown")).toBe("metadata");
+    expect(parseQualityHubTab("reports")).toBe("reports");
+    expect(parseQualityHubTab("approval")).toBe("approval");
+    expect(parseQualityHubTab("user-books")).toBe("user-books");
+
+    const services = createAdminServiceFixture();
+    vi.mocked(services.metadataQuality.get).mockResolvedValue(dashboardFixture);
+    vi.mocked(services.bookContentQuality.listReports).mockResolvedValue({
+      items: [],
+      total: 0,
+      summary: { OPEN: 0, UNDER_REVIEW: 0, RESOLVED: 0, REJECTED: 0 },
+      limit: 10,
+      offset: 0,
+    });
+    vi.mocked(services.bookContentQuality.listBooks).mockResolvedValue({
+      items: [],
+      total: 0,
+      summary: {},
+      alert_summary: { CHILD_SAFETY: 0, COPYRIGHT: 0, BOTH: 0 },
+      limit: 10,
+      offset: 0,
+    });
+    vi.mocked(services.bookContentQuality.listUserBooks!).mockResolvedValue({
+      items: [],
+      total: 0,
+      summary: { PENDING_ADMIN: 0 },
+      limit: 30,
+      offset: 0,
+    });
+
+    const user = userEvent.setup();
+    const { container } = render(
+      withAdminFixture(<AdminQualityHubScreen initialTab="metadata" />, services),
+    );
+
+    expect(await screen.findByText("12")).toBeInTheDocument();
+    // Single unified H1 — no duplicate stacked headers
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs).toHaveLength(4);
+    expect(tabs[0]).toHaveAttribute("aria-selected", "true");
+
+    // Switch across reports -> approval -> user-books and assert unique IDs
+    await user.click(screen.getByRole("tab", { name: "Báo cáo người dùng" }));
+    expect(
+      await screen.findByRole("heading", { name: "Báo cáo từ phụ huynh" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Duyệt & An toàn sách" }));
+    expect(
+      await screen.findByRole("heading", { name: "Kiểm tra nội dung toàn sách" }),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("tab", { name: /Sách người dùng/ }),
+    );
+    expect(
+      await screen.findByRole("heading", {
+        name: "Hàng đợi kiểm duyệt Sách người dùng",
+      }),
+    ).toBeInTheDocument();
+
+    // Verify ZERO duplicate IDs in DOM
+    const idElements = Array.from(container.querySelectorAll("[id]"));
+    const ids = idElements.map((el) => el.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
