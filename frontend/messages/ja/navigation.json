@@ -1,0 +1,77 @@
+{
+  "parent": {
+    "navLabel": "保護者用ナビゲーション",
+    "skipToContent": "ナビゲーションをスキップしてコンテンツへ",
+    "dashboard": "概要",
+    "myBooks": "マイブック",
+    "reports": "進捗",
+    "readingManagement": "読書管理",
+    "sessions": "履歴",
+    "sessionsLong": "読書履歴",
+    "entertainment": "エンターテインメント",
+    "difficultWords": "練習が必要な単語",
+    "children": "お子様のプロフィール",
+    "parentProfile": "保護者のプロフィール",
+    "parentProfileLong": "保護者のプロフィール",
+    "settings": "設定",
+    "helpSupport": "ヘルプとサポート",
+    "moreTitle": "その他の機能",
+    "booksShort": "本",
+    "scannerShort": "スキャン",
+    "moreButton": "その他",
+    "mobileAriaLabel": "モバイル用クイックナビゲーション",
+    "moreDescriptions": {
+      "myBooks": "ご家庭の本のアップロードと管理",
+      "readingManagement": "お子様の目標、読書スケジュール、保存した本",
+      "sessions": "完了した読書セッションの確認",
+      "entertainment": "言語ゲーム、読み聞かせ、カラオケ",
+      "difficultWords": "お子様が読み間違えやすい単語の練習"
+    }
+  },
+  "admin": {
+    "navLabel": "管理者用ナビゲーション",
+    "skipToContent": "ナビゲーションをスキップして管理コンテンツへ",
+    "badge": "管理",
+    "karaoke": "歌",
+    "parents": "保護者",
+    "books": "ブックライブラリ",
+    "metadataQuality": "本の品質",
+    "auditLogs": "監査ログ",
+    "training": "OCRトレーニング",
+    "health": "運用",
+    "moreTitle": "その他の管理",
+    "mobileQualityShort": "品質",
+    "mobileOcrShort": "OCR",
+    "mobileMoreDescriptions": {
+      "auditLogs": "管理用監査ログの追跡",
+      "training": "VietOCR V2モデルの学習と運用",
+      "health": "システム、OCRワーカー、音声の状態"
+    }
+  },
+  "accountMenu": {
+    "openAria": "アカウントメニューを開く",
+    "closeAria": "アカウントメニューを閉じる",
+    "menuAria": "ViReadアカウントメニュー",
+    "shortMenuAria": "アカウントメニュー",
+    "accountNavAria": "ViReadアカウント",
+    "profileSection": "プロフィール",
+    "accountSection": "アカウント",
+    "helpSection": "ヘルプ",
+    "sessionSection": "セッション",
+    "defaultAccountLabel": "ViReadアカウント"
+  },
+  "childSwitcher": {
+    "selectedAria": "選択中の子：{alias}、タップで切り替え",
+    "openAria": "子を素早く切り替え",
+    "compactLabel": "{alias} · 学年 {grade}",
+    "selectChild": "子を選択",
+    "listAria": "子プロフィールの素早い切り替え",
+    "gradeLabel": " · 学年 {grade}",
+    "manageChildren": "子プロフィールの管理"
+  },
+  "footer": {
+    "ariaLabel": "ViReadについて",
+    "logoDashboardAria": "ViRead - ダッシュボードへ",
+    "logoHomeAria": "ViRead - ホームへ"
+  }
+}

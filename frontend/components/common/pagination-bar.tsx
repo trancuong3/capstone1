@@ -3,6 +3,7 @@
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { Button } from "@/components/common/button";
+import { useI18n } from "@/hooks/use-i18n";
 import { cn } from "@/lib/utils/cn";
 
 export interface PaginationBarProps {
@@ -27,13 +28,14 @@ export function PaginationBar({
   onPageChange,
   ariaLabel,
   itemLabel,
-  prevLabel = "Trước",
-  nextLabel = "Tiếp",
+  prevLabel,
+  nextLabel,
   compact = false,
   disabled = false,
   showSummaryWhenSinglePage = false,
   className,
 }: PaginationBarProps) {
+  const { t, formatNumber } = useI18n();
   const safePageSize = Math.max(1, Math.floor(pageSize));
   const safeTotal = Math.max(0, Math.floor(total));
   const totalPages = Math.max(1, Math.ceil(safeTotal / safePageSize));
@@ -45,16 +47,35 @@ export function PaginationBar({
 
   const start = (safePage - 1) * safePageSize + 1;
   const end = Math.min(safePage * safePageSize, safeTotal);
-  const labelSuffix = itemLabel ? ` ${itemLabel}` : "";
   const isSinglePage = safeTotal <= safePageSize;
 
   if (isSinglePage && !showSummaryWhenSinglePage) {
     return null;
   }
 
+  const resolvedPrevLabel = prevLabel ?? t("common.pagination.previousShort");
+  const resolvedNextLabel = nextLabel ?? t("common.pagination.nextShort");
   const navAriaLabel =
     ariaLabel ??
-    (itemLabel ? `Điều hướng danh sách ${itemLabel}` : "Phân trang");
+    (itemLabel
+      ? t("common.pagination.navAriaWithLabel", { itemLabel })
+      : t("common.pagination.navAria"));
+
+  const startFormatted = formatNumber(start);
+  const endFormatted = formatNumber(end);
+  const totalFormatted = formatNumber(safeTotal);
+  const rangeSummary = itemLabel
+    ? t("common.pagination.rangeSummaryWithLabel", {
+        start: startFormatted,
+        end: endFormatted,
+        total: totalFormatted,
+        itemLabel,
+      })
+    : t("common.pagination.rangeSummary", {
+        start: startFormatted,
+        end: endFormatted,
+        total: totalFormatted,
+      });
 
   const buttonSizeClass = compact
     ? "min-h-10 px-3 py-1.5 text-sm"
@@ -69,10 +90,7 @@ export function PaginationBar({
         className,
       )}
     >
-      <p className="text-sm text-muted tabular-nums">
-        Đang xem {start}–{end} / {safeTotal}
-        {labelSuffix}
-      </p>
+      <p className="text-sm text-muted tabular-nums">{rangeSummary}</p>
 
       {!isSinglePage ? (
         <div className="flex flex-wrap items-center gap-2">
@@ -84,14 +102,20 @@ export function PaginationBar({
             type="button"
             variant="secondary"
           >
-            <ChevronLeft aria-hidden="true" className="size-4" />
-            {prevLabel}
+            <ChevronLeft
+              aria-hidden="true"
+              className="size-4 viread-rtl-flip"
+            />
+            {resolvedPrevLabel}
           </Button>
           <span
             aria-current="page"
             className="min-w-20 text-center text-sm font-bold text-ink tabular-nums"
           >
-            Trang {safePage} / {totalPages}
+            {t("common.pagination.summary", {
+              page: formatNumber(safePage),
+              totalPages: formatNumber(totalPages),
+            })}
           </span>
           <Button
             className={buttonSizeClass}
@@ -101,8 +125,11 @@ export function PaginationBar({
             type="button"
             variant="secondary"
           >
-            {nextLabel}
-            <ChevronRight aria-hidden="true" className="size-4" />
+            {resolvedNextLabel}
+            <ChevronRight
+              aria-hidden="true"
+              className="size-4 viread-rtl-flip"
+            />
           </Button>
         </div>
       ) : null}

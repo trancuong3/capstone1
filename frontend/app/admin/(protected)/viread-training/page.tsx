@@ -1,5 +1,5 @@
-import { AdminVireadTrainingScreen } from "@/components/admin/admin-viread-training-screen";
+import { DynamicAdminVireadTrainingScreen } from "@/components/admin/admin-dynamic-screens";
 
 export default function AdminVireadTrainingPage() {
-  return <AdminVireadTrainingScreen />;
+  return <DynamicAdminVireadTrainingScreen />;
 }

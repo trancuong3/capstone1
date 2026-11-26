@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/common/page-header";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useChildService } from "@/hooks/use-child-service";
+import { useI18n } from "@/hooks/use-i18n";
 import type { ChildProfileDTO } from "@/types/child";
 
 type ChildrenState =
@@ -18,6 +19,7 @@ type ChildrenState =
   | { status: "error" };
 
 export function ChildrenListScreen() {
+  const { t } = useI18n();
   const childService = useChildService();
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<ChildrenState>({ status: "loading" });
@@ -52,22 +54,22 @@ export function ChildrenListScreen() {
         action={
           <ButtonLink className="sm:min-w-60" href="/children/new">
             <Plus aria-hidden="true" className="size-5" />
-            Tạo hồ sơ bé
+            {t("parent.children.createButton")}
           </ButtonLink>
         }
         className="mb-0"
-        description="Ba mẹ có thể tạo và chỉnh sửa những hồ sơ thuộc tài khoản này."
-        title="Hồ sơ của các bé"
+        description={t("parent.children.listDescription")}
+        title={t("parent.children.listTitle")}
       />
 
       {state.status === "loading" ? (
         <div
           aria-busy="true"
-          aria-label="Đang tải hồ sơ bé"
+          aria-label={t("parent.children.loadingAria")}
           className="grid gap-6 sm:grid-cols-2"
         >
           <span className="sr-only" role="status">
-            Đang tải…
+            {t("common.states.loading")}
           </span>
           {[0, 1, 2].map((item) => (
             <Skeleton className="h-20 w-full rounded-card" key={item} />
@@ -77,8 +79,11 @@ export function ChildrenListScreen() {
 
       {state.status === "error" ? (
         <div className="flex flex-col gap-4">
-          <StatusMessage title="Chưa tải được hồ sơ bé" tone="error">
-            Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
+          <StatusMessage
+            title={t("parent.children.loadErrorTitle")}
+            tone="error"
+          >
+            {t("auth.errors.generic")}
           </StatusMessage>
           <Button
             className="sm:w-auto sm:self-start sm:px-8"
@@ -86,7 +91,7 @@ export function ChildrenListScreen() {
             variant="secondary"
           >
             <RefreshCw aria-hidden="true" className="size-5" />
-            Thử lại
+            {t("common.actions.retry")}
           </Button>
         </div>
       ) : null}
@@ -96,14 +101,14 @@ export function ChildrenListScreen() {
           action={
             <ButtonLink className="max-w-80" href="/children/new">
               <Plus aria-hidden="true" className="size-5" />
-              Tạo hồ sơ đầu tiên
+              {t("parent.children.createFirstButton")}
             </ButtonLink>
           }
-          description="Tạo hồ sơ đầu tiên để bé bắt đầu hành trình đọc sách."
+          description={t("parent.children.emptyDescription")}
           icon={
             <UsersRound aria-hidden="true" className="size-10 text-primary" />
           }
-          title="Chưa có hồ sơ bé"
+          title={t("parent.children.emptyTitle")}
         />
       ) : null}
 

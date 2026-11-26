@@ -141,6 +141,9 @@ jobs:
           "app/admin/(protected)/parents/[parentId]/page.tsx"
 
       # Full-repository checks must block the PR, not be informational only.
+      - name: Check i18n dictionaries and placeholders
+        run: npm run i18n:check
+
       - name: Required full frontend verification (format, lint, typecheck, unit)
         run: npm run verify
 

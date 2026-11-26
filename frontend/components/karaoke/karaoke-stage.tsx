@@ -28,6 +28,8 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { KaraokeScoreCard } from "@/components/karaoke/karaoke-score-card";
 import { StatusMessage } from "@/components/common/status-message";
 import { SyllableLyrics } from "@/components/karaoke/syllable-lyrics";
+import { useEntertainmentPreferences } from "@/hooks/use-entertainment-preferences";
+import { useTranslations } from "@/hooks/use-i18n";
 import { useKaraokeScoring } from "@/hooks/use-karaoke-scoring";
 import type { KaraokePlayerController } from "@/hooks/use-karaoke-player";
 import {
@@ -71,6 +73,7 @@ const LyricPickerList = memo(function LyricPickerList({
   practiceId: string | null;
   onSelectLine: (line: KaraokeLine) => void;
 }) {
+  const t = useTranslations("entertainment");
   return (
     <div className="mt-3 grid max-h-72 gap-2 overflow-y-auto">
       {lines.map((line, i) => (
@@ -78,13 +81,18 @@ const LyricPickerList = memo(function LyricPickerList({
           type="button"
           key={line.id}
           disabled={!ready}
-          aria-label={`Luyện câu ${i + 1}: ${line.text}`}
+          aria-label={t("karaoke.stage.pickLineAria", {
+            number: i + 1,
+            text: line.text,
+          })}
           aria-pressed={practiceId === line.id}
-          className="min-h-14 rounded-control border border-border bg-white px-4 py-3 text-left break-words focus-visible:outline-3 focus-visible:outline-primary disabled:opacity-50"
+          className="min-h-14 rounded-control border border-border bg-white px-4 py-3 text-start break-words focus-visible:outline-3 focus-visible:outline-primary disabled:opacity-50"
           onClick={() => onSelectLine(line)}
         >
-          <span className="mr-2 font-bold text-primary">{i + 1}.</span>
-          {line.text}
+          <span className="me-2 font-bold text-primary">{i + 1}.</span>
+          <span className="viread-learning-content" dir="ltr" lang="vi">
+            {line.text}
+          </span>
         </button>
       ))}
     </div>
@@ -100,9 +108,12 @@ const MusicalSummaryPanel = memo(function MusicalSummaryPanel({
   bestFullSongScore: number | null;
   onPracticeSegment: (segment: MusicalSegmentReport) => void;
 }) {
+  const t = useTranslations("entertainment");
   const isInsufficient = evaluation.scoringMode === "INSUFFICIENT_EVIDENCE";
   const formatSubScore = (value: number | null) =>
-    value === null ? "Chưa đo" : `${value} điểm`;
+    value === null
+      ? t("karaoke.stage.musicalSummary.unmeasured")
+      : t("karaoke.stage.musicalSummary.points", { score: value });
   const statusBadge = (status: MusicalSegmentReport["status"]) => {
     if (status === "GREAT")
       return "border-green-400 bg-green-100 text-green-900";
@@ -111,16 +122,17 @@ const MusicalSummaryPanel = memo(function MusicalSummaryPanel({
     return "border-orange-400 bg-orange-100 text-orange-900";
   };
   const statusLabel = (status: MusicalSegmentReport["status"]) => {
-    if (status === "GREAT") return "Rất tốt";
-    if (status === "GOOD") return "Khá tốt";
-    return "Cần luyện";
+    if (status === "GREAT")
+      return t("karaoke.stage.musicalSummary.statusGreat");
+    if (status === "GOOD") return t("karaoke.stage.musicalSummary.statusGood");
+    return t("karaoke.stage.musicalSummary.statusPractice");
   };
 
   return (
     <section
-      aria-label="Phân tích nhạc lý buổi hát"
+      aria-label={t("karaoke.stage.musicalSummary.ariaLabel")}
       data-testid="karaoke-musical-summary"
-      className="mx-auto grid w-full max-w-2xl gap-4 rounded-card border border-border bg-white p-5 text-left shadow-sm"
+      className="mx-auto grid w-full max-w-2xl gap-4 rounded-card border border-border bg-white p-5 text-start shadow-sm"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span
@@ -131,7 +143,9 @@ const MusicalSummaryPanel = memo(function MusicalSummaryPanel({
         </span>
         {bestFullSongScore !== null && (
           <span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold text-amber-900">
-            Kỷ lục cả bài: {bestFullSongScore} điểm
+            {t("karaoke.stage.musicalSummary.bestFullSong", {
+              score: bestFullSongScore,
+            })}
           </span>
         )}
       </div>
@@ -141,7 +155,7 @@ const MusicalSummaryPanel = memo(function MusicalSummaryPanel({
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <div className="rounded-control border border-border bg-sky/40 p-3 text-center">
               <span className="block text-xs font-bold text-muted">
-                Nhịp điệu
+                {t("karaoke.stage.musicalSummary.rhythmLabel")}
               </span>
               <span className="text-lg font-extrabold text-primary">
                 {formatSubScore(evaluation.rhythmScore)}
@@ -149,7 +163,7 @@ const MusicalSummaryPanel = memo(function MusicalSummaryPanel({
             </div>
             <div className="rounded-control border border-border bg-sky/40 p-3 text-center">
               <span className="block text-xs font-bold text-muted">
-                Giai điệu
+                {t("karaoke.stage.musicalSummary.pitchLabel")}
               </span>
               <span className="text-lg font-extrabold text-primary">
                 {formatSubScore(evaluation.pitchScore)}
@@ -157,7 +171,7 @@ const MusicalSummaryPanel = memo(function MusicalSummaryPanel({
             </div>
             <div className="rounded-control border border-border bg-sky/40 p-3 text-center">
               <span className="block text-xs font-bold text-muted">
-                Lời hát
+                {t("karaoke.stage.musicalSummary.lyricsLabel")}
               </span>
               <span className="text-lg font-extrabold text-primary">
                 {formatSubScore(evaluation.lyricsScore)}
@@ -165,7 +179,7 @@ const MusicalSummaryPanel = memo(function MusicalSummaryPanel({
             </div>
             <div className="rounded-control border border-border bg-sky/40 p-3 text-center">
               <span className="block text-xs font-bold text-muted">
-                Độ trôi chảy
+                {t("karaoke.stage.musicalSummary.fluencyLabel")}
               </span>
               <span className="text-lg font-extrabold text-primary">
                 {formatSubScore(evaluation.fluencyScore)}
@@ -174,16 +188,16 @@ const MusicalSummaryPanel = memo(function MusicalSummaryPanel({
           </div>
 
           <p className="text-xs text-muted">
-            Cơ sở chấm cao độ: <strong>{evaluation.pitchBasisLabelVi}</strong>
+            {t("karaoke.stage.musicalSummary.pitchBasisPrefix")}{" "}
+            <strong>{evaluation.pitchBasisLabelVi}</strong>
             {evaluation.speakerBleedSuspected
-              ? " · Phát hiện nhẹ tiếng nhạc loa lọt vào micro."
+              ? ` · ${t("karaoke.stage.musicalSummary.speakerBleedNote")}`
               : ""}
           </p>
         </>
       ) : (
         <p className="text-sm font-semibold text-amber-900">
-          Chưa đủ tín hiệu âm thanh để chấm nhạc lý lần này. Bé thử đưa micro
-          lại gần miệng hơn hoặc đeo tai nghe rồi hát lại nhé!
+          {t("karaoke.stage.musicalSummary.insufficientHint")}
         </p>
       )}
 
@@ -191,10 +205,15 @@ const MusicalSummaryPanel = memo(function MusicalSummaryPanel({
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-orange-300 bg-orange-50 p-3">
           <div className="min-w-0 flex-1">
             <p className="text-xs font-extrabold text-orange-900">
-              Đoạn nên luyện thêm · Câu{" "}
-              {evaluation.weakestSegment.lineIndex + 1}
+              {t("karaoke.stage.musicalSummary.weakestSegmentTitle", {
+                number: evaluation.weakestSegment.lineIndex + 1,
+              })}
             </p>
-            <p className="truncate text-sm font-bold text-slate-900">
+            <p
+              className="viread-learning-content truncate text-sm font-bold text-slate-900"
+              dir="ltr"
+              lang="vi"
+            >
               {evaluation.weakestSegment.text}
             </p>
             <p className="text-xs text-orange-900">
@@ -206,7 +225,7 @@ const MusicalSummaryPanel = memo(function MusicalSummaryPanel({
             className="sm:w-auto"
             onClick={() => onPracticeSegment(evaluation.weakestSegment!)}
           >
-            Luyện lại đoạn này (0.85x)
+            {t("karaoke.stage.musicalSummary.retrySegmentSlow")}
           </Button>
         </div>
       )}
@@ -214,7 +233,9 @@ const MusicalSummaryPanel = memo(function MusicalSummaryPanel({
       {evaluation.segments.length > 0 && !isInsufficient && (
         <details className="rounded-control border border-border bg-slate-50/70 p-3">
           <summary className="cursor-pointer text-sm font-bold text-primary">
-            Báo cáo theo từng đoạn ({evaluation.segments.length} câu)
+            {t("karaoke.stage.musicalSummary.segmentReportSummary", {
+              count: evaluation.segments.length,
+            })}
           </summary>
           <ol className="mt-3 grid max-h-64 gap-2 overflow-y-auto">
             {evaluation.segments.map((seg) => (
@@ -225,8 +246,11 @@ const MusicalSummaryPanel = memo(function MusicalSummaryPanel({
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-extrabold text-primary">
-                      Câu {seg.lineIndex + 1} ({formatKaraokeTime(seg.startMs)}–
-                      {formatKaraokeTime(seg.endMs)})
+                      {t("karaoke.stage.musicalSummary.segmentLineHeader", {
+                        number: seg.lineIndex + 1,
+                        start: formatKaraokeTime(seg.startMs),
+                        end: formatKaraokeTime(seg.endMs),
+                      })}
                     </span>
                     <span
                       className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${statusBadge(seg.status)}`}
@@ -234,7 +258,13 @@ const MusicalSummaryPanel = memo(function MusicalSummaryPanel({
                       {statusLabel(seg.status)}
                     </span>
                   </div>
-                  <p className="text-sm font-semibold">{seg.text}</p>
+                  <p
+                    className="viread-learning-content text-sm font-semibold"
+                    dir="ltr"
+                    lang="vi"
+                  >
+                    {seg.text}
+                  </p>
                   <p className="text-xs text-muted">{seg.tipVi}</p>
                 </div>
                 {seg.status === "PRACTICE" && (
@@ -243,7 +273,7 @@ const MusicalSummaryPanel = memo(function MusicalSummaryPanel({
                     className="min-h-10 rounded-control border border-primary bg-sky px-3 py-1.5 text-xs font-bold text-primary"
                     onClick={() => onPracticeSegment(seg)}
                   >
-                    Luyện lại đoạn này (0.85x)
+                    {t("karaoke.stage.musicalSummary.retrySegmentSlow")}
                   </button>
                 )}
               </li>
@@ -285,6 +315,8 @@ export function KaraokeStage({
 }) {
   // Stabilize lyric & song references even if parent wrapper clones `source` per frame.
   const lyrics = source.lyrics;
+  const t = useTranslations("entertainment");
+  const { reducedMotion, calmSound } = useEntertainmentPreferences();
   const root = useRef<HTMLElement>(null);
   const expandButton = useRef<HTMLButtonElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -517,7 +549,7 @@ export function KaraokeStage({
     countdownSound.current = createCountdownSound();
     function tick(value: number) {
       if (ticket !== generation.current) return;
-      countdownSound.current?.play(value);
+      if (calmSound) countdownSound.current?.play(value);
       if (value === 0) {
         preparingMic.current = false;
         timer.current = null;
@@ -877,22 +909,24 @@ export function KaraokeStage({
   }
   const status =
     countdown !== null || scoring.status === "arming"
-      ? "Chuẩn bị"
+      ? t("karaoke.stage.status.preparing")
       : player.waiting
-        ? "Đang tải nhạc…"
+        ? t("karaoke.stage.status.loading")
         : !started && !practiceLine && player.currentMs === 0
-          ? "Bấm Bắt đầu hát"
+          ? t("karaoke.stage.status.pressStart")
           : activeLine
             ? player.playing
-              ? "Câu đang hát"
-              : "Câu để hát"
+              ? t("karaoke.stage.status.activePlaying")
+              : t("karaoke.stage.status.activeReady")
             : !player.playing
-              ? "Bấm Hát tiếp"
+              ? t("karaoke.stage.status.pressResume")
               : next
                 ? secondsToNext !== null && secondsToNext <= 3
-                  ? `Vào lời sau ${secondsToNext} giây`
-                  : "Đoạn nhạc · Chuẩn bị câu tiếp theo"
-                : "Cùng nghe đoạn nhạc cuối nhé";
+                  ? t("karaoke.stage.status.countdownNext", {
+                      seconds: secondsToNext,
+                    })
+                  : t("karaoke.stage.status.interludeNext")
+                : t("karaoke.stage.status.outro");
   const finalScore =
     scoring.score ??
     (scoring.status === "insufficient" ? scoring.liveScore : null);
@@ -931,6 +965,7 @@ export function KaraokeStage({
       ref={root}
       tabIndex={0}
       aria-label={label}
+      data-reduced-motion={reducedMotion ? "true" : undefined}
       onKeyDown={keyboard}
       className={`${styles.stage} ${expanded ? styles.expanded : ""} grid gap-5 focus-visible:outline-3 focus-visible:outline-primary`}
     >
@@ -941,9 +976,13 @@ export function KaraokeStage({
           </div>
           <div className="min-w-0">
             <p className="text-label font-bold text-primary">
-              HÁT VUI CÙNG {childAlias}
+              {t("karaoke.stage.eyebrow", { alias: childAlias })}
             </p>
-            <h1 className="break-words text-heading font-extrabold">
+            <h1
+              className="viread-learning-content break-words text-heading font-extrabold"
+              dir="ltr"
+              lang="vi"
+            >
               {source.title}
             </h1>
           </div>
@@ -961,14 +1000,14 @@ export function KaraokeStage({
             ) : (
               <Maximize2 aria-hidden className="size-5" />
             )}
-            {expanded ? "Thu gọn màn hát" : "Mở rộng màn hát"}
+            {expanded ? t("karaoke.stage.collapse") : t("karaoke.stage.expand")}
           </button>
         </div>
       </div>
 
       <div
         role="group"
-        aria-label="Chế độ hát"
+        aria-label={t("karaoke.stage.modeGroupAria")}
         className="flex flex-wrap gap-2"
       >
         <Button
@@ -978,7 +1017,7 @@ export function KaraokeStage({
           onClick={() => selectMode(false)}
         >
           <MicOff aria-hidden className="size-5" />
-          Hát tự do
+          {t("karaoke.stage.freeMode")}
         </Button>
         <Button
           className="sm:w-auto"
@@ -988,13 +1027,12 @@ export function KaraokeStage({
           onClick={() => selectMode(true)}
         >
           <Mic aria-hidden className="size-5" />
-          Hát có chấm điểm
+          {t("karaoke.stage.scoredMode")}
         </Button>
       </div>
-
       <div
         role="group"
-        aria-label="Kiểu luyện hát"
+        aria-label={t("karaoke.stage.practiceModeGroupAria")}
         className="flex flex-wrap gap-2"
       >
         {PRACTICE_MODES.map((item) => {
@@ -1005,7 +1043,7 @@ export function KaraokeStage({
               type="button"
               aria-pressed={active}
               onClick={() => selectPracticeMode(item.mode)}
-              className={`min-h-11 rounded-control border px-3 py-2 text-xs font-bold transition sm:text-sm ${
+              className={`min-h-11 rounded-control border px-3 py-2 text-xs font-bold ${reducedMotion ? "" : "transition "}sm:text-sm ${
                 active
                   ? "border-primary bg-primary text-white"
                   : "border-border bg-white text-slate-800 hover:bg-sky/50"
@@ -1021,9 +1059,7 @@ export function KaraokeStage({
         <div className="grid gap-2 rounded-control bg-sky p-3">
           <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-primary">
             <Headphones aria-hidden className="size-4 shrink-0" />
-            <span>
-              Khuyên dùng tai nghe để chấm cao độ và nhịp điệu chính xác nhất!
-            </span>
+            <span>{t("karaoke.stage.headphoneRecommendation")}</span>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <label className="flex min-h-12 items-center gap-3">
@@ -1042,9 +1078,9 @@ export function KaraokeStage({
                 }}
               />
               <span>
-                Mình đang đeo tai nghe · Bật nhạc đệm
+                {t("karaoke.stage.headphonesLabel")}
                 <small className="block text-muted">
-                  Khi dùng loa, micro bật chế độ lọc nhiễu loa thông minh.
+                  {t("karaoke.stage.speakerFilterHint")}
                 </small>
               </span>
             </label>
@@ -1069,8 +1105,8 @@ export function KaraokeStage({
             >
               <Volume2 aria-hidden className="size-4" />
               {speakerBacking
-                ? "Đang bật nhạc đệm qua loa"
-                : "Bật nhạc đệm qua loa (lọc nhiễu)"}
+                ? t("karaoke.stage.speakerBackingOn")
+                : t("karaoke.stage.speakerBackingOff")}
             </button>
           </div>
         </div>
@@ -1078,8 +1114,7 @@ export function KaraokeStage({
 
       {!scoring.supported && practiceMode !== "RHYTHM_TAP" ? (
         <p className="text-sm text-muted">
-          Trình duyệt này hỗ trợ hát tự do và Gõ nhịp theo bài hát. Để chấm điểm
-          bằng micro, ba mẹ hãy mở bằng trình duyệt có nhận dạng giọng nói.
+          {t("karaoke.stage.unsupportedScoringWithRhythmHint")}
         </p>
       ) : scoring.error && practiceMode !== "RHYTHM_TAP" ? (
         <StatusMessage tone="warning">{scoring.error}</StatusMessage>
@@ -1089,8 +1124,8 @@ export function KaraokeStage({
         countdown === null ? (
         <p role="status" className="text-sm text-muted">
           {scoring.status === "arming"
-            ? "Đang chờ quyền micro. Ba mẹ giúp bé chọn Cho phép nhé."
-            : "Khi bé bắt đầu hát, hãy cho phép dùng micro. Phân tích nhịp và cao độ chạy ngay trên thiết bị, không lưu âm thanh của bé."}
+            ? t("karaoke.stage.micArmingStatus")
+            : t("karaoke.stage.micReadyNoticeDsp")}
         </p>
       ) : null}
 
@@ -1117,13 +1152,13 @@ export function KaraokeStage({
             />
           )}
           <h2 className="text-heading font-extrabold">
-            {childAlias} đã hát xong rồi!
+            {t("karaoke.stage.finishedHeading", { alias: childAlias })}
           </h2>
           {!finalScore && !showMusicalPanel && (
             <p role="status" className="text-muted">
               {scoring.status === "finishing"
-                ? "Đang nghe nốt câu cuối…"
-                : "Cảm ơn bé đã mang tiếng hát đến hôm nay."}
+                ? t("karaoke.stage.finishingLastLine")
+                : t("karaoke.stage.thanksSinging")}
             </p>
           )}
           <div className="flex flex-wrap justify-center gap-3 px-4">
@@ -1132,14 +1167,14 @@ export function KaraokeStage({
               onClick={restartSong}
             >
               <RotateCcw aria-hidden className="size-5" />
-              Hát lại bài này
+              {t("karaoke.stage.singAgain")}
             </Button>
             <ButtonLink
               variant="secondary"
               className={`${styles.action} sm:w-auto`}
               href="/karaoke"
             >
-              Chọn bài khác
+              {t("karaoke.stage.chooseAnother")}
             </ButtonLink>
           </div>
         </div>
@@ -1147,7 +1182,7 @@ export function KaraokeStage({
         <>
           <div
             className={`${styles.lyrics} rounded-card bg-white/80 px-4`}
-            aria-label="Lời bài hát"
+            aria-label={t("karaoke.lyrics.regionAria")}
           >
             <p
               role="status"
@@ -1160,8 +1195,12 @@ export function KaraokeStage({
             >
               {scoring.listening && (
                 <Mic
-                  aria-label="Đang lắng nghe"
-                  className="size-4 animate-pulse text-primary"
+                  aria-label={t("karaoke.stage.listeningAria")}
+                  className={
+                    reducedMotion
+                      ? "size-4 text-primary"
+                      : "size-4 animate-pulse text-primary"
+                  }
                 />
               )}
               {status}
@@ -1182,6 +1221,7 @@ export function KaraokeStage({
                       line={activeLine}
                       currentMs={player.currentMs}
                       highlightActive
+                      reducedMotion={reducedMotion}
                       subscribeClock={player.subscribeClock}
                       evidence={
                         scoredMode
@@ -1194,8 +1234,16 @@ export function KaraokeStage({
                         scoredMode ? scoring.previewWords : undefined
                       }
                     />
+                  ) : next?.text ? (
+                    <span
+                      className="viread-learning-content"
+                      dir="ltr"
+                      lang="vi"
+                    >
+                      {next.text}
+                    </span>
                   ) : (
-                    (next?.text ?? "Cùng nghe nhạc nhé!")
+                    t("karaoke.stage.listenMusicDefault")
                   )}
                 </p>
 
@@ -1207,7 +1255,7 @@ export function KaraokeStage({
                       onClick={handleRhythmTap}
                     >
                       <Drum aria-hidden className="size-6" />
-                      Gõ nhịp theo bài hát (Phím Cách)
+                      {t("karaoke.stage.rhythmTapButton")}
                     </Button>
                     {rhythmTapFeedback && (
                       <p
@@ -1215,8 +1263,10 @@ export function KaraokeStage({
                         data-testid="karaoke-rhythm-tap-feedback"
                         className="text-sm font-bold text-primary"
                       >
-                        {rhythmTapFeedback.labelVi} · Chuỗi đúng:{" "}
-                        {rhythmTapFeedback.streak}
+                        {t("karaoke.stage.rhythmTapFeedback", {
+                          feedback: rhythmTapFeedback.labelVi,
+                          streak: rhythmTapFeedback.streak,
+                        })}
                       </p>
                     )}
                   </div>
@@ -1228,29 +1278,34 @@ export function KaraokeStage({
                     className="mx-auto flex flex-wrap items-center justify-center gap-2 text-xs font-bold sm:text-sm"
                   >
                     <span className="rounded-full border border-green-500 bg-green-100 px-3 py-1 text-green-900">
-                      Đúng: {liveMatched}
+                      {t("karaoke.stage.liveMatched", { count: liveMatched })}
                     </span>
                     <span className="rounded-full border border-red-500 bg-red-100 px-3 py-1 text-red-900">
-                      Chưa đúng: {liveWrong}
+                      {t("karaoke.stage.liveWrong", { count: liveWrong })}
                     </span>
                     <span className="rounded-full border border-orange-400 bg-orange-100 px-3 py-1 text-orange-900">
-                      Bỏ qua: {liveOmitted}
+                      {t("karaoke.stage.liveOmitted", { count: liveOmitted })}
                     </span>
                     {pendingWords > 0 && (
                       <span className="rounded-full border border-slate-300 bg-slate-50 px-3 py-1 text-slate-700">
-                        Đang xử lý: {pendingWords}
+                        {t("karaoke.stage.liveProcessing", {
+                          count: pendingWords,
+                        })}
                       </span>
                     )}
                     {livePercent !== null && (
                       <span className="rounded-full border border-primary bg-sky px-3 py-1 text-primary">
-                        Tỉ lệ đúng: {livePercent}%
+                        {t("karaoke.stage.livePercent", {
+                          percent: livePercent,
+                        })}
                       </span>
                     )}
                     {scoring.liveTelemetry?.voiced &&
                       scoring.liveTelemetry.frequencyHz && (
                         <span className="rounded-full border border-indigo-300 bg-indigo-50 px-3 py-1 text-indigo-900">
-                          Giọng hát:{" "}
-                          {Math.round(scoring.liveTelemetry.frequencyHz)} Hz
+                          {t("karaoke.stage.livePitchHz", {
+                            hz: Math.round(scoring.liveTelemetry.frequencyHz),
+                          })}
                         </span>
                       )}
                   </div>
@@ -1262,37 +1317,69 @@ export function KaraokeStage({
                       {scoring.signal === "uncertain" &&
                       liveEvaluated === 0 &&
                       pendingWords === 0
-                        ? "Mình chưa nghe rõ. Bé đưa micro gần hơn một chút nhé."
-                        : "Nét chấm: đang nghe và đối chiếu, chưa tính điểm."}
+                        ? t("karaoke.stage.uncertainMicHint")
+                        : t("karaoke.stage.dottedMatchingHint")}
                     </p>
                   )}
                 {activeLine && next && (
-                  <p className={styles.next}>Tiếp theo: {next.text}</p>
+                  <p className={styles.next}>
+                    {t("karaoke.lyrics.nextPrefix")}
+                    <span
+                      className="viread-learning-content"
+                      dir="ltr"
+                      lang="vi"
+                    >
+                      {next.text}
+                    </span>
+                  </p>
                 )}
                 <p className="text-sm text-muted">
-                  {practiceLine
-                    ? `${practiceMode === "SEGMENT" ? "Đang luyện đoạn khó" : "Đang luyện câu"} ${lines.indexOf(practiceLine) + 1}${player.rate < 1 ? ` (${player.rate}x)` : ""}`
-                    : activeLine
-                      ? `Câu ${activeIndex + 1} / ${lines.length}`
-                      : "Bé sẵn sàng hát cùng mình nhé"}
+                  {practiceLine ? (
+                    <>
+                      <span>
+                        {practiceMode === "SEGMENT"
+                          ? t("karaoke.stage.practicingSegment", {
+                              number: lines.indexOf(practiceLine) + 1,
+                            })
+                          : t("karaoke.stage.practicingLine", {
+                              number: lines.indexOf(practiceLine) + 1,
+                            })}
+                      </span>
+                      {player.rate < 1 ? (
+                        <span>
+                          {" "}
+                          {t("karaoke.stage.practicingRateSuffix", {
+                            rate: player.rate,
+                          })}
+                        </span>
+                      ) : null}
+                    </>
+                  ) : activeLine ? (
+                    t("karaoke.stage.lineProgress", {
+                      current: activeIndex + 1,
+                      total: lines.length,
+                    })
+                  ) : (
+                    t("karaoke.stage.readyToSing")
+                  )}
                 </p>
               </>
             )}
           </div>
           {practiceLine && scoring.status === "finishing" && (
-            <p role="status">Đang nghe nốt câu cuối…</p>
+            <p role="status">{t("karaoke.stage.finishingLastLine")}</p>
           )}
           {practiceLine && scoring.score && (
             <KaraokeScoreCard score={scoring.score} practice />
           )}
           {practiceLine && scoring.status === "insufficient" && (
-            <p role="status">Mình chưa nghe rõ. Bé thử lại nhé!</p>
+            <p role="status">{t("karaoke.stage.notClearRetry")}</p>
           )}
           {practiceLine && (scoredMode || practiceMode === "SEGMENT") && (
             <Button variant="quiet" onClick={leavePractice}>
               {scoring.songScore || practiceReturnMs >= source.duration_ms
-                ? "Về kết quả bài hát"
-                : "Về lượt hát cả bài"}
+                ? t("karaoke.stage.backToSongScore")
+                : t("karaoke.stage.backToFullSong")}
             </Button>
           )}
           <div className="flex flex-wrap justify-center gap-3">
@@ -1307,14 +1394,14 @@ export function KaraokeStage({
                 <Play aria-hidden className="size-6" />
               )}
               {countdown !== null || scoring.status === "arming"
-                ? "Hủy chuẩn bị"
+                ? t("karaoke.stage.cancelPrep")
                 : player.playing
-                  ? "Tạm dừng"
+                  ? t("karaoke.stage.pause")
                   : player.error
-                    ? "Thử phát lại"
+                    ? t("karaoke.stage.retryPlay")
                     : !started && player.currentMs === 0
-                      ? "Bắt đầu hát"
-                      : "Hát tiếp"}
+                      ? t("karaoke.stage.startSinging")
+                      : t("karaoke.stage.resumeSinging")}
             </Button>
             <Button
               variant="secondary"
@@ -1323,7 +1410,7 @@ export function KaraokeStage({
               onClick={() => practice()}
             >
               <RotateCcw aria-hidden className="size-5" />
-              Hát lại câu này
+              {t("karaoke.stage.practiceThisLine")}
             </Button>
             {(scoredMode || practiceMode === "RHYTHM_TAP") &&
               started &&
@@ -1335,7 +1422,7 @@ export function KaraokeStage({
                   onClick={finishAndScoreSong}
                 >
                   <Star aria-hidden className="size-5" />
-                  Kết thúc & chấm điểm
+                  {t("karaoke.stage.finishAndScore")}
                 </Button>
               )}
             {practiceLine && (
@@ -1367,21 +1454,23 @@ export function KaraokeStage({
                 }}
               >
                 <Repeat2 aria-hidden className="size-5" />
-                {repeat ? "Đang lặp câu" : "Lặp câu"}
+                {repeat
+                  ? t("karaoke.stage.repeatingLine")
+                  : t("karaoke.stage.repeatLine")}
               </Button>
             )}
           </div>
         </>
       )}
       {player.error && (
-        <StatusMessage tone="error" title="Nhạc đang gặp chút trục trặc">
-          Ba mẹ giúp bé tải lại nhạc rồi thử lại nhé.
+        <StatusMessage tone="error" title={t("karaoke.stage.audioErrorTitle")}>
+          {t("karaoke.stage.audioErrorDesc")}
         </StatusMessage>
       )}
       <div className="grid gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted">
           <label htmlFor={`karaoke-position-${source.version_id}`}>
-            Vị trí phát
+            {t("karaoke.controls.positionLabel")}
           </label>
           <span className="tabular-nums">
             {formatKaraokeTime(player.currentMs)} /{" "}
@@ -1400,7 +1489,7 @@ export function KaraokeStage({
         </div>
         <input
           id={`karaoke-position-${source.version_id}`}
-          aria-label="Vị trí phát"
+          aria-label={t("karaoke.controls.positionLabel")}
           type="range"
           min={0}
           max={source.duration_ms}
@@ -1422,22 +1511,22 @@ export function KaraokeStage({
           className="min-h-12 w-full accent-primary"
         />
         <label className="flex flex-wrap items-center justify-center gap-3 font-bold">
-          Tốc độ hát
+          {t("karaoke.stage.tempoLabel")}
           <select
-            aria-label="Tốc độ hát"
+            aria-label={t("karaoke.stage.tempoLabel")}
             className="min-h-14 rounded-control border border-border bg-white px-4"
             value={player.rate}
             onChange={(event) => player.setRate(Number(event.target.value))}
           >
-            <option value={0.75}>Chậm · 0.75×</option>
-            <option value={0.85}>Luyện đoạn · 0.85×</option>
-            <option value={1}>Bình thường · 1×</option>
+            <option value={0.75}>{t("karaoke.stage.tempoSlow")}</option>
+            <option value={0.85}>{t("karaoke.stage.tempoSegment")}</option>
+            <option value={1}>{t("karaoke.stage.tempoNormal")}</option>
           </select>
         </label>
       </div>
       <details className="min-w-0 rounded-control border border-border bg-white/70 p-4">
         <summary className="min-h-11 cursor-pointer content-center font-bold text-primary">
-          Chọn câu để luyện
+          {t("karaoke.stage.pickLineSummary")}
         </summary>
         <LyricPickerList
           lines={lines}
@@ -1451,19 +1540,19 @@ export function KaraokeStage({
             className="mt-3 sm:w-auto"
             onClick={leavePractice}
           >
-            Trở về hát cả bài
+            {t("karaoke.stage.backToWholeSong")}
           </Button>
         )}
       </details>
       <details className="min-w-0 rounded-control border border-border bg-white/70 p-4">
         <summary className="min-h-11 cursor-pointer content-center font-bold text-primary">
-          Âm lượng và thông tin bài hát
+          {t("karaoke.stage.volumeAndInfoSummary")}
         </summary>
         <div className="mt-3 grid min-w-0 gap-4">
           <label className="grid gap-2 font-bold">
-            Âm lượng
+            {t("karaoke.controls.volumeLabel")}
             <input
-              aria-label="Âm lượng"
+              aria-label={t("karaoke.controls.volumeLabel")}
               type="range"
               min={0}
               max={1}
@@ -1475,8 +1564,14 @@ export function KaraokeStage({
           </label>
           {source.author && (
             <div className="min-w-0">
-              <h2 className="font-bold">Thông tin bài hát</h2>
-              <p className="mt-2 break-words text-sm text-muted">
+              <h2 className="font-bold">
+                {t("karaoke.stage.songInfoHeading")}
+              </h2>
+              <p
+                className="viread-learning-content mt-2 break-words text-sm text-muted"
+                dir="ltr"
+                lang="vi"
+              >
                 {source.author}
               </p>
             </div>
@@ -1488,7 +1583,7 @@ export function KaraokeStage({
               disabled={!player.ready}
               onClick={restartSong}
             >
-              Hát lại từ đầu
+              {t("karaoke.stage.restartFromBeginning")}
             </Button>
             {onReload && (
               <Button
@@ -1500,16 +1595,16 @@ export function KaraokeStage({
                   onReload();
                 }}
               >
-                Tải lại nhạc
+                {t("karaoke.stage.reloadAudio")}
               </Button>
             )}
           </div>
           <p className="text-sm text-muted">
             {scoredMode
-              ? "Phím cách để phát hoặc tạm dừng bài hát."
+              ? t("karaoke.stage.spaceHintScored")
               : practiceMode === "RHYTHM_TAP"
-                ? "Phím cách để gõ nhịp theo phách khi bài hát đang phát."
-                : "Nhạc phát khi bé bấm nút. Bé hát vui cùng lời trên màn hình; không thu âm. Phím cách để phát hoặc tạm dừng khi vùng hát có focus."}
+                ? t("karaoke.stage.spaceHintRhythmTap")
+                : t("karaoke.stage.spaceHintFree")}
           </p>
         </div>
       </details>
@@ -1523,7 +1618,7 @@ export function KaraokeStage({
             onReload();
           }}
         >
-          Tải lại nhạc để thử lại
+          {t("karaoke.stage.reloadAudioRetry")}
         </Button>
       )}
     </section>

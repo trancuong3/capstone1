@@ -1,36 +1,30 @@
+"use client";
+
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import type { HistoryEventDTO } from "@/types/reading";
 
-const eventLabels: Record<HistoryEventDTO["type"], string> = {
-  MISPRONUNCIATION: "Ghi nhận phát âm",
-  OMISSION: "Bỏ sót",
-  REPETITION: "Lặp từ",
-  LONG_PAUSE: "Dừng lâu",
-  SUBSTITUTION: "Thay từ",
-  SELF_CORRECTION: "Tự sửa",
-  READ_EXAMPLE: "Nghe đọc mẫu",
-  WORD_RETRY: "Lượt đọc lại",
-};
-
-const statusLabels: Record<HistoryEventDTO["status"], string> = {
-  DETECTED: "Đã phát hiện, chưa xác nhận",
-  FEEDBACK_GIVEN: "Đã đưa phản hồi",
-  IGNORED_BY_GATE: "Không qua điều kiện xác nhận",
-  CANDIDATE: "Đang xem xét",
-  CONFIRMED: "Đã xác nhận",
-  FAILED: "Chưa đọc đúng ở lượt này",
-  UNCERTAIN: "Chưa chắc chắn",
-  DISMISSED: "Đã loại",
-};
+function eventStatusBadgeClass(status: HistoryEventDTO["status"]): string {
+  if (status === "CONFIRMED") {
+    return "border border-success-ink/20 bg-success-surface text-success-ink";
+  }
+  if (status === "FAILED") {
+    return "border border-warning/25 bg-warning-surface text-warning";
+  }
+  return "border border-border bg-canvas text-muted";
+}
 
 interface SessionEventListProps {
   readonly events: readonly HistoryEventDTO[];
 }
 
 export function SessionEventList({ events }: SessionEventListProps) {
+  const { formatNumber } = useI18n();
+  const t = useTranslations("reports");
+
   if (events.length === 0) {
     return (
-      <p className="rounded-control bg-sky p-5 text-body text-muted">
-        Buổi đọc này chưa có sự kiện để hiển thị.
+      <p className="rounded-control border border-border bg-canvas px-4 py-4 text-sm text-muted">
+        {t("sessions.events.empty")}
       </p>
     );
   }
@@ -41,9 +35,14 @@ export function SessionEventList({ events }: SessionEventListProps) {
   return (
     <div className="flex flex-col gap-5">
       {retryEvents.length > 0 ? (
-        <section aria-label="Kết quả đọc lại" className="flex flex-col gap-3">
-          <h3 className="text-lg font-semibold text-ink">Kết quả đọc lại</h3>
-          <ol className="flex flex-col gap-3">
+        <section
+          aria-label={t("sessions.events.retrySectionAria")}
+          className="flex flex-col gap-2.5"
+        >
+          <h3 className="text-base font-extrabold text-ink">
+            {t("sessions.events.retrySectionTitle")}
+          </h3>
+          <ol className="divide-y divide-border rounded-control border border-border bg-white">
             {retryEvents.map((event) => {
               const metadata = event.metadata;
               const attempt = metadata.retry_attempt;
@@ -51,40 +50,58 @@ export function SessionEventList({ events }: SessionEventListProps) {
               const recognizedText = metadata.recognized_text;
               const targetWord = metadata.target_word;
               return (
-                <li
-                  className="rounded-control border border-border bg-white p-4"
-                  key={event.id}
-                >
+                <li className="space-y-1.5 p-3.5 sm:p-4" key={event.id}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-semibold text-ink">
+                    <p className="text-sm font-bold text-ink">
                       {event.status === "CONFIRMED"
-                        ? "Đã đọc đúng ở lượt đọc lại"
+                        ? t("sessions.events.retryCorrect")
                         : event.status === "FAILED"
-                          ? "Chưa đọc đúng ở lượt đọc lại"
-                          : "Kết quả đọc lại chưa chắc chắn"}
+                          ? t("sessions.events.retryFailed")
+                          : t("sessions.events.retryUncertain")}
                     </p>
-                    <span className="rounded-full bg-sky px-3 py-1 text-label font-semibold text-primary-hover">
+                    <span
+                      className={`rounded-control px-2.5 py-0.5 text-xs font-bold ${eventStatusBadgeClass(event.status)}`}
+                    >
                       {typeof attempt === "number" && Number.isInteger(attempt)
-                        ? `Lần thử ${attempt}`
-                        : statusLabels[event.status]}
+                        ? t("sessions.events.retryAttempt", { attempt })
+                        : t(`sessions.events.statuses.${event.status}`)}
                     </span>
                   </div>
-                  <p className="mt-2 text-label text-muted">
-                    Từ cần luyện:{" "}
-                    {typeof targetWord === "string"
-                      ? targetWord
-                      : (event.page_revision_word_id ?? "Chưa ghi nhận")}
+                  <p className="text-sm text-muted">
+                    {t("sessions.events.practiceWordLabel")}
+                    <strong
+                      className={
+                        typeof targetWord === "string"
+                          ? "viread-learning-content font-bold text-ink"
+                          : "font-bold text-ink"
+                      }
+                      dir={typeof targetWord === "string" ? "ltr" : undefined}
+                      lang={typeof targetWord === "string" ? "vi" : undefined}
+                    >
+                      {typeof targetWord === "string"
+                        ? targetWord
+                        : (event.page_revision_word_id ??
+                          t("sessions.detail.notRecorded"))}
+                    </strong>
                     {typeof originalStatus === "string"
-                      ? ` · ${originalStatus === "OMISSION" ? "Bỏ sót" : "Phát âm chưa đúng"}`
+                      ? ` · ${
+                          originalStatus === "OMISSION"
+                            ? t("sessions.events.originalOmission")
+                            : t("sessions.events.originalMispronunciation")
+                        }`
                       : ""}
                   </p>
                   {typeof recognizedText === "string" && recognizedText ? (
-                    <p className="mt-2 text-label text-muted">
-                      ViRead nhận diện: “{recognizedText}”
+                    <p className="text-sm text-muted">
+                      {t("sessions.events.recognizedPrefix", {
+                        text: recognizedText,
+                      })}
                     </p>
                   ) : null}
-                  <p className="mt-2 text-label text-muted">
-                    Trang {event.page_id} · revision đã đọc{" "}
+                  <p className="text-xs text-muted">
+                    {t("sessions.events.pageRevisionMeta", {
+                      pageId: event.page_id,
+                    })}
                     <code className="break-all">{event.page_revision_id}</code>
                   </p>
                 </li>
@@ -93,17 +110,18 @@ export function SessionEventList({ events }: SessionEventListProps) {
           </ol>
         </section>
       ) : null}
+
       {readingEvents.length > 0 ? (
         <section
-          aria-label="Sự kiện lượt đọc đầu"
-          className="flex flex-col gap-3"
+          aria-label={t("sessions.events.firstPassSectionAria")}
+          className="flex flex-col gap-2.5"
         >
           {retryEvents.length > 0 ? (
-            <h3 className="text-lg font-semibold text-ink">
-              Sự kiện lượt đọc đầu
+            <h3 className="text-base font-extrabold text-ink">
+              {t("sessions.events.firstPassSectionTitle")}
             </h3>
           ) : null}
-          <ol className="flex flex-col gap-3">
+          <ol className="divide-y divide-border rounded-control border border-border bg-white">
             {readingEvents.map((event) => {
               const countsAsError =
                 event.status === "CONFIRMED" &&
@@ -115,27 +133,33 @@ export function SessionEventList({ events }: SessionEventListProps) {
                 ].includes(event.type);
 
               return (
-                <li
-                  className="rounded-control border border-border bg-white p-4"
-                  key={event.id}
-                >
+                <li className="space-y-1.5 p-3.5 sm:p-4" key={event.id}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-semibold text-ink">
-                      {eventLabels[event.type]}
+                    <p className="text-sm font-bold text-ink">
+                      {t(`sessions.events.types.${event.type}`)}
                     </p>
-                    <span className="rounded-full bg-sky px-3 py-1 text-label font-semibold text-primary-hover">
-                      {statusLabels[event.status]}
+                    <span
+                      className={`rounded-control px-2.5 py-0.5 text-xs font-bold ${eventStatusBadgeClass(event.status)}`}
+                    >
+                      {t(`sessions.events.statuses.${event.status}`)}
                     </span>
                   </div>
-                  <p className="mt-2 text-label text-muted">
-                    Mốc {Math.round(event.start_ms / 1000)} giây · revision lịch
-                    sử{" "}
+                  <p className="text-xs text-muted">
+                    {t("sessions.events.timestampAt")}
+                    <span className="font-bold tabular-nums text-ink">
+                      {t("sessions.events.secondsValue", {
+                        seconds: formatNumber(
+                          Math.round(event.start_ms / 1000),
+                        ),
+                      })}
+                    </span>
+                    {t("sessions.events.versionSeparator")}
                     <code className="break-all">{event.page_revision_id}</code>
                   </p>
-                  <p className="mt-2 text-label font-semibold text-muted">
+                  <p className="text-xs font-semibold text-muted">
                     {countsAsError
-                      ? "Bằng chứng lỗi đã xác nhận."
-                      : "Sự kiện hỗ trợ/không chắc chắn, không tính là lỗi của bé."}
+                      ? t("sessions.events.confirmedEvidence")
+                      : t("sessions.events.supportOrUncertainEvidence")}
                   </p>
                 </li>
               );

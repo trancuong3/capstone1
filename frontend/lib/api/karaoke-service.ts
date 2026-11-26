@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { apiQuery, requestApi } from "@/lib/api/api-client";
 import { isServiceError } from "@/lib/api/service-error";
+import { translateRuntime } from "@/lib/i18n/runtime";
 import { syllableIssues } from "@/lib/karaoke/syllable-timing";
 import {
   karaokePreviewSchema,
@@ -99,16 +100,16 @@ export function karaokeParentErrorMessage(error: unknown) {
   if (isServiceError(error)) {
     switch (error.status) {
       case 401:
-        return "Phiên đăng nhập đã hết hạn. Ba mẹ vui lòng đăng nhập lại.";
+        return translateRuntime("errors.clientRuntime.sessionExpiredParent");
       case 403:
-        return "Tài khoản hoặc hồ sơ hiện tại chưa được phép mở nội dung này.";
+        return translateRuntime("errors.clientRuntime.karaokeParent403");
       case 404:
-        return "Bài hát không còn khả dụng hoặc không phù hợp với hồ sơ bé đang chọn.";
+        return translateRuntime("errors.clientRuntime.karaokeParent404");
       case 409:
-        return "Bài hát đã có phiên bản mới. Ba mẹ hãy tải phiên bản mới trước khi cho bé hát tiếp.";
+        return translateRuntime("errors.clientRuntime.karaokeParent409");
       case 503:
-        return "Kho bài hát tạm thời chưa sẵn sàng. Ba mẹ vui lòng thử lại sau.";
+        return translateRuntime("errors.clientRuntime.karaokeParent503");
     }
   }
-  return "Chưa tải được bài hát. Ba mẹ kiểm tra kết nối rồi thử lại nhé.";
+  return translateRuntime("errors.clientRuntime.karaokeParentFallback");
 }

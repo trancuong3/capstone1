@@ -20,8 +20,11 @@ from app.schemas.sentence_shooter import (
     SentenceShooterShotRequest,
 )
 from app.services.games.sentence_shooter_service import SentenceShooterService
+from app.services.rate_limiter import rate_limit
 
-router = APIRouter()
+router = APIRouter(
+    dependencies=[Depends(rate_limit("games", default_max=120, default_window=60.0))]
+)
 
 
 def build_service(db: AsyncSession) -> SentenceShooterService:

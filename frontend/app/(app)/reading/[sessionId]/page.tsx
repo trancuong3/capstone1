@@ -1,15 +1,25 @@
 import type { Metadata } from "next";
 
-import { AppServicesProvider } from "@/components/providers/app-services-provider";
 import { ReadingScreen } from "@/components/reading/reading-screen";
+import { translateMessage } from "@/lib/i18n/formatter";
+import { getServerI18n } from "@/lib/i18n/server";
 import {
   parseReadingUiState,
   parseReconnectDemoMode,
 } from "@/lib/utils/reading-state";
+import { viMessages } from "@/messages/vi";
 
-export const metadata: Metadata = {
-  title: "Bạn nhỏ cùng đọc",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const { locale, messages } = await getServerI18n();
+  return {
+    title: translateMessage(
+      messages,
+      viMessages,
+      locale,
+      "reading.session.pageTitle",
+    ),
+  };
+}
 
 interface ReadingPageProps {
   params: Promise<{ sessionId: string }>;
@@ -31,13 +41,11 @@ export default async function ReadingPage({
   const [{ sessionId }, query] = await Promise.all([params, searchParams]);
 
   return (
-    <AppServicesProvider scenario="default">
-      <ReadingScreen
-        initialPageId={firstValue(query.pageId)}
-        initialUiState={parseReadingUiState(query.state)}
-        reconnectMode={parseReconnectDemoMode(query.reconnect)}
-        sessionId={sessionId}
-      />
-    </AppServicesProvider>
+    <ReadingScreen
+      initialPageId={firstValue(query.pageId)}
+      initialUiState={parseReadingUiState(query.state)}
+      reconnectMode={parseReconnectDemoMode(query.reconnect)}
+      sessionId={sessionId}
+    />
   );
 }

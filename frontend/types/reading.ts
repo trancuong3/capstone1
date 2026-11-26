@@ -101,6 +101,8 @@ export interface ReadingPageDTO {
   readonly image_url?: string | null;
   /** Missing/false means use OCR text; coordinates alone do not prove alignment. */
   readonly image_overlay_safe?: boolean;
+  readonly illustration_url?: string | null;
+  readonly illustration_text_free?: boolean;
   readonly text?: string;
   readonly words: readonly ReadingPageWordDTO[];
   /** Zero-based line indices that begin a new paragraph. */
@@ -151,6 +153,7 @@ export interface ComprehensionAnswerResultDTO {
   readonly is_correct: boolean | null;
   readonly score: number | null;
   readonly feedback_code: string | null;
+  readonly story_hint?: string | null;
 }
 
 export type AnswerResult = ComprehensionAnswerResultDTO;

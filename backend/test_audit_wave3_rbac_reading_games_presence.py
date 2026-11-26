@@ -89,8 +89,8 @@ class AuditWave3RbacReadingGamesPresenceTests(unittest.IsolatedAsyncioTestCase):
         )
         repo.get_by_id = AsyncMock(return_value=active_profile)
         with patch(
-            "app.services.profile_service.create_signed_image_url",
-            side_effect=lambda path, **_: f"https://signed.example/{path}",
+            "app.services.profile_service.create_cached_signed_image_urls",
+            side_effect=lambda paths, **_: [f"https://signed.example/{path}" for path in paths],
         ) as sign_mock:
             result = await svc.get_current_profile(me_id)
             self.assertIsNone(result["avatar_url"])
@@ -99,6 +99,10 @@ class AuditWave3RbacReadingGamesPresenceTests(unittest.IsolatedAsyncioTestCase):
                 f"https://signed.example/children/{child_id}/avatar/valid.png",
             )
             self.assertEqual(sign_mock.call_count, 1)
+            self.assertEqual(
+                sign_mock.call_args.args[0],
+                [f"children/{child_id}/avatar/valid.png"],
+            )
 
         # SentenceShooterRepository bundle queries must enforce Profile.Active == 1
         shot_src = inspect.getsource(SentenceShooterRepository.load_shot_bundle)

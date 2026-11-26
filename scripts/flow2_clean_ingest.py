@@ -31,6 +31,18 @@ BACKEND_DIR = REPO_ROOT / "backend"
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+from app.services.viread_flow2_hygiene import (
+    DEFAULT_MAX_LABEL_LENGTH,
+    MIN_LINE_EDGE_VARIANCE,
+    MIN_LINE_HEIGHT_PX,
+    MIN_LINE_STDDEV,
+    MIN_LINE_WIDTH_PX,
+    detect_vietnamese_pii_strict,
+    open_image_exif_safe,
+    sanitize_and_validate_vietocr_label,
+    validate_flow2_line_crop,
+)
+
 ALLOWED_RIGHTS_BASES = frozenset({
     "owner_supplied",
     "owner_authorized",
@@ -40,11 +52,11 @@ ALLOWED_RIGHTS_BASES = frozenset({
     "cc0",
 })
 
-MIN_WIDTH_PX = 24
-MIN_HEIGHT_PX = 12
-MIN_STDDEV = 8.0
-MIN_EDGE_VARIANCE = 15.0
-MAX_LABEL_LEN = 300
+MIN_WIDTH_PX = MIN_LINE_WIDTH_PX
+MIN_HEIGHT_PX = MIN_LINE_HEIGHT_PX
+MIN_STDDEV = MIN_LINE_STDDEV
+MIN_EDGE_VARIANCE = MIN_LINE_EDGE_VARIANCE
+MAX_LABEL_LEN = DEFAULT_MAX_LABEL_LENGTH
 
 
 @dataclass
@@ -76,17 +88,20 @@ class RejectedSample:
 
 
 def normalize_label_nfc(raw_label: str) -> str:
-    text_val = unicodedata.normalize("NFC", str(raw_label or ""))
-    if any(ord(ch) < 32 and ch not in {"\t", " "} for ch in text_val):
-        raise ValueError("FORBIDDEN_CONTROL_CHARS")
-    collapsed = " ".join(text_val.split())
-    return unicodedata.normalize("NFC", collapsed)
+    cleaned, reason = sanitize_and_validate_vietocr_label(raw_label, max_length=MAX_LABEL_LEN)
+    if cleaned is None:
+        raise ValueError(reason or "INVALID_LABEL")
+    return cleaned
 
 
 def stable_flow2_split(group_id: str) -> str:
     digest = hashlib.sha256(f"viread-vietocr-v2-split-v1\0{group_id}".encode("utf-8")).hexdigest()
     value = int(digest[:8], 16) / 0xFFFFFFFF
-    return "train" if value < 0.70 else "validation" if value < 0.85 else "holdout"
+    if value < 0.70:
+        return "train"
+    if value < 0.85:
+        return "validation"
+    return "holdout"
 
 
 def deterministic_clean_sample_id(source_group_id: str, line_index: int, image_sha256: str) -> str:
@@ -98,30 +113,24 @@ def deterministic_clean_sample_id(source_group_id: str, line_index: int, image_s
     )
 
 
-def validate_image_quality(image_bytes: bytes) -> tuple[bool, str | None, bytes]:
-    """Validate image readability, dimensions, contrast, and sharpness; return canonical PNG bytes."""
+def validate_image_quality(
+    image_bytes: bytes,
+    *,
+    label: str | None = None,
+) -> tuple[bool, str | None, bytes]:
+    """Validate image readability, EXIF orientation, dimensions, contrast, and sharpness; return canonical PNG bytes."""
     try:
-        with Image.open(BytesIO(image_bytes)) as img:
-            img.load()
-            rgb = img.convert("RGB")
+        rgb = open_image_exif_safe(image_bytes)
     except Exception:
         return False, "UNREADABLE_IMAGE", b""
 
-    width, height = rgb.size
-    if width < MIN_WIDTH_PX or height < MIN_HEIGHT_PX:
-        return False, f"IMAGE_TOO_SMALL({width}x{height})", b""
-    if width / max(height, 1) < 0.5:
-        return False, "INVALID_ASPECT_RATIO", b""
-
-    gray = rgb.convert("L")
-    stat = ImageStat.Stat(gray)
-    if stat.stddev[0] < MIN_STDDEV:
-        return False, "BLANK_OR_LOW_CONTRAST", b""
-
-    edges = gray.filter(ImageFilter.FIND_EDGES)
-    edge_var = ImageStat.Stat(edges).var[0]
-    if edge_var < MIN_EDGE_VARIANCE:
-        return False, "TOO_BLURRY", b""
+    ok, _metrics, reason = validate_flow2_line_crop(rgb, label=label)
+    if not ok:
+        if reason == "LOW_CONTRAST_OR_BLANK":
+            return False, "BLANK_OR_LOW_CONTRAST", b""
+        if reason == "BLURRY_OR_LOW_EDGE_DETAIL":
+            return False, "TOO_BLURRY", b""
+        return False, reason or "IMAGE_QUALITY_REJECTED", b""
 
     buf = BytesIO()
     rgb.save(buf, format="PNG", optimize=True)
@@ -139,7 +148,7 @@ def validate_batch(
     locked_test_groups: set[str] | None = None,
     existing_eligible_labels: dict[str, str] | None = None,
 ) -> tuple[list[ValidatedSample], list[RejectedSample]]:
-    """Apply all verification, rights, quality, dedup, and leakage gates to a batch of candidate records."""
+    """Apply all verification, rights, quality, PII, vocab, dedup, and leakage gates to a batch of candidate records."""
     locked_hashes = {h.lower() for h in (locked_test_hashes or set())}
     locked_groups = set(locked_test_groups or set())
     known_labels = {k.lower(): unicodedata.normalize("NFC", v) for k, v in (existing_eligible_labels or {}).items()}
@@ -147,10 +156,12 @@ def validate_batch(
     accepted: list[ValidatedSample] = []
     rejected: list[RejectedSample] = []
     seen_hashes: dict[str, str] = {}
+    group_splits: dict[str, str] = {}
 
     for idx, raw in enumerate(records):
         status = str(raw.get("verification_status") or "").strip().upper()
-        ver_source = str(raw.get("verification_source") or "admin").strip().lower()
+        # Require explicit verification_source == "admin" (never silently default missing field to admin).
+        ver_source = str(raw.get("verification_source") or "").strip().lower()
         verified_by = str(raw.get("verified_by") or "").strip()
         verified_at = str(raw.get("verified_at") or "").strip()
         ai_review_required = bool(raw.get("ai_review_required", False))
@@ -161,7 +172,7 @@ def validate_batch(
                 RejectedSample(
                     row_index=idx,
                     reason_code="NOT_ADMIN_VERIFIED",
-                    detail="Sample is not explicitly Admin VERIFIED; routed to pending review.",
+                    detail="Sample is not explicitly Admin VERIFIED (requires verification_status=VERIFIED, verification_source=admin, verified_by); routed to pending review.",
                     route_to_pending_review=True,
                     raw=raw,
                 )
@@ -190,33 +201,35 @@ def validate_batch(
                 RejectedSample(
                     row_index=idx,
                     reason_code="LOCKED_TEST_GROUP_LEAKAGE",
-                    detail=f"source_group_id '{source_group_id}' overlaps LOCKED_TEST.",
+                    detail=f"source_group_id '{source_group_id}' overlaps LOCKED_TEST or holdout.",
                     route_to_pending_review=False,
                     raw=raw,
                 )
             )
             continue
 
-        # 4. Label gate
+        # 4. Label & VietOCR vocab + contact PII gate
         try:
             label = normalize_label_nfc(str(raw.get("label") or ""))
         except ValueError as exc:
+            code = str(exc)
             rejected.append(
                 RejectedSample(
                     row_index=idx,
-                    reason_code=str(exc),
-                    detail="Invalid characters in label.",
+                    reason_code="INVALID_LABEL_LENGTH" if code in {"EMPTY_LABEL", "LABEL_TOO_LONG"} else code,
+                    detail=f"Label failed hygiene validation: {code}",
                     route_to_pending_review=True,
                     raw=raw,
                 )
             )
             continue
-        if not label or len(label) > MAX_LABEL_LEN:
+        pii_flags = detect_vietnamese_pii_strict(label, mode="contact_only")
+        if pii_flags:
             rejected.append(
                 RejectedSample(
                     row_index=idx,
-                    reason_code="INVALID_LABEL_LENGTH",
-                    detail="Label is empty or exceeds maximum length.",
+                    reason_code="PII_DETECTED",
+                    detail=f"Label contains sensitive contact/ID pattern: {', '.join(pii_flags)}",
                     route_to_pending_review=True,
                     raw=raw,
                 )
@@ -240,7 +253,7 @@ def validate_batch(
             )
             continue
 
-        ok, err_code, png_bytes = validate_image_quality(img_path.read_bytes())
+        ok, err_code, png_bytes = validate_image_quality(img_path.read_bytes(), label=label)
         if not ok:
             rejected.append(
                 RejectedSample(
@@ -262,7 +275,7 @@ def validate_batch(
                 RejectedSample(
                     row_index=idx,
                     reason_code="LOCKED_TEST_IMAGE_LEAKAGE",
-                    detail="Image SHA-256 already exists in LOCKED_TEST.",
+                    detail="Image SHA-256 already exists in LOCKED_TEST or holdout.",
                     route_to_pending_review=False,
                     raw=raw,
                 )
@@ -293,11 +306,24 @@ def validate_batch(
                 )
             )
             continue
-        seen_hashes[image_sha] = label
 
         line_index = int(raw.get("line_index", idx))
         requested_split = str(raw.get("split") or "").strip().lower()
         split = requested_split if requested_split in {"train", "validation", "holdout"} else stable_flow2_split(source_group_id)
+        existing_group_split = group_splits.get(source_group_id)
+        if existing_group_split is not None and existing_group_split != split:
+            rejected.append(
+                RejectedSample(
+                    row_index=idx,
+                    reason_code="GROUP_SPLIT_LEAKAGE_IN_BATCH",
+                    detail=f"source_group_id '{source_group_id}' appeared in multiple splits ({existing_group_split} vs {split}).",
+                    route_to_pending_review=True,
+                    raw=raw,
+                )
+            )
+            continue
+        group_splits[source_group_id] = split
+        seen_hashes[image_sha] = label
         sample_id = deterministic_clean_sample_id(source_group_id, line_index, image_sha)
 
         accepted.append(
@@ -452,6 +478,12 @@ async def _run_cli(args: argparse.Namespace) -> int:
                     FROM public.viread_ocr_samples s
                     LEFT JOIN public.bookpages p ON p.id = s.source_page_id
                     WHERE s.source_flow = 'LOCKED_TEST'
+                       OR (
+                           s.source_flow = 'FLOW1_VERIFIED'
+                           AND s.dataset_version_id IS NULL
+                           AND s.split = 'holdout'
+                           AND COALESCE(to_jsonb(s)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
+                       )
                     """
                 )
             )

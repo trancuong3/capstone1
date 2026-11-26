@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ViRead</string>
+    <string name="loading_title">ViRead açılıyor</string>
+    <string name="loading_subtitle">ViRead yükleniyor…</string>
+    <string name="loading_hint_stage2">Sunucuya bağlanılıyor…</string>
+    <string name="loading_hint_stage3">Sunucu başlatılıyor, lütfen bekleyin…</string>
+    <string name="loading_cold_start_hint">Sunucu başlatılıyor (cold-start), lütfen kısa bir süre bekleyin…</string>
+    <string name="error_title_network">ViRead sunucusuna bağlanılamadı</string>
+    <string name="error_title_server">ViRead sunucusu başlatılıyor veya meşgul</string>
+    <string name="error_title_timeout">ViRead\'e bağlanılamıyor</string>
+    <string name="error_title_tls">Geçersiz güvenlik sertifikası</string>
+    <string name="offline_message">ViRead sunucusuna bağlanılamadı. Lütfen Wi-Fi / mobil ağ bağlantınızı veya sunucu adresini kontrol edip Yeniden Dene\'ye dokunun.</string>
+    <string name="timeout_message">ViRead sunucusu yavaş yanıt veriyor. Ağ bağlantınızı kontrol edip Yeniden Dene\'ye dokunun. İlk açılışta sunucunun başlaması 30–60 saniye sürebilir.</string>
+    <string name="server_5xx_message">ViRead sunucusu meşgul veya yeniden başlatılıyor (%1$d). Birkaç saniye bekleyip Yeniden Dene\'ye dokunun.</string>
+    <string name="tls_error_message">Sunucunun HTTPS güvenlik sertifikası geçersiz olduğu için ViRead, aile hesabınızı korumak amacıyla bağlantıyı engelledi.</string>
+    <string name="no_network_toast">Cihazda şu anda İnternet veya Wi-Fi bağlantısı yok.</string>
+    <string name="network_ready_toast">Ağ bağlantısı algılandı. ViRead yeniden yükleniyor…</string>
+    <string name="retry_button">Yeniden Dene</string>
+    <string name="open_home_button">Giriş sayfasına git</string>
+    <string name="check_connection_button">Bağlantıyı tekrar kontrol et</string>
+    <string name="configure_lan_server_button">LAN HTTPS Sunucusunu Değiştir (Debug)</string>
+    <string name="lan_dialog_title">LAN HTTPS Sunucusunu Yapılandır (Debug)</string>
+    <string name="lan_dialog_hint">Aynı Wi-Fi üzerindeki Next.js sunucusunun HTTPS adresini girin (örn. https://192.168.1.10:8443). HTTP veya localhost kabul edilmez.</string>
+    <string name="lan_dialog_save">Kaydet &amp; Bağlan</string>
+    <string name="lan_dialog_reset">Varsayılana döndür</string>
+    <string name="lan_dialog_cancel">Kapat</string>
+    <string name="lan_invalid_url_toast">Geçersiz adres. Yalnızca geçerli bir LAN HTTPS kaynağı kabul edilir (alt yol veya HTTP olamaz).</string>
+    <string name="file_chooser_title">Kitap sayfası resmi seçin, fotoğraf çekin veya PDF/DOCX seçin</string>
+    <string name="permission_denied_title">Bu özellik için izin gerekiyor</string>
+    <string name="permission_denied_message">ViRead için Kamera veya Mikrofon izni şu anda kapalı. İstediğiniz zaman Uygulama Ayarları\'nı açıp etkinleştirebilirsiniz.</string>
+    <string name="open_app_settings_button">Uygulama Ayarlarını Aç</string>
+    <string name="back_exit_confirm_toast">ViRead\'den çıkmak için tekrar basın</string>
+</resources>

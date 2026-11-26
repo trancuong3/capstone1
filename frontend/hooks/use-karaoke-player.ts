@@ -8,6 +8,8 @@ import {
   useState,
 } from "react";
 
+import { translateRuntime } from "@/lib/i18n/runtime";
+
 const ALLOWED_RATES = [0.75, 0.85, 1] as const;
 // Throttle React tree state updates during continuous 60fps rAF playback (~15 Hz)
 // while ref-based clock subscribers still run at full 60fps for smooth lyric fill.
@@ -157,7 +159,9 @@ export function useKaraokePlayer(
         .catch(() => {
           if (!disposed && ticket === operation.current) {
             onPause();
-            setError("Chưa phát lặp được. Hãy bấm nghe câu để thử lại.");
+            setError(
+              translateRuntime("entertainment.karaokeRuntime.loopPlayFailed"),
+            );
           }
         });
     }
@@ -173,7 +177,7 @@ export function useKaraokePlayer(
         setReady(false);
         audio.pause();
         setError(
-          "Thời lượng nhạc không khớp bản đã lưu. Hãy kiểm tra hoặc tải lại nhạc.",
+          translateRuntime("entertainment.karaokeRuntime.durationMismatch"),
         );
         return;
       }
@@ -186,7 +190,7 @@ export function useKaraokePlayer(
       setPlaying(false);
       setWaiting(false);
       setError(
-        "Không tải được nhạc hoặc liên kết đã hết hạn. Hãy tải lại nhạc.",
+        translateRuntime("entertainment.karaokeRuntime.audioLoadOrExpired"),
       );
     }
     const listeners: [string, () => void][] = [
@@ -266,7 +270,9 @@ export function useKaraokePlayer(
       if (!audio || !ready || blocked.current || playPending.current) return;
       if (Date.parse(expiresAt) <= Date.now()) {
         pause();
-        setError("Liên kết phát nhạc đã hết hạn. Hãy tải lại nhạc.");
+        setError(
+          translateRuntime("entertainment.karaokeRuntime.audioLinkExpired"),
+        );
         return;
       }
       if (start !== undefined) seek(start);
@@ -293,7 +299,9 @@ export function useKaraokePlayer(
           setPlaying(false);
           setWaiting(false);
           setError(
-            "Trình duyệt chưa phát được nhạc. Hãy bấm Phát để thử lại và kiểm tra thiết bị âm thanh.",
+            translateRuntime(
+              "entertainment.karaokeRuntime.audioBrowserPlayBlocked",
+            ),
           );
         }
       } finally {

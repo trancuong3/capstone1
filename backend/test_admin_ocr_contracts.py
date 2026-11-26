@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from app.api.deps import get_current_parent_id, get_db
 from app.api.routes.admin_ocr import router as admin_ocr_router
+from app.api.routes.book import router as book_router
 from app.api.routes.admin_viread_training import _require_training_worker_token, _safe_runtime
 from app.schemas.admin_ocr import (
     AdminBookCreateRequest,
@@ -135,7 +136,9 @@ class AdminOcrAuthorizationTests(unittest.TestCase):
         self.db.rollback = AsyncMock()
         self.db.add = MagicMock()
         self.db.add_all = MagicMock()
+
         self.app = FastAPI()
+        self.app.include_router(book_router, prefix="/books")
         self.app.include_router(admin_ocr_router, prefix="/books")
         self.app.dependency_overrides[get_db] = lambda: self.db
         self.client = TestClient(self.app)

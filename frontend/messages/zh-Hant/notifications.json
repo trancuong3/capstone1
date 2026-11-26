@@ -1,0 +1,15 @@
+{
+  "reminders": {
+    "saved": "閱讀提醒已儲存。",
+    "deleted": "閱讀提醒已刪除。",
+    "emailSent": "閱讀提醒電子郵件已發送。"
+  },
+  "presence": {
+    "childStarted": "{alias} 剛開始了一場新的閱讀活動。",
+    "childCompleted": "{alias} 已完成閱讀活動。"
+  },
+  "updates": {
+    "saved": "變更已儲存。",
+    "localeChanged": "顯示語言已更新為 {language}。"
+  }
+}

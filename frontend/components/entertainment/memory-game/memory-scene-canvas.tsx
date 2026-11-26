@@ -2,6 +2,7 @@
 
 import { useEffect, useId, type ReactElement } from "react";
 
+import { useTranslations } from "@/hooks/use-i18n";
 import type {
   MemoryColorShapeCue,
   MemoryThemeKey,
@@ -13,6 +14,7 @@ export interface MemorySceneCanvasProps {
   readonly sceneSpec: SceneSpecDTO;
   readonly mode: "observe" | "peek" | "reveal";
   readonly showColorCues?: boolean;
+  readonly reducedMotion?: boolean;
   readonly matchedObjectIds?: ReadonlySet<string>;
   readonly missedObjectIds?: ReadonlySet<string>;
   readonly focusedObjectId?: string | null;
@@ -2058,6 +2060,7 @@ export function MemorySceneCanvas({
   sceneSpec,
   mode,
   showColorCues = true,
+  reducedMotion = false,
   matchedObjectIds,
   missedObjectIds,
   focusedObjectId = null,
@@ -2065,6 +2068,7 @@ export function MemorySceneCanvas({
   onSceneReady,
   className = "",
 }: MemorySceneCanvasProps) {
+  const t = useTranslations("games");
   const uniqueId = useId().replace(/:/g, "");
   const gradId = `mem-sky-${uniqueId}`;
   const maskId = `mem-spotlight-mask-${uniqueId}`;
@@ -2103,11 +2107,15 @@ export function MemorySceneCanvas({
 
   return (
     <div
-      className={`relative overflow-hidden rounded-card border-2 border-border bg-white shadow-sm ${className}`}
+      className={`relative overflow-hidden rounded-card border-2 border-border bg-white shadow-sm ${reducedMotion ? "motion-reduce" : ""} ${className}`}
+      data-reduced-motion={reducedMotion ? "true" : "false"}
       data-testid="memory-scene-container"
     >
       <svg
-        aria-label={`Bức tranh chủ đề ${sceneSpec.theme_name_vi} gồm ${sceneSpec.objects.length} chi tiết`}
+        aria-label={t("memoryGame.canvas.svgAria", {
+          theme: sceneSpec.theme_name_vi,
+          count: sceneSpec.objects.length,
+        })}
         className="block h-auto w-full select-none"
         data-scene-ready="true"
         data-scene-seed={String(sceneSpec.scene_seed)}
@@ -2115,7 +2123,11 @@ export function MemorySceneCanvas({
         role="img"
         viewBox={`0 0 ${width} ${height}`}
       >
-        <title>{`Bức tranh trí nhớ: ${sceneSpec.theme_name_vi}`}</title>
+        <title>
+          {t("memoryGame.canvas.svgTitle", {
+            theme: sceneSpec.theme_name_vi,
+          })}
+        </title>
         <desc>{sceneSpec.backdrop.mood_vi}</desc>
 
         {renderThemeBackdrop(sceneSpec.theme_key, sceneSpec, gradId)}

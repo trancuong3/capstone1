@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import shutil
 import sqlite3
 import string
@@ -412,6 +413,7 @@ class GoogleDriveDesktopStore(TrainingArtifactStore):
         min_free_buffer_bytes: int | None = None,
         max_training_budget_bytes: int | None = None,
     ) -> None:
+        self._raw_root_input = str(root_dir)
         self._root_dir = Path(root_dir).resolve()
         self._account_email = (account_email or "").strip().lower() or None
         self._min_free_buffer_bytes = (
@@ -448,12 +450,46 @@ class GoogleDriveDesktopStore(TrainingArtifactStore):
         return self._index_dir() / f"{clean_id}.json"
 
     def _assert_root_available(self) -> None:
+        app_env = (os.getenv("APP_ENVIRONMENT") or "").strip().lower()
+        is_render = (os.getenv("RENDER") or "").strip().lower() in {"1", "true", "yes", "on"}
+        if app_env == "production" or is_render:
+            raise DriveNotConnectedError(
+                "Google Drive for Desktop local mount is disabled on production/cloud hosts; connect via Apps Script Bridge"
+            )
+        if os.name != "nt" and re.match(r"^[A-Za-z]:[\\/]", self._raw_root_input.strip()):
+            raise DriveNotConnectedError(
+                f"Google Drive for Desktop Windows mount ({self._raw_root_input}) is inaccessible on non-Windows host"
+            )
         # Check the top-level mount anchor (e.g. G:\ or parent drive) exists before touching anything
         anchor = Path(self._root_dir.anchor) if self._root_dir.anchor else self._root_dir.parent
         if not anchor.exists():
             raise DriveNotConnectedError(
                 f"Google Drive for Desktop mount ({anchor}) is offline; start Google Drive on Windows"
             )
+
+    def _delete_index_entries_for_logical_path(
+        self,
+        logical_path: str,
+        *,
+        exclude_file_id: str | None = None,
+    ) -> int:
+        idx_dir = self._index_dir()
+        if not idx_dir.is_dir():
+            return 0
+        removed = 0
+        for entry in idx_dir.glob("*.json"):
+            try:
+                rec = json.loads(entry.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if str(rec.get("logical_path") or "") != logical_path:
+                continue
+            file_id = str(rec.get("file_id") or "")
+            if exclude_file_id and file_id == exclude_file_id:
+                continue
+            entry.unlink(missing_ok=True)
+            removed += 1
+        return removed
 
     def _resolve_target_path(self, logical_path: str) -> Path:
         clean = validate_logical_path(logical_path, require_known_category=True)
@@ -1008,13 +1044,18 @@ class GoogleDriveDesktopStore(TrainingArtifactStore):
         expected_sha256: str | None = None,
     ) -> StoredArtifact:
         logical_path = validate_resume_object_path(job_id, relative_path)
-        return self.put(
+        stored = self.put(
             logical_path,
             data,
             content_type=content_type,
             expected_sha256=expected_sha256,
             metadata={"purpose": "colab_resume", "job_id": str(job_id).strip().lower()},
         )
+        self._delete_index_entries_for_logical_path(
+            logical_path,
+            exclude_file_id=stored.drive_file_id,
+        )
+        return stored
 
     def open_resume_file_stream(
         self,
@@ -1060,7 +1101,7 @@ class GoogleDriveDesktopStore(TrainingArtifactStore):
     def delete_resume_file(self, job_id: str, relative_path: str) -> bool:
         logical_path = validate_resume_object_path(job_id, relative_path)
         target = self._resolve_target_path(logical_path)
-        if not target.is_file():
-            return False
+        existed = target.is_file()
         target.unlink(missing_ok=True)
-        return True
+        removed_idx = self._delete_index_entries_for_logical_path(logical_path)
+        return existed or removed_idx > 0

@@ -49,27 +49,22 @@ from app.services.ocr_engine import (
     extract_text_and_boxes,
     normalize_word,
 )
+from app.services.parent_private_book_post_ocr import (
+    build_empty_text_findings,
+    build_image_only_findings,
+    build_proofread_suggestions as _shared_build_proofread_suggestions,
+    build_rights_declaration_finding,
+    build_rule_and_duplicate_findings,
+    build_tool_check_scope,
+    compact_provider_events as _compact_provider_events,
+    compute_candidate_hash,
+    format_safety_findings,
+    normalize_private_book_text as _normalize_text,
+    should_auto_accept_spelling,
+)
 from app.services.storage_service import download_object
 
 logger = logging.getLogger(__name__)
-
-
-def compute_candidate_hash(
-    candidate_text: str | None,
-    *,
-    source_sha256: str,
-    is_image_only: bool = False,
-) -> str:
-    """Bind candidate snapshot hash to both normalized text and source image digest."""
-    if is_image_only and not (candidate_text or "").strip():
-        raw = f"IMAGE_ONLY:{source_sha256}"
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-    text_hash = safety_content_hash(candidate_text or "")
-    return hashlib.sha256(f"{source_sha256}:{text_hash}".encode("utf-8")).hexdigest()
-
-
-def _normalize_text(value: str) -> str:
-    return unicodedata.normalize("NFC", value.replace("\r\n", "\n").replace("\r", "\n")).strip()
 
 
 def _valid_box(raw: object) -> list[float] | None:
@@ -116,8 +111,9 @@ def align_edited_text_to_words(
     tokens_with_lines: list[tuple[int, str]] = []
     for line_idx, line in enumerate(lines):
         for tok in line.split():
-            if tok.strip():
-                tokens_with_lines.append((line_idx, tok.strip()))
+            cleaned = tok.strip()
+            if cleaned and normalize_word(cleaned):
+                tokens_with_lines.append((line_idx, cleaned))
     if not tokens_with_lines:
         return []
 
@@ -131,14 +127,20 @@ def align_edited_text_to_words(
     if len(valid_base) == len(tokens_with_lines):
         aligned: list[dict[str, Any]] = []
         for idx, ((line_idx, tok), (orig, box)) in enumerate(zip(tokens_with_lines, valid_base)):
-            aligned.append({
+            orig_line = int(orig.get("line_index", line_idx))
+            entry: dict[str, Any] = {
                 "word_index": idx,
-                "line_index": int(orig.get("line_index", line_idx)),
+                "line_index": orig_line,
                 "text": tok,
                 "normalized_text": normalize_word(tok) or tok.lower(),
                 "bounding_box": box,
                 "ocr_confidence": orig.get("ocr_confidence"),
-            })
+            }
+            if orig_line != line_idx:
+                entry["bbox_source"] = "aligned_reordered"
+            elif orig.get("bbox_source"):
+                entry["bbox_source"] = orig.get("bbox_source")
+            aligned.append(entry)
         return aligned
 
     # Group base boxes by line or fallback evenly across the OCR text envelope so
@@ -159,7 +161,9 @@ def align_edited_text_to_words(
     out: list[dict[str, Any]] = []
     word_idx = 0
     for line_idx, line in enumerate(lines):
-        line_tokens = [t.strip() for t in line.split() if t.strip()]
+        line_tokens = [
+            t.strip() for t in line.split() if t.strip() and normalize_word(t.strip())
+        ]
         if not line_tokens:
             continue
         y = min(0.92, top + line_idx * (total_h / line_count))
@@ -175,6 +179,7 @@ def align_edited_text_to_words(
                 "normalized_text": normalize_word(tok) or tok.lower(),
                 "bounding_box": [round(x, 6), round(y, 6), round(w, 6), round(h, 6)],
                 "ocr_confidence": None,
+                "bbox_source": "synthetic_grid",
             })
             word_idx += 1
     return out
@@ -186,20 +191,7 @@ def build_proofread_suggestions(
     uncertain_indices: set[int],
 ) -> list[dict[str, Any]]:
     """Compute word-level spelling/diacritic diff between OCR and proofread output."""
-    proof_tokens = [tok for tok in _normalize_text(proofread_text).split() if tok]
-    suggestions: list[dict[str, Any]] = []
-    for idx, word in enumerate(ocr_words):
-        original = str(word.get("text") or "").strip()
-        suggested = proof_tokens[idx] if idx < len(proof_tokens) else original
-        is_uncertain = idx in uncertain_indices
-        if original != suggested or is_uncertain:
-            suggestions.append({
-                "word_index": idx,
-                "original": original,
-                "suggested": suggested,
-                "uncertain": is_uncertain,
-            })
-    return suggestions
+    return _shared_build_proofread_suggestions(ocr_words, proofread_text, uncertain_indices)
 
 
 def _extract_ocr_words_and_text(raw_result: Any) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:

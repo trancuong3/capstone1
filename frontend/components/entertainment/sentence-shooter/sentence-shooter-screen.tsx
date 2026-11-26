@@ -44,9 +44,12 @@ import {
 } from "@/components/entertainment/sentence-shooter/sound-engine";
 import { StageLayoutCache } from "@/components/entertainment/sentence-shooter/stage-layout-cache";
 import { ToyCannon } from "@/components/entertainment/sentence-shooter/toy-cannon";
+import { useEntertainmentPreferences } from "@/hooks/use-entertainment-preferences";
+import { useTranslations } from "@/hooks/use-i18n";
 import { useSentenceShooterService } from "@/hooks/use-sentence-shooter-service";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
+import { cn } from "@/lib/utils/cn";
 import type { BookListItemDTO } from "@/types/book";
 import type {
   SentenceShooterBookDTO,
@@ -77,43 +80,54 @@ interface ActiveProjectile {
 
 const difficulties: ReadonlyArray<{
   value: SentenceShooterDifficulty;
-  title: string;
-  description: string;
+  titleKey: string;
+  descKey: string;
 }> = [
-  { value: "easy", title: "Dễ", description: "Câu ngắn, 3–5 từ" },
-  { value: "medium", title: "Trung bình", description: "Câu vừa, 6–9 từ" },
-  { value: "challenge", title: "Thử thách", description: "Câu dài, 10–14 từ" },
+  {
+    value: "easy",
+    titleKey: "sentenceShooter.difficulties.easyTitle",
+    descKey: "sentenceShooter.difficulties.easyDesc",
+  },
+  {
+    value: "medium",
+    titleKey: "sentenceShooter.difficulties.mediumTitle",
+    descKey: "sentenceShooter.difficulties.mediumDesc",
+  },
+  {
+    value: "challenge",
+    titleKey: "sentenceShooter.difficulties.challengeTitle",
+    descKey: "sentenceShooter.difficulties.challengeDesc",
+  },
 ];
 
 const learningModes: ReadonlyArray<{
   value: SentenceShooterLearningMode;
-  title: string;
-  description: string;
+  titleKey: string;
+  descKey: string;
 }> = [
   {
     value: "WORD_ORDER",
-    title: "Xếp thứ tự từ",
-    description: "Bắn lần lượt từng từ để ghép lại thành câu hoàn chỉnh.",
+    titleKey: "sentenceShooter.learningModes.wordOrderTitle",
+    descKey: "sentenceShooter.learningModes.wordOrderDesc",
   },
   {
     value: "FILL_BLANK",
-    title: "Điền từ vào chỗ trống",
-    description: "Đọc câu còn thiếu và chọn từ phù hợp bắn vào chỗ trống.",
+    titleKey: "sentenceShooter.learningModes.fillBlankTitle",
+    descKey: "sentenceShooter.learningModes.fillBlankDesc",
   },
   {
     value: "GRAMMAR_FOCUS",
-    title: "Luyện ngữ pháp",
-    description: "Luyện từ nối, từ chỉ hoạt động và dấu câu tiếng Việt.",
+    titleKey: "sentenceShooter.learningModes.grammarFocusTitle",
+    descKey: "sentenceShooter.learningModes.grammarFocusDesc",
   },
 ];
 
-const LEARNING_MODE_LABELS: Record<SentenceShooterLearningMode, string> = {
-  WORD_ORDER: "Xếp thứ tự từ",
-  FILL_BLANK: "Điền từ vào chỗ trống",
-  GRAMMAR_FOCUS: "Luyện ngữ pháp",
+const LEARNING_MODE_LABEL_KEYS: Record<SentenceShooterLearningMode, string> = {
+  WORD_ORDER: "sentenceShooter.learningModes.wordOrderTitle",
+  FILL_BLANK: "sentenceShooter.learningModes.fillBlankTitle",
+  GRAMMAR_FOCUS: "sentenceShooter.learningModes.grammarFocusTitle",
 };
 
-const gameError = "Chưa kết nối được trò chơi. Ba mẹ và bé hãy thử lại nhé.";
 const MAX_ACTIVE_PROJECTILES = 6;
 
 interface SentenceShooterScreenProps {
@@ -133,15 +147,233 @@ function toBookCover(book: SentenceShooterBookDTO): BookListItemDTO {
   };
 }
 
+interface SentenceShooterResultViewProps {
+  backHref: string;
+  calmSound: boolean;
+  child: NonNullable<
+    ReturnType<typeof useValidatedSelectedChild>["state"] & { status: "ready" }
+  >["child"];
+  finalSentence: string;
+  isLoadingResult: boolean;
+  learningMode: SentenceShooterLearningMode;
+  onReloadResult: () => void;
+  onRestartLobby: () => void;
+  readingSessionId?: string;
+  reducedMotion: boolean;
+  result: SentenceShooterResultDTO | null;
+  resultError: boolean;
+  session: SentenceShooterSessionDTO | null;
+}
+
+function SentenceShooterResultView({
+  backHref,
+  calmSound,
+  child,
+  finalSentence,
+  isLoadingResult,
+  learningMode,
+  onReloadResult,
+  onRestartLobby,
+  readingSessionId,
+  reducedMotion,
+  result,
+  resultError,
+  session,
+}: SentenceShooterResultViewProps) {
+  const t = useTranslations("games");
+  const speechPlayer = useSpeechPlayer();
+  const summaryBookTitle = result?.book.title ?? session?.book.title ?? "";
+  const summaryCompletedRounds =
+    result?.completed_rounds ?? session?.completed_rounds ?? 0;
+  const summaryTotalRounds = result?.total_rounds ?? session?.total_rounds ?? 0;
+  const summaryTotalStars = result?.total_stars ?? session?.total_stars ?? 0;
+  const summaryMode =
+    result?.learning_mode ?? session?.learning_mode ?? learningMode;
+  const summaryPracticedWords =
+    result?.practiced_difficult_words ??
+    session?.practiced_difficult_words ??
+    [];
+
+  useEffect(() => {
+    if (!calmSound) {
+      speechPlayer.stop();
+    }
+  }, [calmSound, speechPlayer]);
+
+  function readSentence() {
+    if (!calmSound || !finalSentence.trim()) return;
+    speechPlayer.stop();
+    void speechPlayer.play(finalSentence).catch(() => undefined);
+  }
+
+  return (
+    <section
+      className={cn(
+        "mx-auto flex w-full max-w-[900px] flex-col gap-6 px-4 py-6 sm:px-8 sm:py-10",
+        reducedMotion && "motion-reduce",
+      )}
+      data-calm-sound={calmSound ? "true" : "false"}
+      data-reduced-motion={reducedMotion ? "true" : "false"}
+    >
+      <BookChildHeader
+        backHref={backHref}
+        child={child}
+        mobileLabel={
+          readingSessionId
+            ? t("sentenceShooter.mobileResultLabel")
+            : t("sentenceShooter.mobilePlayZoneLabel")
+        }
+      />
+      <div className="relative overflow-hidden rounded-card border border-border bg-cream p-6 text-center shadow-sm sm:p-10">
+        <div
+          aria-hidden="true"
+          className="mb-3 flex justify-center gap-3 text-warning"
+        >
+          <span className="text-3xl">✦</span>
+          <span className="mt-3 text-4xl">★</span>
+          <span className="text-3xl">✦</span>
+        </div>
+        <p className="font-extrabold text-primary">
+          {t("sentenceShooter.resultSavedEyebrow")} ·{" "}
+          {t(LEARNING_MODE_LABEL_KEYS[summaryMode])}
+        </p>
+        <h1 className="mt-2 text-heading font-extrabold text-ink">
+          {result && result.status !== "COMPLETED"
+            ? t("sentenceShooter.resultPartialTitle")
+            : t("sentenceShooter.resultCompletedTitle")}
+        </h1>
+        <p
+          className="viread-learning-content mt-2 text-body text-muted"
+          dir="ltr"
+          lang="vi"
+        >
+          {summaryBookTitle}
+        </p>
+        <div className="mx-auto mt-7 grid max-w-2xl grid-cols-2 gap-3 sm:grid-cols-4">
+          {[
+            [
+              t("sentenceShooter.statCompletedRounds"),
+              `${summaryCompletedRounds}/${summaryTotalRounds}`,
+            ],
+            [
+              t("sentenceShooter.statCorrectWords"),
+              result ? String(result.correct_count) : "—",
+            ],
+            [
+              t("sentenceShooter.statRetries"),
+              result ? String(result.mistakes_total) : "—",
+            ],
+            [
+              t("sentenceShooter.statHints"),
+              result ? String(result.hint_count) : "—",
+            ],
+          ].map(([label, value]) => (
+            <div className="rounded-control bg-white/90 p-4" key={label}>
+              <p className="text-sm font-bold text-muted">{label}</p>
+              <p className="mt-1 text-2xl font-extrabold tabular-nums text-ink">
+                {value}
+              </p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-6 inline-flex items-center gap-2 rounded-full bg-warning-surface px-5 py-3 text-xl font-extrabold text-warning">
+          <span aria-hidden="true">★</span>{" "}
+          {t("sentenceShooter.starsEarned", { count: summaryTotalStars })}
+        </p>
+        {summaryPracticedWords.length > 0 ? (
+          <p className="mt-4 inline-flex flex-wrap items-center justify-center gap-1.5 rounded-full bg-sky px-4 py-1.5 text-sm font-bold text-primary">
+            <Sparkles aria-hidden="true" className="size-4" />
+            {t("sentenceShooter.practicedDifficultWordsSummary")}{" "}
+            <span className="viread-learning-content" dir="ltr" lang="vi">
+              {summaryPracticedWords.join(", ")}
+            </span>
+          </p>
+        ) : null}
+        {result ? (
+          <p className="mt-3 text-sm font-semibold text-muted">
+            {t("sentenceShooter.durationLine", {
+              minutes: Math.floor(result.duration_seconds / 60),
+              seconds: result.duration_seconds % 60,
+            })}
+          </p>
+        ) : isLoadingResult ? (
+          <p className="mt-3 text-sm font-semibold text-muted" role="status">
+            {t("sentenceShooter.loadingResultDetails")}
+          </p>
+        ) : resultError ? (
+          <div className="mt-3 flex flex-col items-center gap-2">
+            <p className="text-sm font-semibold text-danger">
+              {t("sentenceShooter.loadResultFailed")}
+            </p>
+            <Button onClick={onReloadResult} size="compact" variant="secondary">
+              <RefreshCw aria-hidden="true" className="size-4" />{" "}
+              {t("sentenceShooter.reloadResult")}
+            </Button>
+          </div>
+        ) : null}
+        <div className="mx-auto mt-7 flex max-w-md flex-col gap-3 sm:flex-row">
+          <Button
+            className="sm:flex-1"
+            onClick={onRestartLobby}
+            variant="secondary"
+          >
+            <RotateCcw aria-hidden="true" className="size-5" />{" "}
+            {t("sentenceShooter.playNewSession")}
+          </Button>
+          <Button
+            className="sm:flex-1"
+            disabled={!calmSound}
+            onClick={readSentence}
+            variant="quiet"
+          >
+            <Volume2 aria-hidden="true" className="size-5" />{" "}
+            {t("sentenceShooter.readSampleSentence")}
+          </Button>
+        </div>
+        <p className="mt-4 text-sm text-muted">
+          {t("sentenceShooter.lastSentencePrefix")}
+          {finalSentence ? (
+            <span className="viread-learning-content" dir="ltr" lang="vi">
+              {finalSentence}
+            </span>
+          ) : (
+            t("sentenceShooter.lastSentenceFallback")
+          )}
+        </p>
+      </div>
+      <Link
+        className="self-center rounded-control px-4 py-3 font-bold text-primary hover:bg-sky"
+        href={backHref}
+      >
+        <ArrowLeft
+          aria-hidden="true"
+          className="viread-rtl-flip me-2 inline size-4"
+        />
+        {readingSessionId
+          ? t("sentenceShooter.backToReadingResult")
+          : t("sentenceShooter.backToEntertainment")}
+      </Link>
+    </section>
+  );
+}
+
 export function SentenceShooterScreen({
   initialBookId,
   readingSessionId,
 }: SentenceShooterScreenProps = {}) {
+  const t = useTranslations("games");
+  const gameError = t("sentenceShooter.gameError");
+  const shootError = t("sentenceShooter.shootError");
   const router = useRouter();
   const shooterService = useSentenceShooterService();
+  const speechPlayer = useSpeechPlayer();
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const child = childState.status === "ready" ? childState.child : null;
   const childId = child?.id ?? null;
+
+  const { reducedMotion, calmSound, setCalmSound } =
+    useEntertainmentPreferences();
+  const soundEnabled = calmSound;
 
   const [difficulty, setDifficulty] =
     useState<SentenceShooterDifficulty>("easy");
@@ -181,7 +413,6 @@ export function SentenceShooterScreen({
   const [isRequestingHint, setIsRequestingHint] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [soundEnabled, setSoundEnabled] = useState(true);
   const [cannonAngle, setCannonAngle] = useState(0);
   const [wobbleTokenId, setWobbleTokenId] = useState("");
   const [prefetchedNextRound, setPrefetchedNextRound] =
@@ -217,25 +448,44 @@ export function SentenceShooterScreen({
   const sessionEpochRef = useRef(0);
   const controlAbortRef = useRef<AbortController | null>(null);
   const shooterServiceRef = useRef(shooterService);
+  const speechPlayerRef = useRef(speechPlayer);
   const soundEnabledRef = useRef(soundEnabled);
+  const reducedMotionRef = useRef(reducedMotion);
+  const calmSoundRef = useRef(calmSound);
   const roundRef = useRef(round);
+  const shootErrorRef = useRef(shootError);
 
   const readingCompletionHref = readingSessionId
     ? `/reading/${encodeURIComponent(readingSessionId)}`
     : "/entertainment";
-  const speechPlayer = useSpeechPlayer();
 
   useEffect(() => {
     shooterServiceRef.current = shooterService;
   }, [shooterService]);
 
   useEffect(() => {
+    speechPlayerRef.current = speechPlayer;
+  }, [speechPlayer]);
+
+  useEffect(() => {
     soundEnabledRef.current = soundEnabled;
-  }, [soundEnabled]);
+    calmSoundRef.current = calmSound;
+    if (!calmSound) {
+      speechPlayerRef.current.stop();
+    }
+  }, [calmSound, soundEnabled]);
+
+  useEffect(() => {
+    reducedMotionRef.current = reducedMotion;
+  }, [reducedMotion]);
 
   useEffect(() => {
     roundRef.current = round;
   }, [round]);
+
+  useEffect(() => {
+    shootErrorRef.current = shootError;
+  }, [shootError]);
 
   function clearProjectileTimers() {
     for (const timer of projectileTimersRef.current.values()) {
@@ -299,6 +549,10 @@ export function SentenceShooterScreen({
           playShooterSound(
             response.session_completed ? "celebrate" : "correct",
             soundEnabledRef.current,
+            {
+              reducedMotion: reducedMotionRef.current,
+              calmSound: calmSoundRef.current,
+            },
           );
           if (response.round_completed) {
             roundCompletedRef.current = true;
@@ -336,11 +590,14 @@ export function SentenceShooterScreen({
           // Surgical rollback: shot has already been shifted off pendingShots,
           // so only this bubble wobbles & returns to the selectable tray.
           setWobbleTokenId(shot.token.id);
-          playShooterSound("wrong", soundEnabledRef.current);
+          playShooterSound("wrong", soundEnabledRef.current, {
+            reducedMotion: reducedMotionRef.current,
+            calmSound: calmSoundRef.current,
+          });
         }
       },
       onShotError: (shot) => {
-        setError("Chưa gửi được lượt bắn. Từ vẫn còn để bé thử lại nhé.");
+        setError(shootErrorRef.current);
         setSelectedTokenId(shot.token.id);
       },
     };
@@ -410,8 +667,10 @@ export function SentenceShooterScreen({
     const controller = new AbortController();
     let active = true;
     async function loadBooks() {
-      setBookState({ status: "loading" });
-      setSelectedBookId("");
+      setBookState((current) =>
+        current.status === "loading" ? current : { status: "loading" },
+      );
+      setSelectedBookId((current) => (current === "" ? current : ""));
       try {
         const books = await shooterService.listBooks(
           selectedChildId,
@@ -468,7 +727,7 @@ export function SentenceShooterScreen({
 
     setCannonAngle(trajectory.angle);
 
-    if (prefersReducedMotion()) {
+    if (reducedMotionRef.current || prefersReducedMotion()) {
       return;
     }
 
@@ -542,7 +801,10 @@ export function SentenceShooterScreen({
     // Immediate non-blocking visual + audio feedback (<30ms, zero HTTP wait,
     // zero forced layout reflows via ResizeObserver-cached coordinates).
     spawnVisualProjectile(token.id);
-    playShooterSound("shot", soundEnabled);
+    playShooterSound("shot", soundEnabled, {
+      reducedMotion,
+      calmSound,
+    });
   }
 
   async function startGame() {
@@ -629,7 +891,7 @@ export function SentenceShooterScreen({
       setFeedback(hint.message);
     } catch {
       if (epoch === sessionEpochRef.current && !controller.signal.aborted) {
-        setError("Chưa lấy được gợi ý. Bé có thể thử lại sau nhé.");
+        setError(t("sentenceShooter.hintError"));
       }
     } finally {
       if (controlAbortRef.current === controller) {
@@ -715,7 +977,7 @@ export function SentenceShooterScreen({
       setCannonAngle(0);
     } catch {
       if (epoch === sessionEpochRef.current && !controller.signal.aborted) {
-        setError("Chưa mở được câu tiếp theo. Bé hãy thử lại nhé.");
+        setError(t("sentenceShooter.nextRoundError"));
       }
     } finally {
       if (controlAbortRef.current === controller) {
@@ -735,7 +997,7 @@ export function SentenceShooterScreen({
 
   async function exitGame() {
     if (!session) return;
-    const shouldExit = window.confirm("Bé muốn kết thúc lượt chơi này chứ?");
+    const shouldExit = window.confirm(t("sentenceShooter.exitConfirm"));
     if (!shouldExit) return;
     sessionEpochRef.current += 1;
     shotQueueRef.current?.resetEpoch();
@@ -750,7 +1012,7 @@ export function SentenceShooterScreen({
       await shooterService.abandon(session.session_id);
       router.push("/entertainment");
     } catch {
-      setError("Chưa thể lưu lượt chơi. Hãy thử thoát lại nhé.");
+      setError(t("sentenceShooter.exitError"));
       setIsExiting(false);
     }
   }
@@ -791,7 +1053,7 @@ export function SentenceShooterScreen({
   }
 
   function playSentenceAudio(text: string) {
-    if (!text.trim()) return;
+    if (!calmSound || !text.trim()) return;
     speechPlayer.stop();
     void speechPlayer.play(text).catch(() => undefined);
   }
@@ -803,7 +1065,7 @@ export function SentenceShooterScreen({
         className="mx-auto w-full max-w-[1130px] px-4 py-8"
       >
         <span className="sr-only" role="status">
-          Đang xác minh hồ sơ của bé…
+          {t("sentenceShooter.verifyingChild")}
         </span>
         <Skeleton className="h-14 w-full max-w-sm rounded-card" />
       </section>
@@ -813,134 +1075,37 @@ export function SentenceShooterScreen({
   if (childState.status === "error") {
     return (
       <section className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-4 py-8">
-        <StatusMessage title="Chưa xác minh được hồ sơ của bé" tone="error">
-          Ba mẹ vui lòng thử lại trước khi bắt đầu trò chơi.
+        <StatusMessage
+          title={t("sentenceShooter.childErrorTitle")}
+          tone="error"
+        >
+          {t("sentenceShooter.childErrorBody")}
         </StatusMessage>
         <Button className="sm:w-auto" onClick={retryChild} variant="secondary">
-          <RefreshCw aria-hidden="true" className="size-5" /> Thử lại
+          <RefreshCw aria-hidden="true" className="size-5" />{" "}
+          {t("sentenceShooter.retry")}
         </Button>
       </section>
     );
   }
 
-  if (mode === "result" && (result || session)) {
-    const summaryBookTitle = result?.book.title ?? session?.book.title ?? "";
-    const summaryCompletedRounds =
-      result?.completed_rounds ?? session?.completed_rounds ?? 0;
-    const summaryTotalRounds =
-      result?.total_rounds ?? session?.total_rounds ?? 0;
-    const summaryTotalStars = result?.total_stars ?? session?.total_stars ?? 0;
-    const summaryMode =
-      result?.learning_mode ?? session?.learning_mode ?? learningMode;
-    const summaryPracticedWords =
-      result?.practiced_difficult_words ??
-      session?.practiced_difficult_words ??
-      [];
-
+  if (mode === "result" && (result || session) && child) {
     return (
-      <section className="mx-auto flex w-full max-w-[900px] flex-col gap-6 px-4 py-6 sm:px-8 sm:py-10">
-        <BookChildHeader
-          backHref={readingCompletionHref}
-          child={child}
-          mobileLabel={readingSessionId ? "Kết quả đọc" : "Khu vui học"}
-        />
-        <div className="relative overflow-hidden rounded-card border border-border bg-cream p-6 text-center shadow-sm sm:p-10">
-          <div
-            aria-hidden="true"
-            className="mb-3 flex justify-center gap-3 text-warning"
-          >
-            <span className="text-3xl">✦</span>
-            <span className="mt-3 text-4xl">★</span>
-            <span className="text-3xl">✦</span>
-          </div>
-          <p className="font-extrabold text-primary">
-            Lượt chơi đã lưu · {LEARNING_MODE_LABELS[summaryMode]}
-          </p>
-          <h1 className="mt-2 text-heading font-extrabold text-ink">
-            {result && result.status !== "COMPLETED"
-              ? "Kết quả lượt chơi"
-              : "Giỏi quá, bé đã hoàn thành!"}
-          </h1>
-          <p className="mt-2 text-body text-muted">{summaryBookTitle}</p>
-          <div className="mx-auto mt-7 grid max-w-2xl grid-cols-2 gap-3 sm:grid-cols-4">
-            {[
-              [
-                "Câu hoàn thành",
-                `${summaryCompletedRounds}/${summaryTotalRounds}`,
-              ],
-              ["Từ ghép đúng", result ? String(result.correct_count) : "—"],
-              ["Lần thử lại", result ? String(result.mistakes_total) : "—"],
-              ["Gợi ý", result ? String(result.hint_count) : "—"],
-            ].map(([label, value]) => (
-              <div className="rounded-control bg-white/90 p-4" key={label}>
-                <p className="text-sm font-bold text-muted">{label}</p>
-                <p className="mt-1 text-2xl font-extrabold text-ink">{value}</p>
-              </div>
-            ))}
-          </div>
-          <p className="mt-6 inline-flex items-center gap-2 rounded-full bg-warning-surface px-5 py-3 text-xl font-extrabold text-warning">
-            <span aria-hidden="true">★</span> {summaryTotalStars} sao
-          </p>
-          {summaryPracticedWords.length > 0 ? (
-            <p className="mt-4 inline-flex flex-wrap items-center justify-center gap-1.5 rounded-full bg-sky px-4 py-1.5 text-sm font-bold text-primary">
-              <Sparkles aria-hidden="true" className="size-4" />
-              Từ khó bé vừa luyện: {summaryPracticedWords.join(", ")}
-            </p>
-          ) : null}
-          {result ? (
-            <p className="mt-3 text-sm font-semibold text-muted">
-              Thời gian chơi: {Math.floor(result.duration_seconds / 60)} phút{" "}
-              {result.duration_seconds % 60} giây
-            </p>
-          ) : isLoadingResult ? (
-            <p className="mt-3 text-sm font-semibold text-muted" role="status">
-              Đang tải chi tiết bảng tổng kết…
-            </p>
-          ) : resultError ? (
-            <div className="mt-3 flex flex-col items-center gap-2">
-              <p className="text-sm font-semibold text-danger">
-                Chưa tải được chi tiết bảng tổng kết.
-              </p>
-              <Button
-                onClick={() => void loadCompletedResult()}
-                size="compact"
-                variant="secondary"
-              >
-                <RefreshCw aria-hidden="true" className="size-4" /> Tải lại bảng
-                tổng kết
-              </Button>
-            </div>
-          ) : null}
-          <div className="mx-auto mt-7 flex max-w-md flex-col gap-3 sm:flex-row">
-            <Button
-              className="sm:flex-1"
-              onClick={restartLobby}
-              variant="secondary"
-            >
-              <RotateCcw aria-hidden="true" className="size-5" /> Chơi lượt mới
-            </Button>
-            <Button
-              className="sm:flex-1"
-              onClick={() => playSentenceAudio(finalSentence)}
-              variant="quiet"
-            >
-              <Volume2 aria-hidden="true" className="size-5" /> Nghe lại câu
-              hoàn chỉnh
-            </Button>
-          </div>
-          <p className="mt-4 text-sm text-muted">
-            Câu cuối:{" "}
-            {finalSentence || "Bé đã cùng khám phá những câu trong cuốn sách!"}
-          </p>
-        </div>
-        <Link
-          className="self-center rounded-control px-4 py-3 font-bold text-primary hover:bg-sky"
-          href={readingCompletionHref}
-        >
-          <ArrowLeft aria-hidden="true" className="mr-2 inline size-4" />
-          {readingSessionId ? "Quay lại kết quả đọc" : "Về khu Giải trí"}
-        </Link>
-      </section>
+      <SentenceShooterResultView
+        backHref={readingCompletionHref}
+        calmSound={calmSound}
+        child={child}
+        finalSentence={finalSentence}
+        isLoadingResult={isLoadingResult}
+        learningMode={learningMode}
+        onReloadResult={() => void loadCompletedResult()}
+        onRestartLobby={restartLobby}
+        readingSessionId={readingSessionId}
+        reducedMotion={reducedMotion}
+        result={result}
+        resultError={resultError}
+        session={session}
+      />
     );
   }
 
@@ -979,20 +1144,31 @@ export function SentenceShooterScreen({
     let blankCursor = 0;
 
     return (
-      <section className="mx-auto flex w-full max-w-[1130px] flex-col gap-3 px-4 py-4 sm:px-6 sm:py-5">
+      <section
+        className={cn(
+          "mx-auto flex w-full max-w-[1130px] flex-col gap-3 px-4 py-4 sm:px-6 sm:py-5",
+          reducedMotion && "motion-reduce",
+        )}
+        data-calm-sound={calmSound ? "true" : "false"}
+        data-reduced-motion={reducedMotion ? "true" : "false"}
+      >
         <BookChildHeader
           backHref="/entertainment"
           child={child}
-          mobileLabel="Khu vui học"
+          mobileLabel={t("sentenceShooter.mobilePlayZoneLabel")}
         />
         <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-card border border-border bg-white px-4 py-2">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="truncate text-lg font-extrabold text-ink">
+              <h1
+                className="viread-learning-content truncate text-lg font-extrabold text-ink"
+                dir="ltr"
+                lang="vi"
+              >
                 {session.book.title}
               </h1>
               <span className="rounded-full bg-sky px-2.5 py-0.5 text-xs font-extrabold text-primary">
-                {LEARNING_MODE_LABELS[activeLearningMode]}
+                {t(LEARNING_MODE_LABEL_KEYS[activeLearningMode])}
               </span>
               {activePracticedWords.length > 0 ? (
                 <span
@@ -1000,20 +1176,37 @@ export function SentenceShooterScreen({
                   data-testid="difficult-word-badge"
                 >
                   <Sparkles aria-hidden="true" className="size-3.5" />
-                  {activeLearningMode === "WORD_ORDER" || roundComplete
-                    ? `Ôn từ khó: ${activePracticedWords.join(", ")}`
-                    : "Có từ bé đang luyện"}
+                  {activeLearningMode === "WORD_ORDER" || roundComplete ? (
+                    <>
+                      {t("sentenceShooter.difficultWordReviewPrefix")}{" "}
+                      <span
+                        className="viread-learning-content"
+                        dir="ltr"
+                        lang="vi"
+                      >
+                        {activePracticedWords.join(", ")}
+                      </span>
+                    </>
+                  ) : (
+                    t("sentenceShooter.difficultWordActiveHint")
+                  )}
                 </span>
               ) : null}
             </div>
             <p className="mt-1 text-sm font-bold text-muted">
-              Câu {round.round_number}/{session.total_rounds}
+              {t("sentenceShooter.roundProgress", {
+                current: round.round_number,
+                total: session.total_rounds,
+              })}
             </p>
           </div>
           <div
             className="flex items-center gap-3"
             role="group"
-            aria-label={`Đã ghép ${placedTokens.length} trên ${round.token_count} từ`}
+            aria-label={t("sentenceShooter.placedAria", {
+              placed: placedTokens.length,
+              total: round.token_count,
+            })}
           >
             <div className="h-3 w-24 overflow-hidden rounded-full bg-sky sm:w-36">
               <div
@@ -1024,7 +1217,9 @@ export function SentenceShooterScreen({
               />
             </div>
             <span
-              aria-label={`${session.total_stars} sao`}
+              aria-label={t("sentenceShooter.starsAria", {
+                count: session.total_stars,
+              })}
               className="inline-flex items-center gap-1 font-extrabold text-warning"
             >
               <span aria-hidden="true">★</span>
@@ -1032,19 +1227,23 @@ export function SentenceShooterScreen({
             </span>
             {sessionScore > 0 ? (
               <span
-                className="rounded-full bg-success-surface px-2.5 py-0.5 text-xs font-extrabold text-success-ink"
+                className="rounded-full bg-success-surface px-2.5 py-0.5 text-xs font-extrabold tabular-nums text-success-ink"
                 data-testid="session-score"
               >
-                {sessionScore} điểm
+                {t("sentenceShooter.scoreBadge", { score: sessionScore })}
               </span>
             ) : null}
           </div>
           <div className="flex gap-2">
             <button
-              aria-label={soundEnabled ? "Tắt âm thanh" : "Bật âm thanh"}
+              aria-label={
+                soundEnabled
+                  ? t("sentenceShooter.muteSoundAria")
+                  : t("sentenceShooter.enableSoundAria")
+              }
               aria-pressed={soundEnabled}
               className="flex size-11 items-center justify-center rounded-control bg-sky text-primary hover:bg-border"
-              onClick={() => setSoundEnabled((enabled) => !enabled)}
+              onClick={() => setCalmSound(!soundEnabled)}
               type="button"
             >
               {soundEnabled ? (
@@ -1054,13 +1253,15 @@ export function SentenceShooterScreen({
               )}
             </button>
             <button
-              aria-label="Tạm dừng"
+              aria-label={t("sentenceShooter.pauseAria")}
               className="flex min-h-11 items-center justify-center gap-2 rounded-control bg-sky px-3 font-bold text-primary hover:bg-border disabled:opacity-55"
               onClick={() => setIsPaused(true)}
               type="button"
             >
               <Pause aria-hidden="true" className="size-5" />
-              <span className="hidden sm:inline">Tạm dừng</span>
+              <span className="hidden sm:inline">
+                {t("sentenceShooter.pause")}
+              </span>
             </button>
             <button
               className="flex min-h-11 items-center justify-center rounded-control px-3 font-bold text-danger hover:bg-danger-surface disabled:opacity-55"
@@ -1068,7 +1269,7 @@ export function SentenceShooterScreen({
               onClick={() => void exitGame()}
               type="button"
             >
-              Thoát
+              {t("sentenceShooter.exit")}
             </button>
           </div>
         </header>
@@ -1082,15 +1283,17 @@ export function SentenceShooterScreen({
             <div className="space-y-2 rounded-control bg-cream px-3 py-3 sm:px-4">
               <p className="font-bold text-ink">
                 {activeLearningMode === "FILL_BLANK"
-                  ? "Điền từ vào chỗ trống"
+                  ? t("sentenceShooter.slotHeadingFillBlank")
                   : activeLearningMode === "GRAMMAR_FOCUS"
-                    ? "Hoàn thiện ngữ pháp câu"
-                    : "Câu của bé"}
+                    ? t("sentenceShooter.slotHeadingGrammarFocus")
+                    : t("sentenceShooter.childSentenceHeading")}
               </p>
               <div
+                aria-label={t("sentenceShooter.slotsAria")}
+                className="viread-learning-content flex w-full flex-wrap gap-2"
+                dir="ltr"
+                lang="vi"
                 role="list"
-                className="flex w-full flex-wrap gap-2"
-                aria-label="Các ô ghép câu"
               >
                 {hasPromptSlots
                   ? (round.prompt_slots ?? []).map((slot) => {
@@ -1116,10 +1319,18 @@ export function SentenceShooterScreen({
                         <div
                           aria-label={
                             confirmed
-                              ? `Ô ${slotIndex + 1}: ${confirmed.text}`
+                              ? t("sentenceShooter.slotFilledAria", {
+                                  index: slotIndex + 1,
+                                  word: confirmed.text,
+                                })
                               : optimistic
-                                ? `Ô ${slotIndex + 1}: ${optimistic.text} (đang kiểm tra)`
-                                : `Ô ${slotIndex + 1} còn trống`
+                                ? t("sentenceShooter.slotPendingAria", {
+                                    index: slotIndex + 1,
+                                    word: optimistic.text,
+                                  })
+                                : t("sentenceShooter.slotEmptyAria", {
+                                    index: slotIndex + 1,
+                                  })
                           }
                           className={[
                             "flex min-h-12 min-w-[68px] max-w-full items-center justify-center rounded-control border-2 px-3 py-2 text-center text-base font-extrabold sm:min-h-14 sm:min-w-[84px] sm:px-4 sm:text-lg",
@@ -1143,7 +1354,7 @@ export function SentenceShooterScreen({
                             <>
                               <Check
                                 aria-hidden="true"
-                                className="mr-1 size-4 shrink-0"
+                                className="me-1 size-4 shrink-0"
                               />
                               {confirmed.text}
                             </>
@@ -1165,10 +1376,18 @@ export function SentenceShooterScreen({
                         <div
                           aria-label={
                             confirmed
-                              ? `Ô ${index + 1}: ${confirmed.text}`
+                              ? t("sentenceShooter.slotFilledAria", {
+                                  index: index + 1,
+                                  word: confirmed.text,
+                                })
                               : optimistic
-                                ? `Ô ${index + 1}: ${optimistic.text} (đang kiểm tra)`
-                                : `Ô ${index + 1} còn trống`
+                                ? t("sentenceShooter.slotPendingAria", {
+                                    index: index + 1,
+                                    word: optimistic.text,
+                                  })
+                                : t("sentenceShooter.slotEmptyAria", {
+                                    index: index + 1,
+                                  })
                           }
                           className={[
                             "flex min-h-12 min-w-[54px] max-w-full items-center justify-center rounded-control border-2 px-3 py-2 text-center text-base font-extrabold sm:min-h-14 sm:min-w-[70px] sm:px-4 sm:text-lg",
@@ -1192,7 +1411,7 @@ export function SentenceShooterScreen({
                             <>
                               <Check
                                 aria-hidden="true"
-                                className="mr-1 size-4 shrink-0"
+                                className="me-1 size-4 shrink-0"
                               />
                               {confirmed.text}
                             </>
@@ -1208,12 +1427,20 @@ export function SentenceShooterScreen({
             </div>
             <div className="space-y-2 rounded-control bg-sky/45 px-3 py-3 sm:px-4">
               <p className="font-bold text-ink">
-                {round.prompt_hint || "Chọn từ tiếp theo"}
+                {round.prompt_hint ? (
+                  <span className="viread-learning-content" dir="ltr" lang="vi">
+                    {round.prompt_hint}
+                  </span>
+                ) : (
+                  t("sentenceShooter.nextWordHeading")
+                )}
               </p>
               <div
+                aria-label={t("sentenceShooter.wordBankAria")}
+                className="viread-learning-content flex w-full flex-wrap items-center gap-2.5"
+                dir="ltr"
+                lang="vi"
                 role="group"
-                className="flex w-full flex-wrap items-center gap-2.5"
-                aria-label="Các từ để ghép"
               >
                 {round.tokens.map((token) => {
                   const placed = placedTokenIds.has(token.id);
@@ -1229,7 +1456,11 @@ export function SentenceShooterScreen({
                     <button
                       aria-pressed={selected || inFlight}
                       aria-label={
-                        hinted ? `${token.text} · Từ gợi ý` : undefined
+                        hinted
+                          ? t("sentenceShooter.hintedTokenAria", {
+                              word: token.text,
+                            })
+                          : undefined
                       }
                       aria-busy={inFlight || undefined}
                       className={[
@@ -1275,7 +1506,7 @@ export function SentenceShooterScreen({
                           <span
                             aria-hidden="true"
                             className="inline-block size-2 rounded-full bg-warning"
-                            title="Từ bé đang luyện"
+                            title={t("sentenceShooter.difficultWordDotTitle")}
                           />
                         ) : null}
                       </span>
@@ -1299,11 +1530,21 @@ export function SentenceShooterScreen({
                 role="status"
                 aria-live="polite"
               >
-                {pendingShots.length > 0
-                  ? pendingShots.length > 1
-                    ? `Đang kiểm tra ${pendingShots.length} từ bé chọn…`
-                    : "Đang kiểm tra từ bé chọn…"
-                  : feedback || "Bấm vào một từ để ghép câu."}
+                {pendingShots.length > 0 ? (
+                  pendingShots.length > 1 ? (
+                    t("sentenceShooter.checkingMultipleTokensStatus", {
+                      count: pendingShots.length,
+                    })
+                  ) : (
+                    t("sentenceShooter.checkingTokenStatus")
+                  )
+                ) : feedback ? (
+                  <span className="viread-learning-content" dir="ltr" lang="vi">
+                    {feedback}
+                  </span>
+                ) : (
+                  t("sentenceShooter.defaultPromptStatus")
+                )}
               </p>
               <button
                 className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-control bg-warning-surface px-3 font-bold text-warning hover:bg-book-orange disabled:opacity-55"
@@ -1311,25 +1552,31 @@ export function SentenceShooterScreen({
                 onClick={() => void requestHint()}
                 type="button"
               >
-                <Lightbulb aria-hidden="true" className="size-5" /> Gợi ý một từ
+                <Lightbulb aria-hidden="true" className="size-5" />{" "}
+                {t("sentenceShooter.hintButton")}
               </button>
             </div>
             {roundComplete ? (
               <div className="w-full rounded-card border border-[#B6DDBB] bg-success-surface p-5 text-center">
-                <p className="text-xl font-extrabold text-success-ink">
+                <p
+                  className="viread-learning-content text-xl font-extrabold text-success-ink"
+                  dir="ltr"
+                  lang="vi"
+                >
                   {completedDisplaySentence}
                 </p>
                 <p className="mt-2 font-bold text-success-ink">
-                  Tuyệt vời! Bé đã ghép đúng cả câu.
+                  {t("sentenceShooter.roundCompletePraise")}
                 </p>
                 <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
                   <button
-                    className="inline-flex min-h-10 items-center justify-center gap-2 rounded-full border border-[#98D4A2] bg-white px-4 py-1.5 text-sm font-extrabold text-success-ink hover:bg-cream"
+                    className="inline-flex min-h-10 items-center justify-center gap-2 rounded-full border border-[#98D4A2] bg-white px-4 py-1.5 text-sm font-extrabold text-success-ink hover:bg-cream disabled:opacity-50"
+                    disabled={!calmSound}
                     onClick={() => playSentenceAudio(completedDisplaySentence)}
                     type="button"
                   >
                     <Volume2 aria-hidden="true" className="size-4" />
-                    Nghe lại câu hoàn chỉnh
+                    {t("sentenceShooter.readFullSentence")}
                   </button>
                   {activePracticedWords.length > 0 ? (
                     <span
@@ -1337,7 +1584,14 @@ export function SentenceShooterScreen({
                       data-testid="practiced-difficult-words"
                     >
                       <Sparkles aria-hidden="true" className="size-3.5" />
-                      Từ bé vừa luyện: {activePracticedWords.join(", ")}
+                      {t("sentenceShooter.practicedDifficultWordsRound")}{" "}
+                      <span
+                        className="viread-learning-content"
+                        dir="ltr"
+                        lang="vi"
+                      >
+                        {activePracticedWords.join(", ")}
+                      </span>
                     </span>
                   ) : null}
                 </div>
@@ -1347,7 +1601,13 @@ export function SentenceShooterScreen({
                     data-testid="grammar-tip-pill"
                   >
                     <BookOpen aria-hidden="true" className="size-4 shrink-0" />
-                    <span>{roundGrammarTip}</span>
+                    <span
+                      className="viread-learning-content"
+                      dir="ltr"
+                      lang="vi"
+                    >
+                      {roundGrammarTip}
+                    </span>
                   </p>
                 ) : null}
                 <div className="mt-4">
@@ -1358,8 +1618,8 @@ export function SentenceShooterScreen({
                       isLoading={isLoadingNextRound}
                       onClick={() => void continueToNextRound()}
                     >
-                      <Play aria-hidden="true" className="size-5" /> Câu tiếp
-                      theo
+                      <Play aria-hidden="true" className="size-5" />{" "}
+                      {t("sentenceShooter.nextRound")}
                     </Button>
                   ) : (
                     <Button
@@ -1368,8 +1628,8 @@ export function SentenceShooterScreen({
                       isLoading={isLoadingResult}
                       onClick={() => void loadCompletedResult()}
                     >
-                      <RefreshCw aria-hidden="true" className="size-5" /> Xem
-                      kết quả
+                      <RefreshCw aria-hidden="true" className="size-5" />{" "}
+                      {t("sentenceShooter.viewResult")}
                     </Button>
                   )}
                 </div>
@@ -1421,26 +1681,27 @@ export function SentenceShooterScreen({
                 onClick={() => setIsPaused(false)}
                 variant="secondary"
               >
-                <Play aria-hidden="true" className="size-5" /> Chơi tiếp
+                <Play aria-hidden="true" className="size-5" />{" "}
+                {t("sentenceShooter.resumePlay")}
               </Button>
               <Button
                 className="sm:flex-1"
                 onClick={() => void exitGame()}
                 variant="quiet"
               >
-                Kết thúc lượt
+                {t("sentenceShooter.endSession")}
               </Button>
             </div>
           }
           isOpen={isPaused}
           onClose={() => setIsPaused(false)}
           showCloseButton={false}
-          title="Tạm nghỉ một chút nhé?"
+          title={t("sentenceShooter.pauseModalTitle")}
           tone="paper"
         >
-          <p className="text-muted">Lượt chơi của bé đang được giữ lại.</p>
+          <p className="text-muted">{t("sentenceShooter.pauseModalBody")}</p>
           {error ? (
-            <StatusMessage className="mt-4 text-left" tone="error">
+            <StatusMessage className="mt-4 text-start" tone="error">
               {error}
             </StatusMessage>
           ) : null}
@@ -1449,21 +1710,37 @@ export function SentenceShooterScreen({
     );
   }
 
+  const selectedDifficultyOption = difficulties.find(
+    (option) => option.value === difficulty,
+  );
+
   return (
-    <section className="mx-auto flex w-full max-w-[1130px] flex-col gap-6 px-4 py-4 sm:px-8 sm:py-7">
+    <section
+      className={cn(
+        "mx-auto flex w-full max-w-[1130px] flex-col gap-6 px-4 py-4 sm:px-8 sm:py-7",
+        reducedMotion && "motion-reduce",
+      )}
+      data-calm-sound={calmSound ? "true" : "false"}
+      data-reduced-motion={reducedMotion ? "true" : "false"}
+    >
       <BookChildHeader
         backHref={readingCompletionHref}
         child={child}
-        mobileLabel={readingSessionId ? "Kết quả đọc" : "Khu vui học"}
+        mobileLabel={
+          readingSessionId
+            ? t("sentenceShooter.mobileResultLabel")
+            : t("sentenceShooter.mobilePlayZoneLabel")
+        }
       />
       <header className="flex flex-col gap-2 border-b border-border pb-5">
-        <p className="font-extrabold text-primary">Xạ thủ ghép câu</p>
+        <p className="font-extrabold text-primary">
+          {t("sentenceShooter.eyebrow")}
+        </p>
         <h1 className="text-heading font-extrabold text-ink">
-          Chọn sách và bắt đầu chơi
+          {t("sentenceShooter.lobbyTitle")}
         </h1>
         <p className="text-body text-muted">
-          Chọn chế độ học, độ khó và một cuốn sách để cùng bắn từ hoàn thiện
-          câu.
+          {t("sentenceShooter.lobbySubtitle")}
         </p>
       </header>
 
@@ -1473,22 +1750,24 @@ export function SentenceShooterScreen({
       bookState.status === "ready" &&
       !hasManuallySelectedBook &&
       !bookState.books.some((book) => book.id === initialBookId) ? (
-        <StatusMessage title="Cuốn sách chưa sẵn sàng" tone="warning">
-          Cuốn sách bé vừa đọc chưa có đủ câu phù hợp với độ khó và số câu hiện
-          tại. Bé có thể đổi lựa chọn hoặc chọn sách khác bên dưới.
+        <StatusMessage
+          title={t("sentenceShooter.bookNotReadyTitle")}
+          tone="warning"
+        >
+          {t("sentenceShooter.bookNotReadyBody")}
         </StatusMessage>
       ) : null}
 
       <fieldset>
         <legend className="mb-3 text-lg font-extrabold text-ink">
-          Chọn chế độ học
+          {t("sentenceShooter.chooseLearningMode")}
         </legend>
         <div className="grid gap-3 sm:grid-cols-3">
           {learningModes.map((option) => (
             <button
               aria-pressed={learningMode === option.value}
               className={[
-                "min-h-24 rounded-card border-2 p-4 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                "min-h-24 rounded-card border-2 p-4 text-start transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
                 learningMode === option.value
                   ? "border-primary bg-sky"
                   : "border-border bg-white hover:bg-sky/50",
@@ -1498,13 +1777,13 @@ export function SentenceShooterScreen({
               type="button"
             >
               <span className="flex items-center justify-between font-extrabold text-ink">
-                {option.title}
+                {t(option.titleKey)}
                 {learningMode === option.value ? (
                   <Check aria-hidden="true" className="size-5 text-primary" />
                 ) : null}
               </span>
               <span className="mt-1 block text-sm font-semibold text-muted">
-                {option.description}
+                {t(option.descKey)}
               </span>
             </button>
           ))}
@@ -1513,14 +1792,14 @@ export function SentenceShooterScreen({
 
       <fieldset>
         <legend className="mb-3 text-lg font-extrabold text-ink">
-          Chọn độ khó
+          {t("sentenceShooter.chooseDifficulty")}
         </legend>
         <div className="grid gap-3 sm:grid-cols-3">
           {difficulties.map((option) => (
             <button
               aria-pressed={difficulty === option.value}
               className={[
-                "min-h-24 rounded-card border-2 p-4 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                "min-h-24 rounded-card border-2 p-4 text-start transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
                 difficulty === option.value
                   ? "border-primary bg-sky"
                   : "border-border bg-white hover:bg-sky/50",
@@ -1530,13 +1809,13 @@ export function SentenceShooterScreen({
               type="button"
             >
               <span className="flex items-center justify-between font-extrabold text-ink">
-                {option.title}
+                {t(option.titleKey)}
                 {difficulty === option.value ? (
                   <Check aria-hidden="true" className="size-5 text-primary" />
                 ) : null}
               </span>
               <span className="mt-1 block text-sm font-semibold text-muted">
-                {option.description}
+                {t(option.descKey)}
               </span>
             </button>
           ))}
@@ -1545,7 +1824,7 @@ export function SentenceShooterScreen({
 
       <fieldset>
         <legend className="mb-3 text-lg font-extrabold text-ink">
-          Số câu trong lượt chơi
+          {t("sentenceShooter.roundsPerGame")}
         </legend>
         <div className="flex gap-3">
           {([3, 5] as const).map((count) => (
@@ -1561,7 +1840,7 @@ export function SentenceShooterScreen({
               onClick={() => setTotalRounds(count)}
               type="button"
             >
-              {count} câu
+              {t("sentenceShooter.roundsCount", { count })}
             </button>
           ))}
         </div>
@@ -1569,17 +1848,26 @@ export function SentenceShooterScreen({
 
       <div>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-extrabold text-ink">Chọn sách</h2>
+          <h2 className="text-lg font-extrabold text-ink">
+            {t("sentenceShooter.chooseBook")}
+          </h2>
           <span className="text-sm font-semibold text-muted">
-            Đang chọn: {LEARNING_MODE_LABELS[learningMode]} ·{" "}
-            {difficulties.find((option) => option.value === difficulty)?.title}{" "}
-            · {totalRounds} câu
+            {t("sentenceShooter.selectedConfigWithMode", {
+              mode: t(LEARNING_MODE_LABEL_KEYS[learningMode]),
+              difficulty: selectedDifficultyOption
+                ? t(selectedDifficultyOption.titleKey)
+                : "",
+              rounds: totalRounds,
+            })}
           </span>
         </div>
         {initialBookId && selectedBook?.id === initialBookId ? (
           <p className="mb-3 rounded-control bg-success-surface px-4 py-3 text-sm font-semibold text-success-ink">
-            <Gamepad2 aria-hidden="true" className="mr-2 inline size-4" />
-            Đã chọn sách bé vừa đọc: <strong>{selectedBook.title}</strong>
+            <Gamepad2 aria-hidden="true" className="me-2 inline size-4" />
+            {t("sentenceShooter.preselectedRecentBook")}
+            <strong className="viread-learning-content" dir="ltr" lang="vi">
+              {selectedBook.title}
+            </strong>
           </p>
         ) : null}
         {bookState.status === "loading" ? (
@@ -1588,7 +1876,7 @@ export function SentenceShooterScreen({
             className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
           >
             <span className="sr-only" role="status">
-              Đang tìm sách có câu phù hợp…
+              {t("sentenceShooter.findingBooksStatus")}
             </span>
             {[0, 1, 2].map((item) => (
               <Skeleton className="h-48 w-full rounded-card" key={item} />
@@ -1597,7 +1885,10 @@ export function SentenceShooterScreen({
         ) : null}
         {bookState.status === "error" ? (
           <div className="flex flex-col gap-3">
-            <StatusMessage title="Chưa tải được danh sách sách" tone="error">
+            <StatusMessage
+              title={t("sentenceShooter.booksLoadErrorTitle")}
+              tone="error"
+            >
               {gameError}
             </StatusMessage>
             <Button
@@ -1605,19 +1896,20 @@ export function SentenceShooterScreen({
               onClick={() => setReloadKey((key) => key + 1)}
               variant="secondary"
             >
-              <RefreshCw aria-hidden="true" className="size-5" /> Thử lại
+              <RefreshCw aria-hidden="true" className="size-5" />{" "}
+              {t("sentenceShooter.retry")}
             </Button>
           </div>
         ) : null}
         {bookState.status === "ready" && bookState.books.length === 0 ? (
           <EmptyState
-            description="Chưa có sách phù hợp với độ khó và số câu đã chọn. Hãy thử mức dễ hơn hoặc chọn 3 câu."
+            description={t("sentenceShooter.emptyBooksDesc")}
             icon={
               <span aria-hidden="true" className="text-4xl">
                 📚
               </span>
             }
-            title="Chưa có sách sẵn sàng"
+            title={t("sentenceShooter.emptyBooksTitle")}
           />
         ) : null}
         {bookState.status === "ready" && bookState.books.length > 0 ? (
@@ -1634,7 +1926,7 @@ export function SentenceShooterScreen({
                     <button
                       aria-pressed={selected}
                       className={[
-                        "flex min-h-28 items-center gap-4 rounded-control border bg-white p-4 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                        "flex min-h-28 items-center gap-4 rounded-control border bg-white p-4 text-start transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
                         selected
                           ? "border-primary ring-2 ring-primary/20"
                           : "border-border hover:border-primary/60",
@@ -1648,16 +1940,35 @@ export function SentenceShooterScreen({
                     >
                       <BookCover book={toBookCover(book)} size="small" />
                       <span className="min-w-0">
-                        <span className="block line-clamp-2 break-words font-extrabold text-ink">
+                        <span
+                          className="viread-learning-content block line-clamp-2 break-words font-extrabold text-ink"
+                          dir="ltr"
+                          lang="vi"
+                        >
                           {book.title}
                         </span>
                         <span className="mt-1 block text-sm font-semibold text-muted">
-                          {book.author
-                            ? `Tác giả: ${book.author}`
-                            : "Sách ViRead"}
+                          {book.author ? (
+                            <>
+                              {t("sentenceShooter.authorPrefix", {
+                                author: "",
+                              }).trimEnd()}{" "}
+                              <span
+                                className="viread-learning-content"
+                                dir="ltr"
+                                lang="vi"
+                              >
+                                {book.author}
+                              </span>
+                            </>
+                          ) : (
+                            t("sentenceShooter.defaultBookSource")
+                          )}
                         </span>
                         <span className="mt-3 inline-block rounded-full bg-success-surface px-3 py-1 text-xs font-extrabold text-success-ink">
-                          Sẵn sàng chơi · {book.available_rounds} câu phù hợp
+                          {t("sentenceShooter.readyRoundsBadge", {
+                            count: book.available_rounds,
+                          })}
                         </span>
                       </span>
                     </button>
@@ -1665,9 +1976,9 @@ export function SentenceShooterScreen({
                 })}
             </div>
             <PaginationBar
-              ariaLabel="Phân trang sách Xạ thủ ghép câu"
+              ariaLabel={t("sentenceShooter.booksPaginationAria")}
               compact
-              itemLabel="cuốn sách"
+              itemLabel={t("sentenceShooter.booksPaginationItem")}
               onPageChange={setBooksPage}
               page={booksPage}
               pageSize={SHOOTER_BOOKS_PAGE_SIZE}
@@ -1682,7 +1993,8 @@ export function SentenceShooterScreen({
           className="flex min-h-14 items-center justify-center gap-2 rounded-control px-5 font-bold text-primary hover:bg-sky"
           href="/entertainment"
         >
-          <ArrowLeft aria-hidden="true" className="size-5" /> Về khu Giải trí
+          <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-5" />{" "}
+          {t("sentenceShooter.backToEntertainment")}
         </Link>
         <Button
           className="sm:max-w-sm"
@@ -1692,11 +2004,12 @@ export function SentenceShooterScreen({
           isLoading={isStartingSession}
           onClick={() => void startGame()}
         >
-          <Play aria-hidden="true" className="size-5" /> Bắt đầu chơi
+          <Play aria-hidden="true" className="size-5" />{" "}
+          {t("sentenceShooter.startPlaying")}
         </Button>
       </div>
       <p className="text-center text-sm font-semibold text-muted">
-        Mỗi từ có thẻ riêng, kể cả khi trong câu có từ lặp lại.
+        {t("sentenceShooter.duplicateTokenNote")}
       </p>
     </section>
   );

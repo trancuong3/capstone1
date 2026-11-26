@@ -293,7 +293,7 @@ class ParentPrivateBookAccessAndIsolationTests(unittest.IsolatedAsyncioTestCase)
             page_img_a = await client_a.get(preview_url.replace("http://testserver", ""))
             self.assertEqual(page_img_a.status_code, 200)
             self.assertIn("no-store", page_img_a.headers.get("cache-control", "").lower())
-            self.assertTrue(page_img_a.content.startswith(b"\x89PNG"))
+            self.assertTrue(page_img_a.content.startswith((b"\x89PNG", b"\xff\xd8\xff")))
 
             sub_img_path = f"/books/my-books/{book_id}/submissions/{sub_id}/image"
             sub_img_a = await client_a.get(sub_img_path)

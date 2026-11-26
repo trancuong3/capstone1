@@ -3,6 +3,7 @@ import { z } from "zod";
 import { apiQuery, requestApi } from "@/lib/api/api-client";
 import { withRequestDeadline } from "@/lib/api/request-deadline";
 import { ServiceError } from "@/lib/api/service-error";
+import { translateRuntime } from "@/lib/i18n/runtime";
 import type {
   PictureCatalogDTO,
   PictureEvaluateResponseDTO,
@@ -209,7 +210,9 @@ async function withPictureDeadline<T>(
     ) {
       throw new ServiceError({
         code: "NETWORK_ERROR",
-        message: "Cô giáo AI đang phản hồi hơi lâu. Bé hãy bấm Thử lại nhé.",
+        message: translateRuntime(
+          "entertainment.pictureDescription.aiTimeoutError",
+        ),
         status: 504,
         request_id: "",
         retryable: true,

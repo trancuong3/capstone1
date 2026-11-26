@@ -13,10 +13,22 @@ import {
   VolumeX,
   Wind,
 } from "lucide-react";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import { Button, ButtonLink } from "@/components/common/button";
 import { ToyCannon } from "@/components/entertainment/sentence-shooter/toy-cannon";
+import { AppServicesContext } from "@/components/providers/app-services-provider";
+import { AppStoreContext } from "@/components/providers/app-store-provider";
+import { useEntertainmentPreferences } from "@/hooks/use-entertainment-preferences";
+import { useTranslations } from "@/hooks/use-i18n";
+import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { createAdaptiveLearningService } from "@/lib/api/adaptive-learning-service";
 import { createChildService } from "@/lib/api/child-service";
 import { cn } from "@/lib/utils/cn";
@@ -25,10 +37,9 @@ import type {
   EntertainmentRecommendationsDTO,
   GameKey,
 } from "@/types/adaptive-learning";
+import type { ChildProfileDTO } from "@/types/child";
 
 const ONBOARDING_STORAGE_KEY = "viread:entertainment-v4-onboarding-done";
-const REDUCED_MOTION_STORAGE_KEY = "viread:entertainment-v4-reduced-motion";
-const SOUND_MUTED_STORAGE_KEY = "viread:entertainment-v4-sound-muted";
 
 interface Props {
   readonly initialRecommendations?: EntertainmentRecommendationsDTO | null;
@@ -67,7 +78,11 @@ function ViReadMascot({ reducedMotion }: { readonly reducedMotion: boolean }) {
   );
 }
 
-function MemoryPreviewIllustration() {
+function MemoryPreviewIllustration({
+  chips,
+}: {
+  readonly chips: readonly string[];
+}) {
   return (
     <div
       aria-hidden="true"
@@ -120,32 +135,31 @@ function MemoryPreviewIllustration() {
         />
       </svg>
       <div className="flex flex-wrap justify-center gap-2 text-xs font-bold text-emerald-900">
-        <span className="rounded-full bg-white/90 px-3 py-1 shadow-xs">
-          Quan sát tranh
-        </span>
-        <span className="rounded-full bg-white/90 px-3 py-1 shadow-xs">
-          Nhớ chi tiết
-        </span>
-        <span className="rounded-full bg-white/90 px-3 py-1 shadow-xs">
-          Kể tiếp câu chuyện
-        </span>
+        {chips.map((label) => (
+          <span
+            className="rounded-full bg-white/90 px-3 py-1 shadow-xs"
+            key={label}
+          >
+            {label}
+          </span>
+        ))}
       </div>
     </div>
   );
 }
 
-const ONBOARDING_STEPS = [
+const ONBOARDING_STEP_KEYS = [
   {
-    title: "1. Chọn góc chơi bé thích",
-    body: "Bốn góc chơi nhẹ nhàng: Kể chuyện tranh, Xạ thủ ghép câu, Hát vui cùng bé và Bé nhớ được gì?",
+    titleKey: "hub.onboardingStep1Title",
+    bodyKey: "hub.onboardingStep1Body",
   },
   {
-    title: "2. Chơi bằng giọng nói hoặc chạm",
-    body: "Các nút bấm to rõ, dễ chạm trên điện thoại và máy tính bảng. Bé có thể nói hoặc chọn chữ đều được.",
+    titleKey: "hub.onboardingStep2Title",
+    bodyKey: "hub.onboardingStep2Body",
   },
   {
-    title: "3. Vui học không áp lực",
-    body: "Mỗi phiên 10–15 phút là tuyệt nhất. Không tính giờ căng thẳng, luôn có Cô giáo AI và Cú Mèo cổ vũ bé!",
+    titleKey: "hub.onboardingStep3Title",
+    bodyKey: "hub.onboardingStep3Body",
   },
 ] as const;
 
@@ -159,11 +173,42 @@ function readBrowserPref(reader: () => boolean): boolean {
   }
 }
 
+function HubSelectedChildSync({
+  onChildReady,
+}: {
+  readonly onChildReady: (child: ChildProfileDTO) => void;
+}) {
+  const { state } = useValidatedSelectedChild();
+
+  useEffect(() => {
+    if (state.status === "ready") {
+      onChildReady(state.child);
+    }
+  }, [onChildReady, state]);
+
+  return null;
+}
+
 export function EntertainmentScreen({
   initialRecommendations = null,
 }: Props = {}) {
-  const [recommendations, setRecommendations] =
-    useState<EntertainmentRecommendationsDTO | null>(initialRecommendations);
+  const t = useTranslations("entertainment");
+  const childSelectId = useId();
+  const appStore = useContext(AppStoreContext);
+  const appServices = useContext(AppServicesContext);
+  const { reducedMotion, calmSound, toggleReducedMotion, toggleCalmSound } =
+    useEntertainmentPreferences();
+
+  const [childrenList, setChildrenList] = useState<readonly ChildProfileDTO[]>(
+    [],
+  );
+  const [validatedChild, setValidatedChild] = useState<ChildProfileDTO | null>(
+    null,
+  );
+  const [fallbackChildId, setFallbackChildId] = useState<string | null>(null);
+  const [fetchedRecommendations, setFetchedRecommendations] =
+    useState<EntertainmentRecommendationsDTO | null>(null);
+
   const storedShowOnboarding = useSyncExternalStore(
     emptySubscribe,
     () =>
@@ -172,88 +217,117 @@ export function EntertainmentScreen({
       ),
     () => false,
   );
-  const storedReducedMotion = useSyncExternalStore(
-    emptySubscribe,
-    () =>
-      readBrowserPref(() => {
-        const saved = window.localStorage.getItem(REDUCED_MOTION_STORAGE_KEY);
-        if (saved === "true") return true;
-        if (saved === "false") return false;
-        return (
-          typeof window.matchMedia === "function" &&
-          window.matchMedia("(prefers-reduced-motion: reduce)").matches
-        );
-      }),
-    () => false,
-  );
-  const storedSoundMuted = useSyncExternalStore(
-    emptySubscribe,
-    () =>
-      readBrowserPref(
-        () => window.localStorage.getItem(SOUND_MUTED_STORAGE_KEY) === "true",
-      ),
-    () => false,
-  );
 
   const [onboardingOverride, setOnboardingOverride] = useState<boolean | null>(
     null,
   );
   const [onboardingStep, setOnboardingStep] = useState(0);
-  const [motionOverride, setMotionOverride] = useState<boolean | null>(null);
-  const [soundOverride, setSoundOverride] = useState<boolean | null>(null);
 
   const showOnboarding = onboardingOverride ?? storedShowOnboarding;
-  const reducedMotion = motionOverride ?? storedReducedMotion;
-  const soundMuted = soundOverride ?? storedSoundMuted;
+  const activeChildId =
+    appStore?.selectedChildId ??
+    validatedChild?.id ??
+    fallbackChildId ??
+    initialRecommendations?.child_id ??
+    null;
+
+  const handleValidatedChildReady = useCallback((child: ChildProfileDTO) => {
+    setValidatedChild((current) =>
+      current?.id === child.id ? current : child,
+    );
+  }, []);
 
   useEffect(() => {
-    if (initialRecommendations) return;
     let active = true;
-    async function loadAdaptiveRecommendations() {
+    const childService = appServices?.childService ?? createChildService();
+
+    async function loadChildren() {
       try {
-        const children = await createChildService().list();
-        if (!active || !children.length) return;
-        const recs = await createAdaptiveLearningService().getRecommendations(
-          children[0].id,
-        );
-        if (active) {
-          setRecommendations(recs);
+        const children = await childService.list();
+        if (!active) return;
+        setChildrenList(children);
+        if (!children.length) return;
+        const currentSelected = appStore?.selectedChildId ?? null;
+        if (currentSelected) {
+          return;
+        }
+        if (appStore) {
+          appStore.selectChild(children[0].id);
+          appStore.setValidatedSelectedChild(children[0]);
+        } else if (!initialRecommendations) {
+          setFallbackChildId(children[0].id);
         }
       } catch {
         // Gracefully remain in calm static child-first hub when unauthenticated or offline.
       }
     }
-    void loadAdaptiveRecommendations();
+
+    void loadChildren();
     return () => {
       active = false;
     };
-  }, [initialRecommendations]);
+  }, [appServices?.childService, appStore, initialRecommendations]);
+
+  useEffect(() => {
+    const targetChildId = appStore?.selectedChildId ?? fallbackChildId;
+    if (!targetChildId) return;
+    if (
+      initialRecommendations &&
+      initialRecommendations.child_id === targetChildId
+    ) {
+      return;
+    }
+
+    let active = true;
+    async function loadAdaptiveRecommendations(childId: string) {
+      try {
+        const recs =
+          await createAdaptiveLearningService().getRecommendations(childId);
+        if (active) {
+          setFetchedRecommendations(recs);
+        }
+      } catch {
+        // Gracefully keep static child-first hub if adaptive recommendations are unavailable.
+      }
+    }
+
+    void loadAdaptiveRecommendations(targetChildId);
+    return () => {
+      active = false;
+    };
+  }, [appStore?.selectedChildId, fallbackChildId, initialRecommendations]);
+
+  const recommendations =
+    fetchedRecommendations &&
+    (!activeChildId || fetchedRecommendations.child_id === activeChildId)
+      ? fetchedRecommendations
+      : initialRecommendations &&
+          (!activeChildId || initialRecommendations.child_id === activeChildId)
+        ? initialRecommendations
+        : null;
+
+  function handleSelectChild(nextChildId: string) {
+    if (!nextChildId) return;
+    const matched =
+      childrenList.find((item) => item.id === nextChildId) ?? null;
+    if (appStore) {
+      appStore.selectChild(nextChildId);
+      if (matched) {
+        appStore.setValidatedSelectedChild(matched);
+      }
+    } else {
+      setFallbackChildId(nextChildId);
+    }
+    if (matched) {
+      setValidatedChild(matched);
+    }
+  }
 
   function finishOnboarding() {
     setOnboardingOverride(false);
     setOnboardingStep(0);
     try {
       window.localStorage.setItem(ONBOARDING_STORAGE_KEY, "1");
-    } catch {
-      // Ignore restricted storage.
-    }
-  }
-
-  function toggleReducedMotion() {
-    const next = !reducedMotion;
-    setMotionOverride(next);
-    try {
-      window.localStorage.setItem(REDUCED_MOTION_STORAGE_KEY, String(next));
-    } catch {
-      // Ignore restricted storage.
-    }
-  }
-
-  function toggleSoundMuted() {
-    const next = !soundMuted;
-    setSoundOverride(next);
-    try {
-      window.localStorage.setItem(SOUND_MUTED_STORAGE_KEY, String(next));
     } catch {
       // Ignore restricted storage.
     }
@@ -266,6 +340,14 @@ export function EntertainmentScreen({
     ]),
   );
   const primaryRec = recommendations?.primary_recommendation ?? null;
+  const activeStep = ONBOARDING_STEP_KEYS[onboardingStep];
+  const displayChild =
+    childrenList.find((item) => item.id === activeChildId) ??
+    (validatedChild?.id === activeChildId ? validatedChild : null);
+  const profileBadgeAlias =
+    recommendations?.child_alias ?? displayChild?.alias ?? null;
+  const profileBadgeGrade =
+    recommendations?.child_grade ?? displayChild?.grade ?? null;
 
   return (
     <section
@@ -273,35 +355,67 @@ export function EntertainmentScreen({
         "activity-library mx-auto flex w-full max-w-[1140px] flex-col gap-5 pb-8",
         reducedMotion && "motion-reduce",
       )}
+      data-calm-sound={calmSound ? "true" : "false"}
       data-reduced-motion={reducedMotion ? "true" : "false"}
-      data-sound-muted={soundMuted ? "true" : "false"}
+      data-sound-muted={calmSound ? "false" : "true"}
     >
+      {appStore && appServices && appStore.selectedChildId ? (
+        <HubSelectedChildSync onChildReady={handleValidatedChildReady} />
+      ) : null}
+
       <header className="flex flex-col gap-3 border-b border-border pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-sm font-bold tracking-wide text-primary uppercase">
-            Vui học tiếng Việt mỗi ngày
+            {t("hub.eyebrow")}
           </p>
           <h1 className="book-title mt-1 text-3xl text-ink sm:text-4xl">
-            Giải trí
+            {t("hub.heading")}
           </h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {childrenList.length > 1 ? (
+            <div className="min-w-0 sm:min-w-52">
+              <label className="sr-only" htmlFor={childSelectId}>
+                {t("hub.selectChildLabel")}
+              </label>
+              <select
+                aria-label={t("hub.selectChildAria")}
+                className="min-h-12 w-full cursor-pointer rounded-control border border-border bg-white px-3.5 text-sm font-bold text-ink outline-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                data-testid="hub-child-selector"
+                id={childSelectId}
+                onChange={(event) => handleSelectChild(event.target.value)}
+                value={activeChildId ?? ""}
+              >
+                {childrenList.map((child) => (
+                  <option key={child.id} value={child.id}>
+                    {t("hub.childOptionLabel", {
+                      alias: child.alias,
+                      grade: child.grade,
+                    })}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+
           <Button
+            aria-pressed={!calmSound}
             className="min-h-12 px-4"
             fullWidth={false}
-            onClick={toggleSoundMuted}
+            onClick={toggleCalmSound}
             size="compact"
             type="button"
             variant="quiet"
           >
-            {soundMuted ? (
-              <VolumeX aria-hidden="true" className="size-4" />
-            ) : (
+            {calmSound ? (
               <Volume2 aria-hidden="true" className="size-4" />
+            ) : (
+              <VolumeX aria-hidden="true" className="size-4" />
             )}
-            {soundMuted ? "Đang tắt tiếng" : "Âm thanh dịu"}
+            {calmSound ? t("hub.calmSound") : t("hub.soundMuted")}
           </Button>
           <Button
+            aria-pressed={reducedMotion}
             className="min-h-12 px-4"
             fullWidth={false}
             onClick={toggleReducedMotion}
@@ -310,7 +424,9 @@ export function EntertainmentScreen({
             variant="quiet"
           >
             <Wind aria-hidden="true" className="size-4" />
-            {reducedMotion ? "Đã giảm chuyển động" : "Giảm chuyển động"}
+            {reducedMotion
+              ? t("hub.reducedMotionActive")
+              : t("hub.reduceMotion")}
           </Button>
           <Button
             className="min-h-12 px-4"
@@ -324,7 +440,7 @@ export function EntertainmentScreen({
             variant="secondary"
           >
             <HelpCircle aria-hidden="true" className="size-4" />
-            Hướng dẫn chơi
+            {t("hub.onboardingGuideButton")}
           </Button>
         </div>
       </header>
@@ -336,32 +452,49 @@ export function EntertainmentScreen({
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-extrabold text-amber-800 shadow-xs">
               <Sparkles aria-hidden="true" className="size-3.5" />
-              Cú Mèo ViRead gợi ý
+              {t("hub.mascotBadge")}
             </span>
-            {recommendations ? (
-              <span className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-muted">
-                Hồ sơ {recommendations.child_alias} · Lớp{" "}
-                {recommendations.child_grade}
+            {profileBadgeAlias && profileBadgeGrade !== null ? (
+              <span
+                className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-muted"
+                data-testid="hub-active-child-badge"
+              >
+                {t("hub.childProfileBadge", {
+                  alias: profileBadgeAlias,
+                  grade: profileBadgeGrade,
+                })}
               </span>
             ) : null}
           </div>
           <p className="text-lg font-extrabold text-ink">
-            {recommendations?.mascot_greeting_vi ??
-              "Chào bé yêu! Hôm nay bé muốn kể chuyện tranh, ghép câu, hát vui hay thử trí nhớ nào?"}
+            {recommendations?.mascot_greeting_vi ? (
+              <span className="viread-learning-content" dir="ltr" lang="vi">
+                {recommendations.mascot_greeting_vi}
+              </span>
+            ) : (
+              t("hub.defaultGreeting")
+            )}
           </p>
           <p className="text-sm leading-6 text-muted">
-            {primaryRec?.reason_vi ??
-              "Mỗi trò chơi đều kết nối nhẹ nhàng với sách bé đang đọc để giúp bé nhớ từ lâu hơn mà không hề áp lực."}
+            {primaryRec?.reason_vi ? (
+              <span className="viread-learning-content" dir="ltr" lang="vi">
+                {primaryRec.reason_vi}
+              </span>
+            ) : (
+              t("hub.defaultRecommendationReason")
+            )}
           </p>
           {recommendations?.focus_difficult_words.length ? (
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <span className="text-xs font-bold text-ink">
-                Từ bé đang ôn nhẹ:
+                {t("hub.focusDifficultWordsLabel")}
               </span>
               {recommendations.focus_difficult_words.map((word) => (
                 <span
-                  className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-bold text-amber-900"
+                  className="viread-learning-content rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-bold text-amber-900"
+                  dir="ltr"
                   key={word}
+                  lang="vi"
                 >
                   {word}
                 </span>
@@ -375,7 +508,8 @@ export function EntertainmentScreen({
             href={primaryRec.href}
             size="compact"
           >
-            Chơi gợi ý ngay <ArrowRight aria-hidden="true" className="size-4" />
+            {t("hub.playSuggestedCta")}{" "}
+            <ArrowRight aria-hidden="true" className="viread-rtl-flip size-4" />
           </ButtonLink>
         ) : null}
       </div>
@@ -383,23 +517,26 @@ export function EntertainmentScreen({
       {/* Interactive First-Visit Onboarding (Calm, Zero Dark Patterns) */}
       {showOnboarding ? (
         <aside
-          aria-label="Hướng dẫn làm quen khu vực Giải trí"
+          aria-label={t("hub.onboardingRegionAria")}
           className="rounded-card border border-primary/25 bg-white p-5 shadow-xs sm:p-6"
         >
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-xs font-extrabold tracking-wide text-primary uppercase">
-                Hướng dẫn nhanh ({onboardingStep + 1}/{ONBOARDING_STEPS.length})
+                {t("hub.onboardingCounter", {
+                  current: onboardingStep + 1,
+                  total: ONBOARDING_STEP_KEYS.length,
+                })}
               </p>
               <h2 className="mt-1 text-xl font-extrabold text-ink">
-                {ONBOARDING_STEPS[onboardingStep].title}
+                {t(activeStep.titleKey)}
               </h2>
               <p className="mt-1 text-body text-muted">
-                {ONBOARDING_STEPS[onboardingStep].body}
+                {t(activeStep.bodyKey)}
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {onboardingStep < ONBOARDING_STEPS.length - 1 ? (
+              {onboardingStep < ONBOARDING_STEP_KEYS.length - 1 ? (
                 <Button
                   className="min-h-12"
                   fullWidth={false}
@@ -407,7 +544,7 @@ export function EntertainmentScreen({
                   size="compact"
                   type="button"
                 >
-                  Tiếp theo
+                  {t("hub.onboardingNext")}
                 </Button>
               ) : (
                 <Button
@@ -417,7 +554,7 @@ export function EntertainmentScreen({
                   size="compact"
                   type="button"
                 >
-                  Bé đã hiểu rồi!
+                  {t("hub.onboardingDone")}
                 </Button>
               )}
               <Button
@@ -428,7 +565,7 @@ export function EntertainmentScreen({
                 type="button"
                 variant="quiet"
               >
-                Đóng
+                {t("hub.onboardingClose")}
               </Button>
             </div>
           </div>
@@ -437,22 +574,22 @@ export function EntertainmentScreen({
 
       {/* 4 Child-First Play & Learn Zones */}
       <div className="grid items-stretch gap-5 md:grid-cols-2">
-        {/* Zone 1: Thế giới kể chuyện */}
+        {/* Zone 1: Storytelling */}
         <article className="flex flex-col gap-4 rounded-card border border-border bg-white p-6 shadow-xs sm:p-7">
           <div className="flex items-center justify-between gap-2">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-xs font-extrabold text-amber-900">
               <BookOpen aria-hidden="true" className="size-3.5" />
-              Thế giới kể chuyện
+              {t("hub.pictureZoneBadge")}
             </span>
             {primaryRec?.game_key === "PICTURE_DESCRIPTION" ? (
               <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
-                Gợi ý hôm nay
+                {t("hub.todaySuggestionBadge")}
               </span>
             ) : null}
           </div>
           <div className="relative min-h-52 overflow-hidden rounded-card bg-cream">
             <Image
-              alt="Khu vườn đầy nắng để bé quan sát và kể chuyện"
+              alt={t("hub.pictureImageAlt")}
               className="object-cover"
               fill
               sizes="(max-width: 767px) 100vw, 480px"
@@ -460,19 +597,20 @@ export function EntertainmentScreen({
             />
           </div>
           <h2 className="text-2xl font-extrabold text-ink">
-            Kể chuyện qua tranh
+            {t("hub.pictureTitle")}
           </h2>
           <p className="text-body leading-6 text-muted">
-            Quan sát tranh trong sách hoặc ảnh ba mẹ tải lên. Cô giáo AI đồng
-            hành qua 6 chế độ: quan sát, mở rộng từ vựng, ghép câu và sáng tạo.
+            {t("hub.pictureDesc")}
           </p>
           {recommendationByGame.get("PICTURE_DESCRIPTION")?.target_words
             .length ? (
             <p className="text-xs font-semibold text-primary">
-              Từ gợi ý:{" "}
-              {recommendationByGame
-                .get("PICTURE_DESCRIPTION")
-                ?.target_words.join(", ")}
+              {t("hub.suggestedWordsLabel")}{" "}
+              <span className="viread-learning-content" dir="ltr" lang="vi">
+                {recommendationByGame
+                  .get("PICTURE_DESCRIPTION")
+                  ?.target_words.join(", ")}
+              </span>
             </p>
           ) : null}
           <ButtonLink
@@ -480,20 +618,21 @@ export function EntertainmentScreen({
             href="/entertainment/picture-description"
             size="compact"
           >
-            Chọn tranh <ArrowRight aria-hidden="true" className="size-4" />
+            {t("hub.pictureCta")}{" "}
+            <ArrowRight aria-hidden="true" className="viread-rtl-flip size-4" />
           </ButtonLink>
         </article>
 
-        {/* Zone 2: Phiêu lưu cùng chữ */}
+        {/* Zone 2: Word Adventure */}
         <article className="flex flex-col gap-4 rounded-card border border-border bg-white p-6 shadow-xs sm:p-7">
           <div className="flex items-center justify-between gap-2">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-sky px-3 py-1 text-xs font-extrabold text-primary-hover">
               <Sparkles aria-hidden="true" className="size-3.5" />
-              Phiêu lưu cùng chữ
+              {t("hub.shooterZoneBadge")}
             </span>
             {primaryRec?.game_key === "SENTENCE_SHOOTER" ? (
               <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
-                Gợi ý hôm nay
+                {t("hub.todaySuggestionBadge")}
               </span>
             ) : null}
           </div>
@@ -501,7 +640,11 @@ export function EntertainmentScreen({
             aria-hidden="true"
             className="flex min-h-52 flex-col items-center justify-center gap-5 rounded-card bg-sky p-6"
           >
-            <div className="flex flex-wrap justify-center gap-2">
+            <div
+              className="viread-learning-content flex flex-wrap justify-center gap-2"
+              dir="ltr"
+              lang="vi"
+            >
               {["Bé", "đang", "đọc", "sách."].map((word) => (
                 <span
                   className="rounded-control bg-white px-4 py-2 text-xl font-extrabold text-ink shadow-xs"
@@ -513,30 +656,32 @@ export function EntertainmentScreen({
             </div>
             <ToyCannon className="size-24" />
           </div>
-          <h2 className="text-2xl font-extrabold text-ink">Xạ thủ ghép câu</h2>
+          <h2 className="text-2xl font-extrabold text-ink">
+            {t("hub.shooterTitle")}
+          </h2>
           <p className="text-body leading-6 text-muted">
-            Bắn chữ siêu mượt để xếp trật tự câu, điền từ vào chỗ trống và ôn
-            luyện các từ khó từ chính sách bé đang đọc.
+            {t("hub.shooterDesc")}
           </p>
           <ButtonLink
             className="mt-auto min-h-12"
             href="/entertainment/sentence-shooter"
             size="compact"
           >
-            Bắt đầu chơi <ArrowRight aria-hidden="true" className="size-4" />
+            {t("hub.shooterCta")}{" "}
+            <ArrowRight aria-hidden="true" className="viread-rtl-flip size-4" />
           </ButtonLink>
         </article>
 
-        {/* Zone 3: Sân khấu âm nhạc */}
+        {/* Zone 3: Music Stage */}
         <article className="flex flex-col gap-4 rounded-card border border-border bg-cream p-6 shadow-xs sm:p-7">
           <div className="flex items-center justify-between gap-2">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-100 px-3 py-1 text-xs font-extrabold text-rose-900">
               <Music2 aria-hidden="true" className="size-3.5" />
-              Sân khấu âm nhạc
+              {t("hub.karaokeZoneBadge")}
             </span>
             {primaryRec?.game_key === "KARAOKE" ? (
               <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-bold text-primary">
-                Gợi ý hôm nay
+                {t("hub.todaySuggestionBadge")}
               </span>
             ) : null}
           </div>
@@ -549,55 +694,63 @@ export function EntertainmentScreen({
             </div>
             <div className="flex flex-wrap justify-center gap-2 text-xs font-bold text-rose-900">
               <span className="rounded-full bg-rose-50 px-3 py-1">
-                Chấm nhịp & giai điệu
+                {t("hub.karaokeChipRhythm")}
               </span>
               <span className="rounded-full bg-rose-50 px-3 py-1">
-                Gõ nhịp vui
+                {t("hub.karaokeChipTap")}
               </span>
               <span className="rounded-full bg-rose-50 px-3 py-1">
-                Luyện đoạn 0.85x
+                {t("hub.karaokeChipSlowPractice")}
               </span>
             </div>
           </div>
-          <h2 className="text-2xl font-extrabold text-ink">Hát vui cùng bé</h2>
+          <h2 className="text-2xl font-extrabold text-ink">
+            {t("hub.karaokeTitle")}
+          </h2>
           <p className="text-body leading-6 text-muted">
-            Chọn bài hát yêu thích, nghe nhạc và cùng bé hát theo lời trên màn
-            hình. Hỗ trợ chấm nhịp điệu, giai điệu và luyện lại từng đoạn khó.
+            {t("hub.karaokeDesc")}
           </p>
           <ButtonLink
             className="mt-auto min-h-12"
             href="/karaoke"
             size="compact"
           >
-            Mở thư viện bài hát{" "}
-            <ArrowRight aria-hidden="true" className="size-4" />
+            {t("hub.karaokeCta")}{" "}
+            <ArrowRight aria-hidden="true" className="viread-rtl-flip size-4" />
           </ButtonLink>
         </article>
 
-        {/* Zone 4: Khám phá trí nhớ (NEW Game V4.0) */}
+        {/* Zone 4: Memory Explorer */}
         <article className="flex flex-col gap-4 rounded-card border border-emerald-200 bg-white p-6 shadow-xs sm:p-7">
           <div className="flex items-center justify-between gap-2">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-extrabold text-emerald-900">
               <Brain aria-hidden="true" className="size-3.5" />
-              Khám phá trí nhớ
+              {t("hub.memoryZoneBadge")}
             </span>
             <span className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-extrabold text-white">
-              Mới
+              {t("hub.newBadge")}
             </span>
           </div>
-          <MemoryPreviewIllustration />
-          <h2 className="text-2xl font-extrabold text-ink">Bé nhớ được gì?</h2>
+          <MemoryPreviewIllustration
+            chips={[
+              t("hub.memoryChipObserve"),
+              t("hub.memoryChipRemember"),
+              t("hub.memoryChipStory"),
+            ]}
+          />
+          <h2 className="text-2xl font-extrabold text-ink">
+            {t("hub.memoryTitle")}
+          </h2>
           <p className="text-body leading-6 text-muted">
-            Quan sát tranh minh họa tiếng Việt trong thời gian bé tự chọn, nhớ
-            lại màu sắc và vị trí rồi tưởng tượng kể tiếp câu chuyện thật hay!
+            {t("hub.memoryDesc")}
           </p>
           <ButtonLink
             className="mt-auto min-h-12"
             href="/entertainment/memory-game"
             size="compact"
           >
-            Khám phá trí nhớ{" "}
-            <ArrowRight aria-hidden="true" className="size-4" />
+            {t("hub.memoryCta")}{" "}
+            <ArrowRight aria-hidden="true" className="viread-rtl-flip size-4" />
           </ButtonLink>
         </article>
       </div>
@@ -607,10 +760,15 @@ export function EntertainmentScreen({
         <Coffee aria-hidden="true" className="size-5 shrink-0 text-primary" />
         <p>
           <strong className="font-bold text-ink">
-            Nhịp nghỉ mắt khỏe mạnh:
+            {t("hub.breakReminderTitle")}
           </strong>{" "}
-          {recommendations?.natural_break_reminder_vi ??
-            "Mỗi phiên chơi khoảng 10–15 phút là vừa đẹp để mắt bé luôn khỏe mạnh và tiếp thu tự nhiên."}
+          {recommendations?.natural_break_reminder_vi ? (
+            <span className="viread-learning-content" dir="ltr" lang="vi">
+              {recommendations.natural_break_reminder_vi}
+            </span>
+          ) : (
+            t("hub.defaultBreakReminder")
+          )}
         </p>
       </footer>
     </section>

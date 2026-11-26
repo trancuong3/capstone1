@@ -37,6 +37,8 @@ jobs:
           gradle-version: "8.11.1"
       - name: Verify HTTPS frontend gate with offline unit tests
         run: python3 -m unittest discover -s android/scripts -p 'test_verify_frontend.py' -v
+      - name: Verify APK quality and secret-audit script unit tests
+        run: python3 -m unittest discover -s android/scripts -p 'test_verify_apk_quality.py' -v
       - name: Run JVM tests, compile Android, and lint
         working-directory: android
         env:

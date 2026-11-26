@@ -12,8 +12,11 @@ import { gradeWords, type GradedWordState } from "@/lib/reading/word-grading";
 import { parseVoiceIntent, type VoiceIntent } from "@/lib/reading/voice-intent";
 import type { ReadingPageWordDTO } from "@/types/reading";
 
-/** Words per millisecond of detected speech beyond which text is implausible. */
-const MIN_SPEECH_MS_PER_WORD = 150;
+/** Words per millisecond of detected speech beyond which text is implausible.
+ * Relaxed from 150ms -> 85ms so fluent Vietnamese Grade 3-5 readers (~110-145ms/syllable)
+ * are never rejected while provider auto-fill bursts (<85ms/word) are still blocked.
+ */
+const MIN_SPEECH_MS_PER_WORD = 85;
 
 export type EvidenceRejectReason =
   | EchoVerdictReason

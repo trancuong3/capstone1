@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import hashlib
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, UploadFile, status
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,10 +30,12 @@ from app.policies.book_access import (
     MODERATION_SUSPENDED,
     VISIBILITY_PARENT_PRIVATE,
     admin_submission_image_url,
+    is_private_book_readable_by,
     private_page_image_url,
     private_submission_image_url,
 )
 from app.repositories.parent_private_book_repository import ParentPrivateBookRepository
+from app.services.tts_audio_cache_service import invalidate_tts_cache_best_effort
 from app.schemas.parent_private_book import (
     SOURCE_TYPE_LABELS,
     WORKFLOW_STATUS_LABELS,
@@ -66,7 +71,9 @@ from app.schemas.parent_private_book import (
 )
 from app.services.document_rasterizer_service import (
     MAX_DOCUMENT_BYTES,
+    iter_rasterized_spooled_document,
     rasterize_uploaded_document,
+    spool_upload_file,
 )
 from app.services.ocr_ai.child_safety import content_hash as safety_content_hash
 from app.services.ocr_inference_job_service import (
@@ -385,7 +392,13 @@ class ParentPrivateBookService:
             source_format=sub.SourceFormat,
             image_width=int(sub.ImageWidth),
             image_height=int(sub.ImageHeight),
-            image_url=private_submission_image_url(sub.BookId, sub.Id, base_url=base_url),
+            image_url=private_submission_image_url(
+                sub.BookId,
+                sub.Id,
+                base_url=base_url,
+                storage_path=sub.SourceStoragePath,
+                owner_id=sub.OwnerParentId,
+            ),
             source_type=sub.SourceType,  # type: ignore[arg-type]
             source_type_label=SOURCE_TYPE_LABELS.get(sub.SourceType, sub.SourceType),
             source_note=sub.SourceNote,
@@ -460,6 +473,19 @@ class ParentPrivateBookService:
                 "Chỉ bạn và các hồ sơ trẻ của bạn có thể đọc sách này sau khi trang được kiểm tra. "
                 "Sách này hiện không được dùng để huấn luyện OCR."
             )
+        try:
+            from app.services.ocr_ai.config import OcrCorrectionConfig
+
+            if (
+                OcrCorrectionConfig.private_book_allow_cloud_ai()
+                and (os.getenv("OCR_CLOUD_CORRECTION_ENABLED") or "").strip().lower()
+                in {"1", "true", "yes", "on"}
+            ):
+                privacy_notice = (
+                    f"{privacy_notice} Văn bản trang sách tải lên được soát lỗi chính tả và kiểm tra an toàn trẻ em qua dịch vụ AI đám mây bảo mật."
+                )
+        except Exception:
+            pass
         return ParentPrivateBookSummaryRead(
             id=book.Id,
             title=book.Title,
@@ -610,13 +636,24 @@ class ParentPrivateBookService:
         for sub in all_subs:
             subs_by_book.setdefault(sub.BookId, []).append(sub)
 
+        readable_ids: set[UUID] | None = None
+        if not ready_only and isinstance(getattr(self, "db", None), AsyncSession):
+            readable_rows = await self.db.execute(
+                select(Book.Id).where(
+                    Book.Id.in_(book_ids),
+                    is_private_book_readable_by(actor_id),
+                )
+            )
+            readable_ids = set(readable_rows.scalars().all())
+
         results: list[ParentPrivateBookSummaryRead] = []
         for book in books:
-            readable = (
-                True
-                if ready_only
-                else await self.repo.is_private_book_readable(book.Id, actor_id)
-            )
+            if ready_only:
+                readable = True
+            elif readable_ids is not None:
+                readable = book.Id in readable_ids
+            else:
+                readable = await self.repo.is_private_book_readable(book.Id, actor_id)
             results.append(
                 self._serialize_book_summary(
                     book,
@@ -676,6 +713,25 @@ class ParentPrivateBookService:
         readable = await self.repo.is_private_book_readable(book_id, actor_id)
         contrib_map = await self._load_contribution_states([book])
 
+        pending_ocr_sub = next(
+            (
+                s
+                for s in submissions
+                if s.WorkflowStatus == "CHECKING" and s.OcrStatus == "PENDING"
+            ),
+            None,
+        )
+        if pending_ocr_sub is not None:
+            from app.services.remote_ocr_wakeup import (
+                maybe_nudge_ocr_wakeup_for_stale_queued_job,
+            )
+
+            maybe_nudge_ocr_wakeup_for_stale_queued_job(
+                job_id=pending_ocr_sub.Id,
+                created_at=pending_ocr_sub.UpdatedAt or pending_ocr_sub.CreatedAt,
+                reason="parent_book_poll_nudge",
+            )
+
         pages_dto = [
             ParentPrivatePageRead(
                 page_id=page.Id,
@@ -688,6 +744,8 @@ class ParentPrivateBookService:
                     page.Id,
                     revision_id=page.CurrentVerifiedRevisionId,
                     base_url=base_url,
+                    storage_path=page.ImagePath,
+                    owner_id=book.OwnerParentId,
                 ),
                 created_at=page.CreatedAt,
             )
@@ -750,11 +808,13 @@ class ParentPrivateBookService:
             committed_map = await self.repo.committed_page_counts([book.Id])
             submissions = await self.repo.list_submissions_for_book(book.Id)
             readable = await self.repo.is_private_book_readable(book.Id, actor_id)
+            contrib_map = await self._load_contribution_states([book])
             return self._serialize_book_summary(
                 book,
                 committed_count=committed_map.get(book.Id, 0),
                 submissions=submissions,
                 readable_for_children=readable,
+                ocr_contribution=contrib_map.get(book.Id),
             )
 
         # Snapshot committed pages into plain tuples BEFORE rollback so Storage I/O runs outside DB write locks
@@ -894,6 +954,7 @@ class ParentPrivateBookService:
                 _reset_submission_for_full_recheck(
                     sub, now=now, reset_ocr=True, auto_recheck=True
                 )
+                reset_sub_ids.add(sub.Id)
                 reset_staged += 1
 
             await self.repo.supersede_open_moderation_requests_for_book(locked_book.Id, now)
@@ -903,7 +964,7 @@ class ParentPrivateBookService:
                     locked_book.Id, lock=True
                 )
                 affected_subs.extend(s for s in all_book_subs if s.Id in reset_sub_ids and s not in new_submissions)
-            await self._sync_remote_ocr_for_submissions(
+            post_ocr_ready = await self._sync_remote_ocr_for_submissions(
                 affected_subs, reason="BOOK_METADATA_UPDATED_RECHECK"
             )
             await self._safe_revoke_flow2_contributions(
@@ -923,6 +984,7 @@ class ParentPrivateBookService:
             )
             await self.repo.commit()
             await self.db.refresh(locked_book)
+            self._dispatch_post_ocr_if_ready(post_ocr_ready)
         except Exception:
             await self.repo.rollback()
             for p in uploaded_paths:
@@ -946,14 +1008,20 @@ class ParentPrivateBookService:
         submissions: list[ParentBookPageSubmission],
         *,
         reason: str = "SUPERSEDED_BY_PARENT_ACTION",
-    ) -> None:
+    ) -> list[ParentBookPageSubmission]:
+        """Enqueue remote OCR jobs without firing post-OCR before transaction commit.
+
+        Returns submissions that hit the SHA-256 OCR cache and are ready for
+        post-OCR dispatch strictly AFTER `await self.repo.commit()`.
+        """
         if not is_remote_ocr_mode() or not isinstance(self.db, AsyncSession):
-            return
+            return []
         job_svc = OcrInferenceJobService(self.db)
+        post_ocr_ready: list[ParentBookPageSubmission] = []
         for sub in submissions:
             await job_svc.cancel_for_submission(sub.Id, reason=reason)
             if sub.WorkflowStatus == "CHECKING" and sub.OcrStatus == "PENDING":
-                await job_svc.enqueue_job(
+                job = await job_svc.enqueue_job(
                     job_kind=JOB_KIND_PARENT_SUBMISSION,
                     owner_user_id=sub.OwnerParentId,
                     book_id=sub.BookId,
@@ -970,7 +1038,14 @@ class ParentPrivateBookService:
                     expected_version=int(sub.SubmissionVersion),
                     expected_candidate_hash=sub.CandidateHash,
                     processing_meta={"source_page_number": int(sub.SourcePageNumber)},
+                    schedule_post_ocr=False,
                 )
+                if getattr(job, "should_schedule_post_ocr", False) or (
+                    sub.WorkflowStatus == "CHECKING"
+                    and sub.OcrStatus in ("COMPLETED", "NO_TEXT_DETECTED")
+                ):
+                    post_ocr_ready.append(sub)
+        return post_ocr_ready
 
     @staticmethod
     def _dispatch_post_ocr_if_ready(submissions: list[ParentBookPageSubmission]) -> None:
@@ -1031,6 +1106,7 @@ class ParentPrivateBookService:
             },
         )
         await self.repo.commit()
+        await invalidate_tts_cache_best_effort(self.db, book_id=book.Id, commit=True)
 
         # Best-effort cleanup of staging objects not referenced by moderation history
         preserved_paths = await self.repo.list_moderation_storage_paths_for_book(book_id)
@@ -1378,7 +1454,7 @@ class ParentPrivateBookService:
                 )
 
             await self.repo.supersede_open_moderation_requests(sub.Id, now)
-            await self._sync_remote_ocr_for_submissions(
+            post_ocr_ready = await self._sync_remote_ocr_for_submissions(
                 [sub], reason="SUPERSEDED_BY_PARENT_COMMITTED_REPLACE"
             )
             await self._safe_revoke_flow2_contributions(
@@ -1401,6 +1477,7 @@ class ParentPrivateBookService:
             )
             await self.repo.commit()
             await self.db.refresh(sub)
+            self._dispatch_post_ocr_if_ready(post_ocr_ready)
         except Exception:
             await self.repo.rollback()
             await asyncio.to_thread(
@@ -1408,7 +1485,9 @@ class ParentPrivateBookService:
             )
             raise
 
-        return self._serialize_submission(locked_book, sub, base_url=base_url)
+        resp = self._serialize_submission(locked_book, sub, base_url=base_url)
+        await invalidate_tts_cache_best_effort(self.db, page_id=page_id, commit=True)
+        return resp
 
     async def delete_committed_page(
         self, actor_id: UUID, book_id: UUID, page_id: UUID
@@ -1454,16 +1533,17 @@ class ParentPrivateBookService:
             },
         )
         await self.repo.commit()
-
         committed_map = await self.repo.committed_page_counts([book.Id])
         readable = await self.repo.is_private_book_readable(book.Id, actor_id)
-        return ParentDeletePrivatePageResponse(
+        resp = ParentDeletePrivatePageResponse(
             status="deleted",
             book_id=book.Id,
             page_id=page_id,
             committed_page_count=committed_map.get(book.Id, 0),
             readable_for_children=readable,
         )
+        await invalidate_tts_cache_best_effort(self.db, page_id=page_id, commit=True)
+        return resp
 
     # ------------------------------------------------------------------
     # Parent Page Submission (Upload -> Staging -> Check Queue)
@@ -1514,76 +1594,92 @@ class ParentPrivateBookService:
 
         await self.repo.rollback()
 
-        raw_bytes = await upload.read(MAX_DOCUMENT_BYTES + 1)
-        if not raw_bytes:
+        spooled = await spool_upload_file(upload, max_bytes=MAX_DOCUMENT_BYTES)
+        if spooled.byte_length <= 0:
+            spooled.close()
             raise HTTPException(status_code=422, detail="The uploaded document is empty or corrupted")
-        if len(raw_bytes) > MAX_DOCUMENT_BYTES:
-            raise HTTPException(status_code=413, detail="Document exceeds the 50 MB limit")
-
-        bundle = await asyncio.to_thread(
-            rasterize_uploaded_document,
-            filename=upload.filename or "page.png",
-            content_type=upload.content_type or "",
-            data=raw_bytes,
-        )
 
         batch_id = uuid4()
         now = datetime.now(timezone.utc)
         expires_at = now + timedelta(days=STAGING_TTL_DAYS)
         uploaded_paths: list[str] = []
         created_rows: list[ParentBookPageSubmission] = []
+        post_ocr_ready: list[ParentBookPageSubmission] = []
+        source_format: str = "IMAGE"
 
         try:
-            for idx, page in enumerate(bundle.pages, start=1):
-                sub_id = uuid4()
-                page_sha = hashlib.sha256(page.image_bytes).hexdigest()
-                storage_path = (
-                    f"private-books/{actor_id}/{book_id}/staging/{sub_id}/"
-                    f"page-{page.source_page}.{page.extension}"
-                )
-                await asyncio.to_thread(
-                    upload_object,
-                    storage_path,
-                    page.image_bytes,
-                    page.content_type,
-                    bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
-                    upsert=False,
-                )
-                uploaded_paths.append(storage_path)
-                page_target = (
-                    (target_page_number + idx - 1)
-                    if target_page_number is not None
-                    else None
-                )
-                created_rows.append(
-                    ParentBookPageSubmission(
-                        Id=sub_id,
-                        BookId=book_id,
-                        OwnerParentId=actor_id,
-                        BatchId=batch_id,
-                        BatchTotalPages=len(bundle.pages),
-                        SourcePageNumber=page.source_page,
-                        TargetPageNumber=page_target,
-                        IdempotencyKey=normalized_key,
-                        SourceFileName=bundle.file_name,
-                        SourceFormat=bundle.source_format,
-                        SourceStoragePath=storage_path,
-                        SourceSha256=page_sha,
-                        ImageWidth=page.width,
-                        ImageHeight=page.height,
-                        SourceType=source_type,
-                        SourceNote=clean_note,
-                        SubmissionVersion=1,
-                        OptimisticLockVersion=1,
-                        WorkflowStatus="CHECKING",
-                        OcrStatus="PENDING",
-                        ProofreadStatus="PENDING",
-                        ToolCheckStatus="PENDING",
-                        TempExpiresAt=expires_at,
-                        CreatedAt=now,
-                        UpdatedAt=now,
-                    )
-                )
+            with iter_rasterized_spooled_document(spooled) as (
+                file_name,
+                source_format,
+                _source_sha256,
+                page_iter,
+            ):
+                def _next_page(it):
+                    return next(it, None)
+
+                idx = 0
+                while True:
+                    page = await asyncio.to_thread(_next_page, page_iter)
+                    if page is None:
+                        break
+                    idx += 1
+                    try:
+                        sub_id = uuid4()
+                        page_sha = hashlib.sha256(page.image_bytes).hexdigest()
+                        storage_path = (
+                            f"private-books/{actor_id}/{book_id}/staging/{sub_id}/"
+                            f"page-{page.source_page}.{page.extension}"
+                        )
+                        await asyncio.to_thread(
+                            upload_object,
+                            storage_path,
+                            page.image_bytes,
+                            page.content_type,
+                            bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
+                            upsert=False,
+                        )
+                        uploaded_paths.append(storage_path)
+                        page_target = (
+                            (target_page_number + idx - 1)
+                            if target_page_number is not None
+                            else None
+                        )
+                        created_rows.append(
+                            ParentBookPageSubmission(
+                                Id=sub_id,
+                                BookId=book_id,
+                                OwnerParentId=actor_id,
+                                BatchId=batch_id,
+                                BatchTotalPages=1,
+                                SourcePageNumber=page.source_page,
+                                TargetPageNumber=page_target,
+                                IdempotencyKey=normalized_key,
+                                SourceFileName=file_name,
+                                SourceFormat=source_format,
+                                SourceStoragePath=storage_path,
+                                SourceSha256=page_sha,
+                                ImageWidth=page.width,
+                                ImageHeight=page.height,
+                                SourceType=source_type,
+                                SourceNote=clean_note,
+                                SubmissionVersion=1,
+                                OptimisticLockVersion=1,
+                                WorkflowStatus="CHECKING",
+                                OcrStatus="PENDING",
+                                ProofreadStatus="PENDING",
+                                ToolCheckStatus="PENDING",
+                                TempExpiresAt=expires_at,
+                                CreatedAt=now,
+                                UpdatedAt=now,
+                            )
+                        )
+                    finally:
+                        del page
+                        gc.collect()
+
+            total_batch_pages = len(created_rows)
+            for row in created_rows:
+                row.BatchTotalPages = total_batch_pages
 
             # Re-verify book state & persist atomically
             locked_book = await self.repo.get_owned_private_book(book_id, actor_id, lock=True)
@@ -1595,10 +1691,11 @@ class ParentPrivateBookService:
                     detail="Sách riêng đang bị đình chỉ hoặc ngừng hoạt động.",
                 )
             await self.repo.add_submissions(created_rows)
-            await self._sync_remote_ocr_for_submissions(
+            post_ocr_ready = await self._sync_remote_ocr_for_submissions(
                 created_rows, reason="INITIAL_SUBMIT"
             )
             await self.repo.commit()
+            self._dispatch_post_ocr_if_ready(post_ocr_ready)
         except IntegrityError:
             await self.repo.rollback()
             for p in uploaded_paths:
@@ -1624,6 +1721,8 @@ class ParentPrivateBookService:
             for p in uploaded_paths:
                 await asyncio.to_thread(delete_object, p, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET)
             raise
+        finally:
+            spooled.close()
 
         for row in created_rows:
             await self.db.refresh(row)
@@ -1631,7 +1730,7 @@ class ParentPrivateBookService:
         return ParentSubmitPagesResponse(
             book_id=book_id,
             batch_id=batch_id,
-            source_format=bundle.source_format,
+            source_format=source_format,
             total_pages=len(created_rows),
             replayed_idempotency=False,
             submissions=[
@@ -1655,6 +1754,16 @@ class ParentPrivateBookService:
         sub = await self.repo.get_owned_submission(book_id, submission_id, actor_id)
         if sub is None:
             raise HTTPException(status_code=404, detail="Resource not found")
+        if sub.WorkflowStatus == "CHECKING" and sub.OcrStatus == "PENDING":
+            from app.services.remote_ocr_wakeup import (
+                maybe_nudge_ocr_wakeup_for_stale_queued_job,
+            )
+
+            maybe_nudge_ocr_wakeup_for_stale_queued_job(
+                job_id=sub.Id,
+                created_at=sub.UpdatedAt or sub.CreatedAt,
+                reason="parent_submission_poll_nudge",
+            )
         return self._serialize_submission(book, sub, base_url=base_url)
 
     async def accept_spelling(
@@ -1906,11 +2015,12 @@ class ParentPrivateBookService:
             sub.TempExpiresAt = now + timedelta(days=STAGING_TTL_DAYS)
             sub.UpdatedAt = now
             await self.repo.supersede_open_moderation_requests(sub.Id, now)
-            await self._sync_remote_ocr_for_submissions(
+            post_ocr_ready = await self._sync_remote_ocr_for_submissions(
                 [sub], reason="SUPERSEDED_BY_PARENT_REPLACE"
             )
             await self.repo.commit()
             await self.db.refresh(sub)
+            self._dispatch_post_ocr_if_ready(post_ocr_ready)
         except Exception:
             await self.repo.rollback()
             await asyncio.to_thread(delete_object, new_storage_path, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET)
@@ -2553,7 +2663,19 @@ class ParentPrivateBookService:
             "REJECTED": 0,
             "SUSPENDED": 0,
         }
-        queue_items: list[AdminUserBookQueueItemRead] = []
+        priority_order = {
+            "PENDING_ADMIN": 0,
+            "NEEDS_ADMIN_REVIEW": 1,
+            "CHECK_FAILED": 2,
+            "REJECTED": 3,
+            "NEEDS_RECHECK": 4,
+            "APPROVED_READY_TO_ADD": 5,
+            "ADDED_TO_BOOK": 6,
+            "PASSED_READY_TO_ADD": 7,
+            "CHECKING": 8,
+        }
+        selected_rows: list[tuple[Book, list[ParentBookPageSubmission], str, ParentBookPageSubmission | None]] = []
+        primary_sub_ids: list[UUID] = []
         for book in books:
             subs = subs_by_book.get(book.Id, [])
             q_status = self._classify_admin_queue_status(book, subs)
@@ -2563,28 +2685,40 @@ class ParentPrivateBookService:
             if status_filter is not None and q_status != status_filter:
                 continue
 
-            # Pick most relevant submission for primary "Mở để duyệt" CTA
-            priority_order = {
-                "PENDING_ADMIN": 0,
-                "NEEDS_ADMIN_REVIEW": 1,
-                "CHECK_FAILED": 2,
-                "REJECTED": 3,
-                "NEEDS_RECHECK": 4,
-                "APPROVED_READY_TO_ADD": 5,
-                "ADDED_TO_BOOK": 6,
-                "PASSED_READY_TO_ADD": 7,
-                "CHECKING": 8,
-            }
             sorted_subs = sorted(
                 subs,
                 key=lambda s: (priority_order.get(s.WorkflowStatus, 9), -s.UpdatedAt.timestamp()),
             )
             primary_sub = sorted_subs[0] if sorted_subs else None
-            latest_req = (
-                await self.repo.get_open_moderation_request(primary_sub.Id)
-                if primary_sub is not None
-                else None
+            if primary_sub is not None:
+                primary_sub_ids.append(primary_sub.Id)
+            selected_rows.append((book, subs, q_status, primary_sub))
+
+        open_req_by_sub: dict[UUID, ParentBookModerationRequest] = {}
+        if primary_sub_ids and isinstance(getattr(self, "db", None), AsyncSession):
+            req_rows = await self.db.execute(
+                select(ParentBookModerationRequest)
+                .where(
+                    ParentBookModerationRequest.SubmissionId.in_(primary_sub_ids),
+                    ParentBookModerationRequest.Status == "PENDING_ADMIN",
+                )
+                .order_by(
+                    ParentBookModerationRequest.SubmissionId,
+                    ParentBookModerationRequest.CreatedAt.desc(),
+                    ParentBookModerationRequest.Id.desc(),
+                )
             )
+            for req in req_rows.scalars().all():
+                open_req_by_sub.setdefault(req.SubmissionId, req)
+
+        queue_items: list[AdminUserBookQueueItemRead] = []
+        for book, subs, q_status, primary_sub in selected_rows:
+            if primary_sub is None:
+                latest_req = None
+            elif isinstance(getattr(self, "db", None), AsyncSession):
+                latest_req = open_req_by_sub.get(primary_sub.Id)
+            else:
+                latest_req = await self.repo.get_open_moderation_request(primary_sub.Id)
             queue_items.append(
                 AdminUserBookQueueItemRead(
                     book_id=book.Id,
@@ -2718,7 +2852,11 @@ class ParentPrivateBookService:
             source_sha256=sub.SourceSha256,
             image_width=int(sub.ImageWidth),
             image_height=int(sub.ImageHeight),
-            image_url=admin_submission_image_url(sub.Id, base_url=base_url),
+            image_url=admin_submission_image_url(
+                sub.Id,
+                base_url=base_url,
+                storage_path=sub.SourceStoragePath,
+            ),
             workflow_status=sub.WorkflowStatus,  # type: ignore[arg-type]
             workflow_status_label=WORKFLOW_STATUS_LABELS.get(sub.WorkflowStatus, sub.WorkflowStatus),
             request_status=latest_req.Status if latest_req else None,
@@ -3035,10 +3173,12 @@ class ParentPrivateBookService:
         if is_remote_ocr_mode() and isinstance(self.db, AsyncSession):
             await OcrInferenceJobService(self.db).cancel_for_book(book.Id, reason="BOOK_SUSPENDED")
         await self.repo.commit()
-        return {
+        result = {
             "book_id": str(book.Id),
             "moderation_status": MODERATION_SUSPENDED,
             "suspended_at": now.isoformat(),
             "reason": payload.reason,
             "audit_log_id": str(audit.Id),
         }
+        await invalidate_tts_cache_best_effort(self.db, book_id=book.Id, commit=True)
+        return result

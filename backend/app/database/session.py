@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import socket
 import ssl
 import sys
@@ -9,9 +10,9 @@ import threading
 import time
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import IllegalStateChangeError
+from sqlalchemy.exc import DisconnectionError, IllegalStateChangeError, InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool
@@ -24,6 +25,8 @@ from .config import (
     DATABASE_CONCURRENCY_LIMIT,
     DATABASE_CONCURRENCY_WAIT_TIMEOUT,
     DATABASE_CONNECT_TIMEOUT,
+    DATABASE_POOL_PRE_PING,
+    DATABASE_POOL_RECYCLE_SECONDS,
     DATABASE_POOLER_MODE,
     DATABASE_SSL_REQUIRED,
     DATABASE_SSL_ROOT_CERT,
@@ -218,8 +221,13 @@ _running_test_cli = any(
     runner in (sys.argv[0] if sys.argv else "")
     for runner in ("unittest", "pytest")
 )
+_force_null_pool = (
+    (os.getenv("DATABASE_FORCE_NULL_POOL") or "").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
 _use_null_pool = (
-    APP_ENVIRONMENT == "test"
+    _force_null_pool
+    or APP_ENVIRONMENT == "test"
     or _running_test_cli
     or (
         DATABASE_POOLER_MODE == "local"
@@ -234,6 +242,23 @@ if _use_null_pool:
         poolclass=NullPool,
         connect_args=asyncpg_connect_args,
     )
+elif DATABASE_POOLER_MODE == "transaction":
+    # Tiny bounded pool avoids per-request TLS/SCRAM handshakes across Supavisor
+    # transaction pooler (port 6543) while prepared statements remain disabled.
+    # pool_pre_ping defaults False here (DATABASE_POOL_PRE_PING=true overrides)
+    # so warm checkouts avoid a synchronous extra Oregon<->APAC SELECT 1 RTT;
+    # pool_recycle=180 + asyncpg connection lifecycle guard staleness.
+    engine = create_async_engine(
+        sqlalchemy_database_url,
+        echo=False,
+        pool_size=2,
+        max_overflow=2,
+        pool_timeout=DATABASE_CONCURRENCY_WAIT_TIMEOUT,
+        pool_recycle=DATABASE_POOL_RECYCLE_SECONDS,
+        pool_pre_ping=DATABASE_POOL_PRE_PING,
+        pool_use_lifo=True,
+        connect_args=asyncpg_connect_args,
+    )
 else:
     _base_pool_size = max(2, min(DATABASE_CONCURRENCY_LIMIT, 4))
     _max_overflow = max(2, DATABASE_CONCURRENCY_LIMIT - _base_pool_size)
@@ -243,11 +268,31 @@ else:
         pool_size=_base_pool_size,
         max_overflow=_max_overflow,
         pool_timeout=DATABASE_CONCURRENCY_WAIT_TIMEOUT,
-        pool_recycle=300,
-        pool_pre_ping=True,
+        pool_recycle=DATABASE_POOL_RECYCLE_SECONDS,
+        pool_pre_ping=DATABASE_POOL_PRE_PING,
         pool_use_lifo=True,
         connect_args=asyncpg_connect_args,
     )
+
+def _evict_closed_asyncpg_connection(
+    dbapi_connection: Any,
+    _connection_record: Any,
+    _connection_proxy: Any,
+) -> None:
+    """0-RTT checkout guard: evict already-closed asyncpg sockets before query execution.
+
+    When `DATABASE_POOL_PRE_PING=False` (default on Supavisor transaction pooler),
+    this avoids a cross-region SELECT 1 round-trip on healthy connections while
+    still forcing transparent reconnect if Supavisor closed an idle socket.
+    """
+    raw_conn = getattr(dbapi_connection, "_connection", None)
+    is_closed = getattr(raw_conn, "is_closed", None)
+    if callable(is_closed) and is_closed():
+        raise DisconnectionError("asyncpg connection already closed before checkout")
+
+
+if not _use_null_pool:
+    event.listen(engine.sync_engine, "checkout", _evict_closed_asyncpg_connection)
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
@@ -264,7 +309,7 @@ async def get_db():
         yield session
 
 
-_DNS_CACHE_TTL_SECONDS = 60.0
+_DNS_CACHE_TTL_SECONDS = 300.0
 _dns_cache_lock = threading.Lock()
 _dns_cache: dict[tuple[str, int], float] = {}
 
@@ -304,9 +349,23 @@ async def probe_database_connection(*, timeout: float | None = None) -> dict[str
 
         async def _select_one() -> bool:
             async with AsyncSessionLocal() as session:
+                if isinstance(session, AsyncSession):
+                    # AUTOCOMMIT avoids BEGIN + ROLLBACK around read-only SELECT 1
+                    # (cuts 3 cross-region round-trips down to 1 single RTT).
+                    await session.connection(
+                        execution_options={"isolation_level": "AUTOCOMMIT"}
+                    )
                 return (await session.scalar(text("SELECT 1"))) == 1
 
-        ok = await asyncio.wait_for(_select_one(), timeout=effective_timeout)
+        async def _select_one_with_stale_retry() -> bool:
+            try:
+                return await _select_one()
+            except (DisconnectionError, InterfaceError, OperationalError, ConnectionError, OSError):
+                # Recover seamlessly if a pooled idle connection was dropped mid-flight
+                # when DATABASE_POOL_PRE_PING=False.
+                return await _select_one()
+
+        ok = await asyncio.wait_for(_select_one_with_stale_retry(), timeout=effective_timeout)
         return {
             "ok": bool(ok),
             "dns_resolved": dns_resolved,

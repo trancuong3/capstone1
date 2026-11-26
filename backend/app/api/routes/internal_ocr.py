@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -192,13 +193,24 @@ async def download_ocr_job_source(
     fencing_token: int = Query(ge=1),
     _: str = Depends(require_ocr_worker_token),
     db: AsyncSession = Depends(get_db),
-) -> Response:
+) -> StreamingResponse:
     raw, mime_type = await OcrInferenceJobService(db).stream_job_source(
         job_id=job_id,
         worker_id=worker_id,
         fencing_token=fencing_token,
     )
-    return Response(content=raw, media_type=mime_type)
+
+    def _chunk_iter():
+        chunk_size = 65536
+        view = memoryview(raw)
+        for offset in range(0, len(view), chunk_size):
+            yield bytes(view[offset : offset + chunk_size])
+
+    return StreamingResponse(
+        _chunk_iter(),
+        media_type=mime_type,
+        headers={"Content-Length": str(len(raw))},
+    )
 
 
 @router.post("/{job_id}/complete")

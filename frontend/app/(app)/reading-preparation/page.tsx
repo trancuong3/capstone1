@@ -1,11 +1,21 @@
 import type { Metadata } from "next";
 
-import { AppServicesProvider } from "@/components/providers/app-services-provider";
 import { ReadingPreparationScreen } from "@/components/reading/reading-preparation-screen";
+import { translateMessage } from "@/lib/i18n/formatter";
+import { getServerI18n } from "@/lib/i18n/server";
+import { viMessages } from "@/messages/vi";
 
-export const metadata: Metadata = {
-  title: "Chuẩn bị đọc sách",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const { locale, messages } = await getServerI18n();
+  return {
+    title: translateMessage(
+      messages,
+      viMessages,
+      locale,
+      "reading.preparation.pageTitle",
+    ),
+  };
+}
 
 interface ReadingPreparationPageProps {
   searchParams: Promise<{
@@ -25,13 +35,11 @@ export default async function ReadingPreparationPage({
 }: ReadingPreparationPageProps) {
   const query = await searchParams;
   return (
-    <AppServicesProvider scenario="default">
-      <ReadingPreparationScreen
-        bookId={firstValue(query.bookId)}
-        pageId={firstValue(query.pageId)}
-        endPageId={firstValue(query.endPageId)}
-        confidence={firstValue(query.confidence)}
-      />
-    </AppServicesProvider>
+    <ReadingPreparationScreen
+      bookId={firstValue(query.bookId)}
+      pageId={firstValue(query.pageId)}
+      endPageId={firstValue(query.endPageId)}
+      confidence={firstValue(query.confidence)}
+    />
   );
 }

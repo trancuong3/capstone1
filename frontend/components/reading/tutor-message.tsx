@@ -1,6 +1,9 @@
+"use client";
+
 import type { TutorAction } from "@/types/reading";
 
 import { ReadingStatusDialog } from "@/components/reading/reading-status-dialog";
+import { useTranslations } from "@/hooks/use-i18n";
 
 interface TutorMessageProps {
   action: TutorAction | null;
@@ -23,22 +26,29 @@ export function TutorMessage({
   ttsFailed = false,
   word,
 }: TutorMessageProps) {
+  const t = useTranslations("reading");
+
   return (
     <ReadingStatusDialog
       body={
         <div className="space-y-3">
-          <p className="text-[32px] font-semibold text-primary">{word}</p>
+          <p
+            className="viread-learning-content text-[32px] font-semibold text-primary"
+            dir="ltr"
+            lang="vi"
+          >
+            {word}
+          </p>
           <p>
             {ttsFailed
-              ? (errorMessage ??
-                "Mình chưa phát được âm thanh. Bé vẫn có thể nhìn chữ và đọc tiếp nhé.")
+              ? (errorMessage ?? t("tutor.audioUnavailable"))
               : isPlaying
-                ? "Mình đang phát âm thanh mẫu. Bé lắng nghe nhé."
-                : "Bé có thể nhấn Nghe mẫu để nghe lại từ này."}
+                ? t("tutor.playingSample")
+                : t("tutor.listenHint")}
           </p>
           {action?.message_code === "READ_EXAMPLE_REPLAYED" ? (
             <p className="font-semibold text-success-ink" role="status">
-              Đã thử lại phần nghe mẫu.
+              {t("tutor.retriedStatus")}
             </p>
           ) : null}
         </div>
@@ -49,15 +59,15 @@ export function TutorMessage({
         disabled: isPlaying,
         isLoading: isRetrying,
         label: isPlaying
-          ? "Đang phát"
+          ? t("tutor.playingAction")
           : ttsFailed
-            ? "Thử nghe lại"
-            : "Nghe mẫu",
+            ? t("tutor.retryListenAction")
+            : t("tutor.listenAction"),
         onClick: onRetry,
         variant: "secondary",
       }}
-      secondaryAction={{ label: "Đọc tiếp", onClick: onClose }}
-      title="Từ này mình đọc thế nào nhỉ?"
+      secondaryAction={{ label: t("tutor.continueReading"), onClick: onClose }}
+      title={t("tutor.title")}
     />
   );
 }

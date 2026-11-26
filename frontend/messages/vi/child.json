@@ -1,0 +1,36 @@
+{
+  "list": {
+    "title": "Hồ sơ bé",
+    "subtitle": "Quản lý thông tin và cấp độ đọc của từng bé.",
+    "addChild": "Thêm hồ sơ bé",
+    "empty": "Chưa có hồ sơ bé nào. Hãy tạo hồ sơ đầu tiên cho bé."
+  },
+  "switcher": {
+    "selectChild": "Chọn bé",
+    "quickSwitchAria": "Đổi nhanh bé",
+    "selectedAria": "Bé đang chọn: {alias}, bấm để đổi",
+    "gradeLabel": "Lớp {grade}",
+    "gradeShort": "L{grade}",
+    "manageChildren": "Quản lý hồ sơ bé"
+  },
+  "form": {
+    "createTitle": "Tạo hồ sơ bé",
+    "editTitle": "Cập nhật hồ sơ bé",
+    "aliasLabel": "Tên gọi thân mật",
+    "gradeLabel": "Khối lớp",
+    "ageLabel": "Độ tuổi",
+    "saveSuccess": "Đã lưu thông tin hồ sơ bé."
+  },
+  "count": "{count, plural, =0 {Chưa có bé nào} other {# bé}}",
+  "selector": {
+    "label": "Hồ sơ của bé",
+    "selectAria": "Chọn hồ sơ bé để xem dữ liệu",
+    "optionLabel": "{alias} · Lớp {grade}"
+  },
+  "verification": {
+    "loading": "Đang xác minh hồ sơ trẻ…",
+    "errorTitle": "Không thể xác minh hồ sơ trẻ",
+    "errorBody": "Chưa thể xác nhận hồ sơ thuộc tài khoản hiện tại. Ba mẹ vui lòng thử lại.",
+    "retry": "Thử lại"
+  }
+}

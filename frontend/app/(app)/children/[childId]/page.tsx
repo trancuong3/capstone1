@@ -1,11 +1,21 @@
 import type { Metadata } from "next";
 
 import { ChildProfileScreen } from "@/components/children/child-profile-screen";
-import { AppServicesProvider } from "@/components/providers/app-services-provider";
+import { translateMessage } from "@/lib/i18n/formatter";
+import { getServerI18n } from "@/lib/i18n/server";
+import { viMessages } from "@/messages/vi";
 
-export const metadata: Metadata = {
-  title: "Chi tiết hồ sơ bé",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const { locale, messages } = await getServerI18n();
+  return {
+    title: translateMessage(
+      messages,
+      viMessages,
+      locale,
+      "parent.children.detailPageTitle",
+    ),
+  };
+}
 
 interface ChildDetailsPageProps {
   params: Promise<{
@@ -31,13 +41,11 @@ export default async function ChildDetailsPage({
     : query.avatarError;
 
   return (
-    <AppServicesProvider>
-      <ChildProfileScreen
-        childId={childId}
-        hasAvatarError={avatarError === "1"}
-        hasCreatedNotice={created === "1"}
-        mode="edit"
-      />
-    </AppServicesProvider>
+    <ChildProfileScreen
+      childId={childId}
+      hasAvatarError={avatarError === "1"}
+      hasCreatedNotice={created === "1"}
+      mode="edit"
+    />
   );
 }

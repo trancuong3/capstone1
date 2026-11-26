@@ -1,4 +1,7 @@
+"use client";
+
 import { Button } from "@/components/common/button";
+import { useTranslations } from "@/hooks/use-i18n";
 import type { KaraokePlayerController } from "@/hooks/use-karaoke-player";
 import { formatKaraokeTime } from "@/lib/karaoke/lyrics-timeline";
 
@@ -9,6 +12,8 @@ export function KaraokeControls({
   player: KaraokePlayerController;
   durationMs: number;
 }) {
+  const t = useTranslations("entertainment");
+
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap gap-3">
@@ -18,10 +23,10 @@ export function KaraokeControls({
           onClick={() => (player.playing ? player.pause() : void player.play())}
         >
           {player.playing
-            ? "Tạm dừng"
+            ? t("karaoke.controls.pause")
             : player.currentMs >= durationMs
-              ? "Hát lại"
-              : "Phát"}
+              ? t("karaoke.controls.replay")
+              : t("karaoke.controls.play")}
         </Button>
         <Button
           className="sm:w-auto"
@@ -32,7 +37,7 @@ export function KaraokeControls({
             player.seek(0);
           }}
         >
-          Về đầu
+          {t("karaoke.controls.restart")}
         </Button>
         <span className="self-center tabular-nums">
           {formatKaraokeTime(player.currentMs)} /{" "}
@@ -40,9 +45,9 @@ export function KaraokeControls({
         </span>
       </div>
       <label className="grid gap-2 font-bold">
-        Vị trí phát
+        {t("karaoke.controls.positionLabel")}
         <input
-          aria-label="Vị trí phát"
+          aria-label={t("karaoke.controls.positionLabel")}
           type="range"
           min={0}
           max={durationMs}
@@ -54,9 +59,9 @@ export function KaraokeControls({
         />
       </label>
       <label className="grid gap-2 font-bold sm:max-w-xs">
-        Âm lượng
+        {t("karaoke.controls.volumeLabel")}
         <input
-          aria-label="Âm lượng"
+          aria-label={t("karaoke.controls.volumeLabel")}
           type="range"
           min={0}
           max={1}
@@ -68,10 +73,10 @@ export function KaraokeControls({
       </label>
       <p role="status" className="text-sm text-muted">
         {player.waiting
-          ? "Đang tải nhạc…"
+          ? t("karaoke.controls.loadingAudio")
           : !player.ready && !player.error
-            ? "Đang đọc thông tin âm thanh…"
-            : "Âm thanh chỉ phát khi bạn bấm nút. Không thu âm."}
+            ? t("karaoke.controls.readingAudioMeta")
+            : t("karaoke.controls.noRecordHint")}
       </p>
     </div>
   );

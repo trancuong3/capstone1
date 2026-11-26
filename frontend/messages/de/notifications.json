@@ -1,0 +1,15 @@
+{
+  "reminders": {
+    "saved": "Leseerinnerung gespeichert.",
+    "deleted": "Leseerinnerung gelöscht.",
+    "emailSent": "E-Mail zur Leseerinnerung gesendet."
+  },
+  "presence": {
+    "childStarted": "{alias} hat gerade eine neue Lese-Session begonnen.",
+    "childCompleted": "{alias} hat eine Lese-Session abgeschlossen."
+  },
+  "updates": {
+    "saved": "Änderungen gespeichert.",
+    "localeChanged": "Anzeigesprache aktualisiert auf {language}."
+  }
+}

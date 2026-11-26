@@ -1,0 +1,117 @@
+{
+  "recorder": {
+    "permissionRequired": "يلزم إذن الميكروفون لتسجيل صوت الطفل.",
+    "recording": "جارٍ الاستماع لقراءة الطفل…",
+    "processing": "جارٍ تحليل النطق…",
+    "playback": "استماع إلى التسجيل"
+  },
+  "preferences": {
+    "title": "خيارات الصوت",
+    "voiceSpeed": "سرعة التشغيل",
+    "autoRead": "تشغيل الصوت النموذجي تلقائياً عند فتح الصفحة",
+    "slow": "بطيء",
+    "normal": "عادي",
+    "fast": "سريع"
+  },
+  "status": {
+    "micReady": "الميكروفون جاهز",
+    "micMuted": "الميكروفون متوقف",
+    "ttsReady": "الصوت النموذجي جاهز"
+  },
+  "settings": {
+    "buttonLabel": "الصوت",
+    "modalTitle": "الصوت النموذجي",
+    "savedVoice": "الصوت المحفوظ",
+    "defaultVoice": "الصوت الافتراضي",
+    "localOnlyMode": "هذا الجهاز فقط",
+    "localWithGoogleMode": "هذا الجهاز + بديل Google",
+    "speedLabel": "سرعة القراءة",
+    "regionAndVoiceTitle": "اختر المنطقة والصوت",
+    "regionAria": "اختر المنطقة",
+    "filterAria": "تصفية الأصوات",
+    "allVoices": "جميع الأصوات",
+    "maleVoice": "صوت ذكري",
+    "femaleVoice": "صوت أنثوي",
+    "youngVoice": "صوت شاب",
+    "childVoice": "صوت طفل",
+    "loadingVoices": "جارٍ تحميل قائمة الأصوات…",
+    "loadErrorFallback": "تعذر تحميل قائمة الأصوات. يظل الصوت الافتراضي متاحاً.",
+    "retry": "إعادة المحاولة",
+    "emptyVoices": "لا توجد أصوات متاحة. يمكن لطفلك استخدام صوت النظام الافتراضي على هذا الجهاز.",
+    "emptyFiltered": "لا توجد أصوات تطابق عوامل التصفية الخاصة بك.",
+    "parentModeTitle": "إعدادات معالجة الصوت (وضع الوالدين)",
+    "localAvailable": "جاهز",
+    "localUnavailable": "معطل",
+    "googleConfigured": "تم التكوين",
+    "googleUnconfigured": "مفتاح API غير مكون",
+    "localOnlyTitle": "هذا الجهاز فقط",
+    "localOnlyDesc": "يعمل بنسبة 100% محلياً (الخادم + المتصفح)، بدون استدعاءات لـ Google",
+    "localWithGoogleTitle": "هذا الجهاز + بديل Google",
+    "localWithGoogleDesc": "أولوية للمحلي، مع التحويل التلقائي إلى الإنترنت كاحتياطي",
+    "googleSttFallback": "احتياطي Google للتعرف على الصوت (STT)",
+    "googleTtsFallback": "احتياطي Google للنطق (TTS)",
+    "missingGoogleKeyHint": "إذا لم يتم تكوين مفتاح Google Cloud API في backend/.env، فسيستخدم ViRead تلقائيًا Google/المتصفح عبر الإنترنت كاحتياطي.",
+    "useDefaultVoice": "استخدام الصوت الافتراضي",
+    "preview": "معاينة",
+    "stopPreview": "إيقاف المعاينة",
+    "previewFailed": "تعذر تشغيل الصوت. يُرجى المحاولة مرة أخرى أو اختيار صوت مختلف.",
+    "savedVoiceResetNotice": "الصوت المحفوظ سابقًا لم يعد متاحًا. عاد ViRead إلى الصوت الافتراضي لمراجعة الوالدين.",
+    "regions": {
+      "all": "جميع المناطق",
+      "north": "الشمال",
+      "central": "الوسط",
+      "south": "الجنوب"
+    },
+    "genders": {
+      "female": "أنثى",
+      "male": "ذكر"
+    },
+    "ageGroups": {
+      "young": "صغير السن",
+      "child": "صوت طفل",
+      "middle_aged": "متوسط العمر",
+      "old": "متقدم في السن"
+    },
+    "accents": {
+      "northern": "لهجة شمالية",
+      "southern": "لهجة جنوبية",
+      "central": "لهجة وسطى",
+      "american": "لهجة أمريكية",
+      "british": "لهجة بريطانية"
+    },
+    "googleProviderLabel": "احتياطي Google"
+  },
+  "engineBadge": {
+    "ariaLabel": "مصدر الصوت: STT {stt}، TTS {tts}",
+    "fallbackDetail": "{base} (الاحتياطي: {reason})",
+    "androidDetail": "{base} (الجهاز · صوت Android vi-VN)",
+    "catalogCacheDetail": "{base} (ذاكرة التخزين المؤقت القياسية · قراءة نموذجية بدون تأخير)",
+    "googleCloudDetail": "{base} (عبر الإنترنت · يتم استخدام احتياطي Google Cloud API)",
+    "browserDefaultDetail": "{base} (عبر الإنترنت · احتياطي Google / المتصفح)",
+    "wasmDetail": "{base} (دون اتصال · التعرف على الجهاز عبر WASM)",
+    "localDetail": "{base} (دون اتصال · يعمل مباشرة على هذا الجهاز)",
+    "shortLabels": {
+      "local_offline": "دون اتصال",
+      "browser_wasm": "دون اتصال (WASM)",
+      "catalog_cache": "ذاكرة التخزين المؤقت القياسية",
+      "android_native": "Android (vi-VN)",
+      "google_cloud": "عبر الإنترنت (Google API)",
+      "browser_default": "عبر الإنترنت (Google / المتصفح)"
+    }
+  },
+  "playback": {
+    "unavailable": "الصوت على الجهاز غير جاهز بعد. يمكن لولي الأمر والطفل متابعة النص على الشاشة والنقر على إعادة المحاولة.",
+    "lockedVoiceUnavailableNotice": "الصوت المحدد مشغول مؤقتاً. تحافظ ViRead على الإرشادات النصية لتجنب تغيير الصوت تلقائياً — يرجى النقر على إعادة المحاولة.",
+    "serverFallbackNotice": "الصوت المحدد غير متاح حالياً، يقوم النظام بالقراءة باستخدام صوت احتياطي.",
+    "androidNativeFallbackNotice": "صوت الخادم غير مفعل — تستخدم ViRead صوت اللغة الفيتنامية على جهاز Android.",
+    "browserFallbackNotice": "صوت الجهاز غير مفعل — تستخدم ViRead صوت المتصفح عبر الإنترنت.",
+    "autoplayBlocked": "المتصفح في انتظار لمس الطفل لزر الاستماع مرة أخرى لتشغيل الصوت.",
+    "partialPlayback": "تم مقاطعة الصوت. يمكنكم الاستماع مرة أخرى من البداية."
+  },
+  "wasm": {
+    "workerUnavailable": "Web Worker غير متاح",
+    "wasmUnavailable": "WebAssembly غير متاح",
+    "cryptoUnavailable": "Web Crypto API غير متاح",
+    "deviceUnsupported": "WASM STT غير متاح على هذا الجهاز."
+  }
+}

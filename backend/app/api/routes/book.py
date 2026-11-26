@@ -74,9 +74,45 @@ async def create_book(
 
 
 @router.get("/{book_id}/pages", response_model=List[BookPageResponse])
-async def get_book_pages(book_id: UUID, db: AsyncSession = Depends(get_db)):
-    """Return the pages for a book through the service/repository flow."""
-    return await BookService(db).list_pages(book_id)
+async def get_book_pages(
+    book_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the pages for an eligible catalog book without leaking raw internal paths."""
+    from urllib.parse import urlsplit
+    from app.services.storage_service import create_signed_image_url
+
+    pages = await BookService(db).list_pages(book_id)
+    has_bearer = bool((request.headers.get("authorization") or "").strip())
+    sanitized: list[BookPageResponse] = []
+    for page in pages:
+        raw_image_path = str(getattr(page, "ImagePath", "") or "").strip()
+        safe_image_url = ""
+        parsed = urlsplit(raw_image_path)
+        if parsed.scheme == "https" and parsed.netloc and not parsed.username and not parsed.password:
+            safe_image_url = raw_image_path
+        elif has_bearer and raw_image_path and "://" not in raw_image_path:
+            try:
+                safe_image_url = create_signed_image_url(raw_image_path) or ""
+            except Exception:
+                safe_image_url = ""
+        sanitized.append(
+            BookPageResponse(
+                Id=page.Id,
+                BookId=page.BookId,
+                PageNumber=page.PageNumber,
+                ImagePath=safe_image_url,
+                Width=page.Width,
+                Height=page.Height,
+                FeaturePath=None,
+                ProcessingMeta={},
+                LifecycleStatus=page.LifecycleStatus,
+                CurrentVerifiedRevisionId=page.CurrentVerifiedRevisionId,
+                CreatedAt=page.CreatedAt,
+            )
+        )
+    return sanitized
 
 
 @router.get("/catalog", response_model=list[CatalogBookResponse])

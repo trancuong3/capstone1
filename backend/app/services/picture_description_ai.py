@@ -37,8 +37,8 @@ logger = logging.getLogger(__name__)
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-DEFAULT_PRIMARY_MODEL = "gemini-3.1-flash-lite"
-DEFAULT_FALLBACK_MODEL = "gemini-3.5-flash-lite"
+DEFAULT_PRIMARY_MODEL = "gemini-3.5-flash-lite"
+DEFAULT_FALLBACK_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_EXTRA_GEMINI_MODELS: tuple[str, ...] = (
     "gemma-4-26b-a4b-it",
     "gemini-flash-lite-latest",

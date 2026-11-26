@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ViRead</string>
+    <string name="loading_title">กำลังเปิด ViRead</string>
+    <string name="loading_subtitle">กำลังโหลด ViRead…</string>
+    <string name="loading_hint_stage2">กำลังเชื่อมต่อเซิร์ฟเวอร์…</string>
+    <string name="loading_hint_stage3">เซิร์ฟเวอร์กำลังเริ่มต้น โปรดรอสักครู่…</string>
+    <string name="loading_cold_start_hint">เซิร์ฟเวอร์กำลังเริ่มต้นระบบ (cold-start) โปรดรอสักครู่…</string>
+    <string name="error_title_network">ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ ViRead</string>
+    <string name="error_title_server">เซิร์ฟเวอร์ ViRead กำลังเริ่มต้นหรือกำลังยุ่ง</string>
+    <string name="error_title_timeout">ไม่สามารถเชื่อมต่อ ViRead ได้</string>
+    <string name="error_title_tls">ใบรับรองความปลอดภัยไม่ถูกต้อง</string>
+    <string name="offline_message">ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ ViRead ได้ โปรดตรวจสอบ Wi-Fi / อินเทอร์เน็ตมือถือ หรือที่อยู่เซิร์ฟเวอร์แล้วกด ลองอีกครั้ง</string>
+    <string name="timeout_message">เซิร์ฟเวอร์ ViRead ตอบสนองช้า โปรดตรวจสอบการเชื่อมต่อเครือข่ายแล้วกด ลองอีกครั้ง หากเปิดใช้งานครั้งแรกอาจใช้เวลา 30–60 วินาทีในการเริ่มต้น</string>
+    <string name="server_5xx_message">เซิร์ฟเวอร์ ViRead กำลังยุ่งหรือกำลังรีสตาร์ท (%1$d) โปรดรอสักครู่แล้วกด ลองอีกครั้ง</string>
+    <string name="tls_error_message">ใบรับรองความปลอดภัย HTTPS ของเซิร์ฟเวอร์ไม่ถูกต้อง ViRead จึงบล็อกการเชื่อมต่อเพื่อปกป้องบัญชีครอบครัวของคุณ</string>
+    <string name="no_network_toast">ขณะนี้อุปกรณ์ยังไม่มีการเชื่อมต่ออินเทอร์เน็ตหรือ Wi-Fi</string>
+    <string name="network_ready_toast">พบการเชื่อมต่อเครือข่ายแล้ว กำลังโหลด ViRead อีกครั้ง…</string>
+    <string name="retry_button">ลองอีกครั้ง</string>
+    <string name="open_home_button">ไปที่หน้าเข้าสู่ระบบ</string>
+    <string name="check_connection_button">ตรวจสอบการเชื่อมต่ออีกครั้ง</string>
+    <string name="configure_lan_server_button">เปลี่ยนเซิร์ฟเวอร์ LAN HTTPS (Debug)</string>
+    <string name="lan_dialog_title">ตั้งค่าเซิร์ฟเวอร์ LAN HTTPS (Debug)</string>
+    <string name="lan_dialog_hint">ป้อนที่อยู่ HTTPS ของเซิร์ฟเวอร์ Next.js บน Wi-Fi เดียวกัน (เช่น https://192.168.1.10:8443) ไม่รองรับ HTTP หรือ localhost</string>
+    <string name="lan_dialog_save">บันทึก &amp; เชื่อมต่อ</string>
+    <string name="lan_dialog_reset">คืนค่าเริ่มต้น</string>
+    <string name="lan_dialog_cancel">ปิด</string>
+    <string name="lan_invalid_url_toast">ที่อยู่ไม่ถูกต้อง รองรับเฉพาะต้นทาง LAN HTTPS ที่ถูกต้องเท่านั้น (ไม่มีพาธย่อยหรือ HTTP)</string>
+    <string name="file_chooser_title">เลือกรูปหน้าหนังสือ ถ่ายภาพ หรือเลือก PDF/DOCX</string>
+    <string name="permission_denied_title">จำเป็นต้องได้รับอนุญาตเพื่อใช้ฟีเจอร์นี้</string>
+    <string name="permission_denied_message">สิทธิ์กล้องหรือไมโครโฟนสำหรับ ViRead ถูกปิดอยู่ คุณสามารถเปิดใช้งานได้ทุกเมื่อในการตั้งค่าแอป</string>
+    <string name="open_app_settings_button">เปิดการตั้งค่าแอป</string>
+    <string name="back_exit_confirm_toast">กดอีกครั้งเพื่อออกจาก ViRead</string>
+</resources>

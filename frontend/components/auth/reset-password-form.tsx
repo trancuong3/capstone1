@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowLeft, ArrowRight } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -12,20 +12,14 @@ import { TextField } from "@/components/common/text-field";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useHydrated } from "@/hooks/use-hydrated";
+import { useI18n } from "@/hooks/use-i18n";
 import { AuthServiceError } from "@/lib/api/auth-service";
 import type { AuthMockScenario } from "@/types/auth";
 
-const resetPasswordSchema = z
-  .object({
-    newPassword: z.string().min(8, "Mật khẩu mới cần có ít nhất 8 ký tự."),
-    confirmPassword: z.string().min(1, "Ba mẹ vui lòng nhập lại mật khẩu mới."),
-  })
-  .refine((values) => values.newPassword === values.confirmPassword, {
-    message: "Hai mật khẩu chưa khớp.",
-    path: ["confirmPassword"],
-  });
-
-type ResetPasswordFormValues = z.infer<typeof resetPasswordSchema>;
+interface ResetPasswordFormValues {
+  newPassword: string;
+  confirmPassword: string;
+}
 
 interface ResetPasswordFormProps {
   onRecoveryFailure: (reason: "invalid-token" | "expired-token") => void;
@@ -38,10 +32,30 @@ export function ResetPasswordForm({
   onSuccess,
   scenario,
 }: ResetPasswordFormProps) {
+  const { t } = useI18n();
   const authService = useAuthService();
   const authRuntime = useAuthRuntime();
   const isHydrated = useHydrated();
   const [hasError, setHasError] = useState(scenario === "safe-error");
+
+  const resetPasswordSchema = useMemo(
+    () =>
+      z
+        .object({
+          newPassword: z
+            .string()
+            .min(8, t("validation.passwordMinLength", { min: 8 })),
+          confirmPassword: z
+            .string()
+            .min(1, t("validation.confirmNewPasswordRequired")),
+        })
+        .refine((values) => values.newPassword === values.confirmPassword, {
+          message: t("validation.passwordMismatchShort"),
+          path: ["confirmPassword"],
+        }),
+    [t],
+  );
+
   const {
     formState: { errors, isSubmitting },
     handleSubmit,
@@ -81,14 +95,12 @@ export function ResetPasswordForm({
       onSubmit={onSubmit}
     >
       {hasError ? (
-        <StatusMessage tone="error">
-          Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
-        </StatusMessage>
+        <StatusMessage tone="error">{t("auth.errors.generic")}</StatusMessage>
       ) : null}
       <TextField
         autoComplete="new-password"
         error={errors.newPassword?.message}
-        label="Mật khẩu mới"
+        label={t("auth.fields.newPassword")}
         placeholder="••••••••••••"
         type="password"
         {...register("newPassword")}
@@ -96,7 +108,7 @@ export function ResetPasswordForm({
       <TextField
         autoComplete="new-password"
         error={errors.confirmPassword?.message}
-        label="Nhập lại mật khẩu mới"
+        label={t("auth.fields.reenterNewPassword")}
         placeholder="••••••••••••"
         type="password"
         {...register("confirmPassword")}
@@ -108,14 +120,16 @@ export function ResetPasswordForm({
         isLoading={isSubmitting}
         type="submit"
       >
-        {isSubmitting ? "Đang lưu…" : "Lưu mật khẩu mới"}
+        {isSubmitting
+          ? t("common.actions.saving")
+          : t("auth.resetPassword.submit")}
         {!isSubmitting ? (
-          <ArrowRight aria-hidden="true" className="size-5" />
+          <ArrowRight aria-hidden="true" className="size-5 viread-rtl-flip" />
         ) : null}
       </Button>
       <ButtonLink href="/login" variant="quiet">
-        <ArrowLeft aria-hidden="true" className="size-5" />
-        Về đăng nhập
+        <ArrowLeft aria-hidden="true" className="size-5 viread-rtl-flip" />
+        {t("auth.forgotPassword.backToLogin")}
       </ButtonLink>
     </form>
   );

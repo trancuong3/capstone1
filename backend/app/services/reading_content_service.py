@@ -22,6 +22,7 @@ from app.schemas.reading import (
     ReadingSessionPageProgressDTO,
     ReadingSessionPageProgressItem,
 )
+from app.services.catalog_tts_cache import resolve_verified_catalog_tts_url
 from app.services.storage_service import create_signed_image_url
 from app.services.word_box_geometry import has_verified_geometry
 
@@ -1152,6 +1153,7 @@ class ReadingContentService:
         *,
         base_url: str | None = None,
         book_is_private: bool | None = None,
+        owner_parent_id: UUID | None = None,
     ) -> ReadingPageDTO:
         text_content = (revision.VerifiedText or "").strip()
         if not text_content:
@@ -1198,6 +1200,10 @@ class ReadingContentService:
         page_number = page.PageNumber
         page_width = int(page.Width)
         page_height = int(page.Height)
+        is_verified_revision = (
+            getattr(revision, "VerificationStatus", None) == "VERIFIED"
+            or page.CurrentVerifiedRevisionId == page_revision_id
+        )
         processing_meta = getattr(revision, "ProcessingMeta", None)
         if not isinstance(processing_meta, dict):
             processing_meta = {}
@@ -1229,21 +1235,39 @@ class ReadingContentService:
             image_path = page.ImagePath
 
         book_id_value = getattr(page, "BookId", None)
-        if book_is_private is None:
-            book_is_private = False
-            if book_id_value is not None and isinstance(self.repository, ReadingContentRepository):
-                book_row = await self.repository.book_by_id(book_id_value)
+        needs_book_lookup = book_is_private is None or (
+            book_is_private and owner_parent_id is None
+        )
+        if (
+            needs_book_lookup
+            and book_id_value is not None
+            and isinstance(self.repository, ReadingContentRepository)
+        ):
+            book_row = await self.repository.book_by_id(book_id_value)
+            if book_is_private is None:
                 book_is_private = book_row is not None and is_book_private(book_row)
+            if book_row is not None and owner_parent_id is None:
+                owner_parent_id = getattr(book_row, "OwnerParentId", None)
+        elif book_is_private is None:
+            book_is_private = False
+
+        is_verified_revision = (
+            getattr(revision, "VerificationStatus", None) == "VERIFIED"
+            or page.CurrentVerifiedRevisionId == page_revision_id
+        )
 
         await self.repository.db.rollback()
 
         image_url = None
         if book_is_private and book_id_value is not None:
-            image_url = private_page_image_url(
+            image_url = await asyncio.to_thread(
+                private_page_image_url,
                 book_id_value,
                 page_id,
                 revision_id=page_revision_id,
                 base_url=base_url,
+                storage_path=image_path,
+                owner_id=owner_parent_id,
             )
         elif image_path:
             try:
@@ -1261,6 +1285,41 @@ class ReadingContentService:
                 if isinstance(item, int) and not isinstance(item, bool) and item >= 0
             })
 
+        illustration_url = None
+        illustration_text_free = False
+        try:
+            from sqlalchemy import desc, select
+            from app.models.smart_book_studio import BookPresentationAsset
+
+            db_session = getattr(self.repository, "db", None)
+            if db_session is not None and callable(getattr(db_session, "begin_nested", None)):
+                async with db_session.begin_nested():
+                    ill_asset = await db_session.scalar(
+                        select(BookPresentationAsset)
+                        .where(
+                            BookPresentationAsset.BookPageId == page_id,
+                            BookPresentationAsset.AssetRole == "PAGE_ILLUSTRATION",
+                            BookPresentationAsset.IsActive.is_(True),
+                            BookPresentationAsset.ModerationStatus == "APPROVED",
+                            BookPresentationAsset.TextFreeVerified.is_(True),
+                        )
+                        .order_by(desc(BookPresentationAsset.AssetVersion), desc(BookPresentationAsset.UpdatedAt))
+                        .limit(1)
+                    )
+                    if ill_asset is not None:
+                        illustration_url = f"/studio/assets/{ill_asset.Id}/media"
+                        illustration_text_free = True
+        except Exception:
+            illustration_url = None
+            illustration_text_free = False
+
+        tts_audio_url = resolve_verified_catalog_tts_url(
+            is_public_catalog=not bool(book_is_private),
+            is_verified=is_verified_revision,
+            text=text_content,
+            processing_meta=processing_meta,
+        )
+
         return ReadingPageDTO(
             page_id=page_id,
             page_revision_id=page_revision_id,
@@ -1271,10 +1330,13 @@ class ReadingContentService:
             width=page_width,
             height=page_height,
             image_url=image_url,
+            tts_audio_url=tts_audio_url,
             image_overlay_safe=has_verified_geometry(
                 processing_meta.get("word_box_geometry"),
                 [word.model_dump() for word in words], page_width, page_height,
             ),
+            illustration_url=illustration_url,
+            illustration_text_free=illustration_text_free,
             text=text_content,
             words=words,
             paragraph_start_line_indices=safe_line_indices("paragraph_start_line_indices"),

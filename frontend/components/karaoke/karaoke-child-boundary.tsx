@@ -4,6 +4,7 @@ import { useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Button, ButtonLink } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
+import { useTranslations } from "@/hooks/use-i18n";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import type { ChildProfileDTO } from "@/types/child";
@@ -13,6 +14,7 @@ export function KaraokeChildBoundary({
 }: {
   children: (child: ChildProfileDTO) => ReactNode;
 }) {
+  const t = useTranslations("entertainment");
   const auth = useAuthRuntime();
   const { replace } = useRouter();
   // INITIAL_SESSION can arrive after the SDK initialization promise resolves.
@@ -26,13 +28,14 @@ export function KaraokeChildBoundary({
   useEffect(() => {
     if (signedOut) replace("/login");
   }, [signedOut, replace]);
-  if (restoring) return <p role="status">Đang kiểm tra phiên đăng nhập…</p>;
+  if (restoring)
+    return <p role="status">{t("karaoke.boundary.checkingSession")}</p>;
   if (auth.status === "error" || signedOut)
     return (
       <StatusMessage tone="warning">
-        Ba mẹ vui lòng đăng nhập lại để mở Hát vui.
+        {t("karaoke.boundary.loginRequired")}
         <ButtonLink className="mt-3 sm:w-auto" href="/login">
-          Đăng nhập lại
+          {t("karaoke.boundary.reloginAction")}
         </ButtonLink>
       </StatusMessage>
     );
@@ -46,15 +49,16 @@ function ValidatedChild({
 }: {
   children: (child: ChildProfileDTO) => ReactNode;
 }) {
+  const t = useTranslations("entertainment");
   const { state, retry } = useValidatedSelectedChild();
   if (state.status === "loading" || state.status === "redirecting")
-    return <p role="status">Đang kiểm tra hồ sơ bé…</p>;
+    return <p role="status">{t("karaoke.boundary.checkingChild")}</p>;
   if (state.status === "error")
     return (
       <StatusMessage tone="error">
-        Chưa tải được hồ sơ bé.
+        {t("karaoke.boundary.childError")}
         <Button className="mt-3 sm:w-auto" variant="secondary" onClick={retry}>
-          Thử lại hồ sơ
+          {t("karaoke.boundary.retryChild")}
         </Button>
       </StatusMessage>
     );

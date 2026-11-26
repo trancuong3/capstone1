@@ -22,10 +22,14 @@ from ocr_worker.service import (  # noqa: E402
     build_smoke_test_image_bytes,
     build_worker_http_app,
     configure_cpu_thread_caps,
+    install_vietocr_safe_config_loader,
     install_zero_db_config_shim,
 )
 from ocr_worker.worker import (  # noqa: E402
+    DEFAULT_BACKEND_TIMEOUT_SECONDS,
     BackendOcrClient,
+    compute_adaptive_poll_delay,
+    is_quiet_standby_enabled,
     process_claimed_job,
 )
 
@@ -61,6 +65,14 @@ class TestOcrWorkerServiceAndClient(unittest.TestCase):
             cfg = sys.modules["app.database.config"]
             self.assertIsNone(cfg.SUPABASE_ADMIN_KEY)
             self.assertIsNone(cfg.DATABASE_URL)
+            self.assertTrue(callable(cfg.supabase_admin_headers))
+            self.assertEqual(cfg.supabase_admin_headers(), {"apikey": ""})
+            self.assertEqual(
+                cfg.supabase_admin_headers("sb_secret_abc", extra={"X-Test": "1"}),
+                {"apikey": "sb_secret_abc", "X-Test": "1"},
+            )
+            self.assertTrue(cfg.is_supabase_jwt_key("eyJ.payload.sig"))
+            self.assertFalse(cfg.is_supabase_jwt_key("sb_secret_abc"))
 
     def test_health_and_version_independent_engine_states(self):
         runtime = OcrRuntimeManager(worker_id="test-ocr-1")
@@ -251,6 +263,626 @@ class TestOcrWorkerServiceAndClient(unittest.TestCase):
         self.assertTrue(out["full_text"].strip())
         self.assertGreaterEqual(len(out["words"]), 1)
         self.assertLessEqual(torch.get_num_threads(), CPU_THREADS)
+
+    def test_complete_and_fail_job_retry_on_transient_502_503_without_retrying_409(self):
+        token = "r" * 40
+        complete_attempts = 0
+        fail_attempts = 0
+        conflict_attempts = 0
+
+        def backend_handler(request: httpx.Request) -> httpx.Response:
+            nonlocal complete_attempts, fail_attempts, conflict_attempts
+            if request.url.path == "/internal/ocr-jobs/job-ok/complete":
+                complete_attempts += 1
+                if complete_attempts < 3:
+                    return httpx.Response(503 if complete_attempts == 1 else 502, text="bad gateway")
+                return httpx.Response(200, json={"status": "SUCCEEDED", "job_id": "job-ok"})
+            if request.url.path == "/internal/ocr-jobs/job-fail/fail":
+                fail_attempts += 1
+                if fail_attempts == 1:
+                    return httpx.Response(503, text="temporarily unavailable")
+                return httpx.Response(200, json={"status": "FAILED_RETRYABLE"})
+            if request.url.path == "/internal/ocr-jobs/job-conflict/complete":
+                conflict_attempts += 1
+                return httpx.Response(409, json={"detail": "Fencing token mismatch"})
+            return httpx.Response(404)
+
+        client = BackendOcrClient(
+            "https://api.example",
+            token,
+            transport=httpx.MockTransport(backend_handler),
+            completion_retry_attempts=5,
+            completion_retry_base_delay=0.001,
+        )
+        try:
+            code, body = client.complete_job("job-ok", {"worker_id": "w1", "fencing_token": 1})
+            self.assertEqual(code, 200)
+            self.assertEqual(body["status"], "SUCCEEDED")
+            self.assertEqual(complete_attempts, 3)
+
+            f_code, f_body = client.fail_job("job-fail", {"worker_id": "w1", "fencing_token": 1})
+            self.assertEqual(f_code, 200)
+            self.assertEqual(f_body["status"], "FAILED_RETRYABLE")
+            self.assertEqual(fail_attempts, 2)
+
+            c_code, _c_body = client.complete_job("job-conflict", {"worker_id": "w1", "fencing_token": 1})
+            self.assertEqual(c_code, 409)
+            self.assertEqual(conflict_attempts, 1)
+        finally:
+            client.close()
+
+    def test_stable_hostname_worker_id_default(self):
+        with patch.dict(os.environ, {"VIREAD_OCR_WORKER_ID": ""}, clear=False):
+            r1 = OcrRuntimeManager()
+            r2 = OcrRuntimeManager()
+            self.assertEqual(r1.worker_id, r2.worker_id)
+            self.assertTrue(r1.worker_id.startswith("win-ocr-"))
+
+    def test_wakeup_endpoint_constant_time_auth_and_passive_health_isolation(self):
+        runtime = OcrRuntimeManager(worker_id="hf-ocr-standby-1")
+        runtime.set_standby_mode("quiet_standby")
+        valid_token = "w" * 40
+
+        unconfigured_client = TestClient(build_worker_http_app(runtime, worker_token="short"))
+        self.assertEqual(unconfigured_client.post("/wakeup").status_code, 503)
+
+        client = TestClient(build_worker_http_app(runtime, worker_token=valid_token))
+        # Passive /health must NOT wake the worker or alter standby_mode.
+        h1 = client.get("/health").json()
+        self.assertEqual(h1["standby_mode"], "quiet_standby")
+        self.assertEqual(h1["wakeup_count"], 0)
+        self.assertFalse(runtime.wake_event.is_set())
+
+        # Missing or invalid token -> 401
+        self.assertEqual(client.post("/wakeup").status_code, 401)
+        self.assertEqual(
+            client.post("/wakeup", headers={"X-ViRead-Ocr-Worker-Token": "x" * 40}).status_code,
+            401,
+        )
+        self.assertFalse(runtime.wake_event.is_set())
+
+        # Valid token -> 200 + switches to burst_awake + sets wake_event
+        wake_resp = client.post(
+            "/wakeup",
+            headers={"X-ViRead-Ocr-Worker-Token": valid_token},
+            json={"reason": "enqueue:LOCAL_PAGE_SCAN", "burst_seconds": 90},
+        )
+        self.assertEqual(wake_resp.status_code, 200)
+        wake_body = wake_resp.json()
+        self.assertTrue(wake_body["woken"])
+        self.assertEqual(wake_body["standby_mode"], "burst_awake")
+        self.assertEqual(wake_body["wakeup_count"], 1)
+        self.assertTrue(runtime.wake_event.is_set())
+
+    def test_direct_signed_shard_download_and_fallback_with_cache_dir(self):
+        token = "z" * 40
+        shard0 = b"vietocr-shard-0-bytes"
+        shard1 = b"vietocr-shard-1-bytes"
+        assembled = shard0 + shard1
+        full_sha = hashlib.sha256(assembled).hexdigest()
+        s0_sha = hashlib.sha256(shard0).hexdigest()
+        s1_sha = hashlib.sha256(shard1).hexdigest()
+        cfg_bytes = b"vocab: test\n"
+        cfg_sha = hashlib.sha256(cfg_bytes).hexdigest()
+
+        backend_shard_calls: list[str] = []
+        storage_headers: list[dict[str, str]] = []
+
+        def backend_handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.headers.get("X-ViRead-Ocr-Worker-Token"), token)
+            backend_shard_calls.append(request.url.path)
+            if request.url.path == "/internal/ocr-jobs/active-model":
+                return httpx.Response(
+                    200,
+                    json={
+                        "profile": "FLOW1_EXTERNAL_TRDG",
+                        "checkpoint_sha256": full_sha,
+                        "storage_path": "models/manifest.json",
+                        "has_custom_config": True,
+                        "config_sha256": cfg_sha,
+                        "config_signed_url": "https://cdn.storage.example/cfg.yml",
+                        "shards": [
+                            {
+                                "index": 0,
+                                "sha256": s0_sha,
+                                "bytes": len(shard0),
+                                "signed_url": "https://cdn.storage.example/shard0",
+                            },
+                            {
+                                "index": 1,
+                                "sha256": s1_sha,
+                                "bytes": len(shard1),
+                                "signed_url": "https://cdn.storage.example/expired-shard1",
+                            },
+                        ],
+                    },
+                )
+            if request.url.path == "/internal/ocr-jobs/active-model/shard/1":
+                return httpx.Response(200, content=shard1)
+            return httpx.Response(404)
+
+        def storage_handler(request: httpx.Request) -> httpx.Response:
+            storage_headers.append({k.lower(): v for k, v in request.headers.items()})
+            self.assertNotIn("x-viread-ocr-worker-token", {k.lower() for k in request.headers})
+            if str(request.url) == "https://cdn.storage.example/shard0":
+                return httpx.Response(200, content=shard0)
+            if str(request.url) == "https://cdn.storage.example/expired-shard1":
+                return httpx.Response(403)
+            if str(request.url) == "https://cdn.storage.example/cfg.yml":
+                return httpx.Response(200, content=cfg_bytes)
+            return httpx.Response(404)
+
+        with tempfile.TemporaryDirectory(prefix="viread-worker-cache-") as tmp_cache:
+            with patch.dict(os.environ, {"VIREAD_OCR_MODEL_CACHE_DIR": tmp_cache}, clear=False):
+                client = BackendOcrClient(
+                    "https://api.example",
+                    token,
+                    transport=httpx.MockTransport(backend_handler),
+                    storage_transport=httpx.MockTransport(storage_handler),
+                )
+                try:
+                    self.assertEqual(client.timeout_seconds, DEFAULT_BACKEND_TIMEOUT_SECONDS)
+                    self.assertEqual(DEFAULT_BACKEND_TIMEOUT_SECONDS, 75.0)
+                    runtime = OcrRuntimeManager(worker_id="w-shard-test")
+                    info = runtime.sync_active_model(
+                        manifest_fetcher=client.get_active_model,
+                        artifact_fetcher=client.download_model_artifact,
+                        direct_url_fetcher=client.download_direct_url,
+                    )
+                    self.assertTrue(info["local_pth_exists"])
+                    self.assertTrue(info["local_yml_exists"])
+                    self.assertEqual(
+                        (Path(tmp_cache) / f"viread-vietocr-v2-{full_sha}.pth").read_bytes(),
+                        assembled,
+                    )
+                    # Shard 0 came directly from signed URL; only expired Shard 1 fell back to backend!
+                    self.assertNotIn("/internal/ocr-jobs/active-model/shard/0", backend_shard_calls)
+                    self.assertIn("/internal/ocr-jobs/active-model/shard/1", backend_shard_calls)
+                finally:
+                    client.close()
+
+    def test_vendored_configs_adaptive_poll_and_hf_bundle_contract(self):
+        install_vietocr_safe_config_loader()
+        import vietocr.tool.config as vc
+
+        with patch("requests.get", side_effect=RuntimeError("vocr.vn unreachable")):
+            cfg = vc.Cfg.load_config_from_name("vgg_transformer")
+            self.assertEqual(cfg["backbone"], "vgg19_bn")
+            self.assertEqual(len(cfg["vocab"]), 229)
+
+        with patch.dict(os.environ, {"SPACE_ID": "user/viread-ocr"}, clear=False):
+            os.environ.pop("VIREAD_OCR_QUIET_STANDBY", None)
+            self.assertTrue(is_quiet_standby_enabled())
+
+        self.assertEqual(compute_adaptive_poll_delay(base_poll_seconds=2.0, idle_seconds=5.0), 2.0)
+        self.assertEqual(compute_adaptive_poll_delay(base_poll_seconds=2.0, idle_seconds=30.0), 5.0)
+        self.assertEqual(compute_adaptive_poll_delay(base_poll_seconds=2.0, idle_seconds=70.0), 10.0)
+
+        from scripts.build_hf_space_bundle import build_hf_space_bundle
+
+        with tempfile.TemporaryDirectory(prefix="viread-hf-bundle-test-") as tmp_bundle:
+            summary = build_hf_space_bundle(Path(tmp_bundle) / "space")
+            self.assertLess(summary["total_bytes"], 1_048_576)
+            self.assertGreaterEqual(summary["file_count"], 18)
+
+    def test_get_active_model_retries_transient_502_503_and_push_hf_space_contracts(self):
+        token = "m" * 40
+        active_model_calls = 0
+
+        def backend_handler(request: httpx.Request) -> httpx.Response:
+            nonlocal active_model_calls
+            if request.url.path == "/internal/ocr-jobs/active-model":
+                active_model_calls += 1
+                if active_model_calls < 3:
+                    return httpx.Response(502 if active_model_calls == 1 else 503, text="waking")
+                return httpx.Response(
+                    200,
+                    json={
+                        "profile": "FLOW1_EXTERNAL_TRDG",
+                        "checkpoint_sha256": EXPECTED_FLOW1_TRDG_SHA256,
+                        "shards": [],
+                    },
+                )
+            return httpx.Response(404)
+
+        client = BackendOcrClient(
+            "https://api.example",
+            token,
+            transport=httpx.MockTransport(backend_handler),
+            completion_retry_attempts=3,
+            completion_retry_base_delay=0.001,
+        )
+        try:
+            manifest = client.get_active_model()
+            self.assertEqual(manifest["profile"], "FLOW1_EXTERNAL_TRDG")
+            self.assertEqual(active_model_calls, 3)
+        finally:
+            client.close()
+
+        from scripts.push_hf_space import (
+            _redact_secrets,
+            ensure_private_docker_space,
+            main as push_hf_main,
+        )
+
+        # Dry-run succeeds with exit code 0 without requiring HF_TOKEN
+        self.assertEqual(
+            push_hf_main(["--space-id", "demo-user/viread-ocr-worker", "--dry-run"]),
+            0,
+        )
+        self.assertNotIn(
+            "hf_secret_123456",
+            _redact_secrets("Authorization: Bearer hf_secret_123456 failed", "hf_secret_123456"),
+        )
+
+        seen_payloads: list[dict[str, object]] = []
+
+        def fake_hf_api(method: str, url: str, *, hf_token: str, payload=None):
+            if method == "GET" and url.endswith("/api/spaces/demo-user/viread-ocr-worker"):
+                return 404, {"error": "Not found"}
+            if method == "GET" and url.endswith("/api/whoami-v2"):
+                return 200, {"name": "demo-user"}
+            if method == "POST" and url.endswith("/api/repos/create"):
+                assert isinstance(payload, dict)
+                seen_payloads.append(payload)
+                return 201, {"url": "https://huggingface.co/spaces/demo-user/viread-ocr-worker"}
+            return 500, {"error": "unexpected"}
+
+        with patch("scripts.push_hf_space._hf_api_request", side_effect=fake_hf_api):
+            ensure_private_docker_space(
+                space_id="demo-user/viread-ocr-worker",
+                hf_token="hf_test_token_abcdef",
+                public=False,
+            )
+        self.assertEqual(len(seen_payloads), 1)
+        self.assertEqual(seen_payloads[0].get("visibility"), "private")
+        self.assertEqual(seen_payloads[0].get("sdk"), "docker")
+        self.assertEqual(seen_payloads[0].get("hardware"), "cpu-basic")
+        self.assertNotIn("organization", seen_payloads[0])
+
+        def fake_hf_402(method: str, url: str, *, hf_token: str, payload=None):
+            if method == "GET" and "/api/spaces/" in url:
+                return 404, {}
+            if method == "GET" and url.endswith("/api/whoami-v2"):
+                return 200, {"name": "demo-user"}
+            return 402, {"error": "Payment Required for hf_test_token_abcdef"}
+
+        with patch("scripts.push_hf_space._hf_api_request", side_effect=fake_hf_402):
+            with self.assertRaises(RuntimeError) as ctx:
+                ensure_private_docker_space(
+                    space_id="demo-user/viread-ocr-worker",
+                    hf_token="hf_test_token_abcdef",
+                    public=False,
+                )
+            self.assertIn("Google Cloud Run Always Free", str(ctx.exception))
+            self.assertNotIn("hf_test_token_abcdef", str(ctx.exception))
+
+    def test_synchronous_wakeup_drain_single_flight_and_nonblocking_health(self):
+        import asyncio
+        import json
+        import time
+
+        from ocr_worker.worker import drain_queue_synchronously
+
+        token = "d" * 40
+        img_bytes = b"synthetic-page-bytes"
+        img_sha = hashlib.sha256(img_bytes).hexdigest()
+
+        queued_jobs = [
+            {
+                "job_id": "drain-job-1",
+                "job_kind": "LOCAL_PAGE_SCAN",
+                "fencing_token": 1,
+                "image_sha256": img_sha,
+                "source_url": None,
+                "source_fallback_path": "/internal/ocr-jobs/drain-job-1/source",
+            },
+            {
+                "job_id": "drain-job-2",
+                "job_kind": "LOCAL_PAGE_SCAN",
+                "fencing_token": 1,
+                "image_sha256": img_sha,
+                "source_url": None,
+                "source_fallback_path": "/internal/ocr-jobs/drain-job-2/source",
+            },
+        ]
+        straggler_job = {
+            "job_id": "drain-job-3",
+            "job_kind": "LOCAL_PAGE_SCAN",
+            "fencing_token": 1,
+            "image_sha256": img_sha,
+            "source_url": None,
+            "source_fallback_path": "/internal/ocr-jobs/drain-job-3/source",
+        }
+        empty_polls = 0
+        completed_ids: list[str] = []
+
+        def backend_handler(request: httpx.Request) -> httpx.Response:
+            nonlocal empty_polls
+            if request.url.path == "/internal/ocr-jobs/worker-heartbeat":
+                return httpx.Response(200, json={"ok": True})
+            if request.url.path == "/internal/ocr-jobs/claim":
+                if queued_jobs:
+                    return httpx.Response(200, json={"job": queued_jobs.pop(0)})
+                empty_polls += 1
+                if empty_polls == 1:
+                    # Simulate a straggler page committing right before the 3s re-check!
+                    queued_jobs.append(straggler_job)
+                return httpx.Response(200, json={"job": None})
+            if request.url.path.endswith("/source"):
+                return httpx.Response(200, content=img_bytes)
+            if request.url.path.endswith("/complete"):
+                body = json.loads(request.content.decode("utf-8"))
+                completed_ids.append(request.url.path.split("/")[-2])
+                self.assertEqual(body["source_sha256"], img_sha)
+                return httpx.Response(200, json={"status": "SUCCEEDED"})
+            return httpx.Response(404)
+
+        class _FakeReadyRuntime(OcrRuntimeManager):
+            def run_ocr_for_job(self, job_id: str, image_bytes: bytes) -> dict:
+                time.sleep(0.04)
+                return {
+                    "full_text": f"Xin chào {job_id}",
+                    "words": [{"text": "Xin", "bbox": [0.1, 0.1, 0.1, 0.05]}],
+                    "ocr_meta": {"runtime_device": "cpu"},
+                    "model_profile": "FLOW1_EXTERNAL_TRDG",
+                    "model_sha256": EXPECTED_FLOW1_TRDG_SHA256,
+                    "engine_diagnostics": {},
+                    "duration_ms": 40,
+                }
+
+        runtime = _FakeReadyRuntime(worker_id="aca-ocr-1")
+        with runtime._state_lock:
+            runtime._engines["paddleocr"].loaded = True
+            runtime._engines["vietocr"].loaded = True
+            runtime._engines["tesseract_vie"].loaded = True
+
+        backend_client = BackendOcrClient(
+            "https://api.example",
+            token,
+            transport=httpx.MockTransport(backend_handler),
+        )
+        try:
+            with patch.dict(
+                os.environ,
+                {"VIREAD_OCR_SCALE_TO_ZERO": "true"},
+                clear=False,
+            ):
+                app = build_worker_http_app(
+                    runtime,
+                    worker_token=token,
+                    drain_runner=lambda _r: drain_queue_synchronously(
+                        backend_client,
+                        runtime,
+                        straggler_wait_seconds=0.05,
+                    ),
+                )
+
+                async def _exercise_asgi() -> None:
+                    transport = httpx.ASGITransport(app=app)
+                    async with httpx.AsyncClient(
+                        transport=transport, base_url="http://worker.local"
+                    ) as http:
+                        # Unauthenticated drain -> 401
+                        unauth = await http.post("/wakeup?drain=true")
+                        self.assertEqual(unauth.status_code, 401)
+
+                        # Fire primary drain; while it is processing job 1, fire a 2nd concurrent
+                        # drain AND a passive GET /health to verify event-loop responsiveness!
+                        primary_task = asyncio.create_task(
+                            http.post(
+                                "/wakeup?drain=true",
+                                headers={"X-ViRead-Ocr-Worker-Token": token},
+                                json={"reason": "enqueue:LOCAL_PAGE_SCAN"},
+                            )
+                        )
+                        await asyncio.sleep(0.02)
+
+                        t_health = time.perf_counter()
+                        health_resp, dup_resp = await asyncio.gather(
+                            http.get("/health"),
+                            http.post(
+                                "/wakeup?drain=true",
+                                headers={"X-ViRead-Ocr-Worker-Token": token},
+                                json={"reason": "concurrent_second_enqueue"},
+                            ),
+                        )
+                        health_ms = (time.perf_counter() - t_health) * 1000.0
+                        self.assertEqual(health_resp.status_code, 200)
+                        self.assertLess(health_ms, 80.0)
+
+                        self.assertEqual(dup_resp.status_code, 200)
+                        dup_json = dup_resp.json()
+                        self.assertTrue(dup_json["ok"])
+                        self.assertTrue(dup_json["already_draining"])
+
+                        primary_resp = await primary_task
+                        self.assertEqual(primary_resp.status_code, 200)
+                        primary_json = primary_resp.json()
+                        self.assertTrue(primary_json["ok"])
+                        self.assertTrue(primary_json["drained"])
+                        self.assertFalse(primary_json["already_draining"])
+                        self.assertEqual(primary_json["drained_jobs"], 3)
+                        self.assertEqual(primary_json["standby_mode"], "scale_to_zero")
+
+                asyncio.run(_exercise_asgi())
+                self.assertEqual(
+                    completed_ids,
+                    ["drain-job-1", "drain-job-2", "drain-job-3"],
+                )
+        finally:
+            backend_client.close()
+
+    def test_checkpoint_cdn_url_sha256_verification_prebaked_skip_smoke_and_hf_model_helper(self):
+        from ocr_worker.prebake import fetch_and_verify
+        from ocr_worker.service import should_skip_startup_smoke
+        from scripts.push_hf_model_checkpoint import main as push_model_main
+
+        token = "c" * 40
+        pth_bytes = b"verified-flow1-vietocr-checkpoint-payload"
+        pth_sha = hashlib.sha256(pth_bytes).hexdigest()
+        cfg_bytes = b"backbone: vgg19_bn\nvocab: abc\n"
+        cfg_sha = hashlib.sha256(cfg_bytes).hexdigest()
+
+        supabase_calls: list[str] = []
+        cdn_headers_seen: list[tuple[str, dict[str, str]]] = []
+
+        def backend_handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/internal/ocr-jobs/active-model":
+                return httpx.Response(
+                    200,
+                    json={
+                        "profile": "FLOW1_EXTERNAL_TRDG",
+                        "checkpoint_sha256": pth_sha,
+                        "storage_path": "models/manifest.json",
+                        "has_custom_config": True,
+                        "config_sha256": cfg_sha,
+                        "config_signed_url": "https://supabase.example/cfg.yml",
+                        "shards": [
+                            {
+                                "index": 0,
+                                "sha256": pth_sha,
+                                "bytes": len(pth_bytes),
+                                "signed_url": "https://supabase.example/shard0",
+                            }
+                        ],
+                    },
+                )
+            supabase_calls.append(request.url.path)
+            if request.url.path == "/internal/ocr-jobs/active-model/shard/0":
+                return httpx.Response(200, content=pth_bytes)
+            if request.url.path == "/internal/ocr-jobs/active-model/config":
+                return httpx.Response(200, content=cfg_bytes)
+            return httpx.Response(404)
+
+        def supabase_storage_handler(request: httpx.Request) -> httpx.Response:
+            supabase_calls.append(str(request.url))
+            if str(request.url).endswith("/shard0"):
+                return httpx.Response(200, content=pth_bytes)
+            if str(request.url).endswith("/cfg.yml"):
+                return httpx.Response(200, content=cfg_bytes)
+            return httpx.Response(404)
+
+        cdn_mode = "valid"
+
+        def cdn_handler(request: httpx.Request) -> httpx.Response:
+            hdrs = {k.lower(): v for k, v in request.headers.items()}
+            cdn_headers_seen.append((str(request.url.host), hdrs))
+            # Worker token must NEVER leak to CDN!
+            self.assertNotIn("x-viread-ocr-worker-token", hdrs)
+            if str(request.url).endswith(".pth"):
+                if cdn_mode == "tampered":
+                    return httpx.Response(200, content=b"tampered-corrupt-weights")
+                return httpx.Response(200, content=pth_bytes)
+            if str(request.url).endswith(".yml"):
+                return httpx.Response(200, content=cfg_bytes)
+            return httpx.Response(404)
+
+        # Case 1: Valid HF Model Repo CDN URL -> 0 Supabase calls + HF token attached ONLY to huggingface.co
+        with tempfile.TemporaryDirectory(prefix="viread-cdn-ok-") as tmp_dir:
+            with patch.dict(
+                os.environ,
+                {
+                    "VIREAD_OCR_MODEL_CACHE_DIR": tmp_dir,
+                    "VIREAD_OCR_PREBAKED_MODEL_DIR": str(Path(tmp_dir) / "empty-prebaked"),
+                    "VIREAD_OCR_CHECKPOINT_CDN_URL": f"https://huggingface.co/cuonghhhdd3/viread-ocr-models/resolve/main/viread-vietocr-v2-{pth_sha}.pth",
+                    "VIREAD_HF_MODEL_TOKEN": "hf_model_read_token_secret",
+                },
+                clear=False,
+            ):
+                client = BackendOcrClient(
+                    "https://api.example",
+                    token,
+                    transport=httpx.MockTransport(backend_handler),
+                    storage_transport=httpx.MockTransport(supabase_storage_handler),
+                )
+                try:
+                    rt = OcrRuntimeManager(worker_id="w-cdn-ok")
+                    rt._cdn_transport = httpx.MockTransport(cdn_handler)
+                    info = rt.sync_active_model(
+                        manifest_fetcher=client.get_active_model,
+                        artifact_fetcher=client.download_model_artifact,
+                        direct_url_fetcher=client.download_direct_url,
+                    )
+                    self.assertTrue(info["local_pth_exists"])
+                    self.assertTrue(info["local_yml_exists"])
+                    self.assertFalse(info["prebaked_hit"])
+                    self.assertEqual(supabase_calls, [])
+                    self.assertEqual(
+                        cdn_headers_seen[0][1].get("authorization"),
+                        "Bearer hf_model_read_token_secret",
+                    )
+
+                    # Second sync in same dir hits pre-baked / cached file with 0 network calls!
+                    cdn_headers_seen.clear()
+                    info2 = rt.sync_active_model(
+                        manifest_fetcher=client.get_active_model,
+                        artifact_fetcher=client.download_model_artifact,
+                        direct_url_fetcher=client.download_direct_url,
+                    )
+                    self.assertTrue(info2["prebaked_hit"])
+                    self.assertEqual(cdn_headers_seen, [])
+                finally:
+                    client.close()
+
+        # Case 2: Tampered CDN payload with no fallback -> strictly rejected with ValueError!
+        cdn_mode = "tampered"
+        cdn_headers_seen.clear()
+        with tempfile.TemporaryDirectory(prefix="viread-cdn-tamper-") as tmp_dir:
+            with patch.dict(
+                os.environ,
+                {
+                    "VIREAD_OCR_MODEL_CACHE_DIR": tmp_dir,
+                    "VIREAD_OCR_PREBAKED_MODEL_DIR": str(Path(tmp_dir) / "empty-prebaked"),
+                    "VIREAD_OCR_CHECKPOINT_CDN_URL": f"https://github.com/trancuong3/capstone1/releases/download/v1/viread-vietocr-v2-{pth_sha}.pth",
+                    "VIREAD_HF_MODEL_TOKEN": "hf_model_read_token_secret",
+                },
+                clear=False,
+            ):
+                rt_bad = OcrRuntimeManager(worker_id="w-cdn-tamper")
+                rt_bad._cdn_transport = httpx.MockTransport(cdn_handler)
+                with self.assertRaises(ValueError):
+                    rt_bad.sync_active_model(
+                        manifest_fetcher=lambda: {
+                            "profile": "FLOW1_EXTERNAL_TRDG",
+                            "checkpoint_sha256": pth_sha,
+                            "shards": [],
+                        }
+                    )
+                # HF token MUST NOT be sent to github.com!
+                self.assertNotIn("authorization", cdn_headers_seen[0][1])
+                self.assertFalse((Path(tmp_dir) / f"viread-vietocr-v2-{pth_sha}.pth").exists())
+
+        # Case 3: VIREAD_OCR_SKIP_STARTUP_SMOKE + prebake helper + push_hf_model_checkpoint --dry-run
+        with patch.dict(os.environ, {"VIREAD_OCR_SKIP_STARTUP_SMOKE": "true"}, clear=False):
+            self.assertTrue(should_skip_startup_smoke(prebaked_hit=True))
+            self.assertFalse(should_skip_startup_smoke(prebaked_hit=False))
+
+        with tempfile.TemporaryDirectory(prefix="viread-prebake-unit-") as tmp_dir:
+            src_file = Path(tmp_dir) / f"viread-vietocr-v2-{pth_sha}.pth"
+            src_file.write_bytes(pth_bytes)
+            file_uri = src_file.as_uri()
+            baked_dst = Path(tmp_dir) / "baked" / src_file.name
+            fetch_and_verify(file_uri, expected_sha256=pth_sha, dst_path=baked_dst)
+            self.assertEqual(baked_dst.read_bytes(), pth_bytes)
+            with self.assertRaises(ValueError):
+                fetch_and_verify(
+                    file_uri,
+                    expected_sha256="0" * 64,
+                    dst_path=Path(tmp_dir) / "baked" / "bad.pth",
+                )
+            self.assertEqual(
+                push_model_main(
+                    [
+                        "--repo-id",
+                        "cuonghhhdd3/viread-ocr-models",
+                        "--checkpoint-path",
+                        str(src_file),
+                        "--dry-run",
+                    ]
+                ),
+                0,
+            )
 
 
 if __name__ == "__main__":

@@ -11,9 +11,34 @@ const SILENT_WAV_DATA_URI =
 let installed = false;
 let unlocked = false;
 let cleanupListeners: (() => void) | null = null;
+let sharedAudioElement: HTMLAudioElement | null = null;
+let sharedAudioInUse = false;
 
 export function isAndroidAudioUnlocked(): boolean {
   return unlocked;
+}
+
+/**
+ * Borrow the persistent unlocked `<audio>` element on mobile / Android WebView so
+ * async TTS fetches keep the user-gesture autoplay unlock across network delays.
+ * Returns `null` if unavailable or already in use (caller creates a fresh `Audio`).
+ */
+export function acquireUnlockedAudioElement(): {
+  readonly audio: HTMLAudioElement;
+  readonly release: () => void;
+} | null {
+  if (!sharedAudioElement || sharedAudioInUse) return null;
+  sharedAudioInUse = true;
+  const audio = sharedAudioElement;
+  let released = false;
+  return {
+    audio,
+    release: () => {
+      if (released) return;
+      released = true;
+      sharedAudioInUse = false;
+    },
+  };
 }
 
 export function unlockAudioNow(options?: { readonly force?: boolean }): void {
@@ -22,6 +47,7 @@ export function unlockAudioNow(options?: { readonly force?: boolean }): void {
   if (cleanupListeners) {
     cleanupListeners();
     cleanupListeners = null;
+    installed = false;
   }
 
   try {
@@ -33,9 +59,15 @@ export function unlockAudioNow(options?: { readonly force?: boolean }): void {
     if (AudioCtx) {
       const ctx = new AudioCtx();
       if (ctx.state === "suspended") {
-        void ctx.resume().catch(() => undefined);
+        void ctx
+          .resume()
+          .catch(() => undefined)
+          .finally(() => {
+            void ctx.close().catch(() => undefined);
+          });
+      } else {
+        void ctx.close().catch(() => undefined);
       }
-      void ctx.close().catch(() => undefined);
     }
   } catch {
     // Ignore unsupported WebAudio environments
@@ -43,7 +75,8 @@ export function unlockAudioNow(options?: { readonly force?: boolean }): void {
 
   try {
     if (typeof document !== "undefined") {
-      const probe = document.createElement("audio");
+      const probe = sharedAudioElement ?? document.createElement("audio");
+      sharedAudioElement = probe;
       probe.src = SILENT_WAV_DATA_URI;
       probe.muted = true;
       probe.volume = 0;
@@ -52,12 +85,17 @@ export function unlockAudioNow(options?: { readonly force?: boolean }): void {
         void playPromise
           .then(() => {
             probe.pause();
+            probe.muted = false;
+            probe.volume = 1;
             probe.src = "";
           })
           .catch((error: unknown) => {
+            probe.muted = false;
+            probe.volume = 1;
             probe.src = "";
             if (error instanceof Error && error.name === "NotAllowedError") {
               unlocked = false;
+              installed = false;
               installAndroidAudioUnlock();
             }
           });
@@ -84,6 +122,7 @@ export function installAndroidAudioUnlock(): void {
     document.removeEventListener("pointerdown", handler);
     document.removeEventListener("touchstart", handler);
     document.removeEventListener("keydown", handler);
+    installed = false;
   };
 }
 
@@ -92,4 +131,6 @@ export function resetAndroidAudioUnlockForTest(): void {
   cleanupListeners = null;
   installed = false;
   unlocked = false;
+  sharedAudioElement = null;
+  sharedAudioInUse = false;
 }

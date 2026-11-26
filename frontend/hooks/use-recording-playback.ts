@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { translateRuntime } from "@/lib/i18n/runtime";
+
 export function useRecordingPlayback() {
   const activeRef = useRef<{ audio: HTMLAudioElement; url: string } | null>(
     null,
@@ -34,7 +36,7 @@ export function useRecordingPlayback() {
     }
     setError(null);
     if (typeof URL.createObjectURL !== "function") {
-      setError("Trình duyệt này chưa phát được bản ghi.");
+      setError(translateRuntime("errors.clientRuntime.recordingUnsupported"));
       return;
     }
     const url = URL.createObjectURL(recording);
@@ -43,7 +45,7 @@ export function useRecordingPlayback() {
     const failed = () => {
       if (activeRef.current?.audio !== audio) return;
       stop();
-      setError("Chưa phát được bản ghi. Bé có thể thu lại nhé.");
+      setError(translateRuntime("errors.clientRuntime.recordingPlayFailed"));
     };
     audio.onended = stop;
     audio.onerror = failed;

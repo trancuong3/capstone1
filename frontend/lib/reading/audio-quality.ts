@@ -95,6 +95,12 @@ export class AudioQualityMonitor {
   private frames = 0;
   private invalid = false;
   private maxRms = 0;
+  /** Sliding 300ms window of recent frames for sustained clipping detection. */
+  private readonly clipWindow: Array<{
+    readonly atMs: number;
+    readonly elapsedMs: number;
+    readonly clipped: boolean;
+  }> = [];
   private snapshot: AudioQualitySnapshot = {
     status: "UNKNOWN",
     durationMs: 0,
@@ -132,6 +138,34 @@ export class AudioQualityMonitor {
       peak = Math.max(peak, Math.abs(sample));
       if (Math.abs(sample) >= 0.99) clippedSamples++;
     }
+    const frameClipped = clippedSamples / samples.length > 0.05;
+    this.clipWindow.push({
+      atMs: nowMs,
+      elapsedMs: elapsed,
+      clipped: frameClipped,
+    });
+    const windowStartMs = nowMs - 300;
+    while (
+      this.clipWindow.length > 0 &&
+      this.clipWindow[0].atMs < windowStartMs
+    ) {
+      this.clipWindow.shift();
+    }
+    let clippedFramesInWindow = 0;
+    let clippedMsInWindow = 0;
+    for (const entry of this.clipWindow) {
+      if (entry.clipped) {
+        clippedFramesInWindow += 1;
+        clippedMsInWindow += entry.elapsedMs;
+      }
+    }
+    // Require sustained clipping across the 300ms window (>= 120ms and >= 3 frames,
+    // or >= 50% of frames over >= 3 frames) instead of permanently latching a single plosive.
+    const sustainedClipped =
+      clippedFramesInWindow >= 3 &&
+      (clippedMsInWindow >= 120 ||
+        clippedFramesInWindow / this.clipWindow.length >= 0.5);
+
     const rms = Math.sqrt(sum / samples.length);
     this.frames++;
     this.maxRms = Math.max(this.maxRms, rms);
@@ -181,7 +215,7 @@ export class AudioQualityMonitor {
       rms,
       peak,
       noiseFloor: noise,
-      clipped: this.snapshot.clipped || clippedSamples / samples.length > 0.05,
+      clipped: sustainedClipped,
       isSpeaking: speaking,
     };
     return this.getSnapshot();

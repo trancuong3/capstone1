@@ -177,10 +177,13 @@ class AvatarStorageLifecycleTests(unittest.IsolatedAsyncioTestCase):
         )
         service = ProfileService(repository, contact_provider)
 
+        from app.services.storage_service import clear_signed_url_cache
+
+        clear_signed_url_cache()
         with patch(
-            "app.services.profile_service.create_signed_image_url",
-            side_effect=lambda path, **_: f"https://signed.example/{path}",
-        ) as sign_url:
+            "app.services.storage_service.create_signed_image_urls",
+            side_effect=lambda paths, **_: [f"https://signed.example/{p}" for p in paths],
+        ) as sign_urls:
             result = await service.get_current_profile(PARENT_ID)
 
         self.assertEqual(result["avatar_url"], f"https://signed.example/{profile.AvatarPath}")
@@ -188,7 +191,11 @@ class AvatarStorageLifecycleTests(unittest.IsolatedAsyncioTestCase):
             result["children"][0]["avatar_url"],
             f"https://signed.example/{child.AvatarPath}",
         )
-        self.assertEqual(sign_url.call_count, 2)
+        self.assertEqual(sign_urls.call_count, 1)
+        self.assertEqual(
+            set(sign_urls.call_args.args[0]),
+            {profile.AvatarPath, child.AvatarPath},
+        )
 
     async def test_parent_removal_clears_database_before_deleting_object(self):
         old_path = f"profiles/{PARENT_ID}/avatar/parent.webp"

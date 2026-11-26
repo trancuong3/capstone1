@@ -1,8 +1,9 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useId } from "react";
 
-import { SelectField } from "@/components/common/select-field";
+import { useTranslations } from "@/hooks/use-i18n";
 import type { ChildProfileDTO } from "@/types/child";
 
 interface ChildSelectorProps {
@@ -17,36 +18,46 @@ export function ChildSelector({
   selectedChildId,
   clearQueryKeys,
 }: ChildSelectorProps) {
+  const tc = useTranslations("child");
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const selectId = useId();
 
   return (
-    <div className="flex min-w-0 items-end gap-3">
-      <div className="min-w-0 flex-1">
-        <SelectField
-          aria-label="Chọn hồ sơ bé để xem dữ liệu"
-          label="Hồ sơ của bé"
-          onChange={(event) => {
-            const next = new URLSearchParams(searchParams.toString());
-            next.set("childId", event.target.value);
-            next.delete("page");
-            if (clearQueryKeys) {
-              for (const key of clearQueryKeys) {
-                next.delete(key);
-              }
+    <div className="min-w-0">
+      <label
+        className="mb-1.5 block text-xs font-bold text-muted"
+        htmlFor={selectId}
+      >
+        {tc("selector.label")}
+      </label>
+      <select
+        aria-label={tc("selector.selectAria")}
+        className="min-h-12 w-full cursor-pointer rounded-control border border-border bg-white px-3.5 text-sm font-bold text-ink outline-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        id={selectId}
+        onChange={(event) => {
+          const next = new URLSearchParams(searchParams.toString());
+          next.set("childId", event.target.value);
+          next.delete("page");
+          if (clearQueryKeys) {
+            for (const key of clearQueryKeys) {
+              next.delete(key);
             }
-            router.push(`${pathname}?${next.toString()}`);
-          }}
-          value={selectedChildId}
-        >
-          {childrenProfiles.map((child) => (
-            <option key={child.id} value={child.id}>
-              {child.alias} · Lớp {child.grade}
-            </option>
-          ))}
-        </SelectField>
-      </div>
+          }
+          router.push(`${pathname}?${next.toString()}`);
+        }}
+        value={selectedChildId}
+      >
+        {childrenProfiles.map((child) => (
+          <option key={child.id} value={child.id}>
+            {tc("selector.optionLabel", {
+              alias: child.alias,
+              grade: child.grade,
+            })}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }

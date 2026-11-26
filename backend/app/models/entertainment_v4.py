@@ -60,6 +60,10 @@ class LearningSkillEvidence(Base):
             "created_at",
         ),
         Index(
+            "ix_learning_skill_evidence_parent_id",
+            "parent_id",
+        ),
+        Index(
             "uq_learning_skill_evidence_dedupe",
             "child_id",
             "source_module",
@@ -115,6 +119,7 @@ class MemoryGameSession(Base):
         CheckConstraint("stars BETWEEN 0 AND 3", name="ck_memory_game_sessions_stars"),
         CheckConstraint("attempts_count >= 0", name="ck_memory_game_sessions_attempts"),
         Index("ix_memory_game_sessions_child_created", "child_id", "created_at"),
+        Index("ix_memory_game_sessions_parent_id", "parent_id"),
     )
 
     Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
@@ -218,6 +223,13 @@ class KaraokePracticeSession(Base):
             "child_id",
             "song_id",
             "created_at",
+        ),
+        Index("ix_karaoke_practice_sessions_parent_id", "parent_id"),
+        Index("ix_karaoke_practice_sessions_song_id", "song_id"),
+        Index(
+            "ix_karaoke_practice_sessions_song_version_id",
+            "song_version_id",
+            postgresql_where=text("song_version_id IS NOT NULL"),
         ),
     )
 

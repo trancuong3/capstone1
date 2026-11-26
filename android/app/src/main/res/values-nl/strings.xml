@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ViRead</string>
+    <string name="loading_title">ViRead openen</string>
+    <string name="loading_subtitle">ViRead laden…</string>
+    <string name="loading_hint_stage2">Verbinding maken met server…</string>
+    <string name="loading_hint_stage3">Server wordt gestart, even geduld…</string>
+    <string name="loading_cold_start_hint">Server start op (cold-start), een ogenblik geduld…</string>
+    <string name="error_title_network">Kan geen verbinding maken met ViRead-server</string>
+    <string name="error_title_server">ViRead-server start op of is bezet</string>
+    <string name="error_title_timeout">Kan geen verbinding maken met ViRead</string>
+    <string name="error_title_tls">Ongeldig beveiligingscertificaat</string>
+    <string name="offline_message">Kan geen verbinding maken met de ViRead-server. Controleer uw wifi / mobiele netwerk of het serveradres en tik op Opnieuw proberen.</string>
+    <string name="timeout_message">De ViRead-server reageert traag. Controleer uw netwerkverbinding en tik op Opnieuw proberen. Bij een eerste start kan de server 30–60 seconden nodig hebben.</string>
+    <string name="server_5xx_message">De ViRead-server is bezet of start opnieuw op (%1$d). Wacht enkele seconden en tik op Opnieuw proberen.</string>
+    <string name="tls_error_message">Het HTTPS-beveiligingscertificaat van de server is ongeldig; ViRead heeft de verbinding geblokkeerd om uw gezinsaccount te beschermen.</string>
+    <string name="no_network_toast">Dit apparaat heeft momenteel geen internet- of wifiverbinding.</string>
+    <string name="network_ready_toast">Netwerkverbinding gedetecteerd. ViRead opnieuw laden…</string>
+    <string name="retry_button">Opnieuw proberen</string>
+    <string name="open_home_button">Naar inlogpagina</string>
+    <string name="check_connection_button">Verbinding opnieuw controleren</string>
+    <string name="configure_lan_server_button">LAN HTTPS-server wijzigen (Debug)</string>
+    <string name="lan_dialog_title">LAN HTTPS-server instellen (Debug)</string>
+    <string name="lan_dialog_hint">Voer het HTTPS-adres van de Next.js-server op hetzelfde wifinetwerk in (bijv. https://192.168.1.10:8443). HTTP en localhost worden niet geaccepteerd.</string>
+    <string name="lan_dialog_save">Opslaan &amp; Verbinden</string>
+    <string name="lan_dialog_reset">Standaard herstellen</string>
+    <string name="lan_dialog_cancel">Sluiten</string>
+    <string name="lan_invalid_url_toast">Ongeldig adres. Alleen een geldige LAN HTTPS-origin wordt geaccepteerd (geen subpad of HTTP).</string>
+    <string name="file_chooser_title">Kies een paginafoto, maak een foto of kies PDF/DOCX</string>
+    <string name="permission_denied_title">Toestemming vereist voor deze functie</string>
+    <string name="permission_denied_message">Camera- of microfoontoestemming is uitgeschakeld voor ViRead. U kunt deze op elk moment inschakelen via App-instellingen.</string>
+    <string name="open_app_settings_button">App-instellingen openen</string>
+    <string name="back_exit_confirm_toast">Druk nogmaals om ViRead te sluiten</string>
+</resources>

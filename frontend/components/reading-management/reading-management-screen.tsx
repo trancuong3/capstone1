@@ -25,6 +25,7 @@ import { StatusMessage } from "@/components/common/status-message";
 import { VerifiedBookPicker } from "./verified-book-picker";
 import { useBookService } from "@/hooks/use-book-service";
 import { useChildService } from "@/hooks/use-child-service";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useReadingManagementService } from "@/hooks/use-reading-management-service";
 import { conflictMessage } from "@/lib/api/reading-management-messages";
 import {
@@ -57,14 +58,14 @@ const REMINDERS_PAGE_SIZE = 5;
 const DUE_PAGE_SIZE = 5;
 
 const weekdayOptions = [
-  { label: "T2", value: 0 },
-  { label: "T3", value: 1 },
-  { label: "T4", value: 2 },
-  { label: "T5", value: 3 },
-  { label: "T6", value: 4 },
-  { label: "T7", value: 5 },
-  { label: "CN", value: 6 },
-];
+  { key: "mon", value: 0 },
+  { key: "tue", value: 1 },
+  { key: "wed", value: 2 },
+  { key: "thu", value: 3 },
+  { key: "fri", value: 4 },
+  { key: "sat", value: 5 },
+  { key: "sun", value: 6 },
+] as const;
 const inputClass =
   "min-h-12 min-w-0 w-full rounded-control border border-border bg-white px-3 text-label text-ink focus-visible:outline-3 focus-visible:outline-primary";
 const labelClass =
@@ -83,62 +84,8 @@ function localToday(timeZone = "Asia/Ho_Chi_Minh"): string {
     parts.find((part) => part.type === type)?.value ?? "";
   return `${value("year")}-${value("month")}-${value("day")}`;
 }
-function statusText(status: ReadingGoalStatus): string {
-  const labels: Record<ReadingGoalStatus, string> = {
-    ACTIVE: "Đang thực hiện",
-    PAUSED: "Tạm dừng",
-    COMPLETED: "Đã hoàn thành",
-    ENDED: "Đã kết thúc",
-  };
-  return labels[status];
-}
-function planStatusText(status: ReadingPlanStatus): string {
-  const labels: Record<ReadingPlanStatus, string> = {
-    ACTIVE: "Đang theo kế hoạch",
-    PAUSED: "Tạm dừng",
-    COMPLETED: "Đã hoàn thành",
-    ENDED: "Đã kết thúc",
-  };
-  return labels[status];
-}
-function emailStatusText(status: ReadingReminderEmailStatus): string {
-  const labels: Record<ReadingReminderEmailStatus, string> = {
-    NOT_REQUESTED: "Không gửi email",
-    PENDING: "Đang chờ gửi email",
-    SENDING: "Đang gửi email",
-    RETRY: "Sẽ thử gửi lại",
-    SENT: "Đã gửi email",
-    FAILED: "Gửi email chưa thành công",
-  };
-  return labels[status];
-}
 function clock(value: string): string {
   return value.slice(0, 5);
-}
-function formatWeekdaysFull(weekdays: number[]): string {
-  return weekdays
-    .map((day) => weekdayOptions.find((option) => option.value === day)?.label)
-    .filter(Boolean)
-    .join(", ");
-}
-function formatReminderSchedule(weekdays: number[]): string {
-  const uniqueDays = new Set(weekdays);
-  const hasZeroToSix = [0, 1, 2, 3, 4, 5, 6].every((day) =>
-    uniqueDays.has(day),
-  );
-  const hasOneToSeven = [1, 2, 3, 4, 5, 6, 7].every((day) =>
-    uniqueDays.has(day),
-  );
-  if (hasZeroToSix || hasOneToSeven) {
-    return "Hằng ngày";
-  }
-  const hasWeekdaysOnly =
-    uniqueDays.size === 5 &&
-    [0, 1, 2, 3, 4].every((day) => uniqueDays.has(day));
-  if (hasWeekdaysOnly) {
-    return "T2–T6";
-  }
-  return formatWeekdaysFull(weekdays);
 }
 
 interface Props {
@@ -146,9 +93,44 @@ interface Props {
 }
 
 export function ReadingManagementScreen({ requestedChildId }: Props) {
+  const { formatTime } = useI18n();
+  const t = useTranslations("reports");
   const childService = useChildService();
   const bookService = useBookService();
   const service = useReadingManagementService();
+  const statusText = (status: ReadingGoalStatus) =>
+    t(`readingManagement.goalStatus.${status}`);
+  const planStatusText = (status: ReadingPlanStatus) =>
+    t(`readingManagement.planStatus.${status}`);
+  const emailStatusText = (status: ReadingReminderEmailStatus) =>
+    t(`readingManagement.deliveryStatus.${status}`);
+  const formatWeekdaysFull = (weekdays: number[]) =>
+    weekdays
+      .map((day) => {
+        const option = weekdayOptions.find((item) => item.value === day);
+        return option ? t(`readingManagement.weekdaysShort.${option.key}`) : "";
+      })
+      .filter(Boolean)
+      .join(", ");
+  const formatReminderSchedule = (weekdays: number[]) => {
+    const uniqueDays = new Set(weekdays);
+    const hasZeroToSix = [0, 1, 2, 3, 4, 5, 6].every((day) =>
+      uniqueDays.has(day),
+    );
+    const hasOneToSeven = [1, 2, 3, 4, 5, 6, 7].every((day) =>
+      uniqueDays.has(day),
+    );
+    if (hasZeroToSix || hasOneToSeven) {
+      return t("readingManagement.dailyFrequency");
+    }
+    const hasWeekdaysOnly =
+      uniqueDays.size === 5 &&
+      [0, 1, 2, 3, 4].every((day) => uniqueDays.has(day));
+    if (hasWeekdaysOnly) {
+      return t("readingManagement.weekdaysRangeMonFri");
+    }
+    return formatWeekdaysFull(weekdays);
+  };
   const [children, setChildren] = useState<ChildProfileDTO[]>([]);
   const [childId, setChildId] = useState(requestedChildId ?? "");
   const [goals, setGoals] = useState<ReadingGoalDTO[]>([]);
@@ -307,7 +289,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         );
       })
       .catch(() => {
-        if (active) setError("Không tải được hồ sơ bé. Vui lòng thử lại.");
+        if (active) setError(t("readingManagement.loadChildFailed"));
       })
       .finally(() => {
         if (active) setLoadingChildren(false);
@@ -315,7 +297,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     return () => {
       active = false;
     };
-  }, [childService, requestedChildId]);
+  }, [childService, requestedChildId, t]);
 
   useEffect(() => {
     if (!childId) {
@@ -352,9 +334,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         if (controller.signal.aborted || requestId !== requestIdRef.current) {
           return;
         }
-        setError(
-          "Chưa tải được dữ liệu quản lý đọc. Kiểm tra backend và migration Reading Management rồi thử lại.",
-        );
+        setError(t("readingManagement.loadManagementFailed"));
       })
       .finally(() => {
         if (!controller.signal.aborted && requestId === requestIdRef.current) {
@@ -372,6 +352,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     reloadKey,
     selectedChild?.grade,
     service,
+    t,
   ]);
 
   async function runAction(
@@ -391,8 +372,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       return true;
     } catch (failure) {
       setError(
-        conflictMessage(failure) ??
-          "Không thực hiện được thao tác. Dữ liệu chưa được xác nhận đã lưu; vui lòng thử lại.",
+        conflictMessage(failure) ?? t("readingManagement.mutationUnconfirmed"),
       );
       return false;
     } finally {
@@ -405,7 +385,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     if (!childId) return;
     const target = Number(goalTarget);
     if (!Number.isInteger(target) || target <= 0) {
-      setError("Giá trị mục tiêu phải là số nguyên lớn hơn 0.");
+      setError(t("readingManagement.validation.goalPositiveInt"));
       return;
     }
     await runAction(
@@ -420,28 +400,26 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
           ends_on: goalEnd || null,
           timezone: "Asia/Ho_Chi_Minh",
         }),
-      "Đã lưu mục tiêu đọc.",
+      t("readingManagement.notices.goalSaved"),
     );
   }
 
   async function transition(goal: ReadingGoalDTO, next: ReadingGoalStatus) {
     if (
       next === "ENDED" &&
-      !window.confirm(
-        "Kết thúc mục tiêu này? Tiến độ đã ghi nhận vẫn được lưu.",
-      )
+      !window.confirm(t("readingManagement.notices.goalEndConfirm"))
     )
       return;
     await runAction(
       "goal-" + goal.id,
       () => service.transitionGoal(goal.id, next),
-      "Đã cập nhật trạng thái mục tiêu.",
+      t("readingManagement.notices.goalStatusUpdated"),
     );
   }
   async function submitPlan(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!childId || planDays.length === 0) {
-      setError("Hãy chọn ít nhất một ngày đọc trong tuần.");
+      setError(t("readingManagement.validation.selectReadingDay"));
       return;
     }
     const targetMinutes = Number(planMinutes);
@@ -450,12 +428,12 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       targetMinutes < 5 ||
       targetMinutes > 240
     ) {
-      setError("Thời lượng mỗi buổi phải từ 5 đến 240 phút.");
+      setError(t("readingManagement.validation.minutesRange"));
       return;
     }
     const title = planTitle.trim();
     if (!title) {
-      setError("Hãy đặt tên cho kế hoạch đọc.");
+      setError(t("readingManagement.validation.planNameRequired"));
       return;
     }
     const values = {
@@ -470,7 +448,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       ? await runAction(
           "plan-edit-" + editingPlanId,
           () => service.updatePlan(editingPlanId, values),
-          "Đã cập nhật kế hoạch đọc.",
+          t("readingManagement.notices.planUpdated"),
         )
       : await runAction(
           "plan-create",
@@ -480,7 +458,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               starts_on: planStart,
               ...values,
             }),
-          "Đã tạo kế hoạch đọc tuần.",
+          t("readingManagement.notices.planCreated"),
         );
     if (saved) {
       setEditingPlanId("");
@@ -495,16 +473,14 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
   async function transitionPlan(plan: ReadingPlanDTO, next: ReadingPlanStatus) {
     if (
       next === "ENDED" &&
-      !window.confirm(
-        "Kết thúc kế hoạch này? Lịch sử tiến độ đã ghi nhận vẫn được lưu.",
-      )
+      !window.confirm(t("readingManagement.notices.planEndConfirm"))
     )
       return;
     const messages: Record<ReadingPlanStatus, string> = {
-      ACTIVE: "Đã tiếp tục kế hoạch.",
-      PAUSED: "Đã tạm dừng kế hoạch.",
-      COMPLETED: "Đã hoàn thành kế hoạch.",
-      ENDED: "Đã kết thúc kế hoạch.",
+      ACTIVE: t("readingManagement.notices.planActive"),
+      PAUSED: t("readingManagement.notices.planPaused"),
+      COMPLETED: t("readingManagement.notices.planCompleted"),
+      ENDED: t("readingManagement.notices.planEnded"),
     };
     await runAction(
       "plan-transition-" + plan.id,
@@ -515,13 +491,13 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
   async function saveEditedGoal(goal: ReadingGoalDTO) {
     const target = Number(editingTarget);
     if (!Number.isInteger(target) || target <= 0) {
-      setError("Mục tiêu phải là số nguyên lớn hơn 0.");
+      setError(t("readingManagement.validation.targetPositiveInt"));
       return;
     }
     await runAction(
       "goal-edit-" + goal.id,
       () => service.updateGoal(goal.id, { target_value: target }),
-      "Đã cập nhật mục tiêu.",
+      t("readingManagement.notices.goalTargetUpdated"),
     );
     setEditingGoalId("");
   }
@@ -535,13 +511,15 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         if (existing) await service.removeCollection(childId, bookId, type);
         else await service.addCollection(childId, bookId, type);
       },
-      existing ? "Đã gỡ sách khỏi danh sách." : "Đã lưu sách vào danh sách.",
+      existing
+        ? t("readingManagement.notices.bookRemoved")
+        : t("readingManagement.notices.bookSaved"),
     );
   }
   async function submitReminder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!childId || reminderDays.length === 0) {
-      setError("Hãy chọn ít nhất một ngày nhắc.");
+      setError(t("readingManagement.validation.selectReminderDay"));
       return;
     }
     const payload = {
@@ -554,7 +532,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       const saved = await runAction(
         "reminder-edit",
         () => service.updateReminder(editingReminderId, payload),
-        "Đã cập nhật lịch nhắc.",
+        t("readingManagement.notices.reminderUpdated"),
       );
       if (saved) setEditingReminderId("");
     } else {
@@ -566,23 +544,25 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
             ...payload,
             is_active: true,
           }),
-        "Đã tạo lịch nhắc.",
+        t("readingManagement.notices.reminderCreated"),
       );
       if (saved) setReminderEmailEnabled(false);
     }
   }
   if (activeForm) {
     const titles = {
-      plan: editingPlanId ? "Chỉnh sửa kế hoạch đọc" : "Thiết lập kế hoạch đọc",
-      goal: "Thiết lập mục tiêu",
+      plan: editingPlanId
+        ? t("readingManagement.modal.editPlanTitle")
+        : t("readingManagement.modal.createPlanTitle"),
+      goal: t("readingManagement.modal.goalTitle"),
       reminder: editingReminderId
-        ? "Chỉnh sửa lịch nhắc"
-        : "Thiết lập lịch nhắc",
+        ? t("readingManagement.modal.editReminderTitle")
+        : t("readingManagement.modal.createReminderTitle"),
     };
     const descriptions = {
-      plan: "Chọn sách, thời lượng và lịch đọc phù hợp với bé.",
-      goal: "Đặt mục tiêu vừa sức và theo dõi sự tiến bộ của bé.",
-      reminder: "Chọn thời gian và những ngày bạn muốn nhận lời nhắc đọc sách.",
+      plan: t("readingManagement.modal.planSubtitle"),
+      goal: t("readingManagement.modal.goalSubtitle"),
+      reminder: t("readingManagement.modal.reminderSubtitle"),
     };
     return (
       <FormPage
@@ -593,39 +573,44 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         {activeForm === "plan" ? (
           <>
             {error ? (
-              <StatusMessage title="Có vấn đề xảy ra" tone="error">
+              <StatusMessage
+                title={t("readingManagement.errorTitle")}
+                tone="error"
+              >
                 {error}
               </StatusMessage>
             ) : null}
             <form className="grid gap-4 sm:grid-cols-2" onSubmit={submitPlan}>
               <label className={labelClass}>
-                Tên kế hoạch
+                {t("readingManagement.modal.planNameLabel")}
                 <input
                   className={inputClass}
                   maxLength={100}
                   required
                   value={planTitle}
                   onChange={(event) => setPlanTitle(event.target.value)}
-                  placeholder="Ví dụ: Đọc cùng bé sau bữa tối"
+                  placeholder={t("readingManagement.modal.planNamePlaceholder")}
                 />
               </label>
               <label className={labelClass}>
-                Sách dự định đọc
+                {t("readingManagement.modal.planBookLabel")}
                 <select
                   className={inputClass}
                   value={planBookId}
                   onChange={(event) => setPlanBookId(event.target.value)}
                 >
-                  <option value="">Chưa chọn sách</option>
+                  <option value="">
+                    {t("readingManagement.modal.planNoBookOption")}
+                  </option>
                   {(books ?? []).map((book) => (
-                    <option key={book.id} value={book.id}>
+                    <option dir="ltr" key={book.id} value={book.id}>
                       {book.title}
                     </option>
                   ))}
                 </select>
               </label>
               <label className={labelClass}>
-                Thời lượng mỗi buổi (phút)
+                {t("readingManagement.modal.planMinutesLabel")}
                 <input
                   className={inputClass}
                   type="number"
@@ -638,7 +623,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 />
               </label>
               <label className={labelClass}>
-                Múi giờ
+                {t("readingManagement.modal.timezoneLabel")}
                 <input
                   className={inputClass}
                   list="reading-timezones"
@@ -649,7 +634,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               </label>
               <fieldset className="min-w-0 sm:col-span-2">
                 <legend className="mb-2 text-label font-semibold text-ink">
-                  Ngày đọc mỗi tuần
+                  {t("readingManagement.modal.readingDaysLabel")}
                 </legend>
                 <div className="flex flex-wrap gap-2">
                   {weekdayOptions.map((day) => (
@@ -674,13 +659,13 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                           )
                         }
                       />
-                      {day.label}
+                      {t(`readingManagement.weekdaysShort.${day.key}`)}
                     </label>
                   ))}
                 </div>
               </fieldset>
               <label className={labelClass}>
-                Bắt đầu từ
+                {t("readingManagement.modal.startFromLabel")}
                 <input
                   className={inputClass}
                   type="date"
@@ -691,7 +676,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 />
               </label>
               <label className={labelClass}>
-                Kết thúc (tùy chọn)
+                {t("readingManagement.modal.endOptionalLabel")}
                 <input
                   className={inputClass}
                   type="date"
@@ -702,7 +687,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               </label>
               <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
                 <Button type="submit" disabled={Boolean(busyKey)}>
-                  {editingPlanId ? "Lưu kế hoạch" : "Tạo kế hoạch tuần"}
+                  {editingPlanId
+                    ? t("readingManagement.modal.savePlan")
+                    : t("readingManagement.modal.createPlan")}
                 </Button>
                 {editingPlanId ? (
                   <Button
@@ -710,7 +697,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     variant="secondary"
                     onClick={() => setEditingPlanId("")}
                   >
-                    Hủy sửa
+                    {t("readingManagement.modal.cancelEdit")}
                   </Button>
                 ) : null}
               </div>
@@ -719,13 +706,16 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         ) : activeForm === "goal" ? (
           <>
             {error ? (
-              <StatusMessage title="Có vấn đề xảy ra" tone="error">
+              <StatusMessage
+                title={t("readingManagement.errorTitle")}
+                tone="error"
+              >
                 {error}
               </StatusMessage>
             ) : null}
             <form className="grid gap-4 sm:grid-cols-2" onSubmit={submitGoal}>
               <label className={labelClass}>
-                Đo lường
+                {t("readingManagement.modal.metricLabel")}
                 <select
                   className={inputClass}
                   value={goalMetric}
@@ -733,12 +723,16 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     setGoalMetric(e.target.value as ReadingGoalMetric)
                   }
                 >
-                  <option value="MINUTES">Phút đọc</option>
-                  <option value="SESSIONS">Buổi đọc hoàn thành</option>
+                  <option value="MINUTES">
+                    {t("readingManagement.modal.metricMinutes")}
+                  </option>
+                  <option value="SESSIONS">
+                    {t("readingManagement.modal.metricSessions")}
+                  </option>
                 </select>
               </label>
               <label className={labelClass}>
-                Mục tiêu
+                {t("readingManagement.modal.targetValueLabel")}
                 <input
                   className={inputClass}
                   type="number"
@@ -751,7 +745,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 />
               </label>
               <label className={labelClass}>
-                Chu kỳ
+                {t("readingManagement.modal.periodLabel")}
                 <select
                   className={inputClass}
                   value={goalPeriod}
@@ -759,12 +753,16 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     setGoalPeriod(e.target.value as ReadingGoalPeriod)
                   }
                 >
-                  <option value="DAILY">Mỗi ngày</option>
-                  <option value="WEEKLY">Mỗi tuần</option>
+                  <option value="DAILY">
+                    {t("readingManagement.modal.periodDaily")}
+                  </option>
+                  <option value="WEEKLY">
+                    {t("readingManagement.modal.periodWeekly")}
+                  </option>
                 </select>
               </label>
               <label className={labelClass}>
-                Bắt đầu
+                {t("readingManagement.modal.startLabel")}
                 <input
                   className={inputClass}
                   type="date"
@@ -774,7 +772,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 />
               </label>
               <label className={labelClass}>
-                Kết thúc (tùy chọn)
+                {t("readingManagement.modal.endOptionalLabel")}
                 <input
                   className={inputClass}
                   type="date"
@@ -785,7 +783,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               </label>
               <div className="flex items-end">
                 <Button type="submit" disabled={Boolean(busyKey)}>
-                  Tạo mục tiêu
+                  {t("readingManagement.modal.createGoal")}
                 </Button>
               </div>
             </form>
@@ -793,7 +791,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         ) : (
           <>
             {error ? (
-              <StatusMessage title="Có vấn đề xảy ra" tone="error">
+              <StatusMessage
+                title={t("readingManagement.errorTitle")}
+                tone="error"
+              >
                 {error}
               </StatusMessage>
             ) : null}
@@ -802,7 +803,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               onSubmit={submitReminder}
             >
               <label className={labelClass}>
-                Giờ địa phương
+                {t("readingManagement.modal.localTimeLabel")}
                 <input
                   className={inputClass}
                   type="time"
@@ -812,7 +813,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 />
               </label>
               <label className={labelClass}>
-                Timezone IANA
+                {t("readingManagement.modal.ianaTimezoneLabel")}
                 <input
                   className={inputClass}
                   list="reading-timezones"
@@ -830,7 +831,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               </label>
               <fieldset className="min-w-0 sm:col-span-2">
                 <legend className="mb-2 text-label font-semibold text-ink">
-                  Lặp vào ngày
+                  {t("readingManagement.modal.repeatDaysLabel")}
                 </legend>
                 <div className="flex flex-wrap gap-2">
                   {weekdayOptions.map((day) => (
@@ -855,14 +856,14 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                           )
                         }
                       />
-                      {day.label}
+                      {t(`readingManagement.weekdaysShort.${day.key}`)}
                     </label>
                   ))}
                 </div>
               </fieldset>
               <fieldset className="min-w-0 rounded-control border border-border bg-canvas p-3 sm:col-span-2">
                 <legend className="px-1 text-label font-semibold text-ink">
-                  Email nhắc đọc
+                  {t("readingManagement.modal.emailReminderLabel")}
                 </legend>
                 <label className="flex cursor-pointer items-start gap-3">
                   <input
@@ -875,19 +876,20 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   />
                   <span>
                     <span className="flex items-center gap-2 font-semibold text-ink">
-                      <Mail className="size-4 text-primary" /> Gửi email cho phụ
-                      huynh khi đến giờ
+                      <Mail className="size-4 text-primary" />{" "}
+                      {t("readingManagement.modal.sendEmailCheck")}
                     </span>
                     <span className="mt-1 block text-sm text-muted">
-                      Email được gửi tới địa chỉ đã xác minh của tài khoản phụ
-                      huynh.
+                      {t("readingManagement.modal.emailDestinationNote")}
                     </span>
                   </span>
                 </label>
               </fieldset>
               <div className="flex min-w-0 flex-wrap items-end gap-2 sm:col-span-2">
                 <Button type="submit" disabled={Boolean(busyKey)}>
-                  {editingReminderId ? "Lưu chỉnh sửa" : "Tạo lịch nhắc"}
+                  {editingReminderId
+                    ? t("readingManagement.modal.saveChanges")
+                    : t("readingManagement.modal.createReminder")}
                 </Button>
                 {editingReminderId ? (
                   <Button
@@ -895,7 +897,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     variant="secondary"
                     onClick={() => setEditingReminderId("")}
                   >
-                    Hủy sửa
+                    {t("readingManagement.modal.cancelEdit")}
                   </Button>
                 ) : null}
               </div>
@@ -912,7 +914,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         className="mx-auto max-w-[1120px] p-6 text-body text-muted"
         aria-busy="true"
       >
-        Đang tải hồ sơ bé…
+        {t("readingManagement.loadingChild")}
       </section>
     );
 
@@ -921,11 +923,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       <header className="flex flex-wrap items-end justify-between gap-5">
         <div className="min-w-0 flex-1">
           <h1 className="text-heading font-extrabold leading-tight text-ink">
-            Quản lý đọc sách
+            {t("readingManagement.heading")}
           </h1>
           <p className="mt-1.5 max-w-3xl text-body leading-6 text-muted">
-            Đặt mục tiêu, lưu sách và tạo lịch nhắc theo giờ địa phương của gia
-            đình.
+            {t("readingManagement.headingSubtitle")}
           </p>
         </div>
         <Button
@@ -936,7 +937,8 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
           variant="secondary"
           disabled={isReadingDataLoading || !childId}
         >
-          <RefreshCw aria-hidden="true" className="size-4" /> Tải lại
+          <RefreshCw aria-hidden="true" className="size-4" />{" "}
+          {t("readingManagement.reload")}
         </Button>
       </header>
 
@@ -945,7 +947,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
           className="flex min-h-[72px] min-w-0 flex-col gap-1 rounded-control border border-border bg-white px-4 py-3 text-label text-muted shadow-xs"
           htmlFor="management-child"
         >
-          Hồ sơ bé
+          {t("readingManagement.childProfileLabel")}
           <select
             id="management-child"
             className="min-h-6 w-full min-w-0 bg-white text-body text-ink focus-visible:outline-3 focus-visible:outline-primary"
@@ -954,72 +956,78 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
           >
             {children.map((child) => (
               <option key={child.id} value={child.id}>
-                {child.alias} · Lớp {child.grade}
+                {child.alias} ·{" "}
+                {t("readingManagement.bookPicker.gradeSingle", {
+                  grade: child.grade,
+                })}
               </option>
             ))}
           </select>
         </label>
         {selectedChild ? (
           <dl>
-            <InformationField label="Đang xem">
-              {selectedChild.alias} · Lớp {selectedChild.grade}
+            <InformationField label={t("readingManagement.viewingLabel")}>
+              {selectedChild.alias} ·{" "}
+              {t("readingManagement.bookPicker.gradeSingle", {
+                grade: selectedChild.grade,
+              })}
             </InformationField>
           </dl>
         ) : null}
       </div>
       {error && !activeForm ? (
-        <StatusMessage title="Có vấn đề xảy ra" tone="error">
+        <StatusMessage title={t("readingManagement.errorTitle")} tone="error">
           {error}
         </StatusMessage>
       ) : null}
       {success ? (
-        <StatusMessage title="Đã lưu" tone="success">
+        <StatusMessage title={t("readingManagement.savedTitle")} tone="success">
           {success}
         </StatusMessage>
       ) : null}
       {!childId && !isReadingDataLoading ? (
         <EmptyState
           icon={<Target className="size-9" />}
-          title="Chưa có hồ sơ bé"
-          description="Hãy tạo hồ sơ bé trước khi thiết lập mục tiêu hoặc lịch nhắc."
+          title={t("readingManagement.noChildTitle")}
+          description={t("readingManagement.noChildDesc")}
         />
       ) : null}
       {isReadingDataLoading && childId ? (
         <p role="status" aria-live="polite">
-          Đang tải dữ liệu của bé…
+          {t("readingManagement.loadingChildData")}
         </p>
       ) : null}
 
       {hasReadingData ? (
         <>
           <section
-            aria-label="Tổng quan thói quen đọc"
+            aria-label={t("readingManagement.overviewAria")}
             className="grid grid-cols-2 gap-3 lg:grid-cols-4"
           >
             {[
               {
-                label: "Mục tiêu đang chạy",
+                label: t("readingManagement.summaryRunningGoals"),
                 value: goals.filter(isRunningGoal).length,
-                detail: "mục tiêu đọc",
+                detail: t("readingManagement.summaryRunningGoalsDetail"),
                 icon: <Target className="size-4.5" />,
               },
               {
-                label: "Kế hoạch trong tuần",
+                label: t("readingManagement.summaryActivePlans"),
                 value: plans.filter(isRunningPlan).length,
-                detail: "kế hoạch đang hoạt động",
+                detail: t("readingManagement.summaryActivePlansDetail"),
                 icon: <CalendarDays className="size-4.5" />,
               },
               {
-                label: "Lịch nhắc đã bật",
+                label: t("readingManagement.summaryEnabledReminders"),
                 value: reminders.filter((reminder) => reminder.is_active)
                   .length,
-                detail: "lịch nhắc cho bé",
+                detail: t("readingManagement.summaryEnabledRemindersDetail"),
                 icon: <BellRing className="size-4.5" />,
               },
               {
-                label: "Sách đã lưu",
+                label: t("readingManagement.summarySavedBooks"),
                 value: collections.length,
-                detail: "sách yêu thích hoặc muốn đọc",
+                detail: t("readingManagement.summarySavedBooksDetail"),
                 icon: <BookHeart className="size-4.5" />,
               },
             ].map((item) => (
@@ -1046,10 +1054,14 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
 
           <details className="rounded-control border border-border bg-white px-4 py-3 shadow-xs transition hover:border-primary/40">
             <summary className="cursor-pointer font-bold text-primary">
-              Hôm nay bé cần đọc gì?
+              {t("readingManagement.todayTitle", {
+                childName: t("readingManagement.todayDefaultChild"),
+              })}
             </summary>
             <TodaySummary
-              childName={selectedChild?.alias ?? "bé"}
+              childName={
+                selectedChild?.alias ?? t("readingManagement.todayDefaultChild")
+              }
               plans={plans}
               goals={goals}
             />
@@ -1058,7 +1070,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
           <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
             <div className="flex min-w-0 flex-col gap-6">
               <section
-                aria-label="Kế hoạch đọc trong tuần"
+                aria-label={t("readingManagement.plansSectionAria")}
                 className="min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5"
               >
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-3">
@@ -1072,15 +1084,14 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <h2 className="min-w-0 text-lg font-extrabold leading-snug text-ink sm:text-xl">
-                          Kế hoạch đọc trong tuần
+                          {t("readingManagement.plansTitle")}
                         </h2>
                         <span className="shrink-0 rounded-full bg-canvas px-2 py-0.5 text-xs font-bold tabular-nums text-muted">
                           {plans.length}
                         </span>
                       </div>
                       <p className="mt-0.5 text-xs leading-relaxed text-muted">
-                        Chọn ngày, thời lượng và sách dự định đọc. Tiến độ được
-                        tính từ các buổi đọc hợp lệ của bé.
+                        {t("readingManagement.plansSubtitle")}
                       </p>
                     </div>
                   </div>
@@ -1094,7 +1105,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                       setActiveForm("plan");
                     }}
                   >
-                    Thêm kế hoạch
+                    {t("readingManagement.addPlan")}
                   </Button>
                 </div>
 
@@ -1105,10 +1116,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                       className="mx-auto size-7 text-primary/80"
                     />
                     <p className="mt-1.5 text-sm font-semibold text-ink">
-                      Chưa có kế hoạch đọc tuần
+                      {t("readingManagement.plansEmptyTitle")}
                     </p>
                     <p className="mt-0.5 text-xs text-muted">
-                      Tạo lịch đọc phù hợp với thời gian của gia đình.
+                      {t("readingManagement.plansEmptyDesc")}
                     </p>
                   </div>
                 ) : (
@@ -1127,11 +1138,22 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               </h3>
                               <p className="mt-0.5 text-sm text-muted">
                                 {formatWeekdaysFull(plan.weekdays)} ·{" "}
-                                {plan.target_minutes} phút mỗi buổi
+                                {t("readingManagement.planMinutesPerSession", {
+                                  minutes: plan.target_minutes,
+                                })}
                               </p>
                               {plan.book_title ? (
                                 <p className="mt-0.5 break-words text-sm text-muted">
-                                  Sách: {plan.book_title}
+                                  {t("readingManagement.bookPrefix", {
+                                    title: "",
+                                  }).trimEnd()}{" "}
+                                  <span
+                                    className="viread-learning-content"
+                                    dir="ltr"
+                                    lang="vi"
+                                  >
+                                    {plan.book_title}
+                                  </span>
                                 </p>
                               ) : null}
                             </div>
@@ -1140,7 +1162,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                             </span>
                           </div>
                           <div className="mt-3 flex items-center justify-between gap-3 text-sm">
-                            <span>Ngày đọc hoàn thành trong tuần này</span>
+                            <span>
+                              {t("readingManagement.planCompletedDaysLabel")}
+                            </span>
                             <strong className="tabular-nums">
                               {plan.completed_days_this_week}/
                               {plan.scheduled_days_this_week}
@@ -1154,7 +1178,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               }}
                             />
                           </div>
-                          <p className="mt-1 text-right text-xs font-semibold tabular-nums text-primary">
+                          <p className="mt-1 text-end text-xs font-semibold tabular-nums text-primary">
                             {plan.progress_percent}%
                           </p>
                           <PlanInsights plan={plan} />
@@ -1178,7 +1202,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                   setPlanTimezone(plan.timezone);
                                 }}
                               >
-                                Chỉnh sửa
+                                {t("readingManagement.edit")}
                               </Button>
                               {plan.status === "ACTIVE" ? (
                                 <Button
@@ -1191,7 +1215,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                     void transitionPlan(plan, "PAUSED")
                                   }
                                 >
-                                  Tạm dừng
+                                  {t("readingManagement.pause")}
                                 </Button>
                               ) : (
                                 <Button
@@ -1204,7 +1228,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                     void transitionPlan(plan, "ACTIVE")
                                   }
                                 >
-                                  Tiếp tục
+                                  {t("readingManagement.resume")}
                                 </Button>
                               )}
                               <Button
@@ -1221,7 +1245,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                   aria-hidden="true"
                                   className="size-3.5"
                                 />{" "}
-                                Hoàn thành
+                                {t("readingManagement.complete")}
                               </Button>
                               <Button
                                 variant="quiet"
@@ -1233,7 +1257,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                   void transitionPlan(plan, "ENDED")
                                 }
                               >
-                                Kết thúc
+                                {t("readingManagement.end")}
                               </Button>
                             </div>
                           ) : null}
@@ -1241,10 +1265,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                       ))}
                     </div>
                     <PaginationBar
-                      ariaLabel="Phân trang kế hoạch đọc"
+                      ariaLabel={t("readingManagement.plansPaginationAria")}
                       className="mt-3"
                       compact
-                      itemLabel="kế hoạch"
+                      itemLabel={t("readingManagement.plansPaginationItem")}
                       onPageChange={setPlansPage}
                       page={safePlansPage}
                       pageSize={PLANS_PAGE_SIZE}
@@ -1255,7 +1279,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               </section>
 
               <section
-                aria-label="Sách yêu thích và danh sách muốn đọc"
+                aria-label={t("readingManagement.collectionsSectionAria")}
                 className="min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5"
               >
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-3">
@@ -1269,38 +1293,49 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <h2 className="min-w-0 text-lg font-extrabold leading-snug text-ink sm:text-xl">
-                          Sách yêu thích và danh sách muốn đọc
+                          {t("readingManagement.collectionsTitle")}
                         </h2>
                         <span className="shrink-0 rounded-full bg-canvas px-2 py-0.5 text-xs font-bold tabular-nums text-muted">
                           {collections.length}
                         </span>
                       </div>
                       <p className="mt-0.5 text-xs leading-relaxed text-muted">
-                        Các cuốn sách bé yêu thích hoặc muốn đọc. Sách ngừng
-                        hoạt động vẫn có thể bỏ lưu.
+                        {t("readingManagement.collectionsSubtitle")}
                       </p>
                     </div>
                   </div>
                 </div>
                 <p className="mb-3 text-xs font-medium text-muted">
-                  Yêu thích {favorites.length} · Muốn đọc {readingList.length}
+                  {t("readingManagement.collectionsCountSummary", {
+                    favorites: favorites.length,
+                    readingList: readingList.length,
+                  })}
                 </p>
                 {collections.length > 0 ? (
                   <div
                     role="group"
-                    aria-label="Lọc sách đã lưu"
+                    aria-label={t("readingManagement.collectionsFilterAria")}
                     className="mb-3 flex flex-wrap gap-1.5"
                   >
                     {(
                       [
-                        { key: "ALL", label: `Tất cả (${collections.length})` },
+                        {
+                          key: "ALL",
+                          label: t("readingManagement.filterAll", {
+                            count: collections.length,
+                          }),
+                        },
                         {
                           key: "FAVORITE",
-                          label: `Yêu thích (${favorites.length})`,
+                          label: t("readingManagement.filterFavorites", {
+                            count: favorites.length,
+                          }),
                         },
                         {
                           key: "WANT_TO_READ",
-                          label: `Muốn đọc (${readingList.length})`,
+                          label: t("readingManagement.filterReadingList", {
+                            count: readingList.length,
+                          }),
                         },
                       ] as const
                     ).map((tab) => (
@@ -1325,11 +1360,11 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 ) : null}
                 {collections.length === 0 ? (
                   <p className="mt-3 rounded-control border border-dashed border-border/80 bg-canvas/50 px-4 py-4 text-center text-sm text-muted">
-                    Chưa lưu cuốn sách nào.
+                    {t("readingManagement.collectionsEmpty")}
                   </p>
                 ) : filteredCollections.length === 0 ? (
                   <p className="mt-3 rounded-control border border-dashed border-border/80 bg-canvas/50 px-4 py-4 text-center text-sm text-muted">
-                    Chưa có sách nào trong bộ lọc này.
+                    {t("readingManagement.collectionsEmptyFiltered")}
                   </p>
                 ) : (
                   <>
@@ -1342,18 +1377,22 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                         >
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
-                              <strong className="break-words text-sm font-bold text-ink">
+                              <strong
+                                className="viread-learning-content break-words text-sm font-bold text-ink"
+                                dir="ltr"
+                                lang="vi"
+                              >
                                 {entry.book.title}
                               </strong>
                               <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-muted">
                                 {entry.collection_type === "FAVORITE"
-                                  ? "Yêu thích"
-                                  : "Muốn đọc"}
+                                  ? t("readingManagement.favorite")
+                                  : t("readingManagement.wantToRead")}
                               </span>
                             </div>
                             {entry.book.lifecycle_status === "RETIRED" ? (
                               <span className="mt-0.5 block text-xs text-muted">
-                                Không còn khả dụng để đọc
+                                {t("readingManagement.unavailableToRead")}
                               </span>
                             ) : null}
                           </div>
@@ -1363,7 +1402,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 className="inline-flex min-h-8 items-center rounded-control px-2 text-xs font-bold text-primary hover:bg-sky hover:underline"
                                 href={`/books/${encodeURIComponent(entry.book_id)}?childId=${encodeURIComponent(childId)}`}
                               >
-                                Mở sách
+                                {t("readingManagement.openBook")}
                               </Link>
                             ) : null}
                             <Button
@@ -1380,17 +1419,21 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               }
                             >
                               <Trash2 aria-hidden="true" className="size-3.5" />
-                              Bỏ lưu
+                              {t("readingManagement.removeBook")}
                             </Button>
                           </div>
                         </li>
                       ))}
                     </ul>
                     <PaginationBar
-                      ariaLabel="Phân trang sách đã lưu"
+                      ariaLabel={t(
+                        "readingManagement.collectionsPaginationAria",
+                      )}
                       className="mt-3"
                       compact
-                      itemLabel="sách"
+                      itemLabel={t(
+                        "readingManagement.collectionsPaginationItem",
+                      )}
                       onPageChange={setCollectionsPage}
                       page={safeCollectionsPage}
                       pageSize={COLLECTIONS_PAGE_SIZE}
@@ -1414,7 +1457,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
 
             <div className="flex min-w-0 flex-col gap-6">
               <section
-                aria-label="Mục tiêu đọc"
+                aria-label={t("readingManagement.goalsSectionAria")}
                 className="min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5"
               >
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-3">
@@ -1428,15 +1471,14 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <h2 className="min-w-0 text-lg font-extrabold leading-snug text-ink sm:text-xl">
-                          Mục tiêu đọc
+                          {t("readingManagement.goalsTitle")}
                         </h2>
                         <span className="shrink-0 rounded-full bg-canvas px-2 py-0.5 text-xs font-bold tabular-nums text-muted">
                           {goals.length}
                         </span>
                       </div>
                       <p className="mt-0.5 text-xs leading-relaxed text-muted">
-                        Đặt mục tiêu phút hoặc buổi đọc và theo dõi tiến độ định
-                        kỳ của bé.
+                        {t("readingManagement.goalsSubtitle")}
                       </p>
                     </div>
                   </div>
@@ -1447,13 +1489,13 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     className="min-h-9! shrink-0 px-3! py-1.5! text-xs!"
                     onClick={() => setActiveForm("goal")}
                   >
-                    Thêm mục tiêu
+                    {t("readingManagement.addGoal")}
                   </Button>
                 </div>
 
                 {goals.length === 0 ? (
                   <p className="mt-3 rounded-control border border-dashed border-border/80 bg-canvas/50 px-4 py-4 text-center text-sm text-muted">
-                    Bé chưa có mục tiêu đọc nào.
+                    {t("readingManagement.goalsEmpty")}
                   </p>
                 ) : (
                   <>
@@ -1467,22 +1509,33 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                           <div className="flex flex-wrap items-start justify-between gap-2">
                             <h3 className="font-semibold text-ink">
                               {goal.target_value}{" "}
-                              {goal.metric === "MINUTES" ? "phút" : "buổi"} ·{" "}
+                              {goal.metric === "MINUTES"
+                                ? t("readingManagement.unitMinute")
+                                : t("readingManagement.unitSession")}{" "}
+                              ·{" "}
                               {goal.period === "DAILY"
-                                ? "mỗi ngày"
-                                : "mỗi tuần"}
+                                ? t("readingManagement.goalPeriodDaily")
+                                : t("readingManagement.goalPeriodWeekly")}
                             </h3>
                             <span className="shrink-0 rounded-full bg-sky px-2.5 py-0.5 text-xs font-semibold text-primary">
                               {statusText(goal.status)}
                             </span>
                           </div>
                           <p className="mt-1 text-xs text-muted">
-                            Từ {goal.starts_on}
-                            {goal.ends_on ? " đến " + goal.ends_on : ""} ·{" "}
-                            {goal.timezone}
+                            {t("readingManagement.goalDateFrom", {
+                              date: goal.starts_on,
+                            })}
+                            {goal.ends_on
+                              ? t("readingManagement.goalDateTo", {
+                                  date: goal.ends_on,
+                                })
+                              : ""}{" "}
+                            · {goal.timezone}
                           </p>
                           <div className="mt-3 flex items-center justify-between text-sm">
-                            <span>Tiến độ chu kỳ hiện tại</span>
+                            <span>
+                              {t("readingManagement.goalCycleProgress")}
+                            </span>
                             <strong className="tabular-nums">
                               {goal.current_value}/{goal.target_value}
                             </strong>
@@ -1495,14 +1548,16 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               }}
                             />
                           </div>
-                          <p className="mt-1 text-right text-xs font-semibold tabular-nums text-primary">
+                          <p className="mt-1 text-end text-xs font-semibold tabular-nums text-primary">
                             {goal.progress_percent}%
                           </p>
                           <GoalInsights goal={goal} />
                           {editingGoalId === goal.id ? (
                             <div className="mt-3 flex flex-wrap items-center gap-2">
                               <input
-                                aria-label="Giá trị mục tiêu mới"
+                                aria-label={t(
+                                  "readingManagement.newTargetValueAria",
+                                )}
                                 className="min-h-9 w-28 rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
                                 type="number"
                                 min={1}
@@ -1518,7 +1573,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 onClick={() => void saveEditedGoal(goal)}
                                 disabled={Boolean(busyKey)}
                               >
-                                Lưu
+                                {t("readingManagement.save")}
                               </Button>
                               <Button
                                 fullWidth={false}
@@ -1527,7 +1582,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 variant="secondary"
                                 onClick={() => setEditingGoalId("")}
                               >
-                                Hủy
+                                {t("readingManagement.cancel")}
                               </Button>
                             </div>
                           ) : null}
@@ -1544,7 +1599,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                   setEditingTarget(String(goal.target_value));
                                 }}
                               >
-                                Sửa mục tiêu
+                                {t("readingManagement.editGoal")}
                               </Button>
                               {goal.status === "ACTIVE" ? (
                                 <Button
@@ -1557,7 +1612,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                     void transition(goal, "PAUSED")
                                   }
                                 >
-                                  Tạm dừng
+                                  {t("readingManagement.pause")}
                                 </Button>
                               ) : (
                                 <Button
@@ -1570,7 +1625,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                     void transition(goal, "ACTIVE")
                                   }
                                 >
-                                  Tiếp tục
+                                  {t("readingManagement.resume")}
                                 </Button>
                               )}
                               <Button
@@ -1583,7 +1638,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                   void transition(goal, "COMPLETED")
                                 }
                               >
-                                Hoàn thành
+                                {t("readingManagement.complete")}
                               </Button>
                               <Button
                                 variant="quiet"
@@ -1593,7 +1648,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 disabled={Boolean(busyKey)}
                                 onClick={() => void transition(goal, "ENDED")}
                               >
-                                Kết thúc
+                                {t("readingManagement.end")}
                               </Button>
                             </div>
                           ) : null}
@@ -1601,10 +1656,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                       ))}
                     </div>
                     <PaginationBar
-                      ariaLabel="Phân trang mục tiêu đọc"
+                      ariaLabel={t("readingManagement.goalsPaginationAria")}
                       className="mt-3"
                       compact
-                      itemLabel="mục tiêu"
+                      itemLabel={t("readingManagement.goalsPaginationItem")}
                       onPageChange={setGoalsPage}
                       page={safeGoalsPage}
                       pageSize={GOALS_PAGE_SIZE}
@@ -1613,13 +1668,12 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   </>
                 )}
                 <p className="mt-3 text-xs text-muted">
-                  Tiến độ chỉ tính phiên đã hoàn tất với thời điểm bắt đầu/kết
-                  thúc hợp lệ. Mục tiêu không tự hoàn thành chỉ vì đạt 100%.
+                  {t("readingManagement.goalsTimezoneRule")}
                 </p>
               </section>
 
               <section
-                aria-label="Lịch nhắc đọc"
+                aria-label={t("readingManagement.remindersSectionAria")}
                 className="min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5"
               >
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-3">
@@ -1633,16 +1687,14 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <h2 className="min-w-0 text-lg font-extrabold leading-snug text-ink sm:text-xl">
-                          Lịch nhắc đọc
+                          {t("readingManagement.remindersTitle")}
                         </h2>
                         <span className="shrink-0 rounded-full bg-canvas px-2 py-0.5 text-xs font-bold tabular-nums text-muted">
                           {reminders.length}
                         </span>
                       </div>
                       <p className="mt-0.5 text-xs leading-relaxed text-muted">
-                        Lịch được lưu theo múi giờ đã chọn. Khi bật email, máy
-                        chủ sẽ gửi lời nhắc đến địa chỉ đã xác minh của phụ
-                        huynh.
+                        {t("readingManagement.remindersSubtitle")}
                       </p>
                     </div>
                   </div>
@@ -1656,7 +1708,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                       setActiveForm("reminder");
                     }}
                   >
-                    Thêm lịch nhắc
+                    {t("readingManagement.addReminder")}
                   </Button>
                 </div>
 
@@ -1667,7 +1719,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                         aria-hidden="true"
                         className="size-4 shrink-0"
                       />
-                      Đến giờ đọc sách ({due.length})
+                      {t("readingManagement.dueRemindersTitle", {
+                        count: due.length,
+                      })}
                     </h3>
                     <ul className="space-y-1.5">
                       {visibleDue.map((item) => (
@@ -1677,13 +1731,13 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                           className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-white px-3 py-2"
                         >
                           <span className="min-w-0 text-sm text-ink">
-                            Lịch nhắc lúc{" "}
+                            {t("readingManagement.reminderAtPrefix")}
                             {item.reminder
                               ? clock(item.reminder.remind_at)
-                              : new Date(item.scheduled_for).toLocaleTimeString(
-                                  [],
-                                  { hour: "2-digit", minute: "2-digit" },
-                                )}{" "}
+                              : formatTime(item.scheduled_for, {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}{" "}
                             · {item.scheduled_local_date}
                           </span>
                           <div className="flex flex-wrap items-center gap-2">
@@ -1692,7 +1746,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 <Mail aria-hidden="true" className="size-3.5" />{" "}
                                 {item.email_error_code ===
                                 "PARENT_EMAIL_UNVERIFIED"
-                                  ? "Email phụ huynh chưa xác minh"
+                                  ? t("readingManagement.emailUnverifiedLabel")
                                   : emailStatusText(item.email_status)}
                               </span>
                             ) : null}
@@ -1706,22 +1760,26 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 void runAction(
                                   "due-" + item.id,
                                   () => service.acknowledgeOccurrence(item.id),
-                                  "Đã ghi nhận lời nhắc.",
+                                  t("readingManagement.notices.reminderAck"),
                                 )
                               }
                             >
                               <Check aria-hidden="true" className="size-3.5" />
-                              Đã xem
+                              {t("readingManagement.acknowledgeReminder")}
                             </Button>
                           </div>
                         </li>
                       ))}
                     </ul>
                     <PaginationBar
-                      ariaLabel="Phân trang lời nhắc đến giờ"
+                      ariaLabel={t(
+                        "readingManagement.dueRemindersPaginationAria",
+                      )}
                       className="mt-2.5"
                       compact
-                      itemLabel="lời nhắc"
+                      itemLabel={t(
+                        "readingManagement.dueRemindersPaginationItem",
+                      )}
                       onPageChange={setDuePage}
                       page={safeDuePage}
                       pageSize={DUE_PAGE_SIZE}
@@ -1731,7 +1789,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 ) : null}
                 {reminders.length === 0 ? (
                   <p className="mt-3 rounded-control border border-dashed border-border/80 bg-canvas/50 px-4 py-4 text-center text-sm text-muted">
-                    Chưa có lịch nhắc nào.
+                    {t("readingManagement.remindersEmpty")}
                   </p>
                 ) : (
                   <>
@@ -1762,7 +1820,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                     className="size-3 shrink-0"
                                   />
                                 ) : null}
-                                {reminder.email_enabled ? "Email" : "Ứng dụng"}
+                                {reminder.email_enabled
+                                  ? t("readingManagement.channelEmail")
+                                  : t("readingManagement.channelApp")}
                               </span>
                               <span
                                 className="truncate text-xs text-muted"
@@ -1772,7 +1832,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               </span>
                             </div>
                             <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                              <label className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 pr-1 text-xs font-semibold text-ink">
+                              <label className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 pe-1 text-xs font-semibold text-ink">
                                 <input
                                   type="checkbox"
                                   className="size-4 accent-primary"
@@ -1786,12 +1846,16 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                           is_active: e.target.checked,
                                         }),
                                       e.target.checked
-                                        ? "Đã bật lịch nhắc."
-                                        : "Đã tắt lịch nhắc.",
+                                        ? t(
+                                            "readingManagement.notices.reminderEnabled",
+                                          )
+                                        : t(
+                                            "readingManagement.notices.reminderDisabled",
+                                          ),
                                     )
                                   }
                                 />
-                                Đang bật
+                                {t("readingManagement.reminderEnabledLabel")}
                               </label>
                               <Button
                                 variant="quiet"
@@ -1809,7 +1873,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                   );
                                 }}
                               >
-                                Chỉnh sửa
+                                {t("readingManagement.edit")}
                               </Button>
                               <Button
                                 variant="quiet"
@@ -1820,12 +1884,16 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 onClick={() =>
                                   void (
                                     window.confirm(
-                                      "Xóa lịch nhắc này? Các lần gửi trong tương lai sẽ bị hủy.",
+                                      t(
+                                        "readingManagement.notices.reminderDeleteConfirm",
+                                      ),
                                     ) &&
                                     runAction(
                                       "reminder-delete-" + reminder.id,
                                       () => service.deleteReminder(reminder.id),
-                                      "Đã xóa lịch nhắc.",
+                                      t(
+                                        "readingManagement.notices.reminderDeleted",
+                                      ),
                                     )
                                   )
                                 }
@@ -1834,7 +1902,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                   aria-hidden="true"
                                   className="size-3.5"
                                 />
-                                Xóa
+                                {t("readingManagement.delete")}
                               </Button>
                             </div>
                           </article>
@@ -1842,10 +1910,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                       })}
                     </div>
                     <PaginationBar
-                      ariaLabel="Phân trang lịch nhắc đọc"
+                      ariaLabel={t("readingManagement.remindersPaginationAria")}
                       className="mt-3"
                       compact
-                      itemLabel="lịch nhắc"
+                      itemLabel={t("readingManagement.remindersPaginationItem")}
                       onPageChange={setRemindersPage}
                       page={safeRemindersPage}
                       pageSize={REMINDERS_PAGE_SIZE}

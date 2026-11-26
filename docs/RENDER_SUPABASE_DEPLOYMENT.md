@@ -54,6 +54,12 @@ Configure these under the Render Web Service's Environment section:
 | GEMINI_OCR_PRIMARY_MODEL | gemini-3.5-flash-lite |
 | GROQ_OCR_MODEL | qwen/qwen3.8-27b |
 | GEMINI_OCR_FALLBACK_MODEL | gemini-3.1-flash-lite |
+| VIREAD_OCR_MODE | remote_worker (offloads 3-engine OCR off Render 512 MB) |
+| VIREAD_WEB_DISABLE_HEAVY_WORKERS | true (disables heavy in-process loops & caps post-OCR concurrency to 1) |
+| VIREAD_OCR_WORKER_TOKEN | >= 32-char shared secret matching remote OCR worker |
+| VIREAD_OCR_REMOTE_WORKER_URL | Optional HTTPS URL of hosted OCR worker (e.g. `https://<owner>-<space>.hf.space`) for post-commit `/wakeup` and passive 60s `/health` |
+| VIREAD_HF_SPACE_TOKEN | Optional Hugging Face Read token when the OCR Space is Private |
+| PRIVATE_BOOK_ALLOW_CLOUD_AI | true when `/my-books` Stage 2+3 should use Gemini/Groq while local Ollama is off (see `docs/HF_SPACES_ZERO_COST_OCR_DEPLOYMENT.md`) |
 
 Restart the Render service after changing OCR settings. Missing keys cause their
 providers to be skipped while the configured chain continues. Local repository

@@ -507,7 +507,7 @@ class ParentFlow2ContributionRepository:
                         text(
                             """
                             UPDATE public.viread_ocr_training_jobs
-                            SET status = 'CANCELLED',
+                            SET status = 'FAILED',
                                 last_error_code = 'DATASET_CONSENT_REVOKED',
                                 updated_at = :now
                             WHERE dataset_version_id = ANY(:dataset_ids)

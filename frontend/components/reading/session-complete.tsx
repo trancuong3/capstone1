@@ -24,6 +24,7 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { SessionReadingReports } from "@/components/reports/session-reading-reports";
 import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
 import { StatusMessage } from "@/components/common/status-message";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
 import type { ReadingCompletionSummaryUI } from "@/types/reading";
@@ -53,6 +54,9 @@ export function SessionComplete({
   onRetryReports,
   isRetryingReports = false,
 }: SessionCompleteProps) {
+  const { formatNumber } = useI18n();
+  const t = useTranslations("reading");
+  const tb = useTranslations("books");
   const [showWordList, setShowWordList] = useState(false);
   const rangeWasPartial =
     summary.selected_range_pages !== undefined &&
@@ -86,7 +90,7 @@ export function SessionComplete({
 
   return (
     <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
-      <BookChildHeader child={child} mobileLabel="Bạn nhỏ cùng đọc" />
+      <BookChildHeader child={child} mobileLabel={t("session.mobileLabel")} />
       <div className="mx-auto flex w-full max-w-[744px] flex-col gap-4 sm:gap-6">
         <div className="flex flex-col items-start gap-5 rounded-card bg-cream p-6 sm:flex-row">
           <Image
@@ -99,13 +103,13 @@ export function SessionComplete({
           <div>
             <h1 className="text-heading font-extrabold text-ink">
               {rangeWasPartial
-                ? "Đã lưu tiến độ đọc"
-                : "Buổi đọc đã hoàn thành"}
+                ? t("complete.savedTitle")
+                : t("complete.completedTitle")}
             </h1>
             <p className="mt-2 text-body text-muted">
               {rangeWasPartial
-                ? "Phần đã đọc được lưu lại. Một số trang trong phạm vi vẫn chưa hoàn thành."
-                : "Buổi đọc của bé đã được lưu."}
+                ? t("complete.partialSubtitle")
+                : t("complete.completedSubtitle")}
             </p>
           </div>
         </div>
@@ -119,32 +123,41 @@ export function SessionComplete({
               </div>
               <div>
                 <p className="text-sm font-semibold text-primary">
-                  Độ chính xác lượt đầu
+                  {t("complete.firstPassAccuracy")}
                 </p>
                 <h3 className="text-lg font-semibold text-ink">
                   {score >= 90
-                    ? "Đọc rất chính xác"
+                    ? t("complete.ratingHigh")
                     : score >= 70
-                      ? "Phần lớn từ được đọc đúng"
-                      : "Có thêm từ để luyện"}
+                      ? t("complete.ratingMedium")
+                      : t("complete.ratingLow")}
                 </h3>
                 <p className="text-xs text-muted mt-0.5">
-                  Đúng {correctWords.length}/{scoredWordCount} từ
+                  {t("complete.accuracyDetail", {
+                    correct: formatNumber(correctWords.length),
+                    total: formatNumber(scoredWordCount),
+                  })}
                   {mispronouncedWords.length > 0
-                    ? ` · Cần chú ý ${mispronouncedWords.length} từ`
+                    ? t("complete.attentionSuffix", {
+                        count: formatNumber(mispronouncedWords.length),
+                      })
                     : ""}
                   {skippedWords.length > 0
-                    ? ` · Bỏ sót ${skippedWords.length} từ`
+                    ? t("complete.skippedSuffix", {
+                        count: formatNumber(skippedWords.length),
+                      })
                     : ""}
                   {mispronouncedWords.length === 0 && skippedWords.length === 0
-                    ? " · Không sai hoặc bỏ sót từ nào"
+                    ? t("complete.perfectSuffix")
                     : ""}
                 </p>
               </div>
             </div>
             <div
               className="flex items-center gap-1.5"
-              aria-label={`Đánh giá: ${score >= 90 ? "3 sao" : score >= 70 ? "2 sao" : "1 sao"}`}
+              aria-label={t("complete.starsAria", {
+                stars: score >= 90 ? 3 : score >= 70 ? 2 : 1,
+              })}
             >
               <Star className="size-7 fill-amber-400 text-amber-500" />
               <Star
@@ -169,9 +182,11 @@ export function SessionComplete({
 
         {reportError ? (
           <div className="flex flex-col gap-3">
-            <StatusMessage title="Báo cáo đọc chưa sẵn sàng" tone="warning">
-              {reportError} Báo cáo đã lưu vẫn được giữ; có thể thử lại các
-              trang còn thiếu.
+            <StatusMessage
+              title={t("complete.reportPendingTitle")}
+              tone="warning"
+            >
+              {t("complete.reportPendingDesc", { error: reportError })}
             </StatusMessage>
             {onRetryReports ? (
               <Button
@@ -180,7 +195,9 @@ export function SessionComplete({
                 onClick={onRetryReports}
                 variant="secondary"
               >
-                {isRetryingReports ? "Đang thử lưu..." : "Thử lưu báo cáo lại"}
+                {isRetryingReports
+                  ? t("complete.retryingReports")
+                  : t("complete.retryReports")}
               </Button>
             ) : null}
           </div>
@@ -196,10 +213,14 @@ export function SessionComplete({
             />
             <p className="mt-3 text-[26px] font-semibold">
               {summary.duration_minutes === null
-                ? "Chưa ghi nhận"
-                : `${summary.duration_minutes} phút`}
+                ? t("complete.notRecorded")
+                : t("complete.durationMinutes", {
+                    minutes: formatNumber(summary.duration_minutes),
+                  })}
             </p>
-            <p className="text-label text-muted">thời lượng buổi đọc</p>
+            <p className="text-label text-muted">
+              {t("complete.durationLabel")}
+            </p>
           </div>
           {summary.selected_range_pages !== undefined &&
           summary.selected_range_pages !== null ? (
@@ -209,9 +230,13 @@ export function SessionComplete({
                 className="mx-auto size-7 text-purple-ink"
               />
               <p className="mt-3 text-[26px] font-semibold">
-                {summary.selected_range_pages} trang
+                {tb("catalog.pagesCount", {
+                  count: summary.selected_range_pages,
+                })}
               </p>
-              <p className="text-label text-muted">trong phạm vi đã chọn</p>
+              <p className="text-label text-muted">
+                {t("complete.pagesInRangeLabel")}
+              </p>
             </div>
           ) : null}
           <div className="rounded-card bg-cream p-5 text-center">
@@ -221,10 +246,12 @@ export function SessionComplete({
             />
             <p className="mt-3 text-[26px] font-semibold">
               {summary.pages_explored === null
-                ? "Chưa ghi nhận"
-                : `${summary.pages_explored} trang`}
+                ? t("complete.notRecorded")
+                : tb("catalog.pagesCount", { count: summary.pages_explored })}
             </p>
-            <p className="text-label text-muted">đã xác nhận hoàn thành</p>
+            <p className="text-label text-muted">
+              {t("complete.pagesCompletedLabel")}
+            </p>
           </div>
           <button
             type="button"
@@ -239,19 +266,24 @@ export function SessionComplete({
               />
               <p className="mt-3 text-[26px] font-semibold text-ink">
                 {summary.practiced_words === null
-                  ? "Chưa ghi nhận"
-                  : `${summary.practiced_words} từ`}
+                  ? t("complete.notRecorded")
+                  : t("complete.practicedWords", {
+                      count: formatNumber(summary.practiced_words),
+                    })}
               </p>
-              <p className="text-label text-muted">trong lượt đọc</p>
+              <p className="text-label text-muted">
+                {t("complete.practicedWordsLabel")}
+              </p>
             </div>
             <span className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-purple-ink group-hover:underline">
               {showWordList ? (
                 <>
-                  Thu gọn <ChevronUp aria-hidden="true" className="size-3.5" />
+                  {t("complete.collapseDetails")}{" "}
+                  <ChevronUp aria-hidden="true" className="size-3.5" />
                 </>
               ) : (
                 <>
-                  Xem từ bé đọc{" "}
+                  {t("complete.viewSpokenWords")}{" "}
                   <ChevronDown aria-hidden="true" className="size-3.5" />
                 </>
               )}
@@ -275,11 +307,13 @@ export function SessionComplete({
               <div className="flex items-center gap-2">
                 <Mic aria-hidden="true" className="size-5 text-purple-ink" />
                 <h2 className="text-lg font-semibold text-ink">
-                  Kết quả nhận diện giọng nói của bé (STT)
+                  {t("complete.sttResultsTitle")}
                 </h2>
               </div>
               <span className="rounded-full border border-purple/50 bg-purple px-3 py-0.5 text-xs font-semibold text-purple-ink">
-                {spokenWords.length} từ nhận diện
+                {t("complete.recognizedWordsBadge", {
+                  count: formatNumber(spokenWords.length),
+                })}
               </span>
             </div>
 
@@ -291,10 +325,13 @@ export function SessionComplete({
                 {!hasWordAssessment && spokenWords.length > 0 ? (
                   <div>
                     <p className="mb-2 text-sm text-muted">
-                      Các từ đã nhận diện; chưa đủ dữ liệu đánh giá đúng hoặc
-                      sai.
+                      {t("complete.unassessedOnlyLabel")}
                     </p>
-                    <div className="flex flex-wrap gap-2">
+                    <div
+                      className="viread-learning-content flex flex-wrap gap-2"
+                      dir="ltr"
+                      lang="vi"
+                    >
                       {spokenWords.map((word, index) => (
                         <span
                           key={`${word}-${index}`}
@@ -311,11 +348,16 @@ export function SessionComplete({
                     <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-muted">
                       <CheckCircle2 className="size-4 text-emerald-600" />
                       <span>
-                        Danh sách các từ bé đã đọc thành công (
-                        {correctWords.length} từ):
+                        {t("complete.correctWordsTitle", {
+                          count: formatNumber(correctWords.length),
+                        })}
                       </span>
                     </p>
-                    <div className="flex flex-wrap gap-2 max-h-56 overflow-y-auto pr-1">
+                    <div
+                      className="viread-learning-content flex max-h-56 flex-wrap gap-2 overflow-y-auto pe-1"
+                      dir="ltr"
+                      lang="vi"
+                    >
                       {correctWords.map((word, idx) => (
                         <span
                           key={`${word}-${idx}`}
@@ -337,11 +379,16 @@ export function SessionComplete({
                     <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-danger">
                       <AlertCircle className="size-4 text-rose-600" />
                       <span>
-                        Các từ bé cần chú ý phát âm lại (
-                        {mispronouncedWords.length} từ):
+                        {t("complete.mispronouncedWordsTitle", {
+                          count: formatNumber(mispronouncedWords.length),
+                        })}
                       </span>
                     </p>
-                    <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto pr-1">
+                    <div
+                      className="viread-learning-content flex max-h-48 flex-wrap gap-2 overflow-y-auto pe-1"
+                      dir="ltr"
+                      lang="vi"
+                    >
                       {mispronouncedWords.map((word, idx) => (
                         <span
                           key={`${word}-${idx}`}
@@ -363,10 +410,16 @@ export function SessionComplete({
                     <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-warning">
                       <AlertCircle className="size-4 text-amber-700" />
                       <span>
-                        Các từ bé chưa đọc đến ({skippedWords.length} từ):
+                        {t("complete.skippedWordsTitle", {
+                          count: formatNumber(skippedWords.length),
+                        })}
                       </span>
                     </p>
-                    <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto pr-1">
+                    <div
+                      className="viread-learning-content flex max-h-48 flex-wrap gap-2 overflow-y-auto pe-1"
+                      dir="ltr"
+                      lang="vi"
+                    >
                       {skippedWords.map((word, idx) => (
                         <span
                           key={`${word}-${idx}`}
@@ -386,15 +439,17 @@ export function SessionComplete({
                 {transcripts.length > 0 && (
                   <div>
                     <p className="mb-1.5 text-sm font-semibold text-muted">
-                      Câu nhận diện từ microphone:
+                      {t("complete.micSentencesTitle")}
                     </p>
-                    <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
-                      {transcripts.map((t, idx) => (
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto pe-1">
+                      {transcripts.map((transcriptItem, idx) => (
                         <div
                           key={idx}
-                          className="rounded-lg border border-border bg-white/80 px-3.5 py-2 text-sm text-ink italic"
+                          className="viread-learning-content rounded-lg border border-border bg-white/80 px-3.5 py-2 text-sm text-ink italic"
+                          dir="ltr"
+                          lang="vi"
                         >
-                          &ldquo;{t}&rdquo;
+                          &ldquo;{transcriptItem}&rdquo;
                         </div>
                       ))}
                     </div>
@@ -404,11 +459,10 @@ export function SessionComplete({
             ) : (
               <div className="py-4 text-center">
                 <p className="text-body font-medium text-ink">
-                  Chưa ghi nhận từ nào trong lượt đọc này.
+                  {t("complete.emptyTitle")}
                 </p>
                 <p className="mt-1 text-xs text-muted">
-                  Bé hãy bấm nút &ldquo;Đọc&rdquo; và nói to, rõ ràng vào
-                  microphone để hệ thống ghi nhận nhé!
+                  {t("complete.emptyBody")}
                 </p>
               </div>
             )}
@@ -417,15 +471,15 @@ export function SessionComplete({
 
         <ButtonLink className="mx-auto max-w-[360px]" href={rereadHref}>
           <BookOpen aria-hidden="true" className="size-5" />
-          Đọc lại phần này
+          {t("complete.rereadAction")}
         </ButtonLink>
         <ButtonLink
           className="mx-auto max-w-[360px]"
           href={booksHref}
           variant="secondary"
         >
-          Đọc cuốn khác
-          <ArrowRight aria-hidden="true" className="size-5" />
+          {t("complete.readAnotherAction")}
+          <ArrowRight aria-hidden="true" className="viread-rtl-flip size-5" />
         </ButtonLink>
         {!rangeWasPartial ? (
           <ButtonLink
@@ -434,7 +488,7 @@ export function SessionComplete({
             variant="secondary"
           >
             <Gamepad2 aria-hidden="true" className="size-5" />
-            Chơi game
+            {t("complete.playGameAction")}
           </ButtonLink>
         ) : null}
         <ButtonLink
@@ -443,7 +497,7 @@ export function SessionComplete({
           variant="quiet"
         >
           <Home aria-hidden="true" className="size-5" />
-          Về trang chủ
+          {t("complete.goHomeAction")}
         </ButtonLink>
         <ButtonLink
           className="mx-auto max-w-[360px]"
@@ -451,7 +505,7 @@ export function SessionComplete({
           variant="secondary"
         >
           <Users aria-hidden="true" className="size-5" />
-          Xem cùng ba mẹ
+          {t("complete.viewWithParentAction")}
         </ButtonLink>
         <ButtonLink
           className="mx-auto max-w-[360px]"
@@ -459,7 +513,7 @@ export function SessionComplete({
           variant="secondary"
         >
           <FileText aria-hidden="true" className="size-5" />
-          Xem báo cáo
+          {t("complete.viewReportAction")}
         </ButtonLink>
       </div>
     </section>

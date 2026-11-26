@@ -48,13 +48,74 @@ if not hasattr(PIL.Image, "ANTIALIAS"):
     PIL.Image.ANTIALIAS = PIL.Image.Resampling.LANCZOS
 
 import cv2
-import jiwer
 import numpy as np
-import pytesseract
 import requests
-from pytesseract import Output
 from PIL import Image
-from app.database.config import SUPABASE_ADMIN_KEY, SUPABASE_URL
+from app.database.config import SUPABASE_ADMIN_KEY, SUPABASE_URL, supabase_admin_headers
+
+# Optional/worker-only OCR dependencies are imported lazily so light web deploys
+# (`requirements-web.txt`) never crash with ModuleNotFoundError if ocr_engine is
+# accidentally imported.
+jiwer = None
+pytesseract = None
+Output = None
+
+
+def _ensure_jiwer():
+    global jiwer
+    if jiwer is None:
+        try:
+            import jiwer as _jiwer
+            jiwer = _jiwer
+        except ImportError:
+            return None
+    return jiwer
+
+
+def _ensure_pytesseract():
+    global pytesseract, Output
+    if pytesseract is None:
+        try:
+            import pytesseract as _pytesseract
+            from pytesseract import Output as _Output
+            pytesseract = _pytesseract
+            Output = _Output
+        except ImportError:
+            return None, None
+    elif Output is None:
+        Output = getattr(pytesseract, "Output", None)
+    return pytesseract, Output
+
+
+def _is_remote_ocr_mode_guard() -> bool:
+    """Fail-closed in-process OCR guard (zero DB imports for standalone worker compatibility)."""
+    if (os.getenv("VIREAD_OCR_WORKER_PROCESS") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        return False
+    raw_mode = (os.getenv("VIREAD_OCR_MODE") or "").strip().lower()
+    if raw_mode == "remote_worker":
+        return True
+    if raw_mode == "local_inprocess":
+        return False
+    app_env = (os.getenv("APP_ENVIRONMENT") or "").strip().lower()
+    render_flag = (os.getenv("RENDER") or "").strip().lower()
+    disable_heavy = (os.getenv("VIREAD_WEB_DISABLE_HEAVY_WORKERS") or "").strip().lower()
+    return (
+        app_env == "production"
+        or render_flag in {"1", "true", "yes", "on"}
+        or disable_heavy in {"1", "true", "yes", "on"}
+    )
+
+
+def _fallback_cer(reference: str, hypothesis: str) -> float:
+    if not reference:
+        return 0.0 if not hypothesis else 1.0
+    prev = list(range(len(hypothesis) + 1))
+    for i, rc in enumerate(reference, 1):
+        curr = [i]
+        for j, hc in enumerate(hypothesis, 1):
+            curr.append(min(curr[-1] + 1, prev[j] + 1, prev[j - 1] + (rc != hc)))
+        prev = curr
+    return prev[-1] / len(reference)
 
 # OCR runtimes are deliberately imported on the first OCR request. Importing
 # PyTorch and PaddleOCR during FastAPI startup exceeded Render Free's 512 MiB
@@ -209,6 +270,21 @@ def _scan_vietocr_snapshot(
     }
 
 
+def _resolve_predictor_device(predictor: Any | None) -> str:
+    cfg = getattr(predictor, "config", None) if predictor is not None else None
+    if isinstance(cfg, dict):
+        raw_device = str(cfg.get("device") or "").strip().lower()
+        if raw_device:
+            return "cuda" if raw_device.startswith("cuda") else raw_device
+    if torch is not None:
+        try:
+            if torch.cuda.is_available():
+                return "cuda"
+        except Exception:
+            pass
+    return "cpu"
+
+
 def _attach_vietocr_provenance(
     result: dict[str, object],
     snapshot: dict[str, Any] | None,
@@ -232,14 +308,17 @@ def _attach_vietocr_provenance(
             "model_load_status": "not_run",
             "fallback_reason": skipped_reason or snapshot.get("fallback_reason") or "tesseract_fallback",
         }
-    elif status == "error" and not snapshot.get("fallback_reason"):
-        snapshot = {**snapshot, "fallback_reason": "vietocr_inference_error"}
-    elif status == "no_result" and not snapshot.get("fallback_reason"):
-        snapshot = {**snapshot, "fallback_reason": "vietocr_no_result"}
-    elif (snapshot.get("model_load_status") == "unavailable"
-          or status in {"not_installed", "not_initialized", "disabled"}):
-        if not snapshot.get("fallback_reason"):
-            snapshot = {**snapshot, "fallback_reason": "vietocr_unavailable"}
+        metadata.setdefault("runtime_device", "cpu")
+    else:
+        metadata.setdefault("runtime_device", _resolve_predictor_device(_vietocr_engine))
+        if status == "error" and not snapshot.get("fallback_reason"):
+            snapshot = {**snapshot, "fallback_reason": "vietocr_inference_error"}
+        elif status == "no_result" and not snapshot.get("fallback_reason"):
+            snapshot = {**snapshot, "fallback_reason": "vietocr_no_result"}
+        elif (snapshot.get("model_load_status") == "unavailable"
+              or status in {"not_installed", "not_initialized", "disabled"}):
+            if not snapshot.get("fallback_reason"):
+                snapshot = {**snapshot, "fallback_reason": "vietocr_unavailable"}
     metadata["vietocr_runtime_provenance"] = {
         **snapshot,
         "model_inference_status": status,
@@ -301,7 +380,7 @@ def refresh_active_viread_model() -> dict[str, Any] | None:
         response = requests.get(
             f"{SUPABASE_URL.rstrip('/')}/rest/v1/viread_ocr_active_model",
             params={"select": "checkpoint_sha256,storage_path,profile", "singleton": "eq.true", "limit": "1"},
-            headers={"apikey": SUPABASE_ADMIN_KEY, "Authorization": f"Bearer {SUPABASE_ADMIN_KEY}"},
+            headers=supabase_admin_headers(SUPABASE_ADMIN_KEY),
             timeout=(2, 3),
         )
         response.raise_for_status()
@@ -323,10 +402,16 @@ def refresh_active_viread_model() -> dict[str, Any] | None:
 
 def run_active_viread_model_worker(stop_event: threading.Event, *, poll_seconds: int = 300) -> None:
     """Poll the registry calmly and only after OCR dependencies have been activated."""
+    from app.services.worker_telemetry import record_worker_error, record_worker_success
+
     interval = max(30, int(os.getenv("VIREAD_ACTIVE_MODEL_POLL_SECONDS", str(poll_seconds))))
     while not stop_event.is_set():
-        if _ocr_dependencies_loaded:
-            refresh_active_viread_model()
+        try:
+            if _ocr_dependencies_loaded:
+                refresh_active_viread_model()
+            record_worker_success("active_model_registry")
+        except Exception as exc:
+            record_worker_error("active_model_registry", exc)
         stop_event.wait(interval)
 
 
@@ -468,9 +553,92 @@ def evict_cached_viread_checkpoint(checkpoint_sha256: str) -> bool:
     return evicted
 
 
+def _install_safe_vietocr_downloaders() -> None:
+    """Serve vendored VietOCR YAML configs first and enforce finite HTTP timeouts on fallbacks."""
+    try:
+        import vietocr.tool.config as vietocr_cfg_mod
+        import vietocr.tool.utils as vietocr_utils_mod
+    except Exception:
+        return
+    if getattr(vietocr_cfg_mod, "_viread_safe_download_installed", False):
+        return
+
+    vendored_dir = Path(__file__).resolve().parents[3] / "ocr_worker" / "configs"
+
+    def _safe_download_config(config_id: str) -> dict[str, Any]:
+        clean_name = os.path.basename(str(config_id or "").strip())
+        local_candidate = vendored_dir / clean_name
+        if clean_name and local_candidate.is_file():
+            loaded = yaml.safe_load(local_candidate.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                return loaded
+        urls = (
+            f"https://vocr.vn/data/vietocr/config/{config_id}",
+            f"https://raw.githubusercontent.com/pbcquoc/vietocr/master/config/{config_id}",
+        )
+        last_exc: Exception | None = None
+        for url in urls:
+            try:
+                resp = requests.get(url, timeout=(5, 15))
+                resp.raise_for_status()
+                loaded = yaml.safe_load(resp.text)
+                if isinstance(loaded, dict):
+                    return loaded
+            except Exception as exc:
+                last_exc = exc
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError(f"Unable to load VietOCR config: {config_id}")
+
+    def _safe_download_weights(
+        uri: str, cached: str | None = None, md5: str | None = None, quiet: bool = False
+    ) -> str:
+        del cached, md5, quiet
+        if not str(uri).startswith(("http://", "https://")):
+            return uri
+        cache_root = (os.environ.get("VIREAD_OCR_MODEL_CACHE_DIR") or "").strip()
+        target_dir = cache_root if cache_root else tempfile.gettempdir()
+        os.makedirs(target_dir, exist_ok=True)
+        filename = str(uri).rstrip("/").split("/")[-1] or "vgg_transformer.pth"
+        full_path = os.path.join(target_dir, filename)
+        if os.path.isfile(full_path) and os.path.getsize(full_path) > 0:
+            return full_path
+        tmp_path = f"{full_path}.{os.getpid()}.downloading"
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                with requests.get(uri, stream=True, timeout=(10, 120)) as resp:
+                    resp.raise_for_status()
+                    with open(tmp_path, "wb") as out:
+                        for chunk in resp.iter_content(chunk_size=65536):
+                            if chunk:
+                                out.write(chunk)
+                os.replace(tmp_path, full_path)
+                return full_path
+            except Exception as exc:
+                last_exc = exc
+                if os.path.exists(tmp_path):
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+                if attempt < 2:
+                    import time as _time
+                    _time.sleep(1.5 * (attempt + 1))
+        assert last_exc is not None
+        raise last_exc
+
+    vietocr_utils_mod.download_config = _safe_download_config
+    vietocr_cfg_mod.download_config = _safe_download_config
+    vietocr_utils_mod.download_weights = _safe_download_weights
+    vietocr_cfg_mod._viread_safe_download_installed = True
+
+
 def _find_cached_vietocr_weights() -> str | None:
     temp_dir = os.environ.get("TEMP", os.environ.get("TMP", tempfile.gettempdir()))
+    explicit_cache_dir = (os.environ.get("VIREAD_OCR_MODEL_CACHE_DIR") or "").strip()
     candidates = [
+        os.path.join(explicit_cache_dir, "vgg_transformer.pth") if explicit_cache_dir else "",
         os.path.join(temp_dir, "vgg_transformer.pth"),
         os.path.expanduser(r"~\AppData\Local\Temp\vgg_transformer.pth"),
         os.path.expanduser("~/.cache/vietocr/vgg_transformer.pth"),
@@ -534,6 +702,7 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
             try:
                 from vietocr.tool.config import Cfg as vietocr_config
                 from vietocr.tool.predictor import Predictor as vietocr_predictor
+                _install_safe_vietocr_downloaders()
                 Cfg, Predictor = vietocr_config, vietocr_predictor
                 _vietocr_import_status = "success"
                 _vietocr_import_error = None
@@ -670,7 +839,20 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
                         viet_config["weights"] = cached_weight
 
                     if target_device == "cpu":
-                        torch.set_num_threads(min(8, max(2, os.cpu_count() or 4)))
+                        env_threads = (
+                            os.getenv("VIREAD_OCR_CPU_THREADS")
+                            or os.getenv("OMP_NUM_THREADS")
+                            or ""
+                        ).strip()
+                        try:
+                            desired_threads = (
+                                max(1, min(8, int(env_threads)))
+                                if env_threads
+                                else min(8, max(2, os.cpu_count() or 4))
+                            )
+                        except ValueError:
+                            desired_threads = min(8, max(2, os.cpu_count() or 4))
+                        torch.set_num_threads(desired_threads)
                     # Final on-disk verification immediately precedes publication
                     # of this instance. All scans using it receive this digest,
                     # even if the registry changes in a concurrent request.
@@ -753,19 +935,34 @@ def _transfer_punctuation(viet_text: str, paddle_text: str) -> str:
     return v_clean
 
 
+_VIETOCR_SPECIAL_TOKEN_RE = re.compile(r"<(?:pad|sos|eos|unk)>", re.IGNORECASE)
+
+
+def _sanitize_vietocr_prediction(raw_text: str | None) -> tuple[str | None, bool]:
+    """Strip seq2seq decoder control tokens (`<pad>`, `<sos>`, `<eos>`, `<unk>`) without altering normal text."""
+    if not isinstance(raw_text, str):
+        return None, False
+    had_control_token = bool(_VIETOCR_SPECIAL_TOKEN_RE.search(raw_text))
+    cleaned = _VIETOCR_SPECIAL_TOKEN_RE.sub("", raw_text)
+    cleaned = re.sub(r"\s+", " ", unicodedata.normalize("NFC", cleaned)).strip()
+    return (cleaned if cleaned else None), had_control_token
+
+
 def is_vietocr_reliable(
     viet_text: str,
     paddle_text: str,
     paddle_conf: float = 0.90,
     max_cer: float = 0.40,
 ) -> bool:
-    """Reject obvious empty/repetition outputs, not select OCR correctness.
+    """Reject obvious empty/repetition/control-token outputs, not select OCR correctness.
 
     A True result means only that VietOCR can be shown as a provisional draft.
     It does not mean the candidate is better than PaddleOCR or that its words
     are correct. Diacritic-folded CER and line-level confidence are excluded.
     """
     del paddle_text, paddle_conf, max_cer
+    if not isinstance(viet_text, str) or _VIETOCR_SPECIAL_TOKEN_RE.search(viet_text):
+        return False
     candidate = unicodedata.normalize("NFC", viet_text).strip()
     if not candidate:
         return False
@@ -846,7 +1043,13 @@ def _word_engine_evidence(
     if recognized == other:
         return 1.0, "engine_agreement"
     try:
-        similarity = max(0.0, min(1.0, 1.0 - float(jiwer.cer(recognized.casefold(), other.casefold()))))
+        _jiwer = _ensure_jiwer()
+        cer_val = (
+            float(_jiwer.cer(recognized.casefold(), other.casefold()))
+            if _jiwer is not None
+            else _fallback_cer(recognized.casefold(), other.casefold())
+        )
+        similarity = max(0.0, min(1.0, 1.0 - cer_val))
     except (TypeError, ValueError, ZeroDivisionError):
         similarity = None
     return (round(similarity, 4) if similarity is not None else None), "engine_disagreement"
@@ -1000,6 +1203,8 @@ def _extract_curved_lines_from_items(
             "paddle_text": p_text,
             "paddle_conf": p_conf,
             "yc": float((tl[1] + tr[1] + br[1] + bl[1]) / 4.0),
+            "xc": float((tl[0] + tr[0] + br[0] + bl[0]) / 4.0),
+            "x0": float(min(tl[0], bl[0])),
         })
 
     return extracted
@@ -1012,8 +1217,29 @@ def sort_reading_order_adaptive(
     if not items:
         return [], "empty"
 
-    items.sort(key=lambda it: it["yc"])
-    return items, "single_column"
+    # Cluster boxes whose vertical centers fall within a single visual line band
+    # so skewed photos or split horizontal lines always read left-to-right.
+    items.sort(key=lambda it: (it["yc"], it.get("x0", it.get("xc", 0.0))))
+    heights = sorted(max(4.0, float(it.get("band_h", 12.0))) for it in items)
+    median_h = heights[len(heights) // 2] if heights else 12.0
+    bands: list[list[dict[str, Any]]] = []
+    for item in items:
+        placed = False
+        if bands:
+            current_band = bands[-1]
+            band_yc = sum(float(member["yc"]) for member in current_band) / len(current_band)
+            band_h = min(median_h, max(float(member.get("band_h", median_h)) for member in current_band))
+            if abs(float(item["yc"]) - band_yc) <= max(4.0, 0.5 * band_h):
+                current_band.append(item)
+                placed = True
+        if not placed:
+            bands.append([item])
+
+    ordered: list[dict[str, Any]] = []
+    for band in bands:
+        band.sort(key=lambda it: (it.get("x0", it.get("xc", 0.0)), it["yc"]))
+        ordered.extend(band)
+    return ordered, "single_column"
 
 
 def _segment_words_by_ink(
@@ -1244,9 +1470,12 @@ def _resolve_tesseract_command() -> str | None:
 
 def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
     """Fallback Tesseract cho môi trường CI headless không có GPU/PaddleOCR."""
+    _pt, _output = _ensure_pytesseract()
+    if _pt is None:
+        raise OcrEngineUnavailable("pytesseract is not installed")
     configured_binary = _resolve_tesseract_command()
     if configured_binary:
-        pytesseract.pytesseract.tesseract_cmd = configured_binary.strip('"\'')
+        _pt.pytesseract.tesseract_cmd = configured_binary.strip('"\'')
         _ensure_tesseract_language_data()
 
     array = np.frombuffer(image_bytes, dtype=np.uint8)
@@ -1260,17 +1489,19 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
     _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
     try:
-        result = pytesseract.image_to_data(
+        dict_output = getattr(_output, "DICT", "dict")
+        result = _pt.image_to_data(
             otsu,
             lang=target_lang,
             config="--oem 1 --psm 6",
-            output_type=Output.DICT,
+            output_type=dict_output,
         )
     except Exception as exc:
         raise OcrEngineUnavailable("Tesseract execution failed") from exc
 
     words: list[dict[str, object]] = []
-    lines: dict[int, list[str]] = {}
+    lines: dict[tuple[int, int, int], list[str]] = {}
+    line_index_map: dict[tuple[int, int, int], int] = {}
 
     for index, raw_text in enumerate(result.get("text", [])):
         token = unicodedata.normalize("NFC", str(raw_text)).strip()
@@ -1282,7 +1513,9 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
             w = int(result["width"][index])
             h = int(result["height"][index])
             conf = float(result["conf"][index])
-            line = int(result["line_num"][index])
+            block_num = int(result.get("block_num", [0] * (index + 1))[index])
+            par_num = int(result.get("par_num", [0] * (index + 1))[index])
+            line_num = int(result["line_num"][index])
         except (KeyError, TypeError, ValueError, IndexError):
             continue
 
@@ -1290,13 +1523,22 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
         if not normalized:
             continue
 
+        clamped_bbox = _normalized_box((left, top, w, h), orig_width, orig_height)
+        if clamped_bbox is None:
+            continue
+
+        line_key = (block_num, par_num, line_num)
+        if line_key not in line_index_map:
+            line_index_map[line_key] = len(line_index_map)
+        seq_line_index = line_index_map[line_key]
+
         confidence = conf / 100.0 if 0 <= conf <= 100 else None
         words.append({
             "word_index": len(words),
-            "line_index": line,
+            "line_index": seq_line_index,
             "text": token,
             "normalized_text": normalized,
-            "bbox": [left / orig_width, top / orig_height, w / orig_width, h / orig_height],
+            "bbox": clamped_bbox,
             "ocr_confidence": confidence,
             "ocr_score_source": "tesseract_raw_word_score_v1" if confidence is not None else None,
             "ocr_review_status": _tesseract_review_status(confidence),
@@ -1314,12 +1556,12 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
                 "review_reason": "Chỉ có điểm thô từ một engine; Admin cần xác minh nội dung.",
             },
         })
-        lines.setdefault(line, []).append(token)
+        lines.setdefault(line_key, []).append(token)
 
     if not words:
         raise OcrNoTextDetected("Tesseract did not detect usable Vietnamese text")
 
-    formatted_text = "\n".join(" ".join(lines[k]) for k in sorted(lines))
+    formatted_text = "\n".join(" ".join(lines[k]) for k in line_index_map)
     return {
         "text": formatted_text,
         "words": words,
@@ -1562,10 +1804,12 @@ def _recognize_uncertain_word_crops(
                     prediction = predictions[index] if index < len(predictions) else None
                     score = scores[index] if index < len(scores) else None
                     crop_evidence = evidence["crop_evidence"]
-                    crop_evidence["vietocr_candidate"] = (
-                        unicodedata.normalize("NFC", prediction).strip()
-                        if isinstance(prediction, str) else None
-                    )
+                    sanitized_crop, had_ctrl = _sanitize_vietocr_prediction(prediction)
+                    if had_ctrl:
+                        crop_evidence["vietocr_candidate"] = None
+                        crop_evidence["vietocr_control_token_filtered"] = True
+                    else:
+                        crop_evidence["vietocr_candidate"] = sanitized_crop
                     crop_evidence["vietocr_crop_recognition_score"] = _raw_recognition_score(score)
                     crop_evidence["vietocr_decoding_mode"] = crop_evidence_decoding_mode
                     crop_evidence["status"] = "completed"
@@ -1611,8 +1855,11 @@ def _ensure_tesseract_language_data() -> None:
         return
 
     def language_available() -> bool:
+        _pt, _ = _ensure_pytesseract()
+        if _pt is None:
+            return False
         try:
-            return language in pytesseract.get_languages(config="")
+            return language in _pt.get_languages(config="")
         except Exception:
             return False
 
@@ -1630,10 +1877,13 @@ def _ensure_tesseract_language_data() -> None:
 
 
 def _configure_tesseract() -> bool:
+    _pt, _ = _ensure_pytesseract()
+    if _pt is None:
+        return False
     configured_binary = _resolve_tesseract_command()
     if not configured_binary:
         return False
-    pytesseract.pytesseract.tesseract_cmd = configured_binary.strip('"\'')
+    _pt.pytesseract.tesseract_cmd = configured_binary.strip('"\'')
     _ensure_tesseract_language_data()
     return True
 
@@ -1724,16 +1974,20 @@ def _attach_tesseract_line_readings(
 
     if not _configure_tesseract():
         return finish("not_installed")
+    _pt, _output = _ensure_pytesseract()
+    if _pt is None:
+        return finish("not_installed")
     height, width = image.shape[:2]
     try:
         gray = _normalize_text_background(
             cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
         )
-        data = pytesseract.image_to_data(
+        dict_output = getattr(_output, "DICT", "dict")
+        data = _pt.image_to_data(
             gray,
             lang=os.getenv("TESSERACT_LANG", "vie"),
             config="--oem 1 --psm 3",
-            output_type=Output.DICT,
+            output_type=dict_output,
             timeout=60,
         )
     except Exception as exc:
@@ -1853,6 +2107,9 @@ def _recognize_crop_with_tesseract(crop: np.ndarray) -> tuple[str | None, str | 
     """Independent single-word reading of a padded crop; (candidate, error)."""
     if not _configure_tesseract():
         return None, "not_installed"
+    _pt, _ = _ensure_pytesseract()
+    if _pt is None:
+        return None, "not_installed"
     try:
         gray = _normalize_text_background(
             cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
@@ -1860,7 +2117,7 @@ def _recognize_crop_with_tesseract(crop: np.ndarray) -> tuple[str | None, str | 
         gray = cv2.copyMakeBorder(
             gray, 10, 10, 10, 10, cv2.BORDER_REPLICATE
         )
-        text = pytesseract.image_to_string(
+        text = _pt.image_to_string(
             gray,
             lang=os.getenv("TESSERACT_LANG", "vie"),
             config="--oem 1 --psm 8",
@@ -1885,12 +2142,24 @@ def _adjudicate_disputed_words(
     independent engines; every original engine output stays in the evidence.
     """
     import time
+    from concurrent.futures import ThreadPoolExecutor
 
     started = time.perf_counter()
     considered = 0
     resolved = 0
     text_changed = 0
     tesseract_calls = 0
+    try:
+        max_tesseract_crops = max(
+            0, min(MAX_SELECTIVE_WORD_CROPS_PER_PAGE, int(os.getenv("VIREAD_OCR_MAX_TESSERACT_CROPS", "8")))
+        )
+    except ValueError:
+        max_tesseract_crops = 8
+
+    # First pass: collect disputed words that need a single-word Tesseract crop reading
+    # so subprocess calls run concurrently (max_workers=2) instead of serially stalling CPU jobs.
+    pending_tess_jobs: list[tuple[dict[str, object], dict[str, Any], np.ndarray]] = []
+    disputed_entries: list[tuple[dict[str, object], dict[str, Any], dict[str, Any], dict[str, Any]]] = []
     for word in words:
         evidence = word.get("ocr_evidence")
         if not isinstance(evidence, dict):
@@ -1913,15 +2182,40 @@ def _adjudicate_disputed_words(
             continue
         considered += 1
         decision = adjudicate_word(evidence)
-        if decision["status"] != "resolved" and crop_evidence.get("status") == "completed":
+        disputed_entries.append((word, evidence, crop_evidence, decision))
+        if (
+            decision["status"] != "resolved"
+            and crop_evidence.get("status") == "completed"
+            and len(pending_tess_jobs) < max_tesseract_crops
+        ):
             crop, quality = crop_word_region(image, word.get("bbox"))
             if crop is not None and quality.get("crop_quality") == "usable":
-                candidate, error = _recognize_crop_with_tesseract(crop)
-                tesseract_calls += 1
-                crop_evidence["tesseract_candidate"] = candidate
-                if error is not None:
-                    crop_evidence["tesseract_error"] = error
-                decision = adjudicate_word(evidence)
+                pending_tess_jobs.append((word, crop_evidence, crop))
+
+    if pending_tess_jobs:
+        if len(pending_tess_jobs) == 1:
+            _w, crop_ev, crop_img = pending_tess_jobs[0]
+            candidate, error = _recognize_crop_with_tesseract(crop_img)
+            tesseract_calls += 1
+            crop_ev["tesseract_candidate"] = candidate
+            if error is not None:
+                crop_ev["tesseract_error"] = error
+        else:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                futures = [
+                    (crop_ev, pool.submit(_recognize_crop_with_tesseract, crop_img))
+                    for _w, crop_ev, crop_img in pending_tess_jobs
+                ]
+                for crop_ev, fut in futures:
+                    candidate, error = fut.result()
+                    tesseract_calls += 1
+                    crop_ev["tesseract_candidate"] = candidate
+                    if error is not None:
+                        crop_ev["tesseract_error"] = error
+
+    for word, evidence, crop_evidence, decision in disputed_entries:
+        if "tesseract_candidate" in crop_evidence or "tesseract_error" in crop_evidence:
+            decision = adjudicate_word(evidence)
 
         crop_evidence["adjudication_rule"] = OCR_ADJUDICATION_RULE
         crop_evidence["adjudication_status"] = str(decision["status"])
@@ -2147,13 +2441,22 @@ def _extract_text_and_boxes_dual_engine(
                         )
                     viet_text = vietocr_engine.predict(prediction_image)
                 if isinstance(viet_text, str) and viet_text.strip():
-                    viet_text_candidate = unicodedata.normalize("NFC", viet_text).strip()
-                    vietocr_status = "success"
-                    if is_vietocr_reliable(
-                        viet_text_candidate, paddle_text, paddle_conf=paddle_conf, max_cer=0.40
-                    ):
-                        chosen_text = viet_text_candidate
-                        viet_text_used = True
+                    sanitized_line, had_ctrl = _sanitize_vietocr_prediction(viet_text)
+                    viet_text_candidate = sanitized_line
+                    if had_ctrl:
+                        # A seq2seq control token (<pad>/<sos>/<eos>/<unk>) indicates a corrupted
+                        # VietOCR decode (e.g. "ti<pad>f" for "TIFF"). Never let it override PaddleOCR.
+                        vietocr_status = "control_token_filtered"
+                        vietocr_error = "VIETOCR_CONTROL_TOKEN"
+                    elif sanitized_line is not None:
+                        vietocr_status = "success"
+                        if is_vietocr_reliable(
+                            sanitized_line, paddle_text, paddle_conf=paddle_conf, max_cer=0.40
+                        ):
+                            chosen_text = sanitized_line
+                            viet_text_used = True
+                    else:
+                        vietocr_status = "no_result"
                 else:
                     vietocr_status = "no_result"
             except Exception as exc:
@@ -2408,16 +2711,16 @@ def _extract_text_and_boxes_dual_engine(
     formatted_text = "\n".join(lines_output)
 
     try:
-        debug_vis = image.copy()
-        for w in words_output:
-            bx, by, bw, bh = w["bbox"]
-            x1 = int(round(bx * orig_width))
-            y1 = int(round(by * orig_height))
-            x2 = int(round((bx + bw) * orig_width))
-            y2 = int(round((by + bh) * orig_height))
-            cv2.rectangle(debug_vis, (x1, y1), (x2, y2), (0, 255, 0), 1)
         debug_path = os.getenv("OCR_DEBUG_BOXES_PATH", "").strip()
         if debug_path:
+            debug_vis = image.copy()
+            for w in words_output:
+                bx, by, bw, bh = w["bbox"]
+                x1 = int(round(bx * orig_width))
+                y1 = int(round(by * orig_height))
+                x2 = int(round((bx + bw) * orig_width))
+                y2 = int(round((by + bh) * orig_height))
+                cv2.rectangle(debug_vis, (x1, y1), (x2, y2), (0, 255, 0), 1)
             cv2.imwrite(os.path.abspath(debug_path), debug_vis)
     except Exception:
         pass
@@ -2507,6 +2810,10 @@ def extract_text_and_boxes(image_bytes: bytes) -> dict[str, object]:
     another request can switch the globally cached Predictor. Never serialize
     registry pointers or the local checkpoint path to scan metadata.
     """
+    if _is_remote_ocr_mode_guard():
+        raise OcrEngineUnavailable(
+            "In-process OCR is disabled in remote_worker mode; dispatch jobs to the remote OCR worker."
+        )
     _scan_runtime_context.provenance = None
     try:
         paddle_engine, vietocr_engine = _get_ocr_engines()

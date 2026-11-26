@@ -6,6 +6,8 @@
  * and onset-flux BPM estimation. Deterministic on synthetic PCM buffers.
  */
 
+import { translateRuntime } from "@/lib/i18n/runtime";
+
 export type ClassifiedAudioType =
   "VOCAL_FULL" | "INSTRUMENTAL_ONLY" | "UNKNOWN";
 
@@ -356,8 +358,7 @@ export function classifyAudioBuffer(
       audioType: "UNKNOWN",
       estimatedBpm: null,
       confidence: 0.2,
-      guidanceVi:
-        "Đoạn âm thanh quá ngắn để phân loại tự động. Bạn có thể chọn loại nhạc hoặc dán lời trực tiếp.",
+      guidanceVi: translateRuntime("admin.karaoke.classifier.tooShort"),
       metrics: {
         midSideRatio: 0,
         vocalBandRatio: 0,
@@ -404,8 +405,7 @@ export function classifyAudioBuffer(
       audioType: "UNKNOWN",
       estimatedBpm: null,
       confidence: 0.2,
-      guidanceVi:
-        "File âm thanh gần như im lặng. Hãy kiểm tra lại file MP3 trước khi tạo karaoke.",
+      guidanceVi: translateRuntime("admin.karaoke.classifier.nearSilent"),
       metrics: {
         midSideRatio: 0,
         vocalBandRatio: 0,
@@ -509,8 +509,7 @@ export function classifyAudioBuffer(
   if (vocalEvidence >= 0.55 && vocalBandRatio >= 0.3) {
     audioType = "VOCAL_FULL";
     confidence = clamp(0.56 + (vocalEvidence - 0.55) * 0.9, 0.56, 0.96);
-    guidanceVi =
-      "Phát hiện bài hát có giọng hát. Hệ thống có thể tự đọc lời nhúng hoặc nhận diện giọng hát miễn phí nếu chưa có lời.";
+    guidanceVi = translateRuntime("admin.karaoke.classifier.vocalFull");
   } else if (
     vocalEvidence <= 0.38 ||
     vocalBandRatio < 0.24 ||
@@ -522,13 +521,11 @@ export function classifyAudioBuffer(
       0.56,
       0.95,
     );
-    guidanceVi =
-      "Phát hiện nhạc nền không lời (Instrumental). Bạn nên dán lời bài hát hoặc chọn file .lrc kèm theo để tự tạo mốc nhanh.";
+    guidanceVi = translateRuntime("admin.karaoke.classifier.instrumentalOnly");
   } else {
     audioType = "UNKNOWN";
     confidence = 0.45;
-    guidanceVi =
-      "Chưa chắc chắn bài hát có giọng hay chỉ có nhạc nền. Bạn có thể bấm Tự động tạo karaoke hoặc chọn loại nhạc thủ công.";
+    guidanceVi = translateRuntime("admin.karaoke.classifier.unknown");
   }
 
   return {
@@ -570,8 +567,9 @@ export async function classifyAudioFile(
       audioType: "UNKNOWN",
       estimatedBpm: null,
       confidence: 0,
-      guidanceVi:
-        "Trình duyệt chưa hỗ trợ phân tích âm thanh tự động. Bạn vẫn có thể tải MP3 bình thường.",
+      guidanceVi: translateRuntime(
+        "admin.karaoke.classifier.unsupportedBrowser",
+      ),
       metrics: {
         midSideRatio: 0,
         vocalBandRatio: 0,
@@ -593,8 +591,7 @@ export async function classifyAudioFile(
       audioType: "UNKNOWN",
       estimatedBpm: null,
       confidence: 0,
-      guidanceVi:
-        "Không thể tự phân loại âm thanh trên trình duyệt. Máy chủ vẫn sẽ đọc thẻ ID3 và kiểm tra file MP3 khi tải lên.",
+      guidanceVi: translateRuntime("admin.karaoke.classifier.decodeFailed"),
       metrics: {
         midSideRatio: 0,
         vocalBandRatio: 0,

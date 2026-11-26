@@ -1,0 +1,15 @@
+{
+  "reminders": {
+    "saved": "読書リマインダーを保存しました。",
+    "deleted": "読書リマインダーを削除しました。",
+    "emailSent": "読書リマインダーメールを送信しました。"
+  },
+  "presence": {
+    "childStarted": "{alias} さんが新しい読書セッションを開始しました。",
+    "childCompleted": "{alias} さんが読書セッションを完了しました。"
+  },
+  "updates": {
+    "saved": "変更を保存しました。",
+    "localeChanged": "表示言語を {language} に更新しました。"
+  }
+}

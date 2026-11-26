@@ -1,6 +1,10 @@
 "use client";
 
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import {
+  getBrowserAccessToken,
+  invalidateBrowserTokenCache,
+} from "@/lib/api/browser-auth";
+import { translateRuntime } from "@/lib/i18n/runtime";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 import type {
   SupportFeedbackRequest,
@@ -19,15 +23,15 @@ export class SupportFeedbackError extends Error {
 
 function safeMessageForStatus(status: number): string {
   if (status === 401) {
-    return "Phiên đăng nhập đã hết hạn. Ba mẹ vui lòng đăng nhập lại.";
+    return translateRuntime("errors.clientRuntime.sessionExpiredParent");
   }
   if (status === 422) {
-    return "Thông tin gửi đi chưa hợp lệ. Ba mẹ vui lòng kiểm tra lại.";
+    return translateRuntime("errors.clientRuntime.supportInvalidPayload");
   }
   if (status === 503) {
-    return "Hệ thống email hỗ trợ đang tạm thời không khả dụng. Ba mẹ có thể thử gửi lại sau.";
+    return translateRuntime("errors.clientRuntime.supportEmailUnavailable");
   }
-  return "Chưa gửi được phản hồi. Ba mẹ vui lòng thử lại sau.";
+  return translateRuntime("errors.clientRuntime.supportSubmitFailed");
 }
 
 export interface SupportService {
@@ -39,13 +43,16 @@ export interface SupportService {
 export function createSupportService(): SupportService {
   return {
     async submitFeedback(request) {
-      const supabase = createBrowserSupabaseClient();
-      const {
-        data: { session },
-        error: sessionError,
-      } = await supabase.auth.getSession();
-
-      if (sessionError || !session?.access_token) {
+      let accessToken: string;
+      try {
+        accessToken = await getBrowserAccessToken({
+          onUnauthorized: () =>
+            new SupportFeedbackError(safeMessageForStatus(401), 401),
+        });
+      } catch (error) {
+        if (error instanceof SupportFeedbackError) {
+          throw error;
+        }
         throw new SupportFeedbackError(safeMessageForStatus(401), 401);
       }
 
@@ -55,7 +62,7 @@ export function createSupportService(): SupportService {
           method: "POST",
           headers: {
             Accept: "application/json",
-            Authorization: "Bearer " + session.access_token,
+            Authorization: "Bearer " + accessToken,
             "Content-Type": "application/json",
           },
           body: JSON.stringify(request),
@@ -66,6 +73,9 @@ export function createSupportService(): SupportService {
       }
 
       if (!response.ok) {
+        if (response.status === 401) {
+          invalidateBrowserTokenCache();
+        }
         throw new SupportFeedbackError(
           safeMessageForStatus(response.status),
           response.status,

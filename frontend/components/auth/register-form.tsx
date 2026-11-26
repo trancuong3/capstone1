@@ -3,7 +3,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -13,48 +13,51 @@ import { TextField } from "@/components/common/text-field";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useHydrated } from "@/hooks/use-hydrated";
+import { useI18n } from "@/hooks/use-i18n";
 import { AuthServiceError } from "@/lib/api/auth-service";
 import type { AuthMockScenario, ParentRegistrationInput } from "@/types/auth";
-
-const registerSchema = z.object({
-  displayName: z.string().trim().min(1, "Ba mẹ vui lòng nhập họ và tên."),
-  email: z
-    .string()
-    .trim()
-    .min(1, "Ba mẹ vui lòng nhập email.")
-    .email("Email chưa đúng định dạng."),
-  password: z.string().min(8, "Mật khẩu cần có ít nhất 8 ký tự."),
-});
-
-const safeRegistrationError =
-  "Không thể hoàn tất đăng ký. Ba mẹ vui lòng kiểm tra thông tin hoặc đăng nhập nếu đã có tài khoản.";
-const registrationValidationError =
-  "Thông tin đăng ký chưa hợp lệ. Ba mẹ vui lòng kiểm tra và thử lại.";
 
 interface RegisterFormProps {
   onEmailConfirmationRequired: () => void;
   scenario: AuthMockScenario;
 }
 
+type RegisterErrorKind = "validation" | "safe";
+
 export function RegisterForm({
   onEmailConfirmationRequired,
   scenario,
 }: RegisterFormProps) {
+  const { t } = useI18n();
   const authService = useAuthService();
   const authRuntime = useAuthRuntime();
   const isHydrated = useHydrated();
   const router = useRouter();
-  const [errorMessage, setErrorMessage] = useState<string | null>(() => {
-    if (scenario === "validation-error") {
-      return registrationValidationError;
-    }
-
-    if (scenario === "safe-error") {
-      return safeRegistrationError;
-    }
-
+  const [errorKind, setErrorKind] = useState<RegisterErrorKind | null>(() => {
+    if (scenario === "validation-error") return "validation";
+    if (scenario === "safe-error") return "safe";
     return null;
   });
+
+  const registerSchema = useMemo(
+    () =>
+      z.object({
+        displayName: z
+          .string()
+          .trim()
+          .min(1, t("validation.parentDisplayNameRequired")),
+        email: z
+          .string()
+          .trim()
+          .min(1, t("validation.parentEmailRequired"))
+          .email(t("validation.emailInvalidShort")),
+        password: z
+          .string()
+          .min(8, t("validation.passwordMinLengthShort", { min: 8 })),
+      }),
+    [t],
+  );
+
   const {
     formState: { errors, isSubmitting },
     handleSubmit,
@@ -69,7 +72,7 @@ export function RegisterForm({
   });
 
   const onSubmit = handleSubmit(async (values) => {
-    setErrorMessage(null);
+    setErrorKind(null);
     let hasAuthenticated = false;
 
     try {
@@ -101,13 +104,20 @@ export function RegisterForm({
         error instanceof AuthServiceError &&
         error.reason === "registration-validation"
       ) {
-        setErrorMessage(registrationValidationError);
+        setErrorKind("validation");
         return;
       }
 
-      setErrorMessage(safeRegistrationError);
+      setErrorKind("safe");
     }
   });
+
+  const errorMessage =
+    errorKind === "validation"
+      ? t("auth.register.errors.validation")
+      : errorKind === "safe"
+        ? t("auth.register.errors.safe")
+        : null;
 
   return (
     <form
@@ -121,23 +131,23 @@ export function RegisterForm({
       <TextField
         autoComplete="name"
         error={errors.displayName?.message}
-        label="Họ và tên ba mẹ"
-        placeholder="Nguyễn Minh Anh"
+        label={t("auth.fields.parentDisplayName")}
+        placeholder={t("auth.placeholders.parentDisplayName")}
         {...register("displayName")}
       />
       <TextField
         autoComplete="email"
         error={errors.email?.message}
-        label="Email của ba mẹ"
-        placeholder="minhanh@example.com"
+        label={t("auth.fields.parentEmail")}
+        placeholder={t("auth.placeholders.email")}
         type="email"
         {...register("email")}
       />
       <TextField
         autoComplete="new-password"
         error={errors.password?.message}
-        label="Mật khẩu"
-        placeholder="Tối thiểu 8 ký tự"
+        label={t("auth.fields.password")}
+        placeholder={t("auth.placeholders.passwordMinLength", { min: 8 })}
         type="password"
         {...register("password")}
       />
@@ -148,13 +158,15 @@ export function RegisterForm({
         isLoading={isSubmitting}
         type="submit"
       >
-        {isSubmitting ? "Đang tạo tài khoản…" : "Tạo tài khoản"}
+        {isSubmitting
+          ? t("auth.register.submitting")
+          : t("auth.register.createSubmit")}
         {!isSubmitting ? (
-          <ArrowRight aria-hidden="true" className="size-5" />
+          <ArrowRight aria-hidden="true" className="size-5 viread-rtl-flip" />
         ) : null}
       </Button>
       <ButtonLink href="/login" variant="secondary">
-        Đã có tài khoản? Đăng nhập
+        {t("auth.register.haveAccountSignIn")}
       </ButtonLink>
     </form>
   );

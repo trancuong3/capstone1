@@ -25,6 +25,12 @@ import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { MemorySceneCanvas } from "@/components/entertainment/memory-game/memory-scene-canvas";
+import {
+  getEntertainmentPreferences,
+  subscribeEntertainmentPreferences,
+  useEntertainmentPreferences,
+} from "@/hooks/use-entertainment-preferences";
+import { useTranslations } from "@/hooks/use-i18n";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import {
@@ -32,6 +38,7 @@ import {
   type MemoryGameService,
 } from "@/lib/api/memory-game-service";
 import { isServiceError } from "@/lib/api/service-error";
+import { cn } from "@/lib/utils/cn";
 import type {
   MatchedFactDTO,
   MemoryEvaluationDTO,
@@ -86,55 +93,52 @@ const TTS_MIC_COOLDOWN_MS = 350;
 const FALLBACK_TIMER_OPTIONS: ReadonlyArray<{
   mode: MemoryTimerMode;
   seconds: number | null;
-  label_vi: string;
-  recommended_for_vi: string;
+  labelKey: string;
+  recommendedForKey: string;
 }> = [
   {
     mode: "10S",
     seconds: 10,
-    label_vi: "10 giây",
-    recommended_for_vi: "Siêu nhanh",
+    labelKey: "memoryGame.timers.10S.label",
+    recommendedForKey: "memoryGame.timers.10S.recommended",
   },
   {
     mode: "20S",
     seconds: 20,
-    label_vi: "20 giây",
-    recommended_for_vi: "Lớp 4–5",
+    labelKey: "memoryGame.timers.20S.label",
+    recommendedForKey: "memoryGame.timers.20S.recommended",
   },
   {
     mode: "30S",
     seconds: 30,
-    label_vi: "30 giây",
-    recommended_for_vi: "Lớp 2–3",
+    labelKey: "memoryGame.timers.30S.label",
+    recommendedForKey: "memoryGame.timers.30S.recommended",
   },
   {
     mode: "60S",
     seconds: 60,
-    label_vi: "60 giây",
-    recommended_for_vi: "Lớp 1–2",
+    labelKey: "memoryGame.timers.60S.label",
+    recommendedForKey: "memoryGame.timers.60S.recommended",
   },
   {
     mode: "90S",
     seconds: 90,
-    label_vi: "90 giây",
-    recommended_for_vi: "Quan sát kỹ",
+    labelKey: "memoryGame.timers.90S.label",
+    recommendedForKey: "memoryGame.timers.90S.recommended",
   },
   {
     mode: "120S",
     seconds: 120,
-    label_vi: "120 giây",
-    recommended_for_vi: "Chậm rãi",
+    labelKey: "memoryGame.timers.120S.label",
+    recommendedForKey: "memoryGame.timers.120S.recommended",
   },
   {
     mode: "UNLIMITED",
     seconds: null,
-    label_vi: "Không giới hạn",
-    recommended_for_vi: "Tự bấm khi nhớ xong",
+    labelKey: "memoryGame.timers.UNLIMITED.label",
+    recommendedForKey: "memoryGame.timers.UNLIMITED.recommended",
   },
 ];
-
-const DEFAULT_ERROR_MESSAGE =
-  "Chưa kết nối được trò chơi trí nhớ. Ba mẹ và bé hãy thử lại nhé.";
 
 function getSpeechRecognitionCtor(): SpeechRecognitionCtor | null {
   if (typeof window === "undefined") return null;
@@ -145,12 +149,9 @@ function getSpeechRecognitionCtor(): SpeechRecognitionCtor | null {
   return win.SpeechRecognition ?? win.webkitSpeechRecognition ?? null;
 }
 
-function renderStars(count: number) {
+function renderStars(count: number, ariaLabel: string) {
   return (
-    <span
-      aria-label={`${count} trên 3 sao`}
-      className="inline-flex items-center gap-1"
-    >
+    <span aria-label={ariaLabel} className="inline-flex items-center gap-1">
       {[1, 2, 3].map((idx) => (
         <Star
           key={idx}
@@ -171,6 +172,8 @@ export interface MemoryGameScreenProps {
 }
 
 export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
+  const t = useTranslations("games");
+  const defaultErrorMessage = t("memoryGame.defaultError");
   const memoryService = useMemo(
     () => service ?? createMemoryGameService(),
     [service],
@@ -179,6 +182,8 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   const child = childState.status === "ready" ? childState.child : null;
   const childId = child?.id ?? null;
   const speechPlayer = useSpeechPlayer();
+  const { reducedMotion, calmSound, toggleCalmSound } =
+    useEntertainmentPreferences();
 
   // Catalog & history
   const [catalog, setCatalog] = useState<MemoryThemesCatalogDTO | null>(null);
@@ -285,8 +290,17 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
     }
   }, [speechPlayer]);
 
+  useEffect(() => {
+    return subscribeEntertainmentPreferences(() => {
+      if (!getEntertainmentPreferences().calmSound) {
+        stopAllTts();
+      }
+    });
+  }, [stopAllTts]);
+
   const speakVietnamesePrompt = useCallback(
     (text: string) => {
+      if (!calmSound) return;
       // Anti-self-capture invariant: ALWAYS abort active mic BEFORE speaking TTS!
       stopMicCapture();
       stopAllTts();
@@ -322,7 +336,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         .catch(() => undefined)
         .finally(finishSpeak);
     },
-    [speechPlayer, stopAllTts, stopMicCapture],
+    [calmSound, speechPlayer, stopAllTts, stopMicCapture],
   );
 
   const startVoiceCapture = useCallback(
@@ -337,18 +351,14 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
 
       const SpeechRecognition = getSpeechRecognitionCtor();
       if (!SpeechRecognition) {
-        setVoiceNotice(
-          "Trình duyệt này chưa hỗ trợ ghi giọng nói trực tiếp. Bé có thể gõ câu trả lời vào ô bên dưới nhé!",
-        );
+        setVoiceNotice(t("memoryGame.voiceUnsupported"));
         return;
       }
 
       const beginCapture = () => {
         micArmTimeoutRef.current = null;
         setActionError(null);
-        setVoiceNotice(
-          "Đang lắng nghe bé kể... Bấm lại nút micro khi nói xong nhé!",
-        );
+        setVoiceNotice(t("memoryGame.voiceListening"));
         try {
           const recognition = new SpeechRecognition();
           recognition.lang = "vi-VN";
@@ -371,9 +381,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             }
           };
           recognition.onerror = () => {
-            setVoiceNotice(
-              "Micro tạm ngắt kết nối. Lời bé vừa kể vẫn được giữ nguyên — bé có thể nói tiếp hoặc gõ chữ nhé!",
-            );
+            setVoiceNotice(t("memoryGame.voiceDisconnected"));
             stopMicCapture();
           };
           recognition.onend = () => {
@@ -388,9 +396,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           setVoiceTarget(target);
           recognition.start();
         } catch {
-          setVoiceNotice(
-            "Không mở được micro lúc này. Bé hãy gõ câu trả lời vào ô chữ nhé!",
-          );
+          setVoiceNotice(t("memoryGame.voiceUnavailable"));
           stopMicCapture();
         }
       };
@@ -405,7 +411,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         beginCapture();
       }
     },
-    [isListeningVoice, stopAllTts, stopMicCapture],
+    [isListeningVoice, stopAllTts, stopMicCapture, t],
   );
 
   // Stop mic, TTS, and peek timers cleanly on backgrounding / unmount
@@ -461,12 +467,18 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       .catch((err: unknown) => {
         if (controller.signal.aborted) return;
         setCatalogError(
-          isServiceError(err) ? err.message : DEFAULT_ERROR_MESSAGE,
+          isServiceError(err) ? err.message : defaultErrorMessage,
         );
       });
 
     return () => controller.abort();
-  }, [child, childId, hasCustomizedGradeDefaults, memoryService]);
+  }, [
+    child,
+    childId,
+    defaultErrorMessage,
+    hasCustomizedGradeDefaults,
+    memoryService,
+  ]);
 
   const handleSceneReady = useCallback(() => {
     setSceneReady(true);
@@ -522,7 +534,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       setRemainingSeconds(created.timer_seconds);
       setStage("OBSERVE");
     } catch (err: unknown) {
-      setActionError(isServiceError(err) ? err.message : DEFAULT_ERROR_MESSAGE);
+      setActionError(isServiceError(err) ? err.message : defaultErrorMessage);
     } finally {
       setIsStarting(false);
     }
@@ -546,7 +558,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         prev ? { ...prev, hints_used: hint.hints_used } : prev,
       );
     } catch (err: unknown) {
-      setActionError(isServiceError(err) ? err.message : DEFAULT_ERROR_MESSAGE);
+      setActionError(isServiceError(err) ? err.message : defaultErrorMessage);
     } finally {
       setIsLoadingHint(false);
     }
@@ -580,7 +592,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         });
       }, 1000);
     } catch (err: unknown) {
-      setActionError(isServiceError(err) ? err.message : DEFAULT_ERROR_MESSAGE);
+      setActionError(isServiceError(err) ? err.message : defaultErrorMessage);
     }
   };
 
@@ -588,7 +600,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
     if (!session || isSubmittingRef.current) return;
     const trimmed = recallText.trim();
     if (!trimmed) {
-      setActionError("Bé hãy kể hoặc gõ ít nhất một chi tiết bé nhớ được nhé!");
+      setActionError(t("memoryGame.recallEmptyError"));
       return;
     }
     stopMicCapture();
@@ -610,7 +622,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       setStage("REVEAL");
     } catch (err: unknown) {
       // Preserve child's recall draft cleanly on transient error!
-      setActionError(isServiceError(err) ? err.message : DEFAULT_ERROR_MESSAGE);
+      setActionError(isServiceError(err) ? err.message : defaultErrorMessage);
     } finally {
       isSubmittingRef.current = false;
       setIsSubmitting(false);
@@ -621,9 +633,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
     if (!session || isSubmittingRef.current) return;
     const trimmed = creativeText.trim();
     if (!trimmed) {
-      setActionError(
-        "Bé hãy tưởng tượng và kể ít nhất một câu về chuyện xảy ra tiếp theo nhé!",
-      );
+      setActionError(t("memoryGame.creativeEmptyError"));
       return;
     }
     stopMicCapture();
@@ -648,7 +658,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           .catch(() => undefined);
       }
     } catch (err: unknown) {
-      setActionError(isServiceError(err) ? err.message : DEFAULT_ERROR_MESSAGE);
+      setActionError(isServiceError(err) ? err.message : defaultErrorMessage);
     } finally {
       isSubmittingRef.current = false;
       setIsSubmitting(false);
@@ -713,14 +723,14 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       <section className="mx-auto flex w-full max-w-[1040px] flex-col gap-4">
         <StatusMessage tone="error">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <span>Chưa tải được hồ sơ bé. Ba mẹ hãy thử lại nhé.</span>
+            <span>{t("memoryGame.childLoadError")}</span>
             <Button
               fullWidth={false}
               onClick={retryChild}
               size="compact"
               variant="secondary"
             >
-              Thử lại
+              {t("memoryGame.retry")}
             </Button>
           </div>
         </StatusMessage>
@@ -734,17 +744,29 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         <EmptyState
           action={
             <ButtonLink fullWidth={false} href="/children" size="compact">
-              Chọn hồ sơ bé
+              {t("memoryGame.selectChildAction")}
             </ButtonLink>
           }
-          description="Ba mẹ hãy chọn hồ sơ bé trước khi mở trò chơi trí nhớ và kể chuyện sáng tạo nhé."
-          title="Chưa chọn hồ sơ bé"
+          description={t("memoryGame.noChildDescription")}
+          title={t("memoryGame.noChildTitle")}
         />
       </section>
     );
   }
 
-  const timerOptions = catalog?.timer_options ?? FALLBACK_TIMER_OPTIONS;
+  const timerOptions = catalog?.timer_options
+    ? catalog.timer_options.map((opt) => ({
+        mode: opt.mode,
+        seconds: opt.seconds,
+        label: opt.label_vi,
+        recommendedFor: opt.recommended_for_vi,
+      }))
+    : FALLBACK_TIMER_OPTIONS.map((opt) => ({
+        mode: opt.mode,
+        seconds: opt.seconds,
+        label: t(opt.labelKey),
+        recommendedFor: t(opt.recommendedForKey),
+      }));
   const gradeRec = catalog?.grade_recommendations.find(
     (item) => item.grade === child.grade,
   );
@@ -766,7 +788,12 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
 
   return (
     <section
-      className="mx-auto flex w-full max-w-[1060px] flex-col gap-5 pb-10"
+      className={cn(
+        "mx-auto flex w-full max-w-[1060px] flex-col gap-5 pb-10",
+        reducedMotion && "motion-reduce",
+      )}
+      data-calm-sound={calmSound ? "true" : "false"}
+      data-reduced-motion={reducedMotion ? "true" : "false"}
       data-stage={stage}
       data-testid="memory-game-screen"
     >
@@ -774,34 +801,49 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
         <div className="flex flex-col gap-1">
           <Link className="family-inline-link w-fit" href="/entertainment">
-            <ArrowLeft aria-hidden="true" className="size-4" />
-            Quay lại Giải trí
+            <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-4" />
+            {t("memoryGame.backToEntertainment")}
           </Link>
           <h1 className="book-title flex items-center gap-2.5 text-3xl text-ink sm:text-4xl">
             <Brain aria-hidden="true" className="size-8 text-primary" />
-            Bé nhớ được gì?
+            {t("memoryGame.heading")}
           </h1>
-          <p className="text-body text-muted">
-            Quan sát bức tranh đầy màu sắc, rèn trí nhớ vui và tưởng tượng câu
-            chuyện tiếp theo!
-          </p>
+          <p className="text-body text-muted">{t("memoryGame.lead")}</p>
         </div>
-        <BookChildHeader child={child} />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            aria-pressed={!calmSound}
+            className="min-h-11"
+            fullWidth={false}
+            onClick={toggleCalmSound}
+            size="compact"
+            type="button"
+            variant="quiet"
+          >
+            {calmSound ? (
+              <Volume2 aria-hidden="true" className="size-4" />
+            ) : (
+              <VolumeX aria-hidden="true" className="size-4" />
+            )}
+            {calmSound ? t("memoryGame.calmSound") : t("memoryGame.soundMuted")}
+          </Button>
+          <BookChildHeader child={child} />
+        </div>
       </div>
 
       {/* Stage progress pills */}
       <nav
-        aria-label="Các bước chơi Bé nhớ được gì"
+        aria-label={t("memoryGame.stepsNavAria")}
         className="flex flex-wrap items-center gap-2"
       >
         {(
           [
-            ["SETUP", "1. Chọn tranh"],
-            ["OBSERVE", "2. Quan sát"],
-            ["RECALL", "3. Bé nhớ gì?"],
-            ["REVEAL", "4. Soi tranh"],
-            ["CREATIVE", "5. Kể tiếp"],
-            ["SUMMARY", "6. Điểm & Khen"],
+            ["SETUP", t("memoryGame.steps.setup")],
+            ["OBSERVE", t("memoryGame.steps.observe")],
+            ["RECALL", t("memoryGame.steps.recall")],
+            ["REVEAL", t("memoryGame.steps.reveal")],
+            ["CREATIVE", t("memoryGame.steps.creative")],
+            ["SUMMARY", t("memoryGame.steps.summary")],
           ] as const
         ).map(([stepKey, label]) => {
           const isCurrent = stage === stepKey;
@@ -834,7 +876,13 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
 
           {gradeRec ? (
             <div className="rounded-card border border-border bg-sky px-5 py-4 text-ink">
-              <p className="text-body font-bold">{gradeRec.note_vi}</p>
+              <p
+                className="viread-learning-content text-body font-bold"
+                dir="ltr"
+                lang="vi"
+              >
+                {gradeRec.note_vi}
+              </p>
             </div>
           ) : null}
 
@@ -842,11 +890,11 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           <div className="rounded-card border border-border bg-white p-5 sm:p-6">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-xl font-extrabold text-ink">
-                Chọn chủ đề bức tranh
+                {t("memoryGame.chooseThemeHeading")}
               </h2>
               <button
                 aria-pressed={selectedTheme === "random"}
-                className={`rounded-control border px-4 py-2 text-sm font-bold transition-colors ${
+                className={`min-h-11 rounded-control border px-4 py-2 text-sm font-bold transition-colors ${
                   selectedTheme === "random"
                     ? "border-primary bg-primary text-white"
                     : "border-border bg-cream text-ink hover:bg-sky"
@@ -854,7 +902,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 onClick={() => setSelectedTheme("random")}
                 type="button"
               >
-                🎲 Ngẫu nhiên
+                {t("memoryGame.randomThemeButton")}
               </button>
             </div>
 
@@ -872,7 +920,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                     <button
                       key={theme.theme_key}
                       aria-pressed={isActive}
-                      className={`flex flex-col items-start gap-2 rounded-card border-2 p-4 text-left transition-colors ${
+                      className={`flex flex-col items-start gap-2 rounded-card border-2 p-4 text-start transition-colors ${
                         isActive
                           ? "border-primary bg-sky/70"
                           : "border-border bg-cream hover:border-primary/50"
@@ -881,17 +929,27 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                       type="button"
                     >
                       <div className="flex w-full items-center justify-between gap-2">
-                        <span className="text-lg font-extrabold text-ink">
+                        <span
+                          className="viread-learning-content text-lg font-extrabold text-ink"
+                          dir="ltr"
+                          lang="vi"
+                        >
                           {theme.name_vi}
                         </span>
                         <span
-                          className="rounded-full px-2.5 py-0.5 text-xs font-bold text-white"
+                          className="viread-learning-content rounded-full px-2.5 py-0.5 text-xs font-bold text-white"
+                          dir="ltr"
+                          lang="vi"
                           style={{ backgroundColor: theme.accent_hex }}
                         >
                           {theme.badge_vi}
                         </span>
                       </div>
-                      <p className="text-sm leading-5 text-muted">
+                      <p
+                        className="viread-learning-content text-sm leading-5 text-muted"
+                        dir="ltr"
+                        lang="vi"
+                      >
                         {theme.description_vi}
                       </p>
                     </button>
@@ -906,7 +964,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             <div className="rounded-card border border-border bg-white p-5">
               <h2 className="mb-3 flex items-center gap-2 text-lg font-extrabold text-ink">
                 <Clock aria-hidden="true" className="size-5 text-primary" />
-                Thời gian quan sát
+                {t("memoryGame.timerHeading")}
               </h2>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {timerOptions.map((opt) => {
@@ -915,7 +973,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                     <button
                       key={opt.mode}
                       aria-pressed={isActive}
-                      className={`flex flex-col items-start rounded-control border px-3 py-2.5 text-left transition-colors ${
+                      className={`flex flex-col items-start rounded-control border px-3 py-2.5 text-start transition-colors ${
                         isActive
                           ? "border-primary bg-primary text-white"
                           : "border-border bg-cream text-ink hover:bg-sky"
@@ -928,12 +986,12 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                       type="button"
                     >
                       <span className="text-base font-extrabold">
-                        {opt.label_vi}
+                        {opt.label}
                       </span>
                       <span
                         className={`text-xs ${isActive ? "text-white/90" : "text-muted"}`}
                       >
-                        {opt.recommended_for_vi}
+                        {opt.recommendedFor}
                       </span>
                     </button>
                   );
@@ -944,20 +1002,20 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             <div className="flex flex-col gap-4 rounded-card border border-border bg-white p-5">
               <div>
                 <h2 className="mb-3 text-lg font-extrabold text-ink">
-                  Cách bé kể lại
+                  {t("memoryGame.recallModeHeading")}
                 </h2>
                 <div className="grid grid-cols-2 gap-2">
                   {(
                     [
                       [
                         "FREE_RECALL",
-                        "Kể tự do",
-                        "Bé tự do kể mọi chi tiết bé nhớ được",
+                        t("memoryGame.freeRecallTitle"),
+                        t("memoryGame.freeRecallDesc"),
                       ],
                       [
                         "GUIDED_RECALL",
-                        "Trả lời gợi ý",
-                        "Có câu hỏi nhỏ dẫn dắt nhẹ nhàng",
+                        t("memoryGame.guidedRecallTitle"),
+                        t("memoryGame.guidedRecallDesc"),
                       ],
                     ] as const
                   ).map(([modeValue, title, desc]) => {
@@ -966,7 +1024,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                       <button
                         key={modeValue}
                         aria-pressed={active}
-                        className={`flex flex-col items-start gap-1 rounded-control border p-3 text-left transition-colors ${
+                        className={`flex flex-col items-start gap-1 rounded-control border p-3 text-start transition-colors ${
                           active
                             ? "border-primary bg-sky text-ink"
                             : "border-border bg-cream text-ink hover:bg-sky/50"
@@ -993,7 +1051,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                     onChange={(e) => setShowObservationGuide(e.target.checked)}
                     type="checkbox"
                   />
-                  Hiển thị “Gợi ý quan sát” khi xem tranh
+                  {t("memoryGame.showObservationGuideLabel")}
                 </label>
                 <label className="flex cursor-pointer items-center gap-3 text-sm font-bold text-ink">
                   <input
@@ -1002,7 +1060,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                     onChange={(e) => setShowColorCues(e.target.checked)}
                     type="checkbox"
                   />
-                  Hiển thị ký hiệu hình khối hỗ trợ phân biệt màu sắc
+                  {t("memoryGame.showColorCuesLabel")}
                 </label>
               </div>
             </div>
@@ -1016,7 +1074,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
               onClick={() => void startNewSession()}
             >
               <Sparkles aria-hidden="true" className="size-5" />
-              Bắt đầu quan sát tranh
+              {t("memoryGame.startObserveButton")}
             </Button>
           </div>
 
@@ -1024,7 +1082,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           {history.length > 0 ? (
             <div className="rounded-card border border-border bg-cream p-5">
               <h2 className="mb-3 text-lg font-extrabold text-ink">
-                Các bức tranh bé vừa chơi gần đây
+                {t("memoryGame.recentHeading")}
               </h2>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {history.map((item) => (
@@ -1033,23 +1091,37 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                     className="flex flex-col gap-1.5 rounded-control border border-border bg-white p-3.5"
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-extrabold text-ink">
+                      <span
+                        className="viread-learning-content font-extrabold text-ink"
+                        dir="ltr"
+                        lang="vi"
+                      >
                         {item.theme_name_vi}
                       </span>
-                      {renderStars(item.stars)}
+                      {renderStars(
+                        item.stars,
+                        t("memoryGame.starsAria", { count: item.stars }),
+                      )}
                     </div>
                     <p className="text-xs text-muted">
-                      {item.object_count} chi tiết ·{" "}
+                      {t("memoryGame.historyDetailsCount", {
+                        count: item.object_count,
+                      })}{" "}
+                      ·{" "}
                       {item.timer_seconds
                         ? `${item.timer_seconds}s`
-                        : "Không giới hạn"}
+                        : t("memoryGame.timers.UNLIMITED.label")}
                     </p>
                     <div className="mt-1 flex flex-wrap gap-2 text-xs font-bold">
                       <span className="rounded-full bg-success-surface px-2.5 py-0.5 text-success-ink">
-                        Ghi nhớ: {item.best_factual_score}/100
+                        {t("memoryGame.historyMemoryScore", {
+                          score: item.best_factual_score,
+                        })}
                       </span>
                       <span className="rounded-full bg-purple px-2.5 py-0.5 text-purple-ink">
-                        Sáng tạo: {item.best_creative_score}/100
+                        {t("memoryGame.historyCreativeScore", {
+                          score: item.best_creative_score,
+                        })}
                       </span>
                     </div>
                   </div>
@@ -1072,7 +1144,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                   data-testid="timer-unlimited-badge"
                 >
                   <Clock aria-hidden="true" className="size-5" />
-                  Không giới hạn thời gian
+                  {t("memoryGame.unlimitedTimeBadge")}
                 </div>
               ) : (
                 <div
@@ -1106,15 +1178,17 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                   </svg>
                   <div>
                     <p
-                      className="text-2xl font-extrabold text-ink"
+                      className="text-2xl font-extrabold tabular-nums text-ink"
                       data-testid="countdown-seconds"
                     >
                       {sceneReady
-                        ? `${remainingSeconds ?? session.timer_seconds} giây`
-                        : "Đang chuẩn bị…"}
+                        ? t("memoryGame.secondsLeft", {
+                            seconds: remainingSeconds ?? session.timer_seconds,
+                          })
+                        : t("memoryGame.preparingScene")}
                     </p>
                     <p className="text-xs font-semibold text-muted">
-                      Quan sát thật kỹ từng chi tiết nhé!
+                      {t("memoryGame.observeCarefullyHint")}
                     </p>
                   </div>
                 </div>
@@ -1129,7 +1203,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 size="compact"
               >
                 <CheckCircle2 aria-hidden="true" className="size-4" />
-                Bé đã nhớ xong
+                {t("memoryGame.finishObserveButton")}
               </Button>
             </div>
           </div>
@@ -1137,14 +1211,17 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           <MemorySceneCanvas
             mode="observe"
             onSceneReady={handleSceneReady}
+            reducedMotion={reducedMotion}
             sceneSpec={session.scene_spec}
             showColorCues={showColorCues}
           />
 
           {session.scene_spec.matched_focus_words.length > 0 ? (
             <div className="rounded-control border border-border bg-purple/60 px-4 py-2.5 text-sm font-bold text-purple-ink">
-              Từ vựng quen thuộc bé đang luyện có mặt trong tranh:{" "}
-              {session.scene_spec.matched_focus_words.join(", ")}
+              {t("memoryGame.focusWordsInScene")}{" "}
+              <span className="viread-learning-content" dir="ltr" lang="vi">
+                {session.scene_spec.matched_focus_words.join(", ")}
+              </span>
             </div>
           ) : null}
 
@@ -1153,11 +1230,18 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             <div className="rounded-card border border-border bg-cream p-4">
               <p className="mb-1.5 flex items-center gap-2 text-sm font-extrabold text-ink">
                 <Lightbulb aria-hidden="true" className="size-4 text-warning" />
-                Gợi ý quan sát thông minh:
+                {t("memoryGame.observationTipsHeading")}
               </p>
-              <ul className="list-disc space-y-1 pl-5 text-sm text-muted">
+              <ul className="list-disc space-y-1 ps-5 text-sm text-muted">
                 {session.scene_spec.observation_tips_vi.map((tip) => (
-                  <li key={tip}>{tip}</li>
+                  <li
+                    className="viread-learning-content"
+                    dir="ltr"
+                    key={tip}
+                    lang="vi"
+                  >
+                    {tip}
+                  </li>
                 ))}
               </ul>
             </div>
@@ -1176,12 +1260,17 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
               <div className="flex items-center justify-between rounded-control bg-warning-surface px-4 py-2.5 font-bold text-warning">
                 <span className="flex items-center gap-2">
                   <Eye aria-hidden="true" className="size-5" />
-                  Đang xem lại nhanh ({peekRemaining} giây)…
+                  {t("memoryGame.peekingCountdown", { seconds: peekRemaining })}
                 </span>
-                <span>Lần xem lại: {session.peek_count}</span>
+                <span>
+                  {t("memoryGame.peekCountLabel", {
+                    count: session.peek_count,
+                  })}
+                </span>
               </div>
               <MemorySceneCanvas
                 mode="peek"
+                reducedMotion={reducedMotion}
                 sceneSpec={session.scene_spec}
                 showColorCues={showColorCues}
               />
@@ -1195,12 +1284,14 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 <EyeOff aria-hidden="true" className="size-8" />
               </div>
               <h2 className="text-2xl font-extrabold text-ink">
-                Bức tranh đang trốn sau tấm màn bí mật!
+                {t("memoryGame.curtainTitle")}
               </h2>
               <p className="max-w-xl text-body text-muted">
-                Bé hãy kể lại những con vật, đồ vật, màu sắc, số lượng hoặc vị
-                trí mà bé nhớ được trong tranh{" "}
-                <strong>“{session.theme_name_vi}”</strong> nhé!
+                {t("memoryGame.curtainPromptPrefix")}{" "}
+                <strong className="viread-learning-content" dir="ltr" lang="vi">
+                  “{session.theme_name_vi}”
+                </strong>{" "}
+                {t("memoryGame.curtainPromptSuffix")}
               </p>
               <div className="flex flex-wrap justify-center gap-2 pt-1">
                 <Button
@@ -1212,7 +1303,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                   variant="secondary"
                 >
                   <Lightbulb aria-hidden="true" className="size-4" />
-                  Gợi ý cho bé ({session.hints_used})
+                  {t("memoryGame.hintButton", { count: session.hints_used })}
                 </Button>
                 <Button
                   data-testid="supported-peek-btn"
@@ -1222,15 +1313,18 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                   variant="quiet"
                 >
                   <Eye aria-hidden="true" className="size-4" />
-                  Xem lại nhanh 3 giây ({session.peek_count})
+                  {t("memoryGame.peekButton", { count: session.peek_count })}
                 </Button>
                 <Button
+                  disabled={!calmSound}
                   fullWidth={false}
                   onClick={() =>
                     isSpeakingPrompt
                       ? stopAllTts()
                       : speakVietnamesePrompt(
-                          `Bé hãy kể lại những gì bé nhớ được trong bức tranh ${session.theme_name_vi} nhé!`,
+                          t("memoryGame.recallTtsPrompt", {
+                            theme: session.theme_name_vi,
+                          }),
                         )
                   }
                   size="compact"
@@ -1241,7 +1335,9 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                   ) : (
                     <Volume2 aria-hidden="true" className="size-4" />
                   )}
-                  {isSpeakingPrompt ? "Dừng đọc" : "Nghe hướng dẫn"}
+                  {isSpeakingPrompt
+                    ? t("memoryGame.stopAudio")
+                    : t("memoryGame.listenGuide")}
                 </Button>
               </div>
             </div>
@@ -1249,7 +1345,9 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
 
           {peekNotice ? (
             <div className="rounded-control border border-border bg-warning-surface/70 px-4 py-2.5 text-sm font-semibold text-warning">
-              {peekNotice}
+              <span className="viread-learning-content" dir="ltr" lang="vi">
+                {peekNotice}
+              </span>
             </div>
           ) : null}
 
@@ -1260,14 +1358,21 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             >
               <div className="mb-1 flex items-center justify-between gap-2">
                 <span className="font-extrabold text-warning">
-                  💡 Gợi ý bậc {activeHint.tier}/3
+                  {t("memoryGame.hintTierBadge", { tier: activeHint.tier })}
                 </span>
                 <span className="text-xs font-bold text-muted">
-                  Còn {activeHint.remaining_unmentioned_count} chi tiết chưa
-                  nhắc tới
+                  {t("memoryGame.remainingDetails", {
+                    count: activeHint.remaining_unmentioned_count,
+                  })}
                 </span>
               </div>
-              <p className="text-body font-bold">{activeHint.hint_text_vi}</p>
+              <p
+                className="viread-learning-content text-body font-bold"
+                dir="ltr"
+                lang="vi"
+              >
+                {activeHint.hint_text_vi}
+              </p>
             </div>
           ) : null}
 
@@ -1275,11 +1380,18 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           session.scene_spec.guided_questions_vi.length > 0 ? (
             <div className="rounded-card border border-border bg-cream p-4">
               <p className="mb-2 text-sm font-extrabold text-ink">
-                Câu hỏi nhỏ gợi nhớ cho bé:
+                {t("memoryGame.guidedQuestionsHeading")}
               </p>
-              <ul className="list-disc space-y-1 pl-5 text-sm text-muted">
+              <ul className="list-disc space-y-1 ps-5 text-sm text-muted">
                 {session.scene_spec.guided_questions_vi.map((q) => (
-                  <li key={q}>{q}</li>
+                  <li
+                    className="viread-learning-content"
+                    dir="ltr"
+                    key={q}
+                    lang="vi"
+                  >
+                    {q}
+                  </li>
                 ))}
               </ul>
             </div>
@@ -1292,7 +1404,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 className="text-lg font-extrabold text-ink"
                 htmlFor="memory-recall-input"
               >
-                Lời bé kể lại bức tranh
+                {t("memoryGame.recallTextareaLabel")}
               </label>
               <Button
                 data-testid="recall-voice-btn"
@@ -1308,12 +1420,12 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 {isListeningVoice && voiceTarget === "RECALL" ? (
                   <>
                     <MicOff aria-hidden="true" className="size-4" />
-                    Dừng ghi âm
+                    {t("memoryGame.stopVoiceButton")}
                   </>
                 ) : (
                   <>
                     <Mic aria-hidden="true" className="size-4" />
-                    Nói bằng giọng nói
+                    {t("memoryGame.speakVoiceButton")}
                   </>
                 )}
               </Button>
@@ -1326,14 +1438,16 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             ) : null}
 
             <textarea
-              className="min-h-32 w-full rounded-control border border-border bg-cream p-3.5 text-body text-ink focus:border-primary focus:outline-none"
+              className="viread-learning-content min-h-32 w-full rounded-control border border-border bg-cream p-3.5 text-body text-ink focus:border-primary focus:outline-none"
               data-testid="recall-textarea"
+              dir="ltr"
               id="memory-recall-input"
+              lang="vi"
               onChange={(e) => {
                 setRecallText(e.target.value);
                 setRecallInputMode("TEXT");
               }}
-              placeholder="Ví dụ: Bé nhớ có một con mèo mướp màu cam ở dưới trái, hai bông hoa hướng dương màu vàng..."
+              placeholder={t("memoryGame.recallPlaceholder")}
               value={recallText}
             />
 
@@ -1344,7 +1458,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 isLoading={isSubmitting}
                 onClick={() => void handleSubmitRecall()}
               >
-                Kiểm tra trí nhớ của bé
+                {t("memoryGame.submitRecallButton")}
               </Button>
             </div>
           </div>
@@ -1360,15 +1474,22 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
               data-testid="factual-score-card"
             >
               <p className="text-sm font-bold text-success-ink">
-                Điểm ghi nhớ (Chính xác theo tranh)
+                {t("memoryGame.factualScoreAccurateLabel")}
               </p>
               <div className="mt-1 flex items-baseline justify-between">
-                <span className="text-4xl font-extrabold text-ink">
+                <span className="text-4xl font-extrabold tabular-nums text-ink">
                   {recallEvaluation.factual_score}/100
                 </span>
-                {renderStars(recallEvaluation.stars)}
+                {renderStars(
+                  recallEvaluation.stars,
+                  t("memoryGame.starsAria", { count: recallEvaluation.stars }),
+                )}
               </div>
-              <p className="mt-2 text-sm font-semibold text-ink">
+              <p
+                className="viread-learning-content mt-2 text-sm font-semibold text-ink"
+                dir="ltr"
+                lang="vi"
+              >
                 {recallEvaluation.praise_message_vi}
               </p>
             </div>
@@ -1376,9 +1497,13 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             <div className="flex flex-col justify-between rounded-card border border-border bg-purple/50 p-5">
               <div>
                 <p className="text-sm font-bold text-purple-ink">
-                  Bước tiếp theo: Điểm sáng tạo
+                  {t("memoryGame.nextStepCreativeLabel")}
                 </p>
-                <p className="mt-1 text-body font-bold text-ink">
+                <p
+                  className="viread-learning-content mt-1 text-body font-bold text-ink"
+                  dir="ltr"
+                  lang="vi"
+                >
                   {recallEvaluation.creative_followup_vi}
                 </p>
               </div>
@@ -1391,7 +1516,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                   }}
                 >
                   <Sparkles aria-hidden="true" className="size-5" />
-                  Kể tiếp câu chuyện sáng tạo
+                  {t("memoryGame.goCreativeButton")}
                 </Button>
               </div>
             </div>
@@ -1399,7 +1524,9 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
 
           {recallEvaluation.support_summary_vi ? (
             <div className="rounded-control border border-border bg-cream px-4 py-2.5 text-sm font-semibold text-muted">
-              {recallEvaluation.support_summary_vi}
+              <span className="viread-learning-content" dir="ltr" lang="vi">
+                {recallEvaluation.support_summary_vi}
+              </span>
             </div>
           ) : null}
 
@@ -1411,6 +1538,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             onSelectObject={(id) =>
               setFocusedObjectId((prev) => (prev === id ? null : id))
             }
+            reducedMotion={reducedMotion}
             sceneSpec={session.scene_spec}
             showColorCues={showColorCues}
           />
@@ -1421,20 +1549,23 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
               data-testid="spotlight-caption"
             >
               <span>
-                🔦 Đang soi sáng:{" "}
-                <strong>
+                {t("memoryGame.spotlightLabel")}{" "}
+                <strong className="viread-learning-content" dir="ltr" lang="vi">
                   {focusedObject.count > 1 ? `${focusedObject.count} ` : ""}
                   {focusedObject.name_vi}
                 </strong>{" "}
-                — màu {focusedObject.color_vi}, góc{" "}
-                {focusedObject.position_zone} ({focusedObject.action_vi})
+                —{" "}
+                <span className="viread-learning-content" dir="ltr" lang="vi">
+                  {focusedObject.color_vi}, {focusedObject.position_zone} (
+                  {focusedObject.action_vi})
+                </span>
               </span>
               <button
                 className="text-xs font-extrabold text-primary underline"
                 onClick={() => setFocusedObjectId(null)}
                 type="button"
               >
-                Xem toàn tranh
+                {t("memoryGame.viewWholeScene")}
               </button>
             </div>
           ) : null}
@@ -1443,24 +1574,27 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           <div className="grid gap-4 md:grid-cols-2">
             <div className="rounded-card border border-border bg-white p-4">
               <h3 className="mb-3 text-base font-extrabold text-success-ink">
-                ✓ Chi tiết bé nhớ chính xác ({matchedFacts.length})
+                {t("memoryGame.matchedFactsHeading", {
+                  count: matchedFacts.length,
+                })}
               </h3>
               {matchedFacts.length === 0 ? (
                 <p className="text-sm text-muted">
-                  Bấm vào các chi tiết bên phải để xem lại vị trí trên tranh
-                  nhé!
+                  {t("memoryGame.noMatchedFactsHint")}
                 </p>
               ) : (
                 <div className="flex flex-wrap gap-2">
                   {matchedFacts.map((fact) => (
                     <button
                       key={fact.object_id}
-                      className={`rounded-control border px-3 py-2 text-left text-sm font-bold transition-colors ${
+                      className={`viread-learning-content rounded-control border px-3 py-2 text-start text-sm font-bold transition-colors ${
                         focusedObjectId === fact.object_id
                           ? "border-emerald-700 bg-emerald-600 text-white"
                           : "border-emerald-300 bg-success-surface text-success-ink hover:bg-emerald-100"
                       }`}
                       data-testid={`matched-fact-${fact.object_id}`}
+                      dir="ltr"
+                      lang="vi"
                       onClick={() => setFocusedObjectId(fact.object_id)}
                       type="button"
                     >
@@ -1473,24 +1607,27 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
 
             <div className="rounded-card border border-border bg-white p-4">
               <h3 className="mb-3 text-base font-extrabold text-warning">
-                ★ Chi tiết bé khám phá thêm ({missedFacts.length}) — bấm để soi
-                trên tranh!
+                {t("memoryGame.missedFactsHeading", {
+                  count: missedFacts.length,
+                })}
               </h3>
               {missedFacts.length === 0 ? (
                 <p className="text-sm font-bold text-success-ink">
-                  Xuất sắc! Bé không bỏ sót chi tiết nào cả!
+                  {t("memoryGame.allFactsRemembered")}
                 </p>
               ) : (
                 <div className="flex flex-wrap gap-2">
                   {missedFacts.map((fact) => (
                     <button
                       key={fact.object_id}
-                      className={`rounded-control border px-3 py-2 text-left text-sm font-bold transition-colors ${
+                      className={`viread-learning-content rounded-control border px-3 py-2 text-start text-sm font-bold transition-colors ${
                         focusedObjectId === fact.object_id
                           ? "border-amber-700 bg-amber-600 text-white"
                           : "border-amber-300 bg-warning-surface text-warning hover:bg-amber-100"
                       }`}
                       data-testid={`missed-fact-${fact.object_id}`}
+                      dir="ltr"
+                      lang="vi"
                       onClick={() => setFocusedObjectId(fact.object_id)}
                       type="button"
                     >
@@ -1511,22 +1648,27 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-extrabold text-purple-ink">
-                  ✨ Chặng Sáng tạo câu chuyện (Không chấm lỗi đúng-sai!)
+                  {t("memoryGame.creativeStageBadge")}
                 </p>
                 <h2 className="mt-1 text-2xl font-extrabold text-ink">
-                  Chuyện gì xảy ra tiếp theo trong bức tranh?
+                  {t("memoryGame.creativeStageTitle")}
                 </h2>
-                <p className="mt-1 text-body text-muted">
+                <p
+                  className="viread-learning-content mt-1 text-body text-muted"
+                  dir="ltr"
+                  lang="vi"
+                >
                   {session.scene_spec.creative_prompt_vi}
                 </p>
               </div>
               <Button
+                disabled={!calmSound}
                 fullWidth={false}
                 onClick={() =>
                   isSpeakingPrompt
                     ? stopAllTts()
                     : speakVietnamesePrompt(
-                        `Chuyện gì xảy ra tiếp theo trong bức tranh? ${session.scene_spec.creative_prompt_vi}`,
+                        `${t("memoryGame.creativeStageTitle")} ${session.scene_spec.creative_prompt_vi}`,
                       )
                 }
                 size="compact"
@@ -1537,7 +1679,9 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 ) : (
                   <Volume2 aria-hidden="true" className="size-4" />
                 )}
-                {isSpeakingPrompt ? "Dừng đọc" : "Nghe câu hỏi"}
+                {isSpeakingPrompt
+                  ? t("memoryGame.stopAudio")
+                  : t("memoryGame.listenQuestion")}
               </Button>
             </div>
           </div>
@@ -1546,6 +1690,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             matchedObjectIds={matchedObjectIds}
             missedObjectIds={missedObjectIds}
             mode="reveal"
+            reducedMotion={reducedMotion}
             sceneSpec={session.scene_spec}
             showColorCues={showColorCues}
           />
@@ -1556,7 +1701,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 className="text-lg font-extrabold text-ink"
                 htmlFor="memory-creative-input"
               >
-                Câu chuyện tưởng tượng của bé
+                {t("memoryGame.creativeTextareaLabel")}
               </label>
               <Button
                 data-testid="creative-voice-btn"
@@ -1572,12 +1717,12 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 {isListeningVoice && voiceTarget === "CREATIVE" ? (
                   <>
                     <MicOff aria-hidden="true" className="size-4" />
-                    Dừng ghi âm
+                    {t("memoryGame.stopVoiceButton")}
                   </>
                 ) : (
                   <>
                     <Mic aria-hidden="true" className="size-4" />
-                    Kể bằng giọng nói
+                    {t("memoryGame.speakCreativeButton")}
                   </>
                 )}
               </Button>
@@ -1590,14 +1735,16 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             ) : null}
 
             <textarea
-              className="min-h-32 w-full rounded-control border border-border bg-cream p-3.5 text-body text-ink focus:border-primary focus:outline-none"
+              className="viread-learning-content min-h-32 w-full rounded-control border border-border bg-cream p-3.5 text-body text-ink focus:border-primary focus:outline-none"
               data-testid="creative-textarea"
+              dir="ltr"
               id="memory-creative-input"
+              lang="vi"
               onChange={(e) => {
                 setCreativeText(e.target.value);
                 setCreativeInputMode("TEXT");
               }}
-              placeholder="Ví dụ: Sau đó chú mèo rủ các bạn cùng nhau đi khám phá khu vườn cầu vồng thật vui vẻ..."
+              placeholder={t("memoryGame.creativePlaceholder")}
               value={creativeText}
             />
 
@@ -1608,7 +1755,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 size="compact"
                 variant="quiet"
               >
-                Quay lại soi tranh
+                {t("memoryGame.backToRevealButton")}
               </Button>
               <Button
                 data-testid="submit-creative-btn"
@@ -1617,7 +1764,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 onClick={() => void handleSubmitCreative()}
               >
                 <Sparkles aria-hidden="true" className="size-5" />
-                Gửi câu chuyện sáng tạo
+                {t("memoryGame.submitCreativeButton")}
               </Button>
             </div>
           </div>
@@ -1629,12 +1776,19 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         <div className="flex flex-col gap-5" data-testid="summary-stage">
           <div className="rounded-card border border-border bg-cream p-6 text-center">
             <div className="mb-2 flex justify-center">
-              {renderStars(session.stars)}
+              {renderStars(
+                session.stars,
+                t("memoryGame.starsAria", { count: session.stars }),
+              )}
             </div>
             <h2 className="text-3xl font-extrabold text-ink">
-              Tuyệt vời quá, {child.alias}!
+              {t("memoryGame.summaryPraiseTitle", { alias: child.alias })}
             </h2>
-            <p className="mt-2 text-body font-semibold text-muted">
+            <p
+              className="viread-learning-content mt-2 text-body font-semibold text-muted"
+              dir="ltr"
+              lang="vi"
+            >
               {creativeEvaluation?.praise_message_vi ??
                 recallEvaluation?.praise_message_vi}
             </p>
@@ -1647,17 +1801,22 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
               data-testid="factual-score-card"
             >
               <span className="text-sm font-extrabold uppercase tracking-wide text-success-ink">
-                Điểm ghi nhớ
+                {t("memoryGame.factualScoreTitle")}
               </span>
               <span
-                className="text-4xl font-extrabold text-ink"
+                className="text-4xl font-extrabold tabular-nums text-ink"
                 data-testid="factual-score-value"
               >
                 {displayFactualScore}/100
               </span>
               <p className="text-sm text-ink">
-                {recallEvaluation?.praise_message_vi ??
-                  "Bé quan sát và ghi nhớ chi tiết trong tranh rất tốt!"}
+                {recallEvaluation?.praise_message_vi ? (
+                  <span className="viread-learning-content" dir="ltr" lang="vi">
+                    {recallEvaluation.praise_message_vi}
+                  </span>
+                ) : (
+                  t("memoryGame.factualDefaultPraise")
+                )}
               </p>
             </div>
 
@@ -1666,17 +1825,22 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
               data-testid="creative-score-card"
             >
               <span className="text-sm font-extrabold uppercase tracking-wide text-purple-ink">
-                Điểm sáng tạo
+                {t("memoryGame.creativeScoreTitle")}
               </span>
               <span
-                className="text-4xl font-extrabold text-ink"
+                className="text-4xl font-extrabold tabular-nums text-ink"
                 data-testid="creative-score-value"
               >
                 {displayCreativeScore}/100
               </span>
               <p className="text-sm text-ink">
-                {creativeEvaluation?.story_praise_vi ??
-                  "Trí tưởng tượng của bé thật phong phú và đáng yêu!"}
+                {creativeEvaluation?.story_praise_vi ? (
+                  <span className="viread-learning-content" dir="ltr" lang="vi">
+                    {creativeEvaluation.story_praise_vi}
+                  </span>
+                ) : (
+                  t("memoryGame.creativeDefaultPraise")
+                )}
               </p>
             </div>
           </div>
@@ -1685,11 +1849,18 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           creativeEvaluation.creative_highlights.length > 0 ? (
             <div className="rounded-card border border-border bg-white p-5">
               <h3 className="mb-2 text-lg font-extrabold text-purple-ink">
-                ✨ Điểm sáng trong câu chuyện của bé
+                {t("memoryGame.creativeHighlightsHeading")}
               </h3>
-              <ul className="list-disc space-y-1.5 pl-5 text-body text-ink">
+              <ul className="list-disc space-y-1.5 ps-5 text-body text-ink">
                 {creativeEvaluation.creative_highlights.map((item) => (
-                  <li key={item}>{item}</li>
+                  <li
+                    className="viread-learning-content"
+                    dir="ltr"
+                    key={item}
+                    lang="vi"
+                  >
+                    {item}
+                  </li>
                 ))}
               </ul>
             </div>
@@ -1698,8 +1869,10 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           {(creativeEvaluation?.support_summary_vi ??
           recallEvaluation?.support_summary_vi) ? (
             <div className="rounded-control border border-border bg-cream px-4 py-3 text-sm font-semibold text-muted">
-              {creativeEvaluation?.support_summary_vi ??
-                recallEvaluation?.support_summary_vi}
+              <span className="viread-learning-content" dir="ltr" lang="vi">
+                {creativeEvaluation?.support_summary_vi ??
+                  recallEvaluation?.support_summary_vi}
+              </span>
             </div>
           ) : null}
 
@@ -1711,6 +1884,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             onSelectObject={(id) =>
               setFocusedObjectId((prev) => (prev === id ? null : id))
             }
+            reducedMotion={reducedMotion}
             sceneSpec={session.scene_spec}
             showColorCues={showColorCues}
           />
@@ -1722,7 +1896,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
               onClick={resetToSetup}
             >
               <RefreshCw aria-hidden="true" className="size-4" />
-              Chơi bức tranh mới
+              {t("memoryGame.playAgainButton")}
             </Button>
           </div>
         </div>

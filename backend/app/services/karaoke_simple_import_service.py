@@ -1,4 +1,4 @@
-"""One-file Admin Karaoke Simple Mode import and safe compliance publish pipeline."""
+"""One-file Admin Karaoke Simple Mode import, background pipeline bridge & safe publish."""
 import logging
 import math
 import os
@@ -8,12 +8,18 @@ from uuid import UUID, uuid4
 
 import httpx
 from fastapi import HTTPException, UploadFile
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
+from app.core.karaoke_processing_config import (
+    KaraokeConfigurationError,
+    KaraokeProcessingConfig,
+)
 from app.models.entertainment_v4 import KaraokeMusicalProfile
 from app.models.karaoke import utcnow
+from app.repositories.karaoke_processing_repository import KaraokeProcessingRepository
 from app.repositories.karaoke_repository import KaraokeRepository
 from app.schemas.karaoke import (
     AdminDetail,
@@ -24,11 +30,16 @@ from app.schemas.karaoke import (
     canonical_lyric_text,
     clean_text,
 )
+from app.schemas.karaoke_processing import ProcessingStart
 from app.schemas.karaoke_simple_import import (
     AudioType,
     FlaggedLyricLine,
     LyricsSource,
     SimpleImportResult,
+    SimplePipelineLifecycleState,
+    SimpleProcessingApplyRequest,
+    SimpleProcessingStartRequest,
+    SimpleProcessingStatusRead,
     SimplePublishRequest,
 )
 from app.services.karaoke_media_service import (
@@ -39,8 +50,12 @@ from app.services.karaoke_media_service import (
     parse_lrc_text,
     read_upload,
 )
+from app.services.karaoke_practice_service import derive_musical_profile_from_lyrics
+from app.services.karaoke_processing_review import quality_flags
+from app.services.karaoke_processing_service import KaraokeProcessingService
 from app.services.karaoke_service import KaraokeService, content_issues
 from app.services.karaoke_storage_service import KaraokeStorage
+from app.services.worker_telemetry import get_worker_telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -498,8 +513,190 @@ async def transcribe_with_groq_whisper(
     return lyrics_dict, flagged
 
 
+def _load_processing_config(
+    explicit: KaraokeProcessingConfig | None = None,
+) -> KaraokeProcessingConfig:
+    if explicit is not None:
+        return explicit
+    try:
+        return KaraokeProcessingConfig.from_env()
+    except KaraokeConfigurationError:
+        return KaraokeProcessingConfig()
+
+
+def _ensure_v2_lyrics_for_processing(
+    lyrics_dict: dict | None, duration_ms: int | None
+) -> dict | None:
+    """Convert valid timed/untimed lyrics to format_version=2 when possible for KaraokeProcessingJob."""
+    if not isinstance(lyrics_dict, dict):
+        return None
+    try:
+        validated = Lyrics.model_validate(lyrics_dict)
+    except Exception:
+        return None
+    if not validated.lines:
+        return None
+    if validated.format_version == 2 and all(
+        line.syllables
+        and canonical_lyric_text(" ".join(u.text for u in line.syllables))
+        == canonical_lyric_text(line.text)
+        for line in validated.lines
+    ):
+        return validated.model_dump(mode="json")
+    if duration_ms is None or duration_ms < len(validated.lines):
+        return None
+    raw_dump = validated.model_dump(mode="json")
+    all_lines_timed = all(
+        line.start_ms is not None
+        and line.end_ms is not None
+        and line.start_ms < line.end_ms
+        and line.end_ms <= duration_ms
+        for line in validated.lines
+    )
+    if all_lines_timed:
+        upgraded = _upgrade_synced_lyrics_to_syllables(raw_dump, duration_ms)
+    else:
+        joined = "\n".join(line.text for line in validated.lines)
+        upgraded, _ = distribute_plain_lyrics(joined, duration_ms)
+    try:
+        revalidated = Lyrics.model_validate(upgraded)
+    except Exception:
+        return None
+    if revalidated.format_version != 2 or not revalidated.lines:
+        return None
+    if any(
+        not line.syllables
+        or canonical_lyric_text(" ".join(u.text for u in line.syllables))
+        != canonical_lyric_text(line.text)
+        for line in revalidated.lines
+    ):
+        return None
+    return revalidated.model_dump(mode="json")
+
+
+def resolve_simple_lifecycle_state(
+    *,
+    has_audio: bool,
+    lyrics_line_count: int,
+    requires_lyrics_input: bool = False,
+    flagged_count: int = 0,
+    transcribing_active: bool = False,
+    job: object | None = None,
+    operations: list[object] | tuple[object, ...] = (),
+    review_required: bool = False,
+    reviewed: bool = False,
+) -> SimplePipelineLifecycleState:
+    """Map real job, operation-ledger, and draft state into honest Simple Mode lifecycle states."""
+    if job is not None:
+        status = getattr(job, "status", None)
+        stage = getattr(job, "stage", None)
+        provenance = getattr(job, "provenance", None)
+        provenance = provenance if isinstance(provenance, dict) else {}
+        op_states = {
+            str(getattr(op, "step_key", "")): str(getattr(op, "state", ""))
+            for op in operations
+        }
+        active_states = {"PREPARED", "SUBMITTED"}
+
+        if status in {"FAILED", "CANCELLED", "STALE"}:
+            return "FAILED"
+        if status == "QUEUED":
+            return "QUEUED"
+        if status == "RUNNING":
+            if op_states.get("TRANSCRIBE_LYRICS") in active_states:
+                return "TRANSCRIBING_LYRICS"
+            if op_states.get("ANALYZE_MELODY") in active_states:
+                return "ANALYZING_MELODY"
+            if op_states.get("ANALYZE_RHYTHM") in active_states:
+                return "ANALYZING_RHYTHM"
+            if stage == "ALIGNING_LYRICS" or op_states.get("ALIGN_PROVIDED_LYRICS") in active_states:
+                return "ALIGNING_LYRICS"
+            if stage == "VALIDATING_RESULT":
+                phase = str(provenance.get("analysis_phase") or "").upper()
+                if phase == "MELODY" or (
+                    op_states.get("ANALYZE_RHYTHM") == "COMPLETED"
+                    and op_states.get("ANALYZE_MELODY") != "COMPLETED"
+                ):
+                    return "ANALYZING_MELODY"
+                return "ANALYZING_RHYTHM"
+            if stage in {"VALIDATING_INPUT", "PREPARING_AUDIO"} or (
+                op_states.get("SEPARATE_STEMS") in active_states
+                or op_states.get("VERIFY_REFERENCE_TIMELINE") in active_states
+            ):
+                return "SEPARATING_AUDIO"
+            if stage == "QUEUED":
+                return "QUEUED"
+            return "SEPARATING_AUDIO"
+        if status == "NEEDS_REVIEW":
+            return "NEEDS_REVIEW"
+        if status == "READY":
+            try:
+                flags = quality_flags(job)
+            except ValueError:
+                flags = []
+            return "NEEDS_REVIEW" if flags else "READY_FOR_REVIEW"
+        if status == "APPLIED":
+            if (review_required and not reviewed) or flagged_count > 0:
+                return "NEEDS_REVIEW"
+            return "READY_FOR_REVIEW"
+
+    if transcribing_active:
+        return "TRANSCRIBING_LYRICS"
+    if not has_audio or requires_lyrics_input or lyrics_line_count <= 0:
+        return "UPLOADED"
+    if flagged_count > 0 or (review_required and not reviewed):
+        return "NEEDS_REVIEW"
+    return "READY_FOR_REVIEW"
+
+
+def _guidance_for_lifecycle_state(
+    state: SimplePipelineLifecycleState,
+    *,
+    worker_online: bool,
+    safe_error_code: str | None = None,
+    can_apply: bool = False,
+) -> str:
+    if state == "UPLOADED":
+        if worker_online:
+            return (
+                "Đã tải file MP3 lên. Hãy dán lời bài hát hoặc tải file .lrc để bắt đầu "
+                "tách nhạc nền, căn nhịp và xuất bản."
+            )
+        return (
+            "Đã tải file MP3 ở chế độ 0 VND (worker nền đang tắt). "
+            "Hãy dán lời bài hát hoặc tải file .lrc để tạo bản nháp ngay."
+        )
+    if state == "QUEUED":
+        return "Bài hát đã vào hàng đợi xử lý nền (tách giọng, căn lời từng âm tiết và phân tích nhịp/giai điệu)."
+    if state == "SEPARATING_AUDIO":
+        return "Worker đang tách nhạc nền và giọng hát mẫu để phục vụ karaoke."
+    if state == "TRANSCRIBING_LYRICS":
+        return "Đang nhận diện lời bài hát tiếng Việt từ âm thanh."
+    if state == "ALIGNING_LYRICS":
+        return "Worker đang căn khớp mốc thời gian từng âm tiết theo giọng hát."
+    if state == "ANALYZING_RHYTHM":
+        return "Đang phân tích nhịp điệu (beat grid & BPM) cho bài hát."
+    if state == "ANALYZING_MELODY":
+        return "Đang phân tích đường giai điệu tham chiếu cho bài hát."
+    if state == "NEEDS_REVIEW":
+        if can_apply:
+            return (
+                "Xử lý nền hoàn tất nhưng có điểm cần kiểm tra. "
+                "Hãy áp dụng kết quả vào bản nháp và nghe thử trước khi xuất bản."
+            )
+        return "Bản nháp có một số dòng hoặc mốc thời gian cần nghe kiểm tra nhanh trước khi xuất bản."
+    if state == "READY_FOR_REVIEW":
+        if can_apply:
+            return "Xử lý nền hoàn tất. Hãy áp dụng kết quả vào bản nháp, kiểm tra an toàn và xuất bản."
+        return "Bản nháp đã sẵn sàng để nghe kiểm tra nhanh, tích xác nhận an toàn và xuất bản."
+    suffix = f" ({safe_error_code})" if safe_error_code else ""
+    return (
+        f"Tác vụ xử lý nền chưa hoàn tất{suffix}. Bạn có thể thử lại hoặc chuyển sang chỉnh sửa/gõ nhịp thủ công."
+    )
+
+
 class KaraokeSimpleImportService:
-    """Coordinates one-file MP3 ingestion, ID3/LRC/Whisper lyrics resolution, and compliant publish."""
+    """Coordinates one-file MP3 ingestion, background pipeline handoff, and safe publish."""
 
     def __init__(
         self,
@@ -507,11 +704,72 @@ class KaraokeSimpleImportService:
         storage=None,
         *,
         transcriber: TranscriberFn | None = None,
+        processing_service: KaraokeProcessingService | None = None,
+        processing_config: KaraokeProcessingConfig | None = None,
+        worker_online_probe: Callable[[], bool] | None = None,
     ):
         self.repository = repository
         self.storage = storage or KaraokeStorage()
         self.karaoke = KaraokeService(repository, self.storage)
         self.transcriber = transcriber or transcribe_with_groq_whisper
+        self._explicit_processing_service = processing_service
+        self.processing_config = _load_processing_config(processing_config)
+        self._worker_online_probe = worker_online_probe
+        self.processing_replayed = False
+
+    def is_worker_online(self) -> bool:
+        """Report honestly whether the offline/background karaoke worker pipeline is available."""
+        if self._worker_online_probe is not None:
+            return bool(self._worker_online_probe())
+        cfg = self.processing_config
+        if not (cfg.enabled and cfg.configured):
+            return False
+        explicit = os.getenv("KARAOKE_PROCESSING_WORKER_ONLINE")
+        if explicit is not None and explicit.strip() != "":
+            return explicit.strip().lower() in {"1", "true", "yes", "on"}
+        telemetry = get_worker_telemetry("karaoke_processing")
+        if telemetry.get("last_error") is not None and telemetry.get("last_success_at") is None:
+            return False
+        return True
+
+    def _processing_service(self) -> KaraokeProcessingService | None:
+        if self._explicit_processing_service is not None:
+            return self._explicit_processing_service
+        if hasattr(self.repository, "db"):
+            return KaraokeProcessingService(
+                KaraokeProcessingRepository(self.repository.db),
+                self.storage,
+                config=self.processing_config,
+            )
+        return None
+
+    async def _load_musical_profile_best_effort(self, version_id: UUID | None) -> dict | None:
+        if version_id is None:
+            return None
+        db = getattr(self.repository, "db", None)
+        if db is None:
+            return None
+        try:
+            async with self.repository.read():
+                row = await db.scalar(
+                    select(KaraokeMusicalProfile).where(
+                        KaraokeMusicalProfile.SongVersionId == version_id
+                    )
+                )
+            if row is None:
+                return None
+            return {
+                "bpm": float(row.Bpm) if row.Bpm is not None else None,
+                "audio_type": row.AudioType,
+                "has_pitch_contour": bool(row.HasPitchContour),
+                "has_beat_grid": bool(row.HasBeatGrid),
+                "source_method": row.SourceMethod,
+                "profile_json": dict(row.ProfileJson)
+                if isinstance(row.ProfileJson, dict)
+                else {},
+            }
+        except Exception:
+            return None
 
     async def _save_musical_profile_best_effort(
         self,
@@ -524,19 +782,45 @@ class KaraokeSimpleImportService:
         has_cover: bool,
         flagged_count: int,
         requires_lyrics_input: bool,
+        lyrics_dict: dict | None = None,
+        source_method_override: str | None = None,
+        pitch_contour: list[dict] | None = None,
+        processing_job_id: UUID | None = None,
     ) -> None:
         db = getattr(self.repository, "db", None)
         if db is None:
             return
+        beat_grid_ms, derived_bpm, phrase_windows = derive_musical_profile_from_lyrics(
+            lyrics_dict if isinstance(lyrics_dict, dict) else None
+        )
+        effective_bpm = bpm if bpm is not None else derived_bpm
+        safe_bpm = (
+            round(float(effective_bpm), 2)
+            if effective_bpm is not None and 30.0 <= float(effective_bpm) <= 240.0
+            else None
+        )
         source_method_map: dict[LyricsSource, str] = {
             "EMBEDDED_SYNCED": "ID3_LRC",
             "GROQ_WHISPER": "WHISPER_DRAFT",
             "EMBEDDED_UNSYNCED": "LYRICS_TIMING",
             "ADMIN_TEXT": "LYRICS_TIMING",
-            "NONE": "AUDIO_DSP" if bpm is not None else "LYRICS_TIMING",
+            "NONE": "AUDIO_DSP" if safe_bpm is not None else "LYRICS_TIMING",
         }
-        source_method = source_method_map[lyrics_source]
-        safe_bpm = round(float(bpm), 2) if bpm is not None and 30.0 <= bpm <= 240.0 else None
+        allowed_methods = {
+            "ID3_LRC",
+            "AUDIO_DSP",
+            "WHISPER_DRAFT",
+            "MANUAL_TAP",
+            "LYRICS_TIMING",
+        }
+        source_method = (
+            source_method_override
+            if source_method_override in allowed_methods
+            else source_method_map[lyrics_source]
+        )
+        has_beat_grid = bool(beat_grid_ms) or safe_bpm is not None
+        cleaned_contour = [pt for pt in (pitch_contour or [])[:2000] if isinstance(pt, dict)]
+        has_pitch_contour = bool(cleaned_contour)
         profile_json = {
             "lyrics_source": lyrics_source,
             "duration_ms": duration_ms,
@@ -544,7 +828,14 @@ class KaraokeSimpleImportService:
             "flagged_line_count": flagged_count,
             "requires_lyrics_input": requires_lyrics_input,
             "beat_interval_ms": round(60_000.0 / safe_bpm) if safe_bpm else None,
+            "beat_grid_ms": beat_grid_ms[:2000],
+            "phrase_windows": phrase_windows[:300],
         }
+        if cleaned_contour:
+            profile_json["pitch_contour"] = cleaned_contour
+        if processing_job_id is not None:
+            profile_json["processing_job_id"] = str(processing_job_id)
+
         try:
             stmt = (
                 pg_insert(KaraokeMusicalProfile)
@@ -552,8 +843,8 @@ class KaraokeSimpleImportService:
                     SongVersionId=version_id,
                     Bpm=safe_bpm,
                     AudioType=audio_type,
-                    HasPitchContour=False,
-                    HasBeatGrid=safe_bpm is not None,
+                    HasPitchContour=has_pitch_contour,
+                    HasBeatGrid=has_beat_grid,
                     SourceMethod=source_method,
                     ProfileJson=profile_json,
                     UpdatedAt=utcnow(),
@@ -563,7 +854,8 @@ class KaraokeSimpleImportService:
                     set_={
                         "bpm": safe_bpm,
                         "audio_type": audio_type,
-                        "has_beat_grid": safe_bpm is not None,
+                        "has_pitch_contour": has_pitch_contour,
+                        "has_beat_grid": has_beat_grid,
                         "source_method": source_method,
                         "profile_json": profile_json,
                         "updated_at": utcnow(),
@@ -592,6 +884,7 @@ class KaraokeSimpleImportService:
         audio_type: AudioType = "UNKNOWN",
         bpm: float | None = None,
         auto_transcribe: bool = True,
+        enable_background_processing: bool = True,
         source_note: str | None = None,
         usage_note: str | None = None,
         rights_confirmed: bool = False,
@@ -704,6 +997,17 @@ class KaraokeSimpleImportService:
                     "ngay bên dưới để tiếp tục."
                 )
 
+        worker_online = self.is_worker_online()
+        if (
+            worker_online
+            and enable_background_processing
+            and audio_type != "INSTRUMENTAL_ONLY"
+            and resolved_lyrics.get("format_version") != 2
+        ):
+            upgraded_v2 = _ensure_v2_lyrics_for_processing(resolved_lyrics, duration_ms)
+            if upgraded_v2 is not None:
+                resolved_lyrics = upgraded_v2
+
         # Step A: Short DB transaction 1 — create KaraokeSong + initial DRAFT version.
         async with self.repository.write():
             await self.karaoke._actor(actor_id, "admin")
@@ -781,17 +1085,82 @@ class KaraokeSimpleImportService:
             has_cover=bool(cover_path),
             flagged_count=len(flagged_lines),
             requires_lyrics_input=requires_lyrics_input,
+            lyrics_dict=resolved_lyrics,
         )
+
+        # Step E: Non-blocking handoff to background KaraokeProcessingJob when worker is online.
+        processing_queued = False
+        processing_job_id: UUID | None = None
+        processing_notice: str | None = None
+
+        if worker_online and enable_background_processing:
+            proc_service = self._processing_service()
+            v2_lyrics = _ensure_v2_lyrics_for_processing(resolved_lyrics, duration_ms)
+            if audio_type == "INSTRUMENTAL_ONLY":
+                processing_notice = (
+                    "File nhạc nền không lời không cần tách giọng nền — sẵn sàng dùng ngay."
+                )
+            elif v2_lyrics is None:
+                processing_notice = (
+                    "Chưa có đủ lời bài hát để xếp hàng tách giọng/căn nhịp tự động. "
+                    "Hãy thêm lời và kích hoạt xử lý nền bất cứ lúc nào."
+                )
+            elif proc_service is not None:
+                try:
+                    job = await proc_service.start(
+                        actor_id,
+                        song_id,
+                        ProcessingStart(
+                            expected_revision=detail.revision,
+                            draft_version_id=draft_version_id,
+                            idempotency_key=uuid4(),
+                            mode="VOCAL_TRACK",
+                            source_kind="DRAFT_AUDIO",
+                        ),
+                    )
+                    processing_queued = True
+                    processing_job_id = job.id
+                    processing_notice = (
+                        "Đã xếp hàng worker nền tách giọng, căn âm tiết và phân tích nhịp/giai điệu."
+                    )
+                    guidance_vi = (
+                        f"{guidance_vi} Worker nền đang online nên bài hát đã được đưa vào hàng đợi tự động."
+                    )
+                    detail = await self.karaoke.detail(actor_id, song_id)
+                except (HTTPException, SQLAlchemyError) as exc:
+                    processing_notice = (
+                        f"Bản nháp tức thì đã sẵn sàng; chưa xếp hàng worker nền ({getattr(exc, 'detail', 'UNAVAILABLE')})."
+                    )
+        elif not worker_online:
+            processing_notice = (
+                "Worker nền đang offline — bản nháp tức thì 0 VND đã sẵn sàng để kiểm tra và xuất bản ngay."
+            )
 
         # Compute transparent publish readiness & missing checks.
         missing_checks: list[str] = []
         for issue in content_issues(draft_snapshot):
             if issue.code not in missing_checks:
                 missing_checks.append(issue.code)
+        if processing_queued and "PROCESSING_IN_PROGRESS" not in missing_checks:
+            missing_checks.append("PROCESSING_IN_PROGRESS")
         if not rights_confirmed:
             missing_checks.append("RIGHTS_CONFIRMATION_REQUIRED")
         if not child_safe_confirmed:
             missing_checks.append("CHILD_SAFE_CONFIRMATION_REQUIRED")
+
+        _, derived_bpm, _ = derive_musical_profile_from_lyrics(resolved_lyrics)
+        effective_bpm = bpm if bpm is not None else derived_bpm
+
+        lifecycle_state = (
+            "QUEUED"
+            if processing_queued
+            else resolve_simple_lifecycle_state(
+                has_audio=True,
+                lyrics_line_count=len(resolved_lyrics.get("lines") or []),
+                requires_lyrics_input=requires_lyrics_input,
+                flagged_count=len(flagged_lines),
+            )
+        )
 
         return SimpleImportResult(
             song_id=song_id,
@@ -802,7 +1171,7 @@ class KaraokeSimpleImportService:
             duration_ms=duration_ms,
             has_cover=bool(cover_path),
             audio_type=audio_type,
-            bpm=round(float(bpm), 2) if bpm is not None else None,
+            bpm=round(float(effective_bpm), 2) if effective_bpm is not None else None,
             lyrics_source=lyrics_source,
             lyrics_line_count=len(resolved_lyrics.get("lines") or []),
             flagged_lines=flagged_lines,
@@ -810,8 +1179,283 @@ class KaraokeSimpleImportService:
             guidance_vi=guidance_vi,
             ready_to_publish=len(missing_checks) == 0,
             missing_checks=missing_checks,
+            lifecycle_state=lifecycle_state,
+            worker_online=worker_online,
+            processing_queued=processing_queued,
+            processing_job_id=processing_job_id,
+            processing_notice=processing_notice,
             song=detail,
         )
+
+    async def start_simple_processing(
+        self,
+        actor_id: UUID,
+        song_id: UUID,
+        payload: SimpleProcessingStartRequest,
+    ) -> SimpleProcessingStatusRead:
+        """Opt-in non-blocking handoff from a Simple Mode draft to KaraokeProcessingJob."""
+        self.processing_replayed = False
+        async with self.repository.read():
+            await self.karaoke._actor(actor_id, "admin")
+
+        if not self.is_worker_online():
+            raise HTTPException(
+                503,
+                {"code": "PROCESSING_UNAVAILABLE", "message_key": "WORKER_OFFLINE"},
+            )
+        proc_service = self._processing_service()
+        if proc_service is None:
+            raise HTTPException(
+                503,
+                {"code": "PROCESSING_UNAVAILABLE", "message_key": "WORKER_OFFLINE"},
+            )
+
+        snapshot = await self.karaoke._admin_snapshot(
+            actor_id,
+            song_id,
+            DraftRequest(
+                expected_revision=payload.expected_revision,
+                draft_version_id=payload.draft_version_id,
+            ),
+        )
+        draft = snapshot.draft
+        if draft is None:
+            raise HTTPException(409, "Karaoke draft is missing")
+
+        raw_lyrics = (
+            payload.lyrics.model_dump(mode="json")
+            if payload.lyrics is not None
+            else draft.lyrics
+        )
+        v2_lyrics = _ensure_v2_lyrics_for_processing(raw_lyrics, draft.duration_ms)
+        if v2_lyrics is None:
+            raise HTTPException(
+                422,
+                {"code": "LYRICS_REQUIRED", "message_key": "LYRICS_REQUIRED"},
+            )
+
+        current_revision = payload.expected_revision
+        if payload.lyrics is not None or v2_lyrics != draft.lyrics:
+            saved = await self.karaoke.save(
+                actor_id,
+                song_id,
+                DraftWrite(
+                    expected_revision=current_revision,
+                    draft_version_id=payload.draft_version_id,
+                    title=draft.title,
+                    author=draft.author,
+                    min_grade=draft.min_grade,
+                    max_grade=draft.max_grade,
+                    source_note=draft.source_note,
+                    usage_note=draft.usage_note,
+                    lyrics=Lyrics.model_validate(v2_lyrics),
+                ),
+            )
+            current_revision = saved.revision
+
+        if draft.duration_ms:
+            await self._save_musical_profile_best_effort(
+                version_id=payload.draft_version_id,
+                audio_type=payload.audio_type or "UNKNOWN",
+                bpm=payload.bpm,
+                lyrics_source="ADMIN_TEXT" if payload.lyrics is not None else "NONE",
+                duration_ms=draft.duration_ms,
+                has_cover=bool(draft.cover_path),
+                flagged_count=0,
+                requires_lyrics_input=False,
+                lyrics_dict=v2_lyrics,
+            )
+
+        await proc_service.start(
+            actor_id,
+            song_id,
+            ProcessingStart(
+                expected_revision=current_revision,
+                draft_version_id=payload.draft_version_id,
+                idempotency_key=payload.idempotency_key or uuid4(),
+                mode=payload.mode,
+                source_kind=payload.source_kind,
+            ),
+        )
+        self.processing_replayed = bool(getattr(proc_service, "replayed", False))
+        return await self.get_simple_processing_status(actor_id, song_id)
+
+    async def get_simple_processing_status(
+        self,
+        actor_id: UUID,
+        song_id: UUID,
+    ) -> SimpleProcessingStatusRead:
+        """Non-blocking read of honest Simple Mode lifecycle state, job progress, and musical profile."""
+        detail = await self.karaoke.detail(actor_id, song_id)
+        draft = detail.draft
+        active_version = draft or detail.published
+        worker_online = self.is_worker_online()
+
+        summary = detail.processing_summary
+        if draft is not None and summary is not None and summary.draft_version_id != draft.id:
+            summary = None
+
+        job_obj = None
+        job_dto = None
+        operations: list = []
+        proc_service = self._processing_service()
+
+        if summary is not None and proc_service is not None:
+            try:
+                job_dto = await proc_service.get(actor_id, song_id, summary.job_id)
+            except Exception:
+                job_dto = None
+            proc_repo = getattr(proc_service, "repository", None)
+            if proc_repo is not None and hasattr(proc_repo, "get"):
+                try:
+                    async with proc_repo.read():
+                        job_obj = await proc_repo.get(summary.job_id, song_id)
+                        if job_obj is not None and hasattr(proc_repo, "operations"):
+                            operations = list(await proc_repo.operations(summary.job_id))
+                except Exception:
+                    job_obj = None
+                    operations = []
+
+        profile = await self._load_musical_profile_best_effort(
+            active_version.id if active_version is not None else None
+        )
+        lyrics_dict = (
+            active_version.lyrics.model_dump(mode="json")
+            if active_version is not None
+            else None
+        )
+        lyrics_line_count = len((lyrics_dict or {}).get("lines") or [])
+        derived_beats, derived_bpm, _ = derive_musical_profile_from_lyrics(lyrics_dict)
+
+        job_for_state = job_obj or job_dto or summary
+        lifecycle_state = resolve_simple_lifecycle_state(
+            has_audio=bool(active_version and active_version.has_audio),
+            lyrics_line_count=lyrics_line_count,
+            requires_lyrics_input=lyrics_line_count == 0,
+            flagged_count=0,
+            job=job_for_state,
+            operations=operations,
+            review_required=bool(detail.processing_review.required),
+            reviewed=bool(detail.processing_review.reviewed),
+        )
+
+        q_flags = list(job_dto.quality_flags) if job_dto is not None else list(detail.processing_review.quality_flags)
+        can_apply = bool(job_dto.can_apply) if job_dto is not None else False
+        safe_error = (
+            job_dto.safe_error_code
+            if job_dto is not None
+            else (summary.safe_error_code if summary is not None else None)
+        )
+        retry_policy = (
+            job_dto.retry_policy
+            if job_dto is not None
+            else (summary.retry_policy if summary is not None else None)
+        )
+
+        has_beat_grid = bool(
+            (profile and profile.get("has_beat_grid")) or derived_beats or derived_bpm
+        )
+        job_provenance = (
+            job_obj.provenance
+            if job_obj is not None and isinstance(getattr(job_obj, "provenance", None), dict)
+            else {}
+        )
+        has_pitch_contour = bool(
+            (profile and profile.get("has_pitch_contour"))
+            or (
+                isinstance(job_provenance.get("pitch_contour"), list)
+                and len(job_provenance.get("pitch_contour") or []) > 0
+            )
+        )
+        effective_bpm = (
+            profile.get("bpm") if profile and profile.get("bpm") is not None else derived_bpm
+        )
+
+        return SimpleProcessingStatusRead(
+            song_id=detail.song_id,
+            draft_version_id=draft.id if draft is not None else None,
+            revision=detail.revision,
+            lifecycle_state=lifecycle_state,
+            worker_online=worker_online,
+            processing_enabled=bool(self.processing_config.enabled),
+            processing_configured=bool(self.processing_config.configured),
+            job_id=summary.job_id if summary is not None else None,
+            job_status=summary.status if summary is not None else None,
+            job_stage=summary.stage if summary is not None else None,
+            can_apply=can_apply,
+            review_required=bool(detail.processing_review.required),
+            reviewed=bool(detail.processing_review.reviewed),
+            has_beat_grid=has_beat_grid,
+            has_pitch_contour=has_pitch_contour,
+            bpm=round(float(effective_bpm), 2) if effective_bpm is not None else None,
+            safe_error_code=safe_error,
+            retry_policy=retry_policy,
+            quality_flags=q_flags,
+            guidance_vi=_guidance_for_lifecycle_state(
+                lifecycle_state,
+                worker_online=worker_online,
+                safe_error_code=safe_error,
+                can_apply=can_apply,
+            ),
+            song=detail,
+        )
+
+    async def apply_simple_processing(
+        self,
+        actor_id: UUID,
+        song_id: UUID,
+        payload: SimpleProcessingApplyRequest,
+    ) -> SimpleProcessingStatusRead:
+        """Apply completed KaraokeProcessingJob artifacts & enrich KaraokeMusicalProfile."""
+        proc_service = self._processing_service()
+        if proc_service is None:
+            raise HTTPException(
+                503,
+                {"code": "PROCESSING_UNAVAILABLE", "message_key": "WORKER_OFFLINE"},
+            )
+
+        job_provenance: dict = {}
+        proc_repo = getattr(proc_service, "repository", None)
+        if proc_repo is not None and hasattr(proc_repo, "get"):
+            try:
+                async with proc_repo.read():
+                    raw_job = await proc_repo.get(payload.job_id, song_id)
+                    if raw_job is not None and isinstance(getattr(raw_job, "provenance", None), dict):
+                        job_provenance = dict(raw_job.provenance)
+            except Exception:
+                job_provenance = {}
+
+        updated = await proc_service.apply_result(
+            actor_id,
+            song_id,
+            payload.job_id,
+            DraftRequest(
+                expected_revision=payload.expected_revision,
+                draft_version_id=payload.draft_version_id,
+            ),
+        )
+        if updated.draft is not None and updated.draft.duration_ms:
+            pitch_contour = (
+                job_provenance.get("pitch_contour")
+                if isinstance(job_provenance.get("pitch_contour"), list)
+                else None
+            )
+            await self._save_musical_profile_best_effort(
+                version_id=updated.draft.id,
+                audio_type=payload.audio_type or "VOCAL_FULL",
+                bpm=payload.bpm,
+                lyrics_source="ADMIN_TEXT",
+                duration_ms=updated.draft.duration_ms,
+                has_cover=updated.draft.has_cover,
+                flagged_count=len(updated.processing_review.quality_flags),
+                requires_lyrics_input=False,
+                lyrics_dict=updated.draft.lyrics.model_dump(mode="json"),
+                source_method_override="AUDIO_DSP",
+                pitch_contour=pitch_contour,
+                processing_job_id=payload.job_id,
+            )
+
+        return await self.get_simple_processing_status(actor_id, song_id)
 
     async def simple_publish(
         self,
@@ -893,6 +1537,19 @@ class KaraokeSimpleImportService:
                 ),
             )
             current_revision = saved.revision
+            if payload.lyrics is not None and draft.duration_ms:
+                await self._save_musical_profile_best_effort(
+                    version_id=payload.draft_version_id,
+                    audio_type="UNKNOWN",
+                    bpm=None,
+                    lyrics_source="ADMIN_TEXT",
+                    duration_ms=draft.duration_ms,
+                    has_cover=bool(draft.cover_path),
+                    flagged_count=0,
+                    requires_lyrics_input=False,
+                    lyrics_dict=next_lyrics.model_dump(mode="json"),
+                    source_method_override="MANUAL_TAP",
+                )
 
         # Always delegate final publish to KaraokeService.publish (preserves content_issues & locks).
         return await self.karaoke.publish(

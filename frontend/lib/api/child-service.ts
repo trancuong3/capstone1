@@ -9,6 +9,8 @@ import {
 } from "@/lib/api/browser-auth";
 import { clearApiReadCache, runCoalescedApiGet } from "@/lib/api/read-cache";
 import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
+import { clearUserCache } from "@/lib/cache/user-query-cache";
+import { translateRuntime } from "@/lib/i18n/runtime";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
 export interface ChildService {
@@ -92,7 +94,7 @@ function createHttpError(
     code: mapErrorCode(response.status),
     message: extractErrorMessage(
       payload,
-      "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
+      translateRuntime("errors.clientRuntime.genericParentRetry"),
     ),
     status: response.status,
     request_id: response.headers.get("x-request-id") ?? "",
@@ -153,7 +155,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       throw new ServiceError({
         code: "NETWORK_ERROR",
-        message: "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
+        message: translateRuntime("errors.clientRuntime.genericParentRetry"),
         status: 0,
         request_id: "",
         retryable: true,
@@ -178,7 +180,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       throw new ServiceError({
         code: "NETWORK_ERROR",
-        message: "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
+        message: translateRuntime("errors.clientRuntime.genericParentRetry"),
         status: response.status,
         request_id: response.headers.get("x-request-id") ?? "",
         retryable: false,
@@ -188,10 +190,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (method !== "GET") {
     clearApiReadCache();
+    clearUserCache();
     try {
       return await execute();
     } finally {
       clearApiReadCache();
+      clearUserCache();
     }
   }
 

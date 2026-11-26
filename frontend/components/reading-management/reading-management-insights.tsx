@@ -1,19 +1,44 @@
+"use client";
+
 import { Flame, Hourglass, CheckCircle2, CalendarDays } from "lucide-react";
 
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { translateMessage } from "@/lib/i18n/formatter";
+import { normalizeLocale, type SupportedLocale } from "@/lib/i18n/locales";
+import { readLocaleCookie } from "@/lib/i18n/persistence";
+import { getCachedLocaleMessages } from "@/messages/loader";
+import { viMessages } from "@/messages/vi";
 import type {
   ReadingGoalDTO,
   ReadingPlanDTO,
 } from "@/types/reading-management";
 
-const dayNames = [
-  "Chủ nhật",
-  "Thứ hai",
-  "Thứ ba",
-  "Thứ tư",
-  "Thứ năm",
-  "Thứ sáu",
-  "Thứ bảy",
-];
+const WEEKDAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+
+function resolveReadingManagementLocale(): SupportedLocale {
+  if (typeof document !== "undefined") {
+    const cookieLocale = readLocaleCookie();
+    if (cookieLocale) return cookieLocale;
+    const htmlLang = normalizeLocale(document.documentElement.lang);
+    if (htmlLang) return htmlLang;
+  }
+  return "vi";
+}
+
+function translateRm(
+  key: string,
+  params?: Record<string, string | number>,
+  locale: SupportedLocale = resolveReadingManagementLocale(),
+): string {
+  const activeMessages = getCachedLocaleMessages(locale) ?? viMessages;
+  return translateMessage(
+    activeMessages,
+    viMessages,
+    locale,
+    `reports.readingManagement.${key}`,
+    params,
+  );
+}
 
 /** "2026-11-09" -> "09/11". Dates are calendar days, never shifted by time zone. */
 export function shortDate(value: string): string {
@@ -25,13 +50,14 @@ export function shortDate(value: string): string {
 export function dayLabel(value: string): string {
   const [year, month, day] = value.split("-").map(Number);
   const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
-  return `${dayNames[weekday]}, ${shortDate(value)}`;
+  const weekdayName = translateRm(`weekdays.${WEEKDAY_KEYS[weekday] ?? "sun"}`);
+  return `${weekdayName}, ${shortDate(value)}`;
 }
 
 export function goalCycleLabel(goal: ReadingGoalDTO): string | null {
   if (!goal.cycle_starts_on || !goal.cycle_ends_on) return null;
   if (goal.cycle_starts_on === goal.cycle_ends_on) {
-    return `Ngày ${shortDate(goal.cycle_starts_on)}`;
+    return translateRm("cycleDate", { date: shortDate(goal.cycle_starts_on) });
   }
   return `${shortDate(goal.cycle_starts_on)} – ${shortDate(goal.cycle_ends_on)}`;
 }
@@ -50,37 +76,56 @@ const noteClass =
 
 /** Extra lines for a goal card: cycle, phase hint and streak. */
 export function GoalInsights({ goal }: { goal: ReadingGoalDTO }) {
+  const { locale } = useI18n();
+  const t = useTranslations("reports");
   const phase = goal.phase ?? "RUNNING";
   const streak = goal.streak_cycles ?? 0;
-  const cycle = goalCycleLabel(goal);
-  const unit = goal.period === "DAILY" ? "ngày" : "tuần";
+  const cycle =
+    goal.cycle_starts_on && goal.cycle_ends_on
+      ? goal.cycle_starts_on === goal.cycle_ends_on
+        ? t("readingManagement.cycleDate", {
+            date: shortDate(goal.cycle_starts_on),
+          })
+        : `${shortDate(goal.cycle_starts_on)} – ${shortDate(goal.cycle_ends_on)}`
+      : null;
+  const unit =
+    goal.period === "DAILY"
+      ? t("readingManagement.unitDay")
+      : t("readingManagement.unitWeek");
   const finished = goal.status === "COMPLETED" || goal.status === "ENDED";
+  const expiredSuffix = goal.ends_on
+    ? t("readingManagement.expiredDateFrom", { date: shortDate(goal.ends_on) })
+    : "";
+  void locale;
   return (
     <>
       {cycle && !finished ? (
         <p className="mt-1 text-sm text-muted">
-          {phase === "EXPIRED" ? "Chu kỳ cuối" : "Chu kỳ hiện tại"}: {cycle}
+          {phase === "EXPIRED"
+            ? t("readingManagement.cycleLastLabel")
+            : t("readingManagement.cycleCurrentLabel")}
+          : {cycle}
         </p>
       ) : null}
       {phase === "UPCOMING" ? (
         <p className={`${noteClass} bg-sky text-primary`} role="note">
           <Hourglass aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          Mục tiêu chưa đến ngày bắt đầu ({shortDate(goal.starts_on)}).
+          {t("readingManagement.goalNotStarted", {
+            date: shortDate(goal.starts_on),
+          })}
         </p>
       ) : null}
       {phase === "EXPIRED" && !finished ? (
         <p className={`${noteClass} bg-cream text-ink`} role="note">
           <Hourglass aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-          Mục tiêu đã hết hạn
-          {goal.ends_on ? ` từ ${shortDate(goal.ends_on)}` : ""}. Hãy chọn “Hoàn
-          thành” hoặc “Kết thúc” để lưu kết quả.
+          {t("readingManagement.goalExpired", { dateSuffix: expiredSuffix })}
         </p>
       ) : null}
       {streak > 0 && !finished ? (
         <p className={`${noteClass} bg-sky text-primary`}>
           <Flame aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
           <span>
-            <strong>{streak}</strong> {unit} liên tiếp đạt mục tiêu
+            {t("readingManagement.goalStreakSummary", { streak, unit })}
           </span>
         </p>
       ) : null}
@@ -90,6 +135,14 @@ export function GoalInsights({ goal }: { goal: ReadingGoalDTO }) {
 
 /** Extra lines for a plan card: today's progress or the next reading day. */
 export function PlanInsights({ plan }: { plan: ReadingPlanDTO }) {
+  const { locale } = useI18n();
+  const t = useTranslations("reports");
+  const formatDay = (value: string) => {
+    const [year, month, day] = value.split("-").map(Number);
+    const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+    return `${t(`readingManagement.weekdays.${WEEKDAY_KEYS[weekday] ?? "sun"}`)}, ${shortDate(value)}`;
+  };
+  void locale;
   const phase = plan.phase ?? "RUNNING";
   const finished = plan.status === "COMPLETED" || plan.status === "ENDED";
   if (finished) return null;
@@ -97,20 +150,27 @@ export function PlanInsights({ plan }: { plan: ReadingPlanDTO }) {
     return (
       <p className={`${noteClass} bg-sky text-primary`} role="note">
         <Hourglass aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-        Kế hoạch bắt đầu từ {shortDate(plan.starts_on)}.
+        {t("readingManagement.planStartsOn", {
+          date: shortDate(plan.starts_on),
+        })}
         {plan.next_scheduled_date
-          ? ` Buổi đọc đầu tiên: ${dayLabel(plan.next_scheduled_date)}.`
+          ? t("readingManagement.planFirstSession", {
+              day: formatDay(plan.next_scheduled_date),
+            })
           : ""}
       </p>
     );
   }
   if (phase === "EXPIRED") {
+    const dateSuffix = plan.ends_on
+      ? t("readingManagement.expiredDateFrom", {
+          date: shortDate(plan.ends_on),
+        })
+      : "";
     return (
       <p className={`${noteClass} bg-cream text-ink`} role="note">
         <Hourglass aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-        Kế hoạch đã hết hạn
-        {plan.ends_on ? ` từ ${shortDate(plan.ends_on)}` : ""}; số liệu là của
-        tuần cuối. Hãy chọn “Hoàn thành” hoặc “Kết thúc”.
+        {t("readingManagement.planExpired", { dateSuffix })}
       </p>
     );
   }
@@ -128,9 +188,14 @@ export function PlanInsights({ plan }: { plan: ReadingPlanDTO }) {
           <CalendarDays aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
         )}
         <span>
-          {reached ? "Hôm nay bé đã đọc đủ: " : "Hôm nay bé cần đọc: "}
+          {reached
+            ? t("readingManagement.todayPlanReadStatusDone")
+            : t("readingManagement.todayPlanReadStatusNeed")}
           <strong>
-            {minutes}/{plan.target_minutes} phút
+            {t("readingManagement.todayPlanReadMinutes", {
+              minutes,
+              target: plan.target_minutes,
+            })}
           </strong>
         </span>
       </p>
@@ -141,8 +206,8 @@ export function PlanInsights({ plan }: { plan: ReadingPlanDTO }) {
       <p className={`${noteClass} bg-white text-ink`}>
         <CalendarDays aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
         <span>
-          Hôm nay không có lịch đọc. Buổi tiếp theo:{" "}
-          <strong>{dayLabel(plan.next_scheduled_date)}</strong>
+          {t("readingManagement.todayPlanNextSession")}
+          <strong>{formatDay(plan.next_scheduled_date)}</strong>
         </span>
       </p>
     );
@@ -158,6 +223,12 @@ interface TodaySummaryProps {
 
 /** One glance at what the child should do today. */
 export function TodaySummary({ childName, plans, goals }: TodaySummaryProps) {
+  const t = useTranslations("reports");
+  const formatDay = (value: string) => {
+    const [year, month, day] = value.split("-").map(Number);
+    const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+    return `${t(`readingManagement.weekdays.${WEEKDAY_KEYS[weekday] ?? "sun"}`)}, ${shortDate(value)}`;
+  };
   const todayPlans = plans.filter(
     (plan) => isRunningPlan(plan) && plan.is_scheduled_today,
   );
@@ -172,17 +243,20 @@ export function TodaySummary({ childName, plans, goals }: TodaySummaryProps) {
 
   return (
     <section
-      aria-label="Hôm nay"
+      aria-label={t("readingManagement.todayAria")}
       className="rounded-card border border-border bg-white p-5 shadow-sm sm:p-6"
     >
       <h2 className="text-xl font-semibold text-ink">
-        Hôm nay {childName} cần đọc gì?
+        {t("readingManagement.todayTitle", { childName })}
       </h2>
       {todayPlans.length === 0 && dailyGoals.length === 0 ? (
         <p className="mt-3 text-label text-muted">
           {nextPlan?.next_scheduled_date
-            ? `Hôm nay không có lịch đọc. Buổi tiếp theo: ${dayLabel(nextPlan.next_scheduled_date)} (${nextPlan.title}).`
-            : "Chưa có kế hoạch hoặc mục tiêu hằng ngày đang chạy. Hãy tạo kế hoạch bên dưới để bé có việc cần làm."}
+            ? t("readingManagement.todayEmptyNextPlan", {
+                day: formatDay(nextPlan.next_scheduled_date),
+                title: nextPlan.title,
+              })
+            : t("readingManagement.todayNoActiveItems")}
         </p>
       ) : (
         <ul className="mt-4 grid gap-3 md:grid-cols-2">
@@ -196,15 +270,33 @@ export function TodaySummary({ childName, plans, goals }: TodaySummaryProps) {
               <li key={plan.id} className="rounded-control bg-canvas p-3">
                 <p className="font-semibold text-ink">{plan.title}</p>
                 {plan.book_title ? (
-                  <p className="text-sm text-muted">Sách: {plan.book_title}</p>
+                  <p className="text-sm text-muted">
+                    {t("readingManagement.bookPrefix", {
+                      title: "",
+                    }).trimEnd()}{" "}
+                    <span
+                      className="viread-learning-content"
+                      dir="ltr"
+                      lang="vi"
+                    >
+                      {plan.book_title}
+                    </span>
+                  </p>
                 ) : null}
                 <p className="mt-1 text-label text-ink">
-                  {minutes}/{plan.target_minutes} phút hôm nay
-                  {minutes >= plan.target_minutes ? " · Đã đủ" : ""}
+                  {t("readingManagement.todayPlanMinutes", {
+                    minutes,
+                    target: plan.target_minutes,
+                  })}
+                  {minutes >= plan.target_minutes
+                    ? t("readingManagement.todayPlanMetSuffix")
+                    : ""}
                 </p>
                 <div
                   role="progressbar"
-                  aria-label={`Tiến độ hôm nay: ${plan.title}`}
+                  aria-label={t("readingManagement.todayPlanProgressAria", {
+                    title: plan.title,
+                  })}
                   aria-valuemin={0}
                   aria-valuemax={100}
                   aria-valuenow={percent}
@@ -221,19 +313,30 @@ export function TodaySummary({ childName, plans, goals }: TodaySummaryProps) {
           {dailyGoals.map((goal) => (
             <li key={goal.id} className="rounded-control bg-canvas p-3">
               <p className="font-semibold text-ink">
-                Mục tiêu {goal.target_value}{" "}
-                {goal.metric === "MINUTES" ? "phút" : "buổi"} mỗi ngày
+                {t("readingManagement.todayGoalPrefix", {
+                  value: goal.target_value,
+                  unit:
+                    goal.metric === "MINUTES"
+                      ? t("readingManagement.unitMinute")
+                      : t("readingManagement.unitSession"),
+                })}
               </p>
               <p className="mt-1 text-label text-ink">
                 {goal.current_value}/{goal.target_value}
-                {goal.progress_percent >= 100 ? " · Đã đạt" : ""}
+                {goal.progress_percent >= 100
+                  ? t("readingManagement.todayGoalMetSuffix")
+                  : ""}
                 {(goal.streak_cycles ?? 0) > 0
-                  ? ` · ${goal.streak_cycles} ngày liên tiếp`
+                  ? t("readingManagement.todayGoalStreakSuffix", {
+                      streak: goal.streak_cycles ?? 0,
+                    })
                   : ""}
               </p>
               <div
                 role="progressbar"
-                aria-label={`Tiến độ hôm nay: mục tiêu ${goal.target_value}`}
+                aria-label={t("readingManagement.todayGoalProgressAria", {
+                  value: goal.target_value,
+                })}
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={Math.round(goal.progress_percent)}

@@ -1,0 +1,114 @@
+name: GHCR OCR Worker Image Build & Publish
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "ocr_worker/**"
+      - "scripts/build_hf_space_bundle.py"
+      - ".github/workflows/ghcr-ocr-worker-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ghcr-ocr-worker-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish-ghcr-ocr-worker:
+    name: Build, smoke-verify, and publish GHCR 3-engine OCR worker image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Generate and verify clean OCR worker Docker bundle
+        run: python3 -B scripts/build_hf_space_bundle.py --output-dir /tmp/viread-ghcr-ocr --json
+
+      - name: Build linux/amd64 image with pre-baked SHA-256 verified FLOW1_EXTERNAL_TRDG checkpoint
+        run: |
+          OWNER_LOWER="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          SHORT_SHA="$(git rev-parse --short=12 HEAD)"
+          IMAGE_BASE="ghcr.io/${OWNER_LOWER}/viread-ocr-worker"
+          echo "IMAGE_BASE=${IMAGE_BASE}" >> "${GITHUB_ENV}"
+          echo "SHORT_SHA=${SHORT_SHA}" >> "${GITHUB_ENV}"
+
+          FLOW1_SHA="200edce460606275481dda19c50b7763620a112ddc66a8378982bddc013114a6"
+          FLOW1_CFG_SHA="140f4b4a0b1036b074cf7d661e18d8e26303f8a3f5457a700187a9ec101cfb3c"
+          RELEASE_BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/ocr-models-flow1-v2"
+
+          docker build \
+            --platform linux/amd64 \
+            --build-arg PREBAKE_CHECKPOINT_URL="${RELEASE_BASE}/viread-vietocr-v2-${FLOW1_SHA}.pth" \
+            --build-arg PREBAKE_CHECKPOINT_SHA256="${FLOW1_SHA}" \
+            --build-arg PREBAKE_CONFIG_URL="${RELEASE_BASE}/viread-vietocr-v2-${FLOW1_SHA}.yml" \
+            --build-arg PREBAKE_CONFIG_SHA256="${FLOW1_CFG_SHA}" \
+            -t "${IMAGE_BASE}:latest" \
+            -t "${IMAGE_BASE}:sha-${SHORT_SHA}" \
+            /tmp/viread-ghcr-ocr
+
+      - name: Smoke-test 3-engine FLOW1_EXTERNAL_TRDG inference, read-only rootfs, and /wakeup?drain=true
+        run: |
+          TEST_WORKER_TOKEN="ci-ghcr-smoke-worker-token-0123456789abcdef012345"
+          FLOW1_SHA="200edce460606275481dda19c50b7763620a112ddc66a8378982bddc013114a6"
+
+          docker run -d --name viread-ghcr-smoke \
+            --read-only \
+            --tmpfs /tmp:rw,nosuid,size=512m \
+            -p 127.0.0.1:7860:7860 \
+            -e VIREAD_OCR_WORKER_TOKEN="${TEST_WORKER_TOKEN}" \
+            -e VIREAD_OCR_WORKER_ID="ghcr-ci-smoke-1" \
+            -e VIREAD_OCR_QUIET_STANDBY="true" \
+            -e VIREAD_OCR_SCALE_TO_ZERO="true" \
+            -e VIREAD_OCR_WORKER_MODEL_PROFILE="FLOW1_EXTERNAL_TRDG" \
+            -e VIREAD_OCR_WORKER_MODEL_SHA256="${FLOW1_SHA}" \
+            "${IMAGE_BASE}:latest"
+          trap 'docker logs viread-ghcr-smoke || true; docker rm -f viread-ghcr-smoke || true' EXIT
+
+          CONTAINER_UID="$(docker exec viread-ghcr-smoke id -u)"
+          test "${CONTAINER_UID}" = "1000"
+
+          for i in $(seq 1 90); do
+            if curl -fsS "http://127.0.0.1:7860/health" > /tmp/ghcr-health.json 2>/dev/null; then
+              if python3 -c "import json,sys; d=json.load(open('/tmp/ghcr-health.json')); eng=d.get('engines') or {}; ok=bool(d.get('ready') and eng.get('paddleocr',{}).get('inference_verified') and eng.get('vietocr',{}).get('inference_verified')); sys.exit(0 if ok else 1)"; then
+                break
+              fi
+            fi
+            sleep 3
+          done
+
+          python3 - <<'PY'
+          import json
+          health = json.load(open("/tmp/ghcr-health.json", encoding="utf-8"))
+          assert health["ready"] is True, f"Worker not ready: {health}"
+          assert health["standby_mode"] == "scale_to_zero", health
+          assert health["model"]["profile"] == "FLOW1_EXTERNAL_TRDG", health
+          assert health["model"]["matches_flow1_trdg"] is True, health
+          assert health["engines"]["paddleocr"]["inference_verified"] is True, health
+          assert health["engines"]["vietocr"]["inference_verified"] is True, health
+          assert health["engines"]["tesseract_vie"]["installed"] is True, health
+          assert health["engines"]["tesseract_vie"]["inference_verified"] is True, health
+          print("Verified GHCR 3-engine FLOW1_EXTERNAL_TRDG health:", health["worker_id"], health["standby_mode"])
+          PY
+
+          UNAUTH_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST 'http://127.0.0.1:7860/wakeup?drain=true')"
+          test "${UNAUTH_CODE}" = "401"
+
+          AUTH_CODE="$(curl -s -o /tmp/ghcr-wake.json -w '%{http_code}' -X POST 'http://127.0.0.1:7860/wakeup?drain=true' -H "X-ViRead-Ocr-Worker-Token: ${TEST_WORKER_TOKEN}" -H 'Content-Type: application/json' -d '{"reason":"ci_ghcr_verify"}')"
+          test "${AUTH_CODE}" = "200"
+          python3 -c "import json; d=json.load(open('/tmp/ghcr-wake.json')); assert d['ok'] is True and d['drained'] is True, d"
+
+      - name: Log in to GitHub Container Registry and push image tags
+        if: github.event_name != 'pull_request'
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s\n' "${GHCR_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          docker push "${IMAGE_BASE}:latest"
+          docker push "${IMAGE_BASE}:sha-${SHORT_SHA}"
+          docker logout ghcr.io

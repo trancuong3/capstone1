@@ -1,7 +1,7 @@
-"""Admin Karaoke One-File Simple Mode HTTP endpoints (mounted under /karaoke)."""
+"""Admin Karaoke One-File Simple Mode & Background Pipeline Bridge HTTP endpoints (mounted under /karaoke)."""
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -11,6 +11,9 @@ from app.schemas.karaoke import AdminDetail
 from app.schemas.karaoke_simple_import import (
     AudioType,
     SimpleImportResult,
+    SimpleProcessingApplyRequest,
+    SimpleProcessingStartRequest,
+    SimpleProcessingStatusRead,
     SimplePublishRequest,
 )
 from app.services.karaoke_simple_import_service import KaraokeSimpleImportService
@@ -40,6 +43,7 @@ async def simple_import_song(
     audio_type: AudioType = Form(default="UNKNOWN"),
     bpm: float | None = Form(default=None),
     auto_transcribe: bool = Form(default=True),
+    enable_background_processing: bool = Form(default=True),
     source_note: str | None = Form(default=None),
     usage_note: str | None = Form(default=None),
     rights_confirmed: bool = Form(default=False),
@@ -58,11 +62,55 @@ async def simple_import_song(
         audio_type=audio_type,
         bpm=bpm,
         auto_transcribe=auto_transcribe,
+        enable_background_processing=enable_background_processing,
         source_note=source_note,
         usage_note=usage_note,
         rights_confirmed=rights_confirmed,
         child_safe_confirmed=child_safe_confirmed,
     )
+
+
+@router.post(
+    "/admin/songs/{song_id}/simple-processing",
+    response_model=SimpleProcessingStatusRead,
+    status_code=202,
+)
+async def start_simple_processing(
+    song_id: UUID,
+    payload: SimpleProcessingStartRequest,
+    response: Response,
+    actor_id: UUID = Depends(require_admin_id),
+    service: KaraokeSimpleImportService = Depends(get_karaoke_simple_import_service),
+):
+    result = await service.start_simple_processing(actor_id, song_id, payload)
+    if getattr(service, "processing_replayed", False):
+        response.status_code = 200
+    return result
+
+
+@router.get(
+    "/admin/songs/{song_id}/simple-processing",
+    response_model=SimpleProcessingStatusRead,
+)
+async def get_simple_processing_status(
+    song_id: UUID,
+    actor_id: UUID = Depends(require_admin_id),
+    service: KaraokeSimpleImportService = Depends(get_karaoke_simple_import_service),
+):
+    return await service.get_simple_processing_status(actor_id, song_id)
+
+
+@router.post(
+    "/admin/songs/{song_id}/simple-processing/apply",
+    response_model=SimpleProcessingStatusRead,
+)
+async def apply_simple_processing(
+    song_id: UUID,
+    payload: SimpleProcessingApplyRequest,
+    actor_id: UUID = Depends(require_admin_id),
+    service: KaraokeSimpleImportService = Depends(get_karaoke_simple_import_service),
+):
+    return await service.apply_simple_processing(actor_id, song_id, payload)
 
 
 @router.post("/admin/songs/{song_id}/simple-publish", response_model=AdminDetail)

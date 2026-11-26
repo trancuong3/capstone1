@@ -33,6 +33,7 @@ import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
 import type { AdminParentProfileItemDTO } from "@/types/admin";
 
@@ -40,21 +41,12 @@ const PAGE_SIZE = 10;
 type LoadError = "auth" | "forbidden" | "unavailable";
 type ParentForm = AdminParentFormValues;
 
-function formatDate(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? "Không rõ"
-    : new Intl.DateTimeFormat("vi-VN", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-      }).format(date);
-}
-
 const emptyForm: ParentForm = { display_name: "", email: "", phone: "" };
 
 export function AdminParentsScreen() {
   const { parents } = useAdminServices();
+  const t = useTranslations("admin");
+  const { formatDate, formatNumber } = useI18n();
   const [items, setItems] = useState<
     readonly AdminParentProfileItemDTO[] | null
   >(null);
@@ -159,7 +151,7 @@ export function AdminParentsScreen() {
       setFormContactInfoEditable(detail.contact_info_status === "available");
     } catch (cause) {
       if (requestId !== editRequestIdRef.current) return;
-      setActionError(getAdminParentMutationErrorMessage(cause));
+      setActionError(getAdminParentMutationErrorMessage(cause, t));
       setFormMode(null);
       setFormParentId(null);
     } finally {
@@ -175,15 +167,13 @@ export function AdminParentsScreen() {
   ): Promise<void> {
     if (submission.mode === "create") {
       await parents.create(submission.input);
-      setNotice(
-        "Đã gửi lời mời tạo tài khoản Parent. Tài khoản cần hoàn tất quy trình xác minh theo cấu hình Supabase.",
-      );
+      setNotice(t("parents.notices.created"));
       return;
     }
 
     if (!formParentId) throw new Error("Parent id is unavailable.");
     await parents.update(formParentId, submission.input);
-    setNotice("Đã cập nhật hồ sơ Parent.");
+    setNotice(t("parents.notices.updated"));
   }
 
   function handleParentFormSuccess() {
@@ -197,9 +187,7 @@ export function AdminParentsScreen() {
     setDeleteError(null);
     try {
       await parents.deactivate(pendingDelete.id);
-      setNotice(
-        "Đã ẩn Parent khỏi danh sách. Tài khoản Supabase Auth và dữ liệu liên quan vẫn được giữ.",
-      );
+      setNotice(t("parents.notices.deleted"));
       setPendingDelete(null);
       if (items?.length === 1 && offset > 0) {
         setOffset(Math.max(0, offset - PAGE_SIZE));
@@ -207,7 +195,7 @@ export function AdminParentsScreen() {
         await load();
       }
     } catch (cause) {
-      setDeleteError(getAdminParentMutationErrorMessage(cause));
+      setDeleteError(getAdminParentMutationErrorMessage(cause, t));
     } finally {
       setDeleting(false);
     }
@@ -218,14 +206,14 @@ export function AdminParentsScreen() {
   return (
     <>
       <AdminPageHeader
-        eyebrow="Quản lý tài khoản"
-        title="Danh sách phụ huynh"
-        description="Quản lý hồ sơ Parent và các hồ sơ bé liên kết."
+        eyebrow={t("parents.eyebrow")}
+        title={t("parents.listTitle")}
+        description={t("parents.description")}
         actions={
           <>
             <Button className="sm:w-auto" onClick={openCreate}>
               <Plus aria-hidden className="size-5" />
-              Thêm Parent
+              {t("parents.addParent")}
             </Button>
             <Button
               className="sm:w-auto"
@@ -233,7 +221,7 @@ export function AdminParentsScreen() {
               variant="secondary"
             >
               <RefreshCw aria-hidden className="size-5" />
-              Tải lại
+              {t("parents.reload")}
             </Button>
           </>
         }
@@ -256,7 +244,7 @@ export function AdminParentsScreen() {
               type="button"
               variant="secondary"
             >
-              Tải lại dữ liệu
+              {t("parents.reloadData")}
             </Button>
           </StatusMessage>
         </div>
@@ -264,22 +252,28 @@ export function AdminParentsScreen() {
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2">
         <Card className="bg-white">
-          <p className="text-sm font-semibold text-muted">Tổng Parent</p>
+          <p className="text-sm font-semibold text-muted">
+            {t("parents.totalParents")}
+          </p>
           <div className="flex items-center gap-3">
             <UsersRound aria-hidden className="size-8 text-primary" />
-            <p className="text-3xl font-semibold">
-              {total.toLocaleString("vi-VN")}
-            </p>
+            <p className="text-3xl font-semibold">{formatNumber(total)}</p>
           </div>
         </Card>
         <Card className="bg-white">
-          <p className="text-sm font-semibold text-muted">Phạm vi danh sách</p>
+          <p className="text-sm font-semibold text-muted">
+            {t("parents.listRange")}
+          </p>
           <p className="text-lg font-semibold">
             {total === 0
-              ? "Chưa có dữ liệu"
-              : `${offset + 1}–${Math.min(offset + PAGE_SIZE, total)} / ${total}`}
+              ? t("parents.noDataRange")
+              : t("parents.rangeDisplay", {
+                  start: formatNumber(offset + 1),
+                  end: formatNumber(Math.min(offset + PAGE_SIZE, total)),
+                  total: formatNumber(total),
+                })}
           </p>
-          <p className="text-sm text-muted">Sắp xếp theo ngày tạo mới nhất</p>
+          <p className="text-sm text-muted">{t("parents.sortedNewest")}</p>
         </Card>
       </div>
 
@@ -290,15 +284,15 @@ export function AdminParentsScreen() {
         >
           <div className="min-w-0 flex-1">
             <TextField
-              label="Tìm phụ huynh theo tên hiển thị"
+              label={t("parents.searchLabel")}
               onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="Nhập tên phụ huynh"
+              placeholder={t("parents.searchPlaceholder")}
               value={searchInput}
             />
           </div>
           <Button className="sm:w-auto" type="submit">
             <Search aria-hidden className="size-5" />
-            Tìm kiếm
+            {t("parents.searchButton")}
           </Button>
           {search ? (
             <Button
@@ -311,31 +305,31 @@ export function AdminParentsScreen() {
               type="button"
               variant="secondary"
             >
-              Xóa lọc
+              {t("parents.clearFilter")}
             </Button>
           ) : null}
         </form>
       </Card>
 
       {items === null ? (
-        <AdminLoading label="Đang tải danh sách phụ huynh từ database…" />
+        <AdminLoading label={t("parents.loadingList")} />
       ) : error ? (
         <StatusMessage
           tone="error"
           title={
             error === "auth"
-              ? "Phiên đăng nhập không hợp lệ"
+              ? t("parents.authErrorTitle")
               : error === "forbidden"
-                ? "Bạn không có quyền xem danh sách phụ huynh"
-                : "Không thể tải danh sách phụ huynh"
+                ? t("parents.forbiddenErrorTitle")
+                : t("parents.loadErrorTitle")
           }
         >
           {error === "auth" ? (
             <Link className="font-semibold underline" href="/admin/login">
-              Đăng nhập lại
+              {t("common.signInAgain")}
             </Link>
           ) : error === "forbidden" ? (
-            "Chỉ tài khoản có role admin mới được phép xem dữ liệu này."
+            t("parents.forbiddenDesc")
           ) : (
             <Button
               className="sm:w-auto"
@@ -343,7 +337,7 @@ export function AdminParentsScreen() {
               type="button"
               variant="secondary"
             >
-              Thử lại
+              {t("common.retry")}
             </Button>
           )}
         </StatusMessage>
@@ -351,12 +345,10 @@ export function AdminParentsScreen() {
         <EmptyState
           icon={<UsersRound aria-hidden className="size-10 text-primary" />}
           title={
-            search ? "Không tìm thấy phụ huynh" : "Chưa có hồ sơ phụ huynh"
+            search ? t("parents.emptySearchTitle") : t("parents.emptyListTitle")
           }
           description={
-            search
-              ? "Thử tên khác hoặc xóa bộ lọc tìm kiếm."
-              : "Các tài khoản có role parent sẽ xuất hiện ở đây khi đã có hồ sơ trong database."
+            search ? t("parents.emptySearchDesc") : t("parents.emptyListDesc")
           }
           action={
             search ? (
@@ -369,7 +361,7 @@ export function AdminParentsScreen() {
                 }}
                 variant="secondary"
               >
-                Xóa bộ lọc
+                {t("parents.clearFilters")}
               </Button>
             ) : undefined
           }
@@ -382,7 +374,7 @@ export function AdminParentsScreen() {
                 <div className="flex min-w-0 flex-col gap-4">
                   <div className="min-w-0 flex-1">
                     <h2 className="break-words text-xl font-semibold text-ink">
-                      {parent.display_name?.trim() || "Chưa cập nhật tên"}
+                      {parent.display_name?.trim() || t("parents.nameFallback")}
                     </h2>
                     <p className="mt-1 break-all text-xs text-muted">
                       ID: {parent.id}
@@ -391,18 +383,23 @@ export function AdminParentsScreen() {
                   <dl className="grid grid-cols-2 gap-3">
                     <div className="rounded-control bg-canvas px-4 py-3">
                       <dt className="text-xs font-semibold text-muted">
-                        Ngày tạo
+                        {t("parents.createdAt")}
                       </dt>
                       <dd className="mt-1 font-semibold">
-                        {formatDate(parent.created_at)}
+                        {formatDate(parent.created_at, {
+                          year: "numeric",
+                          month: "2-digit",
+                          day: "2-digit",
+                          fallback: t("common.unknown"),
+                        })}
                       </dd>
                     </div>
                     <div className="rounded-control bg-canvas px-4 py-3">
                       <dt className="text-xs font-semibold text-muted">
-                        Hồ sơ bé
+                        {t("parents.childProfiles")}
                       </dt>
                       <dd className="mt-1 font-semibold">
-                        {parent.children_count}
+                        {formatNumber(parent.children_count)}
                       </dd>
                     </div>
                   </dl>
@@ -412,8 +409,11 @@ export function AdminParentsScreen() {
                       href={`/admin/parents/${encodeURIComponent(parent.id)}`}
                       variant="secondary"
                     >
-                      Xem chi tiết
-                      <ChevronRight aria-hidden className="size-5" />
+                      {t("parents.viewDetail")}
+                      <ChevronRight
+                        aria-hidden
+                        className="size-5 rtl:rotate-180"
+                      />
                     </ButtonLink>
                     <Button
                       disabled={formLoading || formMode !== null}
@@ -421,7 +421,8 @@ export function AdminParentsScreen() {
                       onClick={() => void openEdit(parent.id)}
                       variant="secondary"
                     >
-                      <Pencil aria-hidden className="size-5" /> Sửa
+                      <Pencil aria-hidden className="size-5" />{" "}
+                      {t("parents.edit")}
                     </Button>
                     <Button
                       fullWidth={false}
@@ -431,7 +432,8 @@ export function AdminParentsScreen() {
                       }}
                       variant="secondary"
                     >
-                      <UserX aria-hidden className="size-5" /> Vô hiệu hóa
+                      <UserX aria-hidden className="size-5" />{" "}
+                      {t("parents.deactivate")}
                     </Button>
                   </div>
                 </div>
@@ -439,14 +441,14 @@ export function AdminParentsScreen() {
             ))}
           </div>
           <PaginationBar
-            ariaLabel="Phân trang danh sách phụ huynh"
+            ariaLabel={t("parents.paginationAria")}
             className="mt-6"
-            itemLabel="phụ huynh"
-            nextLabel="Trang sau"
+            itemLabel={t("parents.itemLabel")}
+            nextLabel={t("parents.nextLabel")}
             onPageChange={(nextPage) => setOffset((nextPage - 1) * PAGE_SIZE)}
             page={currentPage}
             pageSize={PAGE_SIZE}
-            prevLabel="Trang trước"
+            prevLabel={t("parents.prevLabel")}
             showSummaryWhenSinglePage
             total={total}
           />
@@ -479,25 +481,21 @@ export function AdminParentsScreen() {
             setDeleteError(null);
           }
         }}
-        title="Vô hiệu hóa Parent"
+        title={t("parents.deactivateTitle")}
       >
         {pendingDelete ? (
           <div className="grid gap-4">
             <p>
-              Bạn có chắc muốn vô hiệu hóa Parent{" "}
-              <strong>
-                {pendingDelete.display_name?.trim() || pendingDelete.id}
-              </strong>{" "}
-              khỏi danh sách quản trị?
+              {t("parents.deactivateConfirm", {
+                name: pendingDelete.display_name?.trim() || pendingDelete.id,
+              })}
             </p>
             <p className="text-sm text-muted">
-              Đây là xóa mềm: trạng thái active sẽ chuyển thành 0. Hồ sơ, tài
-              khoản Supabase Auth, hồ sơ bé và lịch sử học tập sẽ được giữ
-              nguyên.
+              {t("parents.deactivateSoftDeleteNote")}
             </p>
             {deleteError ? (
               <StatusMessage tone="error" title={deleteError}>
-                Hãy kiểm tra cấu hình và thử lại.
+                {t("parents.deactivateErrorFallback")}
               </StatusMessage>
             ) : null}
             <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
@@ -511,7 +509,7 @@ export function AdminParentsScreen() {
                 type="button"
                 variant="secondary"
               >
-                Hủy
+                {t("common.cancel")}
               </Button>
               <Button
                 className="sm:w-auto"
@@ -520,7 +518,7 @@ export function AdminParentsScreen() {
                 type="button"
                 variant="destructive"
               >
-                Vô hiệu hóa Parent
+                {t("parents.deactivateTitle")}
               </Button>
             </div>
           </div>

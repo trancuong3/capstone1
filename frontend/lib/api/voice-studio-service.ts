@@ -15,6 +15,10 @@ import {
   getActiveSessionVoiceLock,
   getVoicePolicyPreferences,
 } from "@/lib/reading/session-voice-lock";
+import {
+  getPreferredJsonTtsAcceptHeader,
+  type TtsAudioFormat,
+} from "@/lib/reading/tts-audio-format";
 import { recordTtsEngineUsage } from "@/lib/reading/voice-engine-status";
 import { resolveVoiceGender } from "@/lib/reading/voice-persona";
 import { getApiBaseUrl } from "@/lib/supabase/config";
@@ -41,6 +45,7 @@ const voiceListSchema = z.object({
   default_voice_id: z.string(),
   local_worker_ready: z.boolean().optional(),
   google_tts_available: z.boolean().optional(),
+  cached_voice_ids: z.array(z.string()).optional(),
 });
 
 const timedSpeechSchema = z.object({
@@ -59,6 +64,7 @@ const timedSpeechSchema = z.object({
   region: z.string().nullable().optional(),
   model_version: z.string().nullable().optional(),
   used_fallback_voice: z.boolean().optional(),
+  cached_speed: z.number().positive().nullable().optional(),
 });
 
 export type VoiceOption = z.infer<typeof voiceSchema>;
@@ -79,11 +85,17 @@ export interface TimedSpeech {
   readonly region?: string | null;
   readonly modelVersion?: string | null;
   readonly usedFallbackVoice?: boolean;
+  readonly cachedSpeed?: number | null;
 }
 
 export interface TimedSpeechOptions {
   readonly voiceId?: string | null;
   readonly speed?: number;
+  readonly audioFormat?: TtsAudioFormat;
+  readonly bookId?: string | null;
+  readonly pageId?: string | null;
+  readonly pageRevisionId?: string | null;
+  readonly cacheScope?: "CATALOG" | "PRIVATE" | "COACHING" | null;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
 }
@@ -123,21 +135,28 @@ async function accessToken(): Promise<string> {
   }
 }
 
-async function request(
+function parsePositiveSpeedHeader(raw: string | null): number | null {
+  if (!raw) return null;
+  const parsed = Number(raw.trim());
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function requestWithHeaders(
   path: string,
   init: RequestInit,
   signal?: AbortSignal,
   timeoutMs = 30_000,
-): Promise<unknown> {
+): Promise<{ readonly payload: unknown; readonly headers: Headers }> {
   try {
     return await withRequestDeadline(
       async (requestSignal) => {
         const token = await accessToken();
         requestSignal.throwIfAborted();
+        const requestHeaders = new Headers(init.headers);
         const response = await fetch(`${getApiBaseUrl()}${path}`, {
           ...init,
           headers: {
-            Accept: "application/json",
+            Accept: requestHeaders.get("Accept") ?? "application/json",
             Authorization: `Bearer ${token}`,
             ...(init.body ? { "Content-Type": "application/json" } : {}),
           },
@@ -160,7 +179,7 @@ async function request(
         }
         const payload: unknown = await response.json();
         requestSignal.throwIfAborted();
-        return payload;
+        return { payload, headers: response.headers };
       },
       signal,
       timeoutMs,
@@ -172,6 +191,16 @@ async function request(
     }
     throw failure(0, true);
   }
+}
+
+async function request(
+  path: string,
+  init: RequestInit,
+  signal?: AbortSignal,
+  timeoutMs = 30_000,
+): Promise<unknown> {
+  const { payload } = await requestWithHeaders(path, init, signal, timeoutMs);
+  return payload;
 }
 
 function base64ToBlob(base64: string, contentType: string): Blob {
@@ -214,14 +243,20 @@ export function createVoiceStudioService(): VoiceStudioService {
     async synthesizeTimed(words, options = {}) {
       const policy = getVoicePolicyPreferences();
       const activeLock = getActiveSessionVoiceLock();
-      const payload = await request(
+      const { payload, headers } = await requestWithHeaders(
         "/voice/text-to-speech/timed",
         {
           method: "POST",
+          headers: {
+            Accept: getPreferredJsonTtsAcceptHeader(options.audioFormat),
+          },
           body: JSON.stringify({
             words,
             ...(options.voiceId ? { voice_id: options.voiceId } : {}),
             ...(options.speed !== undefined ? { speed: options.speed } : {}),
+            ...(options.audioFormat
+              ? { audio_format: options.audioFormat }
+              : {}),
             ...(policy.providerMode !== "local_only"
               ? { provider_mode: policy.providerMode }
               : {}),
@@ -231,6 +266,12 @@ export function createVoiceStudioService(): VoiceStudioService {
             ...(activeLock?.sessionId
               ? { session_id: activeLock.sessionId }
               : {}),
+            ...(options.bookId ? { book_id: options.bookId } : {}),
+            ...(options.pageId ? { page_id: options.pageId } : {}),
+            ...(options.pageRevisionId
+              ? { page_revision_id: options.pageRevisionId }
+              : {}),
+            ...(options.cacheScope ? { cache_scope: options.cacheScope } : {}),
           }),
         },
         options.signal,
@@ -265,6 +306,9 @@ export function createVoiceStudioService(): VoiceStudioService {
       const timedProvider = parsed.data.provider ?? "local";
       const resolvedId =
         parsed.data.resolved_voice_id ?? options.voiceId ?? null;
+      const cachedSpeed =
+        parsed.data.cached_speed ??
+        parsePositiveSpeedHeader(headers.get("x-tts-cached-speed"));
       recordTtsEngineUsage({
         provider: timedProvider,
         fallbackUsed:
@@ -282,6 +326,7 @@ export function createVoiceStudioService(): VoiceStudioService {
         region: parsed.data.region ?? null,
         modelVersion: parsed.data.model_version ?? null,
         usedFallbackVoice: Boolean(parsed.data.used_fallback_voice),
+        ...(cachedSpeed !== null ? { cachedSpeed } : {}),
       };
     },
   };

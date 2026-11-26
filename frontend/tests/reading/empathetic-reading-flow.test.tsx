@@ -448,14 +448,14 @@ describe("Empathetic Grade-1 teacher comfort, mistake classification & phonics m
     );
   });
 
-  it("walks the 4-step empathetic ladder including Step-2 SGK phonics spelling guide, blocks 100% of teacher echo, and marks exhausted words assisted", async () => {
+  it("walks the 2-round empathetic ladder including Round-2 SGK phonics spelling guide & phrase, blocks 100% of teacher echo, and marks exhausted words assisted", async () => {
     const phonicsPage = makePage(["Tê", "ăn", "cỏ."], 17);
     services = createServices(phonicsPage);
     servicesHook.mockReturnValue(services);
 
     const rec = await startWithFakeClock();
 
-    // Attempt 1 wrong: "bàn" -> Group C multi-sentence comfort
+    // Attempt 1 wrong: "bàn" -> Round 1 multi-sentence comfort
     act(() => rec.say("bàn"));
     await act(async () => vi.advanceTimersByTimeAsync(1_600));
     const step1Text = speechPlayerMock.play.mock.calls[0]?.[0] as string;
@@ -466,7 +466,7 @@ describe("Empathetic Grade-1 teacher comfort, mistake classification & phonics m
     expect(wordEl("Tê")).not.toHaveClass(SUCCESS);
     expect(wordEl("Tê")).not.toHaveClass("underline");
 
-    // Attempt 2 wrong after echo guard expires -> Step 2 speaks `generateSpokenPhonicsGuide("Tê")` + 0.75x slow sample!
+    // Attempt 2 wrong after echo guard expires -> Round 2 speaks `generateSpokenPhonicsGuide("Tê")` + 0.75x slow sample + meaningful phrase!
     await act(async () => vi.advanceTimersByTimeAsync(2_000));
     speechPlayerMock.play.mockClear();
     act(() => lastRecognition().say("ghế"));
@@ -482,6 +482,7 @@ describe("Empathetic Grade-1 teacher comfort, mistake classification & phonics m
       "Tê",
       { wordSample: true, speedScale: 0.75 },
     ]);
+    expect(step2Calls.map(([t]) => String(t))).toContain("Tê ăn cỏ.");
     expect(screen.getByTestId("reading-companion-bubble")).toHaveAttribute(
       "data-companion-mood",
       "teaching",
@@ -491,29 +492,27 @@ describe("Empathetic Grade-1 teacher comfort, mistake classification & phonics m
     act(() => lastRecognition().say("tờ ê tê"));
     expect(wordEl("Tê")).not.toHaveClass("underline");
 
-    // Attempt 3 wrong -> Step 3 praises persistence + models phrase "Tê ăn cỏ."
-    await act(async () => vi.advanceTimersByTimeAsync(2_000));
-    speechPlayerMock.play.mockClear();
-    act(() => lastRecognition().say("bàn"));
-    await act(async () => vi.advanceTimersByTimeAsync(1_600));
-    const step3Calls = speechPlayerMock.play.mock.calls.map(([t]) => String(t));
-    expect(
-      step3Calls.some((t) => /kiên trì|tự hào|cố gắng|cụm/iu.test(t)),
-    ).toBe(true);
-    expect(step3Calls).toContain("Tê ăn cỏ.");
-
-    // Attempt 4 wrong -> Step 4 celebrates effort warmly, marks "Tê" assisted (never green!), and invites sentence reinforcement!
+    // After the phonics model, an incorrect attempt leads to phrase practice. A further real attempt exhausts the retry budget.
     await act(async () => vi.advanceTimersByTimeAsync(2_000));
     speechPlayerMock.play.mockClear();
     act(() => lastRecognition().say("bàn"));
     await act(async () => vi.advanceTimersByTimeAsync(1_600));
 
-    const step4Calls = speechPlayerMock.play.mock.calls.map(([t]) => String(t));
-    expect(
-      step4Calls.some((t) =>
-        /dũng cảm|tự hào|chăm chỉ|ngôi sao|nỗ lực|giỏi lắm/iu.test(t),
-      ),
-    ).toBe(true);
+    expect(speechPlayerMock.play.mock.calls.map(([text]) => text)).toContain(
+      "Tê ăn cỏ.",
+    );
+    expect(wordEl("Tê")).not.toHaveClass(SUCCESS);
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    speechPlayerMock.play.mockClear();
+    act(() => lastRecognition().say("ghế"));
+    await act(async () => vi.advanceTimersByTimeAsync(1_600));
+
+    const moveOnCalls = speechPlayerMock.play.mock.calls.map(([t]) =>
+      String(t),
+    );
+    expect(moveOnCalls.join(" | ")).toMatch(
+      /dũng cảm|tự hào|chăm chỉ|ngôi sao|nỗ lực|giỏi lắm|kiên trì/iu,
+    );
     expect(wordEl("Tê")).not.toHaveClass(SUCCESS);
     expect(wordEl("Tê")).toHaveClass("underline"); // assisted, never plain green
     expect(

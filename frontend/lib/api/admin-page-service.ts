@@ -11,8 +11,361 @@ import type {
 } from "@/types/admin";
 import { z } from "zod";
 import { requestApi, unavailableOperation } from "@/lib/api/api-client";
-import { isServiceError } from "@/lib/api/service-error";
+import { isServiceError, ServiceError } from "@/lib/api/service-error";
 import { adminRevisionDetailSchema } from "@/lib/api/ocr-review-service";
+import { translateRuntime } from "@/lib/i18n/runtime";
+
+export const adminOcrJobStatusSchema = z.enum([
+  "QUEUED",
+  "CLAIMED",
+  "RUNNING",
+  "FAILED_RETRYABLE",
+  "SUCCEEDED",
+  "DEAD_LETTER",
+  "CANCELLED",
+]);
+
+export const adminOcrJobSchema = z.object({
+  id: z.string(),
+  job_kind: z.string(),
+  status: adminOcrJobStatusSchema,
+  priority: z.number().optional(),
+  book_id: z.string().nullable().optional(),
+  page_id: z.string().nullable().optional(),
+  revision_id: z.string().nullable().optional(),
+  submission_id: z.string().nullable().optional(),
+  worker_id: z.string().nullable().optional(),
+  attempt_count: z.number().optional(),
+  max_attempts: z.number().optional(),
+  error_code: z.string().nullable().optional(),
+  error_message: z.string().nullable().optional(),
+  cancelled_reason: z.string().nullable().optional(),
+  created_at: z.string().nullable().optional(),
+  updated_at: z.string().nullable().optional(),
+  completed_at: z.string().nullable().optional(),
+});
+
+export type AdminOcrJobDTO = z.infer<typeof adminOcrJobSchema>;
+
+export const adminDocumentJobsResponseSchema = z.object({
+  book_id: z.uuid(),
+  source_format: z.string(),
+  total_source_pages: z.number().int().min(1).max(30),
+  job_ids: z.array(z.string()),
+  queued_count: z.number().int().nonnegative(),
+  worker_online: z.boolean(),
+  jobs: z.array(adminOcrJobSchema).optional(),
+});
+
+export type AdminDocumentJobsResponseDTO = z.infer<
+  typeof adminDocumentJobsResponseSchema
+>;
+
+export async function getAdminOcrJob(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<AdminOcrJobDTO> {
+  return requestApi(
+    `/books/admin/ocr-jobs/${encodeURIComponent(jobId)}`,
+    adminOcrJobSchema,
+    signal,
+    { method: "GET", bypassCache: true },
+  );
+}
+
+export async function listAdminBookOcrJobs(
+  bookId: string,
+  signal?: AbortSignal,
+): Promise<readonly AdminOcrJobDTO[]> {
+  return requestApi(
+    `/books/admin/catalog/${encodeURIComponent(bookId)}/ocr-jobs`,
+    z.array(adminOcrJobSchema),
+    signal,
+    { method: "GET", bypassCache: true },
+  );
+}
+
+function isTransientAdminPollError(error: unknown): boolean {
+  if (isServiceError(error)) {
+    return (
+      error.retryable ||
+      error.status === 0 ||
+      error.status === 429 ||
+      error.status === 502 ||
+      error.status === 503 ||
+      error.status === 504
+    );
+  }
+  return error instanceof TypeError;
+}
+
+function waitAdminPollDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(
+      new DOMException("OCR job polling cancelled", "AbortError"),
+    );
+  }
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("OCR job polling cancelled", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function waitForVisibleTab(signal?: AbortSignal): Promise<void> {
+  if (
+    typeof document === "undefined" ||
+    document.visibilityState !== "hidden"
+  ) {
+    return Promise.resolve();
+  }
+  if (signal?.aborted) {
+    return Promise.reject(
+      new DOMException("OCR job polling cancelled", "AbortError"),
+    );
+  }
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState !== "hidden") {
+        cleanup();
+        resolve();
+      }
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException("OCR job polling cancelled", "AbortError"));
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function isTerminalOcrJobStatus(status: AdminOcrJobDTO["status"]): boolean {
+  return (
+    status === "SUCCEEDED" || status === "DEAD_LETTER" || status === "CANCELLED"
+  );
+}
+
+export async function pollAdminOcrJob(
+  initialJob: AdminOcrJobDTO,
+  options: {
+    readonly pollIntervalMs?: number;
+    readonly maxAttempts?: number;
+    readonly signal?: AbortSignal;
+    readonly onTick?: (job: AdminOcrJobDTO) => void;
+  } = {},
+): Promise<AdminOcrJobDTO> {
+  const baseIntervalMs = options.pollIntervalMs ?? 1_500;
+  const maxIntervalMs = Math.max(
+    baseIntervalMs,
+    Math.min(8_000, baseIntervalMs * 5),
+  );
+  const maxAttempts = options.maxAttempts ?? 100;
+  let current = initialJob;
+  let consecutiveErrors = 0;
+  options.onTick?.(current);
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (isTerminalOcrJobStatus(current.status)) {
+      return current;
+    }
+    if (options.signal?.aborted) {
+      throw new DOMException("OCR job polling cancelled", "AbortError");
+    }
+    const backoffStep = Math.min(4, Math.floor(attempt / 4));
+    const delayMs = Math.min(
+      maxIntervalMs,
+      Math.round(baseIntervalMs * Math.pow(1.4, backoffStep)),
+    );
+    await waitAdminPollDelay(delayMs, options.signal);
+    await waitForVisibleTab(options.signal);
+    try {
+      current = await getAdminOcrJob(current.id, options.signal);
+      consecutiveErrors = 0;
+      options.onTick?.(current);
+    } catch (error) {
+      if (
+        options.signal?.aborted ||
+        (error instanceof Error && error.name === "AbortError")
+      ) {
+        throw error;
+      }
+      consecutiveErrors += 1;
+      if (!isTransientAdminPollError(error) || consecutiveErrors > 3) {
+        throw error;
+      }
+    }
+  }
+  return current;
+}
+
+export async function pollAdminBookOcrJobsBatch(
+  bookId: string,
+  initialJobs: readonly AdminOcrJobDTO[],
+  options: {
+    readonly pollIntervalMs?: number;
+    readonly maxAttempts?: number;
+    readonly signal?: AbortSignal;
+    readonly onProgress?: (summary: {
+      readonly completedCount: number;
+      readonly failedCount: number;
+      readonly totalCount: number;
+    }) => void;
+  } = {},
+): Promise<readonly AdminOcrJobDTO[]> {
+  const baseIntervalMs = options.pollIntervalMs ?? 1_500;
+  const maxIntervalMs = Math.max(
+    baseIntervalMs,
+    Math.min(8_000, baseIntervalMs * 5),
+  );
+  const maxAttempts = options.maxAttempts ?? 60;
+  const jobMap = new Map<string, AdminOcrJobDTO>();
+  for (const job of initialJobs) {
+    jobMap.set(job.id, job);
+  }
+  const targetIds = new Set(jobMap.keys());
+  let batchRouteSupported = true;
+  let consecutiveErrors = 0;
+
+  const report = () => {
+    let completedCount = 0;
+    let failedCount = 0;
+    for (const job of jobMap.values()) {
+      if (job.status === "SUCCEEDED") completedCount += 1;
+      else if (job.status === "DEAD_LETTER" || job.status === "CANCELLED") {
+        failedCount += 1;
+      }
+    }
+    options.onProgress?.({
+      completedCount,
+      failedCount,
+      totalCount: jobMap.size,
+    });
+    return completedCount + failedCount >= jobMap.size;
+  };
+
+  if (report()) return Array.from(jobMap.values());
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (options.signal?.aborted) {
+      throw new DOMException("OCR job polling cancelled", "AbortError");
+    }
+    const backoffStep = Math.min(4, Math.floor(attempt / 4));
+    const delayMs = Math.min(
+      maxIntervalMs,
+      Math.round(baseIntervalMs * Math.pow(1.4, backoffStep)),
+    );
+    await waitAdminPollDelay(delayMs, options.signal);
+    await waitForVisibleTab(options.signal);
+
+    try {
+      if (batchRouteSupported) {
+        try {
+          const latestList = await listAdminBookOcrJobs(bookId, options.signal);
+          for (const item of latestList) {
+            if (targetIds.has(item.id)) {
+              jobMap.set(item.id, item);
+            }
+          }
+          consecutiveErrors = 0;
+        } catch (batchErr) {
+          if (isAsyncRouteUnsupported(batchErr)) {
+            batchRouteSupported = false;
+          } else {
+            throw batchErr;
+          }
+        }
+      }
+      if (!batchRouteSupported) {
+        const pending = Array.from(jobMap.values()).filter(
+          (item) => !isTerminalOcrJobStatus(item.status),
+        );
+        const refreshed = await Promise.all(
+          pending.map((item) => getAdminOcrJob(item.id, options.signal)),
+        );
+        for (const item of refreshed) {
+          jobMap.set(item.id, item);
+        }
+        consecutiveErrors = 0;
+      }
+    } catch (error) {
+      if (
+        options.signal?.aborted ||
+        (error instanceof Error && error.name === "AbortError")
+      ) {
+        throw error;
+      }
+      consecutiveErrors += 1;
+      if (!isTransientAdminPollError(error) || consecutiveErrors > 3) {
+        throw error;
+      }
+      continue;
+    }
+
+    if (report()) {
+      return Array.from(jobMap.values());
+    }
+  }
+  return Array.from(jobMap.values());
+}
+
+function isAsyncRouteUnsupported(error: unknown): boolean {
+  return (
+    isServiceError(error) &&
+    (error.status === 404 || error.status === 405 || error.status === 501)
+  );
+}
+
+async function fetchRevisionForCompletedJob(
+  pageId: string,
+  job: AdminOcrJobDTO,
+): Promise<AdminPageRevisionDetailDTO> {
+  if (job.status === "DEAD_LETTER" || job.status === "CANCELLED") {
+    throw new ServiceError({
+      code: "NETWORK_ERROR",
+      status: 503,
+      request_id: job.id,
+      retryable: job.status !== "CANCELLED",
+      message:
+        job.error_message ||
+        translateRuntime("admin.pageUploadRuntime.ocrTaskIncomplete"),
+    });
+  }
+  if (job.status !== "SUCCEEDED") {
+    throw new ServiceError({
+      code: "NETWORK_ERROR",
+      status: 503,
+      request_id: job.id,
+      retryable: true,
+      message: translateRuntime("admin.pageUploadRuntime.ocrTaskQueuedWindows"),
+    });
+  }
+  const targetPageId = job.page_id ?? pageId;
+  if (job.revision_id) {
+    return requestApi(
+      `/books/admin/pages/${encodeURIComponent(targetPageId)}/revisions/${encodeURIComponent(job.revision_id)}`,
+      adminRevisionDetailSchema.refine((item) => item.page_id === targetPageId),
+    );
+  }
+  const processing = await requestApi(
+    `/books/admin/pages/${encodeURIComponent(targetPageId)}/processing`,
+    adminProcessingSchema.refine((item) => item.page_id === targetPageId),
+  );
+  return requestApi(
+    `/books/admin/pages/${encodeURIComponent(targetPageId)}/revisions/${encodeURIComponent(processing.page_revision_id)}`,
+    adminRevisionDetailSchema.refine((item) => item.page_id === targetPageId),
+  );
+}
 
 export interface AdminPageService {
   list(bookId: string): Promise<readonly AdminPageListItemUI[]>;
@@ -103,16 +456,32 @@ function formatDocumentSummary(
 ): string {
   const notes: string[] = [];
   if (response.skipped_empty_count > 0) {
-    notes.push(`bỏ qua ${response.skipped_empty_count} trang trắng`);
+    notes.push(
+      translateRuntime("admin.pageUploadRuntime.skippedEmptyNote", {
+        count: response.skipped_empty_count,
+      }),
+    );
   }
   if (response.failed_pages_count > 0) {
-    notes.push(`lỗi ${response.failed_pages_count} trang`);
+    notes.push(
+      translateRuntime("admin.pageUploadRuntime.failedPagesNote", {
+        count: response.failed_pages_count,
+      }),
+    );
   }
   const suffix = notes.length > 0 ? ` (${notes.join(", ")})` : "";
-  return `Đã tạo ${response.created_pages_count} trang · Cần duyệt${suffix}`;
+  return translateRuntime("admin.pageUploadRuntime.createdPagesSummary", {
+    count: response.created_pages_count,
+    suffix,
+  });
 }
 
-export function createAdminPageService(): AdminPageService {
+export function createAdminPageService(options?: {
+  readonly pollIntervalMs?: number;
+  readonly maxPollAttempts?: number;
+}): AdminPageService {
+  const pollIntervalMs = options?.pollIntervalMs ?? 1_500;
+  const maxPollAttempts = options?.maxPollAttempts ?? 100;
   const uploadIds = new WeakMap<File, string>();
   function uploadIdFor(file: File): string {
     let id = uploadIds.get(file);
@@ -175,12 +544,27 @@ export function createAdminPageService(): AdminPageService {
       const form = new FormData();
       form.append("image", file, file.name);
       form.append("upload_id", uploadIdFor(file));
-      return requestApi(
-        `/books/admin/pages/${encodeURIComponent(pageId)}/reupload-ocr`,
-        adminRevisionDetailSchema.refine((item) => item.page_id === pageId),
-        undefined,
-        { method: "POST", body: form },
-      );
+      try {
+        const job = await requestApi(
+          `/books/admin/pages/${encodeURIComponent(pageId)}/reupload-ocr/jobs`,
+          adminOcrJobSchema,
+          undefined,
+          { method: "POST", body: form },
+        );
+        const finalJob = await pollAdminOcrJob(job, {
+          pollIntervalMs,
+          maxAttempts: maxPollAttempts,
+        });
+        return fetchRevisionForCompletedJob(pageId, finalJob);
+      } catch (error) {
+        if (!isAsyncRouteUnsupported(error)) throw error;
+        return requestApi(
+          `/books/admin/pages/${encodeURIComponent(pageId)}/reupload-ocr`,
+          adminRevisionDetailSchema.refine((item) => item.page_id === pageId),
+          undefined,
+          { method: "POST", body: form },
+        );
+      }
     },
     upload: async (bookId, pages, onProgress) => {
       for (const page of pages) {
@@ -200,36 +584,196 @@ export function createAdminPageService(): AdminPageService {
         form.append("upload_id", uploadIdFor(page.file));
         try {
           if (documentMode) {
-            const summary = await requestApi(
-              `/books/admin/catalog/${encodeURIComponent(bookId)}/documents`,
-              createAdminDocumentUploadResponseSchema(bookId),
-              undefined,
-              { method: "POST", body: form },
-            );
-            onProgress?.({
-              client_id: page.client_id,
-              file_name: page.file_name,
-              progress_percent: 100,
-              status: "PROCESSING",
-              created_pages_count: summary.created_pages_count,
-              skipped_empty_count: summary.skipped_empty_count,
-              failed_pages_count: summary.failed_pages_count,
-              summary_message: formatDocumentSummary(summary),
-            });
+            try {
+              const enqueued = await requestApi(
+                `/books/admin/catalog/${encodeURIComponent(bookId)}/documents/jobs`,
+                adminDocumentJobsResponseSchema.refine(
+                  (res) => res.book_id === bookId,
+                ),
+                undefined,
+                { method: "POST", body: form },
+              );
+              if (!enqueued.worker_online) {
+                onProgress?.({
+                  client_id: page.client_id,
+                  file_name: page.file_name,
+                  progress_percent: 100,
+                  status: "PROCESSING",
+                  created_pages_count: enqueued.queued_count,
+                  skipped_empty_count: 0,
+                  failed_pages_count: 0,
+                  summary_message: translateRuntime(
+                    "admin.pageUploadRuntime.queuedDocPagesForWorker",
+                    { count: enqueued.queued_count },
+                  ),
+                });
+              } else {
+                const jobsToPoll =
+                  enqueued.jobs && enqueued.jobs.length > 0
+                    ? enqueued.jobs
+                    : enqueued.job_ids.map((id): AdminOcrJobDTO => ({
+                        id,
+                        job_kind: "ADMIN_PAGE_UPLOAD",
+                        status: "QUEUED",
+                      }));
+                const settledJobs = await pollAdminBookOcrJobsBatch(
+                  bookId,
+                  jobsToPoll,
+                  {
+                    pollIntervalMs,
+                    maxAttempts: maxPollAttempts,
+                    onProgress: ({
+                      completedCount,
+                      failedCount,
+                      totalCount,
+                    }) => {
+                      const doneSoFar = completedCount + failedCount;
+                      const pct =
+                        totalCount > 0
+                          ? Math.min(
+                              99,
+                              Math.round((doneSoFar / totalCount) * 100),
+                            )
+                          : 100;
+                      onProgress?.({
+                        client_id: page.client_id,
+                        file_name: page.file_name,
+                        progress_percent: pct,
+                        status: "PROCESSING",
+                        created_pages_count: completedCount,
+                        failed_pages_count: failedCount,
+                      });
+                    },
+                  },
+                );
+                const completedCount = settledJobs.filter(
+                  (j) => j.status === "SUCCEEDED",
+                ).length;
+                const failedCount = settledJobs.filter(
+                  (j) => j.status === "DEAD_LETTER" || j.status === "CANCELLED",
+                ).length;
+                const pendingCount = Math.max(
+                  0,
+                  enqueued.queued_count - completedCount - failedCount,
+                );
+                onProgress?.({
+                  client_id: page.client_id,
+                  file_name: page.file_name,
+                  progress_percent: 100,
+                  status: "PROCESSING",
+                  created_pages_count: completedCount,
+                  skipped_empty_count: 0,
+                  failed_pages_count: failedCount,
+                  summary_message:
+                    pendingCount > 0
+                      ? translateRuntime(
+                          "admin.pageUploadRuntime.docPagesPartialProgress",
+                          {
+                            completed: completedCount,
+                            total: enqueued.queued_count,
+                            pending: pendingCount,
+                          },
+                        )
+                      : translateRuntime(
+                          "admin.pageUploadRuntime.docPagesComplete",
+                          {
+                            completed: completedCount,
+                            total: enqueued.queued_count,
+                          },
+                        ),
+                });
+              }
+            } catch (docError) {
+              if (!isAsyncRouteUnsupported(docError)) throw docError;
+              const summary = await requestApi(
+                `/books/admin/catalog/${encodeURIComponent(bookId)}/documents`,
+                createAdminDocumentUploadResponseSchema(bookId),
+                undefined,
+                { method: "POST", body: form },
+              );
+              onProgress?.({
+                client_id: page.client_id,
+                file_name: page.file_name,
+                progress_percent: 100,
+                status: "PROCESSING",
+                created_pages_count: summary.created_pages_count,
+                skipped_empty_count: summary.skipped_empty_count,
+                failed_pages_count: summary.failed_pages_count,
+                summary_message: formatDocumentSummary(summary),
+              });
+            }
           } else {
-            await requestApi(
-              `/books/admin/catalog/${encodeURIComponent(bookId)}/pages`,
-              adminRevisionDetailSchema,
-              undefined,
-              { method: "POST", body: form },
-            );
-            // The endpoint returns only after OCR and database persistence complete.
-            onProgress?.({
-              client_id: page.client_id,
-              file_name: page.file_name,
-              progress_percent: 100,
-              status: "PROCESSING",
-            });
+            try {
+              const job = await requestApi(
+                `/books/admin/catalog/${encodeURIComponent(bookId)}/pages/jobs`,
+                adminOcrJobSchema,
+                undefined,
+                { method: "POST", body: form },
+              );
+              onProgress?.({
+                client_id: page.client_id,
+                file_name: page.file_name,
+                progress_percent: 35,
+                status: "PROCESSING",
+                summary_message:
+                  job.status === "QUEUED"
+                    ? translateRuntime(
+                        "admin.pageUploadRuntime.singlePageQueued",
+                      )
+                    : translateRuntime(
+                        "admin.pageUploadRuntime.singlePageRecognizing",
+                      ),
+              });
+              const finalJob = await pollAdminOcrJob(job, {
+                pollIntervalMs,
+                maxAttempts: maxPollAttempts,
+              });
+              if (
+                finalJob.status === "DEAD_LETTER" ||
+                finalJob.status === "CANCELLED"
+              ) {
+                onProgress?.({
+                  client_id: page.client_id,
+                  file_name: page.file_name,
+                  progress_percent: 0,
+                  status: "FAILED",
+                  error_message:
+                    finalJob.error_message ||
+                    translateRuntime(
+                      "admin.pageUploadRuntime.singlePageFailed",
+                    ),
+                });
+              } else {
+                onProgress?.({
+                  client_id: page.client_id,
+                  file_name: page.file_name,
+                  progress_percent: 100,
+                  status: "PROCESSING",
+                  summary_message:
+                    finalJob.status === "SUCCEEDED"
+                      ? translateRuntime(
+                          "admin.pageUploadRuntime.singlePageSucceeded",
+                        )
+                      : translateRuntime(
+                          "admin.pageUploadRuntime.singlePageWaitingWorker",
+                        ),
+                });
+              }
+            } catch (pageJobError) {
+              if (!isAsyncRouteUnsupported(pageJobError)) throw pageJobError;
+              await requestApi(
+                `/books/admin/catalog/${encodeURIComponent(bookId)}/pages`,
+                adminRevisionDetailSchema,
+                undefined,
+                { method: "POST", body: form },
+              );
+              onProgress?.({
+                client_id: page.client_id,
+                file_name: page.file_name,
+                progress_percent: 100,
+                status: "PROCESSING",
+              });
+            }
           }
         } catch (cause) {
           onProgress?.({
@@ -239,7 +783,9 @@ export function createAdminPageService(): AdminPageService {
             status: "FAILED",
             error_message: isServiceError(cause)
               ? cause.message
-              : "Upload thất bại. Hãy kiểm tra Backend và thử lại.",
+              : translateRuntime(
+                  "admin.pageUploadRuntime.uploadFailedCheckBackend",
+                ),
           });
         }
       }

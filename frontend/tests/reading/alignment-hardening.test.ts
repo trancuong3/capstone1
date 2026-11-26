@@ -6,6 +6,7 @@ import {
   type CaptureScope,
 } from "@/lib/reading/reading-evidence-pipeline";
 import { parseVoiceIntent } from "@/lib/reading/voice-intent";
+import { isWordHelpRequest } from "@/lib/reading/word-help";
 import {
   gradeWord,
   gradeWords,
@@ -169,12 +170,21 @@ describe("EchoGuard", () => {
     });
   });
 
-  it("accepts the child's own imitation that starts after the echo grace", () => {
+  it("accepts the child's own imitation after tail-overlap window while blocking early reverb overlap", () => {
     const guard = new EchoGuard();
     guard.playbackStarted("a", "cho", 1000);
     guard.playbackEnded("a", 1600);
+    // Reverb echo repeating exact TTS text at +400ms (within 800ms tail-overlap window) is blocked
     expect(
-      guard.evaluate({ text: "cho", receivedAt: 2800, onsetAt: 2000 }).accept,
+      guard.evaluate({ text: "cho", receivedAt: 2200, onsetAt: 2000 }),
+    ).toMatchObject({ accept: false, reason: "tail-overlap" });
+    // Distinct non-overlapping child speech at +400ms is accepted immediately
+    expect(
+      guard.evaluate({ text: "mèo", receivedAt: 2200, onsetAt: 2000 }).accept,
+    ).toBe(true);
+    // Child repeating exact TTS word after 800ms tail-overlap window is accepted
+    expect(
+      guard.evaluate({ text: "cho", receivedAt: 2800, onsetAt: 2450 }).accept,
     ).toBe(true);
   });
 
@@ -399,5 +409,79 @@ describe("ReadingEvidencePipeline", () => {
     expect(p.resolveSampleWords("cho")).toEqual(["w3"]);
     expect(p.resolveSampleWords("cho cả nhà")).toEqual(["w3", "w4", "w5"]);
     expect(p.resolveSampleWords("Đến lượt con đọc nhé")).toEqual([]);
+  });
+});
+
+describe("reading-core alignment, segmentId idempotency & child voice intents", () => {
+  it("handles repeated words ('Mi gọi An. An quay lại gọi Mi') cleanly without duplicating or skipping boundaries", () => {
+    const repeatedWords = pageWords("Mi gọi An. An quay lại gọi Mi");
+    const engine = new RealtimeAlignmentEngine(repeatedWords);
+
+    const snap1 = engine.addFinalTranscript("Mi gọi An", "seg-1");
+    expect(snap1.statusByWordId.get("w0")?.status).toBe("MATCH");
+    expect(snap1.statusByWordId.get("w1")?.status).toBe("MATCH");
+    expect(snap1.statusByWordId.get("w2")?.status).toBe("MATCH");
+    expect(snap1.currentWordId).toBe("w3");
+
+    // Duplicate segmentId must be idempotent and never advance the second "An"
+    const dup = engine.addFinalTranscript("Mi gọi An", "seg-1");
+    expect(dup.currentWordId).toBe("w3");
+    expect(dup.statusByWordId.get("w3")).toBeUndefined();
+
+    const snap2 = engine.addFinalTranscript("An quay lại gọi Mi", "seg-2");
+    expect(snap2.statusByWordId.get("w3")?.status).toBe("MATCH");
+    expect(snap2.statusByWordId.get("w6")?.status).toBe("MATCH");
+    expect(snap2.statusByWordId.get("w7")?.status).toBe("MATCH");
+    expect(snap2.currentWordId).toBeNull();
+  });
+
+  it("tracks quick self-correction ('bàn… bạn') and keeps off-book speech neutral", () => {
+    const targetWords = pageWords("Người bạn tốt");
+    const engine = new RealtimeAlignmentEngine(targetWords);
+    engine.addFinalTranscript("Người", "s-1");
+    const slip = engine.addFinalTranscript("bàn bạn", "s-2");
+    expect(slip.statusByWordId.get("w1")?.status).toBe("MATCH");
+    expect(slip.selfCorrectedSlipWordIds?.has("w1")).toBe(true);
+
+    // Off-book chatter never marks upcoming word "tốt" wrong
+    const offBook = engine.addFinalTranscript(
+      "hôm nay trời mưa to quá mẹ ơi",
+      "s-3",
+    );
+    expect(offBook.statusByWordId.get("w2")).toBeUndefined();
+    expect(offBook.currentWordId).toBe("w2");
+  });
+
+  it("recognizes new Vietnamese child intents and yields when phrases appear in upcoming book dialogue", () => {
+    expect(parseVoiceIntent("để con tự đọc").type).toBe("WAIT");
+    expect(parseVoiceIntent("cho con tự đọc").type).toBe("WAIT");
+    expect(parseVoiceIntent("chờ con một chút").type).toBe("WAIT");
+    expect(parseVoiceIntent("chữ này con chưa biết").type).toBe("HELP");
+    expect(parseVoiceIntent("từ này con chưa biết").type).toBe("HELP");
+    expect(parseVoiceIntent("nghỉ một chút").type).toBe("STOP");
+    expect(parseVoiceIntent("tạm nghỉ").type).toBe("STOP");
+    expect(parseVoiceIntent("cho con thử thêm").type).toBe("TRY_MORE");
+
+    expect(isWordHelpRequest("chữ này con chưa biết", "nghiêng đầu")).toBe(
+      true,
+    );
+    expect(isWordHelpRequest("từ này con chưa biết", "nghiêng đầu")).toBe(true);
+
+    // Book dialogue precedence
+    expect(
+      parseVoiceIntent("Dừng lại!", {
+        upcomingText: "Dừng lại! Bé mèo kêu to.",
+      }),
+    ).toEqual({ type: "NONE", reason: "in-book" });
+    expect(
+      parseVoiceIntent("Đọc lại", {
+        upcomingText: "Đọc lại đoạn vừa rồi nhé.",
+      }),
+    ).toEqual({ type: "NONE", reason: "in-book" });
+    expect(
+      parseVoiceIntent("nghỉ một chút", {
+        upcomingText: "Bạn gấu nghỉ một chút dưới gốc cây.",
+      }),
+    ).toEqual({ type: "NONE", reason: "in-book" });
   });
 });

@@ -541,7 +541,7 @@ class RouteTests(unittest.TestCase):
         app.include_router(route.router, prefix="/reading-presence")
         app.dependency_overrides[deps.get_db] = lambda: None
         if actor is not None:
-            app.dependency_overrides[deps.get_current_parent_id] = lambda: actor
+            app.dependency_overrides[deps.require_parent_id] = lambda: actor
         patcher = patch.object(route, "build_service", lambda _db: service)
         patcher.start()
         self.addCleanup(patcher.stop)

@@ -1,0 +1,47 @@
+{
+  "account": {
+    "eyebrow": "Cuenta de ViRead",
+    "title": "Configuración de la cuenta",
+    "description": "Gestionar información de la cuenta, seguridad y opciones de uso de ViRead.",
+    "infoHeading": "Información de la cuenta",
+    "displayName": "Nombre de usuario",
+    "email": "Correo electrónico de la cuenta",
+    "role": "Rol de la cuenta",
+    "emailStatus": "Estado del correo electrónico",
+    "manageProfile": "Gestionar perfil",
+    "changePassword": "Cambiar contraseña",
+    "emailVerificationHeading": "Correo electrónico y verificación",
+    "readingRemindersHeading": "Gestionar recordatorios de lectura",
+    "readingRemindersDescription": "Ajustar los horarios de lectura y recordatorios para su hijo.",
+    "loadingAria": "Cargando configuración de la cuenta",
+    "loadErrorBody": "ViRead no pudo cargar los datos de la cuenta. Por favor, recargue la página o inicie sesión de nuevo.",
+    "notUpdated": "No actualizado",
+    "pendingEmailNotice": "Nuevo correo electrónico pendiente de confirmación:",
+    "emailStatusPending": "Nuevo correo electrónico pendiente de confirmación",
+    "emailVerified": "Verificado",
+    "emailUnverified": "No verificado",
+    "emailPendingBody": "La solicitud de cambio de correo electrónico está pendiente de verificación. El correo actual sigue siendo la dirección verificada anteriormente.",
+    "emailDefaultBody": "Para cambiar su correo electrónico o reenviar un correo de verificación, utilice la función existente en el perfil de padre.",
+    "openParentProfile": "Abrir perfil de padre"
+  },
+  "password": {
+    "title": "Cambiar contraseña",
+    "description": "Utilice una contraseña independiente para proteger su cuenta.",
+    "minLengthHint": "La nueva contraseña debe tener al menos {min} caracteres.",
+    "noPasswordDescription": "Esta cuenta aún no tiene un método de inicio de sesión con contraseña. Los padres pueden solicitar un enlace de restablecimiento de contraseña por correo electrónico.",
+    "requestRecoveryButton": "¿No tiene contraseña? Enviar un enlace de restablecimiento de contraseña por correo electrónico",
+    "changedSuccess": "Contraseña actualizada. Su sesión actual permanece activa.",
+    "currentInvalid": "La contraseña actual es incorrecta.",
+    "changeError": "No se pudo cambiar la contraseña. Por favor, compruebe su conexión e inténtelo de nuevo.",
+    "noEmailForRecovery": "No hay una dirección de correo electrónico registrada para enviar un enlace de restablecimiento de contraseña.",
+    "recoverySent": "Supabase Auth ha recibido la solicitud de restablecimiento de contraseña. Por favor, revise su bandeja de entrada y la carpeta de correo no deseado.",
+    "recoveryError": "No se pudo enviar el enlace de restablecimiento de contraseña. Por favor, inténtelo de nuevo más tarde.",
+    "showFieldAria": "Mostrar {label}",
+    "hideFieldAria": "Ocultar {label}"
+  },
+  "language": {
+    "heading": "Idioma de la interfaz",
+    "description": "Elija el idioma para la navegación y la configuración. El contenido de los libros en vietnamita permanecerá sin cambios.",
+    "learningContentNote": "Cambiar el idioma solo afecta a la navegación, los botones y la configuración. Los libros en vietnamita, el OCR, el reconocimiento de voz (STT) y la síntesis de voz (TTS) seguirán en vietnamita."
+  }
+}

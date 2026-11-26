@@ -929,7 +929,7 @@ test.describe("Reading screen viewport-bounded layout & scroll geometry", () => 
       .toBe(true);
   });
 
-  test("Healthy default stays 100% Offline, and confirmed local outage auto-falls back to Online STT & TTS with zero manual settings clicks", async ({
+  test("Healthy defaults use local engines and a worker outage preserves local-only policy until fallback is enabled", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1366, height: 768 });
@@ -954,33 +954,30 @@ test.describe("Reading screen viewport-bounded layout & scroll geometry", () => 
     await expect(sttHealthy).toContainText("Offline");
     await expect(ttsHealthy).toContainText("Offline");
 
-    // 2. Confirmed local worker outage -> auto-falls back to Online emergency mode with ZERO settings clicks!
+    // An unavailable worker cannot opt the family into an online provider.
     const { voice503Counts } = await installLongReadingSession(page, {
       mode: "prose",
       lineCount: 10,
       voiceStatusUnavailable: true,
     });
-
     const badge = page.getByTestId("voice-engine-status-badge");
-    const sttChip = page.getByTestId("voice-engine-stt-chip");
-    const ttsChip = page.getByTestId("voice-engine-tts-chip");
-
-    await expect(badge).toHaveAttribute("data-stt-tier", "browser_default");
-    await expect(badge).toHaveAttribute("data-tts-tier", "browser_default");
-    await expect(sttChip).toContainText("Online");
-    await expect(ttsChip).toContainText("Online");
-
-    // Clicking a word to hear sample audio should use browser fallback with zero 503 backend spam
-    await page.getByRole("button", { name: "Sáng" }).first().click();
-    await expect
-      .poll(() =>
-        page.evaluate(() =>
-          (
-            window as unknown as { __geomSpeech: { spoken: () => string[] } }
-          ).__geomSpeech.spoken(),
-        ),
-      )
-      .toContain("sáng");
+    await expect(badge).toHaveAttribute("data-stt-tier", "idle");
+    await expect(badge).toHaveAttribute("data-tts-tier", "idle");
+    await page.getByRole("button", { name: "Giọng đọc", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Giọng đọc mẫu" });
+    await expect(
+      dialog.getByRole("button", { name: /Chỉ máy này/ }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      dialog.getByRole("button", { name: /Máy này \+ Google dự phòng/ }),
+    ).toHaveAttribute("aria-pressed", "false");
+    expect(
+      await page.evaluate(() =>
+        (
+          window as unknown as { __geomSpeech: { spoken: () => string[] } }
+        ).__geomSpeech.spoken(),
+      ),
+    ).toEqual([]);
     expect(voice503Counts.tts).toBe(0);
     expect(voice503Counts.stt).toBe(0);
   });

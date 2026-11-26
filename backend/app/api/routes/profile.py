@@ -5,17 +5,24 @@ from sqlalchemy import select
 from typing import List
 from uuid import UUID
 
-from app.api.deps import get_db, get_current_parent_id
+from app.api.deps import (
+    get_current_parent_id,
+    get_db,
+    require_active_profile_id,
+    require_parent_id,
+)
 from app.database.config import SUPABASE_AVATAR_BUCKET
-from app.models import ChildProfile
+from app.models import ChildProfile, Profile
 from app.repositories.profile_repository import ProfileRepository
 from app.services.profile_service import (
     ProfileAccessDeniedError,
     ProfileNotFoundError,
     ProfileService,
+    batch_sign_avatar_paths,
 )
 from app.schemas.profile import (
     ContactPhoneUpdateRequest,
+    DashboardSummaryResponse,
     AdminParentListResponse,
     AdminParentDetailResponse,
     AdminParentCreateRequest,
@@ -79,8 +86,11 @@ class ChildProfileRepository:
     async def list_by_parent(self, parent_id: UUID):
         result = await self.db.execute(
             select(ChildProfile)
+            .join(Profile, Profile.Id == ChildProfile.ParentId)
             .where(
-                ChildProfile.ParentId == parent_id
+                ChildProfile.ParentId == parent_id,
+                Profile.Active == 1,
+                Profile.Role == "parent",
             )
             .order_by(
                 ChildProfile.CreatedAt.desc()
@@ -96,9 +106,12 @@ class ChildProfileRepository:
     ):
         result = await self.db.execute(
             select(ChildProfile)
+            .join(Profile, Profile.Id == ChildProfile.ParentId)
             .where(
                 ChildProfile.Id == child_id,
                 ChildProfile.ParentId == parent_id,
+                Profile.Active == 1,
+                Profile.Role == "parent",
             )
         )
 
@@ -169,15 +182,30 @@ class ChildProfileService:
         self.repository = repository
 
     @staticmethod
-    def _response(child: ChildProfile) -> dict:
+    def _safe_avatar_path(child: ChildProfile) -> str | None:
         avatar_path = getattr(child, "AvatarPath", None)
         expected_prefix = f"children/{child.Id}/avatar/"
-        is_safe_path = (
+        if (
             isinstance(avatar_path, str)
             and avatar_path.startswith(expected_prefix)
             and ".." not in avatar_path
             and not avatar_path.startswith(("http://", "https://"))
-        )
+        ):
+            return avatar_path
+        return None
+
+    @staticmethod
+    def _response(child: ChildProfile, *, avatar_url: str | None = None, use_prebuilt_url: bool = False) -> dict:
+        if not use_prebuilt_url:
+            safe_path = ChildProfileService._safe_avatar_path(child)
+            avatar_url = (
+                create_signed_image_url(
+                    safe_path,
+                    bucket_name=SUPABASE_AVATAR_BUCKET,
+                )
+                if safe_path
+                else None
+            )
         return {
             "id": child.Id,
             "parent_id": child.ParentId,
@@ -185,22 +213,29 @@ class ChildProfileService:
             "grade": child.Grade,
             "settings": child.Settings,
             "created_at": child.CreatedAt,
-            "avatar_url": (
-                create_signed_image_url(
-                    avatar_path,
-                    bucket_name=SUPABASE_AVATAR_BUCKET,
-                )
-                if is_safe_path
-                else None
-            ),
+            "avatar_url": avatar_url,
         }
+
+    async def _serialize_children_batched(self, children: list[ChildProfile]) -> list[dict]:
+        safe_paths = {child.Id: self._safe_avatar_path(child) for child in children}
+        signed_map = await batch_sign_avatar_paths(
+            [p for p in safe_paths.values() if p is not None]
+        )
+        return [
+            self._response(
+                child,
+                avatar_url=signed_map.get(safe_paths[child.Id]) if safe_paths[child.Id] else None,
+                use_prebuilt_url=True,
+            )
+            for child in children
+        ]
 
     async def list_children(
         self,
         parent_id: UUID,
     ):
-        children = await self.repository.list_by_parent(parent_id)
-        return [self._response(child) for child in children]
+        children = list(await self.repository.list_by_parent(parent_id))
+        return await self._serialize_children_batched(children)
 
     async def create_child(
         self,
@@ -214,7 +249,8 @@ class ChildProfileService:
             Settings=child_in.settings,
         )
 
-        return self._response(await self.repository.create(child))
+        created = await self.repository.create(child)
+        return (await self._serialize_children_batched([created]))[0]
 
     async def get_child(
         self,
@@ -229,7 +265,7 @@ class ChildProfileService:
         if child is None:
             raise ChildProfileNotFoundError()
 
-        return self._response(child)
+        return (await self._serialize_children_batched([child]))[0]
 
     async def update_child(
         self,
@@ -248,7 +284,8 @@ class ChildProfileService:
         child.Alias = data.alias
         child.Grade = data.grade
 
-        return self._response(await self.repository.update(child))
+        updated = await self.repository.update(child)
+        return (await self._serialize_children_batched([updated]))[0]
 
     async def delete_child(
         self,
@@ -286,7 +323,7 @@ router = APIRouter()
 async def get_all_children(
     db: AsyncSession = Depends(get_db),
     current_parent_id: UUID = Depends(
-        get_current_parent_id
+        require_parent_id
     ),
 ):
     """
@@ -310,7 +347,7 @@ async def create_child(
     child_in: ChildProfileCreate,
     db: AsyncSession = Depends(get_db),
     current_parent_id: UUID = Depends(
-        get_current_parent_id
+        require_parent_id
     ),
 ):
     """
@@ -334,7 +371,7 @@ async def get_child(
     child_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_parent_id: UUID = Depends(
-        get_current_parent_id
+        require_parent_id
     ),
 ):
     """
@@ -369,7 +406,7 @@ async def update_child(
     child_in: ChildProfileUpdate,
     db: AsyncSession = Depends(get_db),
     current_parent_id: UUID = Depends(
-        get_current_parent_id
+        require_parent_id
     ),
 ):
     """
@@ -404,7 +441,7 @@ async def delete_child(
     child_id: UUID,
     db: AsyncSession = Depends(get_db),
     current_parent_id: UUID = Depends(
-        get_current_parent_id
+        require_parent_id
     ),
 ):
     """
@@ -472,6 +509,38 @@ async def get_current_profile(
     return ParentProfileResponse.model_validate(profile)
 
 
+@router.get(
+    "/dashboard-summary",
+    response_model=DashboardSummaryResponse,
+)
+async def get_dashboard_summary(
+    db: AsyncSession = Depends(get_db),
+    current_parent_id: UUID = Depends(get_current_parent_id),
+):
+    """Consolidated parent dashboard payload (profile + children + latest session/book per child)."""
+    repository = ProfileRepository(db)
+    service = ProfileService(repository)
+    try:
+        summary = await service.get_dashboard_summary(current_parent_id)
+    except ProfileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "RESOURCE_NOT_FOUND",
+                "message": "Profile not found",
+            },
+        )
+    except ProfileAccessDeniedError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "ACCESS_DENIED",
+                "message": "Access denied",
+            },
+        )
+    return DashboardSummaryResponse.model_validate(summary)
+
+
 @router.post(
     "/me/avatar",
     response_model=ParentProfileResponse,
@@ -479,7 +548,7 @@ async def get_current_profile(
 async def upload_current_parent_avatar(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    current_parent_id: UUID = Depends(get_current_parent_id),
+    current_parent_id: UUID = Depends(require_active_profile_id),
 ):
     repository = ProfileRepository(db)
     service = AvatarService(repository, ChildProfileRepository(db))
@@ -512,7 +581,7 @@ async def upload_current_parent_avatar(
 )
 async def remove_current_parent_avatar(
     db: AsyncSession = Depends(get_db),
-    current_parent_id: UUID = Depends(get_current_parent_id),
+    current_parent_id: UUID = Depends(require_active_profile_id),
 ):
     repository = ProfileRepository(db)
     service = AvatarService(repository, ChildProfileRepository(db))
@@ -538,7 +607,7 @@ async def upload_child_avatar(
     child_id: UUID,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    current_parent_id: UUID = Depends(get_current_parent_id),
+    current_parent_id: UUID = Depends(require_parent_id),
 ):
     child_repository = ChildProfileRepository(db)
     service = AvatarService(ProfileRepository(db), child_repository)
@@ -577,7 +646,7 @@ async def upload_child_avatar(
 async def remove_child_avatar(
     child_id: UUID,
     db: AsyncSession = Depends(get_db),
-    current_parent_id: UUID = Depends(get_current_parent_id),
+    current_parent_id: UUID = Depends(require_parent_id),
 ):
     child_repository = ChildProfileRepository(db)
     service = AvatarService(ProfileRepository(db), child_repository)

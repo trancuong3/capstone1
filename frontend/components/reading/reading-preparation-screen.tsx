@@ -9,6 +9,7 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAppStore } from "@/components/providers/app-store-provider";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useBookService } from "@/hooks/use-book-service";
 import { useChildService } from "@/hooks/use-child-service";
 import { useReadingServices } from "@/hooks/use-reading-services";
@@ -44,39 +45,27 @@ type PreparationState =
   | { status: "unavailable"; contextKey: string }
   | { status: "error"; contextKey: string };
 
-const microphoneStatusLabels: Record<MicrophonePermissionUiState, string> = {
-  checking: "Chưa kiểm tra",
-  granted: "Microphone đã sẵn sàng",
-  prompt: "Chưa kiểm tra",
-  denied: "Đang bị từ chối",
-  unsupported: "Không hỗ trợ kiểm tra tự động",
-  no_device: "Không tìm thấy microphone",
-  device_busy: "Microphone đang bận",
-  error: "Không thể kiểm tra",
-};
+type ReadingTranslateFn = ReturnType<typeof useTranslations>;
 
 function microphoneDescription(
   status: MicrophonePermissionUiState,
   verified: boolean,
+  t: ReadingTranslateFn,
 ): string {
   if (verified) {
-    return "Mic đã kiểm tra xong. Bé có thể bấm Bắt đầu đọc.";
+    return t("preparation.statusHints.granted");
   }
   switch (status) {
     case "checking":
     case "granted":
     case "prompt":
-      return "Cấp quyền microphone để tiếp tục. Thiết bị tạm thời dùng để kiểm tra sẽ được đóng sau đó.";
+      return t("preparation.statusHints.prompt");
     case "denied":
-      return "Vui lòng cấp quyền microphone trong cài đặt trình duyệt rồi thử lại.";
     case "unsupported":
-      return "Trình duyệt không cung cấp trạng thái tự động. Ba mẹ vẫn có thể kiểm tra microphone bằng nút bên dưới.";
     case "no_device":
-      return "Không tìm thấy microphone trên thiết bị. Hãy kết nối microphone rồi thử lại.";
     case "device_busy":
-      return "Microphone đang được ứng dụng khác sử dụng. Hãy đóng ứng dụng đó rồi thử lại.";
     case "error":
-      return "Không thể kiểm tra microphone. Hãy sử dụng HTTPS hoặc localhost và thử lại.";
+      return t(`preparation.statusHints.${status}`);
   }
 }
 
@@ -109,6 +98,9 @@ export function ReadingPreparationScreen({
   endPageId,
   confidence,
 }: ReadingPreparationScreenProps) {
+  const { formatNumber } = useI18n();
+  const t = useTranslations("reading");
+  const tc = useTranslations("child");
   const router = useRouter();
   const bookService = useBookService();
   const childService = useChildService();
@@ -272,14 +264,10 @@ export function ReadingPreparationScreen({
         setPermissionState(nextState);
         if (previousState === "granted" && nextState !== "granted") {
           setMicrophoneVerified(false);
-          setPermissionMessage(
-            "Quyền microphone đã thay đổi. Hãy xác minh lại trước khi bắt đầu đọc.",
-          );
+          setPermissionMessage(t("preparation.permChangedError"));
         } else if (nextState === "denied") {
           setMicrophoneVerified(false);
-          setPermissionMessage(
-            "Vui lòng cấp quyền microphone trong cài đặt trình duyệt.",
-          );
+          setPermissionMessage(t("preparation.permDeniedAlert"));
         }
       })
       .then((cleanup) => {
@@ -300,7 +288,7 @@ export function ReadingPreparationScreen({
       permissionCleanupRef.current?.();
       permissionCleanupRef.current = null;
     };
-  }, [childState.status, selectedChildKey, devicePermissionService]);
+  }, [childState.status, selectedChildKey, devicePermissionService, t]);
 
   const handleVerifyMicrophone = useCallback(async () => {
     if (verificationInFlightRef.current || childState.status !== "ready")
@@ -343,7 +331,7 @@ export function ReadingPreparationScreen({
         setPermissionState("error");
         permissionStateRef.current = "error";
         setMicrophoneVerified(false);
-        setPermissionMessage("Không thể kiểm tra microphone. Hãy thử lại.");
+        setPermissionMessage(t("preparation.permCheckFailed"));
       }
     } finally {
       if (requestId === verificationRequestIdRef.current) {
@@ -351,7 +339,7 @@ export function ReadingPreparationScreen({
         if (mountedRef.current) setIsVerifying(false);
       }
     }
-  }, [childState.status, contextKey, devicePermissionService]);
+  }, [childState.status, contextKey, devicePermissionService, t]);
 
   const handleStartReading = useCallback(async () => {
     if (
@@ -396,9 +384,7 @@ export function ReadingPreparationScreen({
       );
     } catch {
       if (mountedRef.current) {
-        setStartError(
-          "Chưa thể tạo buổi đọc với phạm vi này. Ba mẹ hãy kiểm tra trang đã chọn rồi thử lại.",
-        );
+        setStartError(t("preparation.createSessionFailed"));
       }
     } finally {
       startInFlightRef.current = false;
@@ -413,6 +399,7 @@ export function ReadingPreparationScreen({
     readingService,
     router,
     state,
+    t,
   ]);
 
   if (childState.status === "loading" || childState.status === "redirecting") {
@@ -422,7 +409,7 @@ export function ReadingPreparationScreen({
         className="mx-auto w-full max-w-[980px] px-4 py-8"
       >
         <span className="sr-only" role="status">
-          Đang xác minh hồ sơ trẻ…
+          {tc("verification.loading")}
         </span>
         <Skeleton className="h-14 w-full max-w-sm rounded-card" />
       </section>
@@ -432,13 +419,12 @@ export function ReadingPreparationScreen({
   if (childState.status === "error") {
     return (
       <section className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-4 py-8">
-        <StatusMessage title="Không thể xác minh hồ sơ trẻ" tone="error">
-          Chưa thể xác nhận hồ sơ thuộc tài khoản hiện tại. Ba mẹ vui lòng thử
-          lại.
+        <StatusMessage title={tc("verification.errorTitle")} tone="error">
+          {tc("verification.errorBody")}
         </StatusMessage>
         <Button className="sm:w-auto" onClick={retryChild} variant="secondary">
           <RefreshCw aria-hidden="true" className="size-5" />
-          Thử lại
+          {tc("verification.retry")}
         </Button>
       </section>
     );
@@ -451,7 +437,7 @@ export function ReadingPreparationScreen({
         className="mx-auto w-full max-w-[980px] px-4 py-8"
       >
         <span className="sr-only" role="status">
-          Đang tải thông tin sách…
+          {t("preparation.loadingBook")}
         </span>
         <Skeleton className="h-14 w-full max-w-sm rounded-card" />
         <Skeleton className="mt-6 h-64 w-full rounded-card" />
@@ -465,17 +451,19 @@ export function ReadingPreparationScreen({
       <section className="mx-auto flex w-full max-w-[720px] flex-col gap-5 px-4 py-8">
         <StatusMessage
           title={
-            unavailable ? "Sách hiện chưa sẵn sàng" : "Không tìm thấy sách"
+            unavailable
+              ? t("preparation.bookUnavailableTitle")
+              : t("preparation.bookNotFoundTitle")
           }
           tone="error"
         >
           {unavailable
-            ? "Cuốn sách này chưa có nội dung ACTIVE và VERIFIED để bé đọc."
-            : "Cuốn sách không tồn tại hoặc không có trong thư viện hiện tại."}
+            ? t("preparation.bookUnavailableDesc")
+            : t("preparation.bookNotFoundDesc")}
         </StatusMessage>
         <ButtonLink className="sm:max-w-72" href="/books" variant="secondary">
-          <ArrowLeft aria-hidden="true" className="size-5" />
-          Về thư viện sách
+          <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-5" />
+          {t("preparation.backToLibrary")}
         </ButtonLink>
       </section>
     );
@@ -484,8 +472,8 @@ export function ReadingPreparationScreen({
   if (state.status === "error") {
     return (
       <section className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-4 py-8">
-        <StatusMessage title="Chưa tải được thông tin đọc sách" tone="error">
-          Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
+        <StatusMessage title={t("preparation.loadErrorTitle")} tone="error">
+          {t("preparation.loadErrorBody")}
         </StatusMessage>
         <Button
           className="sm:w-auto"
@@ -493,7 +481,7 @@ export function ReadingPreparationScreen({
           variant="secondary"
         >
           <RefreshCw aria-hidden="true" className="size-5" />
-          Thử lại
+          {t("session.retry")}
         </Button>
       </section>
     );
@@ -502,10 +490,10 @@ export function ReadingPreparationScreen({
   const data = state.data;
   const detailHref = `/books/${encodeURIComponent(data.book.id)}${pageId ? `?pageId=${encodeURIComponent(pageId)}` : ""}`;
   const statusText = microphoneVerified
-    ? "Microphone đã sẵn sàng"
+    ? t("preparation.micReady")
     : permissionState === "granted"
-      ? "Microphone đã được cấp quyền"
-      : microphoneStatusLabels[permissionState];
+      ? t("preparation.micGranted")
+      : t(`preparation.statusLabels.${permissionState}`);
   const canStart =
     microphoneVerified &&
     !isVerifying &&
@@ -517,10 +505,10 @@ export function ReadingPreparationScreen({
     <section className="mx-auto flex w-full max-w-[800px] flex-col gap-4">
       <header className="flex flex-col gap-2">
         <h1 className="text-heading font-extrabold leading-tight text-ink">
-          Chuẩn bị đọc sách
+          {t("preparation.heading")}
         </h1>
         <p className="max-w-[760px] text-body leading-7 text-muted">
-          Kiểm tra mic, rồi bé có thể bắt đầu đọc.
+          {t("preparation.subtitle")}
         </p>
       </header>
 
@@ -528,40 +516,53 @@ export function ReadingPreparationScreen({
         <BookCover book={data.book} size="small" showTitle={false} />
         <div className="flex min-w-0 flex-col gap-1.5">
           <div>
-            <h2 className="break-words text-xl font-extrabold text-ink">
+            <h2
+              className="viread-learning-content break-words text-xl font-extrabold text-ink"
+              dir="ltr"
+              lang="vi"
+            >
               {data.book.title}
             </h2>
             <p className="mt-1 text-sm text-muted">
-              {[data.book.author, data.child.alias, `Lớp ${data.child.grade}`]
+              {[
+                data.book.author,
+                data.child.alias,
+                tc("switcher.gradeLabel", { grade: data.child.grade }),
+              ]
                 .filter(Boolean)
                 .join(" · ")}
             </p>
           </div>
           {data.startPage && data.endPage && data.rangeValid ? (
             <p className="w-fit rounded-control bg-sky px-2 py-1 text-sm font-semibold text-primary-hover">
-              Phạm vi đọc: Trang {data.startPage.page_number}–
-              {data.endPage.page_number}
+              {t("preparation.rangeSummary", {
+                start: formatNumber(data.startPage.page_number),
+                end: formatNumber(data.endPage.page_number),
+              })}
             </p>
           ) : null}
           {data.startPage && data.confidence !== null ? (
             <p className="text-sm text-primary">
-              Trang OCR xác nhận: Trang {data.startPage.page_number} · Độ tin
-              cậy {Math.round(data.confidence * 100)}%
+              {t("preparation.ocrMatchSummary", {
+                page: formatNumber(data.startPage.page_number),
+                percent: Math.round(data.confidence * 100),
+              })}
             </p>
           ) : null}
           {data.explicitPageInvalid ? (
             <StatusMessage
-              title="Không tìm thấy trang được nhận diện"
+              title={t("preparation.matchedPageMissingTitle")}
               tone="warning"
             >
-              Trang OCR không nằm trong danh sách trang hợp lệ của sách. ViRead
-              sẽ không tự đổi sang trang khác.
+              {t("preparation.matchedPageMissingDesc")}
             </StatusMessage>
           ) : null}
           {!data.rangeValid && !data.explicitPageInvalid ? (
-            <StatusMessage title="Khoảng trang không hợp lệ" tone="error">
-              Hãy quay lại chi tiết sách và chọn lại trang bắt đầu, trang kết
-              thúc hoặc khoảng liên tục.
+            <StatusMessage
+              title={t("preparation.invalidRangeTitle")}
+              tone="error"
+            >
+              {t("preparation.invalidRangeDesc")}
             </StatusMessage>
           ) : null}
         </div>
@@ -575,22 +576,22 @@ export function ReadingPreparationScreen({
           className="flex items-center gap-2 text-lg font-extrabold text-ink"
           id="microphone-check-title"
         >
-          <Mic aria-hidden="true" className="size-5 text-primary" /> Kiểm tra
-          microphone
+          <Mic aria-hidden="true" className="size-5 text-primary" />{" "}
+          {t("preparation.micCheckSectionTitle")}
         </h2>
         <p className="mt-3 text-body text-muted">
-          ViRead chỉ ghi âm sau khi buổi đọc bắt đầu.
+          {t("preparation.micPrivacyNote")}
         </p>
         <div
           role="status"
           className={`mt-3 rounded-control p-3 ${microphoneVerified ? "bg-sky" : "bg-cream"}`}
         >
           <p className="font-bold text-ink">
-            {isVerifying ? "Đang kiểm tra" : statusText}
+            {isVerifying ? t("preparation.checking") : statusText}
           </p>
           <p className="mt-2 text-body text-muted">
             {permissionMessage ??
-              microphoneDescription(permissionState, microphoneVerified)}
+              microphoneDescription(permissionState, microphoneVerified, t)}
           </p>
         </div>
         <Button
@@ -601,13 +602,13 @@ export function ReadingPreparationScreen({
           variant={microphoneVerified ? "secondary" : "primary"}
         >
           {microphoneVerified
-            ? "Kiểm tra lại microphone"
-            : "Kiểm tra và cấp quyền microphone"}
+            ? t("preparation.recheckMic")
+            : t("preparation.checkAndAllowMic")}
         </Button>
       </section>
 
       {startError ? (
-        <StatusMessage title="Chưa thể bắt đầu đọc" tone="error">
+        <StatusMessage title={t("preparation.startFailedTitle")} tone="error">
           {startError}
         </StatusMessage>
       ) : null}
@@ -619,14 +620,16 @@ export function ReadingPreparationScreen({
           isLoading={isStarting}
           onClick={() => void handleStartReading()}
         >
-          {isStarting ? "Đang tạo buổi đọc…" : "Bắt đầu đọc"}
+          {isStarting
+            ? t("preparation.starting")
+            : t("preparation.startReading")}
         </Button>
         <ButtonLink
           className="min-h-12 sm:order-first sm:w-auto"
           href={detailHref}
           variant="quiet"
         >
-          Quay lại chi tiết sách
+          {t("preparation.backToBookDetail")}
         </ButtonLink>
       </div>
     </section>

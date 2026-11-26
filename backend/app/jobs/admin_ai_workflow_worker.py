@@ -30,6 +30,7 @@ from app.services.ocr_ai.child_safety import (
 )
 from app.services.ocr_ai.config import OcrCorrectionConfig
 from app.services.ocr_ai.exceptions import OcrConfigurationError, OcrOrchestrationError
+from app.services.worker_telemetry import record_worker_error, record_worker_success
 
 
 logger = logging.getLogger(__name__)
@@ -557,6 +558,89 @@ async def _process(workflow_id: UUID, worker_id: str) -> None:
         await _fail(workflow_id, worker_id, stage, type(exc).__name__.upper())
 
 
+_EVENT_WORKFLOW_TASKS: set[asyncio.Task[None]] = set()
+_EVENT_WORKFLOW_SEMAPHORES: dict[int, asyncio.Semaphore] = {}
+
+
+def _event_workflow_semaphore() -> asyncio.Semaphore:
+    loop_id = id(asyncio.get_running_loop())
+    sem = _EVENT_WORKFLOW_SEMAPHORES.get(loop_id)
+    if sem is None:
+        sem = asyncio.Semaphore(1)
+        _EVENT_WORKFLOW_SEMAPHORES[loop_id] = sem
+    return sem
+
+
+async def _run_event_workflow_once(*, worker_id: str | None = None) -> bool:
+    """Claim and execute one queued AdminAiWorkflow stage (zero heavy ML imports)."""
+    if not _configured_enabled():
+        return False
+    effective_worker = worker_id or f"admin-ai-event-{uuid4()}"
+    try:
+        async with AsyncSessionLocal() as session:
+            workflow_id = await AdminAiWorkflowRepository(session).claim_next(
+                effective_worker, lease_seconds=LEASE_SECONDS
+            )
+        record_worker_success("admin_ai_workflow")
+    except Exception as exc:
+        record_worker_error("admin_ai_workflow", exc)
+        log_diagnostic(
+            logger,
+            logging.ERROR,
+            event="admin_ai_workflow_claim_failed",
+            stage="queue_claim",
+            error_code=type(exc).__name__.upper(),
+        )
+        return False
+
+    if workflow_id is None:
+        return False
+    await _process(workflow_id, effective_worker)
+    return True
+
+
+async def _drain_scheduled_admin_ai_workflows(*, max_steps: int = 8) -> None:
+    await asyncio.sleep(0)
+    sem = _event_workflow_semaphore()
+    async with sem:
+        for _ in range(max(1, max_steps)):
+            did_work = await _run_event_workflow_once()
+            if not did_work:
+                break
+
+
+def schedule_admin_ai_workflow(*, force: bool = False) -> asyncio.Task[None] | None:
+    """Trigger event-driven AdminAiWorkflow execution when heavy background workers are disabled."""
+    from app.database.config import APP_ENVIRONMENT
+    from app.services.ocr_inference_job_service import is_heavy_workers_disabled
+
+    if not force:
+        app_env = (os.getenv("APP_ENVIRONMENT") or APP_ENVIRONMENT or "").strip().lower()
+        if app_env == "test" or not is_heavy_workers_disabled() or not _configured_enabled():
+            return None
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    task = loop.create_task(
+        _drain_scheduled_admin_ai_workflows(),
+        name="admin_ai_workflow_event_drain",
+    )
+    _EVENT_WORKFLOW_TASKS.add(task)
+    task.add_done_callback(_EVENT_WORKFLOW_TASKS.discard)
+    return task
+
+
+async def shutdown_scheduled_admin_ai_workflows(*, timeout_seconds: float = 5.0) -> None:
+    if not _EVENT_WORKFLOW_TASKS:
+        return
+    pending = [task for task in list(_EVENT_WORKFLOW_TASKS) if not task.done()]
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.wait(pending, timeout=timeout_seconds)
+
+
 async def run_worker(stop_event: asyncio.Event | None = None, *, poll_seconds: int = POLL_SECONDS) -> None:
     if not _configured_enabled():
         log_diagnostic(logger, logging.INFO, event="admin_ai_workflow_worker_disabled")
@@ -594,7 +678,9 @@ async def run_worker(stop_event: asyncio.Event | None = None, *, poll_seconds: i
                     workflow_id = await AdminAiWorkflowRepository(session).claim_next(
                         worker_id, lease_seconds=LEASE_SECONDS
                     )
+                record_worker_success("admin_ai_workflow")
             except Exception as exc:
+                record_worker_error("admin_ai_workflow", exc)
                 log_diagnostic(
                     logger,
                     logging.ERROR,

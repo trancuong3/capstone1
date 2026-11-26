@@ -1,11 +1,21 @@
 import type { Metadata } from "next";
 
 import { BookDetailScreen } from "@/components/books/book-detail-screen";
-import { AppServicesProvider } from "@/components/providers/app-services-provider";
+import { translateMessage } from "@/lib/i18n/formatter";
+import { getServerI18n } from "@/lib/i18n/server";
+import { viMessages } from "@/messages/vi";
 
-export const metadata: Metadata = {
-  title: "Chi tiết sách",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const { locale, messages } = await getServerI18n();
+  return {
+    title: translateMessage(
+      messages,
+      viMessages,
+      locale,
+      "books.detail.pageTitle",
+    ),
+  };
+}
 
 interface BookDetailPageProps {
   params: Promise<{ bookId: string }>;
@@ -14,9 +24,5 @@ interface BookDetailPageProps {
 export default async function BookDetailPage({ params }: BookDetailPageProps) {
   const { bookId } = await params;
 
-  return (
-    <AppServicesProvider>
-      <BookDetailScreen bookId={bookId} />
-    </AppServicesProvider>
-  );
+  return <BookDetailScreen bookId={bookId} />;
 }

@@ -17,6 +17,19 @@ def _safe_error_code(exc: BaseException) -> str | None:
     return None
 
 
+def _safe_pgcode(exc: BaseException) -> str | None:
+    orig = getattr(exc, "orig", None)
+    raw = (
+        getattr(orig, "sqlstate", None)
+        or getattr(orig, "pgcode", None)
+        or getattr(exc, "sqlstate", None)
+        or getattr(exc, "pgcode", None)
+    )
+    if isinstance(raw, str) and re.fullmatch(r"[A-Za-z0-9]{5}", raw):
+        return raw
+    return None
+
+
 def _safe_status(exc: BaseException) -> int | None:
     value = getattr(exc, "status_code", None) or getattr(exc, "status", None)
     if value is None:
@@ -66,6 +79,7 @@ def log_diagnostic(
         payload["exception_type"] = type(exception).__name__
         payload["http_status"] = _safe_status(exception)
         payload["error_code"] = _safe_error_code(exception)
+        payload["pgcode"] = _safe_pgcode(exception)
         if include_traceback and exception.__traceback__:
             # Log stack frames but not str(exception) or chained exception text,
             # which can contain SQL parameters, provider responses, or credentials.

@@ -13,6 +13,7 @@ import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useBookService } from "@/hooks/use-book-service";
+import { useTranslations } from "@/hooks/use-i18n";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { useReadingManagementService } from "@/hooks/use-reading-management-service";
 import { cn } from "@/lib/utils/cn";
@@ -31,6 +32,8 @@ type CatalogState =
 const BOOKS_PAGE_SIZE = 12;
 
 export function BookLibraryScreen() {
+  const t = useTranslations("books");
+  const tc = useTranslations("child");
   const authRuntime = useAuthRuntime();
   const currentUserId = authRuntime.session?.user?.id ?? "";
   const bookService = useBookService();
@@ -41,8 +44,12 @@ export function BookLibraryScreen() {
   });
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const effectiveSearch = search.trim() ? debouncedSearch : "";
   const [page, setPage] = useState(1);
-  const knownNonEmptyCatalogRef = useRef(false);
+  const knownNonEmptyCatalogRef = useRef<{
+    scopeKey: string;
+    nonEmpty: boolean;
+  }>({ scopeKey: "", nonEmpty: false });
   const [gradeSelection, setGradeSelection] = useState<{
     childId: string;
     grade: number | null;
@@ -68,12 +75,14 @@ export function BookLibraryScreen() {
     savedCollectionOwner === selectedChildId ? savedCollections : [];
 
   useEffect(() => {
-    const delay = search.trim() ? 250 : 0;
+    if (!search.trim() || debouncedSearch === search) {
+      return;
+    }
     const timer = globalThis.setTimeout(() => {
       setDebouncedSearch(search);
-    }, delay);
+    }, 250);
     return () => globalThis.clearTimeout(timer);
-  }, [search]);
+  }, [debouncedSearch, search]);
 
   useEffect(() => {
     if (!selectedChildId) {
@@ -94,13 +103,13 @@ export function BookLibraryScreen() {
         setSavedCollectionOwner(selectedChildId);
         setCollectionNotice({
           tone: "error",
-          text: "Chưa tải được trạng thái sách đã lưu. Hãy kiểm tra backend và migration Reading Management.",
+          text: t("catalog.savedStatusError"),
         });
       });
     return () => {
       isActive = false;
     };
-  }, [readingManagementService, selectedChildId, requestKey]);
+  }, [readingManagementService, selectedChildId, requestKey, t]);
 
   async function toggleSavedCollection(
     bookId: string,
@@ -124,7 +133,7 @@ export function BookLibraryScreen() {
         );
         setCollectionNotice({
           tone: "success",
-          text: "Đã gỡ sách khỏi danh sách.",
+          text: t("catalog.removedFromCollection"),
         });
       } else {
         const saved = await readingManagementService.addCollection(
@@ -139,13 +148,13 @@ export function BookLibraryScreen() {
         );
         setCollectionNotice({
           tone: "success",
-          text: "Đã lưu sách cho hồ sơ bé.",
+          text: t("catalog.savedForChild"),
         });
       }
     } catch {
       setCollectionNotice({
         tone: "error",
-        text: "Không lưu được thay đổi. Vui lòng thử lại; trạng thái chưa được cập nhật.",
+        text: t("catalog.saveCollectionFailed"),
       });
     } finally {
       setCollectionBusyKey("");
@@ -157,26 +166,34 @@ export function BookLibraryScreen() {
       return;
     }
 
+    const scopeKey = `${currentUserId}:${selectedChildId}`;
+    if (knownNonEmptyCatalogRef.current.scopeKey !== scopeKey) {
+      knownNonEmptyCatalogRef.current = { scopeKey, nonEmpty: false };
+    }
     let isActive = true;
 
     async function loadCatalog() {
-      setCatalogState({ status: "loading" });
+      setCatalogState((current) =>
+        current.status === "loading" ? current : { status: "loading" },
+      );
 
       try {
         const books = await bookService.list({
           grade: selectedGrade ?? undefined,
-          search: debouncedSearch,
+          search: effectiveSearch,
           include_private: true,
         });
-        const hasFilters =
-          selectedGrade !== null || debouncedSearch.trim().length > 0;
-        if (books.length > 0) {
-          knownNonEmptyCatalogRef.current = true;
+        if (!isActive) return;
+        const hasFilters = selectedGrade !== null || effectiveSearch.length > 0;
+        let hasCatalog = books.length > 0;
+        if (!hasCatalog && hasFilters) {
+          hasCatalog =
+            knownNonEmptyCatalogRef.current.nonEmpty ||
+            (await bookService.list({ include_private: true })).length > 0;
         }
-        const hasCatalog =
-          books.length > 0 || (hasFilters && knownNonEmptyCatalogRef.current);
 
         if (isActive) {
+          knownNonEmptyCatalogRef.current = { scopeKey, nonEmpty: hasCatalog };
           setPage(1);
           setCatalogState({
             status: "ready",
@@ -199,7 +216,7 @@ export function BookLibraryScreen() {
     bookService,
     childState.status,
     currentUserId,
-    debouncedSearch,
+    effectiveSearch,
     requestKey,
     selectedChildId,
     selectedGrade,
@@ -212,7 +229,7 @@ export function BookLibraryScreen() {
         className="mx-auto w-full max-w-[1280px] px-4 py-8"
       >
         <span className="sr-only" role="status">
-          Đang xác minh hồ sơ trẻ…
+          {tc("verification.loading")}
         </span>
         <Skeleton className="h-14 w-full max-w-sm rounded-card" />
       </section>
@@ -222,13 +239,12 @@ export function BookLibraryScreen() {
   if (childState.status === "error") {
     return (
       <section className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-4 py-8">
-        <StatusMessage title="Không thể xác minh hồ sơ trẻ" tone="error">
-          Chưa thể xác nhận hồ sơ thuộc tài khoản hiện tại. Ba mẹ vui lòng thử
-          lại.
+        <StatusMessage title={tc("verification.errorTitle")} tone="error">
+          {tc("verification.errorBody")}
         </StatusMessage>
         <Button className="sm:w-auto" onClick={retryChild} variant="secondary">
           <RefreshCw aria-hidden="true" className="size-5" />
-          Thử lại
+          {tc("verification.retry")}
         </Button>
       </section>
     );
@@ -239,15 +255,15 @@ export function BookLibraryScreen() {
       <BookChildHeader
         child={child}
         fullBleedDesktop
-        mobileLabel="Cùng bé chọn một cuốn sách"
+        mobileLabel={t("catalog.subtitle")}
       />
 
       {collectionNotice ? (
         <StatusMessage
           title={
             collectionNotice.tone === "success"
-              ? "Đã cập nhật danh sách"
-              : "Không thể cập nhật danh sách"
+              ? t("catalog.collectionUpdatedStatus")
+              : t("catalog.collectionUpdateFailedStatus")
           }
           tone={collectionNotice.tone}
         >
@@ -256,28 +272,30 @@ export function BookLibraryScreen() {
       ) : null}
 
       <div className="mx-auto flex w-full max-w-[1130px] flex-col gap-6">
-        <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-6">
+        <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5 sm:pb-6">
           <div className="flex flex-col gap-2">
-            <h1 className="book-title min-w-0 break-words text-4xl text-ink sm:text-5xl">
-              Tủ sách{child ? ` của ${child.alias}` : " của bé"}
+            <h1 className="book-title min-w-0 break-words text-2xl text-ink sm:text-4xl lg:text-5xl">
+              {child
+                ? t("catalog.familyBooksTitle", { alias: child.alias })
+                : t("catalog.familyBooksDefaultTitle")}
             </h1>
             <div className="flex flex-wrap items-center gap-2">
               <ButtonLink
                 href="/my-books"
                 variant="secondary"
-                className="min-h-10 w-auto px-4 text-sm"
+                className="min-h-12 w-auto px-4 text-sm"
               >
                 <BookMarked aria-hidden="true" className="size-4" />
-                Sách của tôi
+                {t("catalog.myBooksLink")}
               </ButtonLink>
             </div>
           </div>
           <div className="w-full sm:max-w-sm">
             <TextField
-              aria-label="Tìm theo tên sách hoặc tác giả"
-              label="Tìm cuốn sách bé thích…"
+              aria-label={t("catalog.searchAria")}
+              label={t("catalog.searchLabel")}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Tìm theo tên sách hoặc tác giả"
+              placeholder={t("catalog.searchInputPlaceholder")}
               type="search"
               value={search}
             />
@@ -285,7 +303,7 @@ export function BookLibraryScreen() {
         </div>
 
         <fieldset className="min-w-0">
-          <legend className="sr-only">Lọc sách theo lớp</legend>
+          <legend className="sr-only">{t("catalog.gradeFilterLegend")}</legend>
           <div className="flex flex-wrap gap-2">
             {[null, ...CHILD_GRADES].map((grade) => {
               const isSelected = selectedGrade === grade;
@@ -307,7 +325,9 @@ export function BookLibraryScreen() {
                   }}
                   type="button"
                 >
-                  {grade === null ? "Tất cả" : `Lớp ${grade}`}
+                  {grade === null
+                    ? t("catalog.gradeAllOption")
+                    : t("catalog.gradeOption", { grade })}
                 </button>
               );
             })}
@@ -317,11 +337,11 @@ export function BookLibraryScreen() {
         {catalogState.status === "loading" ? (
           <div
             aria-busy="true"
-            aria-label="Đang tải thư viện sách"
+            aria-label={t("catalog.loadingAria")}
             className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3"
           >
             <span className="sr-only" role="status">
-              Đang tải sách…
+              {t("catalog.loadingText")}
             </span>
             {[0, 1, 2, 3].map((item) => (
               <Skeleton
@@ -334,8 +354,8 @@ export function BookLibraryScreen() {
 
         {catalogState.status === "error" ? (
           <div className="flex flex-col gap-4">
-            <StatusMessage title="Chưa tải được thư viện sách" tone="error">
-              Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
+            <StatusMessage title={t("catalog.loadErrorTitle")} tone="error">
+              {t("catalog.loadErrorBody")}
             </StatusMessage>
             <Button
               className="sm:w-auto sm:self-start sm:px-8"
@@ -343,7 +363,7 @@ export function BookLibraryScreen() {
               variant="secondary"
             >
               <RefreshCw aria-hidden="true" className="size-5" />
-              Thử lại
+              {t("catalog.retry")}
             </Button>
           </div>
         ) : null}
@@ -352,14 +372,14 @@ export function BookLibraryScreen() {
         catalogState.books.length === 0 &&
         !catalogState.hasCatalog ? (
           <EmptyState
-            description="Các câu chuyện đã xác minh sẽ xuất hiện tại đây khi sẵn sàng."
+            description={t("catalog.updatingDescription")}
             icon={
               <BookOpenText
                 aria-hidden="true"
                 className="size-10 text-primary"
               />
             }
-            title="Thư viện đang được cập nhật"
+            title={t("catalog.updatingTitle")}
           />
         ) : null}
 
@@ -379,14 +399,14 @@ export function BookLibraryScreen() {
                 }}
                 variant="secondary"
               >
-                Xóa bộ lọc
+                {t("catalog.clearFilter")}
               </Button>
             }
-            description="Thử tên sách, tác giả hoặc lớp khác nhé."
+            description={t("catalog.emptyFilteredDescription")}
             icon={
               <SearchX aria-hidden="true" className="size-10 text-primary" />
             }
-            title="Không tìm thấy cuốn sách phù hợp"
+            title={t("catalog.emptyFilteredTitle")}
           />
         ) : null}
 
@@ -410,8 +430,8 @@ export function BookLibraryScreen() {
                 ))}
             </div>
             <PaginationBar
-              ariaLabel="Phân trang thư viện sách"
-              itemLabel="cuốn sách"
+              ariaLabel={t("catalog.paginationAria")}
+              itemLabel={t("catalog.paginationItemLabel")}
               onPageChange={setPage}
               page={page}
               pageSize={BOOKS_PAGE_SIZE}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 import hashlib
 import hmac
 import io
@@ -715,6 +716,84 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
                 )
 
         return _iter_bytes()
+
+    def open_stream_with_metadata(
+        self,
+        reference: str,
+        *,
+        chunk_size: int = 1024 * 1024,
+        expected_sha256: str | None = None,
+    ) -> tuple[ArtifactMetadata, Iterator[bytes]]:
+        """Fetch Drive metadata + payload eagerly so failures raise before HTTP 200 headers flush."""
+        parsed = parse_artifact_ref(reference)
+        if parsed.provider != StorageProvider.GOOGLE_DRIVE or not parsed.drive_file_id:
+            raise ValueError("GoogleAppsScriptDriveStore only handles gdrive:// references")
+        expected = validate_sha256(expected_sha256, required=False)
+        file_id = parsed.drive_file_id
+
+        res = self._call_bridge("get_file", {"file_id": file_id})
+        file_info = res.get("file") or {}
+        meta = self._metadata_from_file_info(file_info)
+        if meta.is_public:
+            raise DrivePermissionError(
+                "Drive artifact has public permissions; refusing stream",
+                code="DRIVE_PUBLIC_PERMISSION_DETECTED",
+            )
+        if meta.trashed:
+            raise DriveNotFoundError("Drive artifact is trashed")
+
+        raw_bytes = base64.b64decode(str(res.get("content_b64") or ""))
+        is_chunked = bool(file_info.get("is_chunked")) or bool(meta.extra.get("is_chunked"))
+        step = max(64 * 1024, int(chunk_size))
+
+        if is_chunked:
+            try:
+                manifest = json.loads(raw_bytes.decode("utf-8"))
+            except Exception as exc:
+                raise DriveIntegrityError("Corrupted chunked artifact manifest on Google Drive") from exc
+            if not isinstance(manifest, dict) or not manifest.get("viread_chunked_v1"):
+                raise DriveIntegrityError("Invalid chunked artifact manifest structure")
+            parts = sorted(manifest.get("parts") or [], key=lambda p: int(p.get("index", 0)))
+            if meta.size_bytes is None and isinstance(manifest.get("size_bytes"), int):
+                meta = replace(meta, size_bytes=int(manifest["size_bytes"]))
+
+            def _iter_chunked() -> Iterator[bytes]:
+                digest = hashlib.sha256()
+                for part in parts:
+                    part_id = validate_drive_file_id(str(part["file_id"]))
+                    part_res = self._call_bridge("get_file", {"file_id": part_id})
+                    part_bytes = base64.b64decode(str(part_res.get("content_b64") or ""))
+                    expected_part_sha = validate_sha256(part.get("sha256"), required=False)
+                    actual_part_sha = hashlib.sha256(part_bytes).hexdigest()
+                    if expected_part_sha and actual_part_sha != expected_part_sha:
+                        raise DriveIntegrityError("Chunked artifact part SHA-256 mismatch")
+                    for pos in range(0, len(part_bytes), step):
+                        piece = part_bytes[pos : pos + step]
+                        digest.update(piece)
+                        yield piece
+                actual = digest.hexdigest()
+                authoritative = expected or meta.sha256
+                if authoritative and actual != authoritative.lower():
+                    raise DriveIntegrityError(
+                        f"Streamed artifact SHA-256 mismatch: expected {authoritative[:12]}, got {actual[:12]}"
+                    )
+
+            return meta, _iter_chunked()
+
+        actual = hashlib.sha256(raw_bytes).hexdigest()
+        authoritative = expected or meta.sha256
+        if authoritative and actual != authoritative.lower():
+            raise DriveIntegrityError(
+                f"Streamed artifact SHA-256 mismatch: expected {authoritative[:12]}, got {actual[:12]}"
+            )
+        if meta.size_bytes is None:
+            meta = replace(meta, size_bytes=len(raw_bytes))
+
+        def _iter_raw() -> Iterator[bytes]:
+            for pos in range(0, len(raw_bytes), step):
+                yield raw_bytes[pos : pos + step]
+
+        return meta, _iter_raw()
 
     def get(
         self,

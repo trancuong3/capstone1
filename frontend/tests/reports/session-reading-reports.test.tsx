@@ -11,6 +11,7 @@ const { comparisonApi } = vi.hoisted(() => ({
   comparisonApi: {
     getSessionReports: vi.fn(),
     getReadingPage: vi.fn(),
+    deleteReadingReport: vi.fn(),
   },
 }));
 
@@ -99,6 +100,7 @@ beforeEach(() => {
     reports: [report],
   });
   comparisonApi.getReadingPage.mockReset().mockResolvedValue(historicalPage);
+  comparisonApi.deleteReadingReport.mockReset().mockResolvedValue(undefined);
 });
 
 describe("SessionReadingReports", () => {
@@ -141,7 +143,9 @@ describe("SessionReadingReports", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Bé đọc khóe đọc")).toBeInTheDocument();
     expect(
-      screen.getByText(/Không tải được nội dung của đúng revision đã đọc/),
+      screen.getByText(
+        /Chưa tải được nội dung trang sách đã đọc theo đúng phiên bản lúc bé đọc/,
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByText("Bé khỏe đang đọc.")).not.toBeInTheDocument();
     expect(comparisonApi.getReadingPage).toHaveBeenCalledWith(
@@ -288,5 +292,151 @@ describe("SessionReadingReports", () => {
     });
     expect(coAfter.className).not.toContain("bg-red-200");
     expect(screen.getByText(/Đã đọc lại đúng: 1 từ/)).toBeInTheDocument();
+  });
+
+  it("lazy-loads only the active page on mount and caches visited pages without re-fetching", async () => {
+    const page2Id = "20000000-0000-4000-8000-000000000002";
+    const rev2Id = "30000000-0000-4000-8000-000000000002";
+    const page3Id = "20000000-0000-4000-8000-000000000003";
+    const rev3Id = "30000000-0000-4000-8000-000000000003";
+    const page2: ReadingPage = {
+      ...historicalPage,
+      page_id: page2Id,
+      page_revision_id: rev2Id,
+      page_number: 8,
+      text: "Trang tám đã lưu.",
+    };
+    comparisonApi.getSessionReports.mockResolvedValueOnce({
+      session_id: SESSION_ID,
+      total: 3,
+      reports: [
+        { ...report, report_id: "rep-1", created_at: "2026-11-06T10:00:00Z" },
+        {
+          ...report,
+          report_id: "rep-2",
+          page_id: page2Id,
+          page_revision_id: rev2Id,
+          created_at: "2026-11-06T10:02:00Z",
+          transcript: "Trang tám",
+        },
+        {
+          ...report,
+          report_id: "rep-3",
+          page_id: page3Id,
+          page_revision_id: rev3Id,
+          created_at: "2026-11-06T10:04:00Z",
+          transcript: "Trang chín",
+        },
+      ],
+    });
+    comparisonApi.getReadingPage.mockImplementation(async (id: string) =>
+      id === page2Id ? page2 : historicalPage,
+    );
+
+    render(<SessionReadingReports sessionId={SESSION_ID} />);
+    expect(
+      await screen.findByRole("heading", { name: "Trang 7" }),
+    ).toBeInTheDocument();
+    // Only the initial page is requested on mount — NOT eager N-page Promise.all.
+    expect(comparisonApi.getReadingPage).toHaveBeenCalledTimes(1);
+    expect(comparisonApi.getReadingPage).toHaveBeenCalledWith(
+      PAGE_ID,
+      SESSION_ID,
+      REVISION_ID,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Báo cáo trang tiếp theo" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Trang 8" }),
+    ).toBeInTheDocument();
+    expect(comparisonApi.getReadingPage).toHaveBeenCalledTimes(2);
+    expect(comparisonApi.getReadingPage).toHaveBeenLastCalledWith(
+      page2Id,
+      SESSION_ID,
+      rev2Id,
+    );
+
+    // Navigating back to page 1 uses the in-session cache without another network call.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Báo cáo trang trước" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Trang 7" }),
+    ).toBeInTheDocument();
+    expect(comparisonApi.getReadingPage).toHaveBeenCalledTimes(2);
+  });
+
+  it("renders a single primary report per page, discloses extra comparisons, preserves immutable v1 and allows deleting non-v1 comparisons", async () => {
+    const firstPassReport: SavedReadingReport = {
+      ...report,
+      report_id: "rep-v1-first",
+      created_at: "2026-11-06T10:00:00Z",
+      transcript: "Lời đọc lượt đầu",
+      summary: {
+        ...report.summary,
+        assessment_version: 1,
+      },
+    };
+    const retryComparison: SavedReadingReport = {
+      ...report,
+      report_id: "rep-extra-retry",
+      created_at: "2026-11-06T10:01:00Z",
+      transcript: "Lời đọc đối chiếu bổ sung",
+    };
+    comparisonApi.getSessionReports.mockResolvedValueOnce({
+      session_id: SESSION_ID,
+      total: 2,
+      reports: [retryComparison, firstPassReport],
+    });
+
+    render(<SessionReadingReports sessionId={SESSION_ID} />);
+    expect(
+      await screen.findByRole("heading", { name: "Trang 7" }),
+    ).toBeInTheDocument();
+
+    // P0: Only ONE "Báo cáo đọc" heading and ONE primary report region.
+    expect(
+      screen.getAllByRole("heading", { name: "Báo cáo đọc" }),
+    ).toHaveLength(1);
+    expect(
+      screen.getByTestId("session-primary-reading-report"),
+    ).toBeInTheDocument();
+    expect(
+      screen
+        .getByTestId("session-primary-reading-report")
+        .querySelector('[data-active-report-id="rep-v1-first"]'),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Lời đọc lượt đầu").length).toBeGreaterThan(0);
+
+    // Extra comparison is preserved inside collapsible disclosure, not silently dropped or duplicated.
+    const disclosureSummary = screen.getByText(
+      "Các lượt đối chiếu khác của trang này (1)",
+    );
+    fireEvent.click(disclosureSummary);
+    expect(screen.getByText("Được giữ nguyên")).toBeInTheDocument();
+
+    // Switching to inspect the extra comparison works.
+    fireEvent.click(screen.getByRole("button", { name: "Xem lượt này" }));
+    expect(
+      screen.getAllByText("Lời đọc đối chiếu bổ sung").length,
+    ).toBeGreaterThan(0);
+
+    // Deleting only the non-v1 comparison preserves the immutable first-pass report.
+    fireEvent.click(screen.getByRole("button", { name: "Xóa báo cáo" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Xác nhận xóa" }),
+    );
+
+    await waitFor(() =>
+      expect(comparisonApi.deleteReadingReport).toHaveBeenCalledWith(
+        "rep-extra-retry",
+      ),
+    );
+    expect(
+      screen.queryByText("Các lượt đối chiếu khác của trang này (1)"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Lời đọc lượt đầu")).toBeInTheDocument();
   });
 });

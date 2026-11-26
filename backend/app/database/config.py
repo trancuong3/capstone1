@@ -50,6 +50,27 @@ SUPABASE_SERVICE_ROLE_KEY = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip
 SUPABASE_ADMIN_KEY = SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY
 
 
+def is_supabase_jwt_key(api_key: str | None) -> bool:
+    """Return True only when the key looks like a legacy 3-part JWT rather than sb_secret_*."""
+    clean = (api_key or "").strip()
+    return clean.count(".") == 2 and not clean.startswith("sb_")
+
+
+def supabase_admin_headers(
+    api_key: str | None = None,
+    *,
+    extra: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Build Supabase Storage/PostgREST headers compatible with both sb_secret_* and JWT keys."""
+    key = ((api_key if api_key is not None else SUPABASE_ADMIN_KEY) or "").strip()
+    headers: dict[str, str] = {"apikey": key}
+    if is_supabase_jwt_key(key):
+        headers["Authorization"] = f"Bearer {key}"
+    if extra:
+        headers.update(extra)
+    return headers
+
+
 def _int_env(name: str, default: int, *, minimum: int, maximum: int) -> int:
     raw = os.getenv(name)
     if raw is None or not raw.strip():
@@ -183,6 +204,21 @@ DATABASE_CONNECT_TIMEOUT = _float_env(
 )
 DATABASE_COMMAND_TIMEOUT = _float_env(
     "DATABASE_COMMAND_TIMEOUT", 30.0, minimum=1.0, maximum=600.0
+)
+# Supavisor transaction pooler (port 6543) multiplexes server-side connections;
+# pool_pre_ping adds a synchronous extra SELECT 1 round-trip (~250-450ms Oregon<->APAC)
+# before every checkout. Default False on transaction pooler (relying on
+# pool_recycle=180 + asyncpg disconnect handling), True on direct/session mode,
+# and always overridable via DATABASE_POOL_PRE_PING.
+DATABASE_POOL_PRE_PING = _bool_env(
+    "DATABASE_POOL_PRE_PING",
+    default=DATABASE_POOLER_MODE != "transaction",
+)
+DATABASE_POOL_RECYCLE_SECONDS = _int_env(
+    "DATABASE_POOL_RECYCLE_SECONDS",
+    180 if DATABASE_POOLER_MODE == "transaction" else 300,
+    minimum=30,
+    maximum=3600,
 )
 
 if not DATABASE_URL or not SUPABASE_URL or not SUPABASE_KEY:

@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_parent_id, get_db
 from app.diagnostic_logging import log_diagnostic
-from app.schemas.admin_book import AdminBookWriteRequest
 from app.schemas.admin_ocr import (
     AdminOcrCreateDraftRequest,
     AdminOcrDraftRequest,
@@ -26,13 +25,10 @@ from app.schemas.admin_ai_workflow import (
     AdminAiWorkflowRead,
 )
 from app.schemas.book import (
-    AdminBookMetadataResponse,
     AdminDocumentUploadResponse,
     AdminPageLifecycleRead,
     AdminRevisionDetailRead,
 )
-from app.repositories.admin_book_repository import AdminBookRepository
-from app.services.admin_book_service import AdminBookService
 from app.services.admin_ocr_service import AdminOcrService
 from app.services.admin_ocr_jobs import (
     AdminOcrCorrectionJob,
@@ -89,15 +85,6 @@ def _job_read(job: AdminOcrCorrectionJob) -> AdminOcrAiCorrectionJobRead:
 
 
 
-@router.post("/admin/catalog", response_model=AdminBookMetadataResponse, status_code=201)
-async def create_admin_book(
-    payload: AdminBookWriteRequest,
-    actor_id: UUID = Depends(get_current_parent_id),
-    db: AsyncSession = Depends(get_db),
-):
-    return await AdminBookService(AdminBookRepository(db)).create(actor_id, payload)
-
-
 @router.post("/admin/catalog/{book_id}/pages", response_model=AdminRevisionDetailRead, status_code=201)
 async def upload_admin_page(
     book_id: UUID,
@@ -108,7 +95,7 @@ async def upload_admin_page(
     db: AsyncSession = Depends(get_db),
 ):
     detail = await AdminOcrService(db).upload_page(
-        actor_id, book_id, image, upload_id=upload_id
+        actor_id, book_id, image, upload_id=upload_id, page_number=page_number
     )
     # OCR is complete and persisted at this point. Enqueue this page's durable
     # proofreading workflow immediately so book processing can advance page by
@@ -244,6 +231,19 @@ async def enqueue_admin_page_ocr_job(
 ):
     return await AdminOcrService(db).enqueue_upload_page_job(
         actor_id, book_id, image, upload_id=upload_id
+    )
+
+
+@router.post("/admin/catalog/{book_id}/documents/jobs", status_code=202)
+async def enqueue_admin_document_ocr_jobs(
+    book_id: UUID,
+    document: UploadFile = File(...),
+    upload_id: UUID | None = Form(default=None),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminOcrService(db).enqueue_upload_document_jobs(
+        actor_id, book_id, document, upload_id=upload_id
     )
 
 

@@ -1,5 +1,6 @@
 import { getBrowserAccessToken } from "@/lib/api/browser-auth";
 import { ServiceError } from "@/lib/api/service-error";
+import { translateRuntime } from "@/lib/i18n/runtime";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 import type {
   EntertainmentRecommendationsDTO,
@@ -31,7 +32,7 @@ async function fetchJson<T>(path: string): Promise<T> {
   if (!response.ok) {
     throw new ServiceError({
       code: response.status === 404 ? "RESOURCE_NOT_FOUND" : "NETWORK_ERROR",
-      message: "Không thể tải gợi ý học tập lúc này.",
+      message: translateRuntime("entertainment.hub.recommendationLoadError"),
       status: response.status,
       request_id: response.headers.get("x-request-id") ?? "",
       retryable: response.status >= 500,

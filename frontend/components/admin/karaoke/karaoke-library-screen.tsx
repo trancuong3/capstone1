@@ -9,11 +9,13 @@ import { Modal } from "@/components/common/modal";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminKaraoke } from "@/components/karaoke/karaoke-services-provider";
+import { useTranslations } from "@/hooks/use-i18n";
 import { karaokeErrorMessage } from "@/lib/api/admin-karaoke-service";
 import { isServiceError } from "@/lib/api/service-error";
-import { processingStatusLabels } from "@/components/admin/karaoke/karaoke-processing-status";
 import { formatKaraokeTime } from "@/lib/karaoke/lyrics-timeline";
 import type { AdminKaraokeList } from "@/types/karaoke";
+
+const KARAOKE_STATUS_KEYS = ["DRAFT", "PUBLISHED", "HIDDEN"] as const;
 
 export const karaokeStatusLabels = {
   DRAFT: "Bản nháp",
@@ -22,6 +24,7 @@ export const karaokeStatusLabels = {
 };
 export function KaraokeLibraryScreen() {
   const service = useAdminKaraoke();
+  const t = useTranslations("admin");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<"" | "DRAFT" | "PUBLISHED" | "HIDDEN">(
     "",
@@ -137,10 +140,14 @@ export function KaraokeLibraryScreen() {
   return (
     <div className="grid gap-6">
       <AdminPageHeader
-        eyebrow="NỘI DUNG CHO BÉ"
-        title="Bài hát"
-        description="Quản lý nhạc nền, lời và thời gian hiển thị từng câu. Bản nháp không xuất hiện trong thư viện của trẻ."
-        actions={<ButtonLink href="/admin/karaoke/new">Tạo bài hát</ButtonLink>}
+        eyebrow={t("karaoke.library.eyebrow")}
+        title={t("karaoke.library.title")}
+        description={t("karaoke.library.description")}
+        actions={
+          <ButtonLink href="/admin/karaoke/new">
+            {t("karaoke.library.createSong")}
+          </ButtonLink>
+        }
       />
       <Card>
         <form
@@ -148,7 +155,7 @@ export function KaraokeLibraryScreen() {
           className="grid items-end gap-4 md:grid-cols-[2fr_1fr_auto]"
         >
           <label className="grid gap-2 font-bold">
-            Tìm bài hát
+            {t("karaoke.library.searchLabel")}
             <input
               className={karaokeInputClass}
               value={search}
@@ -157,22 +164,22 @@ export function KaraokeLibraryScreen() {
             />
           </label>
           <label className="grid gap-2 font-bold">
-            Trạng thái
+            {t("karaoke.library.statusLabel")}
             <select
               className={karaokeInputClass}
               value={status}
               onChange={(e) => setStatus(e.target.value as typeof status)}
             >
-              <option value="">Tất cả</option>
-              {Object.entries(karaokeStatusLabels).map(([value, label]) => (
+              <option value="">{t("common.all")}</option>
+              {KARAOKE_STATUS_KEYS.map((value) => (
                 <option key={value} value={value}>
-                  {label}
+                  {t(`karaoke.library.statuses.${value}`)}
                 </option>
               ))}
             </select>
           </label>
           <Button type="submit" disabled={busy}>
-            Áp dụng
+            {t("karaoke.library.apply")}
           </Button>
         </form>
       </Card>
@@ -185,50 +192,57 @@ export function KaraokeLibraryScreen() {
             onClick={refresh}
             disabled={busy}
           >
-            Thử tải lại
+            {t("karaoke.library.retryReload")}
           </Button>
         </StatusMessage>
       )}
       {loading ? (
-        <AdminLoading label="Đang tải bài hát…" />
+        <AdminLoading label={t("karaoke.library.loading")} />
       ) : (
         !error &&
         data && (
           <>
             {!data.items.length ? (
               <Card>
-                <p>
-                  Chưa có bài hát phù hợp. Tạo bản nháp để tải nhạc và lời của
-                  bạn lên.
-                </p>
+                <p>{t("karaoke.library.empty")}</p>
               </Card>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {data.items.map((item) => (
                   <Card key={item.song_id}>
                     <p className="text-sm font-bold text-primary-hover">
-                      {karaokeStatusLabels[item.status]}
+                      {t(`karaoke.library.statuses.${item.status}`)}
                       {item.published_version_id && item.draft_version_id
-                        ? " · Có bản đang sửa"
+                        ? t("karaoke.library.hasDraftEditSuffix")
                         : ""}
                     </p>
-                    <h2 className="break-words text-xl font-extrabold">
-                      {item.title || "Bài hát chưa đặt tên"}
+                    <h2
+                      className="break-words text-xl font-extrabold"
+                      dir="auto"
+                    >
+                      {item.title || t("karaoke.library.untitled")}
                     </h2>
                     {item.processing_summary && (
                       <p className="rounded-control bg-sky px-3 py-2 text-sm font-bold text-primary-hover">
-                        Xử lý:{" "}
-                        {processingStatusLabels[item.processing_summary.status]}
+                        {t("karaoke.library.processingPrefix")}{" "}
+                        {t(
+                          `karaoke.processing.statusLabels.${item.processing_summary.status}`,
+                        )}
                       </p>
                     )}
                     <p className="break-words text-muted">
-                      {item.author || "Chưa có tác giả"} · Lớp {item.min_grade}–
-                      {item.max_grade}
-                    </p>
-                    <p>
-                      {item.has_audio && item.duration_ms !== null
-                        ? `Nhạc ${formatKaraokeTime(item.duration_ms)}`
-                        : "Chưa có nhạc"}
+                      {t("karaoke.library.metaLine", {
+                        author:
+                          item.author || t("karaoke.library.unknownAuthor"),
+                        minGrade: item.min_grade,
+                        maxGrade: item.max_grade,
+                        duration:
+                          item.has_audio && item.duration_ms !== null
+                            ? t("karaoke.library.durationValue", {
+                                time: formatKaraokeTime(item.duration_ms),
+                              })
+                            : t("karaoke.library.noAudio"),
+                      })}
                     </p>
                     <div className="mt-auto flex flex-wrap gap-2">
                       <ButtonLink
@@ -240,15 +254,15 @@ export function KaraokeLibraryScreen() {
                         ["READY", "NEEDS_REVIEW"].includes(
                           item.processing_summary.status,
                         )
-                          ? "Xem kết quả"
+                          ? t("karaoke.library.viewResults")
                           : item.processing_summary &&
                               ["QUEUED", "RUNNING"].includes(
                                 item.processing_summary.status,
                               )
-                            ? "Tiếp tục tạo"
+                            ? t("karaoke.library.continueCreating")
                             : item.processing_summary?.status === "FAILED"
-                              ? "Xem lỗi / Thử lại"
-                              : "Chi tiết / Chỉnh sửa"}
+                              ? t("karaoke.library.viewErrorRetry")
+                              : t("karaoke.library.detailEdit")}
                       </ButtonLink>
                       {item.published_version_id && (
                         <Button
@@ -257,7 +271,9 @@ export function KaraokeLibraryScreen() {
                           disabled={busy}
                           onClick={() => setPendingVisibilityItem(item)}
                         >
-                          {item.status === "HIDDEN" ? "Hiện lại" : "Ẩn bài hát"}
+                          {item.status === "HIDDEN"
+                            ? t("karaoke.library.showSong")
+                            : t("karaoke.library.hideSong")}
                         </Button>
                       )}
                     </div>
@@ -266,10 +282,10 @@ export function KaraokeLibraryScreen() {
               </div>
             )}
             <PaginationBar
-              ariaLabel="Phân trang bài hát"
+              ariaLabel={t("karaoke.library.paginationAria")}
               disabled={busy}
-              itemLabel="bài"
-              nextLabel="Trang sau"
+              itemLabel={t("karaoke.library.itemLabel")}
+              nextLabel={t("karaoke.library.nextLabel")}
               onPageChange={(nextPage) => {
                 const limit = Math.max(1, data.limit || 12);
                 setLoading(true);
@@ -282,7 +298,7 @@ export function KaraokeLibraryScreen() {
                 Math.floor(query.offset / Math.max(1, data.limit || 12)) + 1
               }
               pageSize={Math.max(1, data.limit || 12)}
-              prevLabel="Trang trước"
+              prevLabel={t("karaoke.library.prevLabel")}
               total={data.total}
             />
           </>
@@ -300,7 +316,7 @@ export function KaraokeLibraryScreen() {
               type="button"
               variant="secondary"
             >
-              Hủy
+              {t("common.cancel")}
             </Button>
             <Button
               disabled={busy}
@@ -315,8 +331,8 @@ export function KaraokeLibraryScreen() {
               }
             >
               {pendingVisibilityItem?.status === "HIDDEN"
-                ? "Xác nhận hiện lại"
-                : "Xác nhận ẩn bài hát"}
+                ? t("karaoke.library.confirmShow")
+                : t("karaoke.library.confirmHide")}
             </Button>
           </div>
         }
@@ -328,14 +344,20 @@ export function KaraokeLibraryScreen() {
         showCloseButton={!busy}
         title={
           pendingVisibilityItem?.status === "HIDDEN"
-            ? "Hiện lại bài hát?"
-            : "Ẩn bài hát?"
+            ? t("karaoke.library.modalShowTitle")
+            : t("karaoke.library.modalHideTitle")
         }
         tone="paper"
       >
         <p className="text-body text-ink">
           {pendingVisibilityItem
-            ? `${pendingVisibilityItem.status === "HIDDEN" ? "Hiện lại" : "Ẩn"} bài hát “${pendingVisibilityItem.title}” cho trẻ?`
+            ? t("karaoke.library.modalVisibilityDesc", {
+                action:
+                  pendingVisibilityItem.status === "HIDDEN"
+                    ? t("karaoke.library.showSong")
+                    : t("karaoke.library.hideSong"),
+                title: pendingVisibilityItem.title,
+              })
             : ""}
         </p>
       </Modal>

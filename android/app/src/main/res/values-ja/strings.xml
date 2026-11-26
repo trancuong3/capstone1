@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ViRead</string>
+    <string name="loading_title">ViRead を開いています</string>
+    <string name="loading_subtitle">ViRead を読み込み中…</string>
+    <string name="loading_hint_stage2">サーバーに接続しています…</string>
+    <string name="loading_hint_stage3">サーバーを起動中です。しばらくお待ちください…</string>
+    <string name="loading_cold_start_hint">サーバーを起動中（cold-start）です。もうしばらくお待ちください…</string>
+    <string name="error_title_network">ViRead サーバーに接続できません</string>
+    <string name="error_title_server">ViRead サーバーが起動中または混雑しています</string>
+    <string name="error_title_timeout">ViRead に接続できません</string>
+    <string name="error_title_tls">セキュリティ証明書が無効です</string>
+    <string name="offline_message">ViRead サーバーに接続できません。Wi-Fi / モバイル通信またはサーバーアドレスを確認して「再試行」を押してください。</string>
+    <string name="timeout_message">ViRead サーバーの応答に時間がかかっています。通信環境を確認して「再試行」を押してください。初回起動時は 30〜60 秒かかる場合があります。</string>
+    <string name="server_5xx_message">ViRead サーバーが混雑しているか再起動中です (%1$d)。数秒待ってから「再試行」を押してください。</string>
+    <string name="tls_error_message">サーバーの HTTPS セキュリティ証明書が無効なため、ご家族のアカウント保護のため ViRead が接続をブロックしました。</string>
+    <string name="no_network_toast">現在、インターネットまたは Wi-Fi に接続されていません。</string>
+    <string name="network_ready_toast">ネットワーク接続を検出しました。ViRead を再読み込みしています…</string>
+    <string name="retry_button">再試行</string>
+    <string name="open_home_button">ログイン画面へ</string>
+    <string name="check_connection_button">接続を再確認</string>
+    <string name="configure_lan_server_button">LAN HTTPS サーバーを変更 (Debug)</string>
+    <string name="lan_dialog_title">LAN HTTPS サーバー設定 (Debug)</string>
+    <string name="lan_dialog_hint">同じ Wi-Fi 上の Next.js サーバーの HTTPS URL を入力してください（例: https://192.168.1.10:8443）。HTTP や localhost は使用できません。</string>
+    <string name="lan_dialog_save">保存して接続</string>
+    <string name="lan_dialog_reset">初期設定に戻す</string>
+    <string name="lan_dialog_cancel">閉じる</string>
+    <string name="lan_invalid_url_toast">アドレスが無効です。有効な LAN HTTPS オリジンのみ受け付けます（サブパスや HTTP は不可）。</string>
+    <string name="file_chooser_title">本のページ画像を選択、撮影、または PDF/DOCX を選択</string>
+    <string name="permission_denied_title">この機能には権限が必要です</string>
+    <string name="permission_denied_message">ViRead のカメラまたはマイク権限が無効になっています。アプリ設定からいつでも有効にできます。</string>
+    <string name="open_app_settings_button">アプリ設定を開く</string>
+    <string name="back_exit_confirm_toast">もう一度押すと ViRead を終了します</string>
+</resources>

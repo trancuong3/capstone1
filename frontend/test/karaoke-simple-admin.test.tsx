@@ -10,7 +10,9 @@ import { KaraokeServicesProvider } from "@/components/karaoke/karaoke-services-p
 import type {
   KaraokeSimpleImportService,
   SimpleImportResult,
+  SimpleProcessingStatus,
 } from "@/lib/api/karaoke-simple-import-service";
+import { ServiceError } from "@/lib/api/service-error";
 import {
   classifyAudioBuffer,
   cleanFilenameToTitle,
@@ -179,6 +181,43 @@ function makeSimpleImportResult(
       "RIGHTS_CONFIRMATION_REQUIRED",
       "CHILD_SAFE_CONFIRMATION_REQUIRED",
     ],
+    lifecycle_state: "UPLOADED",
+    worker_online: false,
+    processing_queued: false,
+    processing_job_id: null,
+    processing_notice: null,
+    song: detail,
+    ...overrides,
+  };
+}
+
+function makeSimpleProcessingStatus(
+  overrides: Partial<SimpleProcessingStatus> = {},
+): SimpleProcessingStatus {
+  const detail = songDetail();
+  detail.revision = 3;
+  detail.draft!.lyrics = syllableLyrics();
+  return {
+    song_id: songId,
+    draft_version_id: versionId,
+    revision: 3,
+    lifecycle_state: "READY_FOR_REVIEW",
+    worker_online: true,
+    processing_enabled: true,
+    processing_configured: true,
+    job_id: "55555555-5555-4555-8555-555555555555",
+    job_status: "READY",
+    job_stage: "COMPLETE",
+    can_apply: true,
+    review_required: false,
+    reviewed: false,
+    has_beat_grid: true,
+    has_pitch_contour: true,
+    bpm: 120,
+    safe_error_code: null,
+    retry_policy: null,
+    quality_flags: [],
+    guidance_vi: "Đã xử lý nền xong. Bạn có thể áp dụng kết quả vào bản nháp.",
     song: detail,
     ...overrides,
   };
@@ -195,6 +234,22 @@ function makeMockSimpleService(
 
   return {
     simpleImport: vi.fn().mockResolvedValue(importResult),
+    startSimpleProcessing: vi.fn().mockResolvedValue(
+      makeSimpleProcessingStatus({
+        lifecycle_state: "QUEUED",
+        can_apply: false,
+      }),
+    ),
+    getSimpleProcessingStatus: vi
+      .fn()
+      .mockResolvedValue(makeSimpleProcessingStatus()),
+    applySimpleProcessing: vi.fn().mockResolvedValue(
+      makeSimpleProcessingStatus({
+        can_apply: false,
+        review_required: true,
+        reviewed: false,
+      }),
+    ),
     simplePublish: vi.fn().mockResolvedValue(published),
   } satisfies KaraokeSimpleImportService;
 }
@@ -457,6 +512,231 @@ describe("Admin Karaoke Simple Mode workflow", () => {
     await screen.findByText(/Đã hoàn tất căn nhịp 1 lượt bằng phím Space/);
 
     expect(screen.getByRole("button", { name: "Xuất bản ngay" })).toBeEnabled();
+  });
+
+  it("polls background pipeline stages, applies beat/melody artifacts, and enforces review confirmation before publish", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { service } = makeWizardFixture();
+      service.preview.mockResolvedValue(previewDetail());
+      const fingerprint = "a".repeat(64);
+      const reviewedDetail = songDetail();
+      reviewedDetail.revision = 4;
+      reviewedDetail.processing_review = {
+        required: true,
+        current_content_fingerprint: fingerprint,
+        reviewed: true,
+        reviewed_at: "2026-01-01T00:00:00Z",
+        quality_flags: [],
+      };
+      service.confirmReview.mockResolvedValue(reviewedDetail);
+
+      const jobId = "55555555-5555-4555-8555-555555555555";
+      const queuedResult = makeSimpleImportResult({
+        lifecycle_state: "QUEUED",
+        worker_online: true,
+        processing_queued: true,
+        processing_job_id: jobId,
+        processing_notice: "Đã xếp hàng xử lý nền.",
+      });
+      const separatingStatus = makeSimpleProcessingStatus({
+        lifecycle_state: "SEPARATING_AUDIO",
+        job_status: "RUNNING",
+        job_stage: "PREPARING_AUDIO",
+        can_apply: false,
+        has_beat_grid: false,
+        has_pitch_contour: false,
+        guidance_vi: "Đang tách giọng & nhạc nền…",
+      });
+      const readyStatus = makeSimpleProcessingStatus({
+        lifecycle_state: "READY_FOR_REVIEW",
+        can_apply: true,
+        has_beat_grid: true,
+        has_pitch_contour: true,
+        bpm: 120,
+      });
+      const appliedDetail = songDetail();
+      appliedDetail.revision = 3;
+      appliedDetail.draft!.title = "Cháu lên ba";
+      appliedDetail.draft!.author = "Phạm Tuyên";
+      appliedDetail.draft!.lyrics = syllableLyrics();
+      appliedDetail.draft!.source_note =
+        "Tài liệu nhạc thiếu nhi do Quản trị viên tải lên và kiểm duyệt";
+      appliedDetail.draft!.usage_note =
+        "Sử dụng cho luyện đọc và hát karaoke giáo dục lớp 1–5 trên ViRead";
+      appliedDetail.processing_review = {
+        required: true,
+        current_content_fingerprint: fingerprint,
+        reviewed: false,
+        reviewed_at: null,
+        quality_flags: [],
+      };
+      const appliedStatus = makeSimpleProcessingStatus({
+        revision: 3,
+        can_apply: false,
+        review_required: true,
+        reviewed: false,
+        song: appliedDetail,
+      });
+
+      const simpleService = makeMockSimpleService(queuedResult);
+      simpleService.getSimpleProcessingStatus
+        .mockResolvedValueOnce(separatingStatus)
+        .mockResolvedValueOnce(readyStatus);
+      simpleService.applySimpleProcessing.mockResolvedValueOnce(appliedStatus);
+
+      render(
+        <KaraokeServicesProvider service={service}>
+          <KaraokeSimpleUploadScreen
+            simpleService={simpleService}
+            classifier={vi.fn().mockResolvedValue(vocalClassification)}
+          />
+        </KaraokeServicesProvider>,
+      );
+
+      const mp3File = new File(["synthetic-mp3"], "Chau_Len_Ba.mp3", {
+        type: "audio/mpeg",
+      });
+      fireEvent.change(screen.getByLabelText("Chọn file nhạc MP3"), {
+        target: { files: [mp3File] },
+      });
+      await waitFor(() =>
+        expect(screen.getByTestId("audio-type-badge")).toHaveTextContent(
+          "Có giọng hát (Vocal)",
+        ),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Tự động tạo karaoke" }),
+      );
+
+      await screen.findByTestId("simple-pipeline-card");
+      expect(screen.getByTestId("simple-pipeline-lifecycle")).toHaveTextContent(
+        "Đang xếp hàng xử lý nền",
+      );
+
+      await vi.advanceTimersByTimeAsync(3100);
+      await waitFor(() =>
+        expect(
+          screen.getByTestId("simple-pipeline-lifecycle"),
+        ).toHaveTextContent("Đang tách giọng & nhạc nền"),
+      );
+
+      await vi.advanceTimersByTimeAsync(3100);
+      const applyBtn = await screen.findByRole("button", {
+        name: "Áp dụng kết quả tách nhạc & căn âm tiết",
+      });
+      expect(screen.getByText(/Có lưới phách · 120 BPM/)).toBeInTheDocument();
+      expect(screen.getByText("Có đường giai điệu chuẩn")).toBeInTheDocument();
+
+      fireEvent.click(applyBtn);
+      await waitFor(() =>
+        expect(simpleService.applySimpleProcessing).toHaveBeenCalledWith(
+          songId,
+          expect.objectContaining({
+            expected_revision: 3,
+            draft_version_id: versionId,
+            job_id: jobId,
+          }),
+          expect.any(AbortSignal),
+        ),
+      );
+
+      fireEvent.click(
+        screen.getByRole("checkbox", {
+          name: /Tôi xác nhận quyền sử dụng bài hát phù hợp/,
+        }),
+      );
+      fireEvent.click(
+        screen.getByRole("checkbox", {
+          name: /Tôi xác nhận nội dung phù hợp trẻ em lớp 1–5/,
+        }),
+      );
+      const publishBtn = screen.getByRole("button", { name: "Xuất bản ngay" });
+      expect(publishBtn).toBeDisabled();
+
+      const reviewAck = screen.getByRole("checkbox", {
+        name: /Tôi đã nghe thử và kiểm tra kết quả tách giọng\/căn nhịp/,
+      });
+      expect(reviewAck).not.toBeChecked();
+      fireEvent.click(reviewAck);
+      expect(publishBtn).toBeEnabled();
+
+      fireEvent.click(publishBtn);
+      await screen.findByText("Đã xuất bản bài hát");
+      expect(service.confirmReview).toHaveBeenCalledWith(
+        songId,
+        expect.objectContaining({
+          expected_revision: 3,
+          draft_version_id: versionId,
+          content_fingerprint: fingerprint,
+          confirmed_listened: true,
+        }),
+        expect.any(AbortSignal),
+      );
+      expect(simpleService.simplePublish).toHaveBeenCalledWith(
+        songId,
+        expect.objectContaining({
+          expected_revision: 4,
+          draft_version_id: versionId,
+          rights_confirmed: true,
+          child_safe_confirmed: true,
+        }),
+        expect.any(AbortSignal),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("falls back cleanly to 0đ offline notice if manual background trigger gets 503 WORKER_OFFLINE", async () => {
+    const { service } = makeWizardFixture();
+    service.preview.mockResolvedValue(previewDetail());
+    const failedResult = makeSimpleImportResult({
+      lifecycle_state: "FAILED",
+      worker_online: false,
+      processing_queued: false,
+    });
+    const simpleService = makeMockSimpleService(failedResult);
+    simpleService.startSimpleProcessing.mockRejectedValueOnce(
+      new ServiceError({
+        code: "NETWORK_ERROR",
+        message: "WORKER_OFFLINE",
+        status: 503,
+        request_id: "req-offline",
+        retryable: true,
+        provider_code: "WORKER_OFFLINE",
+      }),
+    );
+
+    render(
+      <KaraokeServicesProvider service={service}>
+        <KaraokeSimpleUploadScreen
+          simpleService={simpleService}
+          classifier={vi.fn().mockResolvedValue(vocalClassification)}
+        />
+      </KaraokeServicesProvider>,
+    );
+
+    const mp3File = new File(["synthetic-mp3"], "Chau_Len_Ba.mp3", {
+      type: "audio/mpeg",
+    });
+    fireEvent.change(screen.getByLabelText("Chọn file nhạc MP3"), {
+      target: { files: [mp3File] },
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("audio-type-badge")).toHaveTextContent(
+        "Có giọng hát (Vocal)",
+      ),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Tự động tạo karaoke" }),
+    );
+
+    const retryBtn = await screen.findByRole("button", {
+      name: "Thử chạy lại xử lý nền",
+    });
+    fireEvent.click(retryBtn);
+    await screen.findByText(/Worker xử lý nền hiện đang ngoại tuyến/);
   });
 });
 

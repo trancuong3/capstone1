@@ -3,9 +3,8 @@
  * and "Một buổi, một giọng" (`SessionVoiceLock`) state manager.
  *
  * Guarantees:
- *  1. Default mode is `local_with_google_fallback` ("Máy này + Google dự phòng") with
- *     automatic Online fallback ON for both STT and TTS, while parents can still switch
- *     to strict `local_only` ("Chỉ máy này") at any time.
+ *  1. Default mode is `local_only` ("Chỉ máy này") so child audio stays offline
+ *     by default, while parents can opt in to `local_with_google_fallback` at any time.
  *  2. Separate parent toggles for Speech Recognition (`allowGoogleSttFallback`) and
  *     Sample Reading (`allowGoogleTtsFallback`).
  *  3. Before a reading session starts, locks `(provider, voiceId, region, modelVersion, speed)`
@@ -82,9 +81,9 @@ const LOCK_STORAGE_PREFIX = "viread.session-voice-lock.v1.";
 
 const DEFAULT_POLICY: VoicePolicyPreferences = {
   region: "north",
-  providerMode: "local_with_google_fallback",
-  allowGoogleSttFallback: true,
-  allowGoogleTtsFallback: true,
+  providerMode: "local_only",
+  allowGoogleSttFallback: false,
+  allowGoogleTtsFallback: false,
   modelVersion: DEFAULT_LOCAL_TTS_MODEL_VERSION,
 };
 
@@ -143,21 +142,13 @@ function sanitizePolicy(raw: unknown): VoicePolicyPreferences {
       ? rec.region
       : "north";
   const providerMode: VoiceProviderMode =
-    rec.providerMode === "local_only"
-      ? "local_only"
-      : "local_with_google_fallback";
+    rec.providerMode === "local_with_google_fallback"
+      ? "local_with_google_fallback"
+      : "local_only";
   const allowGoogleSttFallback =
-    providerMode === "local_only"
-      ? false
-      : rec.allowGoogleSttFallback === undefined
-        ? true
-        : Boolean(rec.allowGoogleSttFallback);
+    providerMode === "local_only" ? false : Boolean(rec.allowGoogleSttFallback);
   const allowGoogleTtsFallback =
-    providerMode === "local_only"
-      ? false
-      : rec.allowGoogleTtsFallback === undefined
-        ? true
-        : Boolean(rec.allowGoogleTtsFallback);
+    providerMode === "local_only" ? false : Boolean(rec.allowGoogleTtsFallback);
   const modelVersion =
     typeof rec.modelVersion === "string" &&
     /^[A-Za-z0-9._-]{1,80}$/.test(rec.modelVersion)
@@ -237,11 +228,16 @@ function sanitizeSessionLock(raw: unknown): SessionVoiceLock | null {
     typeof rec.lockedAt === "string" && rec.lockedAt
       ? rec.lockedAt
       : new Date().toISOString();
+  const gender: VoiceGender =
+    rec.gender === "male" || rec.gender === "female"
+      ? rec.gender
+      : resolveVoiceGender(rec.voiceId);
 
   return {
     sessionId: rec.sessionId.trim(),
     provider,
     voiceId: rec.voiceId,
+    gender,
     region,
     modelVersion,
     speed,

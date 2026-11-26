@@ -22,8 +22,11 @@ from app.services.picture_description_service import (
     MAX_UPLOAD_BYTES,
     PictureDescriptionService,
 )
+from app.services.rate_limiter import rate_limit
 
-router = APIRouter()
+router = APIRouter(
+    dependencies=[Depends(rate_limit("games", default_max=120, default_window=60.0))]
+)
 
 
 def _parse_target_words_form(raw: str | None) -> list[str]:

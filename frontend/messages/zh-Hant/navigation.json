@@ -1,0 +1,77 @@
+{
+  "parent": {
+    "navLabel": "家長導覽",
+    "skipToContent": "跳過導覽，前往內容",
+    "dashboard": "總覽",
+    "myBooks": "我的書籍",
+    "reports": "進度",
+    "readingManagement": "閱讀管理",
+    "sessions": "歷史紀錄",
+    "sessionsLong": "閱讀歷史",
+    "entertainment": "娛樂",
+    "difficultWords": "待練習詞彙",
+    "children": "兒童檔案",
+    "parentProfile": "家長檔案",
+    "parentProfileLong": "家長檔案",
+    "settings": "設定",
+    "helpSupport": "幫助與支援",
+    "moreTitle": "更多功能",
+    "booksShort": "書籍",
+    "scannerShort": "掃描",
+    "moreButton": "更多",
+    "mobileAriaLabel": "行動版快速導覽",
+    "moreDescriptions": {
+      "myBooks": "上傳並管理家庭書籍",
+      "readingManagement": "為孩子設定目標、閱讀時間表及已儲存的書籍",
+      "sessions": "回顧已完成的閱讀課程",
+      "entertainment": "語言遊戲、故事與卡拉 OK",
+      "difficultWords": "練習孩子容易讀錯的詞彙"
+    }
+  },
+  "admin": {
+    "navLabel": "管理員導覽",
+    "skipToContent": "跳過導覽，前往管理內容",
+    "badge": "管理員",
+    "karaoke": "歌曲",
+    "parents": "家長",
+    "books": "書庫",
+    "metadataQuality": "書籍品質",
+    "auditLogs": "稽核日誌",
+    "training": "OCR 訓練",
+    "health": "營運",
+    "moreTitle": "更多管理",
+    "mobileQualityShort": "品質",
+    "mobileOcrShort": "OCR",
+    "mobileMoreDescriptions": {
+      "auditLogs": "追蹤管理稽核日誌",
+      "training": "訓練並操作 VietOCR V2 模型",
+      "health": "系統狀態、OCR worker 與語音"
+    }
+  },
+  "accountMenu": {
+    "openAria": "開啟帳號選單",
+    "closeAria": "關閉帳號選單",
+    "menuAria": "ViRead 帳號選單",
+    "shortMenuAria": "帳號選單",
+    "accountNavAria": "ViRead 帳號",
+    "profileSection": "個人檔案",
+    "accountSection": "帳號",
+    "helpSection": "幫助",
+    "sessionSection": "登入階段",
+    "defaultAccountLabel": "ViRead 帳號"
+  },
+  "childSwitcher": {
+    "selectedAria": "目前選擇：{alias}，點擊切換",
+    "openAria": "快速切換兒童",
+    "compactLabel": "{alias} · 年級 {grade}",
+    "selectChild": "選擇兒童",
+    "listAria": "快速切換兒童檔案",
+    "gradeLabel": "· 年級 {grade}",
+    "manageChildren": "管理兒童檔案"
+  },
+  "footer": {
+    "ariaLabel": "ViRead 資訊",
+    "logoDashboardAria": "ViRead - 前往總覽",
+    "logoHomeAria": "ViRead - 前往首頁"
+  }
+}

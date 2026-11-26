@@ -6,11 +6,14 @@ into anonymous endpoints, into public catalog counts/searches, or past an Admin 
 """
 from __future__ import annotations
 
+import logging
 import os
 from uuid import UUID
 
 from sqlalchemy import String, and_, cast, exists, not_, or_, select
 
+from app.database.config import APP_ENVIRONMENT, SUPABASE_PRIVATE_BOOKS_BUCKET
+from app.diagnostic_logging import log_diagnostic
 from app.models import (
     Book,
     BookPage,
@@ -18,6 +21,14 @@ from app.models import (
     ParentBookPageSubmission,
     Profile,
 )
+from app.services.storage_service import (
+    create_signed_image_url,
+    is_local_storage_enabled,
+)
+
+logger = logging.getLogger(__name__)
+_ORIGINAL_CREATE_SIGNED_IMAGE_URL = create_signed_image_url
+PRIVATE_SIGNED_URL_TTL_SECONDS = 300
 
 VISIBILITY_CATALOG = "CATALOG"
 VISIBILITY_PARENT_PRIVATE = "PARENT_PRIVATE"
@@ -121,13 +132,97 @@ def public_api_base_url(request_base_url: str | None = None) -> str:
     return "http://127.0.0.1:8000"
 
 
+def is_private_storage_path_owned_by(
+    storage_path: str | None,
+    owner_id: UUID,
+    *,
+    book_id: UUID | None = None,
+) -> bool:
+    """Verify a private Storage object path sits strictly inside the owner/book namespace."""
+    if not isinstance(storage_path, str):
+        return False
+    cleaned = storage_path.strip()
+    if (
+        not cleaned
+        or cleaned.startswith(("/", "\\", "http://", "https://"))
+        or "\\" in cleaned
+        or ".." in cleaned.split("/")
+    ):
+        return False
+    expected_prefix = (
+        f"private-books/{owner_id}/{book_id}/"
+        if book_id is not None
+        else f"private-books/{owner_id}/"
+    )
+    return cleaned.startswith(expected_prefix)
+
+
+def _try_proxyless_private_signed_url(
+    storage_path: str | None,
+    *,
+    owner_id: UUID | None = None,
+    book_id: UUID | None = None,
+    ttl_seconds: int = PRIVATE_SIGNED_URL_TTL_SECONDS,
+) -> str | None:
+    """Create a short-lived owner-scoped Supabase Storage URL when proxyless serving is active."""
+    if not isinstance(storage_path, str) or not storage_path.strip():
+        return None
+    if is_local_storage_enabled():
+        return None
+    if owner_id is not None and not is_private_storage_path_owned_by(
+        storage_path, owner_id, book_id=book_id
+    ):
+        log_diagnostic(
+            logger,
+            logging.WARNING,
+            event="private_storage_path_scope_mismatch",
+            stage="book_access",
+        )
+        return None
+    force_proxyless = (
+        (os.getenv("VIREAD_PROXYLESS_PRIVATE_URLS") or "").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+    if (
+        APP_ENVIRONMENT == "test"
+        and (os.getenv("SUPABASE_KEY") or "").strip() == "isolated-test-key"
+        and create_signed_image_url is _ORIGINAL_CREATE_SIGNED_IMAGE_URL
+        and not force_proxyless
+    ):
+        return None
+    try:
+        return create_signed_image_url(
+            storage_path.strip(),
+            bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
+            ttl_seconds=ttl_seconds,
+        )
+    except Exception as exc:
+        log_diagnostic(
+            logger,
+            logging.WARNING,
+            event="private_signed_url_fallback_to_proxy",
+            stage="book_access",
+            exception=exc,
+        )
+        return None
+
+
 def private_page_image_url(
     book_id: UUID,
     page_id: UUID,
     *,
     revision_id: UUID | None = None,
     base_url: str | None = None,
+    storage_path: str | None = None,
+    owner_id: UUID | None = None,
 ) -> str:
+    signed_url = _try_proxyless_private_signed_url(
+        storage_path,
+        owner_id=owner_id,
+        book_id=book_id,
+    )
+    if signed_url:
+        return signed_url
     root = public_api_base_url(base_url)
     suffix = f"?revision_id={revision_id}" if revision_id is not None else ""
     return f"{root}/books/my-books/{book_id}/pages/{page_id}/image{suffix}"
@@ -138,7 +233,16 @@ def private_submission_image_url(
     submission_id: UUID,
     *,
     base_url: str | None = None,
+    storage_path: str | None = None,
+    owner_id: UUID | None = None,
 ) -> str:
+    signed_url = _try_proxyless_private_signed_url(
+        storage_path,
+        owner_id=owner_id,
+        book_id=book_id,
+    )
+    if signed_url:
+        return signed_url
     root = public_api_base_url(base_url)
     return f"{root}/books/my-books/{book_id}/submissions/{submission_id}/image"
 
@@ -147,7 +251,11 @@ def admin_submission_image_url(
     submission_id: UUID,
     *,
     base_url: str | None = None,
+    storage_path: str | None = None,
 ) -> str:
+    signed_url = _try_proxyless_private_signed_url(storage_path)
+    if signed_url:
+        return signed_url
     root = public_api_base_url(base_url)
     return f"{root}/books/admin/quality/user-books/submissions/{submission_id}/image"
 

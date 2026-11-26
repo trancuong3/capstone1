@@ -156,6 +156,50 @@ class AssessmentAggregationTests(unittest.TestCase):
         self.assertEqual(result["assessment"].self_corrected_words, 1)
         self.assertEqual(result["assessment_coverage"], {"assessed_sessions": 1, "total_sessions": 2})
 
+    def test_four_mastery_statuses_keep_assisted_separate_without_overwriting_first_pass(self):
+        from datetime import datetime, timedelta, timezone
+        now = datetime(2026, 11, 25, tzinfo=timezone.utc)
+        word_self = WORD_ID
+        word_helped = UUID("60000000-0000-4000-8000-000000000003")
+        word_spelling = UUID("60000000-0000-4000-8000-000000000004")
+        word_uncertain = UUID("60000000-0000-4000-8000-000000000005")
+        report = final_report()
+        report.Summary["initial_assessment"] = [
+            {"word_id": str(OTHER_WORD_ID), "word_index": 0, "text": "Bé", "status": "CORRECT"},
+            {"word_id": str(word_self), "word_index": 1, "text": "bạn", "status": "MISPRONUNCIATION"},
+            {"word_id": str(word_helped), "word_index": 2, "text": "nghiêng", "status": "MISPRONUNCIATION"},
+            {"word_id": str(word_spelling), "word_index": 3, "text": "đầu", "status": "OMISSION"},
+            {"word_id": str(word_uncertain), "word_index": 4, "text": "một", "status": "UNCERTAIN"},
+        ]
+        events = [
+            # Self-corrected independently
+            retry("CONFIRMED", 1, WordId=word_self, CreatedAt=now),
+            # Helped via READ_EXAMPLE then confirmed -> assisted, NOT self_corrected or first_pass_correct
+            SimpleNamespace(
+                SessionId=SESSION_ID, PageId=PAGE_ID, PageRevisionId=REVISION_ID,
+                WordId=word_helped, Type="READ_EXAMPLE", Status="FEEDBACK_GIVEN",
+                Metadata={}, CreatedAt=now,
+            ),
+            retry("CONFIRMED", 1, WordId=word_helped, CreatedAt=now + timedelta(seconds=2)),
+            # Confirmed after spelling guidance -> assisted, NOT self_corrected or first_pass_correct
+            SimpleNamespace(
+                SessionId=SESSION_ID, PageId=PAGE_ID, PageRevisionId=REVISION_ID,
+                WordId=word_spelling, Type="WORD_RETRY", Status="CONFIRMED",
+                Metadata={"retry_attempt": 1, "after_spelling": True, "mastery": "CORRECT_AFTER_SPELLING"},
+                CreatedAt=now + timedelta(seconds=5),
+            ),
+        ]
+        result = aggregate_assessment(SESSION_ID, [report], events)
+        metrics = result["assessment"]
+        self.assertEqual(metrics.first_pass_correct, 1)
+        self.assertEqual(metrics.first_pass_incorrect, 3)
+        self.assertEqual(metrics.self_corrected_words, 1)
+        self.assertEqual(metrics.unresolved_words, 2)
+        self.assertEqual(metrics.recognition_uncertain, 1)
+        self.assertEqual(result["correct_words"], ["Bé"])
+        self.assertEqual(result["assisted_words"], ["nghiêng", "đầu"])
+        self.assertEqual(result["score"], 25)
+
 
 class FinalAssessmentTests(unittest.IsolatedAsyncioTestCase):
     def service(self):

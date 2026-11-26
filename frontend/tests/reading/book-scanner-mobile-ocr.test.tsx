@@ -344,6 +344,19 @@ describe("Mobile Book Scanner & EXIF/Resolution OCR Pre-processing", () => {
       if (path === `/profiles/children/${TEST_CHILD_ID}`) {
         return Response.json(childFixture);
       }
+      if (path === "/reading/scan-page-ocr/jobs") {
+        return Response.json(
+          {
+            job_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            status: "SUCCEEDED",
+            worker_online: true,
+            created_at: "2026-11-25T10:00:00Z",
+            updated_at: "2026-11-25T10:00:01Z",
+            result: ocrSuccessPayload,
+          },
+          { status: 202 },
+        );
+      }
       if (path === "/reading/scan-page-ocr") {
         return Response.json(ocrSuccessPayload);
       }

@@ -17,7 +17,7 @@ os.environ.setdefault("SUPABASE_KEY", "isolated-test-key")
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_current_parent_id
+from app.api.deps import require_parent_id
 from app.api.routes import support as support_route
 from app.database import config as settings
 from app.providers.support_email_provider import (
@@ -194,7 +194,7 @@ class SupportFeedbackTests(unittest.TestCase):
         unauthorized = client.post("/support/feedback", json=VALID_PAYLOAD)
         self.assertEqual(unauthorized.status_code, 401)
 
-        app.dependency_overrides[get_current_parent_id] = (
+        app.dependency_overrides[require_parent_id] = (
             lambda: "10000000-0000-4000-8000-000000000001"
         )
         invalid = client.post(
@@ -207,7 +207,7 @@ class SupportFeedbackTests(unittest.TestCase):
     def test_feedback_route_returns_accepted_only_after_provider_accepts(self):
         app = FastAPI()
         app.include_router(support_route.router, prefix="/support")
-        app.dependency_overrides[get_current_parent_id] = (
+        app.dependency_overrides[require_parent_id] = (
             lambda: "10000000-0000-4000-8000-000000000001"
         )
         client = TestClient(app)
@@ -228,7 +228,7 @@ class SupportFeedbackTests(unittest.TestCase):
     def test_feedback_route_returns_503_when_smtp_is_not_configured(self):
         app = FastAPI()
         app.include_router(support_route.router, prefix="/support")
-        app.dependency_overrides[get_current_parent_id] = (
+        app.dependency_overrides[require_parent_id] = (
             lambda: "10000000-0000-4000-8000-000000000001"
         )
         client = TestClient(app)
