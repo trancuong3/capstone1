@@ -3,7 +3,7 @@
 import { ImageIcon, Power } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AdminBookForm } from "@/components/admin/admin-book-form";
 import {
@@ -18,6 +18,10 @@ import { Modal } from "@/components/common/modal";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useTranslations } from "@/hooks/use-i18n";
+import {
+  createBookAssetsService,
+  type BookAssetsService,
+} from "@/lib/api/book-assets-service";
 import { isServiceError } from "@/lib/api/service-error";
 import type { AdminBookCreateDTO, AdminBookDTO } from "@/types/admin";
 import type {
@@ -37,6 +41,7 @@ interface AdminBookEditorScreenProps {
   returnTo?: "detail" | "metadata-quality";
   issue?: string;
   defaultCoverStudioOpen?: boolean;
+  assetsService?: BookAssetsService;
 }
 
 export function AdminBookEditorScreen({
@@ -44,8 +49,13 @@ export function AdminBookEditorScreen({
   returnTo = "detail",
   issue,
   defaultCoverStudioOpen = false,
+  assetsService,
 }: AdminBookEditorScreenProps) {
   const { books } = useAdminServices();
+  const resolvedAssetsService = useMemo(
+    () => assetsService ?? createBookAssetsService(),
+    [assetsService],
+  );
   const t = useTranslations("admin");
   const router = useRouter();
   const [book, setBook] = useState<AdminBookDTO | null>(null);
@@ -58,6 +68,7 @@ export function AdminBookEditorScreen({
   );
   const [activeCoverAsset, setActiveCoverAsset] =
     useState<BookPresentationAssetDTO | null>(null);
+  const [coverExplicitlyCleared, setCoverExplicitlyCleared] = useState(false);
   const [notice, setNotice] = useState<{
     tone: "info" | "error";
     title: string;
@@ -69,10 +80,22 @@ export function AdminBookEditorScreen({
     const requestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
+    setCoverExplicitlyCleared(false);
     try {
       const current = await books.get(bookId);
       if (requestId !== requestIdRef.current) return;
       setBook(current);
+      // Hydrate active cover asset immediately on mount without waiting for Cover Studio panel.
+      void resolvedAssetsService
+        .getBookAssets(bookId)
+        .then((summary) => {
+          if (requestId !== requestIdRef.current) return;
+          setActiveCoverAsset(summary.active_cover ?? null);
+          setCoverExplicitlyCleared(summary.active_cover == null);
+        })
+        .catch(() => {
+          // Graceful degradation: fall back to book.cover_url / METADATA_RENDER.
+        });
     } catch (cause) {
       if (requestId !== requestIdRef.current) return;
       setBook(null);
@@ -84,7 +107,7 @@ export function AdminBookEditorScreen({
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [bookId, books]);
+  }, [bookId, books, resolvedAssetsService]);
 
   useEffect(() => {
     const timeout = globalThis.setTimeout(() => void load(), 0);
@@ -196,12 +219,14 @@ export function AdminBookEditorScreen({
   }
 
   const resolvedTitle = book.title.trim() || t("books.missingTitle");
-  const resolvedCoverUrl =
-    activeCoverAsset?.media_url ?? book.cover_url ?? null;
-  const resolvedCoverSourceType =
-    activeCoverAsset?.source_type ??
-    (book.cover_source_type as AssetSourceType | null) ??
-    null;
+  const resolvedCoverUrl = coverExplicitlyCleared
+    ? null
+    : (activeCoverAsset?.media_url ?? book.cover_url ?? null);
+  const resolvedCoverSourceType: AssetSourceType | null = coverExplicitlyCleared
+    ? "METADATA_RENDER"
+    : (activeCoverAsset?.source_type ??
+      (book.cover_source_type as AssetSourceType | null | undefined) ??
+      null);
 
   const initial: AdminBookCreateDTO = {
     name: book.name ?? "",
@@ -300,7 +325,11 @@ export function AdminBookEditorScreen({
                   initialCoverUrl={resolvedCoverUrl}
                   maxGrade={book.max_grade}
                   minGrade={book.min_grade}
-                  onCoverUpdated={(asset) => setActiveCoverAsset(asset)}
+                  onCoverUpdated={(asset) => {
+                    setActiveCoverAsset(asset);
+                    setCoverExplicitlyCleared(asset === null);
+                  }}
+                  service={resolvedAssetsService}
                 />
               </div>
             ) : null}

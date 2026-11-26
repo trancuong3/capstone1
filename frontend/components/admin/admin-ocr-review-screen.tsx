@@ -36,6 +36,7 @@ import {
   AdminStatusBadge,
 } from "@/components/admin/admin-ui";
 import { SmartOcrBlockReviewLoader } from "@/components/admin/smart-ocr-block-review";
+import { PageIllustrationStudio } from "@/components/books/page-illustration-studio";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
@@ -971,6 +972,7 @@ export function AdminOcrReviewScreen({
     | null
   >(null);
   const [replacementFile, setReplacementFile] = useState<File | null>(null);
+  const [illustrationStudioOpen, setIllustrationStudioOpen] = useState(false);
   const requestIdRef = useRef(0);
   const revisionChoiceRequestIdRef = useRef(0);
   const draftEditVersionRef = useRef(0);
@@ -4652,11 +4654,39 @@ export function AdminOcrReviewScreen({
           >
             <section className="rounded-xl border border-border bg-white p-4 shadow-2xs sm:p-5">
               <SmartOcrBlockReviewLoader
+                isRevisionVerified={detail.verification_status === "VERIFIED"}
+                onApplyToDraft={async (result) => {
+                  handleDraftTextChange(result.canonical_text);
+                  await load();
+                }}
                 pageId={pageId}
                 pageImageUrl={image.preview_url}
                 pageNumber={image.page_number}
+                pageRevisionId={detail.page_revision_id}
               />
             </section>
+            <details
+              className="rounded-xl border border-border bg-white p-4 shadow-2xs sm:p-5"
+              onToggle={(event) =>
+                setIllustrationStudioOpen(event.currentTarget.open)
+              }
+            >
+              <summary className="min-h-11 cursor-pointer py-2 font-bold text-ink">
+                Studio tranh minh họa sạch chữ (V2)
+              </summary>
+              <div className="mt-4">
+                <PageIllustrationStudio
+                  actorRole="admin"
+                  autoLoad={illustrationStudioOpen}
+                  bookId={bookId}
+                  canonicalText={draftText}
+                  compact
+                  pageId={pageId}
+                  pageNumber={image.page_number}
+                  wordBboxes={words.map((word) => [...word.bbox])}
+                />
+              </div>
+            </details>
           </div>
 
           {/* Tab 5: Lịch sử Revision + Diagnostics + Original OCR */}

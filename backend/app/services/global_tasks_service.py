@@ -1224,6 +1224,540 @@ class GlobalTasksService:
         )
 
 
+async def _execute_ocr_extract_job(
+    db: AsyncSession,
+    svc: GlobalTasksService,
+    job: SmartStudioJob,
+    lease_token: UUID,
+    scheduler: GpuWorkloadScheduler,
+) -> None:
+    """Execute durable OCR_EXTRACT job with sibling cross-page analysis & boundary detection."""
+    if job.BookPageId is None:
+        await svc.commit_stage_result(
+            job_id=job.Id,
+            lease_token=lease_token,
+            stage="OCR_EXTRACT",
+            mark_stage_completed=False,
+            next_status="FAILED",
+            error_code="MISSING_BOOK_PAGE_ID",
+            error_message_vi="Tác vụ tách nội dung OCR thiếu mã trang sách.",
+        )
+        return
+
+    from app.repositories.ocr_extraction_repository import OcrExtractionRepository
+    from app.services.ocr_content_extraction import extract_ocr_content
+    from app.services.ocr_document_boundary import detect_document_boundary
+    from app.services.smart_studio_flags import SmartStudioFlags
+    from app.services.storage_service import download_object
+    from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET, SUPABASE_STORAGE_BUCKET
+    from app.services.gpu_workload_scheduler import WorkloadPriority
+
+    repo = OcrExtractionRepository(db)
+    pair = await repo.get_page_with_book(job.BookPageId)
+    if pair is None:
+        await svc.commit_stage_result(
+            job_id=job.Id,
+            lease_token=lease_token,
+            stage="OCR_EXTRACT",
+            mark_stage_completed=False,
+            next_status="FAILED",
+            error_code="PAGE_NOT_FOUND",
+            error_message_vi="Không tìm thấy trang sách cần tách nội dung OCR.",
+        )
+        return
+
+    page, book = pair
+    if job.ActorRole == "parent" and (
+        not is_book_private(book) or book.OwnerParentId != job.ActorId
+    ):
+        await svc.commit_stage_result(
+            job_id=job.Id,
+            lease_token=lease_token,
+            stage="OCR_EXTRACT",
+            mark_stage_completed=False,
+            next_status="FAILED",
+            error_code="ACCESS_DENIED",
+            error_message_vi="Bạn không có quyền xử lý trang sách này.",
+        )
+        return
+
+    checkpoints = job.CheckpointsJson if isinstance(job.CheckpointsJson, dict) else {}
+    req_opts = checkpoints.get("request") if isinstance(checkpoints.get("request"), dict) else {}
+    raw_mode = str(req_opts.get("filter_mode") or SmartStudioFlags.from_environment().ocr_filter_mode).strip().lower()
+    filter_mode = raw_mode if raw_mode in ("off", "shadow", "active") else "active"
+    include_cross_page = bool(req_opts.get("include_cross_page", True))
+    detect_boundary = bool(req_opts.get("detect_boundary", True))
+
+    revision = await repo.resolve_revision_for_page(page, job.SourceRevisionId)
+    words = await repo.load_revision_words(revision.Id) if revision is not None else []
+    cross_pages = (
+        await repo.load_sibling_cross_pages(book.Id, page.Id)
+        if include_cross_page
+        else []
+    )
+
+    boundary = None
+    remaining_stages = get_remaining_stages(job, ["BOUNDARY_DETECT", "OCR_EXTRACT"])
+    async with scheduler.acquire(
+        priority=WorkloadPriority.URGENT_OCR,
+        workload_id=f"ocr-extract:{job.Id}",
+        estimated_vram_mb=1500,
+    ) as handle:
+        if "BOUNDARY_DETECT" in remaining_stages and detect_boundary and page.ImagePath:
+            try:
+                bucket = (
+                    SUPABASE_PRIVATE_BOOKS_BUCKET
+                    if is_book_private(book)
+                    else (SUPABASE_STORAGE_BUCKET or "books")
+                )
+                img_bytes = download_object(page.ImagePath, bucket_name=bucket)
+                if img_bytes:
+                    boundary = detect_document_boundary(
+                        img_bytes,
+                        word_bboxes_norm=[w.bbox for w in words] if words else None,
+                    )
+            except Exception as exc:
+                logger.debug(
+                    "ocr_extract_boundary_skipped page_id=%s err=%s",
+                    page.Id,
+                    type(exc).__name__,
+                )
+            handle.checkpoint("BOUNDARY_DETECT", raise_on_preempt=True)
+
+        result = extract_ocr_content(
+            words,
+            page_number=max(1, int(page.PageNumber or 1)),
+            book_title=book.Title,
+            book_author=book.Author,
+            cross_pages=cross_pages,
+            boundary=boundary,
+            filter_mode=filter_mode,  # type: ignore[arg-type]
+            book_id=book.Id,
+            book_page_id=page.Id,
+            page_revision_id=revision.Id if revision is not None else None,
+        )
+
+    owner_id = book.OwnerParentId if is_book_private(book) else None
+    existing_row, load_degraded = await repo.get_latest_extraction(page.Id)
+    saved_row = None
+    storage_degraded = load_degraded
+    if not load_degraded:
+        saved_row, storage_degraded = await repo.save_extraction(
+            book_id=book.Id,
+            page_id=page.Id,
+            page_revision_id=revision.Id if revision is not None else None,
+            owner_id=owner_id,
+            extraction=result,
+            source_words=list(words),
+            undo_stack=[],
+            existing_row=existing_row,
+        )
+
+    await svc.commit_stage_result(
+        job_id=job.Id,
+        lease_token=lease_token,
+        stage="OCR_EXTRACT",
+        checkpoint_data={
+            "page_id": str(page.Id),
+            "page_kind": result.page_kind,
+            "filter_mode": result.filter_mode,
+            "storage_degraded": storage_degraded,
+        },
+        next_status="SUCCEEDED",
+        result_ref={
+            "extraction_id": str(saved_row.Id) if saved_row is not None else None,
+            "book_id": str(book.Id),
+            "page_id": str(page.Id),
+            "page_revision_id": str(revision.Id) if revision is not None else None,
+            "page_kind": result.page_kind,
+            "requires_review": bool(result.requires_review),
+            "kept_blocks": result.stats.keep_blocks,
+            "excluded_blocks": result.stats.exclude_blocks,
+            "review_blocks": result.stats.review_blocks,
+        },
+        progress_completed=1,
+        progress_total=1,
+        progress_unit="trang",
+    )
+
+
+async def _execute_batch_book_import_job(
+    db: AsyncSession,
+    svc: GlobalTasksService,
+    job: SmartStudioJob,
+    lease_token: UUID,
+    scheduler: GpuWorkloadScheduler,
+    ai_router: AiCapabilityRouter,
+) -> None:
+    """Execute durable BATCH_BOOK_IMPORT job with per-page checkpoints & cooperative preemption."""
+    if job.BookId is None:
+        await svc.commit_stage_result(
+            job_id=job.Id,
+            lease_token=lease_token,
+            stage="BATCH_BOOK_IMPORT",
+            mark_stage_completed=False,
+            next_status="FAILED",
+            error_code="MISSING_BOOK_ID",
+            error_message_vi="Tác vụ nhập hàng loạt thiếu mã sách.",
+        )
+        return
+
+    from sqlalchemy import select as sa_select
+    from app.models import BookPage
+    from app.repositories.ocr_extraction_repository import OcrExtractionRepository
+    from app.services.book_illustration_service import (
+        BookIllustrationService,
+        _build_default_ocr_check_fn,
+    )
+    from app.services.gpu_workload_scheduler import WorkloadPriority
+    from app.services.ocr_content_extraction import extract_ocr_content
+    from app.services.smart_studio_flags import SmartStudioFlags
+    from app.schemas.book_assets import PageIllustrationExtractRequest
+
+    book = await svc.repo.get_book(job.BookId)
+    if book is None or bool(getattr(book, "IsDeleted", False)):
+        await svc.commit_stage_result(
+            job_id=job.Id,
+            lease_token=lease_token,
+            stage="BATCH_BOOK_IMPORT",
+            mark_stage_completed=False,
+            next_status="FAILED",
+            error_code="BOOK_NOT_FOUND",
+            error_message_vi="Không tìm thấy sách cho tác vụ nhập hàng loạt.",
+        )
+        return
+
+    if job.ActorRole == "parent" and (
+        not is_book_private(book) or book.OwnerParentId != job.ActorId
+    ):
+        await svc.commit_stage_result(
+            job_id=job.Id,
+            lease_token=lease_token,
+            stage="BATCH_BOOK_IMPORT",
+            mark_stage_completed=False,
+            next_status="FAILED",
+            error_code="ACCESS_DENIED",
+            error_message_vi="Bạn không có quyền nhập hàng loạt cho cuốn sách này.",
+        )
+        return
+
+    checkpoints = dict(job.CheckpointsJson or {}) if isinstance(job.CheckpointsJson, dict) else {}
+    req_opts = checkpoints.get("request") if isinstance(checkpoints.get("request"), dict) else {}
+    source_storage_path = (
+        checkpoints.get("source_storage_path")
+        or req_opts.get("source_storage_path")
+    )
+
+    # Mode A: Stored multi-page PDF/DOCX rasterization & page ingestion
+    if isinstance(source_storage_path, str) and source_storage_path.strip() and job.ActorRole == "admin":
+        from tempfile import SpooledTemporaryFile
+        from starlette.concurrency import run_in_threadpool
+        from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET, SUPABASE_STORAGE_BUCKET
+        from app.services.admin_ocr_service import AdminOcrService
+        from app.services.document_rasterizer_service import (
+            SpooledUploadDocument,
+            iter_rasterized_spooled_document,
+        )
+        from app.services.storage_service import download_object
+
+        bucket = (
+            SUPABASE_PRIVATE_BOOKS_BUCKET
+            if is_book_private(book)
+            else (SUPABASE_STORAGE_BUCKET or "books")
+        )
+        doc_bytes = download_object(source_storage_path.strip(), bucket_name=bucket)
+        file_name = str(
+            checkpoints.get("file_name")
+            or req_opts.get("file_name")
+            or source_storage_path.rsplit("/", 1)[-1]
+        )
+        spool_file = SpooledTemporaryFile(max_size=2 * 1024 * 1024, mode="w+b")
+        spool_file.write(doc_bytes)
+        spool_file.seek(0)
+        spooled = SpooledUploadDocument(
+            file_name=file_name,
+            content_type=str(checkpoints.get("content_type") or "application/pdf"),
+            size_bytes=len(doc_bytes),
+            file_obj=spool_file,
+        )
+        completed_source_pages = {
+            int(p)
+            for p in (checkpoints.get("completed_source_pages") or [])
+            if isinstance(p, int) or (isinstance(p, str) and p.isdigit())
+        }
+        created_page_ids: list[str] = list(checkpoints.get("created_page_ids") or [])
+        failed_source_pages: list[int] = list(checkpoints.get("failed_source_pages") or [])
+        total_source_pages = int(checkpoints.get("total_source_pages") or 0)
+        admin_ocr = AdminOcrService(db)
+        started_perf = time.perf_counter()
+
+        try:
+            async with scheduler.acquire(
+                priority=WorkloadPriority.BATCH_MAINTENANCE,
+                workload_id=f"batch-import:{job.Id}",
+                estimated_vram_mb=1500,
+            ) as handle:
+                with iter_rasterized_spooled_document(spooled) as (
+                    _fname,
+                    _fmt,
+                    _sha,
+                    page_iter,
+                ):
+                    rasterized = list(page_iter)
+                    total_source_pages = max(total_source_pages, len(rasterized))
+                    for item in rasterized:
+                        if item.source_page in completed_source_pages:
+                            continue
+                        handle.checkpoint(
+                            f"source_page_{item.source_page}", raise_on_preempt=True
+                        )
+                        try:
+                            _page_num, rev = await admin_ocr._ingest_validated_page_image(
+                                job.ActorId,
+                                book.Id,
+                                data=item.image_bytes,
+                                content_type=item.content_type,
+                                extension=item.extension,
+                                width=item.width,
+                                height=item.height,
+                                upload_id=None,
+                                started_at=started_perf,
+                            )
+                            completed_source_pages.add(item.source_page)
+                            created_page_ids.append(str(rev.page_id))
+                        except Exception as exc:
+                            logger.warning(
+                                "batch_import_document_page_failed job_id=%s source_page=%s err=%s",
+                                job.Id,
+                                item.source_page,
+                                type(exc).__name__,
+                            )
+                            failed_source_pages.append(item.source_page)
+                        done_count = len(completed_source_pages) + len(failed_source_pages)
+                        await svc.commit_stage_result(
+                            job_id=job.Id,
+                            lease_token=lease_token,
+                            stage="BATCH_BOOK_IMPORT",
+                            mark_stage_completed=False,
+                            checkpoint_data={
+                                "completed_source_pages": sorted(completed_source_pages),
+                                "created_page_ids": created_page_ids,
+                                "failed_source_pages": failed_source_pages,
+                                "total_source_pages": total_source_pages,
+                            },
+                            progress_completed=done_count,
+                            progress_total=max(1, total_source_pages),
+                            progress_unit="trang",
+                        )
+        finally:
+            spooled.close()
+
+        final_status: GlobalTaskStatus
+        if created_page_ids and not failed_source_pages:
+            final_status = "SUCCEEDED"
+        elif created_page_ids and failed_source_pages:
+            final_status = "PARTIAL_SUCCESS"
+        else:
+            final_status = "FAILED"
+        await svc.commit_stage_result(
+            job_id=job.Id,
+            lease_token=lease_token,
+            stage="BATCH_BOOK_IMPORT",
+            mark_stage_completed=(final_status != "FAILED"),
+            next_status=final_status,
+            result_ref={
+                "book_id": str(book.Id),
+                "created_page_ids": created_page_ids,
+                "failed_source_pages": failed_source_pages,
+                "total_source_pages": total_source_pages,
+            },
+            progress_completed=len(completed_source_pages) + len(failed_source_pages),
+            progress_total=max(1, total_source_pages),
+            progress_unit="trang",
+            error_code="BATCH_PARTIAL_OR_FAILED" if final_status != "SUCCEEDED" else None,
+            error_message_vi=(
+                "Một số trang không thể nhập thành công; bạn có thể thử lại."
+                if final_status != "SUCCEEDED"
+                else None
+            ),
+        )
+        return
+
+    # Mode B: Batch OCR content extraction (and optional illustration extraction) across book pages
+    requested_page_ids_raw = checkpoints.get("page_ids") or req_opts.get("page_ids") or []
+    requested_page_ids: list[UUID] = []
+    for raw_pid in requested_page_ids_raw:
+        try:
+            requested_page_ids.append(UUID(str(raw_pid)))
+        except (ValueError, TypeError):
+            continue
+
+    page_query = sa_select(BookPage).where(BookPage.BookId == book.Id)
+    if requested_page_ids:
+        page_query = page_query.where(BookPage.Id.in_(requested_page_ids))
+    page_query = page_query.order_by(BookPage.PageNumber.asc())
+    pages = list((await db.scalars(page_query)).all())
+    pages = [p for p in pages if str(getattr(p, "LifecycleStatus", "ACTIVE")).upper() != "RETIRED"]
+
+    if not pages:
+        await svc.commit_stage_result(
+            job_id=job.Id,
+            lease_token=lease_token,
+            stage="BATCH_BOOK_IMPORT",
+            mark_stage_completed=False,
+            next_status="FAILED",
+            error_code="NO_PAGES_TO_IMPORT",
+            error_message_vi="Sách chưa có trang nào để xử lý hàng loạt.",
+        )
+        return
+
+    raw_mode = str(req_opts.get("filter_mode") or SmartStudioFlags.from_environment().ocr_filter_mode).strip().lower()
+    filter_mode = raw_mode if raw_mode in ("off", "shadow", "active") else "active"
+    extract_illustrations = bool(
+        checkpoints.get("extract_illustrations") or req_opts.get("extract_illustrations")
+    )
+
+    stage_outputs = checkpoints.get("stage_outputs") if isinstance(checkpoints.get("stage_outputs"), dict) else {}
+    prev_batch_state = stage_outputs.get("BATCH_BOOK_IMPORT") if isinstance(stage_outputs.get("BATCH_BOOK_IMPORT"), dict) else {}
+    completed_page_ids: list[str] = list(
+        prev_batch_state.get("completed_page_ids")
+        or checkpoints.get("completed_page_ids")
+        or []
+    )
+    completed_set = set(completed_page_ids)
+    failed_page_ids: list[str] = list(prev_batch_state.get("failed_page_ids") or [])
+    extraction_ids: dict[str, str] = dict(prev_batch_state.get("extraction_ids") or {})
+
+    ocr_repo = OcrExtractionRepository(db)
+    total_pages = len(pages)
+    owner_id = book.OwnerParentId if is_book_private(book) else None
+
+    async with scheduler.acquire(
+        priority=WorkloadPriority.BATCH_MAINTENANCE,
+        workload_id=f"batch-import:{job.Id}",
+        estimated_vram_mb=1500,
+    ) as handle:
+        for page in pages:
+            pid_str = str(page.Id)
+            if pid_str in completed_set:
+                continue
+            handle.checkpoint(f"page:{pid_str}", raise_on_preempt=True)
+            try:
+                revision = await ocr_repo.resolve_revision_for_page(page)
+                words = await ocr_repo.load_revision_words(revision.Id) if revision is not None else []
+                cross_pages = await ocr_repo.load_sibling_cross_pages(book.Id, page.Id)
+                extracted = extract_ocr_content(
+                    words,
+                    page_number=max(1, int(page.PageNumber or 1)),
+                    book_title=book.Title,
+                    book_author=book.Author,
+                    cross_pages=cross_pages,
+                    filter_mode=filter_mode,  # type: ignore[arg-type]
+                    book_id=book.Id,
+                    book_page_id=page.Id,
+                    page_revision_id=revision.Id if revision is not None else None,
+                )
+                existing_row, load_degraded = await ocr_repo.get_latest_extraction(page.Id)
+                if not load_degraded:
+                    saved_row, _ = await ocr_repo.save_extraction(
+                        book_id=book.Id,
+                        page_id=page.Id,
+                        page_revision_id=revision.Id if revision is not None else None,
+                        owner_id=owner_id,
+                        extraction=extracted,
+                        source_words=list(words),
+                        undo_stack=[],
+                        existing_row=existing_row,
+                    )
+                    if saved_row is not None:
+                        extraction_ids[pid_str] = str(saved_row.Id)
+
+                if extract_illustrations:
+                    try:
+                        ill_svc = BookIllustrationService(
+                            db,
+                            ocr_check_fn=_build_default_ocr_check_fn(),
+                            ai_router=ai_router,
+                            gpu_scheduler=scheduler,
+                        )
+                        await ill_svc.extract_page_illustration(
+                            job.ActorId,
+                            book.Id,
+                            page.Id,
+                            PageIllustrationExtractRequest(),
+                        )
+                    except Exception as ill_exc:
+                        logger.debug(
+                            "batch_import_illustration_skipped page_id=%s err=%s",
+                            page.Id,
+                            type(ill_exc).__name__,
+                        )
+
+                completed_page_ids.append(pid_str)
+                completed_set.add(pid_str)
+            except Exception as exc:
+                logger.warning(
+                    "batch_import_page_failed job_id=%s page_id=%s err=%s",
+                    job.Id,
+                    page.Id,
+                    type(exc).__name__,
+                )
+                if pid_str not in failed_page_ids:
+                    failed_page_ids.append(pid_str)
+
+            processed_count = min(total_pages, len(completed_set) + len(failed_page_ids))
+            await svc.commit_stage_result(
+                job_id=job.Id,
+                lease_token=lease_token,
+                stage="BATCH_BOOK_IMPORT",
+                mark_stage_completed=False,
+                checkpoint_data={
+                    "completed_page_ids": completed_page_ids,
+                    "failed_page_ids": failed_page_ids,
+                    "extraction_ids": extraction_ids,
+                },
+                progress_completed=processed_count,
+                progress_total=total_pages,
+                progress_unit="trang",
+            )
+
+    if completed_page_ids and not failed_page_ids:
+        final_status = "SUCCEEDED"
+    elif completed_page_ids and failed_page_ids:
+        final_status = "PARTIAL_SUCCESS"
+    else:
+        final_status = "FAILED"
+
+    await svc.commit_stage_result(
+        job_id=job.Id,
+        lease_token=lease_token,
+        stage="BATCH_BOOK_IMPORT",
+        mark_stage_completed=(final_status != "FAILED"),
+        checkpoint_data={
+            "completed_page_ids": completed_page_ids,
+            "failed_page_ids": failed_page_ids,
+            "extraction_ids": extraction_ids,
+        },
+        next_status=final_status,
+        result_ref={
+            "book_id": str(book.Id),
+            "processed_pages": len(completed_page_ids),
+            "failed_pages": len(failed_page_ids),
+            "total_pages": total_pages,
+            "extraction_ids": extraction_ids,
+        },
+        progress_completed=min(total_pages, len(completed_set) + len(failed_page_ids)),
+        progress_total=total_pages,
+        progress_unit="trang",
+        error_code="BATCH_PARTIAL_FAILURE" if final_status != "SUCCEEDED" else None,
+        error_message_vi=(
+            f"Đã xử lý {len(completed_page_ids)}/{total_pages} trang; có {len(failed_page_ids)} trang lỗi."
+            if final_status != "SUCCEEDED"
+            else None
+        ),
+    )
+
+
 async def verify_smart_studio_job_fence_in_tx(
     db: AsyncSession,
     *,
@@ -1311,9 +1845,15 @@ async def process_one_smart_studio_job(
     *,
     worker_id: str = "smart-studio-worker",
     lease_seconds: int = 120,
+    ai_router: AiCapabilityRouter | None = None,
+    gpu_scheduler: GpuWorkloadScheduler | None = None,
 ) -> bool:
-    """Claim and execute at most one durable `SmartStudioJob` with lease & revision fencing."""
-    svc = GlobalTasksService(db)
+    """Claim and execute at most one durable `SmartStudioJob` with lease, revision & GPU fencing."""
+    from app.services.gpu_workload_scheduler import PreemptionRequested, WorkloadPriority
+
+    router = ai_router or get_default_ai_router()
+    scheduler = gpu_scheduler or get_default_gpu_scheduler()
+    svc = GlobalTasksService(db, ai_router=router, gpu_scheduler=scheduler)
     job = await svc.claim_next_job(worker_id=worker_id, lease_seconds=lease_seconds)
     if job is None or not job.LeaseToken:
         return False
@@ -1332,6 +1872,19 @@ async def process_one_smart_studio_job(
     job_progress_total = job.ProgressTotal
     job_progress_unit = job.ProgressUnit
     checkpoints = dict(job.CheckpointsJson) if isinstance(job.CheckpointsJson, dict) else {}
+
+    # Never mis-execute mirrored in-process legacy /ai-correct/jobs rows!
+    if checkpoints.get("mirror_source") == "admin_ocr_ai_correct":
+        await svc.commit_stage_result(
+            job_id=job_id,
+            lease_token=lease_token,
+            stage="PROOFREADING",
+            mark_stage_completed=False,
+            next_status="FAILED",
+            error_code="SERVER_RESTART_INTERRUPTED",
+            error_message_vi="Tác vụ soát lỗi AI đã bị gián đoạn khi máy chủ khởi động lại.",
+        )
+        return True
 
     async def _is_job_still_leased() -> bool:
         current_job = await svc.repo.get_job(job_id, lock=False)
@@ -1366,19 +1919,31 @@ async def process_one_smart_studio_job(
         if job_type in ("COVER_GENERATE", "BOOK_COVER_AI") and job_book_id is not None:
             from app.schemas.book_assets import BookCoverGenerateRequest
             from app.services.book_cover_service import BookCoverService
+            from app.services.book_illustration_service import _build_default_ocr_check_fn
 
-            force_regen = bool(checkpoints.get("force_regenerate", False))
-            prompt_hint = checkpoints.get("prompt_hint")
-            res = await BookCoverService(db).generate_ai_cover(
+            req_opts = checkpoints.get("request") if isinstance(checkpoints.get("request"), dict) else {}
+            raw_hint = req_opts.get("prompt_hint") if "prompt_hint" in req_opts else checkpoints.get("prompt_hint")
+            force_regen = bool(
+                req_opts.get("force_regenerate")
+                if "force_regenerate" in req_opts
+                else checkpoints.get("force_regenerate", False)
+            )
+            res = await BookCoverService(
+                db,
+                ai_router=router,
+                gpu_scheduler=scheduler,
+                ocr_check_fn=_build_default_ocr_check_fn(),
+            ).execute_ai_cover_job(
                 job_actor_id,
                 job_book_id,
                 BookCoverGenerateRequest(
                     force_regenerate=force_regen,
-                    prompt_hint=str(prompt_hint) if isinstance(prompt_hint, str) and prompt_hint.strip() else None,
+                    prompt_hint=str(raw_hint) if isinstance(raw_hint, str) and raw_hint.strip() else None,
                     idempotency_key=f"worker:{job_id}:{attempt_count}",
                 ),
                 existing_job_id=job_id,
                 existing_lease_token=lease_token,
+                managed_by_worker=True,
             )
             if await _is_job_still_leased():
                 if res.status == "SUCCEEDED" and res.cover is not None:
@@ -1418,17 +1983,30 @@ async def process_one_smart_studio_job(
             and job_page_id is not None
         ):
             from app.schemas.book_assets import PageIllustrationExtractRequest
-            from app.services.book_illustration_service import BookIllustrationService
-
-            res = await BookIllustrationService(db).extract_page_illustration(
-                job_actor_id,
-                job_book_id,
-                job_page_id,
-                PageIllustrationExtractRequest(),
-                existing_job_id=job_id,
-                existing_lease_token=lease_token,
-                existing_source_revision_id=source_revision_id,
+            from app.services.book_illustration_service import (
+                BookIllustrationService,
+                _build_default_ocr_check_fn,
             )
+
+            async with scheduler.acquire(
+                priority=WorkloadPriority.PREPROCESSING,
+                workload_id=f"illust-extract:{job_id}",
+                estimated_vram_mb=512,
+            ):
+                res = await BookIllustrationService(
+                    db,
+                    ocr_check_fn=_build_default_ocr_check_fn(),
+                    ai_router=router,
+                    gpu_scheduler=scheduler,
+                ).extract_page_illustration(
+                    job_actor_id,
+                    job_book_id,
+                    job_page_id,
+                    PageIllustrationExtractRequest(),
+                    existing_job_id=job_id,
+                    existing_lease_token=lease_token,
+                    existing_source_revision_id=source_revision_id,
+                )
             if await _is_job_still_leased():
                 if res.status == "EXTRACTED_VERIFIED" and res.asset is not None:
                     await svc.commit_stage_result(
@@ -1461,20 +2039,30 @@ async def process_one_smart_studio_job(
             and job_page_id is not None
         ):
             from app.schemas.book_assets import PageIllustrationGenerateRequest
-            from app.services.book_illustration_service import BookIllustrationService
+            from app.services.book_illustration_service import (
+                BookIllustrationService,
+                _build_default_ocr_check_fn,
+            )
 
-            prompt_hint = checkpoints.get("prompt_hint")
-            res = await BookIllustrationService(db).generate_page_illustration(
+            req_opts = checkpoints.get("request") if isinstance(checkpoints.get("request"), dict) else {}
+            raw_hint = req_opts.get("prompt_hint") if "prompt_hint" in req_opts else checkpoints.get("prompt_hint")
+            res = await BookIllustrationService(
+                db,
+                ocr_check_fn=_build_default_ocr_check_fn(),
+                ai_router=router,
+                gpu_scheduler=scheduler,
+            ).execute_ai_illustration_job(
                 job_actor_id,
                 job_book_id,
                 job_page_id,
                 PageIllustrationGenerateRequest(
-                    prompt_hint=str(prompt_hint) if isinstance(prompt_hint, str) and prompt_hint.strip() else None,
+                    prompt_hint=str(raw_hint) if isinstance(raw_hint, str) and raw_hint.strip() else None,
                     idempotency_key=f"worker:{job_id}:{attempt_count}",
                 ),
                 existing_job_id=job_id,
                 existing_lease_token=lease_token,
                 existing_source_revision_id=source_revision_id,
+                managed_by_worker=True,
             )
             if await _is_job_still_leased():
                 if res.status == "SUCCEEDED" and res.asset is not None:
@@ -1508,6 +2096,16 @@ async def process_one_smart_studio_job(
                     )
             return True
 
+        if job_type == "OCR_EXTRACT":
+            await _execute_ocr_extract_job(db, svc, job, lease_token, scheduler)
+            return True
+
+        if job_type == "BATCH_BOOK_IMPORT":
+            await _execute_batch_book_import_job(
+                db, svc, job, lease_token, scheduler, router
+            )
+            return True
+
         # Unsupported or externally-driven job type: release cleanly to WAITING_FOR_WORKER
         await svc.commit_stage_result(
             job_id=job_id,
@@ -1522,6 +2120,26 @@ async def process_one_smart_studio_job(
         )
         return True
     except (StaleLeaseError, JobCancelledError):
+        return True
+    except PreemptionRequested as exc:
+        logger.info(
+            "smart_studio_job_preempted job_id=%s stage=%s waiting_prio=%s",
+            job.Id,
+            exc.stage,
+            exc.waiting_priority,
+        )
+        try:
+            await svc.commit_stage_result(
+                job_id=job.Id,
+                lease_token=lease_token,
+                stage=str(job.Stage or exc.stage),
+                mark_stage_completed=False,
+                next_status="RETRY_SCHEDULED",
+                error_code="GPU_PREEMPTED_HIGHER_PRIORITY",
+                error_message_vi="Tác vụ tạm nhường GPU cho phiên đọc/OCR ưu tiên cao và sẽ tự tiếp tục.",
+            )
+        except Exception:
+            logger.debug("smart_studio_preempt_requeue_skipped", exc_info=True)
         return True
     except Exception as exc:
         logger.warning(

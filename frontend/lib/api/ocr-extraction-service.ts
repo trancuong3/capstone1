@@ -5,6 +5,7 @@
 
 import { z } from "zod";
 import { requestApi } from "@/lib/api/api-client";
+import { emitStudioTasksChanged } from "@/lib/api/global-tasks-service";
 import {
   OCR_BLOCK_TYPES,
   PAGE_KIND_TYPES,
@@ -169,12 +170,24 @@ export async function analyzeOcrBlocks(
   );
 }
 
+export const applyOcrExtractionToDraftSchema = z.object({
+  page_id: z.string(),
+  revision_id: z.string(),
+  applied_word_count: z.number().int().nonnegative(),
+  canonical_text: z.string(),
+  status: z.string(),
+});
+
+export type ApplyOcrExtractionToDraftResponseDTO = z.infer<
+  typeof applyOcrExtractionToDraftSchema
+>;
+
 export async function extractPageOcrBlocks(
   pageId: string,
   payload: PageExtractRequestDTO = {},
   signal?: AbortSignal,
 ): Promise<PageOcrExtractionDTO> {
-  return requestApi(
+  const result = await requestApi(
     `/studio/ocr/pages/${encodeURIComponent(pageId)}/extract`,
     pageOcrExtractionSchema,
     signal,
@@ -183,6 +196,8 @@ export async function extractPageOcrBlocks(
       body: payload,
     },
   );
+  emitStudioTasksChanged();
+  return result;
 }
 
 export async function getPageOcrExtraction(
@@ -202,7 +217,7 @@ export async function patchPageOcrBlocks(
   payload: PatchPageBlocksRequestDTO,
   signal?: AbortSignal,
 ): Promise<PageOcrExtractionDTO> {
-  return requestApi(
+  const result = await requestApi(
     `/studio/ocr/pages/${encodeURIComponent(pageId)}/blocks`,
     pageOcrExtractionSchema,
     signal,
@@ -211,6 +226,26 @@ export async function patchPageOcrBlocks(
       body: payload,
     },
   );
+  emitStudioTasksChanged();
+  return result;
+}
+
+export async function applyPageOcrExtractionToDraft(
+  pageId: string,
+  payload: { readonly page_revision_id?: string | null } = {},
+  signal?: AbortSignal,
+): Promise<ApplyOcrExtractionToDraftResponseDTO> {
+  const result = await requestApi(
+    `/studio/pages/${encodeURIComponent(pageId)}/ocr-extraction/apply-to-draft`,
+    applyOcrExtractionToDraftSchema,
+    signal,
+    {
+      method: "POST",
+      body: payload,
+    },
+  );
+  emitStudioTasksChanged();
+  return result;
 }
 
 /**

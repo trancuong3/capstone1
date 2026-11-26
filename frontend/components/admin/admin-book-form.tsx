@@ -33,6 +33,7 @@ export interface AdminBookFormProps {
   onSubmit: (value: AdminBookCreateDTO) => Promise<void>;
   showLiveCoverPreview?: boolean;
   sidebarExtra?: ReactNode;
+  submitErrorFallback?: string;
   submitLabel?: string;
 }
 
@@ -53,6 +54,7 @@ export function AdminBookForm({
   onSubmit,
   showLiveCoverPreview = false,
   sidebarExtra,
+  submitErrorFallback,
   submitLabel,
 }: AdminBookFormProps) {
   const t = useTranslations("admin");
@@ -92,7 +94,9 @@ export function AdminBookForm({
 
   const resolvedSubmitLabel = submitLabel ?? t("books.form.defaultSubmit");
   const resolvedErrorFallback =
-    errorFallbackMessage ?? t("books.form.genericSaveError");
+    errorFallbackMessage ??
+    submitErrorFallback ??
+    t("books.form.genericSaveError");
 
   const {
     control,
@@ -395,50 +399,65 @@ export function AdminBookForm({
             className="rounded-xl border border-border bg-white p-5 shadow-2xs"
             data-testid="admin-book-live-cover-preview"
           >
-            <div className="flex items-start gap-4">
-              <BookCover
-                author={watchedAuthor || null}
-                book={{
-                  id: bookId,
-                  title:
-                    watchedTitle?.trim() ||
-                    t(
-                      "books.form.livePreviewTitleFallback",
-                      undefined,
-                      "Tiêu đề sách mới",
-                    ),
-                  author: watchedAuthor || null,
-                  min_grade:
-                    Number.isFinite(previewMinGrade) && previewMinGrade > 0
-                      ? previewMinGrade
-                      : 1,
-                  max_grade:
-                    Number.isFinite(previewMaxGrade) && previewMaxGrade > 0
-                      ? previewMaxGrade
-                      : 5,
-                  lifecycle_status: lifecycleStatus,
-                }}
-                coverSourceType={coverSourceType}
-                coverUrl={coverUrl}
-                size="medium"
-              />
-              <div className="min-w-0 flex-1 space-y-1.5">
-                <p className="text-sm font-extrabold text-ink">
-                  {t(
-                    "books.form.livePreviewHeading",
-                    undefined,
-                    "Xem trước bìa sách",
-                  )}
-                </p>
-                <p className="text-xs leading-relaxed text-muted">
-                  {t(
-                    "books.form.livePreviewDesc",
-                    undefined,
-                    "Khi chưa tải ảnh bìa riêng, ViRead tự tạo bìa chữ tiếng Việt sắc nét theo tiêu đề, tác giả và khối lớp.",
-                  )}
-                </p>
-              </div>
-            </div>
+            {(() => {
+              const resolvedMinGrade =
+                Number.isFinite(previewMinGrade) && previewMinGrade > 0
+                  ? previewMinGrade
+                  : 1;
+              const resolvedMaxGrade =
+                Number.isFinite(previewMaxGrade) && previewMaxGrade > 0
+                  ? previewMaxGrade
+                  : 5;
+              const gradePreviewLabel =
+                resolvedMinGrade === resolvedMaxGrade
+                  ? `Lớp ${resolvedMinGrade}`
+                  : `Lớp ${resolvedMinGrade}–${resolvedMaxGrade}`;
+              return (
+                <div className="flex items-start gap-4">
+                  <BookCover
+                    author={watchedAuthor?.trim() || null}
+                    book={{
+                      id: bookId,
+                      title:
+                        watchedTitle?.trim() ||
+                        t(
+                          "books.form.livePreviewTitleFallback",
+                          undefined,
+                          "Tiêu đề sách mới",
+                        ),
+                      author: watchedAuthor?.trim() || null,
+                      min_grade: resolvedMinGrade,
+                      max_grade: resolvedMaxGrade,
+                      lifecycle_status: lifecycleStatus,
+                    }}
+                    coverSourceType={coverSourceType}
+                    coverUrl={coverUrl}
+                    grade={gradePreviewLabel}
+                    size="medium"
+                  />
+                  <div className="min-w-0 flex-1 space-y-1.5">
+                    <p className="text-sm font-extrabold text-ink">
+                      {coverUrl
+                        ? "Xem trước ảnh bìa đã chọn"
+                        : t(
+                            "books.form.livePreviewHeading",
+                            undefined,
+                            "Xem trước bìa sách",
+                          )}
+                    </p>
+                    <p className="text-xs leading-relaxed text-muted">
+                      {coverUrl
+                        ? "Ảnh bìa sẽ được chuẩn hóa 3:4 WebP và ưu tiên hiển thị cao nhất cho sách này."
+                        : t(
+                            "books.form.livePreviewDesc",
+                            undefined,
+                            "Khi chưa tải ảnh bìa riêng, ViRead tự tạo bìa chữ tiếng Việt sắc nét theo tiêu đề, tác giả và khối lớp.",
+                          )}
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
             {coverStudioSlot ? (
               <div className="mt-4 border-t border-border pt-4">
                 {coverStudioSlot}

@@ -411,14 +411,19 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     <div className="space-y-4">
       <AdminPageHeader
         actions={
-          <ButtonLink
-            href={`/admin/books/${encodeURIComponent(book.id)}/edit`}
-            size="admin"
-            variant="outline"
-          >
-            <Pencil aria-hidden="true" className="size-3.5 shrink-0" />
-            {t("books.detail.editMetadata")}
-          </ButtonLink>
+          <div className="flex flex-wrap items-center gap-2">
+            <ButtonLink
+              href={`/admin/books/${encodeURIComponent(book.id)}/edit`}
+              size="admin"
+              variant="outline"
+            >
+              <Pencil aria-hidden="true" className="size-3.5 shrink-0" />
+              {t("books.detail.editMetadata")}
+            </ButtonLink>
+            <ButtonLink href="/admin/tasks" size="admin" variant="outline">
+              Trung tâm tác vụ AI
+            </ButtonLink>
+          </div>
         }
         badge={<AdminStatusBadge status={book.lifecycle_status} />}
         breadcrumbs={[

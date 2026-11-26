@@ -6,6 +6,7 @@ import {
   BookOpen,
   CheckCircle2,
   Clock3,
+  FileSearch,
   FileUp,
   Image as ImageIcon,
   Lock,
@@ -15,6 +16,7 @@ import {
   Send,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -28,8 +30,10 @@ import {
   type FormEvent,
 } from "react";
 
+import { SmartOcrBlockReviewLoader } from "@/components/admin/smart-ocr-block-review";
 import { BookCover } from "@/components/books/book-cover";
 import { BookCoverStudio } from "@/components/books/book-cover-studio";
+import { PageIllustrationStudio } from "@/components/books/page-illustration-studio";
 import { ParentOcrContributionCard } from "@/components/books/parent-ocr-contribution-card";
 import { AuthenticatedImage } from "@/components/common/authenticated-image";
 import { Button, ButtonLink } from "@/components/common/button";
@@ -41,6 +45,7 @@ import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useParentPrivateBookService } from "@/hooks/use-parent-private-book-service";
 import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
+import { emitStudioTasksChanged } from "@/lib/api/global-tasks-service";
 import {
   fetchOcrWorkerHealth,
   type OcrWorkerHealthSnapshot,
@@ -364,6 +369,10 @@ function ParentPrivateBookManagerContent({
   const [confirmDeletePageId, setConfirmDeletePageId] = useState<string | null>(
     null,
   );
+  const [illustrationStudioPageId, setIllustrationStudioPageId] = useState<
+    string | null
+  >(null);
+  const [smartOcrPageId, setSmartOcrPageId] = useState<string | null>(null);
 
   const loadDetail = useCallback(
     async (silent = false) => {
@@ -600,6 +609,7 @@ function ParentPrivateBookManagerContent({
           format: response.source_format,
         }),
       );
+      emitStudioTasksChanged();
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -657,6 +667,7 @@ function ParentPrivateBookManagerContent({
               page: result.page_number,
             }),
       );
+      emitStudioTasksChanged();
       await loadDetail(true);
     } catch (error) {
       setActionError(errorText(error, t("privateManager.commitErrorFallback")));
@@ -686,6 +697,7 @@ function ParentPrivateBookManagerContent({
           version: sub.submission_version,
         }),
       );
+      emitStudioTasksChanged();
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -703,6 +715,7 @@ function ParentPrivateBookManagerContent({
     try {
       await service.retrySubmission(bookId, sub.id, "AUTO");
       setActionNotice(t("privateManager.retriedNotice"));
+      emitStudioTasksChanged();
       await loadDetail(true);
     } catch (error) {
       setActionError(errorText(error, t("privateManager.retryErrorFallback")));
@@ -725,6 +738,7 @@ function ParentPrivateBookManagerContent({
       });
       setEditingSubId(null);
       setActionNotice(t("privateManager.editedSubmissionNotice"));
+      emitStudioTasksChanged();
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -834,6 +848,7 @@ function ParentPrivateBookManagerContent({
       setActionNotice(
         t("privateManager.editedPageNotice", { page: page.page_number }),
       );
+      emitStudioTasksChanged();
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -859,6 +874,7 @@ function ParentPrivateBookManagerContent({
           page: page.page_number,
         }),
       );
+      emitStudioTasksChanged();
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -906,6 +922,7 @@ function ParentPrivateBookManagerContent({
         sub.source_note,
       );
       setActionNotice(t("privateManager.replacedSubmissionImageNotice"));
+      emitStudioTasksChanged();
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -1142,8 +1159,15 @@ function ParentPrivateBookManagerContent({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <Link
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-control border border-border bg-white px-3 text-xs font-bold text-primary hover:bg-sky/50 focus-visible:outline-3 focus-visible:outline-primary"
+              href="/studio/tasks"
+            >
+              <Sparkles aria-hidden="true" className="size-3.5" />
+              Trung tâm tác vụ
+            </Link>
             <Button
-              className="min-h-10 w-auto px-3 text-xs"
+              className="min-h-11 w-auto px-3 text-xs"
               disabled={isSuspended || busyKey !== null}
               onClick={() => {
                 setShowEditBookForm(false);
@@ -1437,14 +1461,14 @@ function ParentPrivateBookManagerContent({
           </p>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
+        <div className="grid min-w-0 gap-4 md:grid-cols-2">
+          <label className="flex min-w-0 flex-col gap-1.5 text-label font-semibold text-ink">
             {t("privateManager.chooseFileLabel")}
             <input
               ref={fileInputRef}
               accept={ACCEPTED_UPLOAD_EXTENSIONS}
               aria-label={t("privateManager.chooseFileAria")}
-              className="block w-full cursor-pointer rounded-control border border-dashed border-primary/50 bg-canvas p-3 text-sm text-ink file:me-3 file:rounded-control file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white hover:file:bg-primary-hover"
+              className="block w-full min-w-0 max-w-full cursor-pointer rounded-control border border-dashed border-primary/50 bg-canvas p-3 text-sm text-ink file:me-3 file:rounded-control file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white hover:file:bg-primary-hover"
               disabled={uploading || isSuspended}
               onChange={(event) => {
                 const file = event.target.files?.[0] ?? null;
@@ -1463,11 +1487,11 @@ function ParentPrivateBookManagerContent({
             ) : null}
           </label>
 
-          <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
+          <label className="flex min-w-0 flex-col gap-1.5 text-label font-semibold text-ink">
             {t("privateManager.uploadSourceLabel")}
             <select
               aria-label={t("privateManager.uploadSourceAria")}
-              className="min-h-12 rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
+              className="min-h-12 w-full min-w-0 max-w-full truncate rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
               disabled={uploading || isSuspended}
               onChange={(event) =>
                 setUploadSourceType(event.target.value as SourceUsageType)
@@ -2380,6 +2404,9 @@ function ParentPrivateBookManagerContent({
               {visibleCommittedPages.map((page) => {
                 const isEditingPage = editingPageId === page.page_id;
                 const isConfirmingDelete = confirmDeletePageId === page.page_id;
+                const isIllustrationStudioOpen =
+                  illustrationStudioPageId === page.page_id;
+                const isSmartOcrOpen = smartOcrPageId === page.page_id;
                 const isPageBusy =
                   busyKey !== null && busyKey.endsWith(`:${page.page_id}`);
                 return (
@@ -2464,6 +2491,38 @@ function ParentPrivateBookManagerContent({
                         </>
                       ) : null}
                       <button
+                        aria-label={`Mở tranh minh họa trang ${page.page_number}`}
+                        className="inline-flex min-h-11 items-center gap-1 rounded-control border border-primary/30 bg-sky/50 px-2.5 text-xs font-semibold text-primary-hover hover:bg-sky disabled:opacity-50"
+                        disabled={isSuspended || isPageBusy || busyKey !== null}
+                        onClick={() => {
+                          setSmartOcrPageId(null);
+                          setIllustrationStudioPageId((prev) =>
+                            prev === page.page_id ? null : page.page_id,
+                          );
+                        }}
+                        type="button"
+                      >
+                        <ImageIcon aria-hidden="true" className="size-3.5" />
+                        {isIllustrationStudioOpen
+                          ? "Đóng minh họa"
+                          : "Minh họa trang"}
+                      </button>
+                      <button
+                        aria-label={`Xem khối chữ OCR trang ${page.page_number}`}
+                        className="inline-flex min-h-11 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas disabled:opacity-50"
+                        disabled={isPageBusy || busyKey !== null}
+                        onClick={() => {
+                          setIllustrationStudioPageId(null);
+                          setSmartOcrPageId((prev) =>
+                            prev === page.page_id ? null : page.page_id,
+                          );
+                        }}
+                        type="button"
+                      >
+                        <FileSearch aria-hidden="true" className="size-3.5" />
+                        {isSmartOcrOpen ? "Đóng khối OCR" : "Khối chữ OCR"}
+                      </button>
+                      <button
                         aria-label={t(
                           "privateManager.deleteCommittedPageAria",
                           { page: page.page_number },
@@ -2482,6 +2541,34 @@ function ParentPrivateBookManagerContent({
                         {t("privateManager.deletePageAction")}
                       </button>
                     </div>
+
+                    {isIllustrationStudioOpen ? (
+                      <div className="pt-1">
+                        <PageIllustrationStudio
+                          actorRole="parent"
+                          autoLoad
+                          bookId={book.id}
+                          canonicalText={
+                            page.verified_text || page.verified_text_preview
+                          }
+                          compact
+                          pageId={page.page_id}
+                          pageNumber={page.page_number}
+                        />
+                      </div>
+                    ) : null}
+
+                    {isSmartOcrOpen ? (
+                      <div className="rounded-control border border-border bg-canvas/50 p-3">
+                        <SmartOcrBlockReviewLoader
+                          canApplyToDraft={false}
+                          isRevisionVerified
+                          pageId={page.page_id}
+                          pageImageUrl={page.image_url}
+                          pageNumber={page.page_number}
+                        />
+                      </div>
+                    ) : null}
 
                     {isEditingPage ? (
                       <div className="flex flex-col gap-2.5 rounded-control border border-amber-300 bg-amber-50/70 p-3 text-xs">

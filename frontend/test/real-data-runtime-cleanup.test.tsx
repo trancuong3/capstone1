@@ -187,7 +187,22 @@ describe("Phase 5 real-data runtime cleanup", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
   it("uploader accepts multiple page images and exposes the real upload action", async () => {
-    fetchMock.mockResolvedValue(Response.json({ ocr: { ready: true } }));
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).includes("/studio/tasks")) {
+        return Response.json({
+          actor_id: "admin-1",
+          actor_role: "admin",
+          active_count: 0,
+          waiting_review_count: 0,
+          failed_count: 0,
+          completed_count: 0,
+          worker_online: true,
+          recommended_poll_ms: null,
+          tasks: [],
+        });
+      }
+      return Response.json({ ocr: { ready: true } });
+    });
     const onUploaded = vi.fn();
     render(
       <AdminServicesProvider>
@@ -204,12 +219,24 @@ describe("Phase 5 real-data runtime cleanup", () => {
     expect(
       screen.getByRole("button", { name: "Upload và chạy OCR" }),
     ).toBeEnabled();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url).endsWith("/health")),
+      ).toBe(true),
+    );
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([url]) =>
+          String(url).includes("/studio/tasks"),
+        ),
+      ).toBe(true),
+    );
     expect(onUploaded).not.toHaveBeenCalled();
     expect(
       fetchMock.mock.calls.every(
         ([url, init]) =>
-          String(url).endsWith("/health") &&
+          (String(url).endsWith("/health") ||
+            String(url).includes("/studio/tasks")) &&
           ((init as RequestInit | undefined)?.method ?? "GET") === "GET",
       ),
     ).toBe(true);
