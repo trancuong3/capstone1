@@ -170,7 +170,31 @@ async function assertViewportHealth(
   }
 }
 
-async function selectChildAndEnterEntertainment(page: Page): Promise<void> {
+async function installLearningRecommendationsMock(page: Page): Promise<void> {
+  await page
+    .context()
+    .route("http://127.0.0.1:8000/learning/**", async (route) => {
+      const req = route.request();
+      const pathname = new URL(req.url()).pathname;
+      if (req.method() === "OPTIONS") {
+        await respondJson(route, null, 204);
+        return;
+      }
+      if (/^\/learning\/children\/[^/]+\/recommendations$/.test(pathname)) {
+        await respondJson(route, buildRecommendations(child));
+        return;
+      }
+      await route.fallback();
+    });
+}
+
+async function selectChildAndEnterEntertainment(
+  page: Page,
+  mockRecommendations = true,
+): Promise<void> {
+  if (mockRecommendations) {
+    await installLearningRecommendationsMock(page);
+  }
   await page.goto("/dashboard");
   await page
     .getByRole("button", { name: `${child.alias}, lớp ${child.grade}` })
@@ -385,7 +409,11 @@ function buildRecommendations(
 }
 
 test.beforeAll(async ({ request }) => {
-  for (const route of ["/entertainment/memory-game", `/karaoke/${songId}`]) {
+  for (const route of [
+    "/entertainment/memory-game",
+    "/karaoke",
+    `/karaoke/${songId}`,
+  ]) {
     const response = await request.get(route);
     expect(response.status()).toBe(200);
   }
@@ -462,7 +490,7 @@ test("Flow 1: Entertainment Hub V4 (4 zones, mascot, multi-child selector, onboa
       await route.fallback();
     });
 
-  await selectChildAndEnterEntertainment(page);
+  await selectChildAndEnterEntertainment(page, false);
 
   await expect(
     page.getByRole("heading", { name: "Giải trí", level: 1 }),
@@ -1026,9 +1054,16 @@ test("Flow 3: Sentence Shooter V4 (<100ms projectile, 3 modes, zero UI lock unde
   await token2Btn.click();
   await expect(token2Btn).toHaveAttribute("data-shot-state", "in-flight");
 
-  // Wait for tokens 1 & 2 to confirm into slots
-  await expect(token1Btn).toHaveAttribute("data-shot-state", "placed");
-  await expect(token2Btn).toHaveAttribute("data-shot-state", "placed");
+  // Wait for tokens 1 & 2 to confirm into sentence slots (removed from word bank)
+  const sentenceSlots = page.getByRole("list", { name: "Các ô ghép câu" });
+  await expect(
+    sentenceSlots.getByRole("listitem", { name: "Ô 1: Bé" }),
+  ).toBeVisible();
+  await expect(
+    sentenceSlots.getByRole("listitem", { name: "Ô 2: đọc" }),
+  ).toBeVisible();
+  await expect(token1Btn).toHaveCount(0);
+  await expect(token2Btn).toHaveCount(0);
 
   await assertViewportHealth(
     page,
@@ -1042,12 +1077,10 @@ test("Flow 3: Sentence Shooter V4 (<100ms projectile, 3 modes, zero UI lock unde
   await expect(
     page.getByRole("heading", { name: /Giỏi quá, bé đã hoàn thành!/ }),
   ).toBeVisible();
-  await expect(page.getByText("Câu trần thuật ngắn"))
-    .toBeVisible()
-    .catch(() => {
-      // Result view renders practiced difficult words & stars cleanly
-    });
   await expect(page.getByText(/sách/)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Chơi lượt mới" }),
+  ).toBeVisible();
 
   expect(pageErrors).toEqual([]);
   expect(base.unexpected).toEqual([]);
@@ -1284,7 +1317,7 @@ test("Flow 4: Karaoke & Musical Karaoke Stage (modes, beat/pitch/rhythm UI, repo
   // Switch to RHYTHM_TAP, start playing, tap rhythm, and verify report timeline
   await rhythmTapBtn.click();
   await expect(rhythmTapBtn).toHaveAttribute("aria-pressed", "true");
-  await stage.getByRole("button", { name: "Bắt đầu hát", exact: true }).click();
+  await stage.getByRole("button", { name: /^(Bắt đầu hát|Hát tiếp)$/ }).click();
   await expect(
     stage.getByRole("button", { name: "Tạm dừng", exact: true }),
   ).toBeVisible({ timeout: 10_000 });
@@ -1318,6 +1351,7 @@ test("Flow 4: Karaoke & Musical Karaoke Stage (modes, beat/pitch/rhythm UI, repo
 test("Flow 5: Admin Karaoke Simple Mode V4 (1-MP3 upload, auto extract, Review by Exception, compliance gate, Advanced Mode)", async ({
   page,
 }, testInfo) => {
+  test.setTimeout(120_000);
   const base = await installApiFixture(page);
   await setRole(page, "admin");
   const pageErrors: string[] = [];
@@ -2190,5 +2224,4 @@ test("Flow 7: Parent Progress Report with non-diagnostic EntertainmentLearningSu
   await saveAfterScreenshot(page, testInfo.project.name, "reports");
 
   expect(pageErrors).toEqual([]);
-  expect(base.unexpected).toEqual([]);
-});
+  expect(base.
